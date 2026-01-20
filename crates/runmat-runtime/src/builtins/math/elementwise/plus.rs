@@ -4,7 +4,6 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
@@ -13,6 +12,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -381,8 +381,8 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
-            let tensor =
-                Tensor::new(vec![n], vec![1, 1]).map_err(|e| builtin_error(format!("plus: {e}")))?;
+            let tensor = Tensor::new(vec![n], vec![1, 1])
+                .map_err(|e| builtin_error(format!("plus: {e}")))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
@@ -443,7 +443,7 @@ fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
 fn gather_like_prototype(value: &Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(_) => gpu_helpers::gather_value(value)
-            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME)), 
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME)),
         Value::Tensor(_)
         | Value::Num(_)
         | Value::Int(_)
@@ -711,8 +711,7 @@ fn classify_operand(value: Value) -> BuiltinResult<PlusOperand> {
                 .map_err(|e| builtin_error(format!("plus: {e}")))?,
         )),
         Value::LogicalArray(logical) => Ok(PlusOperand::Real(
-            tensor::logical_to_tensor(&logical)
-                .map_err(|e| builtin_error(format!("plus: {e}")))?,
+            tensor::logical_to_tensor(&logical).map_err(|e| builtin_error(format!("plus: {e}")))?,
         )),
         Value::CharArray(chars) => Ok(PlusOperand::Real(char_array_to_tensor(&chars)?)),
         Value::Complex(re, im) => Ok(PlusOperand::Complex(
@@ -730,8 +729,7 @@ fn classify_operand(value: Value) -> BuiltinResult<PlusOperand> {
 
 fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-    Tensor::new(data, vec![chars.rows, chars.cols])
-        .map_err(|e| builtin_error(format!("plus: {e}")))
+    Tensor::new(data, vec![chars.rows, chars.cols]).map_err(|e| builtin_error(format!("plus: {e}")))
 }
 
 fn extract_scalar_f64(value: &Value) -> BuiltinResult<Option<f64>> {
@@ -876,7 +874,10 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = plus_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).unwrap_err();
-        assert!(err.message().contains("plus"), "unexpected error message: {err}");
+        assert!(
+            err.message().contains("plus"),
+            "unexpected error message: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1032,7 +1033,10 @@ pub(crate) mod tests {
         let lhs = Value::Num(2.0);
         let rhs = Value::Num(4.0);
         let err = plus_builtin(lhs, rhs, vec![Value::from("like")]).unwrap_err();
-        assert!(err.message().contains("prototype"), "unexpected error: {err}");
+        assert!(
+            err.message().contains("prototype"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

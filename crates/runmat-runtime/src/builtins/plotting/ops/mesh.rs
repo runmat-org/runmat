@@ -99,7 +99,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::mesh"
 )]
-pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
+pub fn mesh_builtin(
+    x: Tensor,
+    y: Tensor,
+    z: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<String> {
     let x_axis = numeric_vector(x);
     let y_axis = numeric_vector(y);
     let mut x_axis = Some(x_axis);
@@ -168,7 +173,10 @@ pub(crate) fn build_mesh_surface(
     z_grid: Vec<Vec<f64>>,
 ) -> BuiltinResult<SurfacePlot> {
     if x_axis.is_empty() || y_axis.is_empty() {
-        return Err(plotting_error("mesh", "mesh: axis vectors must be non-empty"));
+        return Err(plotting_error(
+            "mesh",
+            "mesh: axis vectors must be non-empty",
+        ));
     }
 
     let surface = SurfacePlot::new(x_axis, y_axis, z_grid)

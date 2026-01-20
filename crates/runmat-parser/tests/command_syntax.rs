@@ -1,6 +1,7 @@
-use runmat_parser::{
-    parse_simple as parse, parse_with_options, CompatMode, Expr, ParserOptions, Stmt,
-};
+use runmat_parser::{parse_with_options, CompatMode, Expr, ParserOptions, Stmt};
+
+mod parse;
+use parse::parse;
 
 #[test]
 fn basic_command_syntax_to_func_call() {

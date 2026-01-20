@@ -430,10 +430,7 @@ fn compute_svd_real(matrix: DMatrix<f64>, options: &SvdOptions) -> BuiltinResult
     assemble_eval_real(&u, &v, &singular_values, options)
 }
 
-fn compute_svd_complex(
-    matrix: DMatrix<Complex64>,
-    options: &SvdOptions,
-) -> BuiltinResult<SvdEval> {
+fn compute_svd_complex(matrix: DMatrix<Complex64>, options: &SvdOptions) -> BuiltinResult<SvdEval> {
     let (mut u, mut singular_values, mut v) = factorize(matrix)?;
     ensure_descending(&mut u, &mut singular_values, &mut v);
     let (u, v) = shape_factors_complex(u, v, singular_values.len(), options.econ);
@@ -459,7 +456,9 @@ fn factorize<T: nalgebra::ComplexField>(
         return Ok((u, singular_values, v));
     }
     let svd = nalgebra::linalg::SVD::new(matrix, true, true);
-    let u = svd.u.ok_or_else(|| svd_error("svd: failed to compute left singular vectors"))?;
+    let u = svd
+        .u
+        .ok_or_else(|| svd_error("svd: failed to compute left singular vectors"))?;
     let v_t = svd
         .v_t
         .ok_or_else(|| svd_error("svd: failed to compute right singular vectors"))?;
@@ -613,12 +612,13 @@ fn sigma_shape(m: usize, n: usize, diag_len: usize, econ: bool) -> (usize, usize
 
 fn singular_vector_value(values: &[f64]) -> BuiltinResult<Value> {
     if values.is_empty() {
-        let tensor = Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| svd_error(format!("svd: {e}")))?;
+        let tensor =
+            Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| svd_error(format!("svd: {e}")))?;
         return Ok(Value::Tensor(tensor));
     }
     let rows = values.len();
-    let tensor = Tensor::new(values.to_vec(), vec![rows, 1])
-        .map_err(|e| svd_error(format!("svd: {e}")))?;
+    let tensor =
+        Tensor::new(values.to_vec(), vec![rows, 1]).map_err(|e| svd_error(format!("svd: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -955,7 +955,8 @@ pub(crate) mod tests {
     #[test]
     fn svd_invalid_option_errors() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
-        let err = error_message(evaluate(Value::Tensor(matrix), &[Value::from("bogus")]).unwrap_err());
+        let err =
+            error_message(evaluate(Value::Tensor(matrix), &[Value::from("bogus")]).unwrap_err());
         assert!(err.contains("unknown option"));
     }
 

@@ -18,8 +18,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 use crate::workspace;
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -202,9 +202,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut host_args = Vec::with_capacity(args.len());
     for value in &args {
-        host_args.push(
-            gather_if_needed(value)?,
-        );
+        host_args.push(gather_if_needed(value)?);
     }
 
     let default_path = Value::from("matlab.mat");
@@ -372,7 +370,9 @@ fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
                 "-struct" => {
                     idx += 1;
                     if idx >= values.len() {
-                        return Err(save_error("save: '-struct' requires a struct variable name"));
+                        return Err(save_error(
+                            "save: '-struct' requires a struct variable name",
+                        ));
                     }
                     let struct_names = extract_names(&values[idx])?;
                     if struct_names.len() != 1 {
@@ -457,8 +457,8 @@ fn ensure_workspace_entries(
 }
 
 fn collect_workspace_entries() -> BuiltinResult<Vec<(String, Value)>> {
-    let snapshot = workspace::snapshot()
-        .ok_or_else(|| save_error("save: workspace state unavailable"))?;
+    let snapshot =
+        workspace::snapshot().ok_or_else(|| save_error("save: workspace state unavailable"))?;
     let mut entries = Vec::with_capacity(snapshot.len());
     for (name, value) in snapshot {
         let gathered = gather_if_needed(&value)?;
@@ -594,9 +594,8 @@ fn lookup_workspace(name: &str) -> BuiltinResult<Value> {
 }
 
 fn normalise_path(path: &Value) -> BuiltinResult<PathBuf> {
-    let raw = value_to_string_scalar(path).ok_or_else(|| {
-        save_error("save: filename must be a character vector or string scalar")
-    })?;
+    let raw = value_to_string_scalar(path)
+        .ok_or_else(|| save_error("save: filename must be a character vector or string scalar"))?;
     let mut path = PathBuf::from(raw);
     if path.extension().is_none() {
         path.set_extension("mat");
@@ -736,9 +735,10 @@ fn convert_value(value: &Value) -> BuiltinResult<MatArray> {
             field_names.sort();
             let mut field_values = Vec::with_capacity(field_names.len());
             for field in &field_names {
-                let val = struct_value.fields.get(field).ok_or_else(|| {
-                    save_error(format!("save: missing struct field '{field}'"))
-                })?;
+                let val = struct_value
+                    .fields
+                    .get(field)
+                    .ok_or_else(|| save_error(format!("save: missing struct field '{field}'")))?;
                 let gathered = gather_if_needed(val)?;
                 field_values.push(convert_value(&gathered)?);
             }
@@ -784,10 +784,7 @@ fn char_array_to_utf16(ca: &CharArray) -> Vec<u16> {
 
 fn write_mat_file(path: &Path, vars: &[MatVar]) -> BuiltinResult<()> {
     let file = File::create(path).map_err(|e| {
-        save_error_with_source(
-            format!("save: failed to open '{}': {e}", path.display()),
-            e,
-        )
+        save_error_with_source(format!("save: failed to open '{}': {e}", path.display()), e)
     })?;
     let mut writer = BufWriter::new(file);
 
@@ -800,18 +797,18 @@ fn write_mat_file(path: &Path, vars: &[MatVar]) -> BuiltinResult<()> {
     header[125] = 0x01;
     header[126] = b'I';
     header[127] = b'M';
-    writer.write_all(&header).map_err(|e| {
-        save_error_with_source(format!("save: failed to write header: {e}"), e)
-    })?;
+    writer
+        .write_all(&header)
+        .map_err(|e| save_error_with_source(format!("save: failed to write header: {e}"), e))?;
 
     for var in vars {
         let matrix_bytes = build_matrix_bytes(&var.array, Some(&var.name))?;
         write_tagged(&mut writer, MI_MATRIX, &matrix_bytes)?;
     }
 
-    writer.flush().map_err(|e| {
-        save_error_with_source(format!("save: flush failed: {e}"), e)
-    })
+    writer
+        .flush()
+        .map_err(|e| save_error_with_source(format!("save: flush failed: {e}"), e))
 }
 
 fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec<u8>> {
@@ -912,9 +909,9 @@ fn write_tagged<W: Write>(writer: &mut W, data_type: u32, data: &[u8]) -> Builti
     if data.len() > u32::MAX as usize {
         return Err(save_error("save: data too large for MAT-file"));
     }
-    writer.write_all(&data_type.to_le_bytes()).map_err(|e| {
-        save_error_with_source(format!("save: write failed: {e}"), e)
-    })?;
+    writer
+        .write_all(&data_type.to_le_bytes())
+        .map_err(|e| save_error_with_source(format!("save: write failed: {e}"), e))?;
     writer
         .write_all(&(data.len() as u32).to_le_bytes())
         .map_err(|e| save_error_with_source(format!("save: write failed: {e}"), e))?;

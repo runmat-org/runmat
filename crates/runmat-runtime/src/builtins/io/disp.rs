@@ -239,7 +239,7 @@ enum Align {
 )]
 fn disp_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
-        return Err((("disp: too many input arguments".to_string())).into());
+        return Err(("disp: too many input arguments".to_string()).into());
     }
 
     let host_value = gather_if_needed(&value).map_err(|e| format!("disp: {e}"))?;

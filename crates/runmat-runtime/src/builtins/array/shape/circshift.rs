@@ -297,7 +297,9 @@ fn circshift_builtin(value: Value, shift: Value, rest: Vec<Value>) -> crate::Bui
                 .map_err(Into::into)
         }
         Value::GpuTensor(handle) => circshift_gpu(handle, dims, shifts).map_err(Into::into),
-        Value::Cell(_) => Err(circshift_error("circshift: cell arrays are not yet supported")),
+        Value::Cell(_) => Err(circshift_error(
+            "circshift: cell arrays are not yet supported",
+        )),
         Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::Struct(_)
@@ -315,10 +317,7 @@ struct CircshiftSpec {
     shifts: Vec<isize>,
 }
 
-fn parse_circshift_spec(
-    shift: &Value,
-    rest: &[Value],
-) -> crate::BuiltinResult<CircshiftSpec> {
+fn parse_circshift_spec(shift: &Value, rest: &[Value]) -> crate::BuiltinResult<CircshiftSpec> {
     let shifts = value_to_shift_vector(shift)?;
     let dims: Vec<usize> = if rest.is_empty() {
         (0..shifts.len()).collect()
@@ -341,7 +340,9 @@ fn parse_circshift_spec(
     let mut seen = HashSet::new();
     for &dim in &dims {
         if !seen.insert(dim) {
-            return Err(circshift_error("circshift: dimension indices must be unique"));
+            return Err(circshift_error(
+                "circshift: dimension indices must be unique",
+            ));
         }
     }
 
@@ -359,7 +360,9 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
         }
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(circshift_error("circshift: shift values must be finite numbers"));
+                return Err(circshift_error(
+                    "circshift: shift values must be finite numbers",
+                ));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
@@ -372,7 +375,9 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
         }
         Value::Tensor(tensor) => {
             if !is_vector_shape(&tensor.shape) && !tensor.data.is_empty() {
-                return Err(circshift_error("circshift: shifts must be specified as a scalar or vector"));
+                return Err(circshift_error(
+                    "circshift: shifts must be specified as a scalar or vector",
+                ));
             }
             tensor
                 .data
@@ -382,7 +387,9 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
         }
         Value::LogicalArray(array) => {
             if !is_vector_shape(&array.shape) && !array.data.is_empty() {
-                return Err(circshift_error("circshift: shifts must be specified as a scalar or vector"));
+                return Err(circshift_error(
+                    "circshift: shifts must be specified as a scalar or vector",
+                ));
             }
             Ok(array
                 .data
@@ -391,7 +398,9 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
                 .collect())
         }
         Value::Bool(flag) => Ok(vec![if *flag { 1 } else { 0 }]),
-        Value::GpuTensor(_) => Err(circshift_error("circshift: shift vector must reside on the host")),
+        Value::GpuTensor(_) => Err(circshift_error(
+            "circshift: shift vector must reside on the host",
+        )),
         Value::StringArray(_) | Value::CharArray(_) | Value::String(_) => {
             Err(circshift_error("circshift: shift values must be numeric"))
         }
@@ -406,7 +415,9 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(circshift_error("circshift: unsupported shift argument type")),
+        | Value::MException(_) => Err(circshift_error(
+            "circshift: unsupported shift argument type",
+        )),
     }
 }
 
@@ -421,7 +432,9 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
         }
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(circshift_error("circshift: dimensions must be finite integers"));
+                return Err(circshift_error(
+                    "circshift: dimensions must be finite integers",
+                ));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
@@ -434,14 +447,16 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
         }
         Value::Tensor(tensor) => {
             if !is_vector_shape(&tensor.shape) && !tensor.data.is_empty() {
-                return Err(
-                    circshift_error("circshift: dimension vectors must be row or column vectors")
-                );
+                return Err(circshift_error(
+                    "circshift: dimension vectors must be row or column vectors",
+                ));
             }
             let mut dims = Vec::with_capacity(tensor.data.len());
             for &val in &tensor.data {
                 if !val.is_finite() {
-                    return Err(circshift_error("circshift: dimensions must be finite integers"));
+                    return Err(circshift_error(
+                        "circshift: dimensions must be finite integers",
+                    ));
                 }
                 let rounded = val.round();
                 if (rounded - val).abs() > f64::EPSILON {
@@ -456,9 +471,9 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
         }
         Value::LogicalArray(array) => {
             if !is_vector_shape(&array.shape) && !array.data.is_empty() {
-                return Err(
-                    circshift_error("circshift: dimension vectors must be row or column vectors")
-                );
+                return Err(circshift_error(
+                    "circshift: dimension vectors must be row or column vectors",
+                ));
             }
             let mut dims = Vec::new();
             for (idx, &flag) in array.data.iter().enumerate() {
@@ -475,15 +490,15 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
                 Err(circshift_error("circshift: dimension indices must be >= 1"))
             }
         }
-        Value::GpuTensor(_) => {
-            Err(circshift_error("circshift: dimension vector must reside on the host"))
-        }
-        Value::StringArray(_) | Value::CharArray(_) | Value::String(_) => {
-            Err(circshift_error("circshift: dimension indices must be numeric"))
-        }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err(circshift_error("circshift: dimensions must be real integers"))
-        }
+        Value::GpuTensor(_) => Err(circshift_error(
+            "circshift: dimension vector must reside on the host",
+        )),
+        Value::StringArray(_) | Value::CharArray(_) | Value::String(_) => Err(circshift_error(
+            "circshift: dimension indices must be numeric",
+        )),
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(circshift_error(
+            "circshift: dimensions must be real integers",
+        )),
         Value::Cell(_)
         | Value::FunctionHandle(_)
         | Value::Closure(_)
@@ -492,7 +507,9 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(circshift_error("circshift: unsupported dimension argument type")),
+        | Value::MException(_) => Err(circshift_error(
+            "circshift: unsupported dimension argument type",
+        )),
     }
 }
 
@@ -533,7 +550,9 @@ fn build_shift_plan(
     shifts: &[isize],
 ) -> crate::BuiltinResult<ShiftPlan> {
     if dims.len() != shifts.len() {
-        return Err(circshift_error("circshift: shift vector must match the number of dimensions"));
+        return Err(circshift_error(
+            "circshift: shift vector must match the number of dimensions",
+        ));
     }
     let mut target_len = shape.len();
     if let Some(max_axis) = dims.iter().copied().max() {
@@ -612,7 +631,8 @@ fn circshift_complex_tensor(
     let ComplexTensor { data, shape, .. } = tensor;
     let plan = build_shift_plan(&shape, dims, shifts)?;
     if data.is_empty() || plan.is_noop() {
-        return ComplexTensor::new(data, shape).map_err(|e| circshift_error(format!("circshift: {e}")));
+        return ComplexTensor::new(data, shape)
+            .map_err(|e| circshift_error(format!("circshift: {e}")));
     }
     let ShiftPlan {
         ext_shape,
@@ -631,7 +651,8 @@ fn circshift_logical_array(
     let LogicalArray { data, shape } = array;
     let plan = build_shift_plan(&shape, dims, shifts)?;
     if data.is_empty() || plan.is_noop() {
-        return LogicalArray::new(data, shape).map_err(|e| circshift_error(format!("circshift: {e}")));
+        return LogicalArray::new(data, shape)
+            .map_err(|e| circshift_error(format!("circshift: {e}")));
     }
     let ShiftPlan {
         ext_shape,
@@ -650,7 +671,8 @@ fn circshift_string_array(
     let StringArray { data, shape, .. } = array;
     let plan = build_shift_plan(&shape, dims, shifts)?;
     if data.is_empty() || plan.is_noop() {
-        return StringArray::new(data, shape).map_err(|e| circshift_error(format!("circshift: {e}")));
+        return StringArray::new(data, shape)
+            .map_err(|e| circshift_error(format!("circshift: {e}")));
     }
     let ShiftPlan {
         ext_shape,
@@ -674,9 +696,9 @@ fn circshift_char_array(
             1 => col_shift = shift,
             _ => {
                 if shift != 0 {
-                    return Err(
-                        circshift_error("circshift: character arrays only support dimensions 1 and 2"),
-                    );
+                    return Err(circshift_error(
+                        "circshift: character arrays only support dimensions 1 and 2",
+                    ));
                 }
             }
         }
@@ -773,7 +795,9 @@ fn circshift_generic<T: Clone>(
     }
     let total: usize = shape.iter().product();
     if total != data.len() {
-        return Err(circshift_error("circshift: shape does not match data length"));
+        return Err(circshift_error(
+            "circshift: shape does not match data length",
+        ));
     }
     if total == 0 {
         return Ok(Vec::new());

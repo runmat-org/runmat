@@ -137,7 +137,14 @@ pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinRes
         let y_arg = y_input.take().expect("stairs y consumed once");
 
         if let (Some(x_gpu), Some(y_gpu)) = (x_arg.gpu_handle(), y_arg.gpu_handle()) {
-            match build_stairs_gpu_plot(BUILTIN_NAME, x_gpu, y_gpu, &appearance, marker_meta.clone(), &label) {
+            match build_stairs_gpu_plot(
+                BUILTIN_NAME,
+                x_gpu,
+                y_gpu,
+                &appearance,
+                marker_meta.clone(),
+                &label,
+            ) {
                 Ok(plot) => {
                     figure.add_stairs_plot_on_axes(plot, axes);
                     return Ok(());
@@ -165,7 +172,10 @@ fn build_stairs_plot(
     label: &str,
 ) -> BuiltinResult<StairsPlot> {
     if x.len() != y.len() {
-        return Err(plotting_error(BUILTIN_NAME, "stairs: X and Y inputs must share the same length"));
+        return Err(plotting_error(
+            BUILTIN_NAME,
+            "stairs: X and Y inputs must share the same length",
+        ));
     }
     if x.len() < 2 {
         return Err(plotting_error(
@@ -189,29 +199,36 @@ fn build_stairs_gpu_plot(
     marker_meta: Option<LineMarkerAppearance>,
     label: &str,
 ) -> BuiltinResult<StairsPlot> {
-    let context = runmat_plot::shared_wgpu_context().ok_or_else(|| {
-        plotting_error(name, format!("{name}: plotting GPU context unavailable"))
-    })?;
+    let context = runmat_plot::shared_wgpu_context()
+        .ok_or_else(|| plotting_error(name, format!("{name}: plotting GPU context unavailable")))?;
 
-    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x).ok_or_else(|| {
-        plotting_error(name, format!("{name}: unable to export GPU X data"))
-    })?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y).ok_or_else(|| {
-        plotting_error(name, format!("{name}: unable to export GPU Y data"))
-    })?;
+    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
+        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU X data")))?;
+    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
+        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Y data")))?;
 
     if x_ref.len < 2 {
-        return Err(plotting_error(name, format!("{name}: inputs must contain at least two elements")));
+        return Err(plotting_error(
+            name,
+            format!("{name}: inputs must contain at least two elements"),
+        ));
     }
     if x_ref.len != y_ref.len {
-        return Err(plotting_error(name, format!("{name}: X and Y inputs must have identical lengths")));
+        return Err(plotting_error(
+            name,
+            format!("{name}: X and Y inputs must have identical lengths"),
+        ));
     }
     if x_ref.precision != y_ref.precision {
-        return Err(plotting_error(name, format!("{name}: X and Y gpuArrays must share the same precision")));
+        return Err(plotting_error(
+            name,
+            format!("{name}: X and Y gpuArrays must share the same precision"),
+        ));
     }
 
-    let len_u32 = u32::try_from(x_ref.len)
-        .map_err(|_| plotting_error(name, format!("{name}: point count exceeds supported range")))?;
+    let len_u32 = u32::try_from(x_ref.len).map_err(|_| {
+        plotting_error(name, format!("{name}: point count exceeds supported range"))
+    })?;
     let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
 
     let inputs = StairsGpuInputs {
@@ -252,7 +269,12 @@ fn build_stairs_gpu_plot(
                 &marker_inputs,
                 &marker_params,
             )
-            .map_err(|e| plotting_error(name, format!("{name}: failed to build marker vertices: {e}")))?,
+            .map_err(|e| {
+                plotting_error(
+                    name,
+                    format!("{name}: failed to build marker vertices: {e}"),
+                )
+            })?,
         )
     } else {
         None

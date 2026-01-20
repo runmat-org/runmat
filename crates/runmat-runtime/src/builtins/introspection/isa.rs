@@ -256,26 +256,32 @@ fn parse_type_name(value: &Value) -> BuiltinResult<String> {
             if sa.rows == 1 && sa.cols == 1 && !sa.data.is_empty() {
                 Ok(sa.data[0].clone())
             } else {
-                Err(build_runtime_error("isa: TYPE must be a string scalar or character vector")
-                    .with_builtin("isa")
-                    .build()
-                    .into())
+                Err(
+                    build_runtime_error("isa: TYPE must be a string scalar or character vector")
+                        .with_builtin("isa")
+                        .build()
+                        .into(),
+                )
             }
         }
         Value::CharArray(ca) => {
             if ca.rows == 1 {
                 Ok(ca.data.iter().collect())
             } else {
-                Err(build_runtime_error("isa: TYPE must be a string scalar or character vector")
-                    .with_builtin("isa")
-                    .build()
-                    .into())
+                Err(
+                    build_runtime_error("isa: TYPE must be a string scalar or character vector")
+                        .with_builtin("isa")
+                        .build()
+                        .into(),
+                )
             }
         }
-        _ => Err(build_runtime_error("isa: TYPE must be a string scalar or character vector")
-            .with_builtin("isa")
-            .build()
-            .into()),
+        _ => Err(
+            build_runtime_error("isa: TYPE must be a string scalar or character vector")
+                .with_builtin("isa")
+                .build()
+                .into(),
+        ),
     }
 }
 
@@ -578,7 +584,10 @@ pub(crate) mod tests {
         );
         let err = isa_builtin(Value::Num(1.0), type_array).unwrap_err();
         let message = error_message(err);
-        assert_eq!(message, "isa: TYPE must be a string scalar or character vector");
+        assert_eq!(
+            message,
+            "isa: TYPE must be a string scalar or character vector"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

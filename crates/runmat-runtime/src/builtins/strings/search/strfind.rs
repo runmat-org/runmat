@@ -233,8 +233,8 @@ fn evaluate_strfind(
     patterns: &TextCollection,
     force_cell_output: bool,
 ) -> BuiltinResult<Value> {
-    let output_shape = broadcast_shapes(BUILTIN_NAME, &subject.shape, &patterns.shape)
-        .map_err(strfind_error)?;
+    let output_shape =
+        broadcast_shapes(BUILTIN_NAME, &subject.shape, &patterns.shape).map_err(strfind_error)?;
     let total = tensor::element_count(&output_shape);
     let return_cell = force_cell_output || subject.is_cell || patterns.is_cell || total != 1;
 
@@ -428,7 +428,9 @@ fn parse_bool_like(value: &Value) -> BuiltinResult<bool> {
             }
         }
         other => value_to_owned_string(other)
-            .ok_or_else(|| strfind_error("strfind: option values must be logical or numeric scalars"))
+            .ok_or_else(|| {
+                strfind_error("strfind: option values must be logical or numeric scalars")
+            })
             .and_then(|text| match text.trim().to_ascii_lowercase().as_str() {
                 "true" | "on" | "1" => Ok(true),
                 "false" | "off" | "0" => Ok(false),

@@ -276,19 +276,21 @@ pub fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<OrderFieldsEvalua
                         if names.is_empty() {
                             return Ok(OrderFieldsEvaluation::new(Value::Cell(cell), permutation));
                         }
-                        return Err(
-                            orderfields_flow("orderfields: struct array has no fields to reorder")
-                        );
+                        return Err(orderfields_flow(
+                            "orderfields: struct array has no fields to reorder",
+                        ));
                     }
                     if let Value::Tensor(tensor) = arg {
                         if tensor.data.is_empty() {
                             return Ok(OrderFieldsEvaluation::new(Value::Cell(cell), permutation));
                         }
-                        return Err(
-                            orderfields_flow("orderfields: struct array has no fields to reorder")
-                        );
+                        return Err(orderfields_flow(
+                            "orderfields: struct array has no fields to reorder",
+                        ));
                     }
-                    return Err(orderfields_flow("orderfields: struct array has no fields to reorder"));
+                    return Err(orderfields_flow(
+                        "orderfields: struct array has no fields to reorder",
+                    ));
                 }
                 return Ok(OrderFieldsEvaluation::new(Value::Cell(cell), permutation));
             }
@@ -388,7 +390,9 @@ fn resolve_order(
             return Ok(permutation);
         }
 
-        return Err(orderfields_flow("orderfields: unrecognised ordering argument"));
+        return Err(orderfields_flow(
+            "orderfields: unrecognised ordering argument",
+        ));
     }
 
     sort_field_names(&mut current);
@@ -466,7 +470,9 @@ fn extract_name_list(arg: &Value) -> BuiltinResult<Option<Vec<String>>> {
                     )
                 })?;
                 if text.is_empty() {
-                    return Err(orderfields_flow("orderfields: field names must be nonempty"));
+                    return Err(orderfields_flow(
+                        "orderfields: field names must be nonempty",
+                    ));
                 }
                 names.push(text);
             }
@@ -486,7 +492,9 @@ fn extract_name_list(arg: &Value) -> BuiltinResult<Option<Vec<String>>> {
                     text.pop();
                 }
                 if text.is_empty() {
-                    return Err(orderfields_flow("orderfields: field names must be nonempty"));
+                    return Err(orderfields_flow(
+                        "orderfields: field names must be nonempty",
+                    ));
                 }
                 names.push(text);
             }
@@ -504,21 +512,29 @@ fn extract_indices(current: &[String], arg: &Value) -> BuiltinResult<Option<Vec<
         return Ok(Some(Vec::new()));
     }
     if tensor.data.len() != current.len() {
-        return Err(orderfields_flow("orderfields: index vector must permute every field exactly once"));
+        return Err(orderfields_flow(
+            "orderfields: index vector must permute every field exactly once",
+        ));
     }
     let mut seen = HashSet::with_capacity(current.len());
     let mut order = Vec::with_capacity(current.len());
     for value in &tensor.data {
         if !value.is_finite() || value.fract() != 0.0 {
-            return Err(orderfields_flow("orderfields: index vector must contain integers"));
+            return Err(orderfields_flow(
+                "orderfields: index vector must contain integers",
+            ));
         }
         let idx = *value as isize;
         if idx < 1 || idx as usize > current.len() {
-            return Err(orderfields_flow("orderfields: index vector element out of range"));
+            return Err(orderfields_flow(
+                "orderfields: index vector element out of range",
+            ));
         }
         let zero_based = (idx as usize) - 1;
         if !seen.insert(zero_based) {
-            return Err(orderfields_flow("orderfields: index vector contains duplicate positions"));
+            return Err(orderfields_flow(
+                "orderfields: index vector contains duplicate positions",
+            ));
         }
         order.push(current[zero_based].clone());
     }
@@ -527,7 +543,9 @@ fn extract_indices(current: &[String], arg: &Value) -> BuiltinResult<Option<Vec<
 
 fn ensure_same_field_set(order: &[String], original: &StructValue) -> BuiltinResult<()> {
     if order.len() != original.fields.len() {
-        return Err(orderfields_flow("orderfields: field names must match the struct exactly"));
+        return Err(orderfields_flow(
+            "orderfields: field names must match the struct exactly",
+        ));
     }
     let mut seen = HashSet::with_capacity(order.len());
     let original_set: HashSet<&str> = original.field_names().map(|s| s.as_str()).collect();
@@ -859,8 +877,9 @@ pub(crate) mod tests {
 
         let names =
             CellArray::new(vec![Value::from("alpha"), Value::from("alpha")], 1, 2).expect("cell");
-        let err =
-            error_message(orderfields_builtin(Value::Struct(st), vec![Value::Cell(names)]).unwrap_err());
+        let err = error_message(
+            orderfields_builtin(Value::Struct(st), vec![Value::Cell(names)]).unwrap_err(),
+        );
         assert!(
             err.contains("duplicate field 'alpha'"),
             "unexpected error: {err}"
@@ -892,7 +911,9 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.fields.insert("x".to_string(), Value::Num(1.0));
 
-        let err = error_message(orderfields_builtin(Value::Struct(st), vec![Value::Num(1.0)]).unwrap_err());
+        let err = error_message(
+            orderfields_builtin(Value::Struct(st), vec![Value::Num(1.0)]).unwrap_err(),
+        );
         assert!(
             err.contains("unrecognised ordering argument"),
             "unexpected error: {err}"

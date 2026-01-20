@@ -403,7 +403,10 @@ fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> BuiltinR
             }
         }
 
-        return Err(min_error(format!("min: unrecognised argument {:?}", rest[idx])));
+        return Err(min_error(format!(
+            "min: unrecognised argument {:?}",
+            rest[idx]
+        )));
     }
 
     if !comparison_set {
@@ -438,7 +441,10 @@ fn parse_elementwise_options(rest: &[Value]) -> BuiltinResult<ComparisonMethod> 
                 _ => {}
             }
         }
-        return Err(min_error(format!("min: unrecognised argument {:?}", rest[idx])));
+        return Err(min_error(format!(
+            "min: unrecognised argument {:?}",
+            rest[idx]
+        )));
     }
     if !comparison_set {
         comparison = ComparisonMethod::Auto;
@@ -454,7 +460,9 @@ fn parse_comparison_method(value: &Value) -> BuiltinResult<ComparisonMethod> {
         "auto" => Ok(ComparisonMethod::Auto),
         "abs" | "magnitude" => Ok(ComparisonMethod::Abs),
         "real" => Ok(ComparisonMethod::Real),
-        other => Err(min_error(format!("min: unsupported ComparisonMethod '{other}'"))),
+        other => Err(min_error(format!(
+            "min: unsupported ComparisonMethod '{other}'"
+        ))),
     }
 }
 
@@ -497,7 +505,9 @@ fn parse_dimension_tensor(tensor: &Tensor) -> BuiltinResult<Option<DimSelection>
         return Ok(Some(DimSelection::Auto));
     }
     if tensor.rows() != 1 && tensor.cols() != 1 && tensor.shape.len() != 1 {
-        return Err(min_error("min: dimension vector must be a row or column vector"));
+        return Err(min_error(
+            "min: dimension vector must be a row or column vector",
+        ));
     }
     let mut dims = Vec::with_capacity(tensor.data.len());
     for &value in &tensor.data {
@@ -617,12 +627,13 @@ fn materialize_for_min(name: &str, value: Value) -> BuiltinResult<InputData> {
             Ok(InputData::Real(tensor))
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| min_error(format!("{name}: {e}")))?;
+            let tensor =
+                Tensor::new(vec![n], vec![1, 1]).map_err(|e| min_error(format!("{name}: {e}")))?;
             Ok(InputData::Real(tensor))
         }
         Value::Int(i) => {
-            let tensor =
-                Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| min_error(format!("{name}: {e}")))?;
+            let tensor = Tensor::new(vec![i.to_f64()], vec![1, 1])
+                .map_err(|e| min_error(format!("{name}: {e}")))?;
             Ok(InputData::Real(tensor))
         }
         Value::Bool(b) => {
@@ -636,11 +647,11 @@ fn materialize_for_min(name: &str, value: Value) -> BuiltinResult<InputData> {
             Ok(InputData::Complex(tensor))
         }
         Value::ComplexTensor(ct) => Ok(InputData::Complex(ct)),
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => Err(
-            min_error(format!(
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
+            Err(min_error(format!(
                 "{name}: expected numeric or logical input, received non-numeric value"
-            )),
-        ),
+            )))
+        }
         Value::GpuTensor(_) => Err(min_error(format!(
             "{name}: internal error – GPU tensors must be gathered before host execution"
         ))),
@@ -658,9 +669,10 @@ fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> BuiltinResult<Min
     let shape = tensor.shape.clone();
     if tensor.data.is_empty() {
         let output_shape = resolve_output_shape(&shape, &args.selection, &[])?;
-        let values =
-            Tensor::new(Vec::new(), output_shape.clone()).map_err(|e| min_error(format!("min: {e}")))?;
-        let indices = Tensor::new(Vec::new(), output_shape).map_err(|e| min_error(format!("min: {e}")))?;
+        let values = Tensor::new(Vec::new(), output_shape.clone())
+            .map_err(|e| min_error(format!("min: {e}")))?;
+        let indices =
+            Tensor::new(Vec::new(), output_shape).map_err(|e| min_error(format!("min: {e}")))?;
         return Ok(MinEvaluation {
             values: tensor::tensor_into_value(values),
             indices: tensor::tensor_into_value(indices),
@@ -671,9 +683,10 @@ fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> BuiltinResult<Min
     let output_len = tensor::element_count(&output_shape);
 
     if output_len == 0 {
-        let values =
-            Tensor::new(Vec::new(), output_shape.clone()).map_err(|e| min_error(format!("min: {e}")))?;
-        let indices = Tensor::new(Vec::new(), output_shape).map_err(|e| min_error(format!("min: {e}")))?;
+        let values = Tensor::new(Vec::new(), output_shape.clone())
+            .map_err(|e| min_error(format!("min: {e}")))?;
+        let indices =
+            Tensor::new(Vec::new(), output_shape).map_err(|e| min_error(format!("min: {e}")))?;
         return Ok(MinEvaluation {
             values: tensor::tensor_into_value(values),
             indices: tensor::tensor_into_value(indices),
@@ -740,7 +753,8 @@ fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> BuiltinResult<Min
 
     let value_tensor =
         Tensor::new(values, output_shape.clone()).map_err(|e| min_error(format!("min: {e}")))?;
-    let index_tensor = Tensor::new(indices, output_shape).map_err(|e| min_error(format!("min: {e}")))?;
+    let index_tensor =
+        Tensor::new(indices, output_shape).map_err(|e| min_error(format!("min: {e}")))?;
 
     Ok(MinEvaluation {
         values: tensor::tensor_into_value(value_tensor),
@@ -757,7 +771,8 @@ fn reduce_complex_tensor(
         let output_shape = resolve_output_shape(&shape, &args.selection, &[])?;
         let values = ComplexTensor::new(Vec::new(), output_shape.clone())
             .map_err(|e| min_error(format!("min: {e}")))?;
-        let indices = Tensor::new(Vec::new(), output_shape).map_err(|e| min_error(format!("min: {e}")))?;
+        let indices =
+            Tensor::new(Vec::new(), output_shape).map_err(|e| min_error(format!("min: {e}")))?;
         return Ok(MinEvaluation {
             values: complex_tensor_into_value(values),
             indices: tensor::tensor_into_value(indices),
@@ -771,7 +786,8 @@ fn reduce_complex_tensor(
     if output_len == 0 {
         let values = ComplexTensor::new(Vec::new(), output_shape.clone())
             .map_err(|e| min_error(format!("min: {e}")))?;
-        let indices = Tensor::new(Vec::new(), output_shape).map_err(|e| min_error(format!("min: {e}")))?;
+        let indices =
+            Tensor::new(Vec::new(), output_shape).map_err(|e| min_error(format!("min: {e}")))?;
         return Ok(MinEvaluation {
             values: complex_tensor_into_value(values),
             indices: tensor::tensor_into_value(indices),
@@ -836,9 +852,10 @@ fn reduce_complex_tensor(
         };
     }
 
-    let value_tensor =
-        ComplexTensor::new(values, output_shape.clone()).map_err(|e| min_error(format!("min: {e}")))?;
-    let index_tensor = Tensor::new(indices, output_shape).map_err(|e| min_error(format!("min: {e}")))?;
+    let value_tensor = ComplexTensor::new(values, output_shape.clone())
+        .map_err(|e| min_error(format!("min: {e}")))?;
+    let index_tensor =
+        Tensor::new(indices, output_shape).map_err(|e| min_error(format!("min: {e}")))?;
     Ok(MinEvaluation {
         values: complex_tensor_into_value(value_tensor),
         indices: tensor::tensor_into_value(index_tensor),
@@ -1563,10 +1580,10 @@ fn elementwise_real_min(
         indices[offset] = origin;
     }
 
-    let value_tensor =
-        Tensor::new(values, plan.output_shape().to_vec()).map_err(|e| min_error(format!("min: {e}")))?;
-    let index_tensor =
-        Tensor::new(indices, plan.output_shape().to_vec()).map_err(|e| min_error(format!("min: {e}")))?;
+    let value_tensor = Tensor::new(values, plan.output_shape().to_vec())
+        .map_err(|e| min_error(format!("min: {e}")))?;
+    let index_tensor = Tensor::new(indices, plan.output_shape().to_vec())
+        .map_err(|e| min_error(format!("min: {e}")))?;
 
     Ok(MinEvaluation {
         values: tensor::tensor_into_value(value_tensor),
@@ -1601,8 +1618,8 @@ fn elementwise_complex_min(
 
     let value_tensor = ComplexTensor::new(values, plan.output_shape().to_vec())
         .map_err(|e| min_error(format!("min: {e}")))?;
-    let index_tensor =
-        Tensor::new(indices, plan.output_shape().to_vec()).map_err(|e| min_error(format!("min: {e}")))?;
+    let index_tensor = Tensor::new(indices, plan.output_shape().to_vec())
+        .map_err(|e| min_error(format!("min: {e}")))?;
 
     Ok(MinEvaluation {
         values: complex_tensor_into_value(value_tensor),

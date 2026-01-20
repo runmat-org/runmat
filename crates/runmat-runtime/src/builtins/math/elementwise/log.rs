@@ -9,13 +9,13 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const IMAG_EPS: f64 = 1e-12;
 
@@ -341,8 +341,7 @@ fn log_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
         }
     } else {
         let data: Vec<f64> = complex_values.into_iter().map(|(re, _)| re).collect();
-        let tensor = Tensor::new(data, shape)
-            .map_err(|e| builtin_error(format!("log: {e}")))?;
+        let tensor = Tensor::new(data, shape).map_err(|e| builtin_error(format!("log: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     }
 }

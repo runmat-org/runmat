@@ -20,7 +20,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{dispatcher::gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, dispatcher::gather_if_needed, make_cell, BuiltinResult, RuntimeError,
+};
 
 const ERROR_NOT_ENOUGH_ARGS: &str = "which: not enough input arguments";
 const ERROR_TOO_MANY_ARGS: &str = "which: too many input arguments";
@@ -259,7 +261,10 @@ fn which_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             cell_values.push(Value::CharArray(CharArray::new_row(entry)));
         }
         return make_cell(cell_values, matches.len(), 1).map_err(|err| {
-            build_runtime_error(err).with_builtin("which").build().into()
+            build_runtime_error(err)
+                .with_builtin("which")
+                .build()
+                .into()
         });
     }
 

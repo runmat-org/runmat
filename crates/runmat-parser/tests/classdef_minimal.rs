@@ -1,4 +1,5 @@
-use runmat_parser::parse_simple as parse;
+mod parse;
+use parse::parse;
 
 #[test]
 fn classdef_minimal_structure() {

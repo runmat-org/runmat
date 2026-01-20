@@ -355,8 +355,8 @@ fn snapshot_to_value(snapshot: RngSnapshot) -> BuiltinResult<Value> {
         .insert("Seed".to_string(), Value::Num(seed_value));
     let lo = (snapshot.state & 0xFFFF_FFFF) as f64;
     let hi = (snapshot.state >> 32) as f64;
-    let tensor = Tensor::new(vec![lo, hi], vec![1, 2])
-        .map_err(|e| builtin_error(format!("rng: {e}")))?;
+    let tensor =
+        Tensor::new(vec![lo, hi], vec![1, 2]).map_err(|e| builtin_error(format!("rng: {e}")))?;
     struct_value
         .fields
         .insert("State".to_string(), Value::Tensor(tensor));
@@ -445,7 +445,9 @@ fn parse_seed_scalar(value: &Value, label: &str) -> BuiltinResult<u64> {
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
             Err(builtin_error(format!("{label}: expected a numeric seed")))
         }
-        _ => Err(builtin_error(format!("{label}: expected a scalar numeric seed"))),
+        _ => Err(builtin_error(format!(
+            "{label}: expected a scalar numeric seed"
+        ))),
     }
 }
 
@@ -657,7 +659,10 @@ pub(crate) mod tests {
         st.fields.insert("State".to_string(), Value::Tensor(tensor));
         let err = rng_builtin(vec![Value::Struct(st)]).unwrap_err();
         let message = err.to_string();
-        assert!(message.contains("Type"), "unexpected error message: {message}");
+        assert!(
+            message.contains("Type"),
+            "unexpected error message: {message}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

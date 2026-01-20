@@ -1,5 +1,5 @@
-use runmat_builtins::{builtin_functions, LogicalArray, NumericDType, Tensor, Value};
 use crate::{build_runtime_error, make_cell_with_shape, new_object_builtin, RuntimeError};
+use runmat_builtins::{builtin_functions, LogicalArray, NumericDType, Tensor, Value};
 
 /// Return `true` when the passed value is a GPU-resident tensor handle.
 pub fn is_gpu_value(value: &Value) -> bool {
@@ -125,11 +125,9 @@ fn call_builtin_sync(name: &str, args: &[Value]) -> Result<Value, RuntimeError> 
             // Otherwise default-construct object
             return new_object_builtin(name.to_string());
         }
-        return Err(
-            build_runtime_error(format!("Undefined function: {name}"))
-                .with_identifier("MATLAB:UndefinedFunction")
-                .build(),
-        );
+        return Err(build_runtime_error(format!("Undefined function: {name}"))
+            .with_identifier("MATLAB:UndefinedFunction")
+            .build());
     }
 
     // Partition into no-category (tests/legacy shims) and categorized (library) builtins.
@@ -177,7 +175,7 @@ fn call_builtin_sync(name: &str, args: &[Value]) -> Result<Value, RuntimeError> 
                 } else {
                     last_error = err;
                 }
-            },
+            }
         }
     }
 

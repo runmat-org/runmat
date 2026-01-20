@@ -208,7 +208,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "ifft";
 
 fn ifft_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build()
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(
@@ -452,8 +454,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<usize
             } else {
                 let len = parse_length(&args[0], BUILTIN_NAME)?;
                 let dim = Some(
-                    tensor::parse_dimension(&args[1], BUILTIN_NAME)
-                        .map_err(|e| ifft_error(e))?,
+                    tensor::parse_dimension(&args[1], BUILTIN_NAME).map_err(|e| ifft_error(e))?,
                 );
                 Ok((len, dim, false))
             }
@@ -471,10 +472,8 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<usize
                 ));
             }
             let len = parse_length(&args[0], BUILTIN_NAME)?;
-            let dim = Some(
-                tensor::parse_dimension(&args[1], BUILTIN_NAME)
-                    .map_err(|e| ifft_error(e))?,
-            );
+            let dim =
+                Some(tensor::parse_dimension(&args[1], BUILTIN_NAME).map_err(|e| ifft_error(e))?);
             Ok((len, dim, symmetry))
         }
         _ => Err(ifft_error(

@@ -4,6 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::build_runtime_error;
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
@@ -11,7 +12,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::build_runtime_error;
 
 const MAX_SAFE_INTEGER: u64 = 1 << 53;
 
@@ -225,7 +225,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message).with_builtin("randperm").build()
+    build_runtime_error(message)
+        .with_builtin("randperm")
+        .build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randperm")]
@@ -300,9 +302,7 @@ impl ParsedRandPerm {
                             ));
                         }
                         let Some(proto) = args.get(idx + 1).cloned() else {
-                            return Err(builtin_error(
-                                "randperm: expected prototype after 'like'",
-                            ));
+                            return Err(builtin_error("randperm: expected prototype after 'like'"));
                         };
                         template = OutputTemplate::Like(proto);
                         idx += 2;
@@ -479,7 +479,9 @@ fn parse_intvalue(
         return Err(builtin_error(message));
     }
     if raw as u128 > MAX_SAFE_INTEGER as u128 {
-        return Err(builtin_error("randperm: values larger than 2^53 are not supported"));
+        return Err(builtin_error(
+            "randperm: values larger than 2^53 are not supported",
+        ));
     }
     if raw > usize::MAX as i128 {
         return Err(builtin_error("randperm: input exceeds platform limits"));
@@ -487,11 +489,7 @@ fn parse_intvalue(
     Ok(raw as usize)
 }
 
-fn parse_numeric(
-    value: f64,
-    allow_zero: bool,
-    message: &str,
-) -> crate::BuiltinResult<usize> {
+fn parse_numeric(value: f64, allow_zero: bool, message: &str) -> crate::BuiltinResult<usize> {
     if !value.is_finite() {
         return Err(builtin_error(message));
     }
@@ -506,7 +504,9 @@ fn parse_numeric(
         return Err(builtin_error(message));
     }
     if rounded > MAX_SAFE_INTEGER as f64 {
-        return Err(builtin_error("randperm: values larger than 2^53 are not supported"));
+        return Err(builtin_error(
+            "randperm: values larger than 2^53 are not supported",
+        ));
     }
     if rounded > usize::MAX as f64 {
         return Err(builtin_error("randperm: input exceeds platform limits"));

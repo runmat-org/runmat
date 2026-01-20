@@ -655,7 +655,9 @@ fn parse_order_value(value: &Value) -> BuiltinResult<NormOrder> {
             if tensor::is_scalar_tensor(t) {
                 parse_numeric(t.data[0])
             } else {
-                Err(builtin_error(format!("{NAME}: norm order must be a scalar.")))
+                Err(builtin_error(format!(
+                    "{NAME}: norm order must be a scalar."
+                )))
             }
         }
         Value::LogicalArray(l) => {
@@ -668,9 +670,9 @@ fn parse_order_value(value: &Value) -> BuiltinResult<NormOrder> {
                 )))
             }
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err(builtin_error(format!("{NAME}: norm order must be real-valued.")))
-        }
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(format!(
+            "{NAME}: norm order must be real-valued."
+        ))),
         Value::GpuTensor(_) => Err(builtin_error(format!(
             "{NAME}: norm order cannot be a GPU-resident tensor."
         ))),
@@ -678,7 +680,9 @@ fn parse_order_value(value: &Value) -> BuiltinResult<NormOrder> {
             if let Some(text) = tensor::value_to_string(value) {
                 parse_order_string(&text)
             } else {
-                Err(builtin_error(format!("{NAME}: unsupported norm order argument {value:?}")))
+                Err(builtin_error(format!(
+                    "{NAME}: unsupported norm order argument {value:?}"
+                )))
             }
         }
     }
@@ -686,7 +690,9 @@ fn parse_order_value(value: &Value) -> BuiltinResult<NormOrder> {
 
 fn parse_numeric(raw: f64) -> BuiltinResult<NormOrder> {
     if raw.is_nan() {
-        return Err(builtin_error(format!("{NAME}: norm order must be a real scalar.")));
+        return Err(builtin_error(format!(
+            "{NAME}: norm order must be a real scalar."
+        )));
     }
     if raw.is_infinite() {
         return Ok(if raw.is_sign_positive() {
@@ -710,7 +716,9 @@ fn parse_numeric(raw: f64) -> BuiltinResult<NormOrder> {
 fn parse_order_string(raw: &str) -> BuiltinResult<NormOrder> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err(builtin_error(format!("{NAME}: norm order string cannot be empty.")));
+        return Err(builtin_error(format!(
+            "{NAME}: norm order string cannot be empty."
+        )));
     }
     let lower = trimmed.to_ascii_lowercase();
     match lower.as_str() {
@@ -722,7 +730,9 @@ fn parse_order_string(raw: &str) -> BuiltinResult<NormOrder> {
             if let Ok(value) = trimmed.parse::<f64>() {
                 parse_numeric(value)
             } else {
-                Err(builtin_error(format!("{NAME}: unrecognised norm order '{trimmed}'.")))
+                Err(builtin_error(format!(
+                    "{NAME}: unrecognised norm order '{trimmed}'."
+                )))
             }
         }
     }
@@ -872,9 +882,8 @@ pub(crate) mod tests {
     #[test]
     fn norm_vector_p_less_than_one_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = unwrap_error(
-            norm_builtin(Value::Tensor(tensor), vec![Value::Num(0.5)]).unwrap_err(),
-        );
+        let err =
+            unwrap_error(norm_builtin(Value::Tensor(tensor), vec![Value::Num(0.5)]).unwrap_err());
         assert!(
             err.message().contains("p >= 1"),
             "expected p >= 1 error, got {err}"
@@ -933,9 +942,8 @@ pub(crate) mod tests {
     #[test]
     fn norm_matrix_invalid_order_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let err = unwrap_error(
-            norm_builtin(Value::Tensor(tensor), vec![Value::Num(3.0)]).unwrap_err(),
-        );
+        let err =
+            unwrap_error(norm_builtin(Value::Tensor(tensor), vec![Value::Num(3.0)]).unwrap_err());
         assert!(
             err.message().contains("not supported"),
             "expected unsupported message, got {err}"

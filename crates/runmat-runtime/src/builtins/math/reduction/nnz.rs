@@ -274,7 +274,9 @@ fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<Value> 
         None => {
             if let Some(p) = provider {
                 if let Ok(result) = p.reduce_nnz(&handle) {
-                    let host = p.download(&result).map_err(|e| nnz_error(format!("nnz: {e}")))?;
+                    let host = p
+                        .download(&result)
+                        .map_err(|e| nnz_error(format!("nnz: {e}")))?;
                     let _ = p.free(&result);
                     let count = host.data.into_iter().next().unwrap_or(0.0);
                     return Ok(Value::Num(count));
@@ -288,10 +290,12 @@ fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<Value> 
                 let zero_based = dim.saturating_sub(1);
                 if zero_based < handle.shape.len() {
                     if let Ok(result) = p.reduce_nnz_dim(&handle, zero_based) {
-                        let host = p.download(&result).map_err(|e| nnz_error(format!("nnz: {e}")))?;
+                        let host = p
+                            .download(&result)
+                            .map_err(|e| nnz_error(format!("nnz: {e}")))?;
                         let _ = p.free(&result);
-                        let tensor =
-                            Tensor::new(host.data, host.shape).map_err(|e| nnz_error(format!("nnz: {e}")))?;
+                        let tensor = Tensor::new(host.data, host.shape)
+                            .map_err(|e| nnz_error(format!("nnz: {e}")))?;
                         return Ok(tensor::tensor_into_value(tensor));
                     }
                 }
@@ -326,9 +330,9 @@ fn count_nonzero_value(value: &Value) -> BuiltinResult<usize> {
         Value::Int(i) => Ok(if i.to_i64() != 0 { 1 } else { 0 }),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Complex(re, im) => Ok(if is_nonzero_complex(*re, *im) { 1 } else { 0 }),
-        Value::GpuTensor(_) => {
-            Err(nnz_error("nnz: GPU inputs are handled before host evaluation"))
-        }
+        Value::GpuTensor(_) => Err(nnz_error(
+            "nnz: GPU inputs are handled before host evaluation",
+        )),
         other => Err(nnz_error(format!(
             "nnz: expected numeric, logical, complex, or char array, got {}",
             describe_value_kind(other)
@@ -432,9 +436,9 @@ fn mask_from_value(value: &Value) -> BuiltinResult<Mask> {
             bits: vec![if is_nonzero_complex(*re, *im) { 1 } else { 0 }],
             shape: vec![1, 1],
         }),
-        Value::GpuTensor(_) => {
-            Err(nnz_error("nnz: GPU inputs are handled before host evaluation"))
-        }
+        Value::GpuTensor(_) => Err(nnz_error(
+            "nnz: GPU inputs are handled before host evaluation",
+        )),
         other => Err(nnz_error(format!(
             "nnz: expected numeric, logical, complex, or char array, got {}",
             describe_value_kind(other)
@@ -746,7 +750,10 @@ pub(crate) mod tests {
                 .contains("expected numeric, logical, complex, or char array"),
             "unexpected error: {err}"
         );
-        assert!(err.message().contains("string scalar"), "unexpected error: {err}");
+        assert!(
+            err.message().contains("string scalar"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

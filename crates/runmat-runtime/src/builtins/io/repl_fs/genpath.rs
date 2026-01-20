@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 use runmat_filesystem as vfs;
 use std::collections::HashSet;
@@ -235,7 +235,9 @@ fn genpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
 fn generate_from_current_directory() -> BuiltinResult<Value> {
     let cwd = env::current_dir().map_err(|err| {
-        genpath_error(format!("genpath: unable to resolve current directory: {err}"))
+        genpath_error(format!(
+            "genpath: unable to resolve current directory: {err}"
+        ))
     })?;
     let (canonical_path, canonical_str) = canonicalize_existing(&cwd, "current directory")?;
     let excludes = ExcludeSet::default();
@@ -295,7 +297,9 @@ fn normalize_root(text: &str) -> BuiltinResult<RootInfo> {
         raw_path
     } else {
         let cwd = env::current_dir().map_err(|err| {
-            genpath_error(format!("genpath: unable to resolve current directory: {err}"))
+            genpath_error(format!(
+                "genpath: unable to resolve current directory: {err}"
+            ))
         })?;
         cwd.join(raw_path)
     };
@@ -614,7 +618,6 @@ pub(crate) mod tests {
             canonicalize_existing(path, &path_to_string(path)).expect("canonical path");
         canonical_str
     }
-
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

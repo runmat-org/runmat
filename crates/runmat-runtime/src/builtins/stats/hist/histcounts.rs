@@ -7,12 +7,12 @@ use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "histcounts";
 const DEFAULT_BIN_COUNT: usize = 10;
@@ -824,9 +824,7 @@ impl HistcountsOptions {
                 return Err(builtin_error("histcounts: BinLimits must be finite"));
             }
             if hi < lo {
-                return Err(builtin_error(
-                    "histcounts: BinLimits must be increasing",
-                ));
+                return Err(builtin_error("histcounts: BinLimits must be increasing"));
             }
         }
         Ok(())
@@ -930,9 +928,7 @@ fn parse_options(args: &[Value]) -> BuiltinResult<HistcountsOptions> {
                 let lo = limits[0];
                 let hi = limits[1];
                 if hi < lo {
-                    return Err(builtin_error(
-                        "histcounts: BinLimits must be increasing",
-                    ));
+                    return Err(builtin_error("histcounts: BinLimits must be increasing"));
                 }
                 if !lo.is_finite() || !hi.is_finite() {
                     return Err(builtin_error("histcounts: BinLimits must be finite"));
@@ -940,9 +936,8 @@ fn parse_options(args: &[Value]) -> BuiltinResult<HistcountsOptions> {
                 options.bin_limits = Some((lo, hi));
             }
             "normalization" => {
-                let text = tensor::value_to_string(value).ok_or_else(|| {
-                    builtin_error("histcounts: Normalization must be a string")
-                })?;
+                let text = tensor::value_to_string(value)
+                    .ok_or_else(|| builtin_error("histcounts: Normalization must be a string"))?;
                 options.normalization = parse_normalization(&text)?;
             }
             "binmethod" => {
@@ -1033,9 +1028,8 @@ fn is_option_key(value: &Value) -> bool {
 }
 
 fn numeric_vector(value: &Value, name: &str, option: &str) -> BuiltinResult<Vec<f64>> {
-    let tensor = tensor::value_to_tensor(value).map_err(|_| {
-        builtin_error(format!("{name}: {option} must be numeric"))
-    })?;
+    let tensor = tensor::value_to_tensor(value)
+        .map_err(|_| builtin_error(format!("{name}: {option} must be numeric")))?;
     Ok(tensor.data)
 }
 
@@ -1072,17 +1066,13 @@ fn scalar_value(value: &Value, name: &str, option: &str) -> BuiltinResult<f64> {
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
         Value::Tensor(tensor) => {
             if tensor.data.len() != 1 {
-                return Err(builtin_error(format!(
-                    "{name}: {option} must be a scalar"
-                )));
+                return Err(builtin_error(format!("{name}: {option} must be a scalar")));
             }
             Ok(tensor.data[0])
         }
         Value::LogicalArray(logical) => {
             if logical.data.len() != 1 {
-                return Err(builtin_error(format!(
-                    "{name}: {option} must be a scalar"
-                )));
+                return Err(builtin_error(format!("{name}: {option} must be a scalar")));
             }
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }

@@ -463,7 +463,9 @@ fn float_to_dim(value: f64) -> BuiltinResult<usize> {
         return Err(gpu_array_error("gpuArray: size arguments must be integers"));
     }
     if rounded < 0.0 {
-        return Err(gpu_array_error("gpuArray: size arguments must be non-negative"));
+        return Err(gpu_array_error(
+            "gpuArray: size arguments must be non-negative",
+        ));
     }
     Ok(rounded as usize)
 }
@@ -548,8 +550,8 @@ fn upload_host_value(value: Value, dtype: DataClass) -> BuiltinResult<PreparedHa
             );
         }
     }
-    let provider = runmat_accelerate_api::provider()
-        .ok_or_else(|| gpu_array_error(ERR_NO_PROVIDER))?;
+    let provider =
+        runmat_accelerate_api::provider().ok_or_else(|| gpu_array_error(ERR_NO_PROVIDER))?;
 
     let tensor = coerce_host_value(value)?;
     let (mut tensor, logical) = cast_tensor(tensor, dtype)?;
@@ -593,10 +595,10 @@ fn convert_device_value(
         _ => {}
     }
 
-    let provider = runmat_accelerate_api::provider()
-        .ok_or_else(|| gpu_array_error(ERR_NO_PROVIDER))?;
-    let tensor = gpu_helpers::gather_tensor(&handle)
-        .map_err(|err| gpu_array_error(err.to_string()))?;
+    let provider =
+        runmat_accelerate_api::provider().ok_or_else(|| gpu_array_error(ERR_NO_PROVIDER))?;
+    let tensor =
+        gpu_helpers::gather_tensor(&handle).map_err(|err| gpu_array_error(err.to_string()))?;
     let (mut tensor, logical) = cast_tensor(tensor, dtype)?;
 
     let view = HostTensorView {
@@ -756,8 +758,7 @@ fn char_array_to_tensor(ca: &CharArray) -> BuiltinResult<Tensor> {
             data[row * cols + col] = ch as u32 as f64;
         }
     }
-    Tensor::new(data, vec![rows, cols])
-        .map_err(|err| gpu_array_error(format!("gpuArray: {err}")))
+    Tensor::new(data, vec![rows, cols]).map_err(|err| gpu_array_error(format!("gpuArray: {err}")))
 }
 
 #[cfg(test)]
@@ -965,7 +966,9 @@ pub(crate) mod tests {
     fn gpu_array_like_requires_argument() {
         test_support::with_test_provider(|_| {
             let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-            let err = call(Value::Tensor(tensor), vec![Value::from("like")]).unwrap_err().to_string();
+            let err = call(Value::Tensor(tensor), vec![Value::from("like")])
+                .unwrap_err()
+                .to_string();
             assert!(err.contains("expected a prototype value"));
         });
     }
@@ -975,7 +978,9 @@ pub(crate) mod tests {
     fn gpu_array_unknown_option_errors() {
         test_support::with_test_provider(|_| {
             let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-            let err = call(Value::Tensor(tensor), vec![Value::from("mystery")]).unwrap_err().to_string();
+            let err = call(Value::Tensor(tensor), vec![Value::from("mystery")])
+                .unwrap_err()
+                .to_string();
             assert!(err.contains("unrecognised option"));
         });
     }
@@ -1082,7 +1087,8 @@ pub(crate) mod tests {
                 Value::Tensor(tensor),
                 vec![Value::from(2i32), Value::from(2i32)],
             )
-            .unwrap_err().to_string();
+            .unwrap_err()
+            .to_string();
             assert!(err.contains("cannot reshape"));
         });
     }

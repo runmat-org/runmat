@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, PagefunOp, PagefunRequest};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -189,9 +189,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn pagefun_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("pagefun")
-        .build()
+    build_runtime_error(message).with_builtin("pagefun").build()
 }
 
 #[runtime_builtin(
@@ -220,9 +218,7 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> crate::Builti
     let all_gpu = operands.iter().all(|v| matches!(v, Value::GpuTensor(_)));
     let mut host_values = Vec::with_capacity(operands.len());
     for value in operands {
-        host_values.push(
-            gather_if_needed(&value)?,
-        );
+        host_values.push(gather_if_needed(&value)?);
     }
 
     let mut page_inputs = Vec::with_capacity(host_values.len());
@@ -306,8 +302,7 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> crate::Builti
         }
 
         let mut evaluated = operation.evaluate(&page_args)?;
-        evaluated =
-            gather_if_needed(&evaluated)?;
+        evaluated = gather_if_needed(&evaluated)?;
         match output_kind {
             OutputKind::Real => {
                 let (data, rows, cols) = tensor_matrix_data(evaluated)?;
@@ -352,18 +347,18 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> crate::Builti
     let output = match output_kind {
         OutputKind::Real => {
             let data = real_data.unwrap_or_default();
-            let tensor = Tensor::new(data, final_shape)
-                .map_err(|e| pagefun_error(format!(
-                    "pagefun: failed to construct result tensor ({e})"
-                )))?;
+            let tensor = Tensor::new(data, final_shape).map_err(|e| {
+                pagefun_error(format!("pagefun: failed to construct result tensor ({e})"))
+            })?;
             FinalOutput::Real(tensor)
         }
         OutputKind::Complex => {
             let data = complex_data.unwrap_or_default();
-            let tensor = ComplexTensor::new(data, final_shape)
-                .map_err(|e| pagefun_error(format!(
+            let tensor = ComplexTensor::new(data, final_shape).map_err(|e| {
+                pagefun_error(format!(
                     "pagefun: failed to construct complex result tensor ({e})"
-                )))?;
+                ))
+            })?;
             FinalOutput::Complex(tensor)
         }
     };
@@ -371,10 +366,7 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> crate::Builti
     output.into_value(all_gpu)
 }
 
-fn try_pagefun_gpu(
-    operation: &PageOperation,
-    operands: &[Value],
-) -> BuiltinResult<Option<Value>> {
+fn try_pagefun_gpu(operation: &PageOperation, operands: &[Value]) -> BuiltinResult<Option<Value>> {
     if operands.is_empty() {
         return Ok(None);
     }
@@ -538,17 +530,18 @@ fn finalise_empty_output(
         .unwrap_or(0);
     match output_kind {
         OutputKind::Real => {
-            let tensor = Tensor::new(vec![0.0; entries], final_shape)
-                .map_err(|e| pagefun_error(format!(
-                    "pagefun: failed to build empty tensor ({e})"
-                )))?;
+            let tensor = Tensor::new(vec![0.0; entries], final_shape).map_err(|e| {
+                pagefun_error(format!("pagefun: failed to build empty tensor ({e})"))
+            })?;
             FinalOutput::Real(tensor).into_value(wants_gpu)
         }
         OutputKind::Complex => {
-            let tensor = ComplexTensor::new(vec![(0.0, 0.0); entries], final_shape)
-                .map_err(|e| pagefun_error(format!(
-                    "pagefun: failed to build empty complex tensor ({e})"
-                )))?;
+            let tensor =
+                ComplexTensor::new(vec![(0.0, 0.0); entries], final_shape).map_err(|e| {
+                    pagefun_error(format!(
+                        "pagefun: failed to build empty complex tensor ({e})"
+                    ))
+                })?;
             FinalOutput::Complex(tensor).into_value(false)
         }
     }
@@ -667,7 +660,9 @@ impl PageInput {
     fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
         let shape = canonical_matrix_shape(&tensor.shape);
         if tensor.data.len() != shape.iter().copied().product::<usize>() {
-            return Err(pagefun_error("pagefun: tensor data does not match its shape"));
+            return Err(pagefun_error(
+                "pagefun: tensor data does not match its shape",
+            ));
         }
         let rows = shape[0];
         let cols = shape[1];
@@ -687,7 +682,9 @@ impl PageInput {
     fn from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Self> {
         let shape = canonical_matrix_shape(&tensor.shape);
         if tensor.data.len() != shape.iter().copied().product::<usize>() {
-            return Err(pagefun_error("pagefun: tensor data does not match its shape"));
+            return Err(pagefun_error(
+                "pagefun: tensor data does not match its shape",
+            ));
         }
         let rows = shape[0];
         let cols = shape[1];
@@ -774,8 +771,9 @@ impl PreparedInput {
                 let slice = buffer
                     .get(offset..end)
                     .ok_or_else(|| pagefun_error("pagefun: page slice out of bounds"))?;
-                let tensor = ComplexTensor::new(slice.to_vec(), vec![self.data.rows, self.data.cols])
-                    .map_err(|e| pagefun_error(format!("pagefun: {e}")))?;
+                let tensor =
+                    ComplexTensor::new(slice.to_vec(), vec![self.data.rows, self.data.cols])
+                        .map_err(|e| pagefun_error(format!("pagefun: {e}")))?;
                 Ok(Value::ComplexTensor(tensor))
             }
         }

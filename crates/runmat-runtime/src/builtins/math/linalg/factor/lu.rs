@@ -577,8 +577,8 @@ fn matrix_to_value(matrix: &RowMajorMatrix) -> BuiltinResult<Value> {
 
 fn pivot_vector_to_value(pivot: &[f64]) -> BuiltinResult<Value> {
     let rows = pivot.len();
-    let tensor = Tensor::new(pivot.to_vec(), vec![rows, 1])
-        .map_err(|e| lu_error(format!("lu: {e}")))?;
+    let tensor =
+        Tensor::new(pivot.to_vec(), vec![rows, 1]).map_err(|e| lu_error(format!("lu: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 

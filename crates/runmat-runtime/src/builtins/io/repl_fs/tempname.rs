@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const ERR_TOO_MANY_INPUTS: &str = "tempname: too many input arguments";
 const ERR_FOLDER_TYPE: &str = "tempname: folder name must be a character vector or string scalar";
@@ -291,8 +291,7 @@ fn parse_folder_argument(value: &Value) -> BuiltinResult<PathBuf> {
         _ => return Err(tempname_error(ERR_FOLDER_TYPE)),
     };
 
-    let expanded = expand_user_path(&text, "tempname")
-        .map_err(|err| tempname_error(err))?;
+    let expanded = expand_user_path(&text, "tempname").map_err(|err| tempname_error(err))?;
     if expanded.is_empty() {
         Err(tempname_error(ERR_FOLDER_EMPTY))
     } else {
@@ -480,8 +479,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_rejects_too_many_arguments() {
-        let err = tempname_builtin(vec![Value::Num(1.0), Value::Num(2.0)])
-            .expect_err("expected error");
+        let err =
+            tempname_builtin(vec![Value::Num(1.0), Value::Num(2.0)]).expect_err("expected error");
         assert_eq!(err.message(), ERR_TOO_MANY_INPUTS);
 
         let err = tempname_builtin(vec![Value::Num(1.0)]).expect_err("error");

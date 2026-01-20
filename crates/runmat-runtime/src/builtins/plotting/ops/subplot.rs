@@ -14,21 +14,33 @@ fn scalar_from_value(value: &Value, name: &str) -> BuiltinResult<usize> {
         Value::Bool(flag) => to_positive_index(if *flag { 1.0 } else { 0.0 }, name),
         Value::Tensor(tensor) => {
             if tensor.data.len() != 1 {
-                return Err(plotting_error(name, format!("{name}: expected scalar input")));
+                return Err(plotting_error(
+                    name,
+                    format!("{name}: expected scalar input"),
+                ));
             }
             to_positive_index(tensor.data[0], name)
         }
-        _ => Err(plotting_error(name, format!("{name}: unsupported argument type"))),
+        _ => Err(plotting_error(
+            name,
+            format!("{name}: unsupported argument type"),
+        )),
     }
 }
 
 fn to_positive_index(value: f64, name: &str) -> BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err(plotting_error(name, format!("{name}: value must be finite")));
+        return Err(plotting_error(
+            name,
+            format!("{name}: value must be finite"),
+        ));
     }
     let rounded = value.round() as i64;
     if rounded <= 0 {
-        return Err(plotting_error(name, format!("{name}: value must be positive")));
+        return Err(plotting_error(
+            name,
+            format!("{name}: value must be positive"),
+        ));
     }
     Ok(rounded as usize)
 }

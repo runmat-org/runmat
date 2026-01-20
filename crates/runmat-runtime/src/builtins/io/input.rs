@@ -190,8 +190,9 @@ fn parse_prompt(value: &Value) -> Result<String, RuntimeError> {
                 Err(build_runtime_error("MATLAB:input:PromptMustBeScalarString").build())
             }
         }
-        other => Err(build_runtime_error(format!("MATLAB:input:InvalidPromptType ({other:?})"))
-            .build()),
+        other => {
+            Err(build_runtime_error(format!("MATLAB:input:InvalidPromptType ({other:?})")).build())
+        }
     }
 }
 
@@ -202,7 +203,9 @@ fn parse_string_flag(value: &Value) -> Result<bool, RuntimeError> {
         Value::String(s) => s,
         Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
         other => {
-            return Err(build_runtime_error(format!("MATLAB:input:InvalidStringFlag ({other:?})")).build())
+            return Err(
+                build_runtime_error(format!("MATLAB:input:InvalidStringFlag ({other:?})")).build(),
+            )
         }
     };
     let trimmed = text.trim();
@@ -220,11 +223,9 @@ fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
     }
     call_builtin("str2double", &[Value::String(trimmed.to_string())]).map_err(|err| {
         let message = err.message().to_string();
-        build_runtime_error(format!(
-            "MATLAB:input:InvalidNumericExpression ({message})"
-        ))
-        .with_source(err)
-        .build()
+        build_runtime_error(format!("MATLAB:input:InvalidNumericExpression ({message})"))
+            .with_source(err)
+            .build()
     })
 }
 

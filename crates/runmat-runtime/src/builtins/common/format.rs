@@ -6,7 +6,7 @@ use std::str::Chars;
 
 use runmat_builtins::{IntValue, LogicalArray, StringArray, Value};
 
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 /// Stateful cursor over formatting arguments.
 #[derive(Debug)]
@@ -30,7 +30,9 @@ impl<'a> ArgCursor<'a> {
 
     fn next(&mut self) -> BuiltinResult<Value> {
         if self.index >= self.args.len() {
-            return Err(format_error("sprintf: not enough input arguments for format specifier"));
+            return Err(format_error(
+                "sprintf: not enough input arguments for format specifier",
+            ));
         }
         let value = self.args[self.index].clone();
         self.index += 1;
@@ -358,7 +360,9 @@ fn apply_format_spec(
             format_char(value, flags, width)
         }
         other => {
-            return Err(format_error(format!("sprintf: unsupported format %{other}")));
+            return Err(format_error(format!(
+                "sprintf: unsupported format %{other}"
+            )));
         }
     }?;
 
@@ -684,7 +688,9 @@ fn value_to_isize(value: &Value) -> BuiltinResult<isize> {
         Value::Int(i) => Ok(i.to_i64().clamp(isize::MIN as i64, isize::MAX as i64) as isize),
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(format_error("sprintf: width/precision specifier must be finite"));
+                return Err(format_error(
+                    "sprintf: width/precision specifier must be finite",
+                ));
             }
             Ok(n.trunc().clamp(isize::MIN as f64, isize::MAX as f64) as isize)
         }
@@ -709,12 +715,16 @@ fn value_to_i128(value: &Value) -> BuiltinResult<i128> {
         }),
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(format_error("sprintf: numeric conversion requires finite input"));
+                return Err(format_error(
+                    "sprintf: numeric conversion requires finite input",
+                ));
             }
             Ok(n.trunc().clamp(i128::MIN as f64, i128::MAX as f64) as i128)
         }
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
-        other => Err(format_error(format!("sprintf: expected numeric argument, got {other:?}"))),
+        other => Err(format_error(format!(
+            "sprintf: expected numeric argument, got {other:?}"
+        ))),
     }
 }
 
@@ -736,7 +746,9 @@ fn value_to_u128(value: &Value) -> BuiltinResult<u128> {
         },
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(format_error("sprintf: numeric conversion requires finite input"));
+                return Err(format_error(
+                    "sprintf: numeric conversion requires finite input",
+                ));
             }
             if *n < 0.0 {
                 return Err(format_error("sprintf: expected non-negative value"));
@@ -755,7 +767,9 @@ fn value_to_f64(value: &Value) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        other => Err(format_error(format!("sprintf: expected numeric value, got {other:?}"))),
+        other => Err(format_error(format!(
+            "sprintf: expected numeric value, got {other:?}"
+        ))),
     }
 }
 
@@ -782,10 +796,9 @@ fn value_to_string(value: &Value) -> BuiltinResult<String> {
 
 fn value_to_char(value: &Value) -> BuiltinResult<char> {
     match value {
-        Value::String(s) => s
-            .chars()
-            .next()
-            .ok_or_else(|| format_error("sprintf: %c conversion requires non-empty character input")),
+        Value::String(s) => s.chars().next().ok_or_else(|| {
+            format_error("sprintf: %c conversion requires non-empty character input")
+        }),
         Value::CharArray(ca) => ca
             .data
             .first()
@@ -793,7 +806,9 @@ fn value_to_char(value: &Value) -> BuiltinResult<char> {
             .ok_or_else(|| format_error("sprintf: %c conversion requires non-empty char input")),
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(format_error("sprintf: %c conversion needs finite numeric value"));
+                return Err(format_error(
+                    "sprintf: %c conversion needs finite numeric value",
+                ));
             }
             let code = n.trunc() as u32;
             std::char::from_u32(code)
@@ -892,8 +907,9 @@ pub fn decode_escape_sequences(context: &str, input: &str) -> BuiltinResult<Stri
                     result.push('\\');
                     result.push('x');
                 } else {
-                    let value = u32::from_str_radix(&hex, 16)
-                        .map_err(|_| format_error(format!("{context}: invalid hexadecimal escape \\x{hex}")))?;
+                    let value = u32::from_str_radix(&hex, 16).map_err(|_| {
+                        format_error(format!("{context}: invalid hexadecimal escape \\x{hex}"))
+                    })?;
                     if let Some(chr) = char::from_u32(value) {
                         result.push(chr);
                     } else {
@@ -914,8 +930,9 @@ pub fn decode_escape_sequences(context: &str, input: &str) -> BuiltinResult<Stri
                         _ => break,
                     }
                 }
-                let value = u32::from_str_radix(&oct, 8)
-                    .map_err(|_| format_error(format!("{context}: invalid octal escape \\{oct}")))?;
+                let value = u32::from_str_radix(&oct, 8).map_err(|_| {
+                    format_error(format!("{context}: invalid octal escape \\{oct}"))
+                })?;
                 if let Some(chr) = char::from_u32(value) {
                     result.push(chr);
                 } else {
@@ -1012,7 +1029,9 @@ fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> Builti
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_) => {
-            return Err(format_error(format!("{context}: unsupported argument type")));
+            return Err(format_error(format!(
+                "{context}: unsupported argument type"
+            )));
         }
     }
     Ok(())

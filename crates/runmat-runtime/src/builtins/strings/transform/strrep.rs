@@ -3,13 +3,15 @@
 use runmat_builtins::{CellArray, CharArray, StringArray, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{gather_if_needed, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeError,
+};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -313,8 +315,8 @@ fn strrep_string_array(array: StringArray, old: &str, new: &str) -> BuiltinResul
         .into_iter()
         .map(|text| strrep_string_value(text, old, new))
         .collect::<Vec<_>>();
-    let rebuilt =
-        StringArray::new(replaced, shape).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+    let rebuilt = StringArray::new(replaced, shape)
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
     Ok(Value::StringArray(rebuilt))
 }
 
@@ -651,7 +653,9 @@ pub(crate) mod tests {
             Value::String("x".into()),
         )
         .expect_err("expected pattern error");
-        assert!(err.to_string().contains("string scalars or character vectors"));
+        assert!(err
+            .to_string()
+            .contains("string scalars or character vectors"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

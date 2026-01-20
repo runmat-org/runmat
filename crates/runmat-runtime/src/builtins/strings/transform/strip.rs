@@ -3,11 +3,11 @@
 use runmat_builtins::{CellArray, CharArray, StringArray, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
 
@@ -342,7 +342,8 @@ fn strip_string_array(array: StringArray, args: &[Value]) -> BuiltinResult<Value
             stripped.push(strip_text(&text, direction, pattern));
         }
     }
-    let result = StringArray::new(stripped, shape).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+    let result = StringArray::new(stripped, shape)
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
     Ok(Value::StringArray(result))
 }
 
@@ -394,7 +395,8 @@ fn strip_cell_array(cell: CellArray, args: &[Value]) -> BuiltinResult<Value> {
         let stripped = strip_cell_element(value, direction, pattern)?;
         stripped_values.push(stripped);
     }
-    make_cell(stripped_values, rows, cols).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+    make_cell(stripped_values, rows, cols)
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
 fn strip_cell_element(

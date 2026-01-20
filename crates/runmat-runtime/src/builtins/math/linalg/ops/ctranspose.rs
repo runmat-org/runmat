@@ -294,8 +294,8 @@ fn ctranspose_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     if rank <= 2 {
         let data = ctranspose_complex_matrix(&ct);
         let shape = vec![ct.cols, ct.rows];
-        let transposed =
-            ComplexTensor::new(data, shape.clone()).map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
+        let transposed = ComplexTensor::new(data, shape.clone())
+            .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
         ctranspose_complex_tensor_value(transposed)
     } else {
         let order = ctranspose_order(rank);
@@ -321,7 +321,8 @@ fn ctranspose_complex_tensor_value(ct: ComplexTensor) -> BuiltinResult<Value> {
         let tensor = Tensor::new(real, shape).map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     } else {
-        let tensor = ComplexTensor::new(conj_data, shape).map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
+        let tensor = ComplexTensor::new(conj_data, shape)
+            .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
@@ -369,7 +370,8 @@ fn ctranspose_char_array(ca: CharArray) -> BuiltinResult<CharArray> {
     let rows = ca.rows;
     let cols = ca.cols;
     if ca.data.is_empty() {
-        return CharArray::new(Vec::new(), cols, rows).map_err(|e| builtin_error(format!("{NAME}: {e}")));
+        return CharArray::new(Vec::new(), cols, rows)
+            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     let mut out = vec!['\0'; ca.data.len()];
     for r in 0..rows {
@@ -525,7 +527,8 @@ fn ctranspose_tensor_matrix(tensor: &Tensor) -> BuiltinResult<Tensor> {
     let rows = tensor.rows();
     let cols = tensor.cols();
     if tensor.data.is_empty() {
-        return Tensor::new(Vec::new(), vec![cols, rows]).map_err(|e| builtin_error(format!("{NAME}: {e}")));
+        return Tensor::new(Vec::new(), vec![cols, rows])
+            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     let mut out = vec![0.0; tensor.data.len()];
     for r in 0..rows {

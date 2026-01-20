@@ -15,11 +15,11 @@ use runmat_accelerate::AccelerateInitOptions;
 use runmat_builtins::Value;
 use runmat_config::{self as config, ConfigLoader, PlotBackend, PlotMode, RunMatConfig};
 use runmat_core::{ExecutionStreamEntry, ExecutionStreamKind, RunError, RunMatSession};
-use runmat_runtime::build_runtime_error;
 use runmat_gc::{
     gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats, GcConfig,
 };
 use runmat_kernel::{ConnectionInfo, KernelConfig, KernelServer};
+use runmat_runtime::build_runtime_error;
 use runmat_snapshot::presets::SnapshotPreset;
 use runmat_snapshot::{SnapshotBuilder, SnapshotConfig, SnapshotLoader};
 use runmat_time::Instant;
@@ -90,9 +90,9 @@ fn format_frontend_error(err: &RunError, source_name: &str, source: &str) -> Opt
                 source,
             ))
         }
-        RunError::Runtime(err) => Some(
-            err.format_diagnostic_with_source(Some(source_name), Some(source)),
-        ),
+        RunError::Runtime(err) => {
+            Some(err.format_diagnostic_with_source(Some(source_name), Some(source)))
+        }
     }
 }
 
@@ -1386,7 +1386,9 @@ async fn execute_script_with_args(
     let result = match engine.execute(&content).await {
         Ok(result) => result,
         Err(err) => {
-            if let Some(diag) = format_frontend_error(&err, script.to_string_lossy().as_ref(), &content) {
+            if let Some(diag) =
+                format_frontend_error(&err, script.to_string_lossy().as_ref(), &content)
+            {
                 eprintln!("{diag}");
             } else {
                 eprintln!("Execution error: {err}");
@@ -1677,25 +1679,17 @@ async fn execute_benchmark(
     println!("Warming up...");
     // Warmup runs
     for _ in 0..3 {
-        let _ = engine
-            .execute(&content)
-            .await
-            .map_err(anyhow::Error::new)?;
+        let _ = engine.execute(&content).await.map_err(anyhow::Error::new)?;
     }
 
     println!("Running benchmark...");
     for i in 1..=iterations {
-        let result = engine
-            .execute(&content)
-            .await
-            .map_err(anyhow::Error::new)?;
+        let result = engine.execute(&content).await.map_err(anyhow::Error::new)?;
 
         let iter_duration = Duration::from_millis(result.execution_time_ms);
-        if let Some(error) = result
-            .error
-            .as_ref()
-            .map(|err| err.format_diagnostic_with_source(Some(file.to_string_lossy().as_ref()), Some(&content)))
-        {
+        if let Some(error) = result.error.as_ref().map(|err| {
+            err.format_diagnostic_with_source(Some(file.to_string_lossy().as_ref()), Some(&content))
+        }) {
             total_time += iter_duration;
             let counters = RuntimeExecutionCounters {
                 total_executions: i as u64,

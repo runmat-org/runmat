@@ -18,7 +18,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::io::json::jsondecode::decode_json_text;
 use crate::call_builtin;
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 const DEFAULT_USER_AGENT: &str = "RunMat webwrite/0.0";
@@ -398,7 +398,9 @@ fn execute_request(
         .map(|s| !s.is_empty())
         .unwrap_or(false);
     if password_present && !username_present {
-        return Err(webwrite_error("webwrite: Password requires a Username option"));
+        return Err(webwrite_error(
+            "webwrite: Password requires a Username option",
+        ));
     }
 
     let mut url = Url::parse(url_text).map_err(|err| {
@@ -577,9 +579,8 @@ fn hex_digit(nibble: u8) -> char {
 }
 
 fn encode_json_payload(value: &Value) -> BuiltinResult<Vec<u8>> {
-    let encoded = call_builtin("jsonencode", std::slice::from_ref(value)).map_err(|flow| {
-        remap_webwrite_flow(flow, |err| format!("webwrite: {}", err.message()))
-    })?;
+    let encoded = call_builtin("jsonencode", std::slice::from_ref(value))
+        .map_err(|flow| remap_webwrite_flow(flow, |err| format!("webwrite: {}", err.message())))?;
     let text = expect_string_scalar(
         &encoded,
         "webwrite: jsonencode returned unexpected value; expected text scalar",
@@ -787,9 +788,7 @@ fn parse_header_fields(value: &Value) -> BuiltinResult<Vec<(String, String)>> {
                     "webwrite: header names must be character vectors or string scalars",
                 )?;
                 if header_name.trim().is_empty() {
-                    return Err(webwrite_error(
-                        "webwrite: header names must not be empty",
-                    ));
+                    return Err(webwrite_error("webwrite: header names must not be empty"));
                 }
                 let header_value = expect_string_scalar(
                     &value,

@@ -234,9 +234,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn repmat_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("repmat")
-        .build()
+    build_runtime_error(message).with_builtin("repmat").build()
 }
 
 #[runtime_builtin(
@@ -249,7 +247,9 @@ fn repmat_error(message: impl Into<String>) -> RuntimeError {
 )]
 fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        return Err(repmat_error("repmat: replication factors must be specified"));
+        return Err(repmat_error(
+            "repmat: replication factors must be specified",
+        ));
     }
     let raw_reps = parse_replication_factors(&rest)?;
     match value {
@@ -258,8 +258,8 @@ fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value>
             Ok(tensor::tensor_into_value(tiled))
         }
         Value::Num(_) | Value::Int(_) => {
-            let tensor = tensor::value_into_tensor_for("repmat", value)
-                .map_err(|e| repmat_error(e))?;
+            let tensor =
+                tensor::value_into_tensor_for("repmat", value).map_err(|e| repmat_error(e))?;
             let tiled = repmat_tensor(&tensor, &raw_reps)?;
             Ok(tensor::tensor_into_value(tiled))
         }
@@ -284,8 +284,8 @@ fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value>
             Ok(Value::ComplexTensor(tiled))
         }
         Value::String(s) => {
-            let array =
-                StringArray::new(vec![s], vec![1, 1]).map_err(|e| repmat_error(format!("repmat: {e}")))?;
+            let array = StringArray::new(vec![s], vec![1, 1])
+                .map_err(|e| repmat_error(format!("repmat: {e}")))?;
             let tiled = repmat_string_array(&array, &raw_reps)?;
             Ok(Value::StringArray(tiled))
         }
@@ -311,7 +311,9 @@ fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value>
 
 fn parse_replication_factors(args: &[Value]) -> crate::BuiltinResult<Vec<usize>> {
     if args.is_empty() {
-        return Err(repmat_error("repmat: replication factors must be specified"));
+        return Err(repmat_error(
+            "repmat: replication factors must be specified",
+        ));
     }
     if args.len() == 1 {
         parse_replication_vector(&args[0])
@@ -329,10 +331,12 @@ fn parse_replication_factors(args: &[Value]) -> crate::BuiltinResult<Vec<usize>>
 }
 
 fn parse_replication_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
-    let tensor = tensor::value_into_tensor_for("repmat", value.clone())
-        .map_err(|e| repmat_error(e))?;
+    let tensor =
+        tensor::value_into_tensor_for("repmat", value.clone()).map_err(|e| repmat_error(e))?;
     if tensor.data.is_empty() {
-        return Err(repmat_error("repmat: replication vector must contain at least one element"));
+        return Err(repmat_error(
+            "repmat: replication vector must contain at least one element",
+        ));
     }
     let mut factors = Vec::with_capacity(tensor.data.len());
     for (idx, &raw) in tensor.data.iter().enumerate() {
@@ -346,7 +350,9 @@ fn parse_replication_scalar(value: &Value) -> crate::BuiltinResult<usize> {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 0 {
-                Err(repmat_error("repmat: replication factors must be non-negative integers"))
+                Err(repmat_error(
+                    "repmat: replication factors must be non-negative integers",
+                ))
             } else {
                 Ok(raw as usize)
             }
@@ -378,7 +384,9 @@ fn coerce_rep_factor(value: f64, position: usize) -> crate::BuiltinResult<usize>
         )));
     }
     if rounded < 0.0 {
-        return Err(repmat_error("repmat: replication factors must be non-negative integers"));
+        return Err(repmat_error(
+            "repmat: replication factors must be non-negative integers",
+        ));
     }
     if rounded > (usize::MAX as f64) {
         return Err(repmat_error(format!(
@@ -393,10 +401,7 @@ fn repmat_tensor(tensor: &Tensor, reps: &[usize]) -> crate::BuiltinResult<Tensor
     Tensor::new(data, shape).map_err(|e| repmat_error(format!("repmat: {e}")))
 }
 
-fn repmat_logical(
-    logical: &LogicalArray,
-    reps: &[usize],
-) -> crate::BuiltinResult<LogicalArray> {
+fn repmat_logical(logical: &LogicalArray, reps: &[usize]) -> crate::BuiltinResult<LogicalArray> {
     let (data, shape) = repmat_column_major(&logical.data, &logical.shape, reps, "repmat")?;
     LogicalArray::new(data, shape).map_err(|e| repmat_error(format!("repmat: {e}")))
 }
@@ -409,10 +414,7 @@ fn repmat_complex_tensor(
     ComplexTensor::new(data, shape).map_err(|e| repmat_error(format!("repmat: {e}")))
 }
 
-fn repmat_string_array(
-    sa: &StringArray,
-    reps: &[usize],
-) -> crate::BuiltinResult<StringArray> {
+fn repmat_string_array(sa: &StringArray, reps: &[usize]) -> crate::BuiltinResult<StringArray> {
     let (data, shape) = repmat_column_major(&sa.data, &sa.shape, reps, "repmat")?;
     StringArray::new(data, shape).map_err(|e| repmat_error(format!("repmat: {e}")))
 }
@@ -424,10 +426,7 @@ fn repmat_char_array(ca: &CharArray, reps: &[usize]) -> crate::BuiltinResult<Cha
     CharArray::new(data, rows, cols).map_err(|e| repmat_error(format!("repmat: {e}")))
 }
 
-fn repmat_cell_array(
-    cell: &CellArray,
-    reps: &[usize],
-) -> crate::BuiltinResult<CellArray> {
+fn repmat_cell_array(cell: &CellArray, reps: &[usize]) -> crate::BuiltinResult<CellArray> {
     let (row_factor, col_factor) = compute_2d_reps(reps)?;
     let (rows, cols) = (
         cell.rows.saturating_mul(row_factor),
@@ -437,7 +436,8 @@ fn repmat_cell_array(
         .checked_mul(cols)
         .ok_or_else(|| repmat_error("repmat: requested output exceeds maximum size"))?;
     if total == 0 {
-        return CellArray::new(Vec::new(), rows, cols).map_err(|e| repmat_error(format!("repmat: {e}")));
+        return CellArray::new(Vec::new(), rows, cols)
+            .map_err(|e| repmat_error(format!("repmat: {e}")));
     }
     let mut values = Vec::with_capacity(total);
     for _ in 0..row_factor {
@@ -453,10 +453,7 @@ fn repmat_cell_array(
     CellArray::new(values, rows, cols).map_err(|e| repmat_error(format!("repmat: {e}")))
 }
 
-fn repmat_gpu_tensor(
-    handle: GpuTensorHandle,
-    reps: &[usize],
-) -> crate::BuiltinResult<Value> {
+fn repmat_gpu_tensor(handle: GpuTensorHandle, reps: &[usize]) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(tiled) = provider.repmat(&handle, reps) {
             return Ok(Value::GpuTensor(tiled));
@@ -472,7 +469,9 @@ fn repmat_gpu_tensor(
             Err(_) => Ok(tensor::tensor_into_value(tiled)),
         }
     } else {
-        Err(repmat_error("repmat: no acceleration provider is registered"))
+        Err(repmat_error(
+            "repmat: no acceleration provider is registered",
+        ))
     }
 }
 
@@ -580,7 +579,9 @@ fn repmat_row_major<T: Clone>(
 
 fn compute_2d_reps(reps: &[usize]) -> crate::BuiltinResult<(usize, usize)> {
     if reps.is_empty() {
-        return Err(repmat_error("repmat: replication factors must be specified"));
+        return Err(repmat_error(
+            "repmat: replication factors must be specified",
+        ));
     }
     if reps.len() == 1 {
         Ok((reps[0], reps[0]))
@@ -609,8 +610,9 @@ fn column_major_strides(dims: &[usize]) -> Vec<usize> {
 
 fn checked_total(shape: &[usize], context: &str) -> crate::BuiltinResult<usize> {
     shape.iter().try_fold(1usize, |acc, &dim| {
-        acc.checked_mul(dim)
-            .ok_or_else(|| repmat_error(format!("{context}: requested output exceeds maximum size")))
+        acc.checked_mul(dim).ok_or_else(|| {
+            repmat_error(format!("{context}: requested output exceeds maximum size"))
+        })
     })
 }
 

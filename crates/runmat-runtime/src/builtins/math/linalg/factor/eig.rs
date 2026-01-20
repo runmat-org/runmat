@@ -313,7 +313,9 @@ impl EigEval {
 
     pub fn left(&self) -> BuiltinResult<Value> {
         self.left.clone().ok_or_else(|| {
-            eig_error("eig: left eigenvectors are not available from the active acceleration provider")
+            eig_error(
+                "eig: left eigenvectors are not available from the active acceleration provider",
+            )
         })
     }
 
@@ -431,10 +433,10 @@ fn compute_eigen(
     }
     let n = matrix.nrows();
     if n == 0 {
-        let empty_vals = Tensor::new(Vec::new(), vec![0, 0])
-            .map_err(|e| eig_error(format!("eig: {e}")))?;
-        let empty_mat = Tensor::new(Vec::new(), vec![0, 0])
-            .map_err(|e| eig_error(format!("eig: {e}")))?;
+        let empty_vals =
+            Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| eig_error(format!("eig: {e}")))?;
+        let empty_mat =
+            Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| eig_error(format!("eig: {e}")))?;
         let eigenvalues_value = Value::Tensor(empty_vals.clone());
         let diagonal_matrix_value = Value::Tensor(empty_mat.clone());
         let diagonal_output = if options.vector_output {
@@ -665,8 +667,8 @@ fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> BuiltinResult<DMatrix<Com
 
 fn vector_to_value(values: &DVector<Complex64>) -> BuiltinResult<Value> {
     if values.is_empty() {
-        let tensor = Tensor::new(Vec::new(), vec![0, 0])
-            .map_err(|e| eig_error(format!("eig: {e}")))?;
+        let tensor =
+            Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| eig_error(format!("eig: {e}")))?;
         return Ok(Value::Tensor(tensor));
     }
     if is_all_real(values.iter().copied()) {
@@ -674,8 +676,8 @@ fn vector_to_value(values: &DVector<Complex64>) -> BuiltinResult<Value> {
         for value in values.iter() {
             data.push(value.re);
         }
-        let tensor = Tensor::new(data, vec![values.len(), 1])
-            .map_err(|e| eig_error(format!("eig: {e}")))?;
+        let tensor =
+            Tensor::new(data, vec![values.len(), 1]).map_err(|e| eig_error(format!("eig: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     } else {
         let mut data = Vec::with_capacity(values.len());
@@ -690,8 +692,8 @@ fn vector_to_value(values: &DVector<Complex64>) -> BuiltinResult<Value> {
 
 fn diag_matrix_value(values: &DVector<Complex64>) -> BuiltinResult<Value> {
     if values.is_empty() {
-        let tensor = Tensor::new(Vec::new(), vec![0, 0])
-            .map_err(|e| eig_error(format!("eig: {e}")))?;
+        let tensor =
+            Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| eig_error(format!("eig: {e}")))?;
         return Ok(Value::Tensor(tensor));
     }
     let size = values.len();
@@ -700,8 +702,8 @@ fn diag_matrix_value(values: &DVector<Complex64>) -> BuiltinResult<Value> {
         for i in 0..size {
             data[i + i * size] = values[i].re;
         }
-        let tensor = Tensor::new(data, vec![size, size])
-            .map_err(|e| eig_error(format!("eig: {e}")))?;
+        let tensor =
+            Tensor::new(data, vec![size, size]).map_err(|e| eig_error(format!("eig: {e}")))?;
         Ok(Value::Tensor(tensor))
     } else {
         let mut data = vec![(0.0f64, 0.0f64); size * size];

@@ -337,7 +337,9 @@ fn is_index_selector(value: &Value) -> bool {
 
 fn parse_index_selector(value: Value) -> BuiltinResult<IndexSelector> {
     let Value::Cell(cell) = value else {
-        return Err(getfield_flow("getfield: indices must be provided in a cell array"));
+        return Err(getfield_flow(
+            "getfield: indices must be provided in a cell array",
+        ));
     };
 
     let mut components = Vec::with_capacity(cell.data.len());
@@ -374,7 +376,9 @@ fn parse_index_text(text: &str) -> BuiltinResult<IndexComponent> {
         return Ok(IndexComponent::End);
     }
     if text == ":" {
-        return Err(getfield_flow("getfield: ':' indexing is not currently supported"));
+        return Err(getfield_flow(
+            "getfield: ':' indexing is not currently supported",
+        ));
     }
     if text.is_empty() {
         return Err(getfield_flow("getfield: index elements must not be empty"));
@@ -398,7 +402,9 @@ fn parse_positive_scalar(value: &Value) -> BuiltinResult<usize> {
         Value::Tensor(t) if t.data.len() == 1 => t.data[0],
         _ => {
             let repr = format!("{value:?}");
-            return Err(getfield_flow(format!("expected positive integer index, got {repr}")));
+            return Err(getfield_flow(format!(
+                "expected positive integer index, got {repr}"
+            )));
         }
     };
 
@@ -433,10 +439,14 @@ fn parse_field_name(value: Value) -> BuiltinResult<String> {
             if ca.rows == 1 {
                 Ok(ca.data.iter().collect())
             } else {
-                Err(getfield_flow("getfield: field names must be 1-by-N character vectors"))
+                Err(getfield_flow(
+                    "getfield: field names must be 1-by-N character vectors",
+                ))
             }
         }
-        other => Err(getfield_flow(format!("getfield: expected field name, got {other:?}"))),
+        other => Err(getfield_flow(format!(
+            "getfield: expected field name, got {other:?}"
+        ))),
     }
 }
 
@@ -539,14 +549,16 @@ fn tensor_dimension_length(tensor: &Tensor, dims: usize, dim_idx: usize) -> Buil
     if dims == 1 {
         let total = tensor.data.len();
         if total == 0 {
-            return Err(getfield_flow("Index exceeds the number of array elements (0)."));
+            return Err(getfield_flow(
+                "Index exceeds the number of array elements (0).",
+            ));
         }
         return Ok(total);
     }
     if dims > 2 {
-        return Err(
-            getfield_flow("getfield: indexing with more than two indices is not supported yet"),
-        );
+        return Err(getfield_flow(
+            "getfield: indexing with more than two indices is not supported yet",
+        ));
     }
     let len = if dim_idx == 0 {
         tensor.rows()
@@ -554,7 +566,9 @@ fn tensor_dimension_length(tensor: &Tensor, dims: usize, dim_idx: usize) -> Buil
         tensor.cols()
     };
     if len == 0 {
-        return Err(getfield_flow("Index exceeds the number of array elements (0)."));
+        return Err(getfield_flow(
+            "Index exceeds the number of array elements (0).",
+        ));
     }
     Ok(len)
 }
@@ -563,18 +577,22 @@ fn cell_dimension_length(cell: &CellArray, dims: usize, dim_idx: usize) -> Built
     if dims == 1 {
         let total = cell.data.len();
         if total == 0 {
-            return Err(getfield_flow("Index exceeds the number of array elements (0)."));
+            return Err(getfield_flow(
+                "Index exceeds the number of array elements (0).",
+            ));
         }
         return Ok(total);
     }
     if dims > 2 {
-        return Err(
-            getfield_flow("getfield: indexing with more than two indices is not supported yet"),
-        );
+        return Err(getfield_flow(
+            "getfield: indexing with more than two indices is not supported yet",
+        ));
     }
     let len = if dim_idx == 0 { cell.rows } else { cell.cols };
     if len == 0 {
-        return Err(getfield_flow("Index exceeds the number of array elements (0)."));
+        return Err(getfield_flow(
+            "Index exceeds the number of array elements (0).",
+        ));
     }
     Ok(len)
 }
@@ -587,14 +605,16 @@ fn string_array_dimension_length(
     if dims == 1 {
         let total = array.data.len();
         if total == 0 {
-            return Err(getfield_flow("Index exceeds the number of array elements (0)."));
+            return Err(getfield_flow(
+                "Index exceeds the number of array elements (0).",
+            ));
         }
         return Ok(total);
     }
     if dims > 2 {
-        return Err(
-            getfield_flow("getfield: indexing with more than two indices is not supported yet"),
-        );
+        return Err(getfield_flow(
+            "getfield: indexing with more than two indices is not supported yet",
+        ));
     }
     let len = if dim_idx == 0 {
         array.rows()
@@ -602,7 +622,9 @@ fn string_array_dimension_length(
         array.cols()
     };
     if len == 0 {
-        return Err(getfield_flow("Index exceeds the number of array elements (0)."));
+        return Err(getfield_flow(
+            "Index exceeds the number of array elements (0).",
+        ));
     }
     Ok(len)
 }
@@ -615,14 +637,16 @@ fn logical_array_dimension_length(
     if dims == 1 {
         let total = logical.data.len();
         if total == 0 {
-            return Err(getfield_flow("Index exceeds the number of array elements (0)."));
+            return Err(getfield_flow(
+                "Index exceeds the number of array elements (0).",
+            ));
         }
         return Ok(total);
     }
     if dims > 2 {
-        return Err(
-            getfield_flow("getfield: indexing with more than two indices is not supported yet"),
-        );
+        return Err(getfield_flow(
+            "getfield: indexing with more than two indices is not supported yet",
+        ));
     }
     let len = if dim_idx == 0 {
         logical.shape.first().copied().unwrap_or(logical.data.len())
@@ -630,7 +654,9 @@ fn logical_array_dimension_length(
         logical.shape.get(1).copied().unwrap_or(1)
     };
     if len == 0 {
-        return Err(getfield_flow("Index exceeds the number of array elements (0)."));
+        return Err(getfield_flow(
+            "Index exceeds the number of array elements (0).",
+        ));
     }
     Ok(len)
 }
@@ -643,18 +669,22 @@ fn char_array_dimension_length(
     if dims == 1 {
         let total = array.rows * array.cols;
         if total == 0 {
-            return Err(getfield_flow("Index exceeds the number of array elements (0)."));
+            return Err(getfield_flow(
+                "Index exceeds the number of array elements (0).",
+            ));
         }
         return Ok(total);
     }
     if dims > 2 {
-        return Err(
-            getfield_flow("getfield: indexing with more than two indices is not supported yet"),
-        );
+        return Err(getfield_flow(
+            "getfield: indexing with more than two indices is not supported yet",
+        ));
     }
     let len = if dim_idx == 0 { array.rows } else { array.cols };
     if len == 0 {
-        return Err(getfield_flow("Index exceeds the number of array elements (0)."));
+        return Err(getfield_flow(
+            "Index exceeds the number of array elements (0).",
+        ));
     }
     Ok(len)
 }
@@ -667,14 +697,16 @@ fn complex_tensor_dimension_length(
     if dims == 1 {
         let total = tensor.data.len();
         if total == 0 {
-            return Err(getfield_flow("Index exceeds the number of array elements (0)."));
+            return Err(getfield_flow(
+                "Index exceeds the number of array elements (0).",
+            ));
         }
         return Ok(total);
     }
     if dims > 2 {
-        return Err(
-            getfield_flow("getfield: indexing with more than two indices is not supported yet"),
-        );
+        return Err(getfield_flow(
+            "getfield: indexing with more than two indices is not supported yet",
+        ));
     }
     let len = if dim_idx == 0 {
         tensor.rows
@@ -682,14 +714,18 @@ fn complex_tensor_dimension_length(
         tensor.cols
     };
     if len == 0 {
-        return Err(getfield_flow("Index exceeds the number of array elements (0)."));
+        return Err(getfield_flow(
+            "Index exceeds the number of array elements (0).",
+        ));
     }
     Ok(len)
 }
 
 fn index_char_array(array: &CharArray, indices: &[usize]) -> BuiltinResult<Value> {
     if indices.is_empty() {
-        return Err(getfield_flow("getfield: at least one index is required for char arrays"));
+        return Err(getfield_flow(
+            "getfield: at least one index is required for char arrays",
+        ));
     }
     if indices.len() == 1 {
         let total = array.rows * array.cols;
@@ -707,8 +743,8 @@ fn index_char_array(array: &CharArray, indices: &[usize]) -> BuiltinResult<Value
             .get(pos)
             .copied()
             .ok_or_else(|| getfield_flow("Index exceeds the number of array elements."))?;
-        let out = CharArray::new(vec![ch], 1, 1)
-            .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
+        let out =
+            CharArray::new(vec![ch], 1, 1).map_err(|e| getfield_flow(format!("getfield: {e}")))?;
         return Ok(Value::CharArray(out));
     }
     if indices.len() == 2 {
@@ -723,8 +759,8 @@ fn index_char_array(array: &CharArray, indices: &[usize]) -> BuiltinResult<Value
             .get(pos)
             .copied()
             .ok_or_else(|| getfield_flow("Index exceeds the number of array elements."))?;
-        let out = CharArray::new(vec![ch], 1, 1)
-            .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
+        let out =
+            CharArray::new(vec![ch], 1, 1).map_err(|e| getfield_flow(format!("getfield: {e}")))?;
         return Ok(Value::CharArray(out));
     }
     Err(getfield_flow(
@@ -922,7 +958,6 @@ fn struct_array_first(cell: &CellArray) -> BuiltinResult<Option<Value>> {
         _ => Err(getfield_flow(
             "getfield: expected struct array elements to be structs",
         )),
-
     }
 }
 

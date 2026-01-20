@@ -433,9 +433,7 @@ fn finalize_output(spec: &FspecialFilterSpec, tensor: Tensor) -> BuiltinResult<V
             Ok(request) => match provider.fspecial(&request) {
                 Ok(handle) => return Ok(Value::GpuTensor(handle)),
                 Err(err) => {
-                    warn!(
-                        "fspecial: provider hook unavailable, falling back to host path: {err}"
-                    )
+                    warn!("fspecial: provider hook unavailable, falling back to host path: {err}")
                 }
             },
             Err(error) => {
@@ -451,9 +449,8 @@ fn finalize_output(spec: &FspecialFilterSpec, tensor: Tensor) -> BuiltinResult<V
 }
 
 fn parse_filter_kind(value: &Value) -> BuiltinResult<FilterKind> {
-    let text = value_to_string(value).ok_or_else(|| {
-        fspecial_error("fspecial: first argument must be a string filter name")
-    })?;
+    let text = value_to_string(value)
+        .ok_or_else(|| fspecial_error("fspecial: first argument must be a string filter name"))?;
     let lower = text.to_ascii_lowercase();
     match lower.as_str() {
         "average" => Ok(FilterKind::Average),
@@ -639,12 +636,13 @@ fn generate_average(rows: usize, cols: usize) -> BuiltinResult<Tensor> {
         .checked_mul(cols)
         .ok_or_else(|| fspecial_error("fspecial: LENGTHS are too large"))?;
     if total == 0 {
-        return Err(fspecial_error("fspecial: LENGTHS must be positive integers"));
+        return Err(fspecial_error(
+            "fspecial: LENGTHS must be positive integers",
+        ));
     }
     let fill = 1.0 / total as f64;
     let data = vec![fill; total];
-    Tensor::new(data, vec![rows, cols])
-        .map_err(|e| fspecial_error(format!("fspecial: {e}")))
+    Tensor::new(data, vec![rows, cols]).map_err(|e| fspecial_error(format!("fspecial: {e}")))
 }
 
 fn generate_disk(radius: f64, size: usize) -> BuiltinResult<Tensor> {
@@ -683,8 +681,7 @@ fn generate_disk(radius: f64, size: usize) -> BuiltinResult<Tensor> {
         *value /= sum;
     }
 
-    Tensor::new(data, vec![size, size])
-        .map_err(|e| fspecial_error(format!("fspecial: {e}")))
+    Tensor::new(data, vec![size, size]).map_err(|e| fspecial_error(format!("fspecial: {e}")))
 }
 
 fn generate_gaussian(rows: usize, cols: usize, sigma: f64) -> BuiltinResult<Tensor> {
@@ -711,8 +708,7 @@ fn generate_gaussian(rows: usize, cols: usize, sigma: f64) -> BuiltinResult<Tens
         *value /= sum;
     }
 
-    Tensor::new(data, vec![rows, cols])
-        .map_err(|e| fspecial_error(format!("fspecial: {e}")))
+    Tensor::new(data, vec![rows, cols]).map_err(|e| fspecial_error(format!("fspecial: {e}")))
 }
 
 fn generate_laplacian(alpha: f64) -> BuiltinResult<Tensor> {
@@ -805,7 +801,8 @@ fn generate_motion(
         *value /= sum;
     }
 
-    Tensor::new(data, vec![kernel_size, kernel_size]).map_err(|e| fspecial_error(format!("fspecial: {e}")))
+    Tensor::new(data, vec![kernel_size, kernel_size])
+        .map_err(|e| fspecial_error(format!("fspecial: {e}")))
 }
 
 fn deposit_bilinear(data: &mut [f64], size: usize, x: f64, y: f64, contribution: f64) {
@@ -1149,8 +1146,8 @@ pub(crate) mod tests {
     #[test]
     fn fspecial_average_rejects_zero_size() {
         let args = vec![Value::from(0)];
-        let err = fspecial_builtin(Value::from("average"), args)
-            .expect_err("fspecial should error");
+        let err =
+            fspecial_builtin(Value::from("average"), args).expect_err("fspecial should error");
         assert!(error_message(err).contains("positive"));
     }
 

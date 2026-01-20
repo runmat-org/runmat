@@ -895,8 +895,9 @@ pub(crate) mod tests {
     #[test]
     fn chol_invalid_option_errors() {
         let a = Matrix::new(vec![4.0, 1.0, 1.0, 3.0], vec![2, 2]).unwrap();
-        let err =
-            error_message(chol_builtin(Value::Tensor(a), vec![Value::from("diagonal")]).unwrap_err());
+        let err = error_message(
+            chol_builtin(Value::Tensor(a), vec![Value::from("diagonal")]).unwrap_err(),
+        );
         assert!(err.to_ascii_lowercase().contains("unknown option"));
     }
 

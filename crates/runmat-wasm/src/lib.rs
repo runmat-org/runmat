@@ -23,19 +23,19 @@ use runmat_core::{
     WorkspaceEntry, WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview,
     WorkspaceSliceOptions, WorkspaceSnapshot,
 };
-use runmat_runtime::build_runtime_error;
 use runmat_logging::{
     init_logging, set_runtime_log_hook, LoggingGuard, LoggingOptions, RuntimeLogRecord,
 };
+use runmat_runtime::build_runtime_error;
 use runmat_thread_local::runmat_thread_local;
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 use serde_wasm_bindgen;
 use std::backtrace::Backtrace;
 use tracing::{info, info_span};
+use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use wasm_bindgen::closure::Closure;
 
 #[cfg(target_arch = "wasm32")]
 mod fs;
@@ -71,13 +71,13 @@ use runmat_runtime::builtins::plotting::{
     FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
 #[cfg(target_arch = "wasm32")]
-use runmat_runtime::RuntimeError;
-#[cfg(target_arch = "wasm32")]
 use runmat_runtime::builtins::{
     plotting::{set_scatter_target_points, set_surface_vertex_budget},
     wasm_registry,
 };
 use runmat_runtime::warning_store::RuntimeWarning;
+#[cfg(target_arch = "wasm32")]
+use runmat_runtime::RuntimeError;
 use serde::{Deserialize, Serialize};
 
 const MAX_DATA_PREVIEW: usize = 4096;
@@ -359,7 +359,8 @@ impl RunMatWasm {
                 // Keep the legacy synchronous bridge (used by some builtins), but prefer the
                 // async handler for `ExecuteFuture`.
                 configure_session_input_handler(&mut session);
-                session.install_async_input_handler(|req| async move { js_input_request(req).await });
+                session
+                    .install_async_input_handler(|req| async move { js_input_request(req).await });
             }
             return Ok(());
         }
@@ -904,10 +905,18 @@ async fn js_input_request(request: InputRequest) -> Result<InputResponse, String
 
     match request.kind {
         InputRequestKind::Line { echo } => {
-            Reflect::set(&js_request, &JsValue::from_str("kind"), &JsValue::from_str("line"))
-                .unwrap_or_default();
-            Reflect::set(&js_request, &JsValue::from_str("echo"), &JsValue::from_bool(echo))
-                .unwrap_or_default();
+            Reflect::set(
+                &js_request,
+                &JsValue::from_str("kind"),
+                &JsValue::from_str("line"),
+            )
+            .unwrap_or_default();
+            Reflect::set(
+                &js_request,
+                &JsValue::from_str("echo"),
+                &JsValue::from_bool(echo),
+            )
+            .unwrap_or_default();
         }
         InputRequestKind::KeyPress => {
             Reflect::set(
@@ -942,8 +951,10 @@ async fn js_input_request(request: InputRequest) -> Result<InputResponse, String
             if let Some(text) = extract_line_value(&value) {
                 return Ok(InputResponse::Line(text));
             }
-            Err("stdin handler must return a string (or Promise of a string) for line input"
-                .to_string())
+            Err(
+                "stdin handler must return a string (or Promise of a string) for line input"
+                    .to_string(),
+            )
         }
         InputRequestKind::KeyPress => Ok(InputResponse::KeyPress),
     }
@@ -1143,9 +1154,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
                 {
                     if let Err(err) = plotting_context::ensure_context_from_provider() {
                         let message = err.message().to_string();
-                        warn!(
-                            "RunMat wasm: unable to install shared plotting context: {message}"
-                        );
+                        warn!("RunMat wasm: unable to install shared plotting context: {message}");
                         gpu_status.error = Some(message);
                     }
                 }
@@ -1788,7 +1797,6 @@ struct MaterializeSlicePayload {
     start: Vec<usize>,
     shape: Vec<usize>,
 }
-
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

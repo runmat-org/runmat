@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 use runmat_filesystem::OpenOptions;
 
 #[cfg_attr(
@@ -209,7 +209,6 @@ fn map_control_flow_with_context(err: RuntimeError, context: &str) -> RuntimeErr
     builder.build()
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FileEncoding {
     Auto,
@@ -328,17 +327,13 @@ fn parse_options(args: &[Value]) -> BuiltinResult<FilewriteOptions> {
         let value = &args[idx + 1];
         if key.eq_ignore_ascii_case("encoding") {
             if encoding_specified {
-                return Err(filewrite_error(
-                    "filewrite: duplicate 'Encoding' argument",
-                ));
+                return Err(filewrite_error("filewrite: duplicate 'Encoding' argument"));
             }
             options.encoding = encoding_from_value(value)?;
             encoding_specified = true;
         } else if key.eq_ignore_ascii_case("writemode") {
             if write_mode_specified {
-                return Err(filewrite_error(
-                    "filewrite: duplicate 'WriteMode' argument",
-                ));
+                return Err(filewrite_error("filewrite: duplicate 'WriteMode' argument"));
             }
             options.write_mode = write_mode_from_value(value)?;
             write_mode_specified = true;
@@ -380,9 +375,9 @@ fn encoding_from_value(value: &Value) -> BuiltinResult<FileEncoding> {
     let label = keyword_name(value)?;
     match FileEncoding::from_label(&label) {
         Some(enc) => Ok(enc),
-        None if label.trim().is_empty() => {
-            Err(filewrite_error("filewrite: encoding name must not be empty"))
-        }
+        None if label.trim().is_empty() => Err(filewrite_error(
+            "filewrite: encoding name must not be empty",
+        )),
         None => Err(filewrite_error(format!(
             "filewrite: unsupported encoding '{}'",
             label
@@ -703,7 +698,6 @@ pub(crate) mod tests {
     }
 
     fn unique_path(prefix: &str) -> PathBuf {
-
         let millis = unix_timestamp_ms();
         let mut path = std::env::temp_dir();
         path.push(format!("runmat_{prefix}_{}_{}", std::process::id(), millis));

@@ -308,16 +308,18 @@ fn inv_real_tensor_impl(matrix: &Tensor) -> BuiltinResult<Tensor> {
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     if rows != cols {
-        return Err(builtin_error(format!("{NAME}: input must be a square matrix.")));
+        return Err(builtin_error(format!(
+            "{NAME}: input must be a square matrix."
+        )));
     }
     if rows == 0 || cols == 0 {
         return Tensor::new(Vec::new(), matrix.shape.clone())
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     let dm = DMatrix::from_column_slice(rows, cols, &matrix.data);
-    let inverse = dm
-        .try_inverse()
-        .ok_or_else(|| builtin_error(format!("{NAME}: matrix is singular to working precision.")))?;
+    let inverse = dm.try_inverse().ok_or_else(|| {
+        builtin_error(format!("{NAME}: matrix is singular to working precision."))
+    })?;
     matrix_to_tensor(NAME, inverse, &matrix.shape)
 }
 
@@ -328,7 +330,9 @@ fn inv_complex_tensor_impl(matrix: &ComplexTensor) -> BuiltinResult<ComplexTenso
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     if rows != cols {
-        return Err(builtin_error(format!("{NAME}: input must be a square matrix.")));
+        return Err(builtin_error(format!(
+            "{NAME}: input must be a square matrix."
+        )));
     }
     if rows == 0 || cols == 0 {
         return ComplexTensor::new(Vec::new(), matrix.shape.clone())
@@ -340,9 +344,9 @@ fn inv_complex_tensor_impl(matrix: &ComplexTensor) -> BuiltinResult<ComplexTenso
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
     let dm = DMatrix::from_column_slice(rows, cols, &data);
-    let inverse = dm
-        .try_inverse()
-        .ok_or_else(|| builtin_error(format!("{NAME}: matrix is singular to working precision.")))?;
+    let inverse = dm.try_inverse().ok_or_else(|| {
+        builtin_error(format!("{NAME}: matrix is singular to working precision."))
+    })?;
     matrix_to_complex_tensor(NAME, inverse, &matrix.shape)
 }
 
@@ -353,12 +357,16 @@ fn matrix_dimensions(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
             if shape[0] == 1 {
                 Ok((1, 1))
             } else {
-                Err(builtin_error(format!("{NAME}: input must be a square matrix.")))
+                Err(builtin_error(format!(
+                    "{NAME}: input must be a square matrix."
+                )))
             }
         }
         _ => {
             if shape.len() > 2 && shape.iter().skip(2).any(|&dim| dim != 1) {
-                Err(builtin_error(format!("{NAME}: inputs must be 2-D matrices.")))
+                Err(builtin_error(format!(
+                    "{NAME}: inputs must be 2-D matrices."
+                )))
             } else {
                 Ok((shape[0], shape[1]))
             }
@@ -383,8 +391,7 @@ fn matrix_to_complex_tensor(
     let cols = matrix.ncols();
     let data: Vec<(f64, f64)> = matrix.as_slice().iter().map(|c| (c.re, c.im)).collect();
     debug_assert_eq!(rows * cols, matrix.len());
-    ComplexTensor::new(data, shape.to_vec())
-        .map_err(|e| builtin_error(format!("{label}: {e}")))
+    ComplexTensor::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("{label}: {e}")))
 }
 
 /// Host helper used by acceleration providers that delegate `inv` back to the CPU path.

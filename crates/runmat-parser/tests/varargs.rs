@@ -1,15 +1,18 @@
-use runmat_parser::{parse_simple as parse, Stmt};
+use runmat_parser::Stmt;
+
+mod parse;
+use parse::parse;
 
 #[test]
 fn varargin_must_be_last_param() {
     let err = parse("function y = f(varargin, x)\nend").unwrap_err();
-    assert!(err.contains("varargin"));
+    assert!(err.message.contains("varargin"));
 }
 
 #[test]
 fn varargout_must_be_last_output() {
     let err = parse("function [varargout, y] = f(x)\nend").unwrap_err();
-    assert!(err.contains("varargout"));
+    assert!(err.message.contains("varargout"));
 }
 
 #[test]

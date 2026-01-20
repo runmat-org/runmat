@@ -236,10 +236,7 @@ pub(crate) fn generate_normal(len: usize, label: &str) -> BuiltinResult<Vec<f64>
     Ok(out)
 }
 
-pub(crate) fn generate_normal_complex(
-    len: usize,
-    label: &str,
-) -> BuiltinResult<Vec<(f64, f64)>> {
+pub(crate) fn generate_normal_complex(len: usize, label: &str) -> BuiltinResult<Vec<(f64, f64)>> {
     let mut guard = rng_state()
         .lock()
         .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;

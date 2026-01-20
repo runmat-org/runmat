@@ -226,8 +226,8 @@ fn remap_char_flow(err: RuntimeError) -> RuntimeError {
 )]
 fn char_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        let empty = CharArray::new(Vec::new(), 0, 0)
-            .map_err(|e| char_flow(format!("char: {e}")))?;
+        let empty =
+            CharArray::new(Vec::new(), 0, 0).map_err(|e| char_flow(format!("char: {e}")))?;
         return Ok(Value::CharArray(empty));
     }
 
@@ -246,8 +246,8 @@ fn char_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 
     if rows.is_empty() {
-        let empty = CharArray::new(Vec::new(), 0, 0)
-            .map_err(|e| char_flow(format!("char: {e}")))?;
+        let empty =
+            CharArray::new(Vec::new(), 0, 0).map_err(|e| char_flow(format!("char: {e}")))?;
         return Ok(Value::CharArray(empty));
     }
 
@@ -295,7 +295,10 @@ fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<char>>> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(char_flow(format!("char: unsupported input type {:?}", value))),
+        | Value::MException(_) => Err(char_flow(format!(
+            "char: unsupported input type {:?}",
+            value
+        ))),
     }
 }
 
@@ -639,8 +642,7 @@ pub(crate) mod tests {
         let sa = StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 1, 2])
             .expect("string array");
         let err = error_message(
-            char_builtin(vec![Value::StringArray(sa)])
-                .expect_err("should reject >2D string array"),
+            char_builtin(vec![Value::StringArray(sa)]).expect_err("should reject >2D string array"),
         );
         assert!(err.contains("2-D"), "expected dimension error, got {err}");
     }
@@ -648,9 +650,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_rejects_complex_input() {
-        let err = error_message(
-            char_builtin(vec![Value::Complex(1.0, 2.0)]).expect_err("complex input"),
-        );
+        let err =
+            error_message(char_builtin(vec![Value::Complex(1.0, 2.0)]).expect_err("complex input"));
         assert!(
             err.contains("complex"),
             "expected complex error message, got {err}"

@@ -4,12 +4,12 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::build_runtime_error;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{random, tensor};
-use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -277,9 +277,7 @@ struct Bounds {
 impl Bounds {
     fn new(lower: i64, upper: i64) -> crate::BuiltinResult<Self> {
         if lower > upper {
-            return Err(builtin_error(
-                "randi: lower bound must be <= upper bound",
-            ));
+            return Err(builtin_error("randi: lower bound must be <= upper bound"));
         }
         let span = (upper as i128)
             .checked_sub(lower as i128)
@@ -465,7 +463,8 @@ fn randi_logical(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value
     let len = tensor::element_count(shape);
     let mut data: Vec<u8> = Vec::with_capacity(len);
     if len == 0 {
-        let logical = LogicalArray::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("randi: {e}")))?;
+        let logical = LogicalArray::new(data, shape.to_vec())
+            .map_err(|e| builtin_error(format!("randi: {e}")))?;
         return Ok(Value::LogicalArray(logical));
     }
 
@@ -480,7 +479,8 @@ fn randi_logical(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value
             .collect();
     }
 
-    let logical = LogicalArray::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("randi: {e}")))?;
+    let logical = LogicalArray::new(data, shape.to_vec())
+        .map_err(|e| builtin_error(format!("randi: {e}")))?;
     Ok(Value::LogicalArray(logical))
 }
 
@@ -496,7 +496,9 @@ fn randi_like(proto: &Value, bounds: &Bounds, shape: &[usize]) -> crate::Builtin
             "randi: complex prototypes are not supported; expected real-valued arrays",
         )),
         Value::Cell(_) => Err(builtin_error("randi: cell prototypes are not supported")),
-        other => Err(builtin_error(format!("randi: unsupported prototype {other:?}"))),
+        other => Err(builtin_error(format!(
+            "randi: unsupported prototype {other:?}"
+        ))),
     }
 }
 
@@ -574,9 +576,7 @@ fn parse_bounds(value: Value) -> crate::BuiltinResult<Bounds> {
         Value::LogicalArray(_) | Value::Bool(_) => Err(builtin_error(
             "randi: bounds must be numeric scalars or vectors",
         )),
-        Value::GpuTensor(_) => Err(builtin_error(
-            "randi: bounds must be specified on the host",
-        )),
+        Value::GpuTensor(_) => Err(builtin_error("randi: bounds must be specified on the host")),
         Value::String(s) => Err(builtin_error(format!(
             "randi: unexpected option '{s}' in first argument"
         ))),
@@ -720,7 +720,9 @@ fn shape_from_value(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
         Value::CharArray(ca) => Ok(vec![ca.rows, ca.cols]),
         Value::Cell(cell) => Ok(vec![cell.rows, cell.cols]),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Ok(vec![1, 1]),
-        other => Err(builtin_error(format!("randi: unsupported prototype {other:?}"))),
+        other => Err(builtin_error(format!(
+            "randi: unsupported prototype {other:?}"
+        ))),
     }
 }
 

@@ -1,8 +1,8 @@
 mod test_helpers;
 
-use runmat_hir::lower;
 use runmat_parser::parse;
 use test_helpers::execute;
+use test_helpers::lower;
 
 #[test]
 fn reshape_and_index_3d_element() {

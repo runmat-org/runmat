@@ -116,11 +116,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::surf"
 )]
-pub fn surf_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
-    let x_tensor = Tensor::try_from(&x)
-        .map_err(|e| plotting_error(BUILTIN_NAME, format!("surf: {e}")))?;
-    let y_tensor = Tensor::try_from(&y)
-        .map_err(|e| plotting_error(BUILTIN_NAME, format!("surf: {e}")))?;
+pub fn surf_builtin(
+    x: Value,
+    y: Value,
+    z: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<String> {
+    let x_tensor =
+        Tensor::try_from(&x).map_err(|e| plotting_error(BUILTIN_NAME, format!("surf: {e}")))?;
+    let y_tensor =
+        Tensor::try_from(&y).map_err(|e| plotting_error(BUILTIN_NAME, format!("surf: {e}")))?;
     let x_axis = numeric_vector(x_tensor);
     let y_axis = numeric_vector(y_tensor);
     let mut x_axis = Some(x_axis);
@@ -205,16 +210,17 @@ pub(crate) fn build_surface_gpu_plot(
     z: &GpuTensorHandle,
 ) -> BuiltinResult<SurfacePlot> {
     if x_axis.is_empty() || y_axis.is_empty() {
-        return Err(plotting_error(name, format!("{name}: axis vectors must be non-empty")));
+        return Err(plotting_error(
+            name,
+            format!("{name}: axis vectors must be non-empty"),
+        ));
     }
 
-    let context = runmat_plot::shared_wgpu_context().ok_or_else(|| {
-        plotting_error(name, format!("{name}: plotting GPU context unavailable"))
-    })?;
+    let context = runmat_plot::shared_wgpu_context()
+        .ok_or_else(|| plotting_error(name, format!("{name}: plotting GPU context unavailable")))?;
 
-    let z_ref = runmat_accelerate_api::export_wgpu_buffer(z).ok_or_else(|| {
-        plotting_error(name, format!("{name}: unable to export GPU Z data"))
-    })?;
+    let z_ref = runmat_accelerate_api::export_wgpu_buffer(z)
+        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Z data")))?;
 
     let expected_len = x_axis
         .len()

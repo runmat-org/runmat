@@ -1,8 +1,8 @@
 mod test_helpers;
 
-use runmat_hir::lower;
 use runmat_parser::parse;
 use test_helpers::execute;
+use test_helpers::lower;
 
 fn find_last_tensor(vars: &[runmat_builtins::Value]) -> runmat_builtins::Tensor {
     vars.iter()
@@ -138,7 +138,7 @@ fn gather_scatter_roundtrip_consistency() {
 fn fastpath_roundtrip_and_broadcast() {
     // Column-major round-trip: read, write full column/row using vector and scalar broadcasts
     let src = "A=reshape([1 2 3 4 5 6 7 8 9 10 11 12],3,4); C1=A(:,2); A(:,2)=[30;31;32]; B1=A; A(1,:)=100; B2=A; A(:,3)=7; B3=A;";
-    let hir = runmat_hir::lower(&runmat_parser::parse(src).unwrap()).unwrap();
+    let hir = lower(&runmat_parser::parse(src).unwrap()).unwrap();
     let vars = execute(&hir).unwrap();
     // C1 == original second column [4;5;6]
     assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![3,1] && t.data==vec![4.0,5.0,6.0])));
@@ -374,7 +374,7 @@ fn func_returns_into_row_col_linear_slices() {
 		E([1 9]) = g();   % linear slice
 		F = E;
 	"#;
-    let hir = runmat_hir::lower(&runmat_parser::parse(src).unwrap()).unwrap();
+    let hir = lower(&runmat_parser::parse(src).unwrap()).unwrap();
     let vars = execute(&hir).unwrap();
     // B should have row1 col2..3 set to 7,8
     assert!(vars
@@ -409,7 +409,7 @@ fn cell_expansion_into_row_col_linear_slices() {
 		G([1 9]) = H{:};   % linear slice two positions
 		I = G;
 	"#;
-    let hir = runmat_hir::lower(&runmat_parser::parse(src).unwrap()).unwrap();
+    let hir = lower(&runmat_parser::parse(src).unwrap()).unwrap();
     let vars = execute(&hir).unwrap();
     // B row1 col2..3 set to 7,8
     assert!(vars
@@ -442,7 +442,7 @@ fn function_return_expansion_into_slice_with_empty() {
         % Empty expansion: ensure we don't crash; assign nothing
         x = g(0);
     "#;
-    let hir = runmat_hir::lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
     let _ = execute(&hir);
 }
 
@@ -455,7 +455,7 @@ fn cell_expansion_into_slice_with_degenerate_dims() {
         A(1,1) = C{1}; A(1,2) = C{2}; A(1,3) = C{3};
         s = sum(A(:));
     "#;
-    let hir = runmat_hir::lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
     let vars = execute(&hir).unwrap();
     assert!(vars
         .iter()
@@ -473,12 +473,11 @@ fn oop_negative_missing_subsref_mex() {
             err = e;
         end
     "#;
-    let hir = runmat_hir::lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
     let out = execute(&hir);
     if let Err(err) = out {
         assert!(
-            err.identifier() == Some("MATLAB:MissingSubsref")
-                || err.message().contains("subsref")
+            err.identifier() == Some("MATLAB:MissingSubsref") || err.message().contains("subsref")
         );
     }
 }
@@ -494,7 +493,7 @@ fn oop_negative_missing_subsasgn_mex() {
             err = e;
         end
     "#;
-    let hir = runmat_hir::lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
     let out = execute(&hir);
     if let Err(err) = out {
         assert!(

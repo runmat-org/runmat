@@ -39,7 +39,9 @@ extern "C" {}
 #[cfg(all(feature = "blas-lapack", not(target_os = "macos")))]
 extern crate openblas_src;
 
-pub use dispatcher::{call_builtin, call_builtin_async, gather_if_needed, is_gpu_value, value_contains_gpu};
+pub use dispatcher::{
+    call_builtin, call_builtin_async, gather_if_needed, is_gpu_value, value_contains_gpu,
+};
 
 pub use runmat_macros::{register_doc_text, register_fusion_spec, register_gpu_spec};
 
@@ -155,18 +157,20 @@ fn deal_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
 #[runmat_macros::runtime_builtin(name = "rethrow", builtin_path = "crate")]
 fn rethrow_builtin(e: Value) -> crate::BuiltinResult<Value> {
     match e {
-        Value::MException(me) => Err(
-            build_runtime_error(me.message)
-                .with_identifier(me.identifier)
-                .build(),
-        ),
+        Value::MException(me) => Err(build_runtime_error(me.message)
+            .with_identifier(me.identifier)
+            .build()),
         Value::String(s) => Err(build_runtime_error(s).build()),
         other => Err(build_runtime_error(format!("MATLAB:error: {other:?}")).build()),
     }
 }
 
 #[runmat_macros::runtime_builtin(name = "call_method", builtin_path = "crate")]
-fn call_method_builtin(base: Value, method: String, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn call_method_builtin(
+    base: Value,
+    method: String,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     match base {
         Value::Object(obj) => {
             // Simple dynamic dispatch via builtin registry: method name may be qualified as Class.method
@@ -198,9 +202,9 @@ fn call_method_builtin(base: Value, method: String, rest: Vec<Value>) -> crate::
             }
             Ok(crate::call_builtin(&method, &args)?)
         }
-        other => Err(((format!(
-            "call_method unsupported on {other:?} for method '{method}'"
-        ))).into()),
+        other => {
+            Err((format!("call_method unsupported on {other:?} for method '{method}'")).into())
+        }
     }
 }
 
@@ -215,7 +219,10 @@ fn subsasgn_dispatch(
     match &obj {
         Value::Object(o) => {
             let qualified = format!("{}.subsasgn", o.class_name);
-            Ok(crate::call_builtin(&qualified, &[obj, Value::String(kind), payload, rhs])?)
+            Ok(crate::call_builtin(
+                &qualified,
+                &[obj, Value::String(kind), payload, rhs],
+            )?)
         }
         Value::HandleObject(h) => {
             let target = unsafe { &*h.target.as_raw() };
@@ -224,9 +231,12 @@ fn subsasgn_dispatch(
                 _ => h.class_name.clone(),
             };
             let qualified = format!("{class_name}.subsasgn");
-            Ok(crate::call_builtin(&qualified, &[obj, Value::String(kind), payload, rhs])?)
+            Ok(crate::call_builtin(
+                &qualified,
+                &[obj, Value::String(kind), payload, rhs],
+            )?)
         }
-        other => Err(((format!("subsasgn: receiver must be object, got {other:?}"))).into()),
+        other => Err((format!("subsasgn: receiver must be object, got {other:?}")).into()),
     }
 }
 
@@ -235,7 +245,10 @@ fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> crate::BuiltinR
     match &obj {
         Value::Object(o) => {
             let qualified = format!("{}.subsref", o.class_name);
-            Ok(crate::call_builtin(&qualified, &[obj, Value::String(kind), payload])?)
+            Ok(crate::call_builtin(
+                &qualified,
+                &[obj, Value::String(kind), payload],
+            )?)
         }
         Value::HandleObject(h) => {
             let target = unsafe { &*h.target.as_raw() };
@@ -244,9 +257,12 @@ fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> crate::BuiltinR
                 _ => h.class_name.clone(),
             };
             let qualified = format!("{class_name}.subsref");
-            Ok(crate::call_builtin(&qualified, &[obj, Value::String(kind), payload])?)
+            Ok(crate::call_builtin(
+                &qualified,
+                &[obj, Value::String(kind), payload],
+            )?)
         }
-        other => Err(((format!("subsref: receiver must be object, got {other:?}"))).into()),
+        other => Err((format!("subsref: receiver must be object, got {other:?}")).into()),
     }
 }
 
@@ -296,7 +312,7 @@ fn addlistener_builtin(
     let key_ptr: usize = match &target {
         Value::HandleObject(h) => (unsafe { h.target.as_raw() }) as usize,
         Value::Object(o) => o as *const _ as usize,
-        _ => return Err((("addlistener: target must be handle or object".to_string())).into()),
+        _ => return Err(("addlistener: target must be handle or object".to_string()).into()),
     };
     let mut reg = events().lock().unwrap();
     let id = {
@@ -327,11 +343,15 @@ fn addlistener_builtin(
 }
 
 #[runmat_macros::runtime_builtin(name = "notify", builtin_path = "crate")]
-fn notify_builtin(target: Value, event_name: String, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn notify_builtin(
+    target: Value,
+    event_name: String,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     let key_ptr: usize = match &target {
         Value::HandleObject(h) => (unsafe { h.target.as_raw() }) as usize,
         Value::Object(o) => o as *const _ as usize,
-        _ => return Err((("notify: target must be handle or object".to_string())).into()),
+        _ => return Err(("notify: target must be handle or object".to_string()).into()),
     };
     let mut to_call: Vec<runmat_builtins::Listener> = Vec::new();
     {
@@ -385,7 +405,7 @@ fn get_p_builtin(obj: Value) -> crate::BuiltinResult<Value> {
                 Ok(Value::Num(0.0))
             }
         }
-        other => Err(((format!("get.p requires object, got {other:?}"))).into()),
+        other => Err((format!("get.p requires object, got {other:?}")).into()),
     }
 }
 
@@ -396,7 +416,7 @@ fn set_p_builtin(obj: Value, val: Value) -> crate::BuiltinResult<Value> {
             o.properties.insert("p_backing".to_string(), val);
             Ok(Value::Object(o))
         }
-        other => Err(((format!("set.p requires object, got {other:?}"))).into()),
+        other => Err((format!("set.p requires object, got {other:?}")).into()),
     }
 }
 
@@ -678,9 +698,7 @@ fn point_move_method(obj: Value, dx: f64, dy: f64) -> crate::BuiltinResult<Value
             o.properties.insert("y".to_string(), Value::Num(y + dy));
             Ok(Value::Object(o))
         }
-        other => Err(((format!(
-            "Point.move requires object receiver, got {other:?}"
-        ))).into()),
+        other => Err((format!("Point.move requires object receiver, got {other:?}")).into()),
     }
 }
 
@@ -708,9 +726,7 @@ fn circle_area_method(obj: Value) -> crate::BuiltinResult<Value> {
             };
             Ok(Value::Num(std::f64::consts::PI * r * r))
         }
-        other => Err(((format!(
-            "Circle.area requires object receiver, got {other:?}"
-        ))).into()),
+        other => Err((format!("Circle.area requires object receiver, got {other:?}")).into()),
     }
 }
 
@@ -762,7 +778,7 @@ fn overidx_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinRe
                 Ok(Value::Num(77.0))
             }
         }
-        _ => Err((("subsref: unsupported payload".to_string())).into()),
+        _ => Err(("subsref: unsupported payload".to_string()).into()),
     }
 }
 
@@ -792,7 +808,7 @@ fn overidx_subsasgn(
             o.properties.insert(field, rhs);
             Ok(Value::Object(o.clone()))
         }
-        _ => Err((("subsasgn: unsupported payload".to_string())).into()),
+        _ => Err(("subsasgn: unsupported payload".to_string()).into()),
     }
 }
 
@@ -801,7 +817,7 @@ fn overidx_subsasgn(
 fn overidx_plus(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err((("OverIdx.plus: receiver must be object".to_string())).into()),
+        _ => return Err(("OverIdx.plus: receiver must be object".to_string()).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -816,7 +832,7 @@ fn overidx_plus(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 fn overidx_times(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err((("OverIdx.times: receiver must be object".to_string())).into()),
+        _ => return Err(("OverIdx.times: receiver must be object".to_string()).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -831,7 +847,7 @@ fn overidx_times(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 fn overidx_mtimes(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err((("OverIdx.mtimes: receiver must be object".to_string())).into()),
+        _ => return Err(("OverIdx.mtimes: receiver must be object".to_string()).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -846,7 +862,7 @@ fn overidx_mtimes(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 fn overidx_lt(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err((("OverIdx.lt: receiver must be object".to_string())).into()),
+        _ => return Err(("OverIdx.lt: receiver must be object".to_string()).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -861,7 +877,7 @@ fn overidx_lt(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 fn overidx_gt(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err((("OverIdx.gt: receiver must be object".to_string())).into()),
+        _ => return Err(("OverIdx.gt: receiver must be object".to_string()).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -876,7 +892,7 @@ fn overidx_gt(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 fn overidx_eq(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err((("OverIdx.eq: receiver must be object".to_string())).into()),
+        _ => return Err(("OverIdx.eq: receiver must be object".to_string()).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -897,7 +913,7 @@ fn overidx_uplus(obj: Value) -> crate::BuiltinResult<Value> {
 fn overidx_rdivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err((("OverIdx.rdivide: receiver must be object".to_string())).into()),
+        _ => return Err(("OverIdx.rdivide: receiver must be object".to_string()).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -912,7 +928,7 @@ fn overidx_rdivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 fn overidx_ldivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err((("OverIdx.ldivide: receiver must be object".to_string())).into()),
+        _ => return Err(("OverIdx.ldivide: receiver must be object".to_string()).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -927,7 +943,7 @@ fn overidx_ldivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 fn overidx_and(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err((("OverIdx.and: receiver must be object".to_string())).into()),
+        _ => return Err(("OverIdx.and: receiver must be object".to_string()).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -942,7 +958,7 @@ fn overidx_and(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 fn overidx_or(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err((("OverIdx.or: receiver must be object".to_string())).into()),
+        _ => return Err(("OverIdx.or: receiver must be object".to_string()).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -957,7 +973,7 @@ fn overidx_or(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 fn overidx_xor(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err((("OverIdx.xor: receiver must be object".to_string())).into()),
+        _ => return Err(("OverIdx.xor: receiver must be object".to_string()).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -978,9 +994,10 @@ fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
             if let Some(name) = s.strip_prefix('@') {
                 Ok(crate::call_builtin(name, &rest)?)
             } else {
-                Err(((format!(
-                    "feval: expected function handle string starting with '@', got {s}"
-                ))).into())
+                Err(
+                    (format!("feval: expected function handle string starting with '@', got {s}"))
+                        .into(),
+                )
             }
         }
         // Also accept character row vector handles like '@max'
@@ -990,12 +1007,13 @@ fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
                 if let Some(name) = s.strip_prefix('@') {
                     Ok(crate::call_builtin(name, &rest)?)
                 } else {
-                    Err(((format!(
+                    Err((format!(
                         "feval: expected function handle string starting with '@', got {s}"
-                    ))).into())
+                    ))
+                    .into())
                 }
             } else {
-                Err((("feval: function handle char array must be a row vector".to_string())).into())
+                Err(("feval: function handle char array must be a row vector".to_string()).into())
             }
         }
         Value::Closure(c) => {
@@ -1004,7 +1022,7 @@ fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
             Ok(crate::call_builtin(&c.function_name, &args)?)
         }
         // Future: support Value::Function variants
-        other => Err(((format!("feval: unsupported function value {other:?}"))).into()),
+        other => Err((format!("feval: unsupported function value {other:?}")).into()),
     }
 }
 
@@ -1094,7 +1112,7 @@ fn prod_var_builtin(a: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
             _ => {}
         }
     }
-    Err((("prod: unsupported arguments".to_string())).into())
+    Err(("prod: unsupported arguments".to_string()).into())
 }
 
 fn any_all_or_cols(a: Value) -> Result<Value, String> {
@@ -1185,7 +1203,7 @@ fn any_var_builtin(a: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
             _ => {}
         }
     }
-    Err((("any: unsupported arguments".to_string())).into())
+    Err(("any: unsupported arguments".to_string()).into())
 }
 
 fn all_all_or_cols(a: Value) -> Result<Value, String> {
@@ -1276,7 +1294,7 @@ fn all_var_builtin(a: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
             _ => {}
         }
     }
-    Err((("all: unsupported arguments".to_string())).into())
+    Err(("all: unsupported arguments".to_string()).into())
 }
 
 #[runmat_macros::runtime_builtin(name = "warning", sink = true, builtin_path = "crate")]
@@ -1297,6 +1315,6 @@ fn getmethod_builtin(obj: Value, name: String) -> crate::BuiltinResult<Value> {
             }))
         }
         Value::ClassRef(cls) => Ok(Value::String(format!("@{cls}.{name}"))),
-        other => Err(((format!("getmethod unsupported on {other:?}"))).into()),
+        other => Err((format!("getmethod unsupported on {other:?}")).into()),
     }
 }

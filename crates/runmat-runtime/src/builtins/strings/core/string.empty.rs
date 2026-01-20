@@ -3,12 +3,12 @@
 use runmat_builtins::{StringArray, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::random_args::{extract_dims, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::map_control_flow_with_builtin;
 use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const LABEL: &str = "string.empty";
@@ -267,11 +267,11 @@ fn parse_shape(args: &[Value]) -> BuiltinResult<Vec<usize>> {
 
         if let Some(keyword) = keyword_of(&arg_host) {
             if keyword.as_str() == "like" {
-                    if like_shape.is_some() {
-                        return Err(string_empty_flow(format!(
-                            "{LABEL}: multiple 'like' prototypes are not supported"
-                        )));
-                    }
+                if like_shape.is_some() {
+                    return Err(string_empty_flow(format!(
+                        "{LABEL}: multiple 'like' prototypes are not supported"
+                    )));
+                }
                 let Some(proto_raw) = args.get(idx + 1) else {
                     return Err(string_empty_flow(format!(
                         "{LABEL}: expected prototype after 'like'"

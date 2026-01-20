@@ -174,14 +174,15 @@ pub(crate) fn parse_ignore_case(fn_name: &str, rest: &[Value]) -> BuiltinResult<
     let mut ignore_case = None;
     for pair in rest.chunks(2) {
         let name = value_to_owned_string(&pair[0]).ok_or_else(|| {
-            text_error(fn_name, format!("{fn_name}: option names must be text scalars"))
+            text_error(
+                fn_name,
+                format!("{fn_name}: option names must be text scalars"),
+            )
         })?;
         if !name.eq_ignore_ascii_case("ignorecase") {
             return Err(text_error(
                 fn_name,
-                format!(
-                    "{fn_name}: unknown option '{name}'; supported option is 'IgnoreCase'"
-                ),
+                format!("{fn_name}: unknown option '{name}'; supported option is 'IgnoreCase'"),
             ));
         }
         let value = parse_logical_value(fn_name, &pair[1])?;
@@ -246,7 +247,10 @@ fn parse_logical_value(fn_name: &str, value: &Value) -> BuiltinResult<bool> {
         }
         _ => {
             let text = value_to_owned_string(value).ok_or_else(|| {
-                text_error(fn_name, format!("{fn_name}: option values must be logical scalars"))
+                text_error(
+                    fn_name,
+                    format!("{fn_name}: option values must be logical scalars"),
+                )
             })?;
             match text.trim().to_ascii_lowercase().as_str() {
                 "true" | "on" | "1" => Ok(true),
@@ -267,9 +271,7 @@ pub(crate) fn value_to_owned_string(value: &Value) -> Option<String> {
 }
 
 fn text_error(fn_name: &str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(fn_name)
-        .build()
+    build_runtime_error(message).with_builtin(fn_name).build()
 }
 
 pub(crate) fn logical_result(
@@ -306,9 +308,7 @@ fn cell_value_to_text(fn_name: &str, value: &Value) -> BuiltinResult<TextElement
         }
         _ => Err(text_error(
             fn_name,
-            format!(
-                "{fn_name}: cell array elements must be character vectors or string scalars"
-            ),
+            format!("{fn_name}: cell array elements must be character vectors or string scalars"),
         )),
     }
 }

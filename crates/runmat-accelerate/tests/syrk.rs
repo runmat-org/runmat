@@ -1,7 +1,7 @@
 #[cfg(feature = "wgpu")]
-use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
-#[cfg(feature = "wgpu")]
 use once_cell::sync::Lazy;
+#[cfg(feature = "wgpu")]
+use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::{HostTensorView, ProviderPrecision};
 #[cfg(feature = "wgpu")]

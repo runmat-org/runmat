@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 
@@ -186,11 +186,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn weboptions_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut gathered = Vec::with_capacity(rest.len());
     for value in rest {
-        gathered.push(
-            gather_if_needed(&value).map_err(|flow| {
-                remap_weboptions_flow(flow, |err| format!("weboptions: {}", err.message()))
-            })?,
-        );
+        gathered.push(gather_if_needed(&value).map_err(|flow| {
+            remap_weboptions_flow(flow, |err| format!("weboptions: {}", err.message()))
+        })?);
     }
     let mut queue: VecDeque<Value> = gathered.into();
     let mut options = default_options_struct();

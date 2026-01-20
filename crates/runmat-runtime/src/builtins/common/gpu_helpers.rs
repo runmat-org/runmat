@@ -35,11 +35,11 @@ pub fn gather_tensor(
             Tensor::new(data, la.shape.clone())
                 .map_err(|e| build_runtime_error(format!("gather: {e}")).build().into())
         }
-        other => Err(build_runtime_error(format!(
-            "gather: unexpected value kind {other:?}"
-        ))
-        .build()
-        .into()),
+        other => Err(
+            build_runtime_error(format!("gather: unexpected value kind {other:?}"))
+                .build()
+                .into(),
+        ),
     }
 }
 

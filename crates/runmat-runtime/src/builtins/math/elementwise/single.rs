@@ -5,7 +5,6 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::{
     gpu_helpers,
     random_args::keyword_of,
@@ -16,6 +15,7 @@ use crate::builtins::common::{
     },
     tensor,
 };
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -307,8 +307,8 @@ fn single_from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
 }
 
 fn single_from_logical_array(array: LogicalArray) -> BuiltinResult<Value> {
-    let tensor = tensor::logical_to_tensor(&array)
-        .map_err(|e| builtin_error(format!("single: {e}")))?;
+    let tensor =
+        tensor::logical_to_tensor(&array).map_err(|e| builtin_error(format!("single: {e}")))?;
     single_tensor_to_host(tensor).map(Value::Tensor)
 }
 
@@ -435,7 +435,9 @@ fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResu
 
 fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        builtin_error("single: GPU output requested via 'like' but no acceleration provider is active")
+        builtin_error(
+            "single: GPU output requested via 'like' but no acceleration provider is active",
+        )
     })?;
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
@@ -473,8 +475,7 @@ fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             let proxy = Value::GpuTensor(handle);
-            gpu_helpers::gather_value(&proxy)
-                .map_err(|e| builtin_error(format!("single: {e}")))
+            gpu_helpers::gather_value(&proxy).map_err(|e| builtin_error(format!("single: {e}")))
         }
         other => Ok(other),
     }

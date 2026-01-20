@@ -16,10 +16,7 @@ use runmat_plot::core::BoundingBox;
 /// Compute the min/max bounds for a GPU tensor by delegating to the runtime
 /// `min`/`max` builtins. Results are returned as `f32` so they can flow directly
 /// into plotting bounding boxes.
-pub fn axis_bounds(
-    handle: &GpuTensorHandle,
-    context: &'static str,
-) -> BuiltinResult<(f32, f32)> {
+pub fn axis_bounds(handle: &GpuTensorHandle, context: &'static str) -> BuiltinResult<(f32, f32)> {
     let min_value = call_builtin("min", &[Value::GpuTensor(handle.clone())])
         .map_err(|flow| map_control_flow_with_builtin(flow, context))?;
     let max_value = call_builtin("max", &[Value::GpuTensor(handle.clone())])
@@ -35,7 +32,8 @@ pub fn gather_tensor_from_gpu(
     name: &'static str,
 ) -> BuiltinResult<Tensor> {
     let value = Value::GpuTensor(handle);
-    let gathered = gather_if_needed(&value).map_err(|flow| map_control_flow_with_builtin(flow, name))?;
+    let gathered =
+        gather_if_needed(&value).map_err(|flow| map_control_flow_with_builtin(flow, name))?;
     Tensor::try_from(&gathered).map_err(|e| plotting_error(name, format!("{name}: {e}")))
 }
 
@@ -48,9 +46,11 @@ pub fn value_to_scalar(mut value: Value, context: &'static str) -> BuiltinResult
     match value {
         Value::Num(n) => Ok(n),
         Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(t) => t.data.first().copied().ok_or_else(|| {
-            plotting_error(context, format!("{context}: expected scalar result"))
-        }),
+        Value::Tensor(t) => {
+            t.data.first().copied().ok_or_else(|| {
+                plotting_error(context, format!("{context}: expected scalar result"))
+            })
+        }
         _ => Err(plotting_error(
             context,
             format!("{context}: expected numeric scalar result"),

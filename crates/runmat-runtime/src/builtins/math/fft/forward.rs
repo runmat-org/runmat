@@ -192,7 +192,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "fft";
 
 fn fft_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build()
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 fn builtin_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
@@ -214,11 +216,7 @@ fn fft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 }
 
-fn fft_host(
-    value: Value,
-    length: Option<usize>,
-    dimension: Option<usize>,
-) -> BuiltinResult<Value> {
+fn fft_host(value: Value, length: Option<usize>, dimension: Option<usize>) -> BuiltinResult<Value> {
     let tensor = value_to_complex_tensor(value, BUILTIN_NAME)?;
     let transformed = fft_complex_tensor(tensor, length, dimension)?;
     Ok(complex_tensor_into_value(transformed))
@@ -290,10 +288,8 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<usize
         }
         2 => {
             let len = parse_length(&args[0], BUILTIN_NAME)?;
-            let dim = Some(
-                tensor::parse_dimension(&args[1], BUILTIN_NAME)
-                    .map_err(|e| fft_error(e))?,
-            );
+            let dim =
+                Some(tensor::parse_dimension(&args[1], BUILTIN_NAME).map_err(|e| fft_error(e))?);
             Ok((len, dim))
         }
         _ => Err(fft_error(

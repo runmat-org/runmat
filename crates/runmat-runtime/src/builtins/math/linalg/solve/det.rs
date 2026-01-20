@@ -328,7 +328,9 @@ fn determinant_from_value(value: Value) -> BuiltinResult<Determinant> {
 fn det_real_tensor(matrix: &Tensor) -> BuiltinResult<f64> {
     let (rows, cols) = matrix_dimensions(matrix.shape.as_slice())?;
     if rows != cols {
-        return Err(builtin_error(format!("{NAME}: input must be a square matrix.")));
+        return Err(builtin_error(format!(
+            "{NAME}: input must be a square matrix."
+        )));
     }
     if rows == 0 && cols == 0 {
         return Ok(1.0);
@@ -343,7 +345,9 @@ fn det_real_tensor(matrix: &Tensor) -> BuiltinResult<f64> {
 fn det_complex_tensor(matrix: &ComplexTensor) -> BuiltinResult<(f64, f64)> {
     let (rows, cols) = matrix_dimensions(matrix.shape.as_slice())?;
     if rows != cols {
-        return Err(builtin_error(format!("{NAME}: input must be a square matrix.")));
+        return Err(builtin_error(format!(
+            "{NAME}: input must be a square matrix."
+        )));
     }
     if rows == 0 && cols == 0 {
         return Ok((1.0, 0.0));
@@ -368,11 +372,15 @@ fn matrix_dimensions(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
             if *rows == 1 {
                 Ok((1, 1))
             } else {
-                Err(builtin_error(format!("{NAME}: input must be a square matrix.")))
+                Err(builtin_error(format!(
+                    "{NAME}: input must be a square matrix."
+                )))
             }
         }
         [rows, cols] => Ok((*rows, *cols)),
-        _ => Err(builtin_error(format!("{NAME}: input must be a square matrix."))),
+        _ => Err(builtin_error(format!(
+            "{NAME}: input must be a square matrix."
+        ))),
     }
 }
 
@@ -397,7 +405,9 @@ fn det_gpu_via_provider(
 ) -> BuiltinResult<Option<Value>> {
     let (rows, cols) = matrix_dimensions(handle.shape.as_slice())?;
     if rows != cols {
-        return Err(builtin_error(format!("{NAME}: input must be a square matrix.")));
+        return Err(builtin_error(format!(
+            "{NAME}: input must be a square matrix."
+        )));
     }
     if rows == 0 {
         let uploaded = upload_scalar(provider, 1.0)?;
@@ -520,7 +530,9 @@ fn diagonal_product_real(upper: &Tensor, dimension: usize) -> BuiltinResult<f64>
     let rows = upper.rows();
     let cols = upper.cols();
     if rows < dimension || cols < dimension {
-        return Err(builtin_error(format!("{NAME}: upper factor shape mismatch")));
+        return Err(builtin_error(format!(
+            "{NAME}: upper factor shape mismatch"
+        )));
     }
     let mut product = 1.0f64;
     for i in 0..dimension {
@@ -534,17 +546,16 @@ fn diagonal_product_real(upper: &Tensor, dimension: usize) -> BuiltinResult<f64>
     Ok(product)
 }
 
-fn diagonal_product_complex(
-    upper: &ComplexTensor,
-    dimension: usize,
-) -> BuiltinResult<(f64, f64)> {
+fn diagonal_product_complex(upper: &ComplexTensor, dimension: usize) -> BuiltinResult<(f64, f64)> {
     if dimension == 0 {
         return Ok((1.0, 0.0));
     }
     let rows = upper.rows;
     let cols = upper.cols;
     if rows < dimension || cols < dimension {
-        return Err(builtin_error(format!("{NAME}: upper factor shape mismatch")));
+        return Err(builtin_error(format!(
+            "{NAME}: upper factor shape mismatch"
+        )));
     }
     let mut product = Complex64::new(1.0, 0.0);
     for i in 0..dimension {
@@ -649,8 +660,9 @@ pub(crate) mod tests {
     fn det_non_square_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
         let err = unwrap_error(det_real_value(tensor).unwrap_err());
-        assert!(err.message().contains("det: input must be a square matrix."));
-
+        assert!(err
+            .message()
+            .contains("det: input must be a square matrix."));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

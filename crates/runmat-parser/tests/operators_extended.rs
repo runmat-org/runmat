@@ -1,4 +1,7 @@
-use runmat_parser::{parse_simple as parse, BinOp, Expr, Stmt, UnOp};
+use runmat_parser::{BinOp, Expr, Stmt, UnOp};
+
+mod parse;
+use parse::parse;
 
 #[test]
 fn non_conjugate_transpose_and_dot_plus() {

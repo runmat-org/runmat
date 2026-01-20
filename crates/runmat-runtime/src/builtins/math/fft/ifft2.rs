@@ -192,7 +192,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "ifft2";
 
 fn ifft2_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build()
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(
@@ -386,9 +388,7 @@ fn parse_ifft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usi
             let len = parse_length(&scalar, BUILTIN_NAME)?;
             Ok((len, len))
         }
-        Value::ComplexTensor(_) => {
-            Err(ifft2_error("ifft2: size vector must contain real values"))
-        }
+        Value::ComplexTensor(_) => Err(ifft2_error("ifft2: size vector must contain real values")),
         Value::GpuTensor(_) => Err(ifft2_error(
             "ifft2: size vector must be numeric and host-resident",
         )),
@@ -408,10 +408,7 @@ fn parse_ifft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usi
     }
 }
 
-fn parse_length_pair(
-    data: &[f64],
-    builtin: &str,
-) -> BuiltinResult<(Option<usize>, Option<usize>)> {
+fn parse_length_pair(data: &[f64], builtin: &str) -> BuiltinResult<(Option<usize>, Option<usize>)> {
     match data.len() {
         0 => Ok((None, None)),
         1 => {
@@ -455,7 +452,9 @@ fn parse_symflag(value: &Value) -> BuiltinResult<Option<bool>> {
     } else if trimmed.eq_ignore_ascii_case("nonsymmetric") {
         Ok(Some(false))
     } else {
-        Err(ifft2_error(format!("ifft2: unrecognized option '{trimmed}'")))
+        Err(ifft2_error(format!(
+            "ifft2: unrecognized option '{trimmed}'"
+        )))
     }
 }
 

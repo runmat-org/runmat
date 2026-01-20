@@ -219,9 +219,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn triu_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("triu")
-        .build()
+    build_runtime_error(message).with_builtin("triu").build()
 }
 
 #[runtime_builtin(
@@ -238,10 +236,10 @@ fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
     let offset = parse_diagonal_offset(&rest)?;
     match value {
-        Value::Tensor(tensor) => Ok(triu_tensor(tensor, offset)
-            .map(tensor::tensor_into_value)?),
-        Value::LogicalArray(array) => Ok(triu_logical_array(array, offset)
-            .map(Value::LogicalArray)?),
+        Value::Tensor(tensor) => Ok(triu_tensor(tensor, offset).map(tensor::tensor_into_value)?),
+        Value::LogicalArray(array) => {
+            Ok(triu_logical_array(array, offset).map(Value::LogicalArray)?)
+        }
         Value::ComplexTensor(tensor) => {
             Ok(triu_complex_tensor(tensor, offset).map(Value::ComplexTensor)?)
         }
@@ -251,8 +249,8 @@ fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
             Ok(triu_complex_tensor(tensor, offset).map(complex_tensor_into_value)?)
         }
         Value::Num(n) => {
-            let tensor = tensor::value_into_tensor_for("triu", Value::Num(n))
-                .map_err(|e| triu_error(e))?;
+            let tensor =
+                tensor::value_into_tensor_for("triu", Value::Num(n)).map_err(|e| triu_error(e))?;
             Ok(triu_tensor(tensor, offset).map(tensor::tensor_into_value)?)
         }
         Value::Int(i) => {
@@ -301,7 +299,9 @@ fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
         Value::Int(i) => Ok(i.to_i64() as isize),
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(triu_error(format!("{name}: diagonal offset must be finite")));
+                return Err(triu_error(format!(
+                    "{name}: diagonal offset must be finite"
+                )));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
@@ -326,12 +326,18 @@ fn triu_tensor(mut tensor: Tensor, offset: isize) -> crate::BuiltinResult<Tensor
     Ok(tensor)
 }
 
-fn triu_logical_array(mut array: LogicalArray, offset: isize) -> crate::BuiltinResult<LogicalArray> {
+fn triu_logical_array(
+    mut array: LogicalArray,
+    offset: isize,
+) -> crate::BuiltinResult<LogicalArray> {
     apply_triu_inplace(&mut array.data, &array.shape, offset, 0u8)?;
     Ok(array)
 }
 
-fn triu_complex_tensor(mut tensor: ComplexTensor, offset: isize) -> crate::BuiltinResult<ComplexTensor> {
+fn triu_complex_tensor(
+    mut tensor: ComplexTensor,
+    offset: isize,
+) -> crate::BuiltinResult<ComplexTensor> {
     apply_triu_inplace(&mut tensor.data, &tensor.shape, offset, (0.0, 0.0))?;
     Ok(tensor)
 }
@@ -534,7 +540,8 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let err = triu_builtin(Value::Tensor(tensor), vec![Value::from("diagonal")]).unwrap_err();
         assert!(
-            err.to_string().contains("diagonal offset must be a scalar numeric value"),
+            err.to_string()
+                .contains("diagonal offset must be a scalar numeric value"),
             "unexpected error: {err}"
         );
     }

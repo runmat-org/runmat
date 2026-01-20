@@ -1076,7 +1076,7 @@ fn test_jit_function_variable_preservation() {
     let mut functions = HashMap::new();
     functions.insert(
         "add_globals".to_string(),
-runmat_ignition::UserFunction {
+        runmat_ignition::UserFunction {
             name: "add_globals".to_string(),
             params: vec![],
             outputs: vec![runmat_hir::VarId(2)],
@@ -1335,7 +1335,7 @@ fn test_jit_simple_function_compilation() {
     let mut functions = HashMap::new();
     functions.insert(
         "double".to_string(),
-runmat_ignition::UserFunction {
+        runmat_ignition::UserFunction {
             name: "double".to_string(),
             params: vec![runmat_hir::VarId(0)],
             outputs: vec![runmat_hir::VarId(1)],
@@ -1571,7 +1571,7 @@ fn test_jit_function_parameter_validation() {
     let mut functions = HashMap::new();
     functions.insert(
         "add_two".to_string(),
-runmat_ignition::UserFunction {
+        runmat_ignition::UserFunction {
             name: "add_two".to_string(),
             params: vec![runmat_hir::VarId(0), runmat_hir::VarId(1)],
             outputs: vec![runmat_hir::VarId(2)],
@@ -1669,7 +1669,7 @@ fn test_jit_function_variable_isolation() {
     let mut functions = HashMap::new();
     functions.insert(
         "isolate_test".to_string(),
-runmat_ignition::UserFunction {
+        runmat_ignition::UserFunction {
             name: "isolate_test".to_string(),
             params: vec![runmat_hir::VarId(0)],
             outputs: vec![runmat_hir::VarId(1)],

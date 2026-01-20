@@ -356,11 +356,15 @@ impl IntClass {
 
     fn to_value(self, scalar: f64) -> BuiltinResult<Value> {
         if scalar.is_nan() {
-            return Err(mean_error("mean: cannot represent NaN as an integer output"));
+            return Err(mean_error(
+                "mean: cannot represent NaN as an integer output",
+            ));
         }
         let rounded = scalar.round();
         if !rounded.is_finite() {
-            return Err(mean_error("mean: integer output overflowed the target type"));
+            return Err(mean_error(
+                "mean: integer output overflowed the target type",
+            ));
         }
         Ok(match self {
             IntClass::I8 => Value::Int(IntValue::I8(rounded as i8)),
@@ -521,10 +525,9 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     && axes_set
                     && !matches!(axes, MeanAxes::Default)
                 {
-                        return Err(mean_error(
-                            "mean: 'all' cannot be combined with an explicit dimension",
-                        ));
-
+                    return Err(mean_error(
+                        "mean: 'all' cannot be combined with an explicit dimension",
+                    ));
                 }
                 axes = selection;
                 axes_set = true;
@@ -536,12 +539,13 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         if axes_set && !matches!(axes, MeanAxes::Default) {
             if let Some(selection) = parse_axes(arg)? {
                 if matches!(selection, MeanAxes::All) {
-                        return Err(mean_error(
-                            "mean: 'all' cannot be combined with an explicit dimension",
-                        ));
-
+                    return Err(mean_error(
+                        "mean: 'all' cannot be combined with an explicit dimension",
+                    ));
                 }
-                return Err(mean_error("mean: multiple dimension specifications provided"));
+                return Err(mean_error(
+                    "mean: multiple dimension specifications provided",
+                ));
             }
         }
 
@@ -596,7 +600,9 @@ fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
             let dim = tensor::parse_dimension(value, "mean").map_err(mean_error)?;
             Ok(Some(MeanAxes::Dim(dim)))
         }
-        Value::GpuTensor(_) => Err(mean_error("mean: dimension arguments cannot be GPU tensors")),
+        Value::GpuTensor(_) => Err(mean_error(
+            "mean: dimension arguments cannot be GPU tensors",
+        )),
         Value::Bool(_) => Err(mean_error("mean: dimension must be numeric")),
         _ => Ok(None),
     }
@@ -615,7 +621,9 @@ fn parse_dimension_vector(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
     let mut dims = Vec::with_capacity(tensor.data.len());
     for &val in &tensor.data {
         if !val.is_finite() {
-            return Err(mean_error("mean: dimension entries must be finite integers"));
+            return Err(mean_error(
+                "mean: dimension entries must be finite integers",
+            ));
         }
         let rounded = val.round();
         let adjusted = if (0.0..1.0).contains(&rounded) {
@@ -641,15 +649,12 @@ fn mean_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {
 }
 
 fn mean_host_complex_scalar(re: f64, im: f64, args: &ParsedArguments) -> BuiltinResult<Value> {
-    let tensor =
-        ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| mean_error(format!("mean: {e}")))?;
+    let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
+        .map_err(|e| mean_error(format!("mean: {e}")))?;
     mean_host_complex_tensor(tensor, args)
 }
 
-fn mean_host_complex_tensor(
-    tensor: ComplexTensor,
-    args: &ParsedArguments,
-) -> BuiltinResult<Value> {
+fn mean_host_complex_tensor(tensor: ComplexTensor, args: &ParsedArguments) -> BuiltinResult<Value> {
     let reduced = mean_complex_tensor(tensor, args.axes.clone(), args.nan_mode)?;
     Ok(complex_tensor_into_value(reduced))
 }
@@ -957,7 +962,8 @@ fn mean_tensor_all(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<Ten
         .map(|dim| dim.max(1))
         .fold(1usize, |acc, dim| acc.saturating_mul(dim));
     if total_elems == 0 || tensor.data.is_empty() {
-        return Tensor::new(vec![f64::NAN], vec![1, 1]).map_err(|e| mean_error(format!("mean: {e}")));
+        return Tensor::new(vec![f64::NAN], vec![1, 1])
+            .map_err(|e| mean_error(format!("mean: {e}")));
     }
     let mut sum = 0.0f64;
     let mut count = 0usize;
@@ -1148,7 +1154,8 @@ fn reduce_complex_tensor_mean_dim(
                 }
             }
         };
-        return ComplexTensor::new(vec![result], vec![1, 1]).map_err(|e| mean_error(format!("mean: {e}")));
+        return ComplexTensor::new(vec![result], vec![1, 1])
+            .map_err(|e| mean_error(format!("mean: {e}")));
     }
 
     let Some(output_shape) = reduction_shape(&shape, dim) else {
@@ -1157,7 +1164,8 @@ fn reduce_complex_tensor_mean_dim(
 
     if tensor.data.is_empty() {
         let fill = vec![(f64::NAN, f64::NAN); tensor::element_count(&output_shape)];
-        return ComplexTensor::new(fill, output_shape).map_err(|e| mean_error(format!("mean: {e}")));
+        return ComplexTensor::new(fill, output_shape)
+            .map_err(|e| mean_error(format!("mean: {e}")));
     }
 
     let dim_index = dim - 1;
@@ -1310,8 +1318,8 @@ fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Val
                 Ok(Value::Tensor(tensor))
             }
             Value::LogicalArray(logical) => {
-                let tensor =
-                    tensor::logical_to_tensor(&logical).map_err(|e| mean_error(format!("{NAME}: {e}")))?;
+                let tensor = tensor::logical_to_tensor(&logical)
+                    .map_err(|e| mean_error(format!("{NAME}: {e}")))?;
                 let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
                 Ok(Value::Tensor(tensor))
             }
@@ -1353,21 +1361,26 @@ fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value>
             Value::GpuTensor(_) => Ok(value),
             Value::Tensor(t) => upload_tensor(t),
             Value::Num(n) => {
-                let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| mean_error(format!("mean: {e}")))?;
+                let tensor = Tensor::new(vec![n], vec![1, 1])
+                    .map_err(|e| mean_error(format!("mean: {e}")))?;
                 upload_tensor(tensor)
             }
             Value::LogicalArray(logical) => {
                 let tensor = tensor::logical_to_tensor(&logical)?;
                 upload_tensor(tensor)
             }
-            other => Err(mean_error(format!("mean: cannot place value {other:?} on the GPU"))),
+            other => Err(mean_error(format!(
+                "mean: cannot place value {other:?} on the GPU"
+            ))),
         },
     }
 }
 
 fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(mean_error("mean: no acceleration provider available to honour GPU output"));
+        return Err(mean_error(
+            "mean: no acceleration provider available to honour GPU output",
+        ));
     };
     let view = HostTensorView {
         data: &tensor.data,
@@ -1399,8 +1412,8 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
             let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
-            let tensor =
-                ComplexTensor::new(data, t.shape.clone()).map_err(|e| mean_error(format!("mean: {e}")))?;
+            let tensor = ComplexTensor::new(data, t.shape.clone())
+                .map_err(|e| mean_error(format!("mean: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
         }
         Value::LogicalArray(logical) => {
@@ -1442,7 +1455,8 @@ fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
             class: PrototypeClass::Complex,
         }),
         other => {
-            let gathered = dispatcher::gather_if_needed(other).map_err(|e| mean_error(format!("mean: {e}")))?;
+            let gathered = dispatcher::gather_if_needed(other)
+                .map_err(|e| mean_error(format!("mean: {e}")))?;
             analyse_like_prototype(&gathered)
         }
     }

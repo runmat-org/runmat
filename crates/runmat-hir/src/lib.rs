@@ -3,6 +3,7 @@ use runmat_parser::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 // Re-export Type from builtins for consistency
 pub use runmat_builtins::Type;
@@ -47,6 +48,32 @@ impl std::error::Error for SemanticError {}
 impl From<String> for SemanticError {
     fn from(value: String) -> Self {
         SemanticError::new(value)
+    }
+}
+
+pub struct LoweringContext<'a> {
+    pub variables: &'a HashMap<String, usize>,
+    pub functions: &'a HashMap<String, HirStmt>,
+}
+
+impl<'a> LoweringContext<'a> {
+    pub fn new(
+        variables: &'a HashMap<String, usize>,
+        functions: &'a HashMap<String, HirStmt>,
+    ) -> Self {
+        Self {
+            variables,
+            functions,
+        }
+    }
+
+    pub fn empty() -> Self {
+        static EMPTY_VARS: OnceLock<HashMap<String, usize>> = OnceLock::new();
+        static EMPTY_FUNCS: OnceLock<HashMap<String, HirStmt>> = OnceLock::new();
+        Self {
+            variables: EMPTY_VARS.get_or_init(HashMap::new),
+            functions: EMPTY_FUNCS.get_or_init(HashMap::new),
+        }
     }
 }
 
@@ -234,16 +261,54 @@ pub struct LoweringResult {
     pub var_names: HashMap<VarId, String>,
 }
 
-pub fn lower(prog: &AstProgram) -> Result<HirProgram, SemanticError> {
+pub fn lower(
+    prog: &AstProgram,
+    context: &LoweringContext<'_>,
+) -> Result<LoweringResult, SemanticError> {
     let mut ctx = Ctx::new();
+
+    for (name, var_id) in context.variables {
+        ctx.scopes[0].bindings.insert(name.clone(), VarId(*var_id));
+        while ctx.var_types.len() <= *var_id {
+            ctx.var_types.push(Type::Unknown);
+        }
+        while ctx.var_names.len() <= *var_id {
+            ctx.var_names.push(None);
+        }
+        ctx.var_names[*var_id] = Some(name.clone());
+        if *var_id >= ctx.next_var {
+            ctx.next_var = var_id + 1;
+        }
+    }
+
+    for (name, func_stmt) in context.functions {
+        ctx.functions.insert(name.clone(), func_stmt.clone());
+    }
+
     let body = ctx.lower_stmts(&prog.body)?;
     let var_types = ctx.var_types.clone();
     let hir = HirProgram { body, var_types };
-    // Apply flow-sensitive inference to populate implicit knowledge for downstream consumers
     let _ = infer_function_output_types(&hir);
-    // Validate class definitions and attributes at lowering time
     validate_classdefs(&hir)?;
-    Ok(hir)
+
+    let mut variables: HashMap<String, usize> = HashMap::new();
+    for (name, var_id) in ctx.scopes[0].bindings.iter() {
+        variables.insert(name.clone(), var_id.0);
+    }
+    let mut var_names = HashMap::new();
+    for (idx, name_opt) in ctx.var_names.iter().enumerate() {
+        if let Some(name) = name_opt {
+            var_names.insert(VarId(idx), name.clone());
+        }
+    }
+
+    Ok(LoweringResult {
+        hir,
+        variables,
+        functions: ctx.functions,
+        var_types: ctx.var_types,
+        var_names,
+    })
 }
 
 /// Infer output types for each function defined in the program using a flow-sensitive, block-structured
@@ -754,14 +819,23 @@ pub fn infer_function_output_types(
                     env = out_env;
                     exits.extend(all_exits);
                 }
-                HirStmt::While { cond: _, body, span: _ } => {
+                HirStmt::While {
+                    cond: _,
+                    body,
+                    span: _,
+                } => {
                     let a = analyze_stmts(_outputs, body, env.clone(), returns, func_defs);
                     if let Some(f) = a.fallthrough {
                         env = join_env(&env, &f);
                     }
                     exits.extend(a.exits);
                 }
-                HirStmt::For { var, expr, body, span: _ } => {
+                HirStmt::For {
+                    var,
+                    expr,
+                    body,
+                    span: _,
+                } => {
                     let t = infer_expr_type(expr, &env, returns);
                     env.insert(*var, t);
                     let a = analyze_stmts(_outputs, body, env.clone(), returns, func_defs);
@@ -1542,7 +1616,12 @@ pub fn infer_function_variable_types(
                     }
                     exits.extend(a.exits);
                 }
-                HirStmt::For { var, expr, body, span: _ } => {
+                HirStmt::For {
+                    var,
+                    expr,
+                    body,
+                    span: _,
+                } => {
                     let t = infer_expr_type(expr, &env, returns);
                     env.insert(*var, t);
                     let a = analyze_stmts(_outputs, body, env.clone(), returns, func_defs);
@@ -1986,71 +2065,6 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), SemanticError> {
     Ok(())
 }
 
-/// Lower AST to HIR with existing variable context for REPL
-pub fn lower_with_context(
-    prog: &AstProgram,
-    existing_vars: &HashMap<String, usize>,
-) -> Result<(HirProgram, HashMap<String, usize>), SemanticError> {
-    let empty_functions = HashMap::new();
-    let result = lower_with_full_context(prog, existing_vars, &empty_functions)?;
-    Ok((result.hir, result.variables))
-}
-
-/// Lower AST to HIR with existing variable and function context for REPL
-pub fn lower_with_full_context(
-    prog: &AstProgram,
-    existing_vars: &HashMap<String, usize>,
-    existing_functions: &HashMap<String, HirStmt>,
-) -> Result<LoweringResult, SemanticError> {
-    let mut ctx = Ctx::new();
-
-    // Pre-populate the context with existing variables
-    for (name, var_id) in existing_vars {
-        ctx.scopes[0].bindings.insert(name.clone(), VarId(*var_id));
-        // Ensure var_types has enough capacity
-        while ctx.var_types.len() <= *var_id {
-            ctx.var_types.push(Type::Unknown);
-        }
-        while ctx.var_names.len() <= *var_id {
-            ctx.var_names.push(None);
-        }
-        ctx.var_names[*var_id] = Some(name.clone());
-        // Update next_var to be at least one more than the highest existing var
-        if *var_id >= ctx.next_var {
-            ctx.next_var = var_id + 1;
-        }
-    }
-
-    // Pre-populate the context with existing functions
-    for (name, func_stmt) in existing_functions {
-        ctx.functions.insert(name.clone(), func_stmt.clone());
-    }
-
-    let body = ctx.lower_stmts(&prog.body)?;
-
-    // Extract all variable bindings (both existing and newly defined)
-    let mut all_vars = HashMap::new();
-    for (name, var_id) in &ctx.scopes[0].bindings {
-        all_vars.insert(name.clone(), var_id.0);
-    }
-
-    Ok(LoweringResult {
-        hir: HirProgram {
-            body,
-            var_types: ctx.var_types.clone(),
-        },
-        variables: all_vars,
-        functions: ctx.functions,
-        var_types: ctx.var_types,
-        var_names: ctx
-            .var_names
-            .into_iter()
-            .enumerate()
-            .filter_map(|(idx, name)| name.map(|n| (VarId(idx), n)))
-            .collect(),
-    })
-}
-
 /// Variable remapping utilities for function execution
 /// These functions remap VarIds in HIR to create local variable contexts
 pub mod remapping {
@@ -2335,7 +2349,6 @@ pub mod remapping {
                 else_body,
                 span: _,
             } => {
-
                 collect_expr_variables(cond, vars);
                 for stmt in then_body {
                     collect_stmt_variables(stmt, vars);
@@ -2352,13 +2365,22 @@ pub mod remapping {
                     }
                 }
             }
-            HirStmt::While { cond, body, span: _ } => {
+            HirStmt::While {
+                cond,
+                body,
+                span: _,
+            } => {
                 collect_expr_variables(cond, vars);
                 for stmt in body {
                     collect_stmt_variables(stmt, vars);
                 }
             }
-            HirStmt::For { var, expr, body, span: _ } => {
+            HirStmt::For {
+                var,
+                expr,
+                body,
+                span: _,
+            } => {
                 vars.insert(*var);
                 collect_expr_variables(expr, vars);
                 for stmt in body {
@@ -2681,7 +2703,12 @@ impl Ctx {
                     })
                     .collect();
                 let value = self.lower_expr(expr)?;
-                Ok(HirStmt::MultiAssign(ids, value, *semicolon_terminated, span))
+                Ok(HirStmt::MultiAssign(
+                    ids,
+                    value,
+                    *semicolon_terminated,
+                    span,
+                ))
             }
             AstStmt::If {
                 cond,
@@ -2708,12 +2735,21 @@ impl Ctx {
                     span,
                 })
             }
-            AstStmt::While { cond, body, span: _ } => Ok(HirStmt::While {
+            AstStmt::While {
+                cond,
+                body,
+                span: _,
+            } => Ok(HirStmt::While {
                 cond: self.lower_expr(cond)?,
                 body: self.lower_stmts(body)?,
                 span,
             }),
-            AstStmt::For { var, expr, body, span: _ } => {
+            AstStmt::For {
+                var,
+                expr,
+                body,
+                span: _,
+            } => {
                 let id = match self.lookup(var) {
                     Some(id) => id,
                     None => self.define(var.clone()),
@@ -2942,11 +2978,9 @@ impl Ctx {
                     let return_type = self.infer_function_return_type(name, &[]);
                     (HirExprKind::FuncCall(name.clone(), vec![]), return_type)
                 } else {
-                    return Err(
-                        SemanticError::new(format!("Undefined variable: {name}"))
-                            .with_identifier("MATLAB:UndefinedVariable")
-                            .with_span(span),
-                    );
+                    return Err(SemanticError::new(format!("Undefined variable: {name}"))
+                        .with_identifier("MATLAB:UndefinedVariable")
+                        .with_span(span));
                 }
             }
             Unary(op, e, _) => {
@@ -3000,7 +3034,11 @@ impl Ctx {
                     ty,
                 )
             }
-            AnonFunc { params, body, span: _ } => {
+            AnonFunc {
+                params,
+                body,
+                span: _,
+            } => {
                 // Lower body in a fresh scope with parameters bound to local VarIds
                 let saved_len = self.scopes.len();
                 self.push_scope();
@@ -3150,7 +3188,7 @@ impl Ctx {
             ALV::Member(base, name) => {
                 // Special-case unknown identifier base to allow struct-like creation semantics (e.g., s.f = 4)
                 if let parser::Expr::Ident(var_name, _) = &**base {
-                    let id = match self.lookup(&var_name) {
+                    let id = match self.lookup(var_name) {
                         Some(id) => id,
                         None => self.define(var_name.clone()),
                     };
@@ -3313,7 +3351,11 @@ impl Ctx {
                         env = out_env;
                         exits.extend(all_exits);
                     }
-                    HirStmt::While { cond: _, body, span: _ } => {
+                    HirStmt::While {
+                        cond: _,
+                        body,
+                        span: _,
+                    } => {
                         // Approximate: analyze once and join with incoming env
                         let a = analyze_stmts(_outputs, body, env.clone());
                         if let Some(f) = a.fallthrough {
@@ -3321,7 +3363,12 @@ impl Ctx {
                         }
                         exits.extend(a.exits);
                     }
-                    HirStmt::For { var, expr, body, span: _ } => {
+                    HirStmt::For {
+                        var,
+                        expr,
+                        body,
+                        span: _,
+                    } => {
                         // Assign loop var type from expr type
                         env.insert(*var, expr.ty.clone());
                         let a = analyze_stmts(_outputs, body, env.clone());

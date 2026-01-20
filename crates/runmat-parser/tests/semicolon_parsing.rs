@@ -1,4 +1,7 @@
-use runmat_parser::{parse_simple as parse, BinOp, Expr, Program, Span, Stmt};
+use runmat_parser::{BinOp, Expr, Program, Span, Stmt};
+
+mod parse;
+use parse::parse;
 
 mod support;
 use support::{binary_boxed, expr_stmt, func_call, ident, num, tensor};
@@ -66,8 +69,8 @@ fn test_expression_without_semicolon() {
                     Box::new(num("2".to_string())),
                 ),
                 false, // false = not semicolon-terminated, output should be shown
-            )]
-        }
+            )],
+        },
     );
 }
 
@@ -85,8 +88,8 @@ fn test_expression_with_semicolon() {
                     Box::new(num("2".to_string())),
                 ),
                 true, // true = semicolon-terminated, output should be suppressed
-            )]
-        }
+            )],
+        },
     );
 }
 
@@ -167,8 +170,8 @@ fn test_function_call_semicolon_preservation() {
             body: vec![expr_stmt(
                 func_call("sin".to_string(), vec![ident("x".to_string())]),
                 true, // Semicolon-terminated
-            )]
-        }
+            )],
+        },
     );
 }
 
@@ -186,7 +189,7 @@ fn test_matrix_literal_semicolon_preservation() {
                     num("3".to_string()),
                 ]]),
                 true, // Semicolon-terminated
-            )]
-        }
+            )],
+        },
     );
 }

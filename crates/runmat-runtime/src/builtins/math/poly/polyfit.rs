@@ -249,7 +249,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::math::poly::polyfit"
 )]
-fn polyfit_builtin(x: Value, y: Value, degree: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn polyfit_builtin(
+    x: Value,
+    y: Value,
+    degree: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     let eval = evaluate(x, y, degree, &rest)?;
     Ok(eval.coefficients())
 }
@@ -269,10 +274,14 @@ pub fn evaluate(x: Value, y: Value, degree: Value, rest: &[Value]) -> BuiltinRes
     let (y_data, is_complex_input) = complex_vector("polyfit", "Y", y_host)?;
 
     if x_data.len() != y_data.len() {
-        return Err(polyfit_error("polyfit: X and Y vectors must be the same length"));
+        return Err(polyfit_error(
+            "polyfit: X and Y vectors must be the same length",
+        ));
     }
     if x_data.is_empty() {
-        return Err(polyfit_error("polyfit: X and Y must contain at least one sample"));
+        return Err(polyfit_error(
+            "polyfit: X and Y must contain at least one sample",
+        ));
     }
     if deg + 1 > x_data.len() && x_data.len() > 1 {
         warn!(
@@ -349,10 +358,14 @@ impl PolyfitSolution {
     fn from_provider(result: ProviderPolyfitResult) -> BuiltinResult<Self> {
         let cols = result.coefficients.len();
         if cols == 0 {
-            return Err(polyfit_error("polyfit: provider returned empty coefficient vector"));
+            return Err(polyfit_error(
+                "polyfit: provider returned empty coefficient vector",
+            ));
         }
         if result.r_matrix.len() != cols * cols {
-            return Err(polyfit_error("polyfit: provider returned malformed R matrix"));
+            return Err(polyfit_error(
+                "polyfit: provider returned malformed R matrix",
+            ));
         }
         let [mu_mean, mu_scale] = result.mu;
         Ok(Self {
@@ -425,7 +438,9 @@ fn parse_degree(value: &Value) -> BuiltinResult<usize> {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 0 {
-                return Err(polyfit_error("polyfit: degree must be a non-negative integer"));
+                return Err(polyfit_error(
+                    "polyfit: degree must be a non-negative integer",
+                ));
             }
             Ok(raw as usize)
         }
@@ -438,7 +453,9 @@ fn parse_degree(value: &Value) -> BuiltinResult<usize> {
                 return Err(polyfit_error("polyfit: degree must be an integer"));
             }
             if rounded < 0.0 {
-                return Err(polyfit_error("polyfit: degree must be a non-negative integer"));
+                return Err(polyfit_error(
+                    "polyfit: degree must be a non-negative integer",
+                ));
             }
             Ok(rounded as usize)
         }
@@ -541,7 +558,9 @@ fn parse_weights(rest: &[Value], len: usize) -> BuiltinResult<Option<Vec<f64>>> 
             let gathered = dispatcher::gather_if_needed(&rest[0])?;
             let data = real_vector("polyfit", "weights", gathered)?;
             if data.len() != len {
-                return Err(polyfit_error("polyfit: weight vector must match the size of X"));
+                return Err(polyfit_error(
+                    "polyfit: weight vector must match the size of X",
+                ));
             }
             validate_weights(&data)?;
             Ok(Some(data))
@@ -572,14 +591,20 @@ fn solve_polyfit(
     weights: Option<&[f64]>,
 ) -> BuiltinResult<PolyfitSolution> {
     if x_data.len() != y_data.len() {
-        return Err(polyfit_error("polyfit: X and Y vectors must be the same length"));
+        return Err(polyfit_error(
+            "polyfit: X and Y vectors must be the same length",
+        ));
     }
     if x_data.is_empty() {
-        return Err(polyfit_error("polyfit: X and Y must contain at least one sample"));
+        return Err(polyfit_error(
+            "polyfit: X and Y must contain at least one sample",
+        ));
     }
     if let Some(w) = weights {
         if w.len() != x_data.len() {
-            return Err(polyfit_error("polyfit: weight vector must match the size of X"));
+            return Err(polyfit_error(
+                "polyfit: weight vector must match the size of X",
+            ));
         }
         validate_weights(w)?;
     }
@@ -653,7 +678,9 @@ fn compute_scale(data: &[f64], mean: f64) -> BuiltinResult<f64> {
     let std = (acc / denom).sqrt();
     let scale = if std.abs() <= EPS { 1.0 } else { std };
     if !scale.is_finite() {
-        return Err(polyfit_error("polyfit: failed to compute a stable scaling factor"));
+        return Err(polyfit_error(
+            "polyfit: failed to compute a stable scaling factor",
+        ));
     }
     Ok(scale)
 }
@@ -715,7 +742,9 @@ fn apply_weights_rhs(rhs: &mut [Complex64], weights: &[f64]) -> BuiltinResult<()
 
 fn ensure_vector_shape(context: &str, label: &str, shape: &[usize]) -> BuiltinResult<()> {
     if !is_vector_shape(shape) {
-        return Err(polyfit_error(format!("{context}: {label} must be a vector")));
+        return Err(polyfit_error(format!(
+            "{context}: {label} must be a vector"
+        )));
     }
     Ok(())
 }
@@ -790,7 +819,9 @@ fn solve_upper(
     rhs: &[Complex64],
 ) -> BuiltinResult<Vec<Complex64>> {
     if rhs.len() < rows {
-        return Err(polyfit_error("polyfit internal error: RHS dimension mismatch"));
+        return Err(polyfit_error(
+            "polyfit internal error: RHS dimension mismatch",
+        ));
     }
     let mut coeffs = vec![Complex64::new(0.0, 0.0); cols];
     for col in (0..cols).rev() {
@@ -909,11 +940,15 @@ pub fn polyfit_host_real_for_provider(
     weights: Option<&[f64]>,
 ) -> BuiltinResult<PolyfitHostRealResult> {
     if x.len() != y.len() {
-        return Err(polyfit_error("polyfit: X and Y vectors must be the same length"));
+        return Err(polyfit_error(
+            "polyfit: X and Y vectors must be the same length",
+        ));
     }
     if let Some(w) = weights {
         if w.len() != x.len() {
-            return Err(polyfit_error("polyfit: weight vector must match the size of X"));
+            return Err(polyfit_error(
+                "polyfit: weight vector must match the size of X",
+            ));
         }
         validate_weights(w)?;
     }

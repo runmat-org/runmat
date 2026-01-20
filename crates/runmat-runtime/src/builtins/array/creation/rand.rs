@@ -5,6 +5,7 @@ use runmat_builtins::{ComplexTensor, NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
 use std::sync::OnceLock;
 
+use crate::build_runtime_error;
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::{
     complex_tensor_into_value, extract_dims, keyword_of, shape_from_value,
@@ -14,7 +15,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -283,7 +283,9 @@ impl ParsedRand {
                         continue;
                     }
                     other => {
-                        return Err(builtin_error(format!("rand: unrecognised option '{other}'")));
+                        return Err(builtin_error(format!(
+                            "rand: unrecognised option '{other}'"
+                        )));
                     }
                 }
             }
@@ -342,7 +344,8 @@ fn rand_double(shape: &[usize]) -> crate::BuiltinResult<Value> {
     }
     let len = tensor::element_count(shape);
     let data = random::generate_uniform(len, "rand")?;
-    let tensor = Tensor::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("rand: {e}")))?;
+    let tensor =
+        Tensor::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("rand: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -358,7 +361,9 @@ fn rand_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
             rand_double(shape)
         }
         Value::CharArray(_) | Value::Cell(_) => rand_double(shape),
-        other => Err(builtin_error(format!("rand: unsupported prototype {other:?}"))),
+        other => Err(builtin_error(format!(
+            "rand: unsupported prototype {other:?}"
+        ))),
     }
 }
 
@@ -376,7 +381,8 @@ fn rand_single(shape: &[usize]) -> crate::BuiltinResult<Value> {
 fn rand_complex(shape: &[usize]) -> crate::BuiltinResult<Value> {
     let len = tensor::element_count(shape);
     let data = random::generate_complex(len, "rand")?;
-    let tensor = ComplexTensor::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("rand: {e}")))?;
+    let tensor = ComplexTensor::new(data, shape.to_vec())
+        .map_err(|e| builtin_error(format!("rand: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -402,7 +408,8 @@ fn rand_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::BuiltinRes
         let len = tensor::element_count(shape);
         let data = random::generate_uniform(len, "rand")?;
 
-        let tensor = Tensor::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("rand: {e}")))?;
+        let tensor =
+            Tensor::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("rand: {e}")))?;
         let view = HostTensorView {
             data: &tensor.data,
             shape: &tensor.shape,

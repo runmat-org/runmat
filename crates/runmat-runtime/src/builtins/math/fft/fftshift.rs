@@ -213,7 +213,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "fftshift";
 
 fn fftshift_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build()
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(
@@ -266,9 +268,9 @@ fn fftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Valu
             let dims = compute_shift_dims(&handle.shape, dims_arg, BUILTIN_NAME)?;
             Ok(fftshift_gpu(handle, &dims)?)
         }
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
-            Err(fftshift_error("fftshift: expected numeric or logical input"))
-        }
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => Err(
+            fftshift_error("fftshift: expected numeric or logical input"),
+        ),
         Value::Struct(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -284,17 +286,13 @@ fn fftshift_tensor(tensor: Tensor, dims: &[usize]) -> BuiltinResult<Tensor> {
     let Tensor { data, shape, .. } = tensor;
     let plan = build_shift_plan(&shape, dims, ShiftKind::Fft);
     if data.is_empty() || plan.is_noop() {
-        return Tensor::new(data, shape)
-            .map_err(|e| fftshift_error(format!("fftshift: {e}")));
+        return Tensor::new(data, shape).map_err(|e| fftshift_error(format!("fftshift: {e}")));
     }
     let rotated = apply_shift(BUILTIN_NAME, &data, &plan.ext_shape, &plan.positive)?;
     Tensor::new(rotated, shape).map_err(|e| fftshift_error(format!("fftshift: {e}")))
 }
 
-fn fftshift_complex_tensor(
-    tensor: ComplexTensor,
-    dims: &[usize],
-) -> BuiltinResult<ComplexTensor> {
+fn fftshift_complex_tensor(tensor: ComplexTensor, dims: &[usize]) -> BuiltinResult<ComplexTensor> {
     let ComplexTensor { data, shape, .. } = tensor;
     let plan = build_shift_plan(&shape, dims, ShiftKind::Fft);
     if data.is_empty() || plan.is_noop() {
@@ -563,8 +561,9 @@ pub(crate) mod tests {
     #[test]
     fn fftshift_rejects_non_integer_dimension_argument() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err =
-            error_message(fftshift_builtin(Value::Tensor(tensor), vec![Value::Num(1.5)]).unwrap_err());
+        let err = error_message(
+            fftshift_builtin(Value::Tensor(tensor), vec![Value::Num(1.5)]).unwrap_err(),
+        );
         assert!(
             err.contains("dimensions must be integers"),
             "unexpected error: {err}"

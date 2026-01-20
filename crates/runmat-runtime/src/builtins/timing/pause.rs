@@ -12,9 +12,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg(not(test))]
 use crate::interaction;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -258,8 +258,8 @@ fn wait_for_key_press() -> Result<(), RuntimeError> {
 }
 
 fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
-    let host_value = gpu_helpers::gather_value(arg)
-        .map_err(|e| pause_error(format!("pause: {e}")))?;
+    let host_value =
+        gpu_helpers::gather_value(arg).map_err(|e| pause_error(format!("pause: {e}")))?;
     match host_value {
         Value::String(text) => parse_command(&text),
         Value::CharArray(ca) => {
@@ -424,7 +424,12 @@ pub(crate) mod tests {
     }
 
     fn assert_pause_error_identifier(err: crate::RuntimeError, identifier: &str) {
-        assert_eq!(err.identifier(), Some(identifier), "message: {}", err.message());
+        assert_eq!(
+            err.identifier(),
+            Some(identifier),
+            "message: {}",
+            err.message()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

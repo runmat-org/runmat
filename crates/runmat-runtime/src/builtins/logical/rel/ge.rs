@@ -384,8 +384,9 @@ impl GeOperand {
             Value::String(s) => Ok(GeOperand::String(StringBuffer::scalar(s))),
             Value::StringArray(sa) => Ok(GeOperand::String(StringBuffer::from_array(sa))),
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)
-                    .map_err(|err| ge_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT))?;
+                let tensor = gpu_helpers::gather_tensor(&handle).map_err(|err| {
+                    ge_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT)
+                })?;
                 Ok(GeOperand::Numeric(NumericBuffer::from_tensor(tensor)))
             }
             Value::Complex(_, _) | Value::ComplexTensor(_) => Err(ge_error(

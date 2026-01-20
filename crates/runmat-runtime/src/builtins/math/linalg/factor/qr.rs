@@ -492,8 +492,8 @@ fn pivot_vector_to_value(pivot: &[usize]) -> BuiltinResult<Value> {
     for &idx in pivot {
         data.push((idx + 1) as f64);
     }
-    let tensor = Tensor::new(data, vec![pivot.len(), 1])
-        .map_err(|e| qr_error(format!("qr: {e}")))?;
+    let tensor =
+        Tensor::new(data, vec![pivot.len(), 1]).map_err(|e| qr_error(format!("qr: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -507,11 +507,7 @@ fn perm_matrix(size: usize, perm: &[usize]) -> ColMajorMatrix {
     matrix
 }
 
-fn matrix_to_value(
-    matrix: &ColMajorMatrix,
-    label: &str,
-    prefer_gpu: bool,
-) -> BuiltinResult<Value> {
+fn matrix_to_value(matrix: &ColMajorMatrix, label: &str, prefer_gpu: bool) -> BuiltinResult<Value> {
     let value = matrix.to_value(label)?;
     Ok(maybe_upload_value(value, prefer_gpu))
 }
@@ -1133,7 +1129,11 @@ pub(crate) mod tests {
                 .map(|idx| {
                     let row = idx % gpu_q.cols();
                     let col = idx / gpu_q.cols();
-                    if row == col { 1.0 } else { 0.0 }
+                    if row == col {
+                        1.0
+                    } else {
+                        0.0
+                    }
                 })
                 .collect::<Vec<_>>(),
             vec![gpu_q.cols(), gpu_q.cols()],

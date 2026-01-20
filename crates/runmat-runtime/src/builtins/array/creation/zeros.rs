@@ -5,6 +5,7 @@ use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 use std::sync::OnceLock;
 
+use crate::build_runtime_error;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionExprContext,
     FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
@@ -12,7 +13,6 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use runmat_builtins::NumericDType;
-use crate::build_runtime_error;
 
 #[cfg_attr(
     feature = "doc_export",
@@ -475,10 +475,7 @@ fn zeros_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::BuiltinRe
     zeros_like(&gathered, shape)
 }
 
-fn zeros_gpu_alloc(
-    shape: &[usize],
-    dtype: NumericDType,
-) -> crate::BuiltinResult<Option<Value>> {
+fn zeros_gpu_alloc(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult<Option<Value>> {
     let Some(provider) = runmat_accelerate_api::provider() else {
         log_zeros_fallback(shape, dtype, "no-provider");
         return Ok(None);

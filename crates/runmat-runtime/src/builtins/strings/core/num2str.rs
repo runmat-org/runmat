@@ -17,9 +17,7 @@ const DEFAULT_PRECISION: usize = 15;
 const MAX_PRECISION: usize = 52;
 
 fn num2str_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("num2str")
-        .build()
+    build_runtime_error(message).with_builtin("num2str").build()
 }
 
 fn remap_num2str_flow(err: RuntimeError) -> RuntimeError {
@@ -330,7 +328,9 @@ fn parse_options(args: Vec<Value>) -> BuiltinResult<FormatOptions> {
 
     if let Some(second) = iter.next() {
         if !is_local_token(&second)? {
-            return Err(num2str_flow("num2str: expected 'local' as the third argument"));
+            return Err(num2str_flow(
+                "num2str: expected 'local' as the third argument",
+            ));
         }
         decimal = detect_decimal_separator(true);
     }
@@ -461,9 +461,7 @@ fn parse_custom_format(text: &str) -> BuiltinResult<CustomFormat> {
     });
 
     let captures = FORMAT_RE.captures(text).ok_or_else(|| {
-        num2str_flow(
-            "num2str: unsupported format string; expected variants like '%0.3f' or '%.5g'",
-        )
+        num2str_flow("num2str: unsupported format string; expected variants like '%0.3f' or '%.5g'")
     })?;
 
     let flags = captures.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -627,8 +625,7 @@ fn format_real_matrix(
     options: &FormatOptions,
 ) -> BuiltinResult<CharArray> {
     if rows == 0 {
-        return CharArray::new(Vec::new(), 0, 0)
-            .map_err(|e| num2str_flow(format!("num2str: {e}")));
+        return CharArray::new(Vec::new(), 0, 0).map_err(|e| num2str_flow(format!("num2str: {e}")));
     }
     if cols == 0 {
         return CharArray::new(Vec::new(), rows, 0)
@@ -682,8 +679,7 @@ fn format_complex_matrix(
     options: &FormatOptions,
 ) -> BuiltinResult<CharArray> {
     if rows == 0 {
-        return CharArray::new(Vec::new(), 0, 0)
-            .map_err(|e| num2str_flow(format!("num2str: {e}")));
+        return CharArray::new(Vec::new(), 0, 0).map_err(|e| num2str_flow(format!("num2str: {e}")));
     }
     if cols == 0 {
         return CharArray::new(Vec::new(), rows, 0)
@@ -753,8 +749,7 @@ fn assemble_rows(entries: Vec<Vec<CellEntry>>, col_widths: Vec<usize>) -> Vec<St
 
 fn rows_to_char_array(rows: Vec<String>) -> BuiltinResult<CharArray> {
     if rows.is_empty() {
-        return CharArray::new(Vec::new(), 0, 0)
-            .map_err(|e| num2str_flow(format!("num2str: {e}")));
+        return CharArray::new(Vec::new(), 0, 0).map_err(|e| num2str_flow(format!("num2str: {e}")));
     }
     let row_count = rows.len();
     let col_count = rows
@@ -772,8 +767,7 @@ fn rows_to_char_array(rows: Vec<String>) -> BuiltinResult<CharArray> {
         data.extend(chars);
     }
 
-    CharArray::new(data, row_count, col_count)
-        .map_err(|e| num2str_flow(format!("num2str: {e}")))
+    CharArray::new(data, row_count, col_count).map_err(|e| num2str_flow(format!("num2str: {e}")))
 }
 
 fn format_real(value: f64, spec: &FormatSpec, decimal: char) -> String {

@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
 
@@ -255,9 +255,10 @@ fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> 
         }
         let timeout = guard.timeout;
         let byte_order = parse_byte_order(&guard.byte_order);
-        let stream = guard.stream.try_clone().map_err(|err| {
-            read_flow(MESSAGE_ID_INTERNAL, format!("read: clone failed ({err})"))
-        })?;
+        let stream = guard
+            .stream
+            .try_clone()
+            .map_err(|err| read_flow(MESSAGE_ID_INTERNAL, format!("read: clone failed ({err})")))?;
         (stream, timeout, byte_order, guard.connected)
     };
 
@@ -491,9 +492,8 @@ fn bytes_to_value(bytes: &[u8], datatype: DataType, order: ByteOrder) -> Builtin
         | DataType::Double => {
             let values = numeric_from_bytes(bytes, datatype, order)?;
             let cols = values.len();
-            let tensor = Tensor::new(values, vec![1, cols]).map_err(|err| {
-                read_flow(MESSAGE_ID_INTERNAL, format!("read: {err}"))
-            })?;
+            let tensor = Tensor::new(values, vec![1, cols])
+                .map_err(|err| read_flow(MESSAGE_ID_INTERNAL, format!("read: {err}")))?;
             Ok(Value::Tensor(tensor))
         }
     }

@@ -353,8 +353,9 @@ impl LeOperand {
             Value::String(s) => Ok(LeOperand::String(StringBuffer::scalar(s))),
             Value::StringArray(sa) => Ok(LeOperand::String(StringBuffer::from_array(sa))),
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)
-                    .map_err(|err| le_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT))?;
+                let tensor = gpu_helpers::gather_tensor(&handle).map_err(|err| {
+                    le_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT)
+                })?;
                 Ok(LeOperand::Numeric(NumericBuffer::from_tensor(tensor)))
             }
             Value::Complex(_, _) | Value::ComplexTensor(_) => Err(le_error(

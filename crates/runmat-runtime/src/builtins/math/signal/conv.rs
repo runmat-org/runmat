@@ -248,7 +248,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "conv";
 
 fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build()
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(

@@ -5,7 +5,6 @@ use runmat_accelerate_api::{self, AccelProvider, GpuTensorHandle, HostTensorView
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::{
     gpu_helpers,
     spec::{
@@ -14,6 +13,7 @@ use crate::builtins::common::{
     },
     tensor,
 };
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -451,7 +451,11 @@ pub(crate) mod tests {
     }
 
     fn assert_error_contains(err: crate::RuntimeError, expected: &str) {
-        assert!(err.message().contains(expected), "unexpected error: {}", err.message());
+        assert!(
+            err.message().contains(expected),
+            "unexpected error: {}",
+            err.message()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

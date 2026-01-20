@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const CLASS_NAME: &str = "containers.Map";
 const MISSING_KEY_ERR: &str = "containers.Map: The specified key is not present in this container.";
@@ -341,7 +341,11 @@ impl ValueType {
     }
 
     fn parse(value: &Value, builtin: &'static str) -> BuiltinResult<Self> {
-        let text = string_from_value(value, "containers.Map: expected a ValueType string", builtin)?;
+        let text = string_from_value(
+            value,
+            "containers.Map: expected a ValueType string",
+            builtin,
+        )?;
         match text.to_ascii_lowercase().as_str() {
             "any" => Ok(ValueType::Any),
             "char" | "character" => Ok(ValueType::Char),
@@ -617,9 +621,8 @@ fn containers_map_is_key(map: Value, key_spec: Value) -> crate::BuiltinResult<Va
             Ok(Value::Bool(flags[0]))
         } else {
             let data: Vec<u8> = flags.into_iter().map(|b| if b { 1 } else { 0 }).collect();
-            let logical = LogicalArray::new(data, collection.shape).map_err(|e| {
-                map_error(format!("containers.Map: {e}"), BUILTIN_IS_KEY)
-            })?;
+            let logical = LogicalArray::new(data, collection.shape)
+                .map_err(|e| map_error(format!("containers.Map: {e}"), BUILTIN_IS_KEY))?;
             Ok(Value::LogicalArray(logical))
         }
     })
@@ -672,12 +675,11 @@ fn containers_map_subsref(map: Value, kind: String, payload: Value) -> crate::Bu
                 let collection = collect_key_spec(&key_arg, store.key_type, BUILTIN_SUBSREF)?;
                 if collection.values.is_empty() {
                     return crate::make_cell_with_shape(Vec::new(), collection.shape.clone())
-                        .map_err(|e| {
-                            map_error(format!("containers.Map: {e}"), BUILTIN_SUBSREF)
-                        });
+                        .map_err(|e| map_error(format!("containers.Map: {e}"), BUILTIN_SUBSREF));
                 }
                 if collection.values.len() == 1 {
-                    let normalized = normalize_key(&collection.values[0], store.key_type, BUILTIN_SUBSREF)?;
+                    let normalized =
+                        normalize_key(&collection.values[0], store.key_type, BUILTIN_SUBSREF)?;
                     store
                         .get(&normalized)
                         .ok_or_else(|| map_error(MISSING_KEY_ERR, BUILTIN_SUBSREF))
@@ -690,9 +692,8 @@ fn containers_map_subsref(map: Value, kind: String, payload: Value) -> crate::Bu
                             .ok_or_else(|| map_error(MISSING_KEY_ERR, BUILTIN_SUBSREF))?;
                         results.push(stored);
                     }
-                    crate::make_cell_with_shape(results, collection.shape.clone()).map_err(|e| {
-                        map_error(format!("containers.Map: {e}"), BUILTIN_SUBSREF)
-                    })
+                    crate::make_cell_with_shape(results, collection.shape.clone())
+                        .map_err(|e| map_error(format!("containers.Map: {e}"), BUILTIN_SUBSREF))
                 }
             })
         }
@@ -702,14 +703,18 @@ fn containers_map_subsref(map: Value, kind: String, payload: Value) -> crate::Bu
                 "containers.Map: property name must be text",
                 BUILTIN_SUBSREF,
             )?;
-            with_store(&map, BUILTIN_SUBSREF, |store| match field.to_ascii_lowercase().as_str() {
-                "count" => Ok(Value::Num(store.len() as f64)),
-                "keytype" => char_array_value(store.key_type.matlab_name(), BUILTIN_SUBSREF),
-                "valuetype" => char_array_value(store.value_type.matlab_name(), BUILTIN_SUBSREF),
-                other => Err(map_error(
-                    format!("containers.Map: no such property '{other}'"),
-                    BUILTIN_SUBSREF,
-                )),
+            with_store(&map, BUILTIN_SUBSREF, |store| {
+                match field.to_ascii_lowercase().as_str() {
+                    "count" => Ok(Value::Num(store.len() as f64)),
+                    "keytype" => char_array_value(store.key_type.matlab_name(), BUILTIN_SUBSREF),
+                    "valuetype" => {
+                        char_array_value(store.value_type.matlab_name(), BUILTIN_SUBSREF)
+                    }
+                    other => Err(map_error(
+                        format!("containers.Map: no such property '{other}'"),
+                        BUILTIN_SUBSREF,
+                    )),
+                }
             })
         }
         "{}" => Err(map_error(
@@ -759,7 +764,8 @@ fn containers_map_subsasgn(
                 let KeyCollection {
                     values: key_values, ..
                 } = collect_key_spec(&key_arg, store.key_type, BUILTIN_SUBSASGN)?;
-                let values = expand_assignment_values(rhs.clone(), key_values.len(), BUILTIN_SUBSASGN)?;
+                let values =
+                    expand_assignment_values(rhs.clone(), key_values.len(), BUILTIN_SUBSASGN)?;
                 for (key_raw, value) in key_values.into_iter().zip(values.into_iter()) {
                     let (normalized, canonical) =
                         canonicalize_key(key_raw, store.key_type, BUILTIN_SUBSASGN)?;
@@ -814,7 +820,10 @@ fn parse_constructor_args(
     let mut uniform_values = false;
     while index < args.len() {
         let keyword = keyword_of(&args[index]).ok_or_else(|| {
-            map_error("containers.Map: expected option name (e.g. 'KeyType')", builtin)
+            map_error(
+                "containers.Map: expected option name (e.g. 'KeyType')",
+                builtin,
+            )
         })?;
         index += 1;
         let Some(value) = args.get(index) else {
@@ -932,9 +941,9 @@ where
     let guard = MAP_REGISTRY
         .read()
         .map_err(|_| map_error("containers.Map: registry lock poisoned", builtin))?;
-    let store = guard.get(&id).ok_or_else(|| {
-        map_error("containers.Map: internal storage not found", builtin)
-    })?;
+    let store = guard
+        .get(&id)
+        .ok_or_else(|| map_error("containers.Map: internal storage not found", builtin))?;
     f(store)
 }
 
@@ -948,9 +957,9 @@ where
     let mut guard = MAP_REGISTRY
         .write()
         .map_err(|_| map_error("containers.Map: registry lock poisoned", builtin))?;
-    let store = guard.get_mut(&id).ok_or_else(|| {
-        map_error("containers.Map: internal storage not found", builtin)
-    })?;
+    let store = guard
+        .get_mut(&id)
+        .ok_or_else(|| map_error("containers.Map: internal storage not found", builtin))?;
     f(store)
 }
 
@@ -988,7 +997,10 @@ fn map_id(handle: &HandleRef, builtin: &'static str) -> BuiltinResult<u64> {
             Some(Value::Int(other)) => {
                 let id = other.to_i64();
                 if id < 0 {
-                    Err(map_error("containers.Map: negative map identifier", builtin))
+                    Err(map_error(
+                        "containers.Map: negative map identifier",
+                        builtin,
+                    ))
                 } else {
                     Ok(id as u64)
                 }
@@ -1046,7 +1058,8 @@ fn flatten_keys(
                     ));
                 }
                 out.push(
-                    gather_if_needed(element).map_err(|err| attach_builtin_context(err, builtin))?,
+                    gather_if_needed(element)
+                        .map_err(|err| attach_builtin_context(err, builtin))?,
                 );
             }
             Ok(out)
@@ -1218,8 +1231,11 @@ fn normalize_key(
             Ok(NormalizedKey::String(text))
         }
         KeyType::Double | KeyType::Single => {
-            let numeric =
-                numeric_from_value(value, "containers.Map: keys must be numeric scalars", builtin)?;
+            let numeric = numeric_from_value(
+                value,
+                "containers.Map: keys must be numeric scalars",
+                builtin,
+            )?;
             if !numeric.is_finite() {
                 return Err(map_error(
                     "containers.Map: keys must be finite numeric scalars",
@@ -1269,11 +1285,7 @@ fn normalize_key(
     }
 }
 
-fn string_from_value(
-    value: &Value,
-    context: &str,
-    builtin: &'static str,
-) -> BuiltinResult<String> {
+fn string_from_value(value: &Value, context: &str, builtin: &'static str) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
@@ -1381,11 +1393,7 @@ fn normalize_logical_value(value: Value, builtin: &'static str) -> BuiltinResult
     }
 }
 
-fn numeric_from_value(
-    value: &Value,
-    context: &str,
-    builtin: &'static str,
-) -> BuiltinResult<f64> {
+fn numeric_from_value(value: &Value, context: &str, builtin: &'static str) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
@@ -1464,11 +1472,7 @@ fn unsigned_from_value(
     }
 }
 
-fn bool_from_value(
-    value: &Value,
-    context: &str,
-    builtin: &'static str,
-) -> BuiltinResult<bool> {
+fn bool_from_value(value: &Value, context: &str, builtin: &'static str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(b) => Ok(*b),
         Value::LogicalArray(arr) if arr.data.len() == 1 => Ok(arr.data[0] != 0),

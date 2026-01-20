@@ -4,7 +4,6 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -12,6 +11,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -306,8 +306,8 @@ fn rem_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 fn compute_rem_real(a: &Tensor, b: &Tensor) -> BuiltinResult<Value> {
-    let plan =
-        BroadcastPlan::new(&a.shape, &b.shape).map_err(|err| builtin_error(format!("rem: {err}")))?;
+    let plan = BroadcastPlan::new(&a.shape, &b.shape)
+        .map_err(|err| builtin_error(format!("rem: {err}")))?;
     if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("rem: {e}")))?;
@@ -323,8 +323,8 @@ fn compute_rem_real(a: &Tensor, b: &Tensor) -> BuiltinResult<Value> {
 }
 
 fn compute_rem_complex(a: &ComplexTensor, b: &ComplexTensor) -> BuiltinResult<Value> {
-    let plan =
-        BroadcastPlan::new(&a.shape, &b.shape).map_err(|err| builtin_error(format!("rem: {err}")))?;
+    let plan = BroadcastPlan::new(&a.shape, &b.shape)
+        .map_err(|err| builtin_error(format!("rem: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("rem: {e}")))?;
@@ -425,15 +425,15 @@ fn value_into_numeric_array(value: Value, name: &str) -> BuiltinResult<NumericAr
                 .map_err(|e| builtin_error(format!("{name}: {e}")))?;
             Ok(NumericArray::Real(tensor))
         }
-        Value::String(_) | Value::StringArray(_) => {
-            Err(builtin_error(format!("{name}: expected numeric input, got string")))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(builtin_error(format!(
+            "{name}: expected numeric input, got string"
+        ))),
         Value::GpuTensor(_) => Err(builtin_error(format!(
             "{name}: internal error converting GPU tensor"
         ))),
         other => {
-            let tensor = tensor::value_into_tensor_for(name, other)
-                .map_err(|err| builtin_error(err))?;
+            let tensor =
+                tensor::value_into_tensor_for(name, other).map_err(|err| builtin_error(err))?;
             Ok(NumericArray::Real(tensor))
         }
     }
@@ -465,8 +465,7 @@ fn into_complex(name: &str, input: NumericArray) -> BuiltinResult<ComplexTensor>
         NumericArray::Real(t) => {
             let Tensor { data, shape, .. } = t;
             let complex: Vec<(f64, f64)> = data.into_iter().map(|re| (re, 0.0)).collect();
-            ComplexTensor::new(complex, shape)
-                .map_err(|e| builtin_error(format!("{name}: {e}")))
+            ComplexTensor::new(complex, shape).map_err(|e| builtin_error(format!("{name}: {e}")))
         }
         NumericArray::Complex(ct) => Ok(ct),
     }

@@ -241,7 +241,9 @@ pub(crate) fn tensor_from_value(value: &Value, context: &'static str) -> Builtin
             Tensor::try_from(&gathered)
                 .map_err(|e| plotting_error(context, format!("{context}: {e}")))
         }
-        _ => Tensor::try_from(value).map_err(|e| plotting_error(context, format!("{context}: {e}"))),
+        _ => {
+            Tensor::try_from(value).map_err(|e| plotting_error(context, format!("{context}: {e}")))
+        }
     }
 }
 
@@ -306,9 +308,7 @@ pub(crate) fn convert_rgb_color_matrix(
     if tensor.cols != 3 && tensor.cols != 4 {
         return Err(plotting_error(
             context,
-            format!(
-                "{context}: color matrices must have three (RGB) or four (RGBA) columns"
-            ),
+            format!("{context}: color matrices must have three (RGB) or four (RGBA) columns"),
         ));
     }
     if tensor.rows == 0 {
@@ -453,9 +453,7 @@ pub fn validate_gpu_color_matrix(
     if rows != point_count {
         return Err(plotting_error(
             context,
-            format!(
-                "{context}: color gpuArray inputs must have {point_count} rows (got {rows})"
-            ),
+            format!("{context}: color gpuArray inputs must have {point_count} rows (got {rows})"),
         ));
     }
     Ok(components)

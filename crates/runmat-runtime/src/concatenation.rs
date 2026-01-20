@@ -230,18 +230,21 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                 if rows == 0 {
                     rows = 1;
                 } else if rows != 1 {
-                    return Err(concat_error("Cannot concatenate scalar with multi-row matrix"));
+                    return Err(concat_error(
+                        "Cannot concatenate scalar with multi-row matrix",
+                    ));
                 }
                 _total_cols += 1;
                 matrices.push(matrix);
             }
             Value::Complex(re, _im) => {
-                let matrix =
-                    Tensor::new_2d(vec![*re], 1, 1).map_err(concat_error)?; // real part in numeric hcat coercion
+                let matrix = Tensor::new_2d(vec![*re], 1, 1).map_err(concat_error)?; // real part in numeric hcat coercion
                 if rows == 0 {
                     rows = 1;
                 } else if rows != 1 {
-                    return Err(concat_error("Cannot concatenate scalar with multi-row matrix"));
+                    return Err(concat_error(
+                        "Cannot concatenate scalar with multi-row matrix",
+                    ));
                 }
                 _total_cols += 1;
                 matrices.push(matrix);
@@ -251,7 +254,9 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                 if rows == 0 {
                     rows = 1;
                 } else if rows != 1 {
-                    return Err(concat_error("Cannot concatenate scalar with multi-row matrix"));
+                    return Err(concat_error(
+                        "Cannot concatenate scalar with multi-row matrix",
+                    ));
                 }
                 _total_cols += 1;
                 matrices.push(matrix);
@@ -273,7 +278,11 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                 _total_cols += m.cols();
                 matrices.push(m.clone());
             }
-            _ => return Err(concat_error(format!("Cannot concatenate value of type {value:?}"))),
+            _ => {
+                return Err(concat_error(format!(
+                    "Cannot concatenate value of type {value:?}"
+                )))
+            }
         }
     }
 
@@ -414,7 +423,9 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                 if cols == 0 {
                     cols = 1;
                 } else if cols != 1 {
-                    return Err(concat_error("Cannot concatenate scalar with multi-column matrix"));
+                    return Err(concat_error(
+                        "Cannot concatenate scalar with multi-column matrix",
+                    ));
                 }
                 _total_rows += 1;
                 matrices.push(matrix);
@@ -424,7 +435,9 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                 if cols == 0 {
                     cols = 1;
                 } else if cols != 1 {
-                    return Err(concat_error("Cannot concatenate scalar with multi-column matrix"));
+                    return Err(concat_error(
+                        "Cannot concatenate scalar with multi-column matrix",
+                    ));
                 }
                 _total_rows += 1;
                 matrices.push(matrix);
@@ -434,7 +447,9 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                 if cols == 0 {
                     cols = 1;
                 } else if cols != 1 {
-                    return Err(concat_error("Cannot concatenate scalar with multi-column matrix"));
+                    return Err(concat_error(
+                        "Cannot concatenate scalar with multi-column matrix",
+                    ));
                 }
                 _total_rows += 1;
                 matrices.push(matrix);
@@ -456,7 +471,11 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                 _total_rows += m.rows();
                 matrices.push(m.clone());
             }
-            _ => return Err(concat_error(format!("Cannot concatenate value of type {value:?}"))),
+            _ => {
+                return Err(concat_error(format!(
+                    "Cannot concatenate value of type {value:?}"
+                )))
+            }
         }
     }
 

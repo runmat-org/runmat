@@ -461,7 +461,9 @@ impl Compiler {
                         visit_expr(cond, max);
                         visit_stmts(body, max);
                     }
-                    HirStmt::For { var, expr, body, .. } => {
+                    HirStmt::For {
+                        var, expr, body, ..
+                    } => {
                         if var.0 + 1 > *max {
                             *max = var.0 + 1;
                         }
@@ -696,7 +698,9 @@ impl Compiler {
                     self.patch(j, Instr::Jump(end));
                 }
             }
-            HirStmt::For { var, expr, body, .. } => {
+            HirStmt::For {
+                var, expr, body, ..
+            } => {
                 if let Some(plan) = self.detect_stochastic_evolution(expr, body) {
                     self.compile_stochastic_evolution(plan)?;
                     return Ok(());
@@ -891,7 +895,9 @@ impl Compiler {
                                 visit_stmt_for_vars(stmt, max);
                             }
                         }
-                        HirStmt::For { var, expr, body, .. } => {
+                        HirStmt::For {
+                            var, expr, body, ..
+                        } => {
                             if var.0 + 1 > *max {
                                 *max = var.0 + 1;
                             }
@@ -1804,9 +1810,9 @@ impl Compiler {
                         self.emit(Instr::LoadStaticProperty(classes.remove(0), name.clone()));
                         return Ok(());
                     }
-                    return Err(self.compile_error(format!(
-                        "Unknown constant or static property: {name}"
-                    )));
+                    return Err(
+                        self.compile_error(format!("Unknown constant or static property: {name}"))
+                    );
                 }
             }
             HirExprKind::Unary(op, e) => {

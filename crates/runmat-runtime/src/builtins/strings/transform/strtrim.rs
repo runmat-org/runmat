@@ -3,11 +3,11 @@
 use runmat_builtins::{CellArray, CharArray, StringArray, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
 
@@ -243,7 +243,8 @@ fn strtrim_builtin(value: Value) -> BuiltinResult<Value> {
 fn strtrim_string_array(array: StringArray) -> BuiltinResult<Value> {
     let StringArray { data, shape, .. } = array;
     let trimmed = data.into_iter().map(trim_string).collect::<Vec<_>>();
-    let out = StringArray::new(trimmed, shape).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+    let out = StringArray::new(trimmed, shape)
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
     Ok(Value::StringArray(out))
 }
 
@@ -285,7 +286,8 @@ fn strtrim_cell_array(cell: CellArray) -> BuiltinResult<Value> {
         let trimmed = strtrim_cell_element(value)?;
         trimmed_values.push(trimmed);
     }
-    make_cell(trimmed_values, rows, cols).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+    make_cell(trimmed_values, rows, cols)
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
 fn strtrim_cell_element(value: &Value) -> BuiltinResult<Value> {

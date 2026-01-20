@@ -1,4 +1,7 @@
-use runmat_parser::{parse_simple as parse, Stmt};
+use runmat_parser::Stmt;
+
+mod parse;
+use parse::parse;
 
 fn single_stmt(src: &str) -> Stmt {
     let program = parse(src).unwrap();
@@ -141,7 +144,7 @@ classdef C
 end
 "#; // missing 'end' after properties
     let err = parse(src).unwrap_err();
-    assert!(err.contains("expected 'end'"));
+    assert!(err.message.contains("expected 'end'"));
 }
 
 #[test]

@@ -483,8 +483,7 @@ fn class_folder_exists(name: &str) -> BuiltinResult<bool> {
 }
 
 fn class_file_exists(name: &str) -> BuiltinResult<bool> {
-    path_class_file_exists(name, CLASS_M_FILE_EXTENSIONS, "classdef", "exist")
-        .map_err(exist_error)
+    path_class_file_exists(name, CLASS_M_FILE_EXTENSIONS, "classdef", "exist").map_err(exist_error)
 }
 
 fn method_exists(name: &str) -> bool {
@@ -617,7 +616,6 @@ pub(crate) mod tests {
             let _ = env::set_current_dir(&self.original);
         }
     }
-
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

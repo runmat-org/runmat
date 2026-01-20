@@ -7,7 +7,7 @@ use lsp_types::{
     SignatureHelp,
 };
 use runmat_builtins::{self, BuiltinFunction, Constant, Type};
-use runmat_hir::{HirStmt, LoweringResult, SemanticError};
+use runmat_hir::{HirStmt, LoweringContext, LoweringResult, SemanticError};
 use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
 pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions};
@@ -70,18 +70,17 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
     let tokens = tokenize_detailed(text);
     match parse_with_options(text, ParserOptions::new(compat)) {
         Ok(ast) => {
-            let lowering =
-                match runmat_hir::lower_with_full_context(&ast, &HashMap::new(), &HashMap::new()) {
-                    Ok(result) => result,
-                    Err(err) => {
-                        return DocumentAnalysis {
-                            tokens,
-                            syntax_error: None,
-                            lowering_error: Some(err),
-                            semantic: None,
-                        };
-                    }
-                };
+            let lowering = match runmat_hir::lower(&ast, &LoweringContext::empty()) {
+                Ok(result) => result,
+                Err(err) => {
+                    return DocumentAnalysis {
+                        tokens,
+                        syntax_error: None,
+                        lowering_error: Some(err),
+                        semantic: None,
+                    };
+                }
+            };
 
             let semantic = build_semantic_model(lowering, &tokens, text);
 

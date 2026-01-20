@@ -9,13 +9,13 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const MAX_FACTORIAL_N: usize = 170;
 
@@ -275,7 +275,9 @@ fn factorial_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             ))
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-            return Err(builtin_error("factorial: expected numeric or logical input"))
+            return Err(builtin_error(
+                "factorial: expected numeric or logical input",
+            ))
         }
         other => {
             let tensor = tensor::value_into_tensor_for("factorial", other)
@@ -333,8 +335,7 @@ fn factorial_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     for &value in &tensor.data {
         data.push(factorial_scalar(value));
     }
-    Tensor::new(data, tensor.shape.clone())
-        .map_err(|e| builtin_error(format!("factorial: {e}")))
+    Tensor::new(data, tensor.shape.clone()).map_err(|e| builtin_error(format!("factorial: {e}")))
 }
 
 fn factorial_scalar(value: f64) -> f64 {

@@ -4,13 +4,15 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{broadcast::BroadcastPlan, gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::common::{
+    broadcast::BroadcastPlan, gpu_helpers, map_control_flow_with_builtin, tensor,
+};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -304,8 +306,7 @@ fn value_into_hypot_tensor(value: Value) -> BuiltinResult<Tensor> {
             .map_err(|e| builtin_error(format!("hypot: {e}"))),
         Value::ComplexTensor(ct) => {
             let data: Vec<f64> = ct.data.iter().map(|(re, im)| re.hypot(*im)).collect();
-            Tensor::new(data, ct.shape.clone())
-                .map_err(|e| builtin_error(format!("hypot: {e}")))
+            Tensor::new(data, ct.shape.clone()).map_err(|e| builtin_error(format!("hypot: {e}")))
         }
         other => {
             if let Value::GpuTensor(_) = other {
@@ -489,7 +490,10 @@ pub(crate) mod tests {
         let lhs = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
         let err = hypot_builtin(Value::Tensor(lhs), Value::Tensor(rhs)).unwrap_err();
-        assert!(err.message().contains("dimension"), "unexpected error: {err}");
+        assert!(
+            err.message().contains("dimension"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

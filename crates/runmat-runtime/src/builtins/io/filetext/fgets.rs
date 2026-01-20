@@ -11,13 +11,12 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry;
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "Invalid file identifier. Use fopen to generate a valid file ID.";
 const BUILTIN_NAME: &str = "fgets";
-
 
 #[cfg_attr(
     feature = "doc_export",
@@ -429,7 +428,9 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
             }
             Ok(n as i32)
         }
-        _ => Err(fgets_error("fgets: file identifier must be a numeric scalar")),
+        _ => Err(fgets_error(
+            "fgets: file identifier must be a numeric scalar",
+        )),
     }
 }
 
@@ -491,7 +492,9 @@ fn parse_nchar(args: &[Value]) -> BuiltinResult<Option<usize>> {
             }
             Ok(Some(n as usize))
         }
-        _ => Err(fgets_error("fgets: nchar must be a non-negative integer scalar")),
+        _ => Err(fgets_error(
+            "fgets: nchar must be a non-negative integer scalar",
+        )),
     }
 }
 
@@ -667,7 +670,9 @@ fn decode_bytes(bytes: &[u8], encoding: &str) -> BuiltinResult<Vec<char>> {
         return decode_with_encoding(bytes, enc);
     }
 
-    Err(fgets_error(format!("fgets: unsupported encoding '{encoding}'")))
+    Err(fgets_error(format!(
+        "fgets: unsupported encoding '{encoding}'"
+    )))
 }
 
 fn decode_with_encoding(bytes: &[u8], enc: &'static Encoding) -> BuiltinResult<Vec<char>> {

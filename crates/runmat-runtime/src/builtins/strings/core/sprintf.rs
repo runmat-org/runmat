@@ -7,11 +7,11 @@ use crate::builtins::common::format::{
     decode_escape_sequences, extract_format_string, flatten_arguments, format_variadic_with_cursor,
     ArgCursor,
 };
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::map_control_flow_with_builtin;
 use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
@@ -256,8 +256,10 @@ fn remap_sprintf_flow(err: RuntimeError) -> RuntimeError {
 )]
 fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered_spec = gather_if_needed(&format_spec).map_err(remap_sprintf_flow)?;
-    let raw_format = extract_format_string(&gathered_spec, "sprintf").map_err(remap_sprintf_flow)?;
-    let format_string = decode_escape_sequences("sprintf", &raw_format).map_err(remap_sprintf_flow)?;
+    let raw_format =
+        extract_format_string(&gathered_spec, "sprintf").map_err(remap_sprintf_flow)?;
+    let format_string =
+        decode_escape_sequences("sprintf", &raw_format).map_err(remap_sprintf_flow)?;
     let flattened_args = flatten_arguments(&rest, "sprintf").map_err(remap_sprintf_flow)?;
     let mut cursor = ArgCursor::new(&flattened_args);
     let mut output = String::new();
@@ -287,8 +289,7 @@ fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult
 fn char_row_value(text: &str) -> BuiltinResult<Value> {
     let chars: Vec<char> = text.chars().collect();
     let len = chars.len();
-    let array =
-        CharArray::new(chars, 1, len).map_err(|e| sprintf_flow(format!("sprintf: {e}")))?;
+    let array = CharArray::new(chars, 1, len).map_err(|e| sprintf_flow(format!("sprintf: {e}")))?;
     Ok(Value::CharArray(array))
 }
 

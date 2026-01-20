@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{
-    gather_if_needed, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeError,
+    build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
 
 #[cfg_attr(
@@ -256,9 +256,7 @@ const IDENT_UNIFORM_OUTPUT: &str = "MATLAB:cellfun:UniformOutput";
 const IDENT_FUNCTION_ERROR: &str = "MATLAB:cellfun:FunctionError";
 
 fn cellfun_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("cellfun")
-        .build()
+    build_runtime_error(message).with_builtin("cellfun").build()
 }
 
 fn cellfun_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
@@ -474,7 +472,8 @@ fn execute_cell(
         outputs.push(host_value);
     }
 
-    make_cell_with_shape(outputs, shape.to_vec()).map_err(|e| cellfun_error(format!("cellfun: {e}")))
+    make_cell_with_shape(outputs, shape.to_vec())
+        .map_err(|e| cellfun_error(format!("cellfun: {e}")))
 }
 
 fn deref_cell_value(cell: &CellArray, index: usize) -> Value {
@@ -598,10 +597,7 @@ fn split_error_message(raw: &str) -> (String, String) {
             return (trimmed.to_string(), String::new());
         }
     }
-    (
-        IDENT_FUNCTION_ERROR.to_string(),
-        trimmed.to_string(),
-    )
+    (IDENT_FUNCTION_ERROR.to_string(), trimmed.to_string())
 }
 
 fn linear_to_indices(mut index: usize, shape: &[usize]) -> Vec<usize> {
@@ -846,18 +842,18 @@ impl UniformCollector {
             UniformCollector::Pending => {
                 let total = total_len(shape).unwrap_or(0);
                 let data = vec![0.0; total];
-                let tensor =
-                    Tensor::new(data, shape.to_vec()).map_err(|e| cellfun_error(format!("cellfun: {e}")))?;
+                let tensor = Tensor::new(data, shape.to_vec())
+                    .map_err(|e| cellfun_error(format!("cellfun: {e}")))?;
                 Ok(Value::Tensor(tensor))
             }
             UniformCollector::Double(data) => {
-                let tensor =
-                    Tensor::new(data, shape.to_vec()).map_err(|e| cellfun_error(format!("cellfun: {e}")))?;
+                let tensor = Tensor::new(data, shape.to_vec())
+                    .map_err(|e| cellfun_error(format!("cellfun: {e}")))?;
                 Ok(Value::Tensor(tensor))
             }
             UniformCollector::Logical(bits) => {
-                let logical =
-                    LogicalArray::new(bits, shape.to_vec()).map_err(|e| cellfun_error(format!("cellfun: {e}")))?;
+                let logical = LogicalArray::new(bits, shape.to_vec())
+                    .map_err(|e| cellfun_error(format!("cellfun: {e}")))?;
                 Ok(Value::LogicalArray(logical))
             }
             UniformCollector::Complex(data) => {
@@ -1274,7 +1270,11 @@ pub(crate) mod tests {
         name = "__cellfun_test_handler",
         builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]
-    fn cellfun_test_handler(seed: Value, _err: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    fn cellfun_test_handler(
+        seed: Value,
+        _err: Value,
+        rest: Vec<Value>,
+    ) -> crate::BuiltinResult<Value> {
         // Return the captured seed regardless of the inputs; ensure rest is present for coverage.
         let _ = rest;
         Ok(seed)

@@ -502,7 +502,7 @@ fn default_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
         }
         _ => Err(warning_default_error(
             "warning: 'default' accepts zero or one identifier argument",
-        )), 
+        )),
     }
 }
 
@@ -628,7 +628,7 @@ fn backtrace_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
         }
         _ => Err(warning_default_error(
             "warning: 'backtrace' accepts zero or one argument",
-        )), 
+        )),
     }
 }
 
@@ -653,16 +653,12 @@ fn apply_state_value(value: &Value) -> crate::BuiltinResult<()> {
 }
 
 fn apply_state_struct(st: &StructValue) -> crate::BuiltinResult<()> {
-    let identifier_value = st
-        .fields
-        .get("identifier")
-        .ok_or_else(|| {
-            warning_default_error("warning: state struct must contain an 'identifier' field")
-        })?;
-    let state_value = st
-        .fields
-        .get("state")
-        .ok_or_else(|| warning_default_error("warning: state struct must contain a 'state' field"))?;
+    let identifier_value = st.fields.get("identifier").ok_or_else(|| {
+        warning_default_error("warning: state struct must contain an 'identifier' field")
+    })?;
+    let state_value = st.fields.get("state").ok_or_else(|| {
+        warning_default_error("warning: state struct must contain a 'state' field")
+    })?;
     let identifier_raw = value_to_string("warning", identifier_value)?;
     let state_raw = value_to_string("warning", state_value)?;
     let identifier_trimmed = identifier_raw.trim();
@@ -670,21 +666,34 @@ fn apply_state_struct(st: &StructValue) -> crate::BuiltinResult<()> {
         if let Some(mode) = parse_mode_keyword(&state_raw) {
             with_manager(|mgr| mgr.set_global_mode(mode));
         } else {
-            return Err(warning_default_error(format!("warning: unknown state '{}'", state_raw)));
+            return Err(warning_default_error(format!(
+                "warning: unknown state '{}'",
+                state_raw
+            )));
         }
     } else if identifier_trimmed.eq_ignore_ascii_case("backtrace") {
         let state = state_raw.trim().to_ascii_lowercase();
         match state.as_str() {
             "on" => with_manager(|mgr| mgr.backtrace_enabled = true),
             "off" | "default" => with_manager(|mgr| mgr.backtrace_enabled = false),
-            other => return Err(warning_default_error(format!("warning: unknown backtrace state '{}'", other))),
+            other => {
+                return Err(warning_default_error(format!(
+                    "warning: unknown backtrace state '{}'",
+                    other
+                )))
+            }
         }
     } else if identifier_trimmed.eq_ignore_ascii_case("verbose") {
         let state = state_raw.trim().to_ascii_lowercase();
         match state.as_str() {
             "on" => with_manager(|mgr| mgr.verbose_enabled = true),
             "off" | "default" => with_manager(|mgr| mgr.verbose_enabled = false),
-            other => return Err(warning_default_error(format!("warning: unknown verbose state '{}'", other))),
+            other => {
+                return Err(warning_default_error(format!(
+                    "warning: unknown verbose state '{}'",
+                    other
+                )))
+            }
         }
     } else if identifier_trimmed.eq_ignore_ascii_case("last") {
         let last_identifier = with_manager(|mgr| mgr.last_warning.clone());
@@ -698,7 +707,10 @@ fn apply_state_struct(st: &StructValue) -> crate::BuiltinResult<()> {
         } else if let Some(mode) = parse_mode_keyword(&state_raw) {
             with_manager(|mgr| mgr.set_identifier_mode(&identifier, mode));
         } else {
-            return Err(warning_default_error(format!("warning: unknown state '{}'", state_raw)));
+            return Err(warning_default_error(format!(
+                "warning: unknown state '{}'",
+                state_raw
+            )));
         }
     } else if state_raw.trim().eq_ignore_ascii_case("default") {
         let normalized = normalize_identifier(identifier_trimmed);
@@ -707,7 +719,10 @@ fn apply_state_struct(st: &StructValue) -> crate::BuiltinResult<()> {
         let normalized = normalize_identifier(identifier_trimmed);
         with_manager(|mgr| mgr.set_identifier_mode(&normalized, mode));
     } else {
-        return Err(warning_default_error(format!("warning: unknown state '{}'", state_raw)));
+        return Err(warning_default_error(format!(
+            "warning: unknown state '{}'",
+            state_raw
+        )));
     }
     Ok(())
 }
@@ -1122,9 +1137,8 @@ pub(crate) mod tests {
         let previous =
             warning_builtin(vec![Value::from("error"), Value::from("all")]).expect("state change");
         assert_state_struct(&previous, "all", "on");
-        let err = unwrap_error(
-            warning_builtin(vec![Value::from("Promoted")]).expect_err("should error"),
-        );
+        let err =
+            unwrap_error(warning_builtin(vec![Value::from("Promoted")]).expect_err("should error"));
         assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
         assert_eq!(err.message(), "Promoted");
     }

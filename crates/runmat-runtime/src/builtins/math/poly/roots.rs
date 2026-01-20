@@ -242,12 +242,13 @@ fn coefficients_to_complex(value: Value) -> BuiltinResult<Vec<Complex64>> {
             tensor_to_complex(tensor)
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| roots_error(format!("roots: {e}")))?;
+            let tensor =
+                Tensor::new(vec![n], vec![1, 1]).map_err(|e| roots_error(format!("roots: {e}")))?;
             tensor_to_complex(tensor)
         }
         Value::Int(i) => {
-            let tensor =
-                Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| roots_error(format!("roots: {e}")))?;
+            let tensor = Tensor::new(vec![i.to_f64()], vec![1, 1])
+                .map_err(|e| roots_error(format!("roots: {e}")))?;
             tensor_to_complex(tensor)
         }
         Value::Bool(b) => {
@@ -320,7 +321,9 @@ fn solve_roots(coeffs: &[Complex64]) -> BuiltinResult<Vec<Complex64>> {
         let a = coeffs[0];
         let b = coeffs[1];
         if a.norm() <= LEADING_ZERO_TOL {
-            return Err(roots_error("roots: leading coefficient must be non-zero after trimming"));
+            return Err(roots_error(
+                "roots: leading coefficient must be non-zero after trimming",
+            ));
         }
         return Ok(vec![-b / a]);
     }
@@ -331,7 +334,9 @@ fn solve_roots(coeffs: &[Complex64]) -> BuiltinResult<Vec<Complex64>> {
     }
     let leading = coeffs[0];
     if leading.norm() <= LEADING_ZERO_TOL {
-        return Err(roots_error("roots: leading coefficient must be non-zero after trimming"));
+        return Err(roots_error(
+            "roots: leading coefficient must be non-zero after trimming",
+        ));
     }
 
     let mut companion = DMatrix::<Complex64>::zeros(degree, degree);
@@ -405,18 +410,20 @@ fn roots_to_value(roots: &[Complex64]) -> BuiltinResult<Value> {
         for &root in roots {
             data.push(root.re);
         }
-        let tensor = Tensor::new(data, vec![roots.len(), 1]).map_err(|e| roots_error(format!("roots: {e}")))?;
+        let tensor = Tensor::new(data, vec![roots.len(), 1])
+            .map_err(|e| roots_error(format!("roots: {e}")))?;
         Ok(Value::Tensor(tensor))
     } else {
         let data: Vec<(f64, f64)> = roots.iter().map(|z| (z.re, z.im)).collect();
-        let tensor =
-            ComplexTensor::new(data, vec![roots.len(), 1]).map_err(|e| roots_error(format!("roots: {e}")))?;
+        let tensor = ComplexTensor::new(data, vec![roots.len(), 1])
+            .map_err(|e| roots_error(format!("roots: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
 
 fn empty_column() -> BuiltinResult<Value> {
-    let tensor = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| roots_error(format!("roots: {e}")))?;
+    let tensor =
+        Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| roots_error(format!("roots: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 

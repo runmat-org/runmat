@@ -462,8 +462,7 @@ fn parse_limit(value: &Value) -> crate::BuiltinResult<usize> {
             parse_limit_tensor(&tensor)
         }
         _ => {
-            let tensor = tensor::value_to_tensor(value)
-                .map_err(|message| find_error(message))?;
+            let tensor = tensor::value_to_tensor(value).map_err(|message| find_error(message))?;
             parse_limit_tensor(&tensor)
         }
     }
@@ -498,13 +497,13 @@ fn materialize_input(value: Value) -> crate::BuiltinResult<(DataStorage, bool)> 
         }
         Value::Tensor(tensor) => Ok((DataStorage::Real(tensor), false)),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|message| find_error(message))?;
+            let tensor =
+                tensor::logical_to_tensor(&logical).map_err(|message| find_error(message))?;
             Ok((DataStorage::Real(tensor), false))
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1])
-                .map_err(|e| find_error(format!("find: {e}")))?;
+            let tensor =
+                Tensor::new(vec![n], vec![1, 1]).map_err(|e| find_error(format!("find: {e}")))?;
             Ok((DataStorage::Real(tensor), false))
         }
         Value::Int(i) => {
@@ -649,8 +648,7 @@ impl FindResult {
             let row = (zero_based % rows) + 1;
             data.push(row as f64);
         }
-        Tensor::new(data, vec![self.indices.len(), 1])
-            .map_err(|e| find_error(format!("find: {e}")))
+        Tensor::new(data, vec![self.indices.len(), 1]).map_err(|e| find_error(format!("find: {e}")))
     }
 
     fn column_tensor(&self) -> crate::BuiltinResult<Tensor> {
@@ -661,8 +659,7 @@ impl FindResult {
             let col = (zero_based / rows) + 1;
             data.push(col as f64);
         }
-        Tensor::new(data, vec![self.indices.len(), 1])
-            .map_err(|e| find_error(format!("find: {e}")))
+        Tensor::new(data, vec![self.indices.len(), 1]).map_err(|e| find_error(format!("find: {e}")))
     }
 
     fn values_value(&self, prefer_gpu: bool) -> crate::BuiltinResult<Value> {

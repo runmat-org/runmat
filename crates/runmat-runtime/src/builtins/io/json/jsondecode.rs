@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const INPUT_TYPE_ERROR: &str = "jsondecode: JSON text must be a character vector or string scalar";
 const PARSE_ERROR_PREFIX: &str = "jsondecode: invalid JSON text";
@@ -344,8 +344,8 @@ fn decode_json_array(values: &[JsonValue]) -> BuiltinResult<Value> {
     }
 
     if let Some(numeric) = parse_numeric_array(values)? {
-        let tensor =
-            Tensor::new(numeric.data, numeric.shape).map_err(|e| jsondecode_error(format!("jsondecode: {e}")))?;
+        let tensor = Tensor::new(numeric.data, numeric.shape)
+            .map_err(|e| jsondecode_error(format!("jsondecode: {e}")))?;
         return Ok(Value::Tensor(tensor));
     }
 
@@ -373,11 +373,8 @@ fn decode_json_array(values: &[JsonValue]) -> BuiltinResult<Value> {
 }
 
 fn empty_double() -> BuiltinResult<Value> {
-    static EMPTY_DOUBLE: Lazy<Option<Value>> = Lazy::new(|| {
-        Tensor::new(Vec::new(), vec![0, 0])
-            .map(Value::Tensor)
-            .ok()
-    });
+    static EMPTY_DOUBLE: Lazy<Option<Value>> =
+        Lazy::new(|| Tensor::new(Vec::new(), vec![0, 0]).map(Value::Tensor).ok());
     if let Some(value) = EMPTY_DOUBLE.as_ref() {
         return Ok(value.clone());
     }
@@ -387,8 +384,8 @@ fn empty_double() -> BuiltinResult<Value> {
 }
 
 fn cell_matrix(elements: Vec<Value>, rows: usize, cols: usize) -> BuiltinResult<Value> {
-    let cell =
-        CellArray::new(elements, rows, cols).map_err(|e| jsondecode_error(format!("jsondecode: {e}")))?;
+    let cell = CellArray::new(elements, rows, cols)
+        .map_err(|e| jsondecode_error(format!("jsondecode: {e}")))?;
     Ok(Value::Cell(cell))
 }
 
@@ -396,7 +393,6 @@ fn cell_row(elements: Vec<Value>) -> BuiltinResult<Value> {
     let cols = elements.len();
     cell_matrix(elements, 1, cols)
 }
-
 
 struct NumericTensor {
     data: Vec<f64>,

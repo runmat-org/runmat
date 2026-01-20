@@ -4,13 +4,13 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::build_runtime_error;
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::build_runtime_error;
 
 const LN_10: f64 = std::f64::consts::LN_10;
 
@@ -210,7 +210,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message).with_builtin("logspace").build()
+    build_runtime_error(message)
+        .with_builtin("logspace")
+        .build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::logspace")]
@@ -235,7 +237,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn logspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err(builtin_error("logspace: expected two or three input arguments"));
+        return Err(builtin_error(
+            "logspace: expected two or three input arguments",
+        ));
     }
 
     let (start_scalar, start_gpu) = parse_scalar("logspace", start)?;
@@ -278,9 +282,9 @@ fn parse_scalar(name: &str, value: Value) -> crate::BuiltinResult<(Scalar, bool)
             let tensor = gpu_helpers::gather_tensor(&handle)?;
             tensor_scalar(name, &tensor).map(|scalar| (scalar, true))
         }
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(builtin_error(format!(
-            "{name}: endpoints must be numeric scalars; received a string-like value"
-        ))),
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(builtin_error(
+            format!("{name}: endpoints must be numeric scalars; received a string-like value"),
+        )),
         other => Err(builtin_error(format!(
             "{name}: endpoints must be numeric scalars; received {other:?}"
         ))),
@@ -340,7 +344,9 @@ fn parse_numeric_count(raw: f64) -> crate::BuiltinResult<usize> {
     }
     let rounded = raw.round();
     if (rounded - raw).abs() > f64::EPSILON {
-        return Err(builtin_error("logspace: number of points must be an integer"));
+        return Err(builtin_error(
+            "logspace: number of points must be an integer",
+        ));
     }
     if rounded < 0.0 {
         return Err(builtin_error("logspace: number of points must be >= 0"));

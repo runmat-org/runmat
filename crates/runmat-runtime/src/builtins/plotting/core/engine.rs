@@ -70,18 +70,20 @@ pub async fn render_figure_png_bytes(
         settings.height = height;
     }
 
-    let exporter = ImageExporter::with_settings(settings).await.map_err(|err| {
-        engine_error_with_source(
-            "Plot export initialization failed.",
-            PlottingBackendError::ImageExportInit(err),
-        )
-    })?;
-    exporter
-        .render_png_bytes(&mut figure)
+    let exporter = ImageExporter::with_settings(settings)
         .await
         .map_err(|err| {
-            engine_error_with_source("Plot export failed.", PlottingBackendError::ImageExport(err))
-        })
+            engine_error_with_source(
+                "Plot export initialization failed.",
+                PlottingBackendError::ImageExportInit(err),
+            )
+        })?;
+    exporter.render_png_bytes(&mut figure).await.map_err(|err| {
+        engine_error_with_source(
+            "Plot export failed.",
+            PlottingBackendError::ImageExport(err),
+        )
+    })
 }
 
 #[cfg(feature = "plot-core")]
@@ -93,10 +95,7 @@ pub async fn render_figure_snapshot(
     const SNAPSHOT_CONTEXT: &str = "renderFigureImage";
     let figure = clone_figure(handle).ok_or_else(|| {
         map_control_flow_with_builtin(
-            engine_error(format!(
-                "figure handle {} does not exist",
-                handle.as_u32()
-            )),
+            engine_error(format!("figure handle {} does not exist", handle.as_u32())),
             SNAPSHOT_CONTEXT,
         )
     })?;
@@ -179,7 +178,10 @@ pub(crate) mod native {
         use runmat_plot::jupyter::JupyterBackend;
         let mut backend = JupyterBackend::new();
         backend.display_figure(figure).map_err(|err| {
-            engine_error_with_source("Jupyter plotting failed.", PlottingBackendError::Jupyter(err))
+            engine_error_with_source(
+                "Jupyter plotting failed.",
+                PlottingBackendError::Jupyter(err),
+            )
         })
     }
 

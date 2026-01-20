@@ -49,7 +49,10 @@ fn main() -> Result<()> {
         .context("unable to resolve src directory")?;
 
     let mut rust_files = Vec::new();
-    for entry in WalkDir::new(&src_root).into_iter().filter_entry(|e| !is_hidden(e.path())) {
+    for entry in WalkDir::new(&src_root)
+        .into_iter()
+        .filter_entry(|e| !is_hidden(e.path()))
+    {
         let entry = entry?;
         if entry.file_type().is_file() && entry.path().extension().is_some_and(|ext| ext == "rs") {
             rust_files.push(entry.into_path());
@@ -65,7 +68,7 @@ fn main() -> Result<()> {
             args.remove_stringified_controlflow,
             args.promote_local_results,
         )
-            .with_context(|| format!("processing {}", file.display()))?;
+        .with_context(|| format!("processing {}", file.display()))?;
         if changed {
             changed_files.push(file);
         }
@@ -300,7 +303,11 @@ impl<'a, 'ast> Visit<'ast> for BuiltinReturnCollector<'a> {
                             let end = span_end(span, self.line_offsets);
                             let original = self.content.get(start..end).unwrap_or("").to_string();
                             let replacement = format!("({original}).into()");
-                            self.edits.push(Edit { start, end, replacement });
+                            self.edits.push(Edit {
+                                start,
+                                end,
+                                replacement,
+                            });
                         }
                     }
                 }
@@ -490,8 +497,11 @@ impl<'a, 'ast> Visit<'ast> for BadControlFlowStringifyFixer<'a> {
                             let recv_span = mc.receiver.span();
                             let recv_start = span_start(recv_span, self.line_offsets);
                             let recv_end = span_end(recv_span, self.line_offsets);
-                            let recv_src =
-                                self.content.get(recv_start..recv_end).unwrap_or("").to_string();
+                            let recv_src = self
+                                .content
+                                .get(recv_start..recv_end)
+                                .unwrap_or("")
+                                .to_string();
                             self.edits.push(Edit {
                                 start,
                                 end,
@@ -581,8 +591,12 @@ impl<'a, 'ast> Visit<'ast> for LocalResultPromoter<'a> {
         // Pass 1: collect candidate helper fns.
         for item in &i.items {
             let syn::Item::Fn(f) = item else { continue };
-            let ReturnType::Type(_, ty) = &f.sig.output else { continue };
-            let Some((ok_ty, err_ty)) = split_result_type(ty.as_ref()) else { continue };
+            let ReturnType::Type(_, ty) = &f.sig.output else {
+                continue;
+            };
+            let Some((ok_ty, err_ty)) = split_result_type(ty.as_ref()) else {
+                continue;
+            };
             if !is_string_type(err_ty) {
                 continue;
             }
@@ -606,7 +620,11 @@ impl<'a, 'ast> Visit<'ast> for LocalResultPromoter<'a> {
             let start = span_start(info.return_ty_span, self.line_offsets);
             let end = span_end(info.return_ty_span, self.line_offsets);
             let replacement = format!("crate::BuiltinResult<{}>", info.ok_tokens);
-            self.edits.push(Edit { start, end, replacement });
+            self.edits.push(Edit {
+                start,
+                end,
+                replacement,
+            });
         }
     }
 
@@ -664,7 +682,11 @@ impl<'a, 'ast> Visit<'ast> for LocalResultPromoter<'a> {
                                         .get(recv_start..recv_end)
                                         .unwrap_or("")
                                         .to_string();
-                                    self.edits.push(Edit { start, end, replacement: recv_src });
+                                    self.edits.push(Edit {
+                                        start,
+                                        end,
+                                        replacement: recv_src,
+                                    });
                                 }
                             }
                         }
@@ -686,10 +708,13 @@ impl<'a, 'ast> Visit<'ast> for LocalResultPromoter<'a> {
                             let span = arg0.span();
                             let start = span_start(span, self.line_offsets);
                             let end = span_end(span, self.line_offsets);
-                            let original =
-                                self.content.get(start..end).unwrap_or("").to_string();
+                            let original = self.content.get(start..end).unwrap_or("").to_string();
                             let replacement = format!("({original}).into()");
-                            self.edits.push(Edit { start, end, replacement });
+                            self.edits.push(Edit {
+                                start,
+                                end,
+                                replacement,
+                            });
                         }
                     }
                 }
@@ -698,5 +723,3 @@ impl<'a, 'ast> Visit<'ast> for LocalResultPromoter<'a> {
         syn::visit::visit_expr_call(self, i);
     }
 }
-
-

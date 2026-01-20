@@ -234,7 +234,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "conv2";
 
 fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build()
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(
@@ -497,11 +499,7 @@ fn tensor_to_matrix(tensor: Tensor, name: &str, arg: &str) -> BuiltinResult<Matr
     })
 }
 
-fn complex_tensor_to_matrix(
-    tensor: ComplexTensor,
-    name: &str,
-    arg: &str,
-) -> BuiltinResult<Matrix> {
+fn complex_tensor_to_matrix(tensor: ComplexTensor, name: &str, arg: &str) -> BuiltinResult<Matrix> {
     if tensor.shape.iter().skip(2).any(|&dim| dim > 1) {
         return Err(runtime_error_for(format!(
             "{name}: {arg} must be 2-D; received shape {:?}",

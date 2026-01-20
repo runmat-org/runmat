@@ -4,13 +4,13 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "diff";
 
@@ -222,7 +222,9 @@ fn diff_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 
     match value {
-        Value::Tensor(tensor) => diff_tensor_host(tensor, order, dim).map(tensor::tensor_into_value),
+        Value::Tensor(tensor) => {
+            diff_tensor_host(tensor, order, dim).map(tensor::tensor_into_value)
+        }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(diff_error)?;
             diff_tensor_host(tensor, order, dim).map(tensor::tensor_into_value)
@@ -318,12 +320,11 @@ fn parse_dimension_arg(value: &Value) -> BuiltinResult<Option<usize>> {
         Value::Int(_) | Value::Num(_) => tensor::parse_dimension(value, "diff")
             .map(Some)
             .map_err(diff_error),
-        Value::Tensor(t) if t.data.len() == 1 => tensor::parse_dimension(
-            &Value::Num(t.data[0]),
-            "diff",
-        )
-        .map(Some)
-        .map_err(diff_error),
+        Value::Tensor(t) if t.data.len() == 1 => {
+            tensor::parse_dimension(&Value::Num(t.data[0]), "diff")
+                .map(Some)
+                .map_err(diff_error)
+        }
         other => Err(diff_error(format!(
             "diff: dimension must be a positive integer scalar, got {:?}",
             other
@@ -362,11 +363,7 @@ fn diff_char_array(chars: CharArray, order: usize, dim: Option<usize>) -> Builti
     diff_tensor_host(tensor, order, dim).map(tensor::tensor_into_value)
 }
 
-pub fn diff_tensor_host(
-    tensor: Tensor,
-    order: usize,
-    dim: Option<usize>,
-) -> BuiltinResult<Tensor> {
+pub fn diff_tensor_host(tensor: Tensor, order: usize, dim: Option<usize>) -> BuiltinResult<Tensor> {
     let mut current = tensor;
     let mut working_dim = dim.unwrap_or_else(|| default_dimension(&current.shape));
     for _ in 0..order {
@@ -413,8 +410,7 @@ fn diff_tensor_once(tensor: Tensor, dim: usize) -> BuiltinResult<Tensor> {
     let mut output_shape = shape.clone();
     if len_dim <= 1 || data.is_empty() {
         output_shape[dim_index] = output_shape[dim_index].saturating_sub(1);
-        return Tensor::new(Vec::new(), output_shape)
-            .map_err(|e| diff_error(format!("diff: {e}")));
+        return Tensor::new(Vec::new(), output_shape).map_err(|e| diff_error(format!("diff: {e}")));
     }
     output_shape[dim_index] = len_dim - 1;
     let stride_before = product(&shape[..dim_index]);

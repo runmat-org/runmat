@@ -335,11 +335,6 @@ pub fn parse_with_options(input: &str, options: ParserOptions) -> Result<Program
     parser.parse_program()
 }
 
-// For backward compatibility
-pub fn parse_simple(input: &str) -> Result<Program, String> {
-    parse(input).map_err(|e| format!("{e}"))
-}
-
 impl std::fmt::Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -562,9 +557,12 @@ impl Parser {
             Stmt::Assign(name, expr, _, span) => {
                 Ok(Stmt::Assign(name, expr, is_semicolon_terminated, span))
             }
-            Stmt::MultiAssign(names, expr, _, span) => {
-                Ok(Stmt::MultiAssign(names, expr, is_semicolon_terminated, span))
-            }
+            Stmt::MultiAssign(names, expr, _, span) => Ok(Stmt::MultiAssign(
+                names,
+                expr,
+                is_semicolon_terminated,
+                span,
+            )),
             Stmt::AssignLValue(lv, expr, _, span) => {
                 Ok(Stmt::AssignLValue(lv, expr, is_semicolon_terminated, span))
             }
@@ -1097,10 +1095,7 @@ impl Parser {
                     curr.lexeme.eq_ignore_ascii_case("i") || curr.lexeme.eq_ignore_ascii_case("j");
                 if is_adjacent && is_imag && matches!(prev.token, Token::Integer | Token::Float) {
                     let token = self.next().unwrap();
-                    let rhs = Expr::Ident(
-                        token.lexeme,
-                        self.span_from(token.position, token.end),
-                    );
+                    let rhs = Expr::Ident(token.lexeme, self.span_from(token.position, token.end));
                     node = self.make_binary(node, BinOp::Mul, rhs);
                     continue;
                 }

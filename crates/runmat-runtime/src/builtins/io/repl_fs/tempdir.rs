@@ -7,11 +7,11 @@ use std::path::Path;
 use runmat_builtins::{CharArray, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::{build_runtime_error, RuntimeError};
 
 const ERR_TOO_MANY_INPUTS: &str = "tempdir: too many input arguments";
 const ERR_UNABLE_TO_DETERMINE: &str =
@@ -259,7 +259,6 @@ pub(crate) mod tests {
     use super::*;
     use std::convert::TryFrom;
     use std::path::{Path, PathBuf};
-
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

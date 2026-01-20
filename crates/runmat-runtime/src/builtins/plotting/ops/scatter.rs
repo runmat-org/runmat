@@ -179,7 +179,9 @@ fn build_scatter_plot(
     style: &mut ScatterResolvedStyle,
 ) -> BuiltinResult<ScatterPlot> {
     if x.len() != y.len() {
-        return Err(scatter_err("scatter: X and Y inputs must share the same length"));
+        return Err(scatter_err(
+            "scatter: X and Y inputs must share the same length",
+        ));
     }
     if x.is_empty() {
         return Err(scatter_err("scatter: inputs cannot be empty"));
@@ -406,7 +408,8 @@ impl ScatterInput {
         match value {
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
             other => {
-                let tensor = Tensor::try_from(&other).map_err(|e| scatter_err(format!("scatter: {e}")))?;
+                let tensor =
+                    Tensor::try_from(&other).map_err(|e| scatter_err(format!("scatter: {e}")))?;
                 Ok(Self::Host(tensor))
             }
         }
@@ -436,8 +439,8 @@ impl ScatterInput {
 
 fn gather_tensor_from_gpu(handle: GpuTensorHandle, name: &'static str) -> BuiltinResult<Tensor> {
     let value = Value::GpuTensor(handle);
-    let gathered = gather_if_needed(&value)
-        .map_err(|flow| map_control_flow_with_builtin(flow, name))?;
+    let gathered =
+        gather_if_needed(&value).map_err(|flow| map_control_flow_with_builtin(flow, name))?;
     Tensor::try_from(&gathered).map_err(|e| scatter_err(format!("{name}: {e}")))
 }
 
@@ -458,10 +461,14 @@ fn build_scatter_gpu_plot(
         return Err(scatter_err("scatter: empty input tensor"));
     }
     if x_ref.len != y_ref.len {
-        return Err(scatter_err("scatter: X and Y inputs must have identical lengths"));
+        return Err(scatter_err(
+            "scatter: X and Y inputs must have identical lengths",
+        ));
     }
     if x_ref.precision != y_ref.precision {
-        return Err(scatter_err("scatter: X and Y gpuArrays must have matching precision"));
+        return Err(scatter_err(
+            "scatter: X and Y gpuArrays must have matching precision",
+        ));
     }
     let point_count = x_ref.len;
     let len_u32 = u32::try_from(point_count)

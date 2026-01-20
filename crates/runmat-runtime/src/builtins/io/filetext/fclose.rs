@@ -4,14 +4,17 @@
 //! identifiers, or all open files. The implementation integrates with the
 //! shared file registry managed by `fopen` and always executes on the host.
 
-use runmat_builtins::{Value};
+use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::io::filetext::{helpers::{char_array_value, extract_scalar_string}, registry};
+use crate::builtins::io::filetext::{
+    helpers::{char_array_value, extract_scalar_string},
+    registry,
+};
 use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
@@ -307,8 +310,7 @@ fn handle_single_argument(value: &Value) -> BuiltinResult<FcloseEval> {
     if matches_keyword(value, "all") {
         return Ok(close_all());
     }
-    let fids = collect_file_ids(value)
-        .map_err(|err| fclose_error(format!("fclose: {err}")))?;
+    let fids = collect_file_ids(value).map_err(|err| fclose_error(format!("fclose: {err}")))?;
     Ok(close_fids(&fids))
 }
 
@@ -428,7 +430,6 @@ fn matches_keyword(value: &Value, keyword: &str) -> bool {
         .map(|text| text.eq_ignore_ascii_case(keyword))
         .unwrap_or(false)
 }
-
 
 #[cfg(test)]
 pub(crate) mod tests {

@@ -8,11 +8,11 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::gpu_helpers;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
@@ -280,7 +280,10 @@ fn value_into_tensor_for(name: &str, value: Value) -> BuiltinResult<Tensor> {
             .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
         other => Err(runtime_error(
             name,
-            format!("{name}: unsupported input type {:?}; expected numeric or logical values", other),
+            format!(
+                "{name}: unsupported input type {:?}; expected numeric or logical values",
+                other
+            ),
         )),
     }
 }
@@ -327,10 +330,7 @@ pub fn symrcm_host_real_data(shape: &[usize], data: &[f64]) -> BuiltinResult<Vec
 }
 
 /// Host implementation for dense complex data.
-pub fn symrcm_host_complex_data(
-    shape: &[usize],
-    data: &[(f64, f64)],
-) -> BuiltinResult<Vec<usize>> {
+pub fn symrcm_host_complex_data(shape: &[usize], data: &[(f64, f64)]) -> BuiltinResult<Vec<usize>> {
     let adjacency = adjacency_from_complex_data(shape, data)?;
     Ok(symmetric_reverse_cuthill_mckee(&adjacency))
 }
@@ -657,7 +657,10 @@ pub(crate) mod tests {
         let tensor = tensor_from_entries(2, 3, &[(0, 1, 1.0)]);
         let err = symrcm_builtin(Value::Tensor(tensor)).expect_err("should fail");
         let message = err.to_string();
-        assert!(message.contains("square"), "unexpected error message: {message}");
+        assert!(
+            message.contains("square"),
+            "unexpected error message: {message}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

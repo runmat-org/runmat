@@ -24,7 +24,6 @@ use runmat_accelerate_api::{
     UniqueOptions, UniqueResult, WgpuBufferRef, WgpuContextHandle,
 };
 use runmat_builtins::{Tensor, Value};
-use runmat_runtime::RuntimeError;
 use runmat_runtime::builtins::image::filters::fspecial::{
     spec_from_request as runtime_fspecial_spec_from_request, FspecialFilterSpec,
 };
@@ -47,6 +46,7 @@ use runmat_runtime::builtins::math::linalg::structure::issymmetric::ensure_matri
 use runmat_runtime::builtins::math::linalg::structure::symrcm::symrcm_host_real_data;
 use runmat_runtime::builtins::math::poly::polyfit::polyfit_host_real_for_provider;
 use runmat_runtime::builtins::math::reduction::compute_median_inplace;
+use runmat_runtime::RuntimeError;
 use runmat_time::Instant;
 use rustfft::FftPlanner;
 use serde::{Deserialize, Serialize};
@@ -9818,13 +9818,9 @@ impl WgpuProvider {
         let kernel_tensor = Tensor::new(kernel_host.data.clone(), kernel_host.shape.clone())
             .map_err(|e| anyhow!("imfilter: {e}"))?;
 
-        let result = runtime_apply_imfilter_tensor(
-            &image_tensor,
-            &kernel_tensor,
-            options,
-            "imfilter",
-        )
-        .map_err(|err| anyhow!(err))?;
+        let result =
+            runtime_apply_imfilter_tensor(&image_tensor, &kernel_tensor, options, "imfilter")
+                .map_err(|err| anyhow!(err))?;
         let data_owned = result.data;
         let shape_owned = result.shape;
         let view = HostTensorView {
@@ -10159,7 +10155,8 @@ impl WgpuProvider {
         Ok(self.register_existing_buffer(out_buffer, state_entry.shape.clone(), total_len))
     }
     pub(crate) fn fspecial_exec(&self, request: &FspecialRequest) -> Result<GpuTensorHandle> {
-        let spec = runtime_fspecial_spec_from_request(&request.filter).map_err(|err| anyhow!(err))?;
+        let spec =
+            runtime_fspecial_spec_from_request(&request.filter).map_err(|err| anyhow!(err))?;
 
         let (rows, cols, kind, sigma, alpha, norm, center_x, center_y) = match &spec {
             FspecialFilterSpec::Average { rows, cols } => (
@@ -14111,14 +14108,15 @@ impl AccelProvider for WgpuProvider {
         let host = self.download(handle)?;
         let HostTensorOwned { data, shape } = host;
         let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("unique: {e}"))?;
-        let eval = match runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
-            tensor, options,
-        ) {
-            Ok(eval) => eval,
-            Err(err) => {
-                return Err(anyhow!("unique: {err}"));
-            }
-        };
+        let eval =
+            match runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
+                tensor, options,
+            ) {
+                Ok(eval) => eval,
+                Err(err) => {
+                    return Err(anyhow!("unique: {err}"));
+                }
+            };
         match eval.into_numeric_unique_result() {
             Ok(result) => Ok(result),
             Err(err) => Err(anyhow!("unique: {err}")),
@@ -14162,14 +14160,15 @@ impl AccelProvider for WgpuProvider {
         let host_b = self.download(b)?;
         let tensor_a = Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("union: {e}"))?;
         let tensor_b = Tensor::new(host_b.data, host_b.shape).map_err(|e| anyhow!("union: {e}"))?;
-        let eval = match runmat_runtime::builtins::array::sorting_sets::union::union_numeric_from_tensors(
-            tensor_a, tensor_b, options,
-        ) {
-            Ok(eval) => eval,
-            Err(err) => {
-                return Err(anyhow!("union: {err}"));
-            }
-        };
+        let eval =
+            match runmat_runtime::builtins::array::sorting_sets::union::union_numeric_from_tensors(
+                tensor_a, tensor_b, options,
+            ) {
+                Ok(eval) => eval,
+                Err(err) => {
+                    return Err(anyhow!("union: {err}"));
+                }
+            };
         match eval.into_numeric_union_result() {
             Ok(result) => Ok(result),
             Err(err) => Err(anyhow!("union: {err}")),
@@ -15512,7 +15511,10 @@ impl AccelProvider for WgpuProvider {
         let right_tensor = host_tensor_from_value("eig", eval.right())?;
 
         let left_value = if compute_left {
-            Some(eval.left().map_err(|err| runtime_flow_to_anyhow("eig", err))?)
+            Some(
+                eval.left()
+                    .map_err(|err| runtime_flow_to_anyhow("eig", err))?,
+            )
         } else {
             None
         };
@@ -16376,8 +16378,8 @@ impl AccelProvider for WgpuProvider {
         // Shared post-map readback logic: decode mapped bytes, unmap, record telemetry,
         // apply transpose metadata, and return host tensor.
         let finish_readback = |staging: wgpu::Buffer, size_bytes: u64| -> Result<HostTensorOwned> {
-        let slice = staging.slice(..);
-        let data = slice.get_mapped_range();
+            let slice = staging.slice(..);
+            let data = slice.get_mapped_range();
             log::trace!(
                 "wgpu download copying data id={} len={} bytes={}",
                 h.buffer_id,
@@ -16385,47 +16387,47 @@ impl AccelProvider for WgpuProvider {
                 size_bytes
             );
 
-        let mut out = vec![0.0f64; entry.len];
-        match entry.precision {
+            let mut out = vec![0.0f64; entry.len];
+            match entry.precision {
                 NumericPrecision::F64 => out.copy_from_slice(cast_slice(&data)),
-            NumericPrecision::F32 => {
-                let f32_slice: &[f32] = cast_slice(&data);
-                for (dst, src) in out.iter_mut().zip(f32_slice.iter()) {
-                    *dst = *src as f64;
-                }
-            }
-        }
-        drop(data);
-        staging.unmap();
-            log::trace!("wgpu download finished copy id={}", h.buffer_id);
-        self.telemetry.record_download_bytes(size_bytes);
-
-        let mut shape = h.shape.clone();
-        if let Some(info) = runmat_accelerate_api::handle_transpose_info(h) {
-            let base_rows = info.base_rows;
-            let base_cols = info.base_cols;
-            if base_rows * base_cols != out.len() {
-                return Err(anyhow!(
-                    "download: transpose metadata mismatch for buffer {}",
-                    h.buffer_id
-                ));
-            }
-            if shape.len() == 2 {
-                let rows_t = base_cols;
-                let cols_t = base_rows;
-                let mut transposed = vec![0.0f64; out.len()];
-                for col in 0..base_cols {
-                    for row in 0..base_rows {
-                        let src_idx = row + col * base_rows;
-                        let dst_idx = col + row * base_cols;
-                        transposed[dst_idx] = out[src_idx];
+                NumericPrecision::F32 => {
+                    let f32_slice: &[f32] = cast_slice(&data);
+                    for (dst, src) in out.iter_mut().zip(f32_slice.iter()) {
+                        *dst = *src as f64;
                     }
                 }
-                out = transposed;
-                shape[0] = rows_t;
-                shape[1] = cols_t;
             }
-        }
+            drop(data);
+            staging.unmap();
+            log::trace!("wgpu download finished copy id={}", h.buffer_id);
+            self.telemetry.record_download_bytes(size_bytes);
+
+            let mut shape = h.shape.clone();
+            if let Some(info) = runmat_accelerate_api::handle_transpose_info(h) {
+                let base_rows = info.base_rows;
+                let base_cols = info.base_cols;
+                if base_rows * base_cols != out.len() {
+                    return Err(anyhow!(
+                        "download: transpose metadata mismatch for buffer {}",
+                        h.buffer_id
+                    ));
+                }
+                if shape.len() == 2 {
+                    let rows_t = base_cols;
+                    let cols_t = base_rows;
+                    let mut transposed = vec![0.0f64; out.len()];
+                    for col in 0..base_cols {
+                        for row in 0..base_rows {
+                            let src_idx = row + col * base_rows;
+                            let dst_idx = col + row * base_cols;
+                            transposed[dst_idx] = out[src_idx];
+                        }
+                    }
+                    out = transposed;
+                    shape[0] = rows_t;
+                    shape[1] = cols_t;
+                }
+            }
 
             log::trace!(
                 "wgpu download complete id={} final_shape={:?}",
@@ -16433,7 +16435,7 @@ impl AccelProvider for WgpuProvider {
                 shape
             );
 
-        Ok(HostTensorOwned { data: out, shape })
+            Ok(HostTensorOwned { data: out, shape })
         };
 
         // wasm/WebGPU: never block waiting for map_async. Instead, schedule the map once and
@@ -16445,8 +16447,11 @@ impl AccelProvider for WgpuProvider {
                 if let Some(state) = pending.get_mut(&h.buffer_id) {
                     match state.rx.try_recv() {
                         Ok(map_result) => {
-                            let PendingWasmMapRead { staging, size_bytes, .. } =
-                                pending.remove(&h.buffer_id).unwrap();
+                            let PendingWasmMapRead {
+                                staging,
+                                size_bytes,
+                                ..
+                            } = pending.remove(&h.buffer_id).unwrap();
                             map_result.map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
                             return finish_readback(staging, size_bytes);
                         }
@@ -16511,7 +16516,10 @@ impl AccelProvider for WgpuProvider {
                 );
             }
 
-            let label = format!("wgpu pending map_async id={} bytes={}", h.buffer_id, size_bytes);
+            let label = format!(
+                "wgpu pending map_async id={} bytes={}",
+                h.buffer_id, size_bytes
+            );
             return Err(anyhow!(label));
         }
 

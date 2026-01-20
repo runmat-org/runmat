@@ -428,7 +428,11 @@ fn try_gpu_linsolve(
 fn parse_options(value: &Value) -> BuiltinResult<SolveOptions> {
     let struct_val = match value {
         Value::Struct(s) => s,
-        other => return Err(builtin_error(format!("linsolve: opts must be a struct, got {other:?}"))),
+        other => {
+            return Err(builtin_error(format!(
+                "linsolve: opts must be a struct, got {other:?}"
+            )))
+        }
     };
     let mut opts = SolveOptions::default();
     for (key, raw_value) in &struct_val.fields {
@@ -559,8 +563,8 @@ fn coerce_numeric(value: Value) -> BuiltinResult<NumericInput> {
             Ok(NumericInput::Real(tensor))
         }
         Value::Bool(b) => {
-            let tensor = Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(builtin_error)?;
+            let tensor =
+                Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1]).map_err(builtin_error)?;
             Ok(NumericInput::Real(tensor))
         }
         Value::Complex(re, im) => {
@@ -761,7 +765,9 @@ fn forward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tenso
             min_diag = min_diag.min(diag_abs);
             max_diag = max_diag.max(diag_abs);
             if diag_abs == 0.0 {
-                return Err(builtin_error("linsolve: matrix is singular to working precision."));
+                return Err(builtin_error(
+                    "linsolve: matrix is singular to working precision.",
+                ));
             }
             let mut accum = 0.0;
             for j in 0..i {
@@ -773,7 +779,8 @@ fn forward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tenso
     }
 
     let rcond = diagonal_rcond(min_diag, max_diag);
-    let tensor = Tensor::new(solution, rhs.shape.clone()).map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
+    let tensor = Tensor::new(solution, rhs.shape.clone())
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
     Ok((tensor, rcond))
 }
 
@@ -792,7 +799,9 @@ fn backward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tens
             min_diag = min_diag.min(diag_abs);
             max_diag = max_diag.max(diag_abs);
             if diag_abs == 0.0 {
-                return Err(builtin_error("linsolve: matrix is singular to working precision."));
+                return Err(builtin_error(
+                    "linsolve: matrix is singular to working precision.",
+                ));
             }
             let mut accum = 0.0;
             for j in (i + 1)..n {
@@ -804,7 +813,8 @@ fn backward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tens
     }
 
     let rcond = diagonal_rcond(min_diag, max_diag);
-    let tensor = Tensor::new(solution, rhs.shape.clone()).map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
+    let tensor = Tensor::new(solution, rhs.shape.clone())
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
     Ok((tensor, rcond))
 }
 
@@ -834,7 +844,9 @@ fn forward_substitution_complex(
             min_diag = min_diag.min(diag_abs);
             max_diag = max_diag.max(diag_abs);
             if diag_abs == 0.0 {
-                return Err(builtin_error("linsolve: matrix is singular to working precision."));
+                return Err(builtin_error(
+                    "linsolve: matrix is singular to working precision.",
+                ));
             }
             let mut accum = Complex64::new(0.0, 0.0);
             for j in 0..i {
@@ -881,7 +893,9 @@ fn backward_substitution_complex(
             min_diag = min_diag.min(diag_abs);
             max_diag = max_diag.max(diag_abs);
             if diag_abs == 0.0 {
-                return Err(builtin_error("linsolve: matrix is singular to working precision."));
+                return Err(builtin_error(
+                    "linsolve: matrix is singular to working precision.",
+                ));
             }
             let mut accum = Complex64::new(0.0, 0.0);
             for j in (i + 1)..n {
@@ -907,7 +921,9 @@ fn solve_general_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tensor, f64)
     let svd = SVD::new(a.clone(), true, true);
     let rcond = singular_value_rcond(svd.singular_values.as_slice());
     let tol = compute_svd_tolerance(svd.singular_values.as_slice(), lhs.rows(), lhs.cols());
-    let solution = svd.solve(&b, tol).map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
+    let solution = svd
+        .solve(&b, tol)
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
     let tensor = matrix_real_to_tensor(solution)?;
     Ok((tensor, rcond))
 }
@@ -931,7 +947,9 @@ fn solve_general_complex(
     let svd = SVD::new(a.clone(), true, true);
     let rcond = singular_value_rcond(svd.singular_values.as_slice());
     let tol = compute_svd_tolerance(svd.singular_values.as_slice(), lhs.rows, lhs.cols);
-    let solution = svd.solve(&b, tol).map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
+    let solution = svd
+        .solve(&b, tol)
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
     let tensor = matrix_complex_to_tensor(solution)?;
     Ok((tensor, rcond))
 }
@@ -941,7 +959,8 @@ fn normalize_rhs_tensor(rhs: Tensor, expected_rows: usize) -> BuiltinResult<Tens
         return Ok(rhs);
     }
     if rhs.shape.len() == 1 && rhs.shape[0] == expected_rows {
-        return Tensor::new(rhs.data, vec![expected_rows, 1]).map_err(|e| builtin_error(format!("{NAME}: {e}")));
+        return Tensor::new(rhs.data, vec![expected_rows, 1])
+            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     if rhs.data.is_empty() && expected_rows == 0 {
         return Ok(rhs);
@@ -949,10 +968,7 @@ fn normalize_rhs_tensor(rhs: Tensor, expected_rows: usize) -> BuiltinResult<Tens
     Err(builtin_error("Matrix dimensions must agree."))
 }
 
-fn normalize_rhs_complex(
-    rhs: ComplexTensor,
-    expected_rows: usize,
-) -> BuiltinResult<ComplexTensor> {
+fn normalize_rhs_complex(rhs: ComplexTensor, expected_rows: usize) -> BuiltinResult<ComplexTensor> {
     if rhs.rows == expected_rows {
         return Ok(rhs);
     }
@@ -969,7 +985,9 @@ fn normalize_rhs_complex(
 fn enforce_rcond(options: &SolveOptions, rcond: f64) -> BuiltinResult<()> {
     if let Some(threshold) = options.rcond {
         if rcond < threshold {
-            return Err(builtin_error("linsolve: matrix is singular to working precision."));
+            return Err(builtin_error(
+                "linsolve: matrix is singular to working precision.",
+            ));
         }
     }
     Ok(())
@@ -987,7 +1005,8 @@ fn compute_svd_tolerance(singular_values: &[f64], rows: usize, cols: usize) -> f
 fn matrix_real_to_tensor(matrix: DMatrix<f64>) -> BuiltinResult<Tensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
-    Tensor::new(matrix.as_slice().to_vec(), vec![rows, cols]).map_err(|e| builtin_error(format!("{NAME}: {e}")))
+    Tensor::new(matrix.as_slice().to_vec(), vec![rows, cols])
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
 fn matrix_complex_to_tensor(matrix: DMatrix<Complex64>) -> BuiltinResult<ComplexTensor> {
@@ -999,14 +1018,17 @@ fn matrix_complex_to_tensor(matrix: DMatrix<Complex64>) -> BuiltinResult<Complex
 
 fn promote_real_tensor(tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
     let data: Vec<(f64, f64)> = tensor.data.iter().map(|&re| (re, 0.0)).collect();
-    ComplexTensor::new(data, tensor.shape.clone()).map_err(|e| builtin_error(format!("{NAME}: {e}")))
+    ComplexTensor::new(data, tensor.shape.clone())
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
 fn ensure_matrix_shape(name: &str, shape: &[usize]) -> BuiltinResult<()> {
     if is_effectively_matrix(shape) {
         Ok(())
     } else {
-        Err(builtin_error(format!("{name}: inputs must be 2-D matrices or vectors")))
+        Err(builtin_error(format!(
+            "{name}: inputs must be 2-D matrices or vectors"
+        )))
     }
 }
 
@@ -1021,7 +1043,9 @@ fn ensure_square(rows: usize, cols: usize) -> BuiltinResult<()> {
     if rows == cols {
         Ok(())
     } else {
-        Err(builtin_error("linsolve: triangular solves require a square coefficient matrix."))
+        Err(builtin_error(
+            "linsolve: triangular solves require a square coefficient matrix.",
+        ))
     }
 }
 

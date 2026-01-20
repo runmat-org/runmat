@@ -222,11 +222,7 @@ fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
 }
 
 /// Evaluate `regexpi` with MATLAB-compatible defaults and return the shared regex evaluation handle.
-pub fn evaluate(
-    subject: Value,
-    pattern: Value,
-    rest: &[Value],
-) -> BuiltinResult<RegexpEvaluation> {
+pub fn evaluate(subject: Value, pattern: Value, rest: &[Value]) -> BuiltinResult<RegexpEvaluation> {
     let options = build_options(rest);
     regexp::evaluate_with(BUILTIN_NAME, subject, pattern, &options)
 }
@@ -239,7 +235,11 @@ pub fn evaluate(
     accel = "sink",
     builtin_path = "crate::builtins::strings::regex::regexpi"
 )]
-fn regexpi_builtin(subject: Value, pattern: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn regexpi_builtin(
+    subject: Value,
+    pattern: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     let evaluation = evaluate(subject, pattern, &rest)?;
     let mut outputs = evaluation.outputs_for_single()?;
     if outputs.is_empty() {

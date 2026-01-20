@@ -244,7 +244,11 @@ const BUILTIN_NAME: &str = "startsWith";
     accel = "sink",
     builtin_path = "crate::builtins::strings::search::startswith"
 )]
-fn startswith_builtin(text: Value, pattern: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn startswith_builtin(
+    text: Value,
+    pattern: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     let text = gather_if_needed(&text)?;
     let pattern = gather_if_needed(&pattern)?;
     let ignore_case = parse_ignore_case(BUILTIN_NAME, &rest)?;
@@ -584,7 +588,9 @@ pub(crate) mod tests {
             vec![Value::String("IgnoreCase".into())],
         )
         .unwrap_err();
-        assert!(err.to_string().contains("expected a value after 'IgnoreCase'"));
+        assert!(err
+            .to_string()
+            .contains("expected a value after 'IgnoreCase'"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

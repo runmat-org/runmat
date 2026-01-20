@@ -8,8 +8,6 @@ use runmat_accelerate_api::{
 use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
 const NAME: &str = "sum";
 
-use runmat_macros::runtime_builtin;
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -17,6 +15,8 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use runmat_macros::runtime_builtin;
 
 #[cfg_attr(
     feature = "doc_export",
@@ -205,7 +205,6 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes:
         "Providers may specialise reduce_sum_dim / reduce_sum; omitnan and multi-axis reductions fall back to the CPU path when unsupported.",
 };
-
 
 fn sum_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
@@ -511,7 +510,9 @@ fn parse_dimension_spec(value: &Value) -> BuiltinResult<Option<DimSelection>> {
             let tensor = tensor::logical_to_tensor(logical).map_err(sum_error)?;
             parse_dimension_tensor(&tensor)
         }
-        Value::GpuTensor(_) => Err(sum_error("sum: dimension arguments must reside on the host")),
+        Value::GpuTensor(_) => Err(sum_error(
+            "sum: dimension arguments must reside on the host",
+        )),
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Ok(None),
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(None),
         _ => Ok(None),
@@ -523,7 +524,9 @@ fn parse_dimension_tensor(tensor: &Tensor) -> BuiltinResult<Option<DimSelection>
         return Ok(Some(DimSelection::Auto));
     }
     if !is_vector_shape(&tensor.shape) {
-        return Err(sum_error("sum: dimension vector must be a row or column vector"));
+        return Err(sum_error(
+            "sum: dimension vector must be a row or column vector",
+        ));
     }
     let mut dims = Vec::with_capacity(tensor.data.len());
     for &v in &tensor.data {
@@ -569,7 +572,8 @@ fn sum_host_complex_tensor(ct: ComplexTensor, parsed: &ParsedArguments) -> Built
 }
 
 fn sum_host_complex_scalar(re: f64, im: f64, parsed: &ParsedArguments) -> BuiltinResult<Value> {
-    let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| sum_error(format!("sum: {e}")))?;
+    let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
+        .map_err(|e| sum_error(format!("sum: {e}")))?;
     sum_host_complex_tensor(tensor, parsed)
 }
 
@@ -613,10 +617,7 @@ fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinResult<V
     Ok(Value::GpuTensor(current))
 }
 
-fn sum_gpu_with_omitnan(
-    handle: GpuTensorHandle,
-    parsed: &ParsedArguments,
-) -> BuiltinResult<Value> {
+fn sum_gpu_with_omitnan(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -1067,8 +1068,8 @@ fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Val
                 Ok(Value::Tensor(tensor))
             }
             Value::LogicalArray(logical) => {
-                let tensor =
-                    tensor::logical_to_tensor(&logical).map_err(|e| sum_error(format!("{NAME}: {e}")))?;
+                let tensor = tensor::logical_to_tensor(&logical)
+                    .map_err(|e| sum_error(format!("{NAME}: {e}")))?;
                 let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
                 Ok(Value::Tensor(tensor))
             }
@@ -1110,21 +1111,26 @@ fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value>
             Value::GpuTensor(_) => Ok(value),
             Value::Tensor(t) => upload_tensor(t),
             Value::Num(n) => {
-                let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| sum_error(format!("sum: {e}")))?;
+                let tensor =
+                    Tensor::new(vec![n], vec![1, 1]).map_err(|e| sum_error(format!("sum: {e}")))?;
                 upload_tensor(tensor)
             }
             Value::LogicalArray(logical) => {
                 let tensor = tensor::logical_to_tensor(&logical).map_err(sum_error)?;
                 upload_tensor(tensor)
             }
-            other => Err(sum_error(format!("sum: cannot place value {other:?} on the GPU"))),
+            other => Err(sum_error(format!(
+                "sum: cannot place value {other:?} on the GPU"
+            ))),
         },
     }
 }
 
 fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(sum_error("sum: no acceleration provider available to honour GPU output"));
+        return Err(sum_error(
+            "sum: no acceleration provider available to honour GPU output",
+        ));
     };
     let view = HostTensorView {
         data: &tensor.data,
@@ -1156,8 +1162,8 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
             let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
-            let tensor =
-                ComplexTensor::new(data, t.shape.clone()).map_err(|e| sum_error(format!("sum: {e}")))?;
+            let tensor = ComplexTensor::new(data, t.shape.clone())
+                .map_err(|e| sum_error(format!("sum: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
         }
         Value::LogicalArray(logical) => {
@@ -1199,8 +1205,8 @@ fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
             class: PrototypeClass::Complex,
         }),
         other => {
-            let gathered =
-                crate::dispatcher::gather_if_needed(other).map_err(|e| sum_error(format!("sum: {e}")))?;
+            let gathered = crate::dispatcher::gather_if_needed(other)
+                .map_err(|e| sum_error(format!("sum: {e}")))?;
             analyse_like_prototype(&gathered)
         }
     }

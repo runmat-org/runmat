@@ -582,8 +582,7 @@ fn reduce_tensor_median_dim(
 
     if reduce_len == 0 || tensor.data.is_empty() {
         let fill = vec![f64::NAN; tensor::element_count(&output_shape)];
-        return Tensor::new(fill, output_shape)
-            .map_err(|e| median_error(format!("median: {e}")));
+        return Tensor::new(fill, output_shape).map_err(|e| median_error(format!("median: {e}")));
     }
 
     if reduce_len == 1 {

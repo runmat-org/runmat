@@ -240,7 +240,9 @@ fn parse_arguments(
                 if dim.is_some() {
                     return Err(cumprod_error("cumprod: dimension specified more than once"));
                 }
-                dim = Some(tensor::parse_dimension(value, "cumprod").map_err(|err| cumprod_error(err))?);
+                dim = Some(
+                    tensor::parse_dimension(value, "cumprod").map_err(|err| cumprod_error(err))?,
+                );
             }
             Value::Tensor(t) if t.data.is_empty() => {
                 // MATLAB allows [] as a placeholder for the default dimension; ignore it.
@@ -289,14 +291,20 @@ fn parse_arguments(
                             nan_set = true;
                         }
                         "" => {
-                            return Err(cumprod_error("cumprod: empty string option is not supported"));
+                            return Err(cumprod_error(
+                                "cumprod: empty string option is not supported",
+                            ));
                         }
                         other => {
-                            return Err(cumprod_error(format!("cumprod: unrecognised option '{other}'")));
+                            return Err(cumprod_error(format!(
+                                "cumprod: unrecognised option '{other}'"
+                            )));
                         }
                     }
                 } else {
-                    return Err(cumprod_error(format!("cumprod: unsupported argument type {value:?}")));
+                    return Err(cumprod_error(format!(
+                        "cumprod: unsupported argument type {value:?}"
+                    )));
                 }
             }
         }
@@ -311,7 +319,8 @@ fn cumprod_host(
     direction: CumprodDirection,
     nan_mode: CumprodNanMode,
 ) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for("cumprod", value).map_err(|err| cumprod_error(err))?;
+    let tensor =
+        tensor::value_into_tensor_for("cumprod", value).map_err(|err| cumprod_error(err))?;
     let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
     let result = cumprod_tensor(&tensor, target_dim, direction, nan_mode)?;
     Ok(tensor::tensor_into_value(result))
@@ -564,7 +573,8 @@ fn cumprod_complex_tensor(
         }
     }
 
-    ComplexTensor::new(output, tensor.shape.clone()).map_err(|e| cumprod_error(format!("cumprod: {e}")))
+    ComplexTensor::new(output, tensor.shape.clone())
+        .map_err(|e| cumprod_error(format!("cumprod: {e}")))
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {

@@ -4,13 +4,15 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{broadcast::BroadcastPlan, gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::common::{
+    broadcast::BroadcastPlan, gpu_helpers, map_control_flow_with_builtin, tensor,
+};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const LN_2: f64 = std::f64::consts::LN_2;
 
@@ -236,7 +238,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "pow2";
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build()
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(
@@ -445,9 +449,9 @@ fn value_into_numeric_array(value: Value, name: &str) -> BuiltinResult<NumericAr
                 .map_err(|e| builtin_error(format!("{name}: {e}")))?;
             Ok(NumericArray::Real(tensor))
         }
-        Value::String(_) | Value::StringArray(_) => {
-            Err(builtin_error(format!("{name}: expected numeric input, got string")))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(builtin_error(format!(
+            "{name}: expected numeric input, got string"
+        ))),
         Value::GpuTensor(_) => Err(builtin_error(format!(
             "{name}: internal error converting GPU tensor"
         ))),

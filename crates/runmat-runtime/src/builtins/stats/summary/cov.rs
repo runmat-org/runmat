@@ -4,13 +4,13 @@ use runmat_accelerate_api::{CovNormalization, CovRows, CovarianceOptions};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cov";
 
@@ -319,9 +319,7 @@ impl CovArgs {
                     normalization_explicit = true;
                 }
                 Value::ComplexTensor(_) => {
-                    return Err(builtin_error(
-                        "cov: complex inputs are not supported yet",
-                    ));
+                    return Err(builtin_error("cov: complex inputs are not supported yet"));
                 }
                 other => {
                     return Err(builtin_error(format!(
@@ -432,9 +430,7 @@ fn cov_host(args: CovArgs) -> BuiltinResult<Value> {
 fn value_to_tensor_gather(value: Value) -> BuiltinResult<Tensor> {
     match value {
         Value::GpuTensor(handle) => gpu_helpers::gather_tensor(&handle),
-        Value::LogicalArray(logical) => {
-            tensor::logical_to_tensor(&logical).map_err(builtin_error)
-        }
+        Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical).map_err(builtin_error),
         other => tensor::value_into_tensor_for("cov", other).map_err(builtin_error),
     }
 }
@@ -442,14 +438,14 @@ fn value_to_tensor_gather(value: Value) -> BuiltinResult<Tensor> {
 fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinResult<Vec<f64>> {
     let tensor = match value {
         Value::GpuTensor(handle) => gpu_helpers::gather_tensor(&handle)?,
-        Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical).map_err(builtin_error)?,
+        Value::LogicalArray(logical) => {
+            tensor::logical_to_tensor(&logical).map_err(builtin_error)?
+        }
         other => tensor::value_into_tensor_for("cov", other).map_err(builtin_error)?,
     };
 
     if tensor.shape.len() > 2 {
-        return Err(builtin_error(
-            "cov: weight vector must be one-dimensional",
-        ));
+        return Err(builtin_error("cov: weight vector must be one-dimensional"));
     }
     if tensor.rows() != expected_rows && tensor.cols() != expected_rows {
         return Err(builtin_error(format!(
@@ -475,9 +471,7 @@ fn parse_rows_option(value: &str) -> BuiltinResult<CovRows> {
         "all" => Ok(CovRows::All),
         "omitrows" | "omit" => Ok(CovRows::OmitRows),
         "partialrows" | "partial" | "pairwise" => Ok(CovRows::PartialRows),
-        other => Err(builtin_error(format!(
-            "cov: unknown rows option '{other}'"
-        ))),
+        other => Err(builtin_error(format!("cov: unknown rows option '{other}'"))),
     }
 }
 
@@ -496,9 +490,7 @@ fn parse_normalization(value: Value) -> BuiltinResult<CovNormalization> {
             }
             let rounded = n.round();
             if (rounded - n).abs() > 1.0e-12 {
-                return Err(builtin_error(
-                    "cov: normalization flag must be an integer",
-                ));
+                return Err(builtin_error("cov: normalization flag must be an integer"));
             }
             match rounded as i64 {
                 0 => Ok(CovNormalization::Unbiased),
@@ -556,9 +548,7 @@ fn value_rows_cols(value: &Value) -> BuiltinResult<(usize, usize)> {
         Value::Tensor(tensor) => Ok((tensor.rows(), tensor.cols())),
         Value::LogicalArray(array) => {
             if array.shape.len() > 2 {
-                return Err(builtin_error(
-                    "cov: inputs must be 2-D matrices or vectors",
-                ));
+                return Err(builtin_error("cov: inputs must be 2-D matrices or vectors"));
             }
             let rows = if array.shape.is_empty() {
                 1
@@ -574,9 +564,7 @@ fn value_rows_cols(value: &Value) -> BuiltinResult<(usize, usize)> {
         }
         Value::GpuTensor(handle) => {
             if handle.shape.len() > 2 {
-                return Err(builtin_error(
-                    "cov: inputs must be 2-D matrices or vectors",
-                ));
+                return Err(builtin_error("cov: inputs must be 2-D matrices or vectors"));
             }
             let rows = if handle.shape.is_empty() {
                 1
@@ -654,8 +642,7 @@ fn covariance_dense(matrix: &Matrix, weight: &CovWeightSpec) -> BuiltinResult<Te
     let rows = matrix.rows;
 
     if cols == 0 {
-        return Tensor::new(Vec::new(), vec![0, 0])
-            .map_err(|e| builtin_error(format!("cov: {e}")));
+        return Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| builtin_error(format!("cov: {e}")));
     }
 
     let mut result = vec![f64::NAN; cols * cols];
@@ -667,7 +654,8 @@ fn covariance_dense(matrix: &Matrix, weight: &CovWeightSpec) -> BuiltinResult<Te
                 CovNormalization::Biased => rows as f64,
             };
             if denom <= 0.0 {
-                return Tensor::new(result, vec![cols, cols]).map_err(|e| builtin_error(format!("cov: {e}")));
+                return Tensor::new(result, vec![cols, cols])
+                    .map_err(|e| builtin_error(format!("cov: {e}")));
             }
 
             let mut means = vec![0.0; cols];
@@ -701,11 +689,13 @@ fn covariance_dense(matrix: &Matrix, weight: &CovWeightSpec) -> BuiltinResult<Te
             }
             let sum_w: f64 = weights.iter().sum();
             if sum_w <= 0.0 {
-                return Tensor::new(result, vec![cols, cols]).map_err(|e| builtin_error(format!("cov: {e}")));
+                return Tensor::new(result, vec![cols, cols])
+                    .map_err(|e| builtin_error(format!("cov: {e}")));
             }
             let denom = sum_w - 1.0;
             if denom <= 0.0 {
-                return Tensor::new(result, vec![cols, cols]).map_err(|e| builtin_error(format!("cov: {e}")));
+                return Tensor::new(result, vec![cols, cols])
+                    .map_err(|e| builtin_error(format!("cov: {e}")));
             }
 
             let mut means = vec![0.0; cols];

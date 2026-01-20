@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const ERROR_ARG_TYPE: &str = "path: arguments must be character vectors or string scalars";
 
@@ -183,7 +183,6 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 }
 
 #[runtime_builtin(
-
     name = "path",
     category = "io/repl_fs",
     summary = "Query or replace the MATLAB search path used by RunMat.",
@@ -327,7 +326,6 @@ pub(crate) mod tests {
             set_path_string(&self.previous);
         }
     }
-
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

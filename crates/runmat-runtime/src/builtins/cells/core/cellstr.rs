@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::dispatcher::gather_if_needed;
-use crate::{make_cell, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, make_cell, make_cell_with_shape, BuiltinResult, RuntimeError};
 
 const ERR_INPUT_NOT_TEXT: &str =
     "cellstr: input must be a character array, string array, or cell array of character vectors";
@@ -237,9 +237,7 @@ const IDENT_INVALID_INPUT: &str = "MATLAB:cellstr:InvalidInput";
 const IDENT_INVALID_CONTENTS: &str = "MATLAB:cellstr:InvalidContents";
 
 fn cellstr_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("cellstr")
-        .build()
+    build_runtime_error(message).with_builtin("cellstr").build()
 }
 
 fn cellstr_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
@@ -345,7 +343,8 @@ fn cellstr_from_cell(cell: CellArray) -> BuiltinResult<Value> {
         let gathered = gather_if_needed(element)?;
         values.push(coerce_to_char_vector(gathered)?);
     }
-    make_cell_with_shape(values, cell.shape.clone()).map_err(|e| cellstr_error(format!("cellstr: {e}")))
+    make_cell_with_shape(values, cell.shape.clone())
+        .map_err(|e| cellstr_error(format!("cellstr: {e}")))
 }
 
 fn coerce_to_char_vector(value: Value) -> BuiltinResult<Value> {
@@ -382,12 +381,9 @@ fn coerce_to_char_vector(value: Value) -> BuiltinResult<Value> {
             ERR_CELL_CONTENT_NOT_TEXT,
             IDENT_INVALID_CONTENTS,
         )),
-        Value::Cell(_) | Value::Struct(_) | Value::Object(_) | Value::HandleObject(_) => {
-            Err(cellstr_error_with_identifier(
-                ERR_CELL_CONTENT_NOT_TEXT,
-                IDENT_INVALID_CONTENTS,
-            ))
-        }
+        Value::Cell(_) | Value::Struct(_) | Value::Object(_) | Value::HandleObject(_) => Err(
+            cellstr_error_with_identifier(ERR_CELL_CONTENT_NOT_TEXT, IDENT_INVALID_CONTENTS),
+        ),
         other => Err(cellstr_error_with_identifier(
             format!("cellstr: unsupported cell element {other:?}"),
             IDENT_INVALID_CONTENTS,

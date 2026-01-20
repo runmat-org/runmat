@@ -134,7 +134,6 @@ fn test_complex_mathematical_operations() {
     });
 }
 
-
 #[test]
 fn test_control_flow_execution() {
     gc_test_context(|| {
@@ -382,9 +381,8 @@ fn test_repl_function_definition_and_call_same_statement() {
         let mut engine = RunMatSession::new().unwrap();
 
         // Define and call function in the same statement (this should work)
-        let result = block_on(
-            engine.execute("function y = double(x); y = x * 2; end; result = double(21)"),
-        );
+        let result =
+            block_on(engine.execute("function y = double(x); y = x * 2; end; result = double(21)"));
         assert!(
             result.is_ok(),
             "Function definition and call should succeed"
@@ -403,52 +401,54 @@ fn test_repl_function_definition_and_call_same_statement() {
 
 #[test]
 fn test_repl_function_persistence() {
-    gc_test_context(|| {
-        let mut engine = RunMatSession::new().unwrap();
+    let handle = std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(|| {
+            gc_test_context(|| {
+                let mut engine = RunMatSession::new().unwrap();
 
-        // Define function in one command
-        let result1 = block_on(engine.execute("function y = add(a, b); y = a + b; end"));
-        assert!(result1.is_ok(), "Function definition should succeed");
+                // Define function in one command
+                let result1 = block_on(engine.execute("function y = add(a, b); y = a + b; end"));
+                assert!(result1.is_ok(), "Function definition should succeed");
 
-        // Use function in another command
-        let result2 = block_on(engine.execute("x = add(10, 20)"));
-        assert!(result2.is_ok(), "Function call should succeed");
+                // Use function in another command
+                let result2 = block_on(engine.execute("x = add(10, 20)"));
+                assert!(result2.is_ok(), "Function call should succeed");
 
-        // Functions should persist across REPL commands
-        let exec_result = result2.unwrap();
-        if let Some(error) = &exec_result.error {
-            panic!("Function call failed with error: {error}");
-        }
-    });
+                // Functions should persist across REPL commands
+                let exec_result = result2.unwrap();
+                if let Some(error) = &exec_result.error {
+                    panic!("Function call failed with error: {error}");
+                }
+            });
+        })
+        .expect("spawn repl function thread");
+    handle.join().expect("join repl function thread");
 }
 
 #[test]
 fn test_debug_function_context() {
-    gc_test_context(|| {
-        let mut engine = RunMatSession::new().unwrap();
+    let handle = std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(|| {
+            gc_test_context(|| {
+                let mut engine = RunMatSession::new().unwrap();
 
-        // First, just define a function
-        let result1 = block_on(engine.execute("function y = test_func(x); y = x + 1; end"));
-        println!("Function definition result: {result1:?}");
-        assert!(result1.is_ok(), "Function definition should succeed");
+                // First, just define a function
+                let result1 = block_on(engine.execute("function y = test_func(x); y = x + 1; end"));
+                assert!(result1.is_ok(), "Function definition should succeed");
 
-        // Try to call a simple builtin to verify engine works
-        let result2 = block_on(engine.execute("builtin_test = abs(-5)"));
-        println!("Builtin call result: {result2:?}");
-        assert!(result2.is_ok(), "Builtin call should succeed");
+                // Try to call a simple builtin to verify engine works
+                let result2 = block_on(engine.execute("builtin_test = abs(-5)"));
+                assert!(result2.is_ok(), "Builtin call should succeed");
 
-        // Now try to call our user-defined function
-        let result3 = block_on(engine.execute("user_func_test = test_func(10)"));
-        println!("User function call result: {result3:?}");
-
-        if let Err(e) = &result3 {
-            println!("Function call error: {e}");
-        } else if let Ok(exec_result) = &result3 {
-            if let Some(error) = &exec_result.error {
-                println!("Execution error: {error}");
-            } else {
-                println!("Function call succeeded!");
-            }
-        }
-    });
+                // Now try to call our user-defined function
+                let result3 = block_on(engine.execute("user_func_test = test_func(10)"));
+                assert!(result3.is_ok(), "Function call should succeed");
+                let exec_result = result3.unwrap();
+                assert!(exec_result.error.is_none(), "Function call should not error");
+            });
+        })
+        .expect("spawn debug function thread");
+    handle.join().expect("join debug function thread");
 }

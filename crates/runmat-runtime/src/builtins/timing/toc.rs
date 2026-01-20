@@ -181,10 +181,7 @@ const ERR_NO_MATCHING_TIC: &str = "MATLAB:toc:NoMatchingTic";
 const ERR_INVALID_HANDLE: &str = "MATLAB:toc:InvalidTimerHandle";
 const ERR_TOO_MANY_INPUTS: &str = "MATLAB:toc:TooManyInputs";
 
-fn toc_error_with_identifier(
-    message: impl Into<String>,
-    identifier: &str,
-) -> crate::RuntimeError {
+fn toc_error_with_identifier(message: impl Into<String>, identifier: &str) -> crate::RuntimeError {
     crate::build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .with_identifier(identifier)
@@ -212,9 +209,8 @@ pub fn toc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 }
 
 fn latest_elapsed() -> Result<f64, crate::RuntimeError> {
-    let start = take_latest_start(BUILTIN_NAME)?.ok_or_else(|| {
-        toc_error_with_identifier("toc: no matching tic", ERR_NO_MATCHING_TIC)
-    })?;
+    let start = take_latest_start(BUILTIN_NAME)?
+        .ok_or_else(|| toc_error_with_identifier("toc: no matching tic", ERR_NO_MATCHING_TIC))?;
     Ok(start.elapsed().as_secs_f64())
 }
 
@@ -242,7 +238,12 @@ pub(crate) mod tests {
     }
 
     fn assert_toc_error_identifier(err: crate::RuntimeError, identifier: &str) {
-        assert_eq!(err.identifier(), Some(identifier), "message: {}", err.message());
+        assert_eq!(
+            err.identifier(),
+            Some(identifier),
+            "message: {}",
+            err.message()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -223,9 +223,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn flipud_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("flipud")
-        .build()
+    build_runtime_error(message).with_builtin("flipud").build()
 }
 
 #[runtime_builtin(
@@ -238,41 +236,43 @@ fn flipud_error(message: impl Into<String>) -> RuntimeError {
 )]
 fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::Tensor(tensor) => Ok(flip_tensor_with("flipud", tensor, &UD_DIM)
-            .map(tensor::tensor_into_value)?),
-        Value::LogicalArray(array) => Ok(flip_logical_array_with("flipud", array, &UD_DIM)
-            .map(Value::LogicalArray)?),
-        Value::ComplexTensor(ct) => Ok(flip_complex_tensor_with("flipud", ct, &UD_DIM)
-            .map(Value::ComplexTensor)?),
+        Value::Tensor(tensor) => {
+            Ok(flip_tensor_with("flipud", tensor, &UD_DIM).map(tensor::tensor_into_value)?)
+        }
+        Value::LogicalArray(array) => {
+            Ok(flip_logical_array_with("flipud", array, &UD_DIM).map(Value::LogicalArray)?)
+        }
+        Value::ComplexTensor(ct) => {
+            Ok(flip_complex_tensor_with("flipud", ct, &UD_DIM).map(Value::ComplexTensor)?)
+        }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| flipud_error(format!("flipud: {e}")))?;
             Ok(flip_complex_tensor_with("flipud", tensor, &UD_DIM)
                 .map(complex_tensor_into_value)?)
         }
-        Value::StringArray(strings) => Ok(flip_string_array_with("flipud", strings, &UD_DIM)
-            .map(Value::StringArray)?),
-        Value::CharArray(chars) => Ok(flip_char_array_with("flipud", chars, &UD_DIM)
-            .map(Value::CharArray)?),
+        Value::StringArray(strings) => {
+            Ok(flip_string_array_with("flipud", strings, &UD_DIM).map(Value::StringArray)?)
+        }
+        Value::CharArray(chars) => {
+            Ok(flip_char_array_with("flipud", chars, &UD_DIM).map(Value::CharArray)?)
+        }
         Value::String(scalar) => Ok(Value::String(scalar)),
         Value::Cell(cell) => flip_cell_array_rows(cell),
         Value::Num(n) => {
             let tensor = tensor::value_into_tensor_for("flipud", Value::Num(n))
                 .map_err(|e| flipud_error(e))?;
-            Ok(flip_tensor_with("flipud", tensor, &UD_DIM)
-                .map(tensor::tensor_into_value)?)
+            Ok(flip_tensor_with("flipud", tensor, &UD_DIM).map(tensor::tensor_into_value)?)
         }
         Value::Int(i) => {
             let tensor = tensor::value_into_tensor_for("flipud", Value::Int(i))
                 .map_err(|e| flipud_error(e))?;
-            Ok(flip_tensor_with("flipud", tensor, &UD_DIM)
-                .map(tensor::tensor_into_value)?)
+            Ok(flip_tensor_with("flipud", tensor, &UD_DIM).map(tensor::tensor_into_value)?)
         }
         Value::Bool(flag) => {
             let tensor = tensor::value_into_tensor_for("flipud", Value::Bool(flag))
                 .map_err(|e| flipud_error(e))?;
-            Ok(flip_tensor_with("flipud", tensor, &UD_DIM)
-                .map(tensor::tensor_into_value)?)
+            Ok(flip_tensor_with("flipud", tensor, &UD_DIM).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => Ok(flip_gpu_with("flipud", handle, &UD_DIM)?),
         Value::FunctionHandle(_)

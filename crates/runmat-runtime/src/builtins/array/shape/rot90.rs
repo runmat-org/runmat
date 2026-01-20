@@ -235,9 +235,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn rot90_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("rot90")
-        .build()
+    build_runtime_error(message).with_builtin("rot90").build()
 }
 
 #[runtime_builtin(
@@ -254,24 +252,21 @@ fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> 
     }
     let steps = parse_rotation_steps(rest.first())?;
     match value {
-        Value::Tensor(tensor) => Ok(rot90_tensor(tensor, steps)
-            .map(tensor::tensor_into_value)?),
-        Value::LogicalArray(logical) => Ok(rot90_logical(logical, steps)
-            .map(Value::LogicalArray)?),
-        Value::ComplexTensor(ct) => Ok(rot90_complex_tensor(ct, steps)
-            .map(Value::ComplexTensor)?),
+        Value::Tensor(tensor) => Ok(rot90_tensor(tensor, steps).map(tensor::tensor_into_value)?),
+        Value::LogicalArray(logical) => Ok(rot90_logical(logical, steps).map(Value::LogicalArray)?),
+        Value::ComplexTensor(ct) => Ok(rot90_complex_tensor(ct, steps).map(Value::ComplexTensor)?),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| rot90_error(format!("rot90: {e}")))?;
             Ok(rot90_complex_tensor(tensor, steps).map(complex_tensor_into_value)?)
         }
-        Value::StringArray(strings) => Ok(rot90_string_array(strings, steps)
-            .map(Value::StringArray)?),
+        Value::StringArray(strings) => {
+            Ok(rot90_string_array(strings, steps).map(Value::StringArray)?)
+        }
         Value::CharArray(chars) => Ok(rot90_char_array(chars, steps).map(Value::CharArray)?),
         Value::String(s) => Ok(Value::String(s)),
         v @ (Value::Num(_) | Value::Int(_) | Value::Bool(_)) => {
-            let tensor = tensor::value_into_tensor_for("rot90", v)
-                .map_err(|e| rot90_error(e))?;
+            let tensor = tensor::value_into_tensor_for("rot90", v).map_err(|e| rot90_error(e))?;
             Ok(rot90_tensor(tensor, steps).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => Ok(rot90_gpu(handle, steps)?),
@@ -399,10 +394,7 @@ fn rot90_logical(array: LogicalArray, steps: usize) -> crate::BuiltinResult<Logi
     LogicalArray::new(data, shape).map_err(|e| rot90_error(format!("rot90: {e}")))
 }
 
-fn rot90_string_array(
-    array: StringArray,
-    steps: usize,
-) -> crate::BuiltinResult<StringArray> {
+fn rot90_string_array(array: StringArray, steps: usize) -> crate::BuiltinResult<StringArray> {
     if steps == 0 {
         return Ok(array);
     }
@@ -439,8 +431,7 @@ fn rot90_char_array(array: CharArray, steps: usize) -> crate::BuiltinResult<Char
             out[dst_idx] = array.data[src_idx];
         }
     }
-    CharArray::new(out, out_rows, out_cols)
-        .map_err(|e| rot90_error(format!("rot90: {e}")))
+    CharArray::new(out, out_rows, out_cols).map_err(|e| rot90_error(format!("rot90: {e}")))
 }
 
 fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResult<Value> {

@@ -9,13 +9,13 @@ use runmat_accelerate_api::{
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -242,7 +242,6 @@ fn sortrows_error(message: impl Into<String>) -> crate::RuntimeError {
 }
 
 #[runtime_builtin(
-
     name = "sortrows",
     category = "array/sorting_sets",
     summary = "Sort matrix rows lexicographically with optional column and direction control.",
@@ -257,14 +256,16 @@ fn sortrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Valu
 
 /// Evaluate the `sortrows` builtin once and expose both outputs.
 pub fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortRowsEvaluation> {
-
     match value {
         Value::GpuTensor(handle) => sortrows_gpu(handle, rest),
         other => sortrows_host(other, rest),
     }
 }
 
-fn sortrows_gpu(handle: GpuTensorHandle, rest: &[Value]) -> crate::BuiltinResult<SortRowsEvaluation> {
+fn sortrows_gpu(
+    handle: GpuTensorHandle,
+    rest: &[Value],
+) -> crate::BuiltinResult<SortRowsEvaluation> {
     ensure_matrix_shape(&handle.shape)?;
     let (_, cols) = rows_cols_from_shape(&handle.shape);
     let args = SortRowsArgs::parse(rest, cols)?;
@@ -286,7 +287,9 @@ fn sortrows_gpu(handle: GpuTensorHandle, rest: &[Value]) -> crate::BuiltinResult
     sortrows_real_tensor_with_args(tensor, &args)
 }
 
-fn sortrows_from_provider_result(result: ProviderSortResult) -> crate::BuiltinResult<SortRowsEvaluation> {
+fn sortrows_from_provider_result(
+    result: ProviderSortResult,
+) -> crate::BuiltinResult<SortRowsEvaluation> {
     let sorted_tensor = Tensor::new(result.values.data, result.values.shape)
         .map_err(|e| sortrows_error(format!("sortrows: {e}")))?;
     let indices_tensor = Tensor::new(result.indices.data, result.indices.shape)
@@ -325,7 +328,10 @@ fn sortrows_host(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortRowsE
     }
 }
 
-fn sortrows_real_tensor(tensor: Tensor, rest: &[Value]) -> crate::BuiltinResult<SortRowsEvaluation> {
+fn sortrows_real_tensor(
+    tensor: Tensor,
+    rest: &[Value],
+) -> crate::BuiltinResult<SortRowsEvaluation> {
     ensure_matrix_shape(&tensor.shape)?;
     let cols = tensor.cols();
     let args = SortRowsArgs::parse(rest, cols)?;
@@ -541,7 +547,8 @@ fn reorder_complex_rows(
             data[dst_idx] = tensor.data[src_idx];
         }
     }
-    ComplexTensor::new(data, tensor.shape.clone()).map_err(|e| sortrows_error(format!("sortrows: {e}")))
+    ComplexTensor::new(data, tensor.shape.clone())
+        .map_err(|e| sortrows_error(format!("sortrows: {e}")))
 }
 
 fn reorder_char_rows(
@@ -783,14 +790,19 @@ impl SortRowsArgs {
                 continue;
             }
             let Some(keyword) = tensor::value_to_string(&rest[i]) else {
-                return Err(sortrows_error(format!("sortrows: invalid argument {:?}", rest[i])));
+                return Err(sortrows_error(format!(
+                    "sortrows: invalid argument {:?}",
+                    rest[i]
+                )));
             };
             let lowered = keyword.trim().to_ascii_lowercase();
             match lowered.as_str() {
                 "comparisonmethod" => {
                     i += 1;
                     if i >= rest.len() {
-                        return Err(sortrows_error("sortrows: expected a value for 'ComparisonMethod'"));
+                        return Err(sortrows_error(
+                            "sortrows: expected a value for 'ComparisonMethod'",
+                        ));
                     }
                     let Some(value_str) = tensor::value_to_string(&rest[i]) else {
                         return Err(sortrows_error(
@@ -814,8 +826,10 @@ impl SortRowsArgs {
                 "missingplacement" => {
                     i += 1;
                     if i >= rest.len() {
-                        return Err(sortrows_error("sortrows: expected a value for 'MissingPlacement'")
-                            .into());
+                        return Err(sortrows_error(
+                            "sortrows: expected a value for 'MissingPlacement'",
+                        )
+                        .into());
                     }
                     let Some(value_str) = tensor::value_to_string(&rest[i]) else {
                         return Err(sortrows_error(
@@ -837,7 +851,9 @@ impl SortRowsArgs {
                     i += 1;
                 }
                 other => {
-                    return Err(sortrows_error(format!("sortrows: unexpected argument '{other}'")));
+                    return Err(sortrows_error(format!(
+                        "sortrows: unexpected argument '{other}'"
+                    )));
                 }
             }
         }
@@ -905,7 +921,9 @@ fn parse_column_vector(
         }
         Value::Tensor(tensor) => {
             if !is_vector(&tensor.shape) {
-                return Err(sortrows_error("sortrows: column specification must be a vector"));
+                return Err(sortrows_error(
+                    "sortrows: column specification must be a vector",
+                ));
             }
             let mut specs = Vec::with_capacity(tensor.data.len());
             for &entry in &tensor.data {
@@ -938,7 +956,9 @@ fn parse_single_column_i64(value: i64, num_cols: usize) -> crate::BuiltinResult<
         return Err(sortrows_error("sortrows: column indices must be >= 1"));
     }
     if num_cols == 0 {
-        return Err(sortrows_error("sortrows: column index exceeds matrix with 0 columns"));
+        return Err(sortrows_error(
+            "sortrows: column index exceeds matrix with 0 columns",
+        ));
     }
     if abs > num_cols {
         return Err(sortrows_error(format!(
@@ -975,7 +995,9 @@ fn default_columns(num_cols: usize) -> Vec<ColumnSpec> {
 
 fn validate_columns(columns: &[ColumnSpec], num_cols: usize) -> crate::BuiltinResult<()> {
     if num_cols == 0 && columns.iter().any(|spec| spec.index > 0) {
-        return Err(sortrows_error("sortrows: column index exceeds matrix with 0 columns"));
+        return Err(sortrows_error(
+            "sortrows: column index exceeds matrix with 0 columns",
+        ));
     }
     for spec in columns {
         if num_cols > 0 && spec.index >= num_cols {

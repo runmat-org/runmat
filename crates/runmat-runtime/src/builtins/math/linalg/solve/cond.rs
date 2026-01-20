@@ -536,17 +536,23 @@ fn parse_norm_value(value: &Value) -> BuiltinResult<CondNorm> {
             if *b {
                 Ok(CondNorm::One)
             } else {
-                Err(builtin_error(format!("{NAME}: norm must be 1, 2, Inf, or 'fro'")))
+                Err(builtin_error(format!(
+                    "{NAME}: norm must be 1, 2, Inf, or 'fro'"
+                )))
             }
         }
         Value::LogicalArray(logical) if logical.len() == 1 => {
             if logical.data[0] != 0 {
                 Ok(CondNorm::One)
             } else {
-                Err(builtin_error(format!("{NAME}: norm must be 1, 2, Inf, or 'fro'")))
+                Err(builtin_error(format!(
+                    "{NAME}: norm must be 1, 2, Inf, or 'fro'"
+                )))
             }
         }
-        _ => Err(builtin_error(format!("{NAME}: norm must be 1, 2, Inf, or 'fro'"))),
+        _ => Err(builtin_error(format!(
+            "{NAME}: norm must be 1, 2, Inf, or 'fro'"
+        ))),
     }
 }
 
@@ -558,7 +564,9 @@ fn parse_norm_numeric(raw: f64) -> BuiltinResult<CondNorm> {
     } else if raw.is_infinite() && raw.is_sign_positive() {
         Ok(CondNorm::Inf)
     } else {
-        Err(builtin_error(format!("{NAME}: norm must be 1, 2, Inf, or 'fro'")))
+        Err(builtin_error(format!(
+            "{NAME}: norm must be 1, 2, Inf, or 'fro'"
+        )))
     }
 }
 
@@ -589,10 +597,7 @@ fn upload_scalar(
 }
 
 /// Helper for provider backends that reuse the host implementation.
-pub fn cond_host_real_for_provider(
-    matrix: &Tensor,
-    norm: ProviderCondNorm,
-) -> BuiltinResult<f64> {
+pub fn cond_host_real_for_provider(matrix: &Tensor, norm: ProviderCondNorm) -> BuiltinResult<f64> {
     cond_real_tensor(matrix, CondNorm::from(norm))
 }
 

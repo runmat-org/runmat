@@ -290,7 +290,6 @@ fn atanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             Err(_) => {
                 // Fall back to host path below.
             }
-
         }
     }
     let tensor = gpu_helpers::gather_tensor(&handle)?;

@@ -194,9 +194,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn size_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("size")
-        .build()
+    build_runtime_error(message).with_builtin("size").build()
 }
 
 #[runtime_builtin(
@@ -441,7 +439,9 @@ pub(crate) mod tests {
         let dims = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let err = size_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)])
             .expect_err("matrix dims");
-        assert!(err.to_string().contains("dimension vector must be a vector"));
+        assert!(err
+            .to_string()
+            .contains("dimension vector must be a vector"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -451,7 +451,9 @@ pub(crate) mod tests {
         let dims = Tensor::new(vec![], vec![1, 0]).unwrap();
         let err =
             size_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect_err("empty dims");
-        assert!(err.to_string().contains("must contain at least one element"));
+        assert!(err
+            .to_string()
+            .contains("must contain at least one element"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

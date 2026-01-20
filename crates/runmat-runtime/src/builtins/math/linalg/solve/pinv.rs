@@ -333,9 +333,7 @@ fn pseudoinverse_real(matrix: &DMatrix<f64>, tol: Option<f64>) -> BuiltinResult<
     let cutoff =
         tol.unwrap_or_else(|| svd_default_tolerance(svd.singular_values.as_slice(), rows, cols));
     svd.pseudo_inverse(cutoff)
-        .map_err(|msg| builtin_error(format!(
-            "{NAME}: failed to compute pseudoinverse ({msg})"
-        )))
+        .map_err(|msg| builtin_error(format!("{NAME}: failed to compute pseudoinverse ({msg})")))
 }
 
 fn pseudoinverse_complex(
@@ -382,8 +380,7 @@ fn matrix_to_complex_tensor(
     let rows = matrix.nrows();
     let cols = matrix.ncols();
     let data: Vec<(f64, f64)> = matrix.as_slice().iter().map(|c| (c.re, c.im)).collect();
-    ComplexTensor::new(data, vec![rows, cols])
-        .map_err(|e| builtin_error(format!("{label}: {e}")))
+    ComplexTensor::new(data, vec![rows, cols]).map_err(|e| builtin_error(format!("{label}: {e}")))
 }
 
 /// Host helper used by acceleration providers that delegate `pinv` back to the CPU path.

@@ -477,8 +477,9 @@ impl NeOperand {
                 Ok(NeOperand::Numeric(NumericBuffer::from_char_array(array)))
             }
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)
-                    .map_err(|err| ne_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT))?;
+                let tensor = gpu_helpers::gather_tensor(&handle).map_err(|err| {
+                    ne_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT)
+                })?;
                 Ok(NeOperand::Numeric(NumericBuffer::from_tensor(tensor)))
             }
             unsupported => Err(ne_error(

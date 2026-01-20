@@ -13,13 +13,14 @@ use runmat_accelerate_api::{
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_gc::gc_test_context;
-use runmat_hir::lower;
+use runmat_hir::{lower as lower_hir, HirProgram, LoweringContext, SemanticError};
 use runmat_ignition::vm::interpret_function as interpret_function_async;
 use runmat_ignition::{compile, interpret as interpret_async, Instr};
 use runmat_parser::parse;
 use runmat_runtime::builtins::image::filters::fspecial::spec_from_request as test_fspecial_spec_from_request;
 use runmat_runtime::builtins::math::linalg::ops::mrdivide_host_real_for_provider;
 use runmat_runtime::{gather_if_needed, RuntimeError};
+use std::collections::HashMap;
 
 fn interpret(bytecode: &runmat_ignition::Bytecode) -> Result<Vec<Value>, RuntimeError> {
     block_on(interpret_async(bytecode))
@@ -32,11 +33,14 @@ fn interpret_function(
     block_on(interpret_function_async(bytecode, vars))
 }
 use runmat_time::Instant;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 type BufferStore = HashMap<u64, (Vec<f64>, Vec<usize>)>;
+
+fn lower(ast: &runmat_parser::Program) -> Result<HirProgram, SemanticError> {
+    lower_hir(ast, &LoweringContext::empty()).map(|result| result.hir)
+}
 
 struct TestProvider {
     next_id: AtomicU64,
@@ -172,8 +176,8 @@ impl AccelProvider for TestProvider {
     }
 
     fn fspecial(&self, request: &FspecialRequest) -> anyhow::Result<GpuTensorHandle> {
-        let spec = test_fspecial_spec_from_request(&request.filter)
-            .map_err(|error| anyhow!(error))?;
+        let spec =
+            test_fspecial_spec_from_request(&request.filter).map_err(|error| anyhow!(error))?;
         let tensor = spec.generate_tensor().map_err(|error| anyhow!(error))?;
         Ok(self.push(tensor.data.clone(), tensor.shape.clone()))
     }
@@ -497,10 +501,11 @@ impl AccelProvider for TestProvider {
         let (data, shape) = self.pull(handle)?;
         let tensor =
             Tensor::new(data, shape).map_err(|e| anyhow!("unique (test provider): {e}"))?;
-        let eval = runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
-            tensor, options,
-        )
-        .map_err(|err| anyhow!("unique (test provider): {err}"))?;
+        let eval =
+            runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
+                tensor, options,
+            )
+            .map_err(|err| anyhow!("unique (test provider): {err}"))?;
         eval.into_numeric_unique_result()
             .map_err(|err| anyhow!("unique (test provider): {err}"))
     }
@@ -1063,7 +1068,7 @@ fn fused_elementwise_then_reduction_sum_rows_profiled() {
 
             let ast = parse(&source).expect("parse");
             let hir = lower(&ast).expect("lower");
-            let bytecode = compile(&hir).expect("compile");
+            let bytecode = compile(&hir, &HashMap::new()).expect("compile");
 
             // Initialize vars and insert tensor for 'X' by locating first LoadVar use
             let mut vars = vec![Value::Num(0.0); bytecode.var_count];
@@ -1189,7 +1194,7 @@ fn reduction_sum_omitnan_vs_include_dim2_gpu_cpu() {
 
         let ast = parse(&source).expect("parse");
         let hir = lower(&ast).expect("lower");
-        let bytecode = compile(&hir).expect("compile");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
         if let Some(graph) = &bytecode.accel_graph {
             let groups = graph.detect_fusion_groups();
             let reduction_count = groups
@@ -1291,7 +1296,7 @@ fn reduction_sum_include_omit_dim1_dim2_gpu_cpu() {
 
         let ast = parse(&source).expect("parse");
         let hir = lower(&ast).expect("lower");
-        let bytecode = compile(&hir).expect("compile");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
 
         // Determine slot for X (first StoreVar in the program)
         let x_index = bytecode
@@ -1451,7 +1456,7 @@ fn reduction_sum_include_omit_dim1_dim2_degenerate_gpu_cpu() {
 
             let ast = parse(&source).expect("parse");
             let hir = lower(&ast).expect("lower");
-            let bytecode = compile(&hir).expect("compile");
+            let bytecode = compile(&hir, &HashMap::new()).expect("compile");
 
             // Determine slot for X (first StoreVar in the program)
             let x_index = bytecode
@@ -1591,7 +1596,7 @@ fn fused_elementwise_then_reduction_sum_dim1_dim2_include_gpu_cpu_small() {
         );
         let ast = parse(&source).expect("parse");
         let hir = lower(&ast).expect("lower");
-        let bytecode = compile(&hir).expect("compile");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
 
         let cpu =
             interpret_function(&bytecode, vec![Value::Num(0.0); bytecode.var_count]).expect("cpu");
@@ -1660,7 +1665,7 @@ fn fused_elementwise_then_reduction_sum_dim1_dim2_omit_gpu_cpu_small() {
         );
         let ast = parse(&source).expect("parse");
         let hir = lower(&ast).expect("lower");
-        let bytecode = compile(&hir).expect("compile");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
 
         let cpu =
             interpret_function(&bytecode, vec![Value::Num(0.0); bytecode.var_count]).expect("cpu");
@@ -1829,7 +1834,7 @@ fn fused_reduction_sum_dim1_dim2_include_gpu_cpu() {
 
         let ast = parse(&source).expect("parse");
         let hir = lower(&ast).expect("lower");
-        let bytecode = compile(&hir).expect("compile");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
 
         let run_with = |use_gpu: bool| -> Vec<Value> {
             let vars = vec![Value::Num(0.0); bytecode.var_count];
@@ -1924,7 +1929,7 @@ fn fused_reduction_sum_dim1_dim2_omit_gpu_cpu() {
 
         let ast = parse(&source).expect("parse");
         let hir = lower(&ast).expect("lower");
-        let bytecode = compile(&hir).expect("compile");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
 
         let run_with = |use_gpu: bool| -> Vec<Value> {
             let vars = vec![Value::Num(0.0); bytecode.var_count];
@@ -1985,7 +1990,7 @@ fn fused_elementwise_residency_and_gather() {
 
         let ast = parse(source).expect("parse");
         let hir = lower(&ast).expect("lower");
-        let bytecode = compile(&hir).expect("compile");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
 
         dbg!(&bytecode.fusion_groups);
         let vars = interpret(&bytecode).expect("interpret");
@@ -2050,7 +2055,7 @@ fn fused_literal_constant_and_extended_builtins() {
 
         let ast = parse(source).expect("parse");
         let hir = lower(&ast).expect("lower");
-        let bytecode = compile(&hir).expect("compile");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
         let vars = interpret(&bytecode).expect("interpret");
 
         let mut stores: Vec<usize> = bytecode
@@ -2124,7 +2129,7 @@ fn centered_gram_fusion_matches_cpu() {
 
         let ast = parse(source).expect("parse");
         let hir = lower(&ast).expect("lower");
-        let bytecode = compile(&hir).expect("compile");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
 
         let cov_index = bytecode
             .instructions
@@ -2207,7 +2212,7 @@ fn mean_all_gpu_matches_cpu() {
 
         let ast = parse(source).expect("parse");
         let hir = lower(&ast).expect("lower");
-        let bytecode = compile(&hir).expect("compile");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
 
         let mu_index = bytecode
             .instructions
@@ -2265,7 +2270,7 @@ fn power_step_normalization_matches_cpu() {
 
         let ast = parse(source).expect("parse");
         let hir = lower(&ast).expect("lower");
-        let bytecode = compile(&hir).expect("compile");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
 
         if let Some(graph) = &bytecode.accel_graph {
             let groups = graph.detect_fusion_groups();
@@ -2344,7 +2349,7 @@ fn image_normalize_matches_cpu() {
 
         let ast = parse(source).expect("parse");
         let hir = lower(&ast).expect("lower");
-        let bytecode = compile(&hir).expect("compile");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
 
         if let Some(graph) = &bytecode.accel_graph {
             let groups = graph.detect_fusion_groups();
@@ -2414,7 +2419,7 @@ fn explained_variance_matches_cpu() {
 
         let ast = parse(source).expect("parse");
         let hir = lower(&ast).expect("lower");
-        let bytecode = compile(&hir).expect("compile");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
 
         if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
             for (pc, instr) in bytecode.instructions.iter().enumerate() {

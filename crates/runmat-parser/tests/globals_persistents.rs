@@ -1,4 +1,7 @@
-use runmat_parser::{parse_simple as parse, Stmt};
+use runmat_parser::Stmt;
+
+mod parse;
+use parse::parse;
 
 #[test]
 fn global_and_persistent() {

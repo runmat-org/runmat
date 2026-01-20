@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 use thiserror::Error;
 
 use runmat_time::Instant;
@@ -371,13 +371,12 @@ pub(crate) fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::BuiltinR
 
     let options = parse_accept_options(rest)?;
 
-    let shared_server = server_handle(server_id)
-        .ok_or_else(|| {
-            accept_error(
-                MESSAGE_ID_INVALID_SERVER,
-                "accept: tcpserver handle is no longer valid",
-            )
-        })?;
+    let shared_server = server_handle(server_id).ok_or_else(|| {
+        accept_error(
+            MESSAGE_ID_INVALID_SERVER,
+            "accept: tcpserver handle is no longer valid",
+        )
+    })?;
 
     let server_guard = shared_server
         .lock()

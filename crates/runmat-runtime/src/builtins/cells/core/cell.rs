@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{
-    gather_if_needed, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeError,
+    build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
 
 #[cfg_attr(
@@ -256,9 +256,7 @@ const IDENT_INVALID_INPUT: &str = "MATLAB:cell:InvalidInput";
 const IDENT_INVALID_SIZE: &str = "MATLAB:cell:InvalidSize";
 
 fn cell_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("cell")
-        .build()
+    build_runtime_error(message).with_builtin("cell").build()
 }
 
 fn cell_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
@@ -497,9 +495,11 @@ fn empty_value_like(proto: Option<&Value>) -> BuiltinResult<Value> {
             Value::LogicalArray(_) | Value::Bool(_) => LogicalArray::new(Vec::new(), vec![0, 0])
                 .map(Value::LogicalArray)
                 .map_err(|e| cell_error(format!("cell: {e}"))),
-            Value::ComplexTensor(_) | Value::Complex(_, _) => ComplexTensor::new(Vec::new(), vec![0, 0])
-                .map(Value::ComplexTensor)
-                .map_err(|e| cell_error(format!("cell: {e}"))),
+            Value::ComplexTensor(_) | Value::Complex(_, _) => {
+                ComplexTensor::new(Vec::new(), vec![0, 0])
+                    .map(Value::ComplexTensor)
+                    .map_err(|e| cell_error(format!("cell: {e}")))
+            }
             Value::String(_) => Ok(Value::String(String::new())),
             Value::StringArray(_) => StringArray::new(Vec::new(), vec![0, 0])
                 .map(Value::StringArray)
@@ -763,9 +763,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_rejects_fractional() {
-        let err = cell_builtin(vec![Value::Num(2.5)])
-            .unwrap_err()
-            .to_string();
+        let err = cell_builtin(vec![Value::Num(2.5)]).unwrap_err().to_string();
         assert!(err.contains("integers"), "unexpected error: {err}");
     }
 

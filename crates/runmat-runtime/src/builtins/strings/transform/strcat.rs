@@ -4,13 +4,15 @@ use runmat_builtins::{CellArray, CharArray, StringArray, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeError,
+};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -490,7 +492,8 @@ fn strcat_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
 
 fn build_string_output(data: Vec<String>, shape: &[usize]) -> BuiltinResult<Value> {
     if data.is_empty() {
-        let array = StringArray::new(data, shape.to_vec()).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+        let array = StringArray::new(data, shape.to_vec())
+            .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
         return Ok(Value::StringArray(array));
     }
 
@@ -499,7 +502,8 @@ fn build_string_output(data: Vec<String>, shape: &[usize]) -> BuiltinResult<Valu
         return Ok(Value::String(data[0].clone()));
     }
 
-    let array = StringArray::new(data, shape.to_vec()).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+    let array = StringArray::new(data, shape.to_vec())
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
     Ok(Value::StringArray(array))
 }
 
@@ -522,13 +526,15 @@ fn build_cell_output(mut data: Vec<String>, shape: &[usize]) -> BuiltinResult<Va
         let char_array = CharArray::new_row(&text);
         values.push(Value::CharArray(char_array));
     }
-    make_cell_with_shape(values, shape.to_vec()).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+    make_cell_with_shape(values, shape.to_vec())
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
 fn build_char_output(data: Vec<String>) -> BuiltinResult<Value> {
     let rows = data.len();
     if rows == 0 {
-        let array = CharArray::new(Vec::new(), 0, 0).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+        let array = CharArray::new(Vec::new(), 0, 0)
+            .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
         return Ok(Value::CharArray(array));
     }
 
@@ -541,7 +547,8 @@ fn build_char_output(data: Vec<String>) -> BuiltinResult<Value> {
         }
         chars.extend(row_chars.into_iter());
     }
-    let array = CharArray::new(chars, rows, max_cols).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+    let array = CharArray::new(chars, rows, max_cols)
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
     Ok(Value::CharArray(array))
 }
 
@@ -787,7 +794,9 @@ pub(crate) mod tests {
     fn strcat_errors_on_invalid_cell_element() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell");
         let err = strcat_builtin(vec![Value::Cell(cell)]).expect_err("expected error");
-        assert!(err.to_string().contains("cell array elements must be character vectors"));
+        assert!(err
+            .to_string()
+            .contains("cell array elements must be character vectors"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

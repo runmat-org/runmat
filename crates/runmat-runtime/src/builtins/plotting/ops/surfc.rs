@@ -15,7 +15,6 @@ use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::{build_surface, build_surface_gpu_plot};
 use std::sync::Arc;
 
-
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -68,7 +67,12 @@ RunMat reuses the same surface renderer as `surf` and complements it with GPU-ge
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::surfc"
 )]
-pub fn surfc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
+pub fn surfc_builtin(
+    x: Tensor,
+    y: Tensor,
+    z: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<String> {
     let x_axis = numeric_vector(x);
     let y_axis = numeric_vector(y);
     let mut x_axis = Some(x_axis);

@@ -1,4 +1,7 @@
-use runmat_parser::{parse_simple as parse, BinOp, Expr, LValue, Stmt};
+use runmat_parser::{BinOp, Expr, LValue, Stmt};
+
+mod parse;
+use parse::parse;
 
 #[test]
 fn paren_slice_assignment_variants() {

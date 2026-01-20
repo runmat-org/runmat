@@ -3,9 +3,9 @@
 use runmat_builtins::{StructValue, Value};
 use runmat_macros::runtime_builtin;
 
+use super::plotting_error;
 use super::state::{current_axes_state, encode_axes_handle, FigureAxesState};
 use super::style::value_as_string;
-use super::plotting_error;
 
 #[runtime_builtin(
     name = "gca",

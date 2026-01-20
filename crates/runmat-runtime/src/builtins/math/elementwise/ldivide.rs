@@ -5,7 +5,6 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
@@ -14,6 +13,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -736,7 +736,9 @@ fn classify_operand(value: Value) -> BuiltinResult<LdivideOperand> {
                 .map_err(|e| builtin_error(format!("ldivide: {e}")))?,
         )),
         Value::ComplexTensor(ct) => Ok(LdivideOperand::Complex(ct)),
-        Value::GpuTensor(_) => Err(builtin_error("ldivide: internal error converting GPU value")),
+        Value::GpuTensor(_) => Err(builtin_error(
+            "ldivide: internal error converting GPU value",
+        )),
         other => Err(builtin_error(format!(
             "ldivide: unsupported operand type {:?}; expected numeric or logical data",
             other
@@ -770,8 +772,8 @@ fn gpu_scalar_value(handle: &GpuTensorHandle) -> BuiltinResult<Option<f64>> {
     if !is_scalar_shape(&handle.shape) {
         return Ok(None);
     }
-    let tensor = gpu_helpers::gather_tensor(handle)
-        .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
+    let tensor =
+        gpu_helpers::gather_tensor(handle).map_err(|e| builtin_error(format!("ldivide: {e}")))?;
     Ok(tensor.data.first().copied())
 }
 
@@ -1049,7 +1051,10 @@ pub(crate) mod tests {
         let lhs = Value::Num(2.0);
         let rhs = Value::Num(4.0);
         let err = ldivide_builtin(lhs, rhs, vec![Value::from("like")]).unwrap_err();
-        assert!(err.message().contains("prototype"), "unexpected error: {err}");
+        assert!(
+            err.message().contains("prototype"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

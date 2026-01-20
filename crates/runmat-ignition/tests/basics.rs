@@ -2,11 +2,12 @@ mod test_helpers;
 
 use runmat_accelerate::ShapeInfo;
 use runmat_builtins::Value;
-use runmat_hir::lower;
 use runmat_ignition::{compile, Instr};
 use runmat_parser::parse;
+use std::collections::HashMap;
 use std::convert::TryInto;
 use test_helpers::execute;
+use test_helpers::lower;
 
 #[test]
 fn arithmetic_and_assignment() {
@@ -36,7 +37,8 @@ fn array_construct_like_and_size_vector_inference() {
     let src_like = "A = rand(3,4); B = zeros('like', A);";
     let ast_like = parse(src_like).expect("parse like");
     let hir_like = lower(&ast_like).expect("lower like");
-    let bytecode_like = runmat_ignition::bytecode::compile(&hir_like).expect("compile like");
+    let bytecode_like =
+        runmat_ignition::bytecode::compile(&hir_like, &HashMap::new()).expect("compile like");
     let graph_like = runmat_ignition::accel_graph::build_accel_graph(
         &bytecode_like.instructions,
         &hir_like.var_types,
@@ -55,7 +57,8 @@ fn array_construct_like_and_size_vector_inference() {
     let src_sz = "sz = [5,6]; B = zeros(sz);";
     let ast_sz = parse(src_sz).expect("parse sz");
     let hir_sz = lower(&ast_sz).expect("lower sz");
-    let bytecode_sz = runmat_ignition::bytecode::compile(&hir_sz).expect("compile sz");
+    let bytecode_sz =
+        runmat_ignition::bytecode::compile(&hir_sz, &HashMap::new()).expect("compile sz");
     let graph_sz = runmat_ignition::accel_graph::build_accel_graph(
         &bytecode_sz.instructions,
         &hir_sz.var_types,
@@ -76,7 +79,7 @@ fn complex_literal_matrix_uses_dynamic_path() {
     let input = "A = [1+2i 3-4j];";
     let ast = parse(input).unwrap();
     let hir = lower(&ast).unwrap();
-    let bytecode = compile(&hir).unwrap();
+    let bytecode = compile(&hir, &HashMap::new()).unwrap();
     assert!(
         bytecode
             .instructions

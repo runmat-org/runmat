@@ -337,14 +337,14 @@ fn coeffs_to_value(coeffs: &[Complex64], orientation: Orientation) -> BuiltinRes
     if coeffs.iter().all(|c| c.im.abs() <= EPS) {
         let data: Vec<f64> = coeffs.iter().map(|c| c.re).collect();
         let shape = orientation.shape_for_len(data.len());
-        let tensor = Tensor::new(data, shape)
-            .map_err(|e| polyint_error(format!("polyint: {e}")))?;
+        let tensor =
+            Tensor::new(data, shape).map_err(|e| polyint_error(format!("polyint: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     } else {
         let data: Vec<(f64, f64)> = coeffs.iter().map(|c| (c.re, c.im)).collect();
         let shape = orientation.shape_for_len(data.len());
-        let tensor = ComplexTensor::new(data, shape)
-            .map_err(|e| polyint_error(format!("polyint: {e}")))?;
+        let tensor =
+            ComplexTensor::new(data, shape).map_err(|e| polyint_error(format!("polyint: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
@@ -412,13 +412,17 @@ fn parse_constant(value: Value) -> BuiltinResult<Complex64> {
     match gathered {
         Value::Tensor(tensor) => {
             if tensor.data.len() != 1 {
-                return Err(polyint_error("polyint: constant of integration must be a scalar"));
+                return Err(polyint_error(
+                    "polyint: constant of integration must be a scalar",
+                ));
             }
             Ok(Complex64::new(tensor.data[0], 0.0))
         }
         Value::ComplexTensor(tensor) => {
             if tensor.data.len() != 1 {
-                return Err(polyint_error("polyint: constant of integration must be a scalar"));
+                return Err(polyint_error(
+                    "polyint: constant of integration must be a scalar",
+                ));
             }
             let (re, im) = tensor.data[0];
             Ok(Complex64::new(re, im))
@@ -430,7 +434,9 @@ fn parse_constant(value: Value) -> BuiltinResult<Complex64> {
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(polyint_error)?;
             if tensor.data.len() != 1 {
-                return Err(polyint_error("polyint: constant of integration must be a scalar"));
+                return Err(polyint_error(
+                    "polyint: constant of integration must be a scalar",
+                ));
             }
             Ok(Complex64::new(tensor.data[0], 0.0))
         }

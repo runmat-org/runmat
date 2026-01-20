@@ -280,7 +280,9 @@ fn parse_arguments(
                 if dim.is_some() {
                     return Err(cummin_error("cummin: dimension specified more than once"));
                 }
-                dim = Some(tensor::parse_dimension(value, "cummin").map_err(|err| cummin_error(err))?);
+                dim = Some(
+                    tensor::parse_dimension(value, "cummin").map_err(|err| cummin_error(err))?,
+                );
             }
             Value::Tensor(t) if t.data.is_empty() => {
                 // MATLAB allows [] placeholders; ignore them.
@@ -327,14 +329,20 @@ fn parse_arguments(
                             nan_set = true;
                         }
                         "" => {
-                            return Err(cummin_error("cummin: empty string option is not supported"));
+                            return Err(cummin_error(
+                                "cummin: empty string option is not supported",
+                            ));
                         }
                         other => {
-                            return Err(cummin_error(format!("cummin: unrecognised option '{other}'")));
+                            return Err(cummin_error(format!(
+                                "cummin: unrecognised option '{other}'"
+                            )));
                         }
                     }
                 } else {
-                    return Err(cummin_error(format!("cummin: unsupported argument type {value:?}")));
+                    return Err(cummin_error(format!(
+                        "cummin: unsupported argument type {value:?}"
+                    )));
                 }
             }
         }
@@ -434,8 +442,8 @@ fn cummin_tensor(
         return Err(cummin_error("cummin: dimension must be >= 1"));
     }
     if tensor.data.is_empty() {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummin_error(format!("cummin: {e}")))?;
+        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
+            .map_err(|e| cummin_error(format!("cummin: {e}")))?;
         return Ok((tensor.clone(), indices));
     }
     if dim > tensor.shape.len() {
@@ -446,8 +454,8 @@ fn cummin_tensor(
     let dim_index = dim - 1;
     let segment_len = tensor.shape[dim_index];
     if segment_len == 0 {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummin_error(format!("cummin: {e}")))?;
+        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
+            .map_err(|e| cummin_error(format!("cummin: {e}")))?;
         return Ok((tensor.clone(), indices));
     }
 
@@ -573,10 +581,10 @@ fn cummin_tensor(
         }
     }
 
-    let values_tensor =
-        Tensor::new(values_out, tensor.shape.clone()).map_err(|e| cummin_error(format!("cummin: {e}")))?;
-    let indices_tensor =
-        Tensor::new(indices_out, tensor.shape.clone()).map_err(|e| cummin_error(format!("cummin: {e}")))?;
+    let values_tensor = Tensor::new(values_out, tensor.shape.clone())
+        .map_err(|e| cummin_error(format!("cummin: {e}")))?;
+    let indices_tensor = Tensor::new(indices_out, tensor.shape.clone())
+        .map_err(|e| cummin_error(format!("cummin: {e}")))?;
     Ok((values_tensor, indices_tensor))
 }
 
@@ -590,8 +598,8 @@ fn cummin_complex_tensor(
         return Err(cummin_error("cummin: dimension must be >= 1"));
     }
     if tensor.data.is_empty() {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummin_error(format!("cummin: {e}")))?;
+        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
+            .map_err(|e| cummin_error(format!("cummin: {e}")))?;
         return Ok((tensor.clone(), indices));
     }
     if dim > tensor.shape.len() {
@@ -602,8 +610,8 @@ fn cummin_complex_tensor(
     let dim_index = dim - 1;
     let segment_len = tensor.shape[dim_index];
     if segment_len == 0 {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummin_error(format!("cummin: {e}")))?;
+        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
+            .map_err(|e| cummin_error(format!("cummin: {e}")))?;
         return Ok((tensor.clone(), indices));
     }
 
@@ -731,10 +739,10 @@ fn cummin_complex_tensor(
         }
     }
 
-    let values_tensor =
-        ComplexTensor::new(values_out, tensor.shape.clone()).map_err(|e| cummin_error(format!("cummin: {e}")))?;
-    let indices_tensor =
-        Tensor::new(indices_out, tensor.shape.clone()).map_err(|e| cummin_error(format!("cummin: {e}")))?;
+    let values_tensor = ComplexTensor::new(values_out, tensor.shape.clone())
+        .map_err(|e| cummin_error(format!("cummin: {e}")))?;
+    let indices_tensor = Tensor::new(indices_out, tensor.shape.clone())
+        .map_err(|e| cummin_error(format!("cummin: {e}")))?;
     Ok((values_tensor, indices_tensor))
 }
 

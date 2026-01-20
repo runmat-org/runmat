@@ -275,10 +275,7 @@ fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
     }
 }
 
-fn ipermute_gpu(
-    handle: GpuTensorHandle,
-    inverse_order: &[usize],
-) -> crate::BuiltinResult<Value> {
+fn ipermute_gpu(handle: GpuTensorHandle, inverse_order: &[usize]) -> crate::BuiltinResult<Value> {
     permute_gpu("ipermute", handle, inverse_order)
 }
 
@@ -312,7 +309,8 @@ pub(crate) mod tests {
     fn ipermute_inverts_permute() {
         let data: Vec<f64> = (1..=24).map(|n| n as f64).collect();
         let order = make_tensor(&[3.0, 1.0, 2.0], &[1, 3]);
-        let order_vec = parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
+        let order_vec =
+            parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
         let original_tensor = make_tensor(&data, &[2, 3, 4]);
         let permuted_tensor =
             permute_tensor("ipermute", original_tensor.clone(), &order_vec).expect("permute");
@@ -336,7 +334,10 @@ pub(crate) mod tests {
             Value::Tensor(order),
         )
         .expect_err("should fail");
-        assert!(err.to_string().contains("duplicate"), "unexpected error: {err}");
+        assert!(
+            err.to_string().contains("duplicate"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -359,8 +360,10 @@ pub(crate) mod tests {
     fn ipermute_char_array_roundtrip() {
         let chars = CharArray::new("runmat".chars().collect(), 2, 3).unwrap();
         let order = make_tensor(&[2.0, 1.0], &[1, 2]);
-        let order_vec = parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
-        let permuted = permute_char_array("ipermute", chars.clone(), &order_vec).expect("permute chars");
+        let order_vec =
+            parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
+        let permuted =
+            permute_char_array("ipermute", chars.clone(), &order_vec).expect("permute chars");
         let restored = ipermute_builtin(Value::CharArray(permuted), Value::Tensor(order))
             .expect("ipermute chars");
         match restored {
@@ -384,8 +387,8 @@ pub(crate) mod tests {
                 shape: &host.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let order_vec =
-                parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
+            let order_vec = parse_order_argument("ipermute", Value::Tensor(order.clone()))
+                .expect("parse order");
             let permuted = permute_gpu("ipermute", handle, &order_vec).expect("permute gpu");
             let restored = ipermute_builtin(permuted, Value::Tensor(order)).expect("ipermute gpu");
             let gathered = test_support::gather(restored).expect("gather");
@@ -408,8 +411,10 @@ pub(crate) mod tests {
     fn ipermute_logical_array_roundtrip() {
         let logical = LogicalArray::new(vec![0, 1, 0, 1], vec![2, 2]).unwrap();
         let order = make_tensor(&[2.0, 1.0], &[1, 2]);
-        let order_vec = parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
-        let permuted = permute_logical_array("ipermute", logical.clone(), &order_vec).expect("permute logical");
+        let order_vec =
+            parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
+        let permuted = permute_logical_array("ipermute", logical.clone(), &order_vec)
+            .expect("permute logical");
         let restored = ipermute_builtin(Value::LogicalArray(permuted), Value::Tensor(order))
             .expect("ipermute logical");
         match restored {
@@ -439,9 +444,11 @@ pub(crate) mod tests {
 
         let host = make_tensor(&(0..24).map(|n| n as f64).collect::<Vec<_>>(), &[2, 3, 4]);
         let order = make_tensor(&[3.0, 1.0, 2.0], &[1, 3]);
-        let order_vec = parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
+        let order_vec =
+            parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
 
-        let permuted_tensor = permute_tensor("ipermute", host.clone(), &order_vec).expect("permute host");
+        let permuted_tensor =
+            permute_tensor("ipermute", host.clone(), &order_vec).expect("permute host");
         let permuted = tensor::tensor_into_value(permuted_tensor);
         let cpu = ipermute_builtin(permuted, Value::Tensor(order.clone())).expect("cpu ipermute");
 
@@ -474,9 +481,10 @@ pub(crate) mod tests {
         ];
         let strings = StringArray::new(data.clone(), vec![2, 2]).unwrap();
         let order = make_tensor(&[2.0, 1.0], &[1, 2]);
-        let order_vec = parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
-        let permuted =
-            permute_string_array("ipermute", strings.clone(), &order_vec).expect("permute string array");
+        let order_vec =
+            parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
+        let permuted = permute_string_array("ipermute", strings.clone(), &order_vec)
+            .expect("permute string array");
         let restored =
             ipermute_builtin(Value::StringArray(permuted), Value::Tensor(order)).expect("ipermute");
         match restored {
@@ -493,7 +501,8 @@ pub(crate) mod tests {
     fn ipermute_extends_missing_dimensions() {
         let row = make_tensor(&[1.0, 2.0, 3.0, 4.0, 5.0], &[1, 5]);
         let order = make_tensor(&[2.0, 1.0, 3.0], &[1, 3]);
-        let order_vec = parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
+        let order_vec =
+            parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
         let permuted = permute_tensor("ipermute", row.clone(), &order_vec).expect("permute");
         let restored = ipermute_builtin(tensor::tensor_into_value(permuted), Value::Tensor(order))
             .expect("ipermute");

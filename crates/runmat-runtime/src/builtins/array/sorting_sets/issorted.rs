@@ -5,13 +5,13 @@ use std::cmp::Ordering;
 use runmat_builtins::{CharArray, ComplexTensor, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -363,7 +363,9 @@ impl IssortedArgs {
                 match token.as_str() {
                     "rows" => {
                         if saw_rows {
-                            return Err(issorted_error("issorted: 'rows' specified more than once"));
+                            return Err(issorted_error(
+                                "issorted: 'rows' specified more than once",
+                            ));
                         }
                         if dim_arg.is_some() {
                             return Err(issorted_error(
@@ -469,7 +471,10 @@ impl IssortedArgs {
                 }
             }
 
-            return Err(issorted_error(format!("issorted: unrecognised argument {:?}", arg)));
+            return Err(issorted_error(format!(
+                "issorted: unrecognised argument {:?}",
+                arg
+            )));
         }
 
         if let Some(dim) = dim_arg {
@@ -487,7 +492,9 @@ impl IssortedArgs {
 
 fn ensure_unique_direction(direction: &Option<Direction>) -> crate::BuiltinResult<()> {
     if direction.is_some() {
-        Err(issorted_error("issorted: sorting direction specified more than once"))
+        Err(issorted_error(
+            "issorted: sorting direction specified more than once",
+        ))
     } else {
         Ok(())
     }
@@ -558,7 +565,9 @@ fn issorted_string(array: &StringArray, args: &IssortedArgs) -> crate::BuiltinRe
         return Ok(true);
     }
     if !matches!(args.comparison, ComparisonMethod::Auto) {
-        return Err(issorted_error("issorted: 'ComparisonMethod' is not supported for string arrays"));
+        return Err(issorted_error(
+            "issorted: 'ComparisonMethod' is not supported for string arrays",
+        ));
     }
     match args.mode {
         CheckMode::Dimension(dim) => Ok(check_string_dimension(array, dim, args)),

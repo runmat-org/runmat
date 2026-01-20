@@ -249,7 +249,9 @@ fn rcond_builtin(value: Value) -> BuiltinResult<Value> {
 fn rcond_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let (rows, cols) = matrix_dimensions_for(NAME, &handle.shape).map_err(builtin_error)?;
     if rows != cols {
-        return Err(builtin_error(format!("{NAME}: input must be a square matrix.")));
+        return Err(builtin_error(format!(
+            "{NAME}: input must be a square matrix."
+        )));
     }
 
     if rows == 0 {

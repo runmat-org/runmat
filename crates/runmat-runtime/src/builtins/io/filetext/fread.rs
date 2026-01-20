@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::{helpers::extract_scalar_string, registry};
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
@@ -261,7 +261,6 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     builder.build()
 }
 
-
 fn map_string_result<T>(result: Result<T, String>) -> BuiltinResult<T> {
     result.map_err(fread_error)
 }
@@ -354,8 +353,7 @@ pub fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadEval> {
 
     let arg_refs: Vec<&Value> = rest.iter().collect();
     let (size_arg, precision_arg, skip_arg, machine_arg, like_arg) =
-        classify_arguments(&arg_refs)
-            .map_err(|e| fread_error(format!("fread: {e}")))?;
+        classify_arguments(&arg_refs).map_err(|e| fread_error(format!("fread: {e}")))?;
 
     let size_host = size_arg.map(gather_value).transpose()?;
     let precision_host = precision_arg.map(gather_value).transpose()?;
@@ -365,8 +363,10 @@ pub fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadEval> {
     let size_spec = map_string_result(parse_size(size_host.as_ref()))?;
     let precision = map_string_result(parse_precision(precision_host.as_ref()))?;
     let skip_bytes = map_string_result(parse_skip(skip_host.as_ref()))?;
-    let machine_format =
-        map_string_result(parse_machine_format(machine_host.as_ref(), &info.machinefmt))?;
+    let machine_format = map_string_result(parse_machine_format(
+        machine_host.as_ref(),
+        &info.machinefmt,
+    ))?;
 
     let mut eval = map_string_result(read_from_handle(
         &mut file,
@@ -532,7 +532,6 @@ fn matches_keyword(value: &Value, keyword: &str) -> bool {
         .map(|text| text.eq_ignore_ascii_case(keyword))
         .unwrap_or(false)
 }
-
 
 fn is_numeric_like(value: &Value) -> bool {
     matches!(

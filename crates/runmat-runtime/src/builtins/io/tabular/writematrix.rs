@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "writematrix";
 
@@ -689,10 +689,7 @@ fn write_matrix(
     }
 
     file.flush().map_err(|err| {
-        writematrix_error_with_source(
-            format!("writematrix: failed to flush output ({err})"),
-            err,
-        )
+        writematrix_error_with_source(format!("writematrix: failed to flush output ({err})"), err)
     })?;
 
     Ok(bytes_written)

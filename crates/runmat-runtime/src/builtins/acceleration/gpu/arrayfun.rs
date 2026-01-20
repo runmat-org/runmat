@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::{
-    gather_if_needed, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeError,
+    build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
 use runmat_accelerate_api::{set_handle_logical, GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, Closure, ComplexTensor, LogicalArray, Tensor, Value};
@@ -345,8 +345,7 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<V
             return Err(arrayfun_flow("arrayfun: struct inputs are not supported"));
         }
 
-        let host_value =
-            gather_if_needed(&raw)?;
+        let host_value = gather_if_needed(&raw)?;
         let data = ArrayData::from_value(host_value)?;
         let len = data.len();
         let is_scalar = len == 1;
@@ -458,8 +457,7 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<V
             }
         };
 
-        let host_result =
-            gather_if_needed(&result)?;
+        let host_result = gather_if_needed(&result)?;
 
         if let Some(collector) = collector.as_mut() {
             collector.push(&host_result)?;
@@ -665,9 +663,11 @@ impl ArrayData {
 
     fn value_at(&self, idx: usize) -> BuiltinResult<Value> {
         match self {
-            ArrayData::Tensor(t) => Ok(Value::Num(*t.data.get(idx).ok_or_else(|| {
-                arrayfun_flow("arrayfun: index out of bounds")
-            })?)),
+            ArrayData::Tensor(t) => {
+                Ok(Value::Num(*t.data.get(idx).ok_or_else(|| {
+                    arrayfun_flow("arrayfun: index out of bounds")
+                })?))
+            }
             ArrayData::Logical(l) => Ok(Value::Bool(
                 *l.data
                     .get(idx)
@@ -1144,8 +1144,7 @@ fn linear_to_indices(mut index: usize, shape: &[usize]) -> Vec<usize> {
 
 fn dims_to_row_tensor(dims: &[usize]) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = dims.iter().map(|&d| d as f64).collect();
-    Tensor::new(data, vec![1, dims.len()])
-        .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))
+    Tensor::new(data, vec![1, dims.len()]).map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))
 }
 
 #[cfg(test)]
@@ -1476,7 +1475,11 @@ pub(crate) mod tests {
         name = "__arrayfun_test_handler",
         builtin_path = "crate::builtins::acceleration::gpu::arrayfun::tests"
     )]
-    fn arrayfun_test_handler(seed: Value, _err: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    fn arrayfun_test_handler(
+        seed: Value,
+        _err: Value,
+        rest: Vec<Value>,
+    ) -> crate::BuiltinResult<Value> {
         let _ = rest;
         Ok(seed)
     }

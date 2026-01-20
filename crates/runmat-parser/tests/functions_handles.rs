@@ -1,4 +1,7 @@
-use runmat_parser::{parse_simple as parse, BinOp, Expr, Stmt};
+use runmat_parser::{BinOp, Expr, Stmt};
+
+mod parse;
+use parse::parse;
 
 #[test]
 fn anonymous_function_and_handle_parse() {

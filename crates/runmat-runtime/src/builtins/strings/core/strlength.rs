@@ -3,11 +3,11 @@
 use runmat_builtins::{CellArray, CharArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::is_missing_string;
 use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
@@ -224,7 +224,8 @@ fn strlength_string_array(array: StringArray) -> BuiltinResult<Value> {
     for text in &data {
         lengths.push(string_scalar_length(text));
     }
-    let tensor = Tensor::new(lengths, shape).map_err(|e| strlength_flow(format!("strlength: {e}")))?;
+    let tensor =
+        Tensor::new(lengths, shape).map_err(|e| strlength_flow(format!("strlength: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -239,8 +240,8 @@ fn strlength_char_array(array: CharArray) -> BuiltinResult<Value> {
         } as f64;
         lengths.push(length);
     }
-    let tensor =
-        Tensor::new(lengths, vec![rows, 1]).map_err(|e| strlength_flow(format!("strlength: {e}")))?;
+    let tensor = Tensor::new(lengths, vec![rows, 1])
+        .map_err(|e| strlength_flow(format!("strlength: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -263,8 +264,8 @@ fn strlength_cell_array(cell: CellArray) -> BuiltinResult<Value> {
             lengths.push(length);
         }
     }
-    let tensor =
-        Tensor::new(lengths, vec![rows, cols]).map_err(|e| strlength_flow(format!("strlength: {e}")))?;
+    let tensor = Tensor::new(lengths, vec![rows, cols])
+        .map_err(|e| strlength_flow(format!("strlength: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 

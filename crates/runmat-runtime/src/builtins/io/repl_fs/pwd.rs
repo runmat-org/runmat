@@ -205,8 +205,11 @@ fn pwd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !args.is_empty() {
         return Err(pwd_error("pwd: too many input arguments"));
     }
-    let current =
-        env::current_dir().map_err(|err| pwd_error(format!("pwd: unable to determine current directory ({err})")))?;
+    let current = env::current_dir().map_err(|err| {
+        pwd_error(format!(
+            "pwd: unable to determine current directory ({err})"
+        ))
+    })?;
     emit_path_stdout(&current);
     Ok(path_to_value(&current))
 }
@@ -245,7 +248,6 @@ pub(crate) mod tests {
             let _ = env::set_current_dir(&self.original);
         }
     }
-
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

@@ -3,13 +3,13 @@
 use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -241,14 +241,12 @@ fn isfinite_host(value: Value) -> BuiltinResult<Value> {
         Value::CharArray(array) => logical_full(BUILTIN_NAME, vec![array.rows, array.cols], true),
         Value::String(_) => Ok(Value::Bool(false)),
         Value::StringArray(array) => logical_full(BUILTIN_NAME, array.shape, false),
-        _ => Err(
-            build_runtime_error(format!(
-                "{BUILTIN_NAME}: expected numeric, logical, char, or string input"
-            ))
-            .with_identifier(IDENTIFIER_INVALID_INPUT)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-        ),
+        _ => Err(build_runtime_error(format!(
+            "{BUILTIN_NAME}: expected numeric, logical, char, or string input"
+        ))
+        .with_identifier(IDENTIFIER_INVALID_INPUT)
+        .with_builtin(BUILTIN_NAME)
+        .build()),
     }
 }
 
@@ -537,5 +535,4 @@ pub(crate) mod tests {
             other => panic!("unexpected results {other:?}"),
         }
     }
-
 }

@@ -10,8 +10,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::io::filetext::{helpers::{char_array_value, extract_scalar_string, normalize_encoding_label}, registry::{self, FileInfo, RegisteredFile}};
-use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::builtins::io::filetext::{
+    helpers::{char_array_value, extract_scalar_string, normalize_encoding_label},
+    registry::{self, FileInfo, RegisteredFile},
+};
+use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
 use runmat_filesystem::OpenOptions;
 
 #[cfg_attr(
@@ -387,8 +390,7 @@ impl ListOutputs {
             handles = Vec::new();
         }
         let shape = if rows == 0 { vec![0, 1] } else { vec![rows, 1] };
-        let tensor = Tensor::new(handles, shape)
-            .map_err(|e| fopen_error(format!("fopen: {e}")))?;
+        let tensor = Tensor::new(handles, shape).map_err(|e| fopen_error(format!("fopen: {e}")))?;
 
         let mut name_values = Vec::with_capacity(infos.len());
         let mut machine_values = Vec::with_capacity(infos.len());
@@ -763,14 +765,11 @@ fn scalar_string(value: &Value, err: &str) -> BuiltinResult<String> {
 fn make_cell_column(values: Vec<Value>) -> BuiltinResult<Value> {
     let len = values.len();
     if len == 0 {
-        make_cell(values, 0, 0)
-            .map_err(|err| fopen_error(format!("fopen: {err}")))
+        make_cell(values, 0, 0).map_err(|err| fopen_error(format!("fopen: {err}")))
     } else {
-        make_cell(values, len, 1)
-            .map_err(|err| fopen_error(format!("fopen: {err}")))
+        make_cell(values, len, 1).map_err(|err| fopen_error(format!("fopen: {err}")))
     }
 }
-
 
 #[cfg(test)]
 pub(crate) mod tests {

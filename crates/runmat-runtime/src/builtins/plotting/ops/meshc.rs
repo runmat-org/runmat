@@ -68,7 +68,12 @@ tested:
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::meshc"
 )]
-pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
+pub fn meshc_builtin(
+    x: Tensor,
+    y: Tensor,
+    z: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<String> {
     let x_axis = numeric_vector(x);
     let y_axis = numeric_vector(y);
     let mut x_axis = Some(x_axis);

@@ -305,7 +305,9 @@ pub(crate) mod tests {
         reset_stopwatch();
         tic_builtin().expect("tic");
         assert!(take_latest_start(BUILTIN_NAME).expect("take").is_some());
-        assert!(take_latest_start(BUILTIN_NAME).expect("second take").is_none());
+        assert!(take_latest_start(BUILTIN_NAME)
+            .expect("second take")
+            .is_none());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

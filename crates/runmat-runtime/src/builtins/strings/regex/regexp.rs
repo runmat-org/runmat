@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -378,17 +378,13 @@ impl RegexpOptions {
                     let policy = rest.get(idx).ok_or_else(|| {
                         runtime_error_for(
                             builtin,
-                            format!(
-                                "{builtin}: expected 'allow' or 'remove' after 'emptymatch'"
-                            ),
+                            format!("{builtin}: expected 'allow' or 'remove' after 'emptymatch'"),
                         )
                     })?;
                     let policy_str = value_to_lower_string(policy).ok_or_else(|| {
                         runtime_error_for(
                             builtin,
-                            format!(
-                                "{builtin}: expected 'allow' or 'remove' after 'emptymatch'"
-                            ),
+                            format!("{builtin}: expected 'allow' or 'remove' after 'emptymatch'"),
                         )
                     })?;
                     idx += 1;
@@ -704,7 +700,12 @@ impl RegexpEvaluation {
         })
     }
 
-    fn make_cell_value(&self, values: Vec<Value>, rows: usize, cols: usize) -> BuiltinResult<Value> {
+    fn make_cell_value(
+        &self,
+        values: Vec<Value>,
+        rows: usize,
+        cols: usize,
+    ) -> BuiltinResult<Value> {
         let builtin = self.builtin;
         make_cell(values, rows, cols)
             .map_err(|err| runtime_error_for(builtin, format!("{builtin}: {err}")))

@@ -6,7 +6,9 @@ pub use runtime_error::{runtime_error, ErrorContext, RuntimeError, RuntimeErrorB
 /// Narrow set of interaction kinds used for host I/O hooks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InteractionKind {
-    Line { echo: bool },
+    Line {
+        echo: bool,
+    },
     KeyPress,
     /// Internal suspension used while waiting for a WebGPU map/readback completion.
     /// The prompt/label carries debug info.
@@ -36,5 +38,3 @@ impl SuspendMarker {
         }
     }
 }
-
-

@@ -245,7 +245,9 @@ fn handle_message_arguments(first: Value, rest: Vec<Value>) -> crate::BuiltinRes
     Err(error_flow(&identifier, message))
 }
 
-fn extract_struct_error_fields(struct_value: &StructValue) -> crate::BuiltinResult<(String, String)> {
+fn extract_struct_error_fields(
+    struct_value: &StructValue,
+) -> crate::BuiltinResult<(String, String)> {
     let identifier_value = struct_value
         .fields
         .get("identifier")
@@ -273,8 +275,7 @@ fn extract_struct_error_fields(struct_value: &StructValue) -> crate::BuiltinResu
 }
 
 fn value_to_string(context: &str, value: &Value) -> crate::BuiltinResult<String> {
-    String::try_from(value)
-        .map_err(|e| error_flow(DEFAULT_IDENTIFIER, format!("{context}: {e}")))
+    String::try_from(value).map_err(|e| error_flow(DEFAULT_IDENTIFIER, format!("{context}: {e}")))
 }
 
 fn normalize_identifier(raw: &str) -> String {
@@ -328,7 +329,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn default_identifier_is_applied() {
-        let err = unwrap_error(error_builtin(vec![Value::from("Failure!")]).expect_err("should error"));
+        let err =
+            unwrap_error(error_builtin(vec![Value::from("Failure!")]).expect_err("should error"));
         assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
         assert_eq!(err.message(), "Failure!");
     }
@@ -352,8 +354,11 @@ pub(crate) mod tests {
     #[test]
     fn identifier_is_normalised_when_namespace_missing() {
         let err = unwrap_error(
-            error_builtin(vec![Value::from("missingNamespace"), Value::from("Message")])
-                .expect_err("should error"),
+            error_builtin(vec![
+                Value::from("missingNamespace"),
+                Value::from("Message"),
+            ])
+            .expect_err("should error"),
         );
         assert_eq!(err.identifier(), Some("MATLAB:missingNamespace"));
         assert_eq!(err.message(), "Message");
@@ -363,8 +368,11 @@ pub(crate) mod tests {
     #[test]
     fn format_string_with_colon_not_treated_as_identifier() {
         let err = unwrap_error(
-            error_builtin(vec![Value::from("Value: %d."), Value::Int(IntValue::I32(7))])
-                .expect_err("should error"),
+            error_builtin(vec![
+                Value::from("Value: %d."),
+                Value::Int(IntValue::I32(7)),
+            ])
+            .expect_err("should error"),
         );
         assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
         assert_eq!(err.message(), "Value: 7.");
@@ -374,7 +382,8 @@ pub(crate) mod tests {
     #[test]
     fn error_accepts_mexception() {
         let mex = MException::new("MATLAB:demo:test".to_string(), "broken".to_string());
-        let err = unwrap_error(error_builtin(vec![Value::MException(mex)]).expect_err("should error"));
+        let err =
+            unwrap_error(error_builtin(vec![Value::MException(mex)]).expect_err("should error"));
         assert_eq!(err.identifier(), Some("MATLAB:demo:test"));
         assert_eq!(err.message(), "broken");
     }

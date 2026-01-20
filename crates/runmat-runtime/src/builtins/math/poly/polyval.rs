@@ -690,7 +690,9 @@ fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
             },
             false,
         )),
-        other => Err(polyval_error(format!("polyval: X must be numeric, got {other:?}"))),
+        other => Err(polyval_error(format!(
+            "polyval: X must be numeric, got {other:?}"
+        ))),
     }
 }
 
@@ -702,26 +704,30 @@ fn parse_mu(value: Value) -> BuiltinResult<Mu> {
         }
         Value::Tensor(tensor) => {
             if tensor.data.len() < 2 {
-                return Err(polyval_error("polyval: mu must contain at least two elements"));
+                return Err(polyval_error(
+                    "polyval: mu must contain at least two elements",
+                ));
             }
             Mu::new(tensor.data[0], tensor.data[1])
         }
         Value::LogicalArray(array) => {
             if array.data.len() < 2 {
-                return Err(polyval_error("polyval: mu must contain at least two elements"));
+                return Err(polyval_error(
+                    "polyval: mu must contain at least two elements",
+                ));
             }
             let mean = if array.data[0] != 0 { 1.0 } else { 0.0 };
             let scale = if array.data[1] != 0 { 1.0 } else { 0.0 };
             Mu::new(mean, scale)
         }
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => {
-            Err(polyval_error(
-                "polyval: mu must be a numeric vector with at least two values",
-            ))
-        }
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Err(
+            polyval_error("polyval: mu must be a numeric vector with at least two values"),
+        ),
         Value::ComplexTensor(tensor) => {
             if tensor.data.len() < 2 {
-                return Err(polyval_error("polyval: mu must contain at least two elements"));
+                return Err(polyval_error(
+                    "polyval: mu must contain at least two elements",
+                ));
             }
             let (mean_re, mean_im) = tensor.data[0];
             let (scale_re, scale_im) = tensor.data[1];
@@ -869,7 +875,9 @@ fn scalar_to_f64(value: Value, context: &str) -> BuiltinResult<f64> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err(polyval_error(format!("{context} must be real-valued")))
         }
-        other => Err(polyval_error(format!("{context} must be a scalar, got {other:?}"))),
+        other => Err(polyval_error(format!(
+            "{context} must be a scalar, got {other:?}"
+        ))),
     }
 }
 
@@ -933,7 +941,9 @@ fn vandermonde_row(x: Complex64, len: usize) -> Vec<Complex64> {
 fn solve_row_against_upper(row: &[Complex64], matrix: &Matrix) -> BuiltinResult<Vec<Complex64>> {
     let n = row.len();
     if matrix.rows != n || matrix.cols != n {
-        return Err(polyval_error("polyval: size of S.R must match the coefficient vector"));
+        return Err(polyval_error(
+            "polyval: size of S.R must match the coefficient vector",
+        ));
     }
     let mut result = vec![Complex64::new(0.0, 0.0); n];
     for j in (0..n).rev() {
@@ -1008,7 +1018,9 @@ fn ensure_vector_shape(name: &str, shape: &[usize]) -> BuiltinResult<()> {
 
 fn ensure_vector_data_shape(name: &str, shape: &[usize]) -> BuiltinResult<()> {
     if !is_vector_shape(shape) {
-        Err(polyval_error(format!("{name}: inputs must be vectors or scalars")))
+        Err(polyval_error(format!(
+            "{name}: inputs must be vectors or scalars"
+        )))
     } else {
         Ok(())
     }

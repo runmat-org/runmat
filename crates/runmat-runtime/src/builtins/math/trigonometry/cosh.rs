@@ -253,8 +253,7 @@ fn cosh_real(value: Value) -> BuiltinResult<Value> {
 
 fn cosh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.cosh()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
-        .map_err(|e| runtime_error_for(format!("cosh: {e}")))
+    Tensor::new(data, tensor.shape.clone()).map_err(|e| runtime_error_for(format!("cosh: {e}")))
 }
 
 fn cosh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {

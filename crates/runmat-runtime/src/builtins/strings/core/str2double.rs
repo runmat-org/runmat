@@ -5,11 +5,11 @@ use std::borrow::Cow;
 use runmat_builtins::{CellArray, CharArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 

@@ -8,7 +8,6 @@ const NAME: &str = "prod";
 
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -16,6 +15,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -205,7 +205,6 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may specialise reduce_prod_dim / reduce_prod. Requests using 'omitnan', multi-axis reductions, or class coercions fall back to the host implementation.",
 };
 
-
 fn prod_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
 }
@@ -255,7 +254,9 @@ fn prod_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
             return Err(prod_error("prod: complex inputs are not yet supported"));
         }
         other => {
-            return Err(prod_error(format!("prod: unsupported input value {other:?}")));
+            return Err(prod_error(format!(
+                "prod: unsupported input value {other:?}"
+            )));
         }
     };
     apply_output_template(raw_result, &parsed.output, &input_meta)
@@ -381,11 +382,15 @@ impl IntClass {
 
     fn to_value(self, scalar: f64) -> BuiltinResult<Value> {
         if scalar.is_nan() {
-            return Err(prod_error("prod: cannot represent NaN as an integer output"));
+            return Err(prod_error(
+                "prod: cannot represent NaN as an integer output",
+            ));
         }
         let rounded = scalar.round();
         if !rounded.is_finite() {
-            return Err(prod_error("prod: integer output overflowed the target type"));
+            return Err(prod_error(
+                "prod: integer output overflowed the target type",
+            ));
         }
         Ok(match self {
             IntClass::I8 => Value::Int(IntValue::I8(rounded as i8)),
@@ -521,7 +526,9 @@ fn parse_dimension_spec(value: &Value) -> BuiltinResult<Option<DimSelection>> {
             let tensor = tensor::logical_to_tensor(logical).map_err(prod_error)?;
             parse_dimension_tensor(&tensor)
         }
-        Value::GpuTensor(_) => Err(prod_error("prod: dimension arguments must reside on the host")),
+        Value::GpuTensor(_) => Err(prod_error(
+            "prod: dimension arguments must reside on the host",
+        )),
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Ok(None),
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(None),
         _ => Ok(None),
@@ -533,7 +540,9 @@ fn parse_dimension_tensor(tensor: &Tensor) -> BuiltinResult<Option<DimSelection>
         return Ok(Some(DimSelection::Auto));
     }
     if !is_vector_shape(&tensor.shape) {
-        return Err(prod_error("prod: dimension vector must be a row or column vector"));
+        return Err(prod_error(
+            "prod: dimension vector must be a row or column vector",
+        ));
     }
     let mut dims = Vec::with_capacity(tensor.data.len());
     for &v in &tensor.data {
@@ -555,8 +564,6 @@ fn parse_dimension_tensor(tensor: &Tensor) -> BuiltinResult<Option<DimSelection>
         Ok(Some(DimSelection::Vec(dims)))
     }
 }
-
-
 
 fn is_vector_shape(shape: &[usize]) -> bool {
     match shape.len() {
@@ -831,8 +838,8 @@ fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Val
                 Ok(Value::Tensor(tensor))
             }
             Value::LogicalArray(logical) => {
-                let tensor =
-                    tensor::logical_to_tensor(&logical).map_err(|e| prod_error(format!("{NAME}: {e}")))?;
+                let tensor = tensor::logical_to_tensor(&logical)
+                    .map_err(|e| prod_error(format!("{NAME}: {e}")))?;
                 let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
                 Ok(Value::Tensor(tensor))
             }
@@ -874,22 +881,26 @@ fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value>
             Value::GpuTensor(_) => Ok(value),
             Value::Tensor(t) => upload_tensor(t),
             Value::Num(n) => {
-                let tensor =
-                    Tensor::new(vec![n], vec![1, 1]).map_err(|e| prod_error(format!("prod: {e}")))?;
+                let tensor = Tensor::new(vec![n], vec![1, 1])
+                    .map_err(|e| prod_error(format!("prod: {e}")))?;
                 upload_tensor(tensor)
             }
             Value::LogicalArray(logical) => {
                 let tensor = tensor::logical_to_tensor(&logical).map_err(prod_error)?;
                 upload_tensor(tensor)
             }
-            other => Err(prod_error(format!("prod: cannot place value {other:?} on the GPU"))),
+            other => Err(prod_error(format!(
+                "prod: cannot place value {other:?} on the GPU"
+            ))),
         },
     }
 }
 
 fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(prod_error("prod: no acceleration provider available to honour GPU output"));
+        return Err(prod_error(
+            "prod: no acceleration provider available to honour GPU output",
+        ));
     };
 
     let view = HostTensorView {

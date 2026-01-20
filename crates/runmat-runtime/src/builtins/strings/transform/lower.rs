@@ -3,11 +3,11 @@
 use runmat_builtins::{CellArray, CharArray, StringArray, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, lowercase_preserving_missing};
 use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
 
@@ -239,7 +239,8 @@ fn lower_string_array(array: StringArray) -> BuiltinResult<Value> {
         .into_iter()
         .map(lowercase_preserving_missing)
         .collect::<Vec<_>>();
-    let lowered_array = StringArray::new(lowered, shape).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+    let lowered_array = StringArray::new(lowered, shape)
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
     Ok(Value::StringArray(lowered_array))
 }
 
@@ -284,7 +285,8 @@ fn lower_cell_array(cell: CellArray) -> BuiltinResult<Value> {
             lowered_values.push(lowered);
         }
     }
-    make_cell(lowered_values, rows, cols).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+    make_cell(lowered_values, rows, cols)
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
 fn lower_cell_element(value: &Value) -> BuiltinResult<Value> {

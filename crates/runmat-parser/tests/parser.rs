@@ -1,9 +1,9 @@
-use runmat_parser::{
-    parse_simple as parse, Attr, BinOp, ClassMember, Expr, LValue, Program, Span, Stmt, UnOp,
-};
+use runmat_parser::{Attr, BinOp, ClassMember, Expr, LValue, Program, Span, Stmt, UnOp};
 
+mod parse;
 mod support;
 mod support_extra;
+use parse::parse;
 use support::{binary_boxed, expr_stmt, func_call, ident, num, tensor};
 use support_extra::{assign, range, span_value, string, unary_boxed};
 
@@ -60,7 +60,9 @@ fn strip_stmt(stmt: &Stmt) -> Stmt {
             body: body.iter().map(strip_stmt).collect(),
             span: Span::default(),
         },
-        Stmt::For { var, expr, body, .. } => Stmt::For {
+        Stmt::For {
+            var, expr, body, ..
+        } => Stmt::For {
             var: var.clone(),
             expr: strip_expr(expr),
             body: body.iter().map(strip_stmt).collect(),
@@ -169,11 +171,9 @@ fn strip_expr(expr: &Expr) -> Expr {
             args.iter().map(strip_expr).collect(),
             Span::default(),
         ),
-        Expr::Member(base, name, _) => Expr::Member(
-            Box::new(strip_expr(base)),
-            name.clone(),
-            Span::default(),
-        ),
+        Expr::Member(base, name, _) => {
+            Expr::Member(Box::new(strip_expr(base)), name.clone(), Span::default())
+        }
         Expr::MemberDynamic(base, name_expr, _) => Expr::MemberDynamic(
             Box::new(strip_expr(base)),
             Box::new(strip_expr(name_expr)),
@@ -198,13 +198,10 @@ fn strip_expr(expr: &Expr) -> Expr {
 fn strip_lvalue(lvalue: &LValue) -> LValue {
     match lvalue {
         LValue::Var(name) => LValue::Var(name.clone()),
-        LValue::Member(base, name) => {
-            LValue::Member(Box::new(strip_expr(base)), name.clone())
+        LValue::Member(base, name) => LValue::Member(Box::new(strip_expr(base)), name.clone()),
+        LValue::MemberDynamic(base, name_expr) => {
+            LValue::MemberDynamic(Box::new(strip_expr(base)), Box::new(strip_expr(name_expr)))
         }
-        LValue::MemberDynamic(base, name_expr) => LValue::MemberDynamic(
-            Box::new(strip_expr(base)),
-            Box::new(strip_expr(name_expr)),
-        ),
         LValue::Index(base, indices) => LValue::Index(
             Box::new(strip_expr(base)),
             indices.iter().map(strip_expr).collect(),
@@ -270,12 +267,12 @@ fn parse_expression() {
                     Box::new(binary_boxed(
                         Box::new(num("2".to_string())),
                         BinOp::Mul,
-                        Box::new(num("3".to_string()))
-                    ))
+                        Box::new(num("3".to_string())),
+                    )),
                 ),
-                false
-            )]
-        }
+                false,
+            )],
+        },
     );
 }
 
@@ -290,11 +287,11 @@ fn parse_assignment() {
                 binary_boxed(
                     Box::new(num("4".to_string())),
                     BinOp::Add,
-                    Box::new(num("5".to_string()))
+                    Box::new(num("5".to_string())),
                 ),
-                true // Semicolon suppresses display even at EOF
-            )]
-        }
+                true, // Semicolon suppresses display even at EOF
+            )],
+        },
     );
 }
 
@@ -309,14 +306,14 @@ fn precedence_and_associativity() {
                     Box::new(binary_boxed(
                         Box::new(num("1".to_string())),
                         BinOp::Sub,
-                        Box::new(num("2".to_string()))
+                        Box::new(num("2".to_string())),
                     )),
                     BinOp::Sub,
-                    Box::new(num("3".to_string()))
+                    Box::new(num("3".to_string())),
                 ),
-                false
-            )]
-        }
+                false,
+            )],
+        },
     );
 }
 
@@ -333,12 +330,12 @@ fn parentheses_override_precedence() {
                     Box::new(binary_boxed(
                         Box::new(num("2".to_string())),
                         BinOp::Add,
-                        Box::new(num("3".to_string()))
-                    ))
+                        Box::new(num("3".to_string())),
+                    )),
                 ),
-                false
-            )]
-        }
+                false,
+            )],
+        },
     );
 }
 
@@ -350,9 +347,9 @@ fn multiple_statements() {
         Program {
             body: vec![
                 assign("x".to_string(), num("1".to_string()), true), // Has semicolon
-                assign("y".to_string(), num("2".to_string()), true)  // Has semicolon
-            ]
-        }
+                assign("y".to_string(), num("2".to_string()), true), // Has semicolon
+            ],
+        },
     );
 }
 
@@ -366,11 +363,11 @@ fn trailing_semicolon_is_allowed() {
                 binary_boxed(
                     Box::new(num("1".to_string())),
                     BinOp::Add,
-                    Box::new(num("2".to_string()))
+                    Box::new(num("2".to_string())),
                 ),
-                true
-            )] // true because it has a semicolon (suppressed output)
-        }
+                true,
+            )], // true because it has a semicolon (suppressed output)
+        },
     );
 }
 
@@ -444,12 +441,12 @@ fn power_is_right_associative() {
                     Box::new(binary_boxed(
                         Box::new(num("3".to_string())),
                         BinOp::Pow,
-                        Box::new(num("2".to_string()))
-                    ))
+                        Box::new(num("2".to_string())),
+                    )),
                 ),
-                false
-            )]
-        }
+                false,
+            )],
+        },
     );
 }
 
@@ -463,11 +460,11 @@ fn unary_minus_precedence() {
                 binary_boxed(
                     Box::new(unary_boxed(UnOp::Minus, Box::new(num("1".to_string())))),
                     BinOp::Add,
-                    Box::new(num("2".to_string()))
+                    Box::new(num("2".to_string())),
                 ),
-                false
-            )]
-        }
+                false,
+            )],
+        },
     );
 }
 
@@ -483,12 +480,12 @@ fn unary_minus_with_power() {
                     Box::new(binary_boxed(
                         Box::new(num("2".to_string())),
                         BinOp::Pow,
-                        Box::new(num("2".to_string()))
-                    ))
+                        Box::new(num("2".to_string())),
+                    )),
                 ),
-                false
-            )]
-        }
+                false,
+            )],
+        },
     );
 }
 
@@ -503,9 +500,9 @@ fn parse_simple_matrix() {
                     vec![num("1".to_string()), num("2".to_string())],
                     vec![num("3".to_string()), num("4".to_string())],
                 ]),
-                false
-            )]
-        }
+                false,
+            )],
+        },
     );
 }
 
@@ -515,8 +512,8 @@ fn parse_empty_matrix() {
     assert_program_eq(
         program,
         Program {
-            body: vec![expr_stmt(tensor(vec![]), false)]
-        }
+            body: vec![expr_stmt(tensor(vec![]), false)],
+        },
     );
 }
 
@@ -531,17 +528,17 @@ fn matrix_with_expressions() {
                     binary_boxed(
                         Box::new(num("1".to_string())),
                         BinOp::Add,
-                        Box::new(num("2".to_string()))
+                        Box::new(num("2".to_string())),
                     ),
                     binary_boxed(
                         Box::new(num("3".to_string())),
                         BinOp::Mul,
-                        Box::new(num("4".to_string()))
+                        Box::new(num("4".to_string())),
                     ),
                 ]]),
-                false
-            )]
-        }
+                false,
+            )],
+        },
     );
 }
 
@@ -554,14 +551,11 @@ fn nested_matrix_literal() {
             body: vec![expr_stmt(
                 tensor(vec![vec![
                     num("1".to_string()),
-                    tensor(vec![vec![
-                        num("2".to_string()),
-                        num("3".to_string())
-                    ]])
-                ],]),
-                false
-            )]
-        }
+                    tensor(vec![vec![num("2".to_string()), num("3".to_string())]]),
+                ]]),
+                false,
+            )],
+        },
     );
 }
 
@@ -629,9 +623,9 @@ fn left_division_operator() {
                     BinOp::LeftDiv,
                     Box::new(num("2".to_string())),
                 ),
-                false
-            )]
-        }
+                false,
+            )],
+        },
     );
 }
 
@@ -647,9 +641,9 @@ fn elementwise_power_operator() {
                     BinOp::ElemPow,
                     Box::new(num("2".to_string())),
                 ),
-                false
-            )]
-        }
+                false,
+            )],
+        },
     );
 }
 
@@ -663,14 +657,10 @@ fn parse_if_else_statement() {
                 cond: ident("x".to_string()),
                 then_body: vec![assign("y".to_string(), num("1".to_string()), false)],
                 elseif_blocks: vec![],
-                else_body: Some(vec![assign(
-                    "y".to_string(),
-                    num("2".to_string()),
-                    false
-                )]),
+                else_body: Some(vec![assign("y".to_string(), num("2".to_string()), false)]),
                 span: span_value(),
-            }]
-        }
+            }],
+        },
     );
 }
 
@@ -689,8 +679,8 @@ fn parse_for_loop() {
                 ),
                 body: vec![assign("x".to_string(), ident("i".to_string()), false)],
                 span: span_value(),
-            }]
-        }
+            }],
+        },
     );
 }
 
@@ -711,11 +701,11 @@ fn parse_function_definition() {
                         BinOp::Add,
                         Box::new(num("1".to_string())),
                     ),
-                    false
+                    false,
                 )],
                 span: span_value(),
-            }]
-        }
+            }],
+        },
     );
 }
 
@@ -730,11 +720,11 @@ fn parse_array_indexing() {
             body: vec![expr_stmt(
                 func_call(
                     "A".to_string(),
-                    vec![num("1".to_string()), num("2".to_string()),]
+                    vec![num("1".to_string()), num("2".to_string())],
                 ),
-                false
-            )]
-        }
+                false,
+            )],
+        },
     );
 }
 
@@ -744,8 +734,8 @@ fn parse_string_literal() {
     assert_program_eq(
         program,
         Program {
-            body: vec![expr_stmt(string("'hello world'".to_string()), false)]
-        }
+            body: vec![expr_stmt(string("'hello world'".to_string()), false)],
+        },
     );
 }
 
@@ -757,9 +747,9 @@ fn parse_function_call_with_string() {
         Program {
             body: vec![expr_stmt(
                 func_call("fprintf".to_string(), vec![string("'test'".to_string())]),
-                false
-            )]
-        }
+                false,
+            )],
+        },
     );
 }
 

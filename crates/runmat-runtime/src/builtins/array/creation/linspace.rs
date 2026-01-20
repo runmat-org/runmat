@@ -5,13 +5,13 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::build_runtime_error;
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -198,7 +198,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message).with_builtin("linspace").build()
+    build_runtime_error(message)
+        .with_builtin("linspace")
+        .build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::linspace")]
@@ -285,9 +287,9 @@ fn parse_scalar_host(name: &str, value: Value) -> crate::BuiltinResult<(Scalar, 
         Value::Tensor(t) => tensor_scalar(name, &t).map(|scalar| (scalar, false)),
         Value::ComplexTensor(t) => complex_tensor_scalar(name, &t).map(|scalar| (scalar, false)),
         Value::GpuTensor(_) => unreachable!("GpuTensor handled by parse_scalar"),
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(builtin_error(format!(
-            "{name}: endpoints must be numeric scalars; received a string-like value"
-        ))),
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(builtin_error(
+            format!("{name}: endpoints must be numeric scalars; received a string-like value"),
+        )),
         other => Err(builtin_error(format!(
             "{name}: endpoints must be numeric scalars; received {other:?}"
         ))),
@@ -354,7 +356,9 @@ fn parse_numeric_count(raw: f64) -> crate::BuiltinResult<usize> {
     }
     let rounded = raw.round();
     if (rounded - raw).abs() > f64::EPSILON {
-        return Err(builtin_error("linspace: number of points must be an integer"));
+        return Err(builtin_error(
+            "linspace: number of points must be an integer",
+        ));
     }
     if rounded < 0.0 {
         return Err(builtin_error("linspace: number of points must be >= 0"));

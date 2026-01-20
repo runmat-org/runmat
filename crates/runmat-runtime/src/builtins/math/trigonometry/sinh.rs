@@ -246,8 +246,7 @@ fn sinh_real(value: Value) -> BuiltinResult<Value> {
 
 fn sinh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.sinh()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
-        .map_err(|e| runtime_error_for(format!("sinh: {e}")))
+    Tensor::new(data, tensor.shape.clone()).map_err(|e| runtime_error_for(format!("sinh: {e}")))
 }
 
 fn sinh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {

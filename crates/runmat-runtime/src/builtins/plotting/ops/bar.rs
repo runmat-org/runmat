@@ -436,8 +436,8 @@ impl BarInput {
 
 fn gather_tensor_from_gpu(handle: GpuTensorHandle, context: &'static str) -> BuiltinResult<Tensor> {
     let value = Value::GpuTensor(handle);
-    let gathered = gather_if_needed(&value)
-        .map_err(|flow| map_control_flow_with_builtin(flow, context))?;
+    let gathered =
+        gather_if_needed(&value).map_err(|flow| map_control_flow_with_builtin(flow, context))?;
     Tensor::try_from(&gathered).map_err(|e| bar_err(format!("{context}: {e}")))
 }
 
@@ -550,8 +550,8 @@ fn build_bar_series_from_matrix(
         for row in 0..matrix.rows {
             values.push(matrix.value(row, col));
         }
-        let mut chart =
-            BarChart::new(labels.clone(), values.clone()).map_err(|err| bar_err(format!("bar: {err}")))?;
+        let mut chart = BarChart::new(labels.clone(), values.clone())
+            .map_err(|err| bar_err(format!("bar: {err}")))?;
         if style.layout == BarLayout::Stacked {
             let offsets = compute_stack_offsets(&values, &mut pos_offsets, &mut neg_offsets);
             chart = chart.with_stack_offsets(offsets).with_group(0, 1);

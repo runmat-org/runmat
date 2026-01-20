@@ -231,7 +231,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "filter";
 
 fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build()
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(
@@ -321,8 +323,7 @@ impl FilterArgs {
         let signal = SignalInput::from_value(x)?;
 
         let dim = if let Some(dim_val) = dim_value {
-            tensor::parse_dimension(&dim_val, "filter")
-                .map_err(|err| runtime_error_for(err))?
+            tensor::parse_dimension(&dim_val, "filter").map_err(|err| runtime_error_for(err))?
         } else {
             default_dimension_from_shape(&signal.shape)
         };
@@ -689,9 +690,8 @@ impl InitialState {
                 None,
             ),
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical).map_err(|e| {
-                    runtime_error_for(format!("{name}: initial conditions: {e}"))
-                })?;
+                let tensor = tensor::logical_to_tensor(&logical)
+                    .map_err(|e| runtime_error_for(format!("{name}: initial conditions: {e}")))?;
                 (
                     tensor
                         .data
@@ -807,11 +807,11 @@ fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluation>> 
         data: &b_real,
         shape: &b_shape,
     };
-    let b_handle = provider
-        .upload(&view_b)
-        .map_err(|e| runtime_error_for(format!(
+    let b_handle = provider.upload(&view_b).map_err(|e| {
+        runtime_error_for(format!(
             "filter: failed to upload numerator coefficients: {e}"
-        )))?;
+        ))
+    })?;
     temp_handles.push(b_handle.clone());
 
     let a_shape = vec![args.coeffs_a.len, 1];
@@ -819,11 +819,11 @@ fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluation>> 
         data: &a_real,
         shape: &a_shape,
     };
-    let a_handle = provider
-        .upload(&view_a)
-        .map_err(|e| runtime_error_for(format!(
+    let a_handle = provider.upload(&view_a).map_err(|e| {
+        runtime_error_for(format!(
             "filter: failed to upload denominator coefficients: {e}"
-        )))?;
+        ))
+    })?;
     temp_handles.push(a_handle.clone());
 
     let (zi_handle_opt, zi_temp) = if args.state_len == 0 || !args.initial.provided {
@@ -842,14 +842,10 @@ fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluation>> 
             data: &zi_real,
             shape: &args.initial.shape,
         };
-        let handle = provider
-            .upload(&view)
-            .map_err(|e| {
-                cleanup_temp_handles(provider, temp_handles.clone());
-                runtime_error_for(format!(
-                    "filter: failed to upload initial conditions: {e}"
-                ))
-            })?;
+        let handle = provider.upload(&view).map_err(|e| {
+            cleanup_temp_handles(provider, temp_handles.clone());
+            runtime_error_for(format!("filter: failed to upload initial conditions: {e}"))
+        })?;
         (Some(handle.clone()), Some(handle))
     };
 
@@ -1025,8 +1021,8 @@ fn filter_host(args: &FilterArgs) -> BuiltinResult<FilterEvaluation> {
         }
     } else {
         let data: Vec<f64> = output.iter().map(|c| c.re).collect();
-        let tensor =
-            Tensor::new(data, args.signal.shape.clone()).map_err(|e| runtime_error_for(format!("filter: {e}")))?;
+        let tensor = Tensor::new(data, args.signal.shape.clone())
+            .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
         tensor::tensor_into_value(tensor)
     };
 
@@ -1048,8 +1044,8 @@ fn filter_host(args: &FilterArgs) -> BuiltinResult<FilterEvaluation> {
         }
     } else {
         let data: Vec<f64> = final_states_column.iter().map(|c| c.re).collect();
-        let tensor =
-            Tensor::new(data, args.state_shape.clone()).map_err(|e| runtime_error_for(format!("filter: {e}")))?;
+        let tensor = Tensor::new(data, args.state_shape.clone())
+            .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
         tensor::tensor_into_value(tensor)
     };
 

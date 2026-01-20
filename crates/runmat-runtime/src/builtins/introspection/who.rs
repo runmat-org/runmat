@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::io::mat::load::read_mat_file_for_builtin;
-use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -242,8 +242,7 @@ fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         cells.push(Value::String(name));
     }
     let rows = cells.len();
-    make_cell(cells, rows, 1)
-        .map_err(|err| build_runtime_error(err).with_builtin("who").build())
+    make_cell(cells, rows, 1).map_err(|err| build_runtime_error(err).with_builtin("who").build())
 }
 
 #[derive(Debug)]
@@ -404,9 +403,8 @@ fn contains_wildcards(text: &str) -> bool {
 }
 
 fn parse_file_path(value: &Value) -> BuiltinResult<PathBuf> {
-    let text = value_to_string_scalar(value).ok_or_else(|| {
-        who_error("who: filename must be a character vector or string scalar")
-    })?;
+    let text = value_to_string_scalar(value)
+        .ok_or_else(|| who_error("who: filename must be a character vector or string scalar"))?;
     let mut path = PathBuf::from(text);
     if path.extension().is_none() {
         path.set_extension("mat");

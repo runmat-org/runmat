@@ -7,7 +7,7 @@ pub mod gc_roots;
 pub mod instr;
 pub mod vm;
 
-pub use bytecode::{compile, compile_with_functions};
+pub use bytecode::compile;
 pub use functions::{Bytecode, ExecutionContext, UserFunction};
 pub use instr::Instr;
 pub use vm::{
@@ -15,10 +15,11 @@ pub use vm::{
     InterpreterOutcome, InterpreterState, PendingWorkspaceGuard,
 };
 
+use miette::{SourceOffset, SourceSpan};
 use runmat_builtins::Value;
 use runmat_hir::{HirProgram, SemanticError, Span};
-use miette::{SourceOffset, SourceSpan};
 use runmat_runtime::{build_runtime_error, RuntimeError};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct CompileError {
@@ -95,6 +96,7 @@ impl From<CompileError> for RuntimeError {
 }
 
 pub async fn execute(program: &HirProgram) -> Result<Vec<Value>, RuntimeError> {
-    let bc = compile(program).map_err(|err| build_runtime_error(err.message).build())?;
+    let bc = compile(program, &HashMap::new())
+        .map_err(|err| build_runtime_error(err.message).build())?;
     interpret(&bc).await
 }

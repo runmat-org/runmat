@@ -4,7 +4,6 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
@@ -13,6 +12,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -399,34 +399,36 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| builtin_error(format!("times: {e}")))?;
+            let tensor = Tensor::new(vec![n], vec![1, 1])
+                .map_err(|e| builtin_error(format!("times: {e}")))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
         Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 })),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(|e| builtin_error(format!("times: {e}")))?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(format!("times: {e}")))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::CharArray(chars) => {
             let tensor = char_array_to_tensor(&chars)?;
             convert_to_gpu(Value::Tensor(tensor))
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err(builtin_error("times: GPU prototypes for 'like' only support real numeric outputs"))
-        }
-        Value::String(_) | Value::StringArray(_) | Value::Cell(_) | Value::Struct(_) => {
-            Err(builtin_error("times: unsupported prototype conversion to GPU output"))
-        }
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
+            "times: GPU prototypes for 'like' only support real numeric outputs",
+        )),
+        Value::String(_) | Value::StringArray(_) | Value::Cell(_) | Value::Struct(_) => Err(
+            builtin_error("times: unsupported prototype conversion to GPU output"),
+        ),
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => {
-            Err(builtin_error("times: unsupported prototype conversion to GPU output"))
-        }
+        | Value::MException(_) => Err(builtin_error(
+            "times: unsupported prototype conversion to GPU output",
+        )),
     }
 }
 
@@ -459,7 +461,7 @@ fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
 fn gather_like_prototype(value: &Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(_) => gpu_helpers::gather_value(value)
-            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME)), 
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME)),
         Value::Tensor(_)
         | Value::Num(_)
         | Value::Int(_)
@@ -480,12 +482,13 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
             let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
-            let tensor =
-                ComplexTensor::new(data, t.shape.clone()).map_err(|e| builtin_error(format!("times: {e}")))?;
+            let tensor = ComplexTensor::new(data, t.shape.clone())
+                .map_err(|e| builtin_error(format!("times: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(|e| builtin_error(format!("times: {e}")))?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(format!("times: {e}")))?;
             real_to_complex(Value::Tensor(tensor))
         }
         Value::CharArray(chars) => {
@@ -633,7 +636,8 @@ fn times_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 fn times_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| builtin_error(format!("times: {err}")))?;
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|err| builtin_error(format!("times: {err}")))?;
     let dtype = real_result_dtype(lhs, rhs);
     if plan.is_empty() {
         let mut tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
@@ -645,14 +649,15 @@ fn times_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
         out[out_idx] = lhs.data[idx_lhs] * rhs.data[idx_rhs];
     }
-    let mut tensor =
-        Tensor::new(out, plan.output_shape().to_vec()).map_err(|e| builtin_error(format!("times: {e}")))?;
+    let mut tensor = Tensor::new(out, plan.output_shape().to_vec())
+        .map_err(|e| builtin_error(format!("times: {e}")))?;
     apply_result_dtype(&mut tensor, dtype);
     Ok(tensor::tensor_into_value(tensor))
 }
 
 fn times_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| builtin_error(format!("times: {err}")))?;
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|err| builtin_error(format!("times: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("times: {e}")))?;
@@ -666,13 +671,14 @@ fn times_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinRes
         let im = ar * bi + ai * br;
         out[out_idx] = (re, im);
     }
-    let tensor =
-        ComplexTensor::new(out, plan.output_shape().to_vec()).map_err(|e| builtin_error(format!("times: {e}")))?;
+    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+        .map_err(|e| builtin_error(format!("times: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
 fn times_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| builtin_error(format!("times: {err}")))?;
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|err| builtin_error(format!("times: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("times: {e}")))?;
@@ -684,8 +690,8 @@ fn times_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value>
         let scalar = rhs.data[idx_rhs];
         out[out_idx] = (ar * scalar, ai * scalar);
     }
-    let tensor =
-        ComplexTensor::new(out, plan.output_shape().to_vec()).map_err(|e| builtin_error(format!("times: {e}")))?;
+    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+        .map_err(|e| builtin_error(format!("times: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -712,7 +718,8 @@ fn apply_result_dtype(tensor: &mut Tensor, dtype: NumericDType) {
 }
 
 fn times_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| builtin_error(format!("times: {err}")))?;
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|err| builtin_error(format!("times: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("times: {e}")))?;
@@ -724,8 +731,8 @@ fn times_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value>
         let (br, bi) = rhs.data[idx_rhs];
         out[out_idx] = (scalar * br, scalar * bi);
     }
-    let tensor =
-        ComplexTensor::new(out, plan.output_shape().to_vec()).map_err(|e| builtin_error(format!("times: {e}")))?;
+    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+        .map_err(|e| builtin_error(format!("times: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -741,18 +748,21 @@ fn classify_operand(value: Value) -> BuiltinResult<TimesOperand> {
             Tensor::new(vec![n], vec![1, 1]).map_err(|e| builtin_error(format!("times: {e}")))?,
         )),
         Value::Int(i) => Ok(TimesOperand::Real(
-            Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| builtin_error(format!("times: {e}")))?,
+            Tensor::new(vec![i.to_f64()], vec![1, 1])
+                .map_err(|e| builtin_error(format!("times: {e}")))?,
         )),
         Value::Bool(b) => Ok(TimesOperand::Real(
             Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
                 .map_err(|e| builtin_error(format!("times: {e}")))?,
         )),
         Value::LogicalArray(logical) => Ok(TimesOperand::Real(
-            tensor::logical_to_tensor(&logical).map_err(|e| builtin_error(format!("times: {e}")))?,
+            tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(format!("times: {e}")))?,
         )),
         Value::CharArray(chars) => Ok(TimesOperand::Real(char_array_to_tensor(&chars)?)),
         Value::Complex(re, im) => Ok(TimesOperand::Complex(
-            ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| builtin_error(format!("times: {e}")))?,
+            ComplexTensor::new(vec![(re, im)], vec![1, 1])
+                .map_err(|e| builtin_error(format!("times: {e}")))?,
         )),
         Value::ComplexTensor(ct) => Ok(TimesOperand::Complex(ct)),
         Value::GpuTensor(_) => Err(builtin_error("times: internal error converting GPU value")),
@@ -765,7 +775,8 @@ fn classify_operand(value: Value) -> BuiltinResult<TimesOperand> {
 
 fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-    Tensor::new(data, vec![chars.rows, chars.cols]).map_err(|e| builtin_error(format!("times: {e}")))
+    Tensor::new(data, vec![chars.rows, chars.cols])
+        .map_err(|e| builtin_error(format!("times: {e}")))
 }
 
 fn extract_scalar_f64(value: &Value) -> BuiltinResult<Option<f64>> {
@@ -1066,7 +1077,10 @@ pub(crate) mod tests {
         let lhs = Value::Num(2.0);
         let rhs = Value::Num(4.0);
         let err = times_builtin(lhs, rhs, vec![Value::from("like")]).unwrap_err();
-        assert!(err.message().contains("prototype"), "unexpected error: {err}");
+        assert!(
+            err.message().contains("prototype"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

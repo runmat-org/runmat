@@ -222,7 +222,6 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute asinh directly on device buffers; runtimes gather to host when unary_asinh is unavailable.",
 };
 
-
 fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -284,8 +283,7 @@ fn asinh_real(value: Value) -> BuiltinResult<Value> {
 
 fn asinh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.asinh()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
-        .map_err(|e| runtime_error_for(format!("asinh: {e}")))
+    Tensor::new(data, tensor.shape.clone()).map_err(|e| runtime_error_for(format!("asinh: {e}")))
 }
 
 fn asinh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {

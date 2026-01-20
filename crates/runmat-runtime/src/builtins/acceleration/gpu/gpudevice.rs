@@ -4,11 +4,11 @@ use runmat_accelerate_api::{ApiDeviceInfo, ProviderPrecision};
 use runmat_builtins::{IntValue, StructValue, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 /// Error used when no acceleration provider is registered.
 pub(crate) const ERR_NO_PROVIDER: &str = "gpuDevice: no acceleration provider registered";
@@ -237,8 +237,8 @@ fn gpu_device_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
 /// Internal helper that queries the provider and returns a populated struct.
 pub(crate) fn active_device_struct() -> BuiltinResult<StructValue> {
-    let provider = runmat_accelerate_api::provider()
-        .ok_or_else(|| gpu_device_error(ERR_NO_PROVIDER))?;
+    let provider =
+        runmat_accelerate_api::provider().ok_or_else(|| gpu_device_error(ERR_NO_PROVIDER))?;
     let info = provider.device_info_struct();
     let precision = provider.precision();
     Ok(build_struct(&info, precision))
@@ -445,7 +445,9 @@ pub(crate) mod tests {
     #[test]
     fn gpu_device_out_of_range_index_errors() {
         test_support::with_test_provider(|_| {
-            let err = gpu_device_builtin(vec![Value::Num(2.0)]).unwrap_err().to_string();
+            let err = gpu_device_builtin(vec![Value::Num(2.0)])
+                .unwrap_err()
+                .to_string();
             assert!(
                 err.contains("gpuDevice: GPU device with index 2 not available"),
                 "unexpected error: {err}"
@@ -457,7 +459,9 @@ pub(crate) mod tests {
     #[test]
     fn gpu_device_unsupported_argument_errors() {
         test_support::with_test_provider(|_| {
-            let err = gpu_device_builtin(vec![Value::from("status")]).unwrap_err().to_string();
+            let err = gpu_device_builtin(vec![Value::from("status")])
+                .unwrap_err()
+                .to_string();
             assert_eq!(err, ERR_UNSUPPORTED_ARGUMENT);
         });
     }
@@ -466,7 +470,9 @@ pub(crate) mod tests {
     #[test]
     fn gpu_device_reset_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
-            let err = gpu_device_builtin(vec![Value::from(" RESET ")]).unwrap_err().to_string();
+            let err = gpu_device_builtin(vec![Value::from(" RESET ")])
+                .unwrap_err()
+                .to_string();
             assert_eq!(err, ERR_RESET_NOT_SUPPORTED);
         });
     }
@@ -476,7 +482,9 @@ pub(crate) mod tests {
     fn gpu_device_reset_char_array_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
             let chars = runmat_builtins::CharArray::new("reset".chars().collect(), 1, 5).unwrap();
-            let err = gpu_device_builtin(vec![Value::CharArray(chars)]).unwrap_err().to_string();
+            let err = gpu_device_builtin(vec![Value::CharArray(chars)])
+                .unwrap_err()
+                .to_string();
             assert_eq!(err, ERR_RESET_NOT_SUPPORTED);
         });
     }
@@ -486,7 +494,9 @@ pub(crate) mod tests {
     fn gpu_device_empty_array_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
             let empty = runmat_builtins::Tensor::zeros(vec![0, 0]);
-            let err = gpu_device_builtin(vec![Value::Tensor(empty)]).unwrap_err().to_string();
+            let err = gpu_device_builtin(vec![Value::Tensor(empty)])
+                .unwrap_err()
+                .to_string();
             assert_eq!(err, ERR_RESET_NOT_SUPPORTED);
         });
     }

@@ -211,9 +211,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn kron_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("kron")
-        .build()
+    build_runtime_error(message).with_builtin("kron").build()
 }
 
 #[derive(Clone)]
@@ -249,10 +247,7 @@ fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     }
 }
 
-fn kron_gpu_gpu(
-    left: GpuTensorHandle,
-    right: GpuTensorHandle,
-) -> crate::BuiltinResult<Value> {
+fn kron_gpu_gpu(left: GpuTensorHandle, right: GpuTensorHandle) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(handle) = provider.kron(&left, &right) {
             return Ok(Value::GpuTensor(handle));
@@ -301,10 +296,7 @@ fn kron_gpu_mixed_left(left: GpuTensorHandle, right: Value) -> crate::BuiltinRes
     finalize_numeric(numeric, true)
 }
 
-fn kron_gpu_mixed_right(
-    left: Value,
-    right: GpuTensorHandle,
-) -> crate::BuiltinResult<Value> {
+fn kron_gpu_mixed_right(left: Value, right: GpuTensorHandle) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(tensor_left) = tensor::value_into_tensor_for("kron", left.clone()) {
             let view = HostTensorView {
@@ -371,10 +363,7 @@ fn compute_numeric_inputs(
     }
 }
 
-fn finalize_numeric(
-    numeric: KronNumericResult,
-    prefer_gpu: bool,
-) -> crate::BuiltinResult<Value> {
+fn finalize_numeric(numeric: KronNumericResult, prefer_gpu: bool) -> crate::BuiltinResult<Value> {
     match numeric {
         KronNumericResult::Real(tensor) => {
             if prefer_gpu {
@@ -458,7 +447,8 @@ fn kron_complex_tensor(
     let (shape_a, shape_b, shape_out) = aligned_shapes(&a.shape, &b.shape)?;
     let total_out = checked_total(&shape_out, "kron")?;
     if total_out == 0 {
-        return ComplexTensor::new(Vec::new(), shape_out).map_err(|e| kron_error(format!("kron: {e}")));
+        return ComplexTensor::new(Vec::new(), shape_out)
+            .map_err(|e| kron_error(format!("kron: {e}")));
     }
 
     let strides_out = column_major_strides(&shape_out);
@@ -480,10 +470,7 @@ fn kron_complex_tensor(
     ComplexTensor::new(data, shape_out).map_err(|e| kron_error(format!("kron: {e}")))
 }
 
-fn aligned_shapes(
-    shape_a: &[usize],
-    shape_b: &[usize],
-) -> crate::BuiltinResult<AlignedShapes> {
+fn aligned_shapes(shape_a: &[usize], shape_b: &[usize]) -> crate::BuiltinResult<AlignedShapes> {
     let rank = shape_a.len().max(shape_b.len()).max(1);
     let mut padded_a = vec![1usize; rank];
     let mut padded_b = vec![1usize; rank];
@@ -562,9 +549,9 @@ fn checked_total(shape: &[usize], context: &str) -> crate::BuiltinResult<usize> 
         if dim == 0 {
             return Ok(0);
         }
-        total = total
-            .checked_mul(dim)
-            .ok_or_else(|| kron_error(format!("{context}: requested output exceeds maximum size")))?;
+        total = total.checked_mul(dim).ok_or_else(|| {
+            kron_error(format!("{context}: requested output exceeds maximum size"))
+        })?;
     }
     Ok(total)
 }

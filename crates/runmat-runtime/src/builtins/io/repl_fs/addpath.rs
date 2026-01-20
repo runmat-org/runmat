@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 use runmat_filesystem as vfs;
 use std::collections::HashSet;
@@ -454,7 +454,9 @@ fn normalize_directory(raw: &str) -> BuiltinResult<String> {
     let metadata = vfs::metadata(&normalized)
         .map_err(|_| addpath_error(format!("addpath: folder '{trimmed}' not found")))?;
     if !metadata.is_dir() {
-        return Err(addpath_error(format!("addpath: '{trimmed}' is not a folder")));
+        return Err(addpath_error(format!(
+            "addpath: '{trimmed}' is not a folder"
+        )));
     }
 
     Ok(path_to_string(&normalized))

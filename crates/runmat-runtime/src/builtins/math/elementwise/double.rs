@@ -5,7 +5,6 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::{
     gpu_helpers,
     random_args::keyword_of,
@@ -16,6 +15,7 @@ use crate::builtins::common::{
     },
     tensor,
 };
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -285,8 +285,8 @@ fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 fn double_from_logical(array: LogicalArray) -> BuiltinResult<Value> {
-    let tensor = tensor::logical_to_tensor(&array)
-        .map_err(|e| builtin_error(format!("double: {e}")))?;
+    let tensor =
+        tensor::logical_to_tensor(&array).map_err(|e| builtin_error(format!("double: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -392,7 +392,9 @@ fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResu
 
 fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        builtin_error("double: GPU output requested via 'like' but no acceleration provider is active")
+        builtin_error(
+            "double: GPU output requested via 'like' but no acceleration provider is active",
+        )
     })?;
     if provider.precision() != ProviderPrecision::F64 {
         return Err(builtin_error(
@@ -435,8 +437,7 @@ fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             let proxy = Value::GpuTensor(handle);
-            gpu_helpers::gather_value(&proxy)
-                .map_err(|e| builtin_error(format!("double: {e}")))
+            gpu_helpers::gather_value(&proxy).map_err(|e| builtin_error(format!("double: {e}")))
         }
         other => Ok(other),
     }

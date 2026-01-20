@@ -5,14 +5,14 @@ use tracing::{debug, info, info_span, warn};
 
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_accelerate_api::provider as accel_provider;
+use runmat_hir::{LoweringContext, LoweringResult, SemanticError, SourceId};
+use runmat_ignition::CompileError;
 use runmat_lexer::{tokenize_detailed, Token as LexToken};
 pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions, SyntaxError};
 use runmat_runtime::builtins::common::gpu_helpers;
 use runmat_runtime::warning_store::RuntimeWarning;
 use runmat_runtime::{build_runtime_error, RuntimeError};
-use runmat_hir::{LoweringResult, SemanticError, SourceId};
-use runmat_ignition::CompileError;
 #[cfg(target_arch = "wasm32")]
 use runmat_snapshot::SnapshotBuilder;
 use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
@@ -20,15 +20,15 @@ use runmat_time::Instant;
 #[cfg(feature = "jit")]
 use runmat_turbine::TurbineEngine;
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
 use uuid::Uuid;
-use std::future::Future;
-use std::pin::Pin;
 
 #[cfg(all(test, target_arch = "wasm32"))]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
@@ -489,7 +489,6 @@ pub struct ExecutionResult {
     pub stdin_events: Vec<StdinEvent>,
 }
 
-
 #[derive(Debug, Clone)]
 struct WorkspaceMaterializeTicket {
     name: String,
@@ -502,7 +501,6 @@ enum FinalStmtEmitDisposition {
     NeedsFallback,
     Suppressed,
 }
-
 
 fn determine_display_label_from_context(
     single_assign_var: Option<usize>,
@@ -785,7 +783,6 @@ impl RunMatSession {
         self.async_input_handler = None;
     }
 
-
     pub fn telemetry_consent(&self) -> bool {
         self.telemetry_consent
     }
@@ -914,42 +911,22 @@ impl RunMatSession {
         self.snapshot.is_some()
     }
 
-    fn parse(&self, input: &str) -> std::result::Result<runmat_parser::Program, SyntaxError> {
-        parse_with_options(input, ParserOptions::new(self.compat_mode))
-    }
-
-    fn lower(
-        &self,
-        ast: &runmat_parser::Program,
-    ) -> std::result::Result<LoweringResult, SemanticError> {
-        runmat_hir::lower_with_full_context(
-            ast,
-            &self.variable_names,
-            &self.function_definitions,
-        )
-    }
-
-    fn compile(
-        &self,
-        hir: &runmat_hir::HirProgram,
-        existing_functions: &HashMap<String, runmat_ignition::UserFunction>,
-    ) -> std::result::Result<runmat_ignition::Bytecode, CompileError> {
-        runmat_ignition::compile_with_functions(hir, existing_functions)
-    }
-
-    fn prepare(&self, input: &str) -> std::result::Result<PreparedExecution, RunError> {
+    fn compile_input(&self, input: &str) -> std::result::Result<PreparedExecution, RunError> {
         let ast = {
             let _span = info_span!("runtime.parse").entered();
-            self.parse(input)?
+            parse_with_options(input, ParserOptions::new(self.compat_mode))?
         };
         let lowering = {
             let _span = info_span!("runtime.lower").entered();
-            self.lower(&ast)?
+            runmat_hir::lower(
+                &ast,
+                &LoweringContext::new(&self.variable_names, &self.function_definitions),
+            )?
         };
         let existing_functions = self.convert_hir_functions_to_user_functions();
         let bytecode = {
             let _span = info_span!("runtime.compile.bytecode").entered();
-            self.compile(&lowering.hir, &existing_functions)?
+            runmat_ignition::compile(&lowering.hir, &existing_functions)?
         };
         Ok(PreparedExecution {
             ast,
@@ -963,7 +940,7 @@ impl RunMatSession {
         &self,
         input: &str,
     ) -> std::result::Result<Option<FusionPlanSnapshot>, RunError> {
-        let prepared = self.prepare(input)?;
+        let prepared = self.compile_input(input)?;
         Ok(build_fusion_snapshot(
             prepared.bytecode.accel_graph.as_ref(),
             &prepared.bytecode.fusion_groups,
@@ -971,18 +948,12 @@ impl RunMatSession {
     }
 
     /// Execute MATLAB/Octave code
-    pub async fn execute(
-        &mut self,
-        input: &str,
-    ) -> std::result::Result<ExecutionResult, RunError> {
+    pub async fn execute(&mut self, input: &str) -> std::result::Result<ExecutionResult, RunError> {
         self.run(input).await
     }
 
     /// Parse, lower, compile, and execute input.
-    pub async fn run(
-        &mut self,
-        input: &str,
-    ) -> std::result::Result<ExecutionResult, RunError> {
+    pub async fn run(&mut self, input: &str) -> std::result::Result<ExecutionResult, RunError> {
         let _active = ActiveExecutionGuard::new(self)
             .map_err(|err| RunError::Runtime(build_runtime_error(err.to_string()).build()))?;
         let exec_span = info_span!(
@@ -1013,7 +984,7 @@ impl RunMatSession {
             ast,
             lowering,
             mut bytecode,
-        } = self.prepare(input)?;
+        } = self.compile_input(input)?;
         if self.verbose {
             debug!("AST: {ast:?}");
         }
@@ -1411,9 +1382,8 @@ impl RunMatSession {
             let mut repl_source_id: Option<SourceId> = None;
             for (name, stmt) in &updated_functions {
                 if matches!(stmt, runmat_hir::HirStmt::Function { .. }) {
-                    let source_id = *repl_source_id.get_or_insert_with(|| {
-                        self.source_pool.intern("<repl>", input)
-                    });
+                    let source_id = *repl_source_id
+                        .get_or_insert_with(|| self.source_pool.intern("<repl>", input));
                     self.function_source_ids.insert(name.clone(), source_id);
                 }
             }
@@ -1637,9 +1607,9 @@ impl RunMatSession {
         &mut self,
         bytecode: &runmat_ignition::Bytecode,
     ) -> Result<runmat_ignition::InterpreterOutcome, RuntimeError> {
-        runmat_ignition::interpret_with_vars(bytecode, &mut self.variable_array, Some("<repl>")).await
+        runmat_ignition::interpret_with_vars(bytecode, &mut self.variable_array, Some("<repl>"))
+            .await
     }
-
 
     /// Prepare variable array for execution by populating with existing values
     fn prepare_variable_array_for_execution(
@@ -1811,7 +1781,6 @@ impl RunMatSession {
     }
 }
 
-
 fn last_displayable_statement_emit_disposition(
     body: &[runmat_hir::HirStmt],
 ) -> FinalStmtEmitDisposition {
@@ -1865,7 +1834,6 @@ fn workspace_entry(name: &str, value: &Value) -> WorkspaceEntry {
         preview_token: None,
     }
 }
-
 
 struct ActiveExecutionGuard {
     flag: *mut bool,

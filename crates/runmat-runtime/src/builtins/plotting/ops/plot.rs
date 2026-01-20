@@ -303,16 +303,13 @@ fn build_line_gpu_plot(
     label: &str,
     appearance: &LineAppearance,
 ) -> BuiltinResult<LinePlot> {
-    let context = runmat_plot::shared_wgpu_context().ok_or_else(|| {
-        plotting_error(BUILTIN_NAME, "plot: plotting GPU context unavailable")
-    })?;
+    let context = runmat_plot::shared_wgpu_context()
+        .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot: plotting GPU context unavailable"))?;
 
-    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x).ok_or_else(|| {
-        plotting_error(BUILTIN_NAME, "plot: unable to export GPU X data")
-    })?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y).ok_or_else(|| {
-        plotting_error(BUILTIN_NAME, "plot: unable to export GPU Y data")
-    })?;
+    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
+        .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot: unable to export GPU X data"))?;
+    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
+        .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot: unable to export GPU Y data"))?;
 
     if x_ref.len < 2 {
         return Err(plot_err("inputs must contain at least two elements"));
@@ -323,8 +320,8 @@ fn build_line_gpu_plot(
     if x_ref.precision != y_ref.precision {
         return Err(plot_err("X and Y gpuArrays must have matching precision"));
     }
-    let len_u32 = u32::try_from(x_ref.len)
-        .map_err(|_| plot_err("point count exceeds supported range"))?;
+    let len_u32 =
+        u32::try_from(x_ref.len).map_err(|_| plot_err("point count exceeds supported range"))?;
     let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
 
     let inputs = runmat_plot::gpu::line::LineGpuInputs {
@@ -347,7 +344,12 @@ fn build_line_gpu_plot(
         &inputs,
         &params,
     )
-    .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot: failed to build GPU vertices: {e}")))?;
+    .map_err(|e| {
+        plotting_error(
+            BUILTIN_NAME,
+            format!("plot: failed to build GPU vertices: {e}"),
+        )
+    })?;
 
     let marker_gpu_vertices = if let Some(marker) = marker_meta.as_ref() {
         let marker_params = runmat_plot::gpu::line::LineGpuParams {
@@ -363,7 +365,12 @@ fn build_line_gpu_plot(
                 &inputs,
                 &marker_params,
             )
-            .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot: failed to build marker vertices: {e}")))?,
+            .map_err(|e| {
+                plotting_error(
+                    BUILTIN_NAME,
+                    format!("plot: failed to build marker vertices: {e}"),
+                )
+            })?,
         )
     } else {
         None

@@ -18,7 +18,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::console::{record_console_output, ConsoleStream};
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -316,7 +316,9 @@ fn list_path(expanded: &str, original: &str) -> BuiltinResult<Vec<String>> {
             }
         }
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(Vec::new()),
-        Err(err) => Err(ls_error(format!("ls: unable to access '{original}' ({err})"))),
+        Err(err) => Err(ls_error(format!(
+            "ls: unable to access '{original}' ({err})"
+        ))),
     }
 }
 
@@ -387,12 +389,16 @@ fn patterns_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
             if data.len() == 1 {
                 Ok(vec![data[0].clone()])
             } else {
-                Err(ls_error("ls: name must be a character vector or string scalar"))
+                Err(ls_error(
+                    "ls: name must be a character vector or string scalar",
+                ))
             }
         }
         Value::CharArray(chars) => {
             if chars.rows != 1 {
-                return Err(ls_error("ls: name must be a character vector or string scalar"));
+                return Err(ls_error(
+                    "ls: name must be a character vector or string scalar",
+                ));
             }
             let mut row = String::with_capacity(chars.cols);
             for c in 0..chars.cols {
@@ -400,7 +406,9 @@ fn patterns_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
             }
             Ok(vec![row.trim_end().to_string()])
         }
-        _ => Err(ls_error("ls: name must be a character vector or string scalar")),
+        _ => Err(ls_error(
+            "ls: name must be a character vector or string scalar",
+        )),
     }
 }
 
@@ -445,7 +453,6 @@ pub(crate) mod tests {
             let _ = env::set_current_dir(&self.original);
         }
     }
-
 
     fn rows_from_value(value: Value) -> Vec<String> {
         match value {
@@ -576,7 +583,10 @@ pub(crate) mod tests {
     #[test]
     fn ls_rejects_numeric_argument() {
         let err = ls_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
-        assert_eq!(err.message(), "ls: name must be a character vector or string scalar");
+        assert_eq!(
+            err.message(),
+            "ls: name must be a character vector or string scalar"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

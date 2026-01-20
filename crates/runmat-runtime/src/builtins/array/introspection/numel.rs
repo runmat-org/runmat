@@ -197,9 +197,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn numel_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("numel")
-        .build()
+    build_runtime_error(message).with_builtin("numel").build()
 }
 
 #[runtime_builtin(
@@ -389,7 +387,8 @@ pub(crate) mod tests {
         let err = numel_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)])
             .expect_err("expected vector shape error");
         assert!(
-            err.to_string().contains("dimension vector must be a vector"),
+            err.to_string()
+                .contains("dimension vector must be a vector"),
             "unexpected error message: {err}"
         );
     }
@@ -401,7 +400,8 @@ pub(crate) mod tests {
         let err = numel_builtin(Value::Tensor(tensor), vec![Value::from("omitnan")])
             .expect_err("expected numeric argument error");
         assert!(
-            err.to_string().contains("dimension arguments must be numeric"),
+            err.to_string()
+                .contains("dimension arguments must be numeric"),
             "unexpected error message: {err}"
         );
     }

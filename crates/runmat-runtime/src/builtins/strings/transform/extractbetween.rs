@@ -5,7 +5,9 @@ use std::cmp::min;
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeError,
+};
 use runmat_builtins::{CharArray, IntValue, StringArray, Value};
 use runmat_macros::runtime_builtin;
 
@@ -241,9 +243,7 @@ const SIZE_MISMATCH_ERROR: &str =
     "extractBetween: boundary sizes must be compatible with the text input";
 
 fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(FN_NAME)
-        .build()
+    build_runtime_error(message).with_builtin(FN_NAME).build()
 }
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
@@ -294,7 +294,8 @@ fn extract_between_builtin(
     let text_shape = normalized_text.shape();
 
     let shape_ts = broadcast_shapes(FN_NAME, text_shape, start_shape).map_err(runtime_error_for)?;
-    let output_shape = broadcast_shapes(FN_NAME, &shape_ts, stop_shape).map_err(runtime_error_for)?;
+    let output_shape =
+        broadcast_shapes(FN_NAME, &shape_ts, stop_shape).map_err(runtime_error_for)?;
     if !normalized_text.supports_shape(&output_shape) {
         return Err(runtime_error_for(SIZE_MISMATCH_ERROR));
     }
@@ -347,12 +348,14 @@ fn parse_boundaries_option(args: &[Value]) -> BuiltinResult<Option<BoundariesMod
     let mut idx = 0;
     while idx < args.len() {
         let name_value = gather_if_needed(&args[idx]).map_err(map_flow)?;
-        let name = value_to_string(&name_value).ok_or_else(|| runtime_error_for(OPTION_NAME_ERROR))?;
+        let name =
+            value_to_string(&name_value).ok_or_else(|| runtime_error_for(OPTION_NAME_ERROR))?;
         if !name.eq_ignore_ascii_case("boundaries") {
             return Err(runtime_error_for(OPTION_NAME_ERROR));
         }
         let value = gather_if_needed(&args[idx + 1]).map_err(map_flow)?;
-        let value_str = value_to_string(&value).ok_or_else(|| runtime_error_for(OPTION_VALUE_ERROR))?;
+        let value_str =
+            value_to_string(&value).ok_or_else(|| runtime_error_for(OPTION_VALUE_ERROR))?;
         let parsed_mode = if value_str.eq_ignore_ascii_case("inclusive") {
             BoundariesMode::Inclusive
         } else if value_str.eq_ignore_ascii_case("exclusive") {
@@ -633,8 +636,8 @@ impl NormalizedText {
             }
             TextKind::StringArray => {
                 let data = results.into_iter().map(|r| r.text).collect::<Vec<_>>();
-                let array =
-                    StringArray::new(data, output_shape).map_err(|e| runtime_error_for(format!("{FN_NAME}: {e}")))?;
+                let array = StringArray::new(data, output_shape)
+                    .map_err(|e| runtime_error_for(format!("{FN_NAME}: {e}")))?;
                 Ok(Value::StringArray(array))
             }
             TextKind::CharArray { rows } => {

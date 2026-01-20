@@ -226,7 +226,9 @@ fn parse_non_negative_integer(value: &Value) -> Result<usize, crate::RuntimeErro
             }
             Ok(rounded as usize)
         }
-        _ => Err(timeit_error("timeit: numOutputs must be a scalar numeric value")),
+        _ => Err(timeit_error(
+            "timeit: numOutputs must be a scalar numeric value",
+        )),
     }
 }
 
@@ -313,7 +315,10 @@ impl TimeitCallable {
             drop(value);
             Ok(Value::Num(0.0))
         } else {
-            Ok(crate::call_builtin("feval", std::slice::from_ref(&self.handle))?)
+            Ok(crate::call_builtin(
+                "feval",
+                std::slice::from_ref(&self.handle),
+            )?)
         }
     }
 }

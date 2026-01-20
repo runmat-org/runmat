@@ -74,10 +74,7 @@ pub use web::{
     resize_web_renderer, web_renderer_ready,
 };
 
-pub(crate) fn plotting_error(
-    builtin: &str,
-    message: impl Into<String>,
-) -> crate::RuntimeError {
+pub(crate) fn plotting_error(builtin: &str, message: impl Into<String>) -> crate::RuntimeError {
     crate::build_runtime_error(message)
         .with_builtin(builtin)
         .build()

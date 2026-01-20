@@ -12,14 +12,14 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{default_libcall_names, FuncId, Linkage, Module};
 use futures::task::noop_waker;
 use log::{debug, error, info, warn};
+use runmat_builtins::{Type, Value};
+use runmat_ignition::{Bytecode, Instr};
+use runmat_runtime::{build_runtime_error, RuntimeError};
 use std::cell::Cell;
 use std::ffi::CStr;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::Context;
-use runmat_builtins::{Type, Value};
-use runmat_ignition::{Bytecode, Instr};
-use runmat_runtime::{build_runtime_error, RuntimeError};
 
 use target_lexicon::Triple;
 use thiserror::Error;
@@ -135,7 +135,7 @@ fn execute_user_function_isolated(
         body: remapped_body,
         var_types: func_var_types,
     };
-    let func_bytecode = runmat_ignition::compile_with_functions(&func_program, all_functions)
+    let func_bytecode = runmat_ignition::compile(&func_program, all_functions)
         .map_err(|e| execution_error(format!("Failed to compile function: {e}")))?;
 
     let func_result_vars = match run_immediate(runmat_ignition::interpret_with_vars(
@@ -525,7 +525,11 @@ impl TurbineEngine {
         debug!("Executing bytecode in Ignition interpreter mode (supports user functions)");
 
         // Use the main Ignition interpreter which has full feature support
-        match run_immediate(runmat_ignition::interpret_with_vars(bytecode, vars, Some("<main>")))? {
+        match run_immediate(runmat_ignition::interpret_with_vars(
+            bytecode,
+            vars,
+            Some("<main>"),
+        ))? {
             Ok(runmat_ignition::InterpreterOutcome::Completed(_)) => Ok((0, false)),
 
             Err(e) => Err(TurbineError::ExecutionError(e)),

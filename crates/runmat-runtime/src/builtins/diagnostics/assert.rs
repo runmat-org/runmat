@@ -281,7 +281,7 @@ fn evaluate_condition(value: Value) -> crate::BuiltinResult<ConditionOutcome> {
         _ => Err(assert_flow(
             INVALID_CONDITION_IDENTIFIER,
             "assert: first input must be logical or numeric.",
-        )), 
+        )),
     }
 }
 
@@ -433,7 +433,7 @@ fn string_scalar_from_value(value: &Value, context: &str) -> crate::BuiltinResul
         Value::CharArray(char_array) if char_array.rows == 1 => {
             Ok(char_array.data.iter().collect::<String>())
         }
-        _ => Err(assert_flow(INVALID_INPUT_IDENTIFIER, context)), 
+        _ => Err(assert_flow(INVALID_INPUT_IDENTIFIER, context)),
     }
 }
 
@@ -482,7 +482,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_false_uses_default_message() {
-        let err = unwrap_error(assert_builtin(vec![Value::Bool(false)]).expect_err("assert should fail"));
+        let err =
+            unwrap_error(assert_builtin(vec![Value::Bool(false)]).expect_err("assert should fail"));
         assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
         assert_eq!(err.message(), DEFAULT_MESSAGE);
     }
@@ -655,9 +656,8 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let err = unwrap_error(
-                assert_builtin(vec![Value::GpuTensor(handle)]).expect_err("assert"),
-            );
+            let err =
+                unwrap_error(assert_builtin(vec![Value::GpuTensor(handle)]).expect_err("assert"));
             assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
         });
     }

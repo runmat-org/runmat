@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
 
 const ERR_TOO_MANY_INPUTS: &str = "getenv: too many input arguments";
 const ERR_INVALID_TYPE: &str = "getenv: NAME must be a character vector, string scalar, string array, or cell array of character vectors";
@@ -313,9 +313,8 @@ fn getenv_from_char_array(array: CharArray) -> BuiltinResult<Value> {
     for row in 0..array.rows {
         rows.push(read_env_string(&char_row_to_string(&array, row)));
     }
-    let result = char_array_from_rows(&rows).map_err(|err| {
-        getenv_error(format!("getenv: unable to build character matrix ({err})"))
-    })?;
+    let result = char_array_from_rows(&rows)
+        .map_err(|err| getenv_error(format!("getenv: unable to build character matrix ({err})")))?;
     Ok(Value::CharArray(result))
 }
 
@@ -398,7 +397,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
     use runmat_builtins::{CharArray, StringArray, Value};
-
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -608,8 +606,8 @@ pub(crate) mod tests {
     #[test]
     fn getenv_invalid_input_errors() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
-        let err = getenv_builtin(vec![Value::Num(std::f64::consts::PI)])
-            .expect_err("expected error");
+        let err =
+            getenv_builtin(vec![Value::Num(std::f64::consts::PI)]).expect_err("expected error");
         assert!(
             err.message().contains("NAME must be"),
             "unexpected error message: {}",

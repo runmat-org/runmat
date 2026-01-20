@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const ERR_TOO_FEW_INPUTS: &str = "setenv: not enough input arguments";
 const ERR_TOO_MANY_INPUTS: &str = "setenv: too many input arguments";
@@ -404,7 +404,6 @@ pub(crate) mod tests {
         format!("RUNMAT_TEST_SETENV_{}", suffix)
     }
 
-
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setenv_sets_variable_and_returns_success() {
@@ -501,8 +500,8 @@ pub(crate) mod tests {
     #[test]
     fn setenv_errors_when_name_is_not_text() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
-        let err = setenv_builtin(vec![Value::Num(5.0), Value::String("value".to_string())])
-            .unwrap_err();
+        let err =
+            setenv_builtin(vec![Value::Num(5.0), Value::String("value".to_string())]).unwrap_err();
         assert_eq!(err.message(), ERR_NAME_TYPE);
     }
 

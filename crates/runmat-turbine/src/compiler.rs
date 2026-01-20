@@ -705,9 +705,9 @@ impl BytecodeCompiler {
         function_definitions: &std::collections::HashMap<String, runmat_ignition::UserFunction>,
     ) -> Result<Value> {
         // Look up the function definition
-        let function_def = function_definitions.get(func_name).ok_or_else(|| {
-            execution_error(format!("Unknown function: {func_name}"))
-        })?;
+        let function_def = function_definitions
+            .get(func_name)
+            .ok_or_else(|| execution_error(format!("Unknown function: {func_name}")))?;
 
         // Validate argument count
         if args.len() != function_def.params.len() {

@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const OPTION_NAME_ERROR: &str = "jsonencode: option names must be character vectors or strings";
 const OPTION_VALUE_ERROR: &str = "jsonencode: option value must be scalar logical or numeric";
@@ -604,14 +604,18 @@ fn cell_array_to_json(ca: &CellArray, options: &JsonEncodeOptions) -> BuiltinRes
     }
 
     if ca.rows == 1 && ca.cols == 1 {
-        let value = ca.get(0, 0).map_err(|e| jsonencode_error(format!("jsonencode: {e}")))?;
+        let value = ca
+            .get(0, 0)
+            .map_err(|e| jsonencode_error(format!("jsonencode: {e}")))?;
         return Ok(JsonValue::Array(vec![value_to_json(&value, options)?]));
     }
 
     if ca.rows == 1 {
         let mut row = Vec::with_capacity(ca.cols);
         for c in 0..ca.cols {
-            let element = ca.get(0, c).map_err(|e| jsonencode_error(format!("jsonencode: {e}")))?;
+            let element = ca
+                .get(0, c)
+                .map_err(|e| jsonencode_error(format!("jsonencode: {e}")))?;
             row.push(value_to_json(&element, options)?);
         }
         return Ok(JsonValue::Array(row));
@@ -620,7 +624,9 @@ fn cell_array_to_json(ca: &CellArray, options: &JsonEncodeOptions) -> BuiltinRes
     if ca.cols == 1 {
         let mut column = Vec::with_capacity(ca.rows);
         for r in 0..ca.rows {
-            let element = ca.get(r, 0).map_err(|e| jsonencode_error(format!("jsonencode: {e}")))?;
+            let element = ca
+                .get(r, 0)
+                .map_err(|e| jsonencode_error(format!("jsonencode: {e}")))?;
             column.push(value_to_json(&element, options)?);
         }
         return Ok(JsonValue::Array(column));
@@ -630,7 +636,9 @@ fn cell_array_to_json(ca: &CellArray, options: &JsonEncodeOptions) -> BuiltinRes
     for r in 0..ca.rows {
         let mut row = Vec::with_capacity(ca.cols);
         for c in 0..ca.cols {
-            let element = ca.get(r, c).map_err(|e| jsonencode_error(format!("jsonencode: {e}")))?;
+            let element = ca
+                .get(r, c)
+                .map_err(|e| jsonencode_error(format!("jsonencode: {e}")))?;
             row.push(value_to_json(&element, options)?);
         }
         rows.push(JsonValue::Array(row));

@@ -205,9 +205,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn squeeze_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("squeeze")
-        .build()
+    build_runtime_error(message).with_builtin("squeeze").build()
 }
 
 #[runtime_builtin(
@@ -267,8 +265,7 @@ fn squeeze_numeric_tensor(tensor: Tensor) -> crate::BuiltinResult<Tensor> {
     if shape == tensor.shape {
         return Ok(tensor);
     }
-    Tensor::new(tensor.data, shape)
-        .map_err(|e| squeeze_error(format!("squeeze: {e}")))
+    Tensor::new(tensor.data, shape).map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 
 fn squeeze_complex_tensor(ct: ComplexTensor) -> crate::BuiltinResult<ComplexTensor> {
@@ -276,8 +273,7 @@ fn squeeze_complex_tensor(ct: ComplexTensor) -> crate::BuiltinResult<ComplexTens
     if shape == ct.shape {
         return Ok(ct);
     }
-    ComplexTensor::new(ct.data, shape)
-        .map_err(|e| squeeze_error(format!("squeeze: {e}")))
+    ComplexTensor::new(ct.data, shape).map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 
 fn squeeze_logical_array(logical: LogicalArray) -> crate::BuiltinResult<LogicalArray> {
@@ -285,8 +281,7 @@ fn squeeze_logical_array(logical: LogicalArray) -> crate::BuiltinResult<LogicalA
     if shape == logical.shape {
         return Ok(logical);
     }
-    LogicalArray::new(logical.data, shape)
-        .map_err(|e| squeeze_error(format!("squeeze: {e}")))
+    LogicalArray::new(logical.data, shape).map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 
 fn squeeze_string_array(strings: StringArray) -> crate::BuiltinResult<StringArray> {
@@ -294,8 +289,7 @@ fn squeeze_string_array(strings: StringArray) -> crate::BuiltinResult<StringArra
     if shape == strings.shape {
         return Ok(strings);
     }
-    StringArray::new(strings.data, shape)
-        .map_err(|e| squeeze_error(format!("squeeze: {e}")))
+    StringArray::new(strings.data, shape).map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 
 fn squeeze_gpu(handle: GpuTensorHandle) -> crate::BuiltinResult<Value> {

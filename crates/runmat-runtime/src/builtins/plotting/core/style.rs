@@ -871,10 +871,7 @@ fn parse_colormap_name(name: &str) -> Option<ColorMap> {
     }
 }
 
-fn parse_shading_option(
-    opts: &LineStyleParseOptions,
-    value: &Value,
-) -> BuiltinResult<ShadingMode> {
+fn parse_shading_option(opts: &LineStyleParseOptions, value: &Value) -> BuiltinResult<ShadingMode> {
     let Some(text) = value_as_string(value) else {
         return Err(ctx_err(opts, "Shading must be a string"));
     };

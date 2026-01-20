@@ -257,8 +257,7 @@ fn fieldnames_builtin(value: Value) -> BuiltinResult<Value> {
         .into_iter()
         .map(|name| Value::CharArray(CharArray::new_row(&name)))
         .collect();
-    crate::make_cell(cells, rows, 1)
-        .map_err(|e| fieldnames_flow(format!("fieldnames: {e}")))
+    crate::make_cell(cells, rows, 1).map_err(|e| fieldnames_flow(format!("fieldnames: {e}")))
 }
 
 fn collect_struct_fieldnames(st: &StructValue) -> Vec<String> {

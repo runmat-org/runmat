@@ -228,20 +228,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn string_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        let gathered = gather_if_needed(&value)
-            .map_err(|flow| remap_string_flow(flow))?;
+        let gathered = gather_if_needed(&value).map_err(|flow| remap_string_flow(flow))?;
         let array = convert_to_string_array(gathered, StringEncoding::Utf8)?;
         return Ok(Value::StringArray(array));
     }
 
     let mut args = rest;
-    let format_value = gather_if_needed(&value)
-        .map_err(|flow| remap_string_flow(flow))?;
+    let format_value = gather_if_needed(&value).map_err(|flow| remap_string_flow(flow))?;
 
     if args.len() == 1 {
         let arg = args.pop().unwrap();
-        let gathered_arg = gather_if_needed(&arg)
-            .map_err(|flow| remap_string_flow(flow))?;
+        let gathered_arg = gather_if_needed(&arg).map_err(|flow| remap_string_flow(flow))?;
         if let Some(encoding) = try_encoding_argument(&format_value, &gathered_arg)? {
             let array = convert_to_string_array(format_value, encoding)?;
             return Ok(Value::StringArray(array));
@@ -252,10 +249,7 @@ fn string_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value>
 
     let gathered_args = args
         .into_iter()
-        .map(|arg| {
-            gather_if_needed(&arg)
-                .map_err(|flow| remap_string_flow(flow))
-        })
+        .map(|arg| gather_if_needed(&arg).map_err(|flow| remap_string_flow(flow)))
         .collect::<Result<Vec<_>, _>>()?;
     let formatted = format_from_spec(format_value, gathered_args)?;
     Ok(Value::StringArray(formatted))
@@ -440,17 +434,14 @@ pub(crate) fn format_from_spec(
                     0 => continue,
                     1 => arg.values[0].clone(),
                     len if len == target_len => arg.values[idx].clone(),
-                    _ => {
-                        return Err(string_flow(
-                            "string: format data arguments must be scalars or match formatSpec size",
-                        ))
-                    }
+                    _ => return Err(string_flow(
+                        "string: format data arguments must be scalars or match formatSpec size",
+                    )),
                 };
             per_call.push(value);
         }
-        let formatted = format_variadic(spec_str, &per_call).map_err(|flow| {
-            remap_string_flow(flow)
-        })?;
+        let formatted =
+            format_variadic(spec_str, &per_call).map_err(|flow| remap_string_flow(flow))?;
         output.push(formatted);
     }
 
@@ -466,8 +457,7 @@ pub(crate) fn format_from_spec(
         target_shape = vec![target_len, 1];
     }
 
-    StringArray::new(output, target_shape)
-        .map_err(|e| string_flow(format!("string: {e}")))
+    StringArray::new(output, target_shape).map_err(|e| string_flow(format!("string: {e}")))
 }
 
 fn resolve_target_shape(
@@ -560,9 +550,8 @@ pub(crate) fn extract_format_spec(value: Value) -> BuiltinResult<FormatSpecData>
                     let idx = row * cell.cols + col;
                     let element = &cell.data[idx];
                     let value = (**element).clone();
-                    let gathered = gather_if_needed(&value).map_err(|flow| {
-                        remap_string_flow(flow)
-                    })?;
+                    let gathered =
+                        gather_if_needed(&value).map_err(|flow| remap_string_flow(flow))?;
                     let text = value_to_scalar_text(&gathered).ok_or_else(|| {
                         string_flow("string: formatSpec cell elements must be text scalars")
                     })?;
@@ -640,9 +629,8 @@ fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                     let idx = row * cell.cols + col;
                     let element = &cell.data[idx];
                     let value = (**element).clone();
-                    let gathered = gather_if_needed(&value).map_err(|flow| {
-                        remap_string_flow(flow)
-                    })?;
+                    let gathered =
+                        gather_if_needed(&value).map_err(|flow| remap_string_flow(flow))?;
                     let value = match gathered {
                         Value::String(s) => Value::String(s),
                         Value::StringArray(sa) if sa.data.len() == 1 => {
@@ -706,9 +694,8 @@ fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
             })
         }
         Value::GpuTensor(handle) => {
-            let gathered = gather_if_needed(&Value::GpuTensor(handle)).map_err(|flow| {
-                remap_string_flow(flow)
-            })?;
+            let gathered = gather_if_needed(&Value::GpuTensor(handle))
+                .map_err(|flow| remap_string_flow(flow))?;
             extract_argument_data(gathered)
         }
         Value::MException(_)
@@ -755,8 +742,7 @@ fn convert_to_string_array(value: Value, encoding: StringEncoding) -> BuiltinRes
 }
 
 fn string_scalar<S: Into<String>>(text: S) -> BuiltinResult<StringArray> {
-    StringArray::new(vec![text.into()], vec![1, 1])
-        .map_err(|e| string_flow(format!("string: {e}")))
+    StringArray::new(vec![text.into()], vec![1, 1]).map_err(|e| string_flow(format!("string: {e}")))
 }
 
 fn value_to_scalar_text(value: &Value) -> Option<String> {
@@ -822,9 +808,7 @@ fn cell_array_to_string_array(
             let idx = row * cell.cols + col;
             let element = &cell.data[idx];
             let value = (**element).clone();
-            let gathered = gather_if_needed(&value).map_err(|flow| {
-                remap_string_flow(flow)
-            })?;
+            let gathered = gather_if_needed(&value).map_err(|flow| remap_string_flow(flow))?;
             strings.push(cell_element_to_string(&gathered)?);
         }
     }
@@ -848,7 +832,9 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
             if ca.rows == 1 {
                 Ok(ca.data.iter().collect())
             } else {
-                Err(string_flow("string: cell character arrays must be row vectors"))
+                Err(string_flow(
+                    "string: cell character arrays must be row vectors",
+                ))
             }
         }
         Value::Num(n) => Ok(Value::Num(*n).to_string()),

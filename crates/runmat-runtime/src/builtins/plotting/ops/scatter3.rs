@@ -18,14 +18,14 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{BuiltinResult, RuntimeError};
 use crate::gather_if_needed;
+use crate::{BuiltinResult, RuntimeError};
 use std::convert::TryFrom;
 
 use super::common::numeric_triplet;
 use super::gpu_helpers::axis_bounds;
-use super::plotting_error;
 use super::perf::scatter3_lod_stride;
+use super::plotting_error;
 use super::point::{
     convert_rgb_color_matrix, convert_scalar_color_values, convert_size_vector,
     map_scalar_values_to_colors, validate_gpu_color_matrix, validate_gpu_vector_length, PointArgs,
@@ -129,7 +129,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::scatter3"
 )]
-pub fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
+pub fn scatter3_builtin(
+    x: Value,
+    y: Value,
+    z: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<String> {
     let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter3())?;
     let mut x_input = Some(ScatterInput::from_value(x)?);
     let mut y_input = Some(ScatterInput::from_value(y)?);
@@ -298,7 +303,9 @@ fn build_scatter3_plot(
     style: &mut Scatter3ResolvedStyle,
 ) -> BuiltinResult<Scatter3Plot> {
     if x.len() != y.len() || x.len() != z.len() {
-        return Err(scatter3_err("scatter3: X, Y, and Z inputs must have identical lengths"));
+        return Err(scatter3_err(
+            "scatter3: X, Y, and Z inputs must have identical lengths",
+        ));
     }
 
     ensure_scatter3_host_metadata(style, x.len())?;
@@ -336,7 +343,8 @@ impl ScatterInput {
         match value {
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
             other => {
-                let tensor = Tensor::try_from(&other).map_err(|e| scatter3_err(format!("scatter3: {e}")))?;
+                let tensor =
+                    Tensor::try_from(&other).map_err(|e| scatter3_err(format!("scatter3: {e}")))?;
                 Ok(Self::Host(tensor))
             }
         }
@@ -366,8 +374,8 @@ impl ScatterInput {
 
 fn gather_tensor_from_gpu(handle: GpuTensorHandle, name: &'static str) -> BuiltinResult<Tensor> {
     let value = Value::GpuTensor(handle);
-    let gathered = gather_if_needed(&value)
-        .map_err(|flow| map_control_flow_with_builtin(flow, name))?;
+    let gathered =
+        gather_if_needed(&value).map_err(|flow| map_control_flow_with_builtin(flow, name))?;
     Tensor::try_from(&gathered).map_err(|e| scatter3_err(format!("{name}: {e}")))
 }
 
@@ -391,10 +399,14 @@ fn build_scatter3_gpu_plot(
         return Err(scatter3_err("scatter3: empty input tensor"));
     }
     if x_ref.len != y_ref.len || x_ref.len != z_ref.len {
-        return Err(scatter3_err("scatter3: X, Y, and Z inputs must have identical lengths"));
+        return Err(scatter3_err(
+            "scatter3: X, Y, and Z inputs must have identical lengths",
+        ));
     }
     if x_ref.precision != y_ref.precision || x_ref.precision != z_ref.precision {
-        return Err(scatter3_err("scatter3: gpuArray inputs must have matching precision"));
+        return Err(scatter3_err(
+            "scatter3: gpuArray inputs must have matching precision",
+        ));
     }
     let point_count = x_ref.len;
     let len_u32 = u32::try_from(point_count)

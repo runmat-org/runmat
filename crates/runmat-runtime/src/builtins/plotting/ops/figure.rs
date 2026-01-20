@@ -3,8 +3,8 @@
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
-use super::state::{new_figure_handle, select_figure, FigureHandle};
 use super::plotting_error;
+use super::state::{new_figure_handle, select_figure, FigureHandle};
 use crate::build_runtime_error;
 
 fn parse_handle(value: &Value) -> crate::BuiltinResult<Option<FigureHandle>> {
@@ -22,9 +22,9 @@ fn parse_handle(value: &Value) -> crate::BuiltinResult<Option<FigureHandle>> {
         Value::Tensor(tensor) => {
             if tensor.data.len() != 1 {
                 return Err(plotting_error(
-                "figure",
-                "figure: handle tensor must contain a single element",
-            ));
+                    "figure",
+                    "figure: handle tensor must contain a single element",
+                ));
             }
             let val = tensor.data[0];
             if !val.is_finite() {
@@ -49,14 +49,12 @@ fn parse_string_handle(text: &str) -> crate::BuiltinResult<Option<FigureHandle>>
     if text.eq_ignore_ascii_case("next") {
         Ok(None)
     } else {
-        let id = text
-            .parse::<u32>()
-            .map_err(|err| {
-                build_runtime_error("figure: invalid handle string")
-                    .with_builtin("figure")
-                    .with_source(err)
-                    .build()
-            })?;
+        let id = text.parse::<u32>().map_err(|err| {
+            build_runtime_error("figure: invalid handle string")
+                .with_builtin("figure")
+                .with_source(err)
+                .build()
+        })?;
         Ok(Some(FigureHandle::from(id)))
     }
 }

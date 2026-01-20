@@ -1,4 +1,7 @@
-use runmat_parser::{parse_simple as parse, Expr, Stmt};
+use runmat_parser::{Expr, Stmt};
+
+mod parse;
+use parse::parse;
 
 #[test]
 fn command_form_with_escaped_double_quotes_and_end() {

@@ -324,7 +324,8 @@ fn transpose_char_array(ca: CharArray) -> BuiltinResult<CharArray> {
     let rows = ca.rows;
     let cols = ca.cols;
     if ca.data.is_empty() {
-        return CharArray::new(Vec::new(), cols, rows).map_err(|e| builtin_error(format!("{NAME}: {e}")));
+        return CharArray::new(Vec::new(), cols, rows)
+            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     let mut out = vec!['\0'; ca.data.len()];
     for r in 0..rows {
@@ -440,7 +441,8 @@ fn transpose_tensor_matrix(tensor: &Tensor) -> BuiltinResult<Tensor> {
     let rows = tensor.rows();
     let cols = tensor.cols();
     if tensor.data.is_empty() {
-        return Tensor::new(Vec::new(), vec![cols, rows]).map_err(|e| builtin_error(format!("{NAME}: {e}")));
+        return Tensor::new(Vec::new(), vec![cols, rows])
+            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     let mut out = vec![0.0; tensor.data.len()];
     for r in 0..rows {

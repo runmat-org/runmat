@@ -1,9 +1,9 @@
 mod test_helpers;
 
-use runmat_hir::lower;
 use runmat_parser::parse;
 use std::convert::TryInto;
 use test_helpers::execute;
+use test_helpers::lower;
 
 #[test]
 fn break_and_continue() {
@@ -140,7 +140,7 @@ fn undefined_variable_raises_mex() {
     let ast = parse("y = x + 1;").unwrap();
     let hir = lower(&ast);
     let err = hir.err().unwrap();
-    assert!(err.contains("MATLAB:UndefinedVariable"));
+    assert_eq!(err.identifier.as_deref(), Some("MATLAB:UndefinedVariable"));
 }
 
 #[test]

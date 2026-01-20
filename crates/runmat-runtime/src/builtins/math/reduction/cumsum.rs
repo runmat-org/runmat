@@ -246,7 +246,9 @@ fn parse_arguments(
                 if dim.is_some() {
                     return Err(cumsum_error("cumsum: dimension specified more than once"));
                 }
-                dim = Some(tensor::parse_dimension(value, "cumsum").map_err(|err| cumsum_error(err))?);
+                dim = Some(
+                    tensor::parse_dimension(value, "cumsum").map_err(|err| cumsum_error(err))?,
+                );
             }
             Value::Tensor(t) if t.data.is_empty() => {
                 // MATLAB allows [] as a placeholder for the default dimension; ignore it.
@@ -295,14 +297,20 @@ fn parse_arguments(
                             nan_set = true;
                         }
                         "" => {
-                            return Err(cumsum_error("cumsum: empty string option is not supported"));
+                            return Err(cumsum_error(
+                                "cumsum: empty string option is not supported",
+                            ));
                         }
                         other => {
-                            return Err(cumsum_error(format!("cumsum: unrecognised option '{other}'")));
+                            return Err(cumsum_error(format!(
+                                "cumsum: unrecognised option '{other}'"
+                            )));
                         }
                     }
                 } else {
-                    return Err(cumsum_error(format!("cumsum: unsupported argument type {value:?}")));
+                    return Err(cumsum_error(format!(
+                        "cumsum: unsupported argument type {value:?}"
+                    )));
                 }
             }
         }
@@ -574,7 +582,8 @@ fn cumsum_complex_tensor(
         }
     }
 
-    ComplexTensor::new(output, tensor.shape.clone()).map_err(|e| cumsum_error(format!("cumsum: {e}")))
+    ComplexTensor::new(output, tensor.shape.clone())
+        .map_err(|e| cumsum_error(format!("cumsum: {e}")))
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {

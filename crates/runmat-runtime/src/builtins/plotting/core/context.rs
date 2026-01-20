@@ -61,9 +61,12 @@ pub fn ensure_context_from_provider() -> BuiltinResult<WgpuContextHandle> {
         return Ok(ctx);
     }
 
-    let handle = runmat_accelerate_api::export_context(AccelContextKind::Plotting).ok_or_else(
-        || context_error("plotting context unavailable (GPU provider did not export a shared device)"),
-    )?;
+    let handle =
+        runmat_accelerate_api::export_context(AccelContextKind::Plotting).ok_or_else(|| {
+            context_error(
+                "plotting context unavailable (GPU provider did not export a shared device)",
+            )
+        })?;
     match handle {
         AccelContextHandle::Wgpu(ctx) => {
             install_wgpu_context(&ctx);

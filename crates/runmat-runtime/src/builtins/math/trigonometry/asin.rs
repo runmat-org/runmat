@@ -237,7 +237,6 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute asin in-place when inputs remain within [-1, 1]; the runtime gathers to host when complex promotion is required.",
 };
 
-
 fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -297,7 +296,6 @@ fn asin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             Err(_) => {
                 // Fall back to host path below.
             }
-
         }
     }
     let tensor = gpu_helpers::gather_tensor(&handle)?;

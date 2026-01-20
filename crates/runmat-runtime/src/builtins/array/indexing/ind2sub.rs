@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{make_cell, build_runtime_error, RuntimeError};
+use crate::{build_runtime_error, make_cell, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -233,7 +233,6 @@ fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinResult<
     let strides = build_strides(&dims, "ind2sub")?;
 
     if let Some(result) = try_gpu_ind2sub(&dims, &strides, total, &indices_val)? {
-
         return Ok(result);
     }
 
@@ -407,9 +406,7 @@ fn coerce_linear_index(value: f64, max_index: usize) -> crate::BuiltinResult<usi
 }
 
 fn ind2sub_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("ind2sub")
-        .build()
+    build_runtime_error(message).with_builtin("ind2sub").build()
 }
 
 #[cfg(test)]
@@ -507,8 +504,6 @@ pub(crate) mod tests {
                 .contains("Index exceeds number of array elements"),
             "unexpected error: {err}"
         );
-
-
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -541,7 +536,8 @@ pub(crate) mod tests {
         let dims = Tensor::new(vec![3.5, 4.0], vec![1, 2]).unwrap();
         let err = ind2sub_builtin(Value::Tensor(dims), Value::Num(5.0)).expect_err("expected fail");
         assert!(
-            err.to_string().contains("Size arguments must be positive integers"),
+            err.to_string()
+                .contains("Size arguments must be positive integers"),
             "unexpected error: {err}"
         );
     }

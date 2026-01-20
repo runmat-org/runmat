@@ -20,7 +20,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::console::{record_console_output, ConsoleStream};
-use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -272,8 +272,11 @@ fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
 }
 
 fn list_current_directory() -> BuiltinResult<Vec<DirRecord>> {
-    let cwd = env::current_dir()
-        .map_err(|err| dir_error(format!("dir: unable to determine current directory ({err})")))?;
+    let cwd = env::current_dir().map_err(|err| {
+        dir_error(format!(
+            "dir: unable to determine current directory ({err})"
+        ))
+    })?;
     let mut records = list_directory(&cwd, true)?;
     sort_records(&mut records);
     Ok(records)
@@ -376,7 +379,9 @@ fn list_path(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRecord>> {
             }
         }
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(Vec::new()),
-        Err(err) => Err(dir_error(format!("dir: unable to access '{original}' ({err})"))),
+        Err(err) => Err(dir_error(format!(
+            "dir: unable to access '{original}' ({err})"
+        ))),
     }
 }
 
@@ -450,7 +455,10 @@ fn list_directory(dir: &Path, include_special: bool) -> BuiltinResult<Vec<DirRec
         let metadata = vfs::metadata(&path)
             .or_else(|_| vfs::symlink_metadata(&path))
             .map_err(|err| {
-                dir_error(format!("dir: unable to read metadata for '{}' ({err})", name))
+                dir_error(format!(
+                    "dir: unable to read metadata for '{}' ({err})",
+                    name
+                ))
             })?;
         records.push(record_from_metadata(&folder, name, &metadata));
     }
@@ -523,7 +531,11 @@ fn absolute_folder_string(path: &Path) -> BuiltinResult<String> {
         path.to_path_buf()
     } else {
         env::current_dir()
-            .map_err(|err| dir_error(format!("dir: unable to determine current directory ({err})")))?
+            .map_err(|err| {
+                dir_error(format!(
+                    "dir: unable to determine current directory ({err})"
+                ))
+            })?
             .join(path)
     };
     let normalized = vfs::canonicalize(&joined).unwrap_or(joined);
@@ -639,7 +651,6 @@ pub(crate) mod tests {
             }
         }
     }
-
 
     fn structs_from_value(value: Value) -> Vec<TestStruct> {
         match value {
@@ -858,7 +869,10 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let err = dir_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
-        assert_eq!(err.message(), "dir: name must be a character vector or string scalar");
+        assert_eq!(
+            err.message(),
+            "dir: name must be a character vector or string scalar"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -868,9 +882,12 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let array = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
-        let err = dir_builtin(vec![Value::StringArray(array)])
-            .expect_err("expected multi-string error");
-        assert_eq!(err.message(), "dir: name must be a character vector or string scalar");
+        let err =
+            dir_builtin(vec![Value::StringArray(array)]).expect_err("expected multi-string error");
+        assert_eq!(
+            err.message(),
+            "dir: name must be a character vector or string scalar"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

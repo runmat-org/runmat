@@ -1,10 +1,10 @@
-use runmat_hir::{lower, HirExprKind, HirStmt, Type};
+use runmat_hir::{lower, HirExprKind, HirStmt, LoweringContext, Type};
 use runmat_parser::parse;
 
 #[test]
 fn lower_simple_assignments() {
     let ast = parse("x=1; y=x+2;").unwrap();
-    let hir = lower(&ast).unwrap();
+    let hir = lower(&ast, &LoweringContext::empty()).unwrap().hir;
     assert_eq!(hir.body.len(), 2);
     let (x_id, y_id) = match (&hir.body[0], &hir.body[1]) {
         (HirStmt::Assign(x_id, x_expr, _, _), HirStmt::Assign(y_id, _, _, _)) => {
@@ -31,13 +31,13 @@ fn lower_simple_assignments() {
 #[test]
 fn error_on_undefined_variable() {
     let ast = parse("y=x").unwrap();
-    assert!(lower(&ast).is_err());
+    assert!(lower(&ast, &LoweringContext::empty()).is_err());
 }
 
 #[test]
 fn function_scope_shadows_outer_variable() {
     let ast = parse("x=1; function y=foo(x); y=x+1; end").unwrap();
-    let hir = lower(&ast).unwrap();
+    let hir = lower(&ast, &LoweringContext::empty()).unwrap().hir;
     // outer assignment defines variable 0
     let outer_id = match &hir.body[0] {
         HirStmt::Assign(id, _, _, _) => *id,
@@ -67,13 +67,13 @@ fn function_scope_shadows_outer_variable() {
 #[test]
 fn undefined_variable_in_function_errors() {
     let ast = parse("function y=f(); y=z; end").unwrap();
-    assert!(lower(&ast).is_err());
+    assert!(lower(&ast, &LoweringContext::empty()).is_err());
 }
 
 #[test]
 fn type_inference_propagates_through_assignments() {
     let ast = parse("x=[1,2]; y=x+1;").unwrap();
-    let hir = lower(&ast).unwrap();
+    let hir = lower(&ast, &LoweringContext::empty()).unwrap().hir;
     let (x_id, y_id) = match (&hir.body[0], &hir.body[1]) {
         (HirStmt::Assign(x_id, x_expr, _, _), HirStmt::Assign(y_id, y_expr, _, _)) => {
             assert!(matches!(x_expr.ty, Type::Tensor { .. }));
@@ -88,7 +88,7 @@ fn type_inference_propagates_through_assignments() {
 #[test]
 fn reassignment_updates_variable_type() {
     let ast = parse("x=1; x=[1,2];").unwrap();
-    let hir = lower(&ast).unwrap();
+    let hir = lower(&ast, &LoweringContext::empty()).unwrap().hir;
     if let HirStmt::Assign(id, expr2, _, _) = &hir.body[1] {
         assert!(matches!(expr2.ty, Type::Tensor { .. }));
         // ensure variable id is same as first assignment

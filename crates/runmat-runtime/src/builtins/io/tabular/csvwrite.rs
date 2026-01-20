@@ -19,7 +19,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "csvwrite";
 
@@ -266,8 +266,8 @@ fn csvwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> crate::Bu
     let (row_offset, col_offset) = parse_offsets(&rest)?;
 
     let gathered_data = gather_if_needed(&data).map_err(map_control_flow)?;
-    let tensor = tensor::value_into_tensor_for("csvwrite", gathered_data)
-        .map_err(csvwrite_error)?;
+    let tensor =
+        tensor::value_into_tensor_for("csvwrite", gathered_data).map_err(csvwrite_error)?;
     ensure_matrix_shape(&tensor)?;
 
     let bytes = write_csv(&path, &tensor, row_offset, col_offset)?;
@@ -313,9 +313,7 @@ fn parse_offset(value: &Value, context: &str) -> BuiltinResult<usize> {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 0 {
-                return Err(csvwrite_error(format!(
-                    "csvwrite: {context} must be >= 0"
-                )));
+                return Err(csvwrite_error(format!("csvwrite: {context} must be >= 0")));
             }
             Ok(raw as usize)
         }
@@ -348,7 +346,9 @@ fn parse_offset(value: &Value, context: &str) -> BuiltinResult<usize> {
 
 fn coerce_offset_from_float(value: f64, context: &str) -> BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err(csvwrite_error(format!("csvwrite: {context} must be finite")));
+        return Err(csvwrite_error(format!(
+            "csvwrite: {context} must be finite"
+        )));
     }
     let rounded = value.round();
     if (rounded - value).abs() > 1e-9 {
@@ -410,10 +410,7 @@ fn write_csv(
 
     if rows == 0 || cols == 0 {
         file.flush().map_err(|err| {
-            csvwrite_error_with_source(
-                format!("csvwrite: failed to flush output ({err})"),
-                err,
-            )
+            csvwrite_error_with_source(format!("csvwrite: failed to flush output ({err})"), err)
         })?;
         return Ok(bytes_written);
     }
@@ -431,10 +428,7 @@ fn write_csv(
         let line = fields.join(",");
         if !line.is_empty() {
             file.write_all(line.as_bytes()).map_err(|err| {
-                csvwrite_error_with_source(
-                    format!("csvwrite: failed to write value ({err})"),
-                    err,
-                )
+                csvwrite_error_with_source(format!("csvwrite: failed to write value ({err})"), err)
             })?;
             bytes_written += line.len();
         }
@@ -448,10 +442,7 @@ fn write_csv(
     }
 
     file.flush().map_err(|err| {
-        csvwrite_error_with_source(
-            format!("csvwrite: failed to flush output ({err})"),
-            err,
-        )
+        csvwrite_error_with_source(format!("csvwrite: failed to flush output ({err})"), err)
     })?;
 
     Ok(bytes_written)

@@ -498,19 +498,13 @@ fn infer_category(inputs: &[Value]) -> BuiltinResult<CatCategory> {
     }
 
     if has_string && (has_char || has_cell || has_complex || (has_numeric && !all_logical)) {
-        return Err(cat_err(
-            "cat: cannot mix string arrays with other classes",
-        ));
+        return Err(cat_err("cat: cannot mix string arrays with other classes"));
     }
     if has_char && (has_cell || has_complex || (has_numeric && !all_logical) || has_string) {
-        return Err(cat_err(
-            "cat: cannot mix char arrays with other classes",
-        ));
+        return Err(cat_err("cat: cannot mix char arrays with other classes"));
     }
     if has_cell && (has_complex || (has_numeric && !all_logical) || has_string || has_char) {
-        return Err(cat_err(
-            "cat: cannot mix cell arrays with other classes",
-        ));
+        return Err(cat_err("cat: cannot mix cell arrays with other classes"));
     }
     if has_complex && (has_string || has_char || has_cell) {
         return Err(cat_err(
@@ -539,15 +533,17 @@ fn finalize_numeric_output(tensor: Tensor, like: &LikeSpec) -> BuiltinResult<Val
         LikeDevice::Host => Ok(tensor::tensor_into_value(tensor)),
         LikeDevice::Gpu => {
             let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-                cat_err("cat: GPU output requested via 'like' but no acceleration provider is active")
+                cat_err(
+                    "cat: GPU output requested via 'like' but no acceleration provider is active",
+                )
             })?;
             let view = HostTensorView {
                 data: &tensor.data,
                 shape: &tensor.shape,
             };
-            let handle = provider
-                .upload(&view)
-                .map_err(|err| cat_err(format!("cat: failed to upload concatenated tensor: {err}")))?;
+            let handle = provider.upload(&view).map_err(|err| {
+                cat_err(format!("cat: failed to upload concatenated tensor: {err}"))
+            })?;
             Ok(Value::GpuTensor(handle))
         }
     }
@@ -602,10 +598,8 @@ fn cat_complex_arrays(
     for value in values {
         let tensor = match value {
             Value::ComplexTensor(ct) => ct,
-            Value::Complex(re, im) => {
-                ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                    .map_err(|e| cat_err(format!("cat: {e}")))?
-            }
+            Value::Complex(re, im) => ComplexTensor::new(vec![(re, im)], vec![1, 1])
+                .map_err(|e| cat_err(format!("cat: {e}")))?,
             other => {
                 let real = tensor::value_into_tensor_for("cat", other).map_err(cat_err)?;
                 tensor_to_complex(real)?
@@ -654,14 +648,16 @@ fn concat_char_rows(arrays: Vec<CharArray>) -> BuiltinResult<Value> {
     let total_rows = arrays.iter().map(|a| a.rows).sum();
     if total_rows == 0 || cols == 0 {
         let data = Vec::new();
-        let result = CharArray::new(data, total_rows, cols).map_err(|e| cat_err(format!("cat: {e}")))?;
+        let result =
+            CharArray::new(data, total_rows, cols).map_err(|e| cat_err(format!("cat: {e}")))?;
         return Ok(Value::CharArray(result));
     }
     let mut data = Vec::with_capacity(total_rows * cols);
     for arr in arrays {
         data.extend_from_slice(&arr.data);
     }
-    let result = CharArray::new(data, total_rows, cols).map_err(|e| cat_err(format!("cat: {e}")))?;
+    let result =
+        CharArray::new(data, total_rows, cols).map_err(|e| cat_err(format!("cat: {e}")))?;
     Ok(Value::CharArray(result))
 }
 
@@ -680,7 +676,8 @@ fn concat_char_cols(arrays: Vec<CharArray>) -> BuiltinResult<Value> {
     let total_cols = arrays.iter().map(|a| a.cols).sum();
     if total_cols == 0 || rows == 0 {
         let data = Vec::new();
-        let result = CharArray::new(data, rows, total_cols).map_err(|e| cat_err(format!("cat: {e}")))?;
+        let result =
+            CharArray::new(data, rows, total_cols).map_err(|e| cat_err(format!("cat: {e}")))?;
         return Ok(Value::CharArray(result));
     }
     let mut data = Vec::with_capacity(rows * total_cols);
@@ -692,7 +689,8 @@ fn concat_char_cols(arrays: Vec<CharArray>) -> BuiltinResult<Value> {
             }
         }
     }
-    let result = CharArray::new(data, rows, total_cols).map_err(|e| cat_err(format!("cat: {e}")))?;
+    let result =
+        CharArray::new(data, rows, total_cols).map_err(|e| cat_err(format!("cat: {e}")))?;
     Ok(Value::CharArray(result))
 }
 
@@ -753,7 +751,8 @@ fn concat_cell_rows(arrays: Vec<CellArray>) -> BuiltinResult<Value> {
             values.push(value);
         }
     }
-    let cell = CellArray::new(values, total_rows, cols).map_err(|e| cat_err(format!("cat: {e}")))?;
+    let cell =
+        CellArray::new(values, total_rows, cols).map_err(|e| cat_err(format!("cat: {e}")))?;
     Ok(Value::Cell(cell))
 }
 
@@ -785,7 +784,8 @@ fn concat_cell_cols(arrays: Vec<CellArray>) -> BuiltinResult<Value> {
             }
         }
     }
-    let cell = CellArray::new(values, rows, total_cols).map_err(|e| cat_err(format!("cat: {e}")))?;
+    let cell =
+        CellArray::new(values, rows, total_cols).map_err(|e| cat_err(format!("cat: {e}")))?;
     Ok(Value::Cell(cell))
 }
 
@@ -897,15 +897,21 @@ fn concat_column_major<T: Clone>(
     let mut output_shape = padded[0].clone();
     let mut concat_dim = 0usize;
     for shape in &padded {
-        concat_dim = concat_dim
-            .checked_add(shape[dim_zero])
-            .ok_or_else(|| cat_err(format!("{context}: concatenated dimension exceeds maximum size")))?;
+        concat_dim = concat_dim.checked_add(shape[dim_zero]).ok_or_else(|| {
+            cat_err(format!(
+                "{context}: concatenated dimension exceeds maximum size"
+            ))
+        })?;
     }
     output_shape[dim_zero] = concat_dim;
 
     let total = match checked_product(&output_shape) {
         Some(total) => total,
-        None => return Err(cat_err(format!("{context}: resulting array exceeds maximum size"))),
+        None => {
+            return Err(cat_err(format!(
+                "{context}: resulting array exceeds maximum size"
+            )))
+        }
     };
     if total == 0 {
         return Ok((Vec::new(), normalize_shape(output_shape, dim_zero)));
@@ -956,7 +962,10 @@ fn value_into_logical(value: Value) -> BuiltinResult<LogicalArray> {
         Value::LogicalArray(array) => Ok(array),
         Value::Bool(flag) => LogicalArray::new(vec![if flag { 1 } else { 0 }], vec![1, 1])
             .map_err(|e| cat_err(format!("cat: {e}"))),
-        other => Err(cat_err(format!("cat: expected logical inputs, got {:?}", other))),
+        other => Err(cat_err(format!(
+            "cat: expected logical inputs, got {:?}",
+            other
+        ))),
     }
 }
 
@@ -966,7 +975,10 @@ fn value_into_string_array(value: Value) -> BuiltinResult<StringArray> {
         Value::String(text) => {
             StringArray::new(vec![text], vec![1, 1]).map_err(|e| cat_err(format!("cat: {e}")))
         }
-        other => Err(cat_err(format!("cat: expected string arrays, got {:?}", other))),
+        other => Err(cat_err(format!(
+            "cat: expected string arrays, got {:?}",
+            other
+        ))),
     }
 }
 

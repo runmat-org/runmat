@@ -335,11 +335,13 @@ pub(crate) mod tests {
     #[test]
     fn argsort_invalid_argument_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = error_message(argsort_builtin(
-            Value::Tensor(tensor),
-            vec![Value::from("MissingPlacement"), Value::from("auto")],
-        )
-        .unwrap_err());
+        let err = error_message(
+            argsort_builtin(
+                Value::Tensor(tensor),
+                vec![Value::from("MissingPlacement"), Value::from("auto")],
+            )
+            .unwrap_err(),
+        );
         assert!(
             err.contains("sort: the 'MissingPlacement' option is not supported"),
             "{err}"
@@ -350,11 +352,13 @@ pub(crate) mod tests {
     #[test]
     fn argsort_invalid_comparison_method_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = error_message(argsort_builtin(
-            Value::Tensor(tensor),
-            vec![Value::from("ComparisonMethod"), Value::from("unknown")],
-        )
-        .unwrap_err());
+        let err = error_message(
+            argsort_builtin(
+                Value::Tensor(tensor),
+                vec![Value::from("ComparisonMethod"), Value::from("unknown")],
+            )
+            .unwrap_err(),
+        );
         assert!(
             err.contains("unsupported ComparisonMethod"),
             "unexpected error: {err}"
@@ -365,14 +369,16 @@ pub(crate) mod tests {
     #[test]
     fn argsort_invalid_comparison_method_value_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = error_message(argsort_builtin(
-            Value::Tensor(tensor),
-            vec![
-                Value::from("ComparisonMethod"),
-                Value::Int(IntValue::I32(1)),
-            ],
-        )
-        .unwrap_err());
+        let err = error_message(
+            argsort_builtin(
+                Value::Tensor(tensor),
+                vec![
+                    Value::from("ComparisonMethod"),
+                    Value::Int(IntValue::I32(1)),
+                ],
+            )
+            .unwrap_err(),
+        );
         assert!(
             err.contains("requires a string value"),
             "unexpected error: {err}"

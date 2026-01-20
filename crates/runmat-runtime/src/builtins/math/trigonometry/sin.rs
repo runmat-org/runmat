@@ -250,8 +250,7 @@ fn sin_real(value: Value) -> BuiltinResult<Value> {
 
 fn sin_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.sin()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
-        .map_err(|e| runtime_error_for(format!("sin: {e}")))
+    Tensor::new(data, tensor.shape.clone()).map_err(|e| runtime_error_for(format!("sin: {e}")))
 }
 
 fn sin_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -306,7 +305,9 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
                 Ok(OutputTemplate::Like(args[1].clone()))
             } else {
-                Err(runtime_error_for("sin: unsupported option; only 'like' is accepted"))
+                Err(runtime_error_for(
+                    "sin: unsupported option; only 'like' is accepted",
+                ))
             }
         }
         _ => Err(runtime_error_for("sin: too many input arguments")),
@@ -335,7 +336,9 @@ fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResu
 
 fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        runtime_error_for("sin: GPU output requested via 'like' but no acceleration provider is active")
+        runtime_error_for(
+            "sin: GPU output requested via 'like' but no acceleration provider is active",
+        )
     })?;
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),

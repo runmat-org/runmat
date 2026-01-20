@@ -201,9 +201,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn rmfield_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("rmfield")
-        .build()
+    build_runtime_error(message).with_builtin("rmfield").build()
 }
 
 #[runtime_builtin(
@@ -254,7 +252,9 @@ fn collect_field_names(value: &Value) -> BuiltinResult<Vec<String>> {
             if sa.data.len() == 1 {
                 expect_scalar_name(value)
                     .map(|name| vec![name])
-                    .map_err(|err| rmfield_flow(format!("rmfield: {}", describe_field_name_error(err))))
+                    .map_err(|err| {
+                        rmfield_flow(format!("rmfield: {}", describe_field_name_error(err)))
+                    })
             } else {
                 string_array_to_names(sa)
             }
@@ -464,9 +464,8 @@ pub(crate) mod tests {
     fn rmfield_errors_when_field_missing() {
         let mut st = StructValue::new();
         st.fields.insert("name".to_string(), Value::from("Ada"));
-        let err = error_message(
-            rmfield_builtin(Value::Struct(st), vec![Value::from("id")]).unwrap_err(),
-        );
+        let err =
+            error_message(rmfield_builtin(Value::Struct(st), vec![Value::from("id")]).unwrap_err());
         assert!(
             err.contains("Reference to non-existent field 'id'."),
             "unexpected error: {err}"

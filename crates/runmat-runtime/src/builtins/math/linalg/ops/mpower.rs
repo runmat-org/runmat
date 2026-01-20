@@ -404,9 +404,9 @@ fn parse_integer_exponent(value: &Value) -> BuiltinResult<Option<i32>> {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw > i32::MAX as i64 || raw < i32::MIN as i64 {
-                return Err(
-                    builtin_error("mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)"),
-                );
+                return Err(builtin_error(
+                    "mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)",
+                ));
             }
             Ok(Some(raw as i32))
         }
@@ -415,9 +415,9 @@ fn parse_integer_exponent(value: &Value) -> BuiltinResult<Option<i32>> {
                 return Err(builtin_error("Matrix power requires integer exponent"));
             }
             if *n > i32::MAX as f64 || *n < i32::MIN as f64 {
-                return Err(
-                    builtin_error("mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)"),
-                );
+                return Err(builtin_error(
+                    "mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)",
+                ));
             }
             Ok(Some(*n as i32))
         }
@@ -427,9 +427,9 @@ fn parse_integer_exponent(value: &Value) -> BuiltinResult<Option<i32>> {
                 return Err(builtin_error("Matrix power requires integer exponent"));
             }
             if scalar > i32::MAX as f64 || scalar < i32::MIN as f64 {
-                return Err(
-                    builtin_error("mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)"),
-                );
+                return Err(builtin_error(
+                    "mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)",
+                ));
             }
             Ok(Some(scalar as i32))
         }
@@ -504,11 +504,10 @@ pub(crate) mod tests {
     #[test]
     fn non_integer_exponent_errors() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let err = unwrap_error(
-            mpower_builtin(Value::Tensor(matrix), Value::Num(1.5)).unwrap_err(),
-        );
+        let err = unwrap_error(mpower_builtin(Value::Tensor(matrix), Value::Num(1.5)).unwrap_err());
         assert!(
-            err.message().contains("Matrix power requires integer exponent"),
+            err.message()
+                .contains("Matrix power requires integer exponent"),
             "{err}"
         );
     }

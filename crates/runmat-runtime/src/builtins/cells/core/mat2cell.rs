@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::{
-    gather_if_needed, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeError,
+    build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
 
 #[cfg_attr(
@@ -377,7 +377,8 @@ impl Mat2CellInput {
             Mat2CellKind::Tensor(t) => {
                 let data = copy_block(&t.data, &self.base_shape, start, sizes)?;
                 let shape = adjust_output_shape(sizes);
-                let tensor = Tensor::new(data, shape).map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
+                let tensor = Tensor::new(data, shape)
+                    .map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
                 Ok(tensor::tensor_into_value(tensor))
             }
             Mat2CellKind::Complex(t) => {
@@ -387,8 +388,8 @@ impl Mat2CellInput {
                     let (re, im) = data[0];
                     Ok(Value::Complex(re, im))
                 } else {
-                    let tensor =
-                        ComplexTensor::new(data, shape).map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
+                    let tensor = ComplexTensor::new(data, shape)
+                        .map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
                     Ok(Value::ComplexTensor(tensor))
                 }
             }
@@ -398,8 +399,8 @@ impl Mat2CellInput {
                     Ok(Value::Bool(data[0] != 0))
                 } else {
                     let shape = adjust_output_shape(sizes);
-                    let logical =
-                        LogicalArray::new(data, shape).map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
+                    let logical = LogicalArray::new(data, shape)
+                        .map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
                     Ok(Value::LogicalArray(logical))
                 }
             }
@@ -409,8 +410,8 @@ impl Mat2CellInput {
                     Ok(Value::String(data.into_iter().next().unwrap()))
                 } else {
                     let shape = adjust_output_shape(sizes);
-                    let strings =
-                        StringArray::new(data, shape).map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
+                    let strings = StringArray::new(data, shape)
+                        .map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
                     Ok(Value::StringArray(strings))
                 }
             }
@@ -481,7 +482,8 @@ fn split_into_cells(input: &Mat2CellInput, partitions: Vec<Vec<usize>>) -> Built
         }
     }
 
-    make_cell_with_shape(cells, normalized_shape).map_err(|e| mat2cell_error(format!("mat2cell: {e}")))
+    make_cell_with_shape(cells, normalized_shape)
+        .map_err(|e| mat2cell_error(format!("mat2cell: {e}")))
 }
 
 fn parse_partition_vector(

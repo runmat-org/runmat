@@ -2,11 +2,11 @@
 use runmat_builtins::{StringArray, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::core::string::{
     extract_format_spec, format_from_spec, FormatSpecData,
 };
@@ -323,8 +323,7 @@ pub(crate) mod tests {
             StringArray::new(vec!["%d".into(), "%d".into()], vec![1, 2]).unwrap(),
         );
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
-        let err =
-            error_message(compose_builtin(spec, vec![Value::Tensor(tensor)]).unwrap_err());
+        let err = error_message(compose_builtin(spec, vec![Value::Tensor(tensor)]).unwrap_err());
         assert!(
             err.starts_with("compose: "),
             "expected compose prefix, got {err}"

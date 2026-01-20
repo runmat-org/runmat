@@ -5,13 +5,13 @@ use runmat_accelerate_api::{
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::random_args::{extract_dims, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "var";
 
@@ -205,7 +205,6 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers compute variance via standard-deviation reductions followed by an in-device squaring pass.",
 };
 
-
 fn var_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
 }
@@ -303,9 +302,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     continue;
                 }
                 _ => {
-                    return Err(var_error(format!(
-                        "var: unrecognised option '{keyword}'"
-                    )));
+                    return Err(var_error(format!("var: unrecognised option '{keyword}'")));
                 }
             }
         }
@@ -324,9 +321,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     continue;
                 }
                 NormParse::Weighted => {
-                    return Err(var_error(
-                        "var: weighted variance is not implemented yet",
-                    ));
+                    return Err(var_error("var: weighted variance is not implemented yet"));
                 }
                 NormParse::NotMatched => {}
             }
@@ -335,9 +330,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         if !axes_set || matches!(axes, VarAxes::Default) {
             if let Some(selection) = parse_axes(arg)? {
                 if axes_set && !matches!(axes, VarAxes::Default) {
-                    return Err(var_error(
-                        "var: multiple dimension specifications provided",
-                    ));
+                    return Err(var_error("var: multiple dimension specifications provided"));
                 }
                 if matches!(selection, VarAxes::All)
                     && axes_set
@@ -353,9 +346,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 continue;
             }
         } else if parse_axes(arg)?.is_some() {
-            return Err(var_error(
-                "var: multiple dimension specifications provided",
-            ));
+            return Err(var_error("var: multiple dimension specifications provided"));
         }
 
         return Err(var_error(format!("var: unrecognised argument {arg:?}")));
@@ -397,14 +388,10 @@ fn parse_normalization(value: &Value) -> BuiltinResult<NormParse> {
         Value::Int(i) => match i.to_i64() {
             0 => Ok(NormParse::Value(VarNormalization::Sample)),
             1 => Ok(NormParse::Value(VarNormalization::Population)),
-            _ => Err(var_error(
-                "var: normalisation flag must be 0, 1, or []",
-            )),
+            _ => Err(var_error("var: normalisation flag must be 0, 1, or []")),
         },
         Value::Num(n) => parse_normalization_scalar(*n),
-        Value::GpuTensor(_) => Err(var_error(
-            "var: normalisation flag must reside on the host",
-        )),
+        Value::GpuTensor(_) => Err(var_error("var: normalisation flag must reside on the host")),
         _ => Ok(NormParse::NotMatched),
     }
 }
@@ -501,8 +488,7 @@ fn var_tensor_reduce(
     let out_len = tensor::element_count(&output_shape);
     if tensor.data.is_empty() {
         let fill = vec![f64::NAN; out_len];
-        return Tensor::new(fill, output_shape)
-            .map_err(|e| var_error(format!("var: {e}")));
+        return Tensor::new(fill, output_shape).map_err(|e| var_error(format!("var: {e}")));
     }
 
     let mut counts = vec![0usize; out_len];

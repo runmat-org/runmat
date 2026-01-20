@@ -6,12 +6,12 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::build_runtime_error;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -363,8 +363,8 @@ fn parse_dim_spec(value: &Value) -> crate::BuiltinResult<DimSelection> {
         }
         Value::Tensor(t) => parse_dim_tensor(t),
         Value::LogicalArray(logical) => {
-            let tensor =
-                tensor::logical_to_tensor(logical).map_err(|e| builtin_error(format!("range: {e}")))?;
+            let tensor = tensor::logical_to_tensor(logical)
+                .map_err(|e| builtin_error(format!("range: {e}")))?;
             parse_dim_tensor(&tensor)
         }
         Value::GpuTensor(_) => Err(builtin_error(
@@ -412,7 +412,11 @@ fn is_vector_shape(shape: &[usize]) -> bool {
     }
 }
 
-fn range_host(value: Value, selection: DimSelection, nan_mode: NanMode) -> crate::BuiltinResult<Value> {
+fn range_host(
+    value: Value,
+    selection: DimSelection,
+    nan_mode: NanMode,
+) -> crate::BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for("range", value)
         .map_err(|e| builtin_error(format!("range: {e}")))?;
     let resolved = resolve_dims(&tensor.shape, &selection)?;

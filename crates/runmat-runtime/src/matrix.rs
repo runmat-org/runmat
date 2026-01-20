@@ -167,7 +167,7 @@ pub fn matrix_eye(n: usize) -> Tensor {
 #[runtime_builtin(name = "matrix_zeros", builtin_path = "crate::matrix")]
 fn matrix_zeros_builtin(rows: i32, cols: i32) -> crate::BuiltinResult<Tensor> {
     if rows < 0 || cols < 0 {
-        return Err((("Matrix dimensions must be non-negative".to_string())).into());
+        return Err(("Matrix dimensions must be non-negative".to_string()).into());
     }
     Ok(Tensor::zeros(vec![rows as usize, cols as usize]))
 }
@@ -175,7 +175,7 @@ fn matrix_zeros_builtin(rows: i32, cols: i32) -> crate::BuiltinResult<Tensor> {
 #[runtime_builtin(name = "matrix_ones", builtin_path = "crate::matrix")]
 fn matrix_ones_builtin(rows: i32, cols: i32) -> crate::BuiltinResult<Tensor> {
     if rows < 0 || cols < 0 {
-        return Err((("Matrix dimensions must be non-negative".to_string())).into());
+        return Err(("Matrix dimensions must be non-negative".to_string()).into());
     }
     Ok(Tensor::ones(vec![rows as usize, cols as usize]))
 }
@@ -183,7 +183,7 @@ fn matrix_ones_builtin(rows: i32, cols: i32) -> crate::BuiltinResult<Tensor> {
 #[runtime_builtin(name = "matrix_eye", builtin_path = "crate::matrix")]
 fn matrix_eye_builtin(n: i32) -> crate::BuiltinResult<Tensor> {
     if n < 0 {
-        return Err((("Matrix size must be non-negative".to_string())).into());
+        return Err(("Matrix size must be non-negative".to_string()).into());
     }
     Ok(matrix_eye(n as usize))
 }
@@ -194,6 +194,6 @@ fn matrix_transpose_builtin(a: Tensor) -> crate::BuiltinResult<Tensor> {
     let result = crate::call_builtin("transpose", &args)?;
     match result {
         Value::Tensor(tensor) => Ok(tensor),
-        other => Err(((format!("matrix_transpose: expected tensor, got {other:?}"))).into()),
+        other => Err((format!("matrix_transpose: expected tensor, got {other:?}")).into()),
     }
 }

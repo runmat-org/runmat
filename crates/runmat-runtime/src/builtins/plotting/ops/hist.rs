@@ -266,7 +266,8 @@ impl HistWeightsInput {
                 Ok(HistWeightsInput::Gpu(handle))
             }
             other => {
-                let tensor = Tensor::try_from(&other).map_err(|e| hist_err(format!("hist: Weights {e}")))?;
+                let tensor =
+                    Tensor::try_from(&other).map_err(|e| hist_err(format!("hist: Weights {e}")))?;
                 if tensor.data.len() != expected_len {
                     return Err(hist_err(format!(
                         "hist: Weights must contain {expected_len} elements (got {})",
@@ -475,7 +476,9 @@ fn parse_hist_arguments(
             }
             "binedges" => {
                 if bin_set {
-                    return Err(hist_err("hist: specify either bins argument or 'BinEdges', not both"));
+                    return Err(hist_err(
+                        "hist: specify either bins argument or 'BinEdges', not both",
+                    ));
                 }
                 let edges = parse_bin_edges_value(value)?;
                 ensure_spec_compatible(
@@ -488,7 +491,9 @@ fn parse_hist_arguments(
             }
             "numbins" => {
                 if bin_set {
-                    return Err(hist_err("hist: NumBins cannot be combined with explicit bins"));
+                    return Err(hist_err(
+                        "hist: NumBins cannot be combined with explicit bins",
+                    ));
                 }
                 let count = parse_num_bins_value(&value)?;
                 ensure_spec_compatible(&HistBinSpec::Count(count), &bin_options, "NumBins")?;
@@ -497,7 +502,9 @@ fn parse_hist_arguments(
             }
             "binwidth" => {
                 if bin_set {
-                    return Err(hist_err("hist: BinWidth cannot be combined with explicit bins"));
+                    return Err(hist_err(
+                        "hist: BinWidth cannot be combined with explicit bins",
+                    ));
                 }
                 ensure_no_explicit_bins(&bin_options, "BinWidth")?;
                 if bin_options.bin_width.is_some() {
@@ -560,7 +567,6 @@ fn parse_hist_bins(arg: Option<Value>, sample_len: usize) -> BuiltinResult<HistB
                     "hist: bin argument must be a scalar count or a vector of centers",
                 ));
             }
-
         }
     };
     Ok(match spec {
@@ -607,7 +613,9 @@ struct RealizedBins {
 impl RealizedBins {
     fn from_edges(edges: Vec<f64>) -> BuiltinResult<Self> {
         if edges.len() < 2 {
-            return Err(hist_err("hist: bin definitions must contain at least two edges"));
+            return Err(hist_err(
+                "hist: bin definitions must contain at least two edges",
+            ));
         }
         let widths = widths_from_edges(&edges);
         let labels = histogram_labels_from_edges(&edges);
@@ -842,7 +850,9 @@ fn parse_bin_limits_value(value: Value) -> BuiltinResult<(f64, f64)> {
         .map_err(|_| hist_err("hist: BinLimits must be provided as a numeric vector"))?;
     let values = numeric_vector(tensor);
     if values.len() != 2 {
-        return Err(hist_err("hist: BinLimits must contain exactly two elements"));
+        return Err(hist_err(
+            "hist: BinLimits must contain exactly two elements",
+        ));
     }
     let lo = values[0];
     let hi = values[1];
@@ -915,7 +925,9 @@ fn parse_bin_edges_value(value: Value) -> BuiltinResult<Vec<f64>> {
         Value::Tensor(tensor) => {
             let edges = numeric_vector(tensor);
             if edges.len() < 2 {
-                return Err(hist_err("hist: 'BinEdges' must contain at least two elements"));
+                return Err(hist_err(
+                    "hist: 'BinEdges' must contain at least two elements",
+                ));
             }
             validate_monotonic(&edges)?;
             Ok(edges)
@@ -976,7 +988,9 @@ fn parse_hist_normalization(arg: Option<Value>) -> BuiltinResult<HistNormalizati
             if let Some(text) = value_as_string(&value) {
                 parse_norm_string(&text)
             } else {
-                Err(hist_err("hist: normalization must be 'count', 'probability', or 'pdf'"))
+                Err(hist_err(
+                    "hist: normalization must be 'count', 'probability', or 'pdf'",
+                ))
             }
         }
     }
@@ -1045,8 +1059,8 @@ fn build_empty_histogram_chart(
 }
 
 fn build_hist_cpu_result(bins: &RealizedBins, counts: Vec<f64>) -> BuiltinResult<HistComputation> {
-    let mut bar =
-        BarChart::new(bins.labels.clone(), counts.clone()).map_err(|err| hist_err(format!("hist: {err}")))?;
+    let mut bar = BarChart::new(bins.labels.clone(), counts.clone())
+        .map_err(|err| hist_err(format!("hist: {err}")))?;
     bar.label = Some(HIST_DEFAULT_LABEL.to_string());
     Ok(HistComputation {
         counts,
@@ -1078,7 +1092,9 @@ fn find_bin_index(edges: &[f64], value: f64) -> usize {
 
 fn edges_from_centers(centers: &[f64]) -> BuiltinResult<Vec<f64>> {
     if centers.is_empty() {
-        return Err(hist_err("hist: bin centers must contain at least one element"));
+        return Err(hist_err(
+            "hist: bin centers must contain at least one element",
+        ));
     }
     if centers.len() == 1 {
         let half = 0.5;
@@ -1173,7 +1189,9 @@ fn build_histogram_gpu_chart(
         Some(min_value_f32 as f64),
     )?;
     let Some(uniform_width_f64) = bins.uniform_width else {
-        return Err(hist_err("hist: GPU rendering currently requires uniform bin edges"));
+        return Err(hist_err(
+            "hist: GPU rendering currently requires uniform bin edges",
+        ));
     };
     let uniform_width = uniform_width_f64 as f32;
     let bin_count_u32 = u32::try_from(bins.bin_count())
@@ -1313,7 +1331,8 @@ impl HistInput {
         match value {
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
             other => {
-                let tensor = Tensor::try_from(&other).map_err(|e| hist_err(format!("hist: {e}")))?;
+                let tensor =
+                    Tensor::try_from(&other).map_err(|e| hist_err(format!("hist: {e}")))?;
                 Ok(Self::Host(tensor))
             }
         }

@@ -3,8 +3,8 @@
 use runmat_builtins::{LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::random_args::{keyword_of, shape_from_value};
 use crate::builtins::common::map_control_flow_with_builtin;
+use crate::builtins::common::random_args::{keyword_of, shape_from_value};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -269,8 +269,9 @@ enum FillKind {
 fn strings_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let ParsedStrings { shape, fill } = parse_arguments(rest)?;
     let total = shape.iter().try_fold(1usize, |acc, &dim| {
-        acc.checked_mul(dim)
-            .ok_or_else(|| strings_flow(format!("{FN_NAME}: requested size exceeds platform limits")))
+        acc.checked_mul(dim).ok_or_else(|| {
+            strings_flow(format!("{FN_NAME}: requested size exceeds platform limits"))
+        })
     })?;
 
     let fill_text = match fill {
@@ -305,7 +306,9 @@ fn parse_arguments(args: Vec<Value>) -> BuiltinResult<ParsedStrings> {
                         )));
                     }
                     let Some(proto_raw) = args.get(idx + 1) else {
-                        return Err(strings_flow(format!("{FN_NAME}: expected prototype after 'like'")));
+                        return Err(strings_flow(format!(
+                            "{FN_NAME}: expected prototype after 'like'"
+                        )));
                     };
                     let proto = gather_if_needed(proto_raw).map_err(remap_strings_flow)?;
                     like_proto = Some(proto);
@@ -385,7 +388,9 @@ fn parse_single_argument(value: Value) -> BuiltinResult<Vec<usize>> {
         Value::Bool(b) => Ok(vec![if b { 1 } else { 0 }]),
         Value::Tensor(t) => parse_size_tensor(&t),
         Value::LogicalArray(arr) => parse_size_logical_array(&arr),
-        other => Err(strings_flow(format!("{FN_NAME}: {SIZE_NUMERIC_ERR}, got {other:?}"))),
+        other => Err(strings_flow(format!(
+            "{FN_NAME}: {SIZE_NUMERIC_ERR}, got {other:?}"
+        ))),
     }
 }
 
@@ -409,7 +414,9 @@ fn parse_size_scalar(value: &Value) -> BuiltinResult<usize> {
             }
             Ok(if arr.data[0] != 0 { 1 } else { 0 })
         }
-        other => Err(strings_flow(format!("{FN_NAME}: {SIZE_NUMERIC_ERR}, got {other:?}"))),
+        other => Err(strings_flow(format!(
+            "{FN_NAME}: {SIZE_NUMERIC_ERR}, got {other:?}"
+        ))),
     }
 }
 

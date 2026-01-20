@@ -278,8 +278,7 @@ fn atan_real(value: Value) -> BuiltinResult<Value> {
 
 fn atan_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.atan()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
-        .map_err(|e| runtime_error_for(format!("atan: {e}")))
+    Tensor::new(data, tensor.shape.clone()).map_err(|e| runtime_error_for(format!("atan: {e}")))
 }
 
 fn atan_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -353,7 +352,9 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
                     return Err(runtime_error_for("atan: too many input arguments"));
                 }
             }
-            Err(runtime_error_for("atan: unsupported option; only 'like' is accepted"))
+            Err(runtime_error_for(
+                "atan: unsupported option; only 'like' is accepted",
+            ))
         }
         _ => unreachable!(),
     }
@@ -396,9 +397,9 @@ fn analyse_like_prototype(prototype: &Value) -> BuiltinResult<LikeAnalysis> {
             device: DevicePreference::Host,
             class: PrototypeClass::Complex,
         }),
-        Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => Err(runtime_error_for(
-            "atan: 'like' prototype must be numeric",
-        )),
+        Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
+            Err(runtime_error_for("atan: 'like' prototype must be numeric"))
+        }
         other => {
             let gathered = dispatcher::gather_if_needed(other)?;
             if &gathered == other {
@@ -471,9 +472,9 @@ fn convert_real_to_complex(value: Value) -> BuiltinResult<Value> {
         }
         Value::Int(i) => convert_real_to_complex(Value::Num(i.to_f64())),
         Value::Bool(b) => convert_real_to_complex(Value::Num(if b { 1.0 } else { 0.0 })),
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(runtime_error_for(
-            "atan: 'like' prototype must be numeric",
-        )),
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
+            Err(runtime_error_for("atan: 'like' prototype must be numeric"))
+        }
         Value::GpuTensor(_) => Err(runtime_error_for(
             "atan: internal error converting GPU value to complex output",
         )),
@@ -485,7 +486,9 @@ fn convert_real_to_complex(value: Value) -> BuiltinResult<Value> {
 
 fn convert_real_value_to_gpu(value: Value) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        runtime_error_for("atan: GPU output requested via 'like' but no acceleration provider is active")
+        runtime_error_for(
+            "atan: GPU output requested via 'like' but no acceleration provider is active",
+        )
     })?;
     match value {
         Value::Tensor(tensor) => {
@@ -493,9 +496,9 @@ fn convert_real_value_to_gpu(value: Value) -> BuiltinResult<Value> {
                 data: &tensor.data,
                 shape: &tensor.shape,
             };
-            let handle = provider
-                .upload(&view)
-                .map_err(|e| runtime_error_for(format!("atan: failed to upload GPU result: {e}")))?;
+            let handle = provider.upload(&view).map_err(|e| {
+                runtime_error_for(format!("atan: failed to upload GPU result: {e}"))
+            })?;
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
@@ -513,9 +516,9 @@ fn convert_real_value_to_gpu(value: Value) -> BuiltinResult<Value> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(runtime_error_for(
             "atan: GPU 'like' prototypes do not support complex outputs",
         )),
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(runtime_error_for(
-            "atan: 'like' prototype must be numeric",
-        )),
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
+            Err(runtime_error_for("atan: 'like' prototype must be numeric"))
+        }
         other => Err(runtime_error_for(format!(
             "atan: unsupported result type {other:?} for GPU output via 'like'"
         ))),

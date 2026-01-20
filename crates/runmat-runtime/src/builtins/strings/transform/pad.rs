@@ -3,11 +3,11 @@
 use runmat_builtins::{CellArray, CharArray, StringArray, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
 
@@ -332,7 +332,8 @@ fn pad_string_array(array: StringArray, options: PadOptions) -> BuiltinResult<Va
         let new_text = apply_padding_owned(text, char_count, target_len, &options);
         padded.push(new_text);
     }
-    let result = StringArray::new(padded, shape).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+    let result = StringArray::new(padded, shape)
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
     Ok(Value::StringArray(result))
 }
 
@@ -448,7 +449,8 @@ fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<Value> 
             CellKind::Char { rows } => {
                 let chars: Vec<char> = padded.chars().collect();
                 let cols = chars.len();
-                let array = CharArray::new(chars, rows, cols).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+                let array = CharArray::new(chars, rows, cols)
+                    .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
                 results.push(Value::CharArray(array));
             }
         }
@@ -511,8 +513,8 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<PadOptions> {
         }
         3 => {
             let length = parse_length(&args[0])?.ok_or_else(|| runtime_error_for(LENGTH_ERROR))?;
-            let direction =
-                try_parse_direction(&args[1], true)?.ok_or_else(|| runtime_error_for(DIRECTION_ERROR))?;
+            let direction = try_parse_direction(&args[1], true)?
+                .ok_or_else(|| runtime_error_for(DIRECTION_ERROR))?;
             let pad_char = parse_pad_char(&args[2])?;
             options.target = PadTarget::Length(length);
             options.direction = direction;

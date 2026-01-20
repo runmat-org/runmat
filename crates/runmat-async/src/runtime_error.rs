@@ -3,7 +3,6 @@ use std::error::Error as StdError;
 use miette::SourceSpan;
 use thiserror::Error;
 
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ErrorContext {
     pub builtin: Option<String>,
@@ -92,8 +91,7 @@ impl RuntimeError {
         if let Some(identifier) = identifier {
             lines.push(format!("id: {identifier}"));
         }
-        if let Some(((source_name, source), span)) =
-            source_name.zip(source).zip(self.span.as_ref())
+        if let Some(((source_name, source), span)) = source_name.zip(source).zip(self.span.as_ref())
         {
             let (line, col, line_text, caret) = render_span(source, span);
             lines.push(format!("--> {source_name}:{line}:{col}"));
@@ -212,6 +210,10 @@ fn render_span(source: &str, span: &SourceSpan) -> (usize, usize, String, String
     let col = offset.saturating_sub(line_start) + 1;
     let available = line_end.saturating_sub(offset).max(1);
     let caret_len = len.max(1).min(available);
-    let caret = format!("{}{}", " ".repeat(col.saturating_sub(1)), "^".repeat(caret_len));
+    let caret = format!(
+        "{}{}",
+        " ".repeat(col.saturating_sub(1)),
+        "^".repeat(caret_len)
+    );
     (line, col, line_text, caret)
 }

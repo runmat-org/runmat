@@ -244,7 +244,6 @@ fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     }
 
     if let Some(value) = try_gpu_sub2ind(&dims, &rest)? {
-
         return Ok(value);
     }
 
@@ -437,11 +436,7 @@ fn subscript_value(tensor: &Tensor, idx: usize) -> f64 {
     }
 }
 
-fn coerce_subscript(
-    value: f64,
-    dim_number: usize,
-    dim_size: usize,
-) -> crate::BuiltinResult<usize> {
+fn coerce_subscript(value: f64, dim_number: usize, dim_size: usize) -> crate::BuiltinResult<usize> {
     if !value.is_finite() {
         return Err(sub2ind_error(
             "Subscript indices must either be real positive integers or logicals.",
@@ -486,9 +481,7 @@ fn build_host_value(data: Vec<f64>, shape: Option<Vec<usize>>) -> crate::Builtin
 }
 
 fn sub2ind_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("sub2ind")
-        .build()
+    build_runtime_error(message).with_builtin("sub2ind").build()
 }
 
 #[cfg(test)]

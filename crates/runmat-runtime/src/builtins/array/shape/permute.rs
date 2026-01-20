@@ -205,9 +205,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn permute_error(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(builtin)
-        .build()
+    build_runtime_error(message).with_builtin(builtin).build()
 }
 
 #[runtime_builtin(
@@ -275,15 +273,14 @@ pub(crate) fn parse_order_argument(
             )
         })?,
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
-            tensor::value_into_tensor_for(builtin, order)
-                .map_err(|e| permute_error(builtin, e))?
+            tensor::value_into_tensor_for(builtin, order).map_err(|e| permute_error(builtin, e))?
         }
         Value::GpuTensor(_) => {
             return Err(permute_error(
                 builtin,
                 format!(
-                    "{builtin}: order vector must be specified on the host (numeric or logical array)"
-                ),
+                "{builtin}: order vector must be specified on the host (numeric or logical array)"
+            ),
             ))
         }
         Value::StringArray(_) | Value::CharArray(_) | Value::ComplexTensor(_) | Value::Cell(_) => {
@@ -302,10 +299,7 @@ pub(crate) fn parse_order_argument(
     parse_order_tensor(builtin, &tensor)
 }
 
-fn parse_order_tensor(
-    builtin: &'static str,
-    tensor: &Tensor,
-) -> crate::BuiltinResult<Vec<usize>> {
+fn parse_order_tensor(builtin: &'static str, tensor: &Tensor) -> crate::BuiltinResult<Vec<usize>> {
     if !is_vector(tensor) {
         return Err(permute_error(
             builtin,
@@ -345,10 +339,7 @@ fn parse_order_tensor(
     Ok(order)
 }
 
-fn validate_permutation(
-    builtin: &'static str,
-    order: &[usize],
-) -> crate::BuiltinResult<()> {
+fn validate_permutation(builtin: &'static str, order: &[usize]) -> crate::BuiltinResult<()> {
     let rank = order.len();
     let mut seen = vec![false; rank];
     for &idx in order {
@@ -398,8 +389,7 @@ pub(crate) fn permute_tensor(
 ) -> crate::BuiltinResult<Tensor> {
     let Tensor { data, shape, .. } = tensor;
     let (out, new_shape) = permute_generic(builtin, &data, &shape, order)?;
-    Tensor::new(out, new_shape)
-        .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
+    Tensor::new(out, new_shape).map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
 }
 
 pub(crate) fn permute_complex_tensor(
@@ -420,8 +410,7 @@ pub(crate) fn permute_logical_array(
 ) -> crate::BuiltinResult<LogicalArray> {
     let LogicalArray { data, shape } = la;
     let (out, new_shape) = permute_generic(builtin, &data, &shape, order)?;
-    LogicalArray::new(out, new_shape)
-        .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
+    LogicalArray::new(out, new_shape).map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
 }
 
 pub(crate) fn permute_string_array(
@@ -431,8 +420,7 @@ pub(crate) fn permute_string_array(
 ) -> crate::BuiltinResult<StringArray> {
     let StringArray { data, shape, .. } = sa;
     let (out, new_shape) = permute_generic(builtin, &data, &shape, order)?;
-    StringArray::new(out, new_shape)
-        .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
+    StringArray::new(out, new_shape).map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
 }
 
 pub(crate) fn permute_char_array(
@@ -668,7 +656,9 @@ pub(crate) mod tests {
         let t = tensor(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
         let order = tensor(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
         let err = permute_builtin(Value::Tensor(t), Value::Tensor(order)).expect_err("should fail");
-        assert!(err.to_string().contains("order must be a row or column vector"));
+        assert!(err
+            .to_string()
+            .contains("order must be a row or column vector"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -696,7 +686,9 @@ pub(crate) mod tests {
         let t = tensor(&data, &[2, 2, 2]);
         let order = tensor(&[2.0, 1.0], &[1, 2]);
         let err = permute_builtin(Value::Tensor(t), Value::Tensor(order)).expect_err("should fail");
-        assert!(err.to_string().contains("order length (2) must be at least ndims(A) (3)"));
+        assert!(err
+            .to_string()
+            .contains("order length (2) must be at least ndims(A) (3)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -778,7 +770,9 @@ pub(crate) mod tests {
         let order = tensor(&[1.0], &[1, 1]);
         let err =
             permute_builtin(Value::CharArray(ca), Value::Tensor(order)).expect_err("should fail");
-        assert!(err.to_string().contains("order length (1) must be at least ndims(A) (2)"));
+        assert!(err
+            .to_string()
+            .contains("order length (1) must be at least ndims(A) (2)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

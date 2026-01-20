@@ -213,7 +213,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "ifftshift";
 
 fn ifftshift_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build()
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(
@@ -266,9 +268,9 @@ fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
             let dims = compute_shift_dims(&handle.shape, dims_arg, BUILTIN_NAME)?;
             Ok(ifftshift_gpu(handle, &dims)?)
         }
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
-            Err(ifftshift_error("ifftshift: expected numeric or logical input"))
-        }
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => Err(
+            ifftshift_error("ifftshift: expected numeric or logical input"),
+        ),
         Value::Struct(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -284,17 +286,13 @@ fn ifftshift_tensor(tensor: Tensor, dims: &[usize]) -> BuiltinResult<Tensor> {
     let Tensor { data, shape, .. } = tensor;
     let plan = build_shift_plan(&shape, dims, ShiftKind::Ifft);
     if data.is_empty() || plan.is_noop() {
-        return Tensor::new(data, shape)
-            .map_err(|e| ifftshift_error(format!("ifftshift: {e}")));
+        return Tensor::new(data, shape).map_err(|e| ifftshift_error(format!("ifftshift: {e}")));
     }
     let rotated = apply_shift(BUILTIN_NAME, &data, &plan.ext_shape, &plan.positive)?;
     Tensor::new(rotated, shape).map_err(|e| ifftshift_error(format!("ifftshift: {e}")))
 }
 
-fn ifftshift_complex_tensor(
-    tensor: ComplexTensor,
-    dims: &[usize],
-) -> BuiltinResult<ComplexTensor> {
+fn ifftshift_complex_tensor(tensor: ComplexTensor, dims: &[usize]) -> BuiltinResult<ComplexTensor> {
     let ComplexTensor { data, shape, .. } = tensor;
     let plan = build_shift_plan(&shape, dims, ShiftKind::Ifft);
     if data.is_empty() || plan.is_noop() {

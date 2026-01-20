@@ -461,7 +461,10 @@ fn parse_tolerance_value(name: &str, value: &Value) -> BuiltinResult<f64> {
         }
     };
     if !raw.is_finite() {
-        return Err(runtime_error(name, format!("{name}: tolerance must be finite")));
+        return Err(runtime_error(
+            name,
+            format!("{name}: tolerance must be finite"),
+        ));
     }
     if raw < 0.0 {
         return Err(runtime_error(
@@ -501,7 +504,10 @@ fn value_into_tensor_for(name: &str, value: Value) -> BuiltinResult<Tensor> {
             .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
         other => Err(runtime_error(
             name,
-            format!("{name}: unsupported input type {:?}; expected numeric or logical values", other),
+            format!(
+                "{name}: unsupported input type {:?}; expected numeric or logical values",
+                other
+            ),
         )),
     }
 }

@@ -4,6 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::build_runtime_error;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionExprContext,
     FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
@@ -11,7 +12,6 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use runmat_builtins::NumericDType;
-use crate::build_runtime_error;
 
 #[cfg_attr(
     feature = "doc_export",
@@ -307,9 +307,7 @@ impl ParsedOnes {
                     }
                     "double" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error(
-                                "ones: cannot combine 'like' with 'double'",
-                            ));
+                            return Err(builtin_error("ones: cannot combine 'like' with 'double'"));
                         }
                         class_override = Some(OutputTemplate::Double);
                         idx += 1;
@@ -317,9 +315,7 @@ impl ParsedOnes {
                     }
                     "single" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error(
-                                "ones: cannot combine 'like' with 'single'",
-                            ));
+                            return Err(builtin_error("ones: cannot combine 'like' with 'single'"));
                         }
                         class_override = Some(OutputTemplate::Single);
                         idx += 1;
@@ -545,7 +541,9 @@ fn shape_from_value(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
         Value::CharArray(ca) => Ok(vec![ca.rows, ca.cols]),
         Value::Cell(cell) => Ok(vec![cell.rows, cell.cols]),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(vec![1, 1]),
-        other => Err(builtin_error(format!("ones: unsupported prototype {other:?}"))),
+        other => Err(builtin_error(format!(
+            "ones: unsupported prototype {other:?}"
+        ))),
     }
 }
 

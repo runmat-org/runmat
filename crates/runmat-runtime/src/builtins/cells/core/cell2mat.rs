@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ReductionNaN, ResidencyPolicy, ScalarType,
     ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -336,8 +336,8 @@ impl CellEntry {
 fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<Value> {
     if ca.data.is_empty() {
         // Mirror MATLAB's behaviour: empty cell array -> 0x0 double matrix.
-        let tensor =
-            Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
+        let tensor = Tensor::new(Vec::new(), vec![0, 0])
+            .map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
         return Ok(Value::Tensor(tensor));
     }
 
@@ -461,7 +461,8 @@ fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<Value>
                 rank,
                 &mut data,
             )?;
-            let tensor = Tensor::new(data, result_shape).map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
+            let tensor = Tensor::new(data, result_shape)
+                .map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
             Ok(Value::Tensor(tensor))
         }
         ElementKind::Complex => {
@@ -474,8 +475,8 @@ fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<Value>
                 rank,
                 &mut data,
             )?;
-            let tensor =
-                ComplexTensor::new(data, result_shape).map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
+            let tensor = ComplexTensor::new(data, result_shape)
+                .map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
             Ok(Value::ComplexTensor(tensor))
         }
         ElementKind::Logical => {
@@ -488,16 +489,16 @@ fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<Value>
                 rank,
                 &mut data,
             )?;
-            let logical =
-                LogicalArray::new(data, result_shape).map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
+            let logical = LogicalArray::new(data, result_shape)
+                .map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
             Ok(Value::LogicalArray(logical))
         }
         ElementKind::Char => {
             let rows = result_shape.first().copied().unwrap_or(0);
             let cols = result_shape.get(1).copied().unwrap_or(1);
             let char_data = copy_chars(&entries, &multi_indices, rows, cols, &block_sizes)?;
-            let array =
-                CharArray::new(char_data, rows, cols).map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
+            let array = CharArray::new(char_data, rows, cols)
+                .map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
             Ok(Value::CharArray(array))
         }
     }
@@ -671,15 +672,12 @@ fn compute_base_offsets(
     let mut base = vec![0usize; total_rank];
     for dim in 0..rank.min(prefix_offsets.len()) {
         let idx = multi.get(dim).copied().unwrap_or(0);
-        let offset = prefix_offsets[dim]
-            .get(idx)
-            .copied()
-            .ok_or_else(|| {
-                cell2mat_error_with_identifier(
-                    "cell2mat: internal offset calculation failed",
-                    IDENT_SIZE_LIMIT,
-                )
-            })?;
+        let offset = prefix_offsets[dim].get(idx).copied().ok_or_else(|| {
+            cell2mat_error_with_identifier(
+                "cell2mat: internal offset calculation failed",
+                IDENT_SIZE_LIMIT,
+            )
+        })?;
         base[dim] = offset;
     }
     Ok(base)

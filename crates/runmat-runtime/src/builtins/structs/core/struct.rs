@@ -192,9 +192,7 @@ enum FieldValue {
 }
 
 fn struct_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("struct")
-        .build()
+    build_runtime_error(message).with_builtin("struct").build()
 }
 
 #[runtime_builtin(
@@ -354,7 +352,11 @@ fn parse_field_name(value: &Value) -> BuiltinResult<String> {
             }
         }
         Value::CharArray(ca) => char_array_to_string(ca)?,
-        _ => return Err(struct_flow("struct: field names must be strings or character vectors")),
+        _ => {
+            return Err(struct_flow(
+                "struct: field names must be strings or character vectors",
+            ))
+        }
     };
 
     validate_field_name(&text)?;
@@ -516,13 +518,15 @@ pub(crate) mod tests {
     fn struct_struct_array_cell_size_mismatch_errors() {
         let names = CellArray::new(vec![Value::from("Ada"), Value::from("Grace")], 1, 2).unwrap();
         let scores = CellArray::new(vec![Value::Int(IntValue::I32(1))], 1, 1).unwrap();
-        let err = error_message(struct_builtin(vec![
-            Value::from("name"),
-            Value::Cell(names),
-            Value::from("score"),
-            Value::Cell(scores),
-        ])
-        .unwrap_err());
+        let err = error_message(
+            struct_builtin(vec![
+                Value::from("name"),
+                Value::Cell(names),
+                Value::from("score"),
+                Value::Cell(scores),
+            ])
+            .unwrap_err(),
+        );
         assert!(err.contains("matching sizes"));
     }
 

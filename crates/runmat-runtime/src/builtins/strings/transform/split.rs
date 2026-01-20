@@ -5,11 +5,11 @@ use std::collections::HashSet;
 use runmat_builtins::{CellArray, CharArray, StringArray, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
@@ -417,7 +417,8 @@ impl TextMatrix {
             } else {
                 vec![rows, cols * block_cols]
             };
-            let array = StringArray::new(Vec::new(), shape).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+            let array = StringArray::new(Vec::new(), shape)
+                .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
             return Ok(Value::StringArray(array));
         }
 
@@ -460,7 +461,8 @@ impl TextMatrix {
         }
 
         let shape = vec![rows, result_cols];
-        let array = StringArray::new(output, shape).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+        let array = StringArray::new(output, shape)
+            .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
         Ok(Value::StringArray(array))
     }
 }

@@ -242,7 +242,6 @@ fn is_undefined_function(err: &RuntimeError) -> bool {
 }
 
 #[runtime_builtin(
-
     name = "setfield",
     category = "structs/core",
     summary = "Assign into struct fields, struct arrays, or MATLAB-style object properties.",
@@ -283,7 +282,9 @@ enum IndexComponent {
 
 fn parse_arguments(mut rest: Vec<Value>) -> BuiltinResult<ParsedArguments> {
     if rest.len() < 2 {
-        return Err(setfield_flow("setfield: expected at least one field name and a value"));
+        return Err(setfield_flow(
+            "setfield: expected at least one field name and a value",
+        ));
     }
 
     let value = rest
@@ -367,7 +368,9 @@ fn assign_without_leading_index(
         Value::Object(object) => assign_into_object(object, steps, rhs),
         Value::Cell(cell) if is_struct_array(&cell) => {
             if cell.data.is_empty() {
-                Err(setfield_flow("setfield: struct array is empty; supply indices in a cell array"))
+                Err(setfield_flow(
+                    "setfield: struct array is empty; supply indices in a cell array",
+                ))
             } else {
                 let selector = IndexSelector {
                     components: vec![IndexComponent::Scalar(1)],
@@ -376,9 +379,9 @@ fn assign_without_leading_index(
             }
         }
         Value::HandleObject(handle) => assign_into_handle(handle, steps, rhs),
-        Value::Listener(_) => {
-            Err(setfield_flow("setfield: listeners do not support direct field assignment"))
-        }
+        Value::Listener(_) => Err(setfield_flow(
+            "setfield: listeners do not support direct field assignment",
+        )),
         other => Err(setfield_flow(format!(
             "setfield unsupported on this value for field '{}': {other:?}",
             steps.first().map(|s| s.name.as_str()).unwrap_or_default()
@@ -393,7 +396,9 @@ fn assign_into_struct_array(
     rhs: Value,
 ) -> BuiltinResult<Value> {
     if selector.components.is_empty() {
-        return Err(setfield_flow("setfield: index cell must contain at least one element"));
+        return Err(setfield_flow(
+            "setfield: index cell must contain at least one element",
+        ));
     }
 
     let resolved = resolve_indices(&Value::Cell(cell.clone()), selector)?;
@@ -415,9 +420,9 @@ fn assign_into_struct_array(
             (row - 1) * cell.cols + (col - 1)
         }
         _ => {
-            return Err(
-                setfield_flow("setfield: indexing with more than two indices is not supported yet"),
-            );
+            return Err(setfield_flow(
+                "setfield: indexing with more than two indices is not supported yet",
+            ));
         }
     };
 
@@ -442,9 +447,9 @@ fn assign_into_value(value: Value, steps: &[FieldStep], rhs: Value) -> BuiltinRe
         Value::Object(object) => assign_into_object(object, steps, rhs),
         Value::Cell(cell) => assign_into_cell(cell, steps, rhs),
         Value::HandleObject(handle) => assign_into_handle(handle, steps, rhs),
-        Value::Listener(_) => {
-            Err(setfield_flow("setfield: listeners do not support nested field assignment"))
-        }
+        Value::Listener(_) => Err(setfield_flow(
+            "setfield: listeners do not support nested field assignment",
+        )),
         other => Err(setfield_flow(format!(
             "Struct contents assignment to a {other:?} object is not supported."
         ))),
@@ -506,9 +511,9 @@ fn assign_into_object(
         .expect("steps is non-empty when assign_into_object is called");
 
     if first.index.is_some() {
-        return Err(
-            setfield_flow("setfield: indexing into object properties is not currently supported"),
-        );
+        return Err(setfield_flow(
+            "setfield: indexing into object properties is not currently supported",
+        ));
     }
 
     if rest.is_empty() {
@@ -665,7 +670,9 @@ fn assign_tensor_element(
                 .map(|slot| *slot = value)
                 .ok_or_else(|| setfield_flow("Index exceeds the number of array elements."))
         }
-        _ => Err(setfield_flow("setfield: indexing with more than two indices is not supported yet")),
+        _ => Err(setfield_flow(
+            "setfield: indexing with more than two indices is not supported yet",
+        )),
     }
 }
 
@@ -703,7 +710,9 @@ fn assign_logical_element(
             logical.data[pos] = if value { 1 } else { 0 };
             Ok(())
         }
-        _ => Err(setfield_flow("setfield: indexing with more than two indices is not supported yet")),
+        _ => Err(setfield_flow(
+            "setfield: indexing with more than two indices is not supported yet",
+        )),
     }
 }
 
@@ -713,8 +722,9 @@ fn assign_string_array_element(
     rhs: Value,
 ) -> BuiltinResult<()> {
     let resolved = resolve_indices(&Value::StringArray(array.clone()), selector)?;
-    let text = String::try_from(&rhs)
-        .map_err(|_| setfield_flow("setfield: string assignments require text-compatible values"))?;
+    let text = String::try_from(&rhs).map_err(|_| {
+        setfield_flow("setfield: string assignments require text-compatible values")
+    })?;
     match resolved.len() {
         1 => {
             let idx = resolved[0];
@@ -737,7 +747,9 @@ fn assign_string_array_element(
             array.data[pos] = text;
             Ok(())
         }
-        _ => Err(setfield_flow("setfield: indexing with more than two indices is not supported yet")),
+        _ => Err(setfield_flow(
+            "setfield: indexing with more than two indices is not supported yet",
+        )),
     }
 }
 
@@ -750,7 +762,9 @@ fn assign_char_array_element(
     let text = String::try_from(&rhs)
         .map_err(|_| setfield_flow("setfield: char assignments require text-compatible values"))?;
     if text.chars().count() != 1 {
-        return Err(setfield_flow("setfield: char array assignments require single characters"));
+        return Err(setfield_flow(
+            "setfield: char array assignments require single characters",
+        ));
     }
     let ch = text.chars().next().unwrap();
     match resolved.len() {
@@ -775,7 +789,9 @@ fn assign_char_array_element(
             array.data[pos] = ch;
             Ok(())
         }
-        _ => Err(setfield_flow("setfield: indexing with more than two indices is not supported yet")),
+        _ => Err(setfield_flow(
+            "setfield: indexing with more than two indices is not supported yet",
+        )),
     }
 }
 
@@ -817,7 +833,9 @@ fn assign_complex_tensor_element(
             tensor.data[pos] = (re, im);
             Ok(())
         }
-        _ => Err(setfield_flow("setfield: indexing with more than two indices is not supported yet")),
+        _ => Err(setfield_flow(
+            "setfield: indexing with more than two indices is not supported yet",
+        )),
     }
 }
 
@@ -915,9 +933,9 @@ fn write_object_property(obj: &mut ObjectInstance, name: &str, rhs: Value) -> Bu
 
 fn assign_into_handle(handle: HandleRef, steps: &[FieldStep], rhs: Value) -> BuiltinResult<Value> {
     if steps.is_empty() {
-        return Err(
-            setfield_flow("setfield: expected at least one field name when assigning into a handle"),
-        );
+        return Err(setfield_flow(
+            "setfield: expected at least one field name when assigning into a handle",
+        ));
     }
     if !handle.valid {
         return Err(setfield_flow(format!(
@@ -943,7 +961,9 @@ fn is_index_selector(value: &Value) -> bool {
 
 fn parse_index_selector(value: Value) -> BuiltinResult<IndexSelector> {
     let Value::Cell(cell) = value else {
-        return Err(setfield_flow("setfield: indices must be provided in a cell array"));
+        return Err(setfield_flow(
+            "setfield: indices must be provided in a cell array",
+        ));
     };
     let mut components = Vec::with_capacity(cell.data.len());
     for handle in &cell.data {
@@ -978,7 +998,9 @@ fn parse_index_text(text: &str) -> BuiltinResult<IndexComponent> {
         return Ok(IndexComponent::End);
     }
     if text == ":" {
-        return Err(setfield_flow("setfield: ':' indexing is not currently supported"));
+        return Err(setfield_flow(
+            "setfield: ':' indexing is not currently supported",
+        ));
     }
     if text.is_empty() {
         return Err(setfield_flow("setfield: index elements must not be empty"));
@@ -1090,14 +1112,16 @@ fn tensor_dimension_length(tensor: &Tensor, dims: usize, dim_idx: usize) -> Buil
     if dims == 1 {
         let total = tensor.data.len();
         if total == 0 {
-            return Err(setfield_flow("Index exceeds the number of array elements (0)."));
+            return Err(setfield_flow(
+                "Index exceeds the number of array elements (0).",
+            ));
         }
         return Ok(total);
     }
     if dims > 2 {
-        return Err(
-            setfield_flow("setfield: indexing with more than two indices is not supported yet"),
-        );
+        return Err(setfield_flow(
+            "setfield: indexing with more than two indices is not supported yet",
+        ));
     }
     let len = if dim_idx == 0 {
         tensor.rows()
@@ -1105,7 +1129,9 @@ fn tensor_dimension_length(tensor: &Tensor, dims: usize, dim_idx: usize) -> Buil
         tensor.cols()
     };
     if len == 0 {
-        return Err(setfield_flow("Index exceeds the number of array elements (0)."));
+        return Err(setfield_flow(
+            "Index exceeds the number of array elements (0).",
+        ));
     }
     Ok(len)
 }
@@ -1114,18 +1140,22 @@ fn cell_dimension_length(cell: &CellArray, dims: usize, dim_idx: usize) -> Built
     if dims == 1 {
         let total = cell.data.len();
         if total == 0 {
-            return Err(setfield_flow("Index exceeds the number of array elements (0)."));
+            return Err(setfield_flow(
+                "Index exceeds the number of array elements (0).",
+            ));
         }
         return Ok(total);
     }
     if dims > 2 {
-        return Err(
-            setfield_flow("setfield: indexing with more than two indices is not supported yet"),
-        );
+        return Err(setfield_flow(
+            "setfield: indexing with more than two indices is not supported yet",
+        ));
     }
     let len = if dim_idx == 0 { cell.rows } else { cell.cols };
     if len == 0 {
-        return Err(setfield_flow("Index exceeds the number of array elements (0)."));
+        return Err(setfield_flow(
+            "Index exceeds the number of array elements (0).",
+        ));
     }
     Ok(len)
 }
@@ -1138,18 +1168,22 @@ fn string_array_dimension_length(
     if dims == 1 {
         let total = array.data.len();
         if total == 0 {
-            return Err(setfield_flow("Index exceeds the number of array elements (0)."));
+            return Err(setfield_flow(
+                "Index exceeds the number of array elements (0).",
+            ));
         }
         return Ok(total);
     }
     if dims > 2 {
-        return Err(
-            setfield_flow("setfield: indexing with more than two indices is not supported yet"),
-        );
+        return Err(setfield_flow(
+            "setfield: indexing with more than two indices is not supported yet",
+        ));
     }
     let len = if dim_idx == 0 { array.rows } else { array.cols };
     if len == 0 {
-        return Err(setfield_flow("Index exceeds the number of array elements (0)."));
+        return Err(setfield_flow(
+            "Index exceeds the number of array elements (0).",
+        ));
     }
     Ok(len)
 }
@@ -1162,21 +1196,27 @@ fn logical_array_dimension_length(
     if dims == 1 {
         let total = array.data.len();
         if total == 0 {
-            return Err(setfield_flow("Index exceeds the number of array elements (0)."));
+            return Err(setfield_flow(
+                "Index exceeds the number of array elements (0).",
+            ));
         }
         return Ok(total);
     }
     if dims > 2 {
-        return Err(
-            setfield_flow("setfield: indexing with more than two indices is not supported yet"),
-        );
+        return Err(setfield_flow(
+            "setfield: indexing with more than two indices is not supported yet",
+        ));
     }
     if array.shape.len() < dims {
-        return Err(setfield_flow("Index exceeds the number of array elements (0)."));
+        return Err(setfield_flow(
+            "Index exceeds the number of array elements (0).",
+        ));
     }
     let len = array.shape[dim_idx];
     if len == 0 {
-        return Err(setfield_flow("Index exceeds the number of array elements (0)."));
+        return Err(setfield_flow(
+            "Index exceeds the number of array elements (0).",
+        ));
     }
     Ok(len)
 }
@@ -1189,18 +1229,22 @@ fn char_array_dimension_length(
     if dims == 1 {
         let total = array.data.len();
         if total == 0 {
-            return Err(setfield_flow("Index exceeds the number of array elements (0)."));
+            return Err(setfield_flow(
+                "Index exceeds the number of array elements (0).",
+            ));
         }
         return Ok(total);
     }
     if dims > 2 {
-        return Err(
-            setfield_flow("setfield: indexing with more than two indices is not supported yet"),
-        );
+        return Err(setfield_flow(
+            "setfield: indexing with more than two indices is not supported yet",
+        ));
     }
     let len = if dim_idx == 0 { array.rows } else { array.cols };
     if len == 0 {
-        return Err(setfield_flow("Index exceeds the number of array elements (0)."));
+        return Err(setfield_flow(
+            "Index exceeds the number of array elements (0).",
+        ));
     }
     Ok(len)
 }
@@ -1213,14 +1257,16 @@ fn complex_tensor_dimension_length(
     if dims == 1 {
         let total = tensor.data.len();
         if total == 0 {
-            return Err(setfield_flow("Index exceeds the number of array elements (0)."));
+            return Err(setfield_flow(
+                "Index exceeds the number of array elements (0).",
+            ));
         }
         return Ok(total);
     }
     if dims > 2 {
-        return Err(
-            setfield_flow("setfield: indexing with more than two indices is not supported yet"),
-        );
+        return Err(setfield_flow(
+            "setfield: indexing with more than two indices is not supported yet",
+        ));
     }
     let len = if dim_idx == 0 {
         tensor.rows
@@ -1228,7 +1274,9 @@ fn complex_tensor_dimension_length(
         tensor.cols
     };
     if len == 0 {
-        return Err(setfield_flow("Index exceeds the number of array elements (0)."));
+        return Err(setfield_flow(
+            "Index exceeds the number of array elements (0).",
+        ));
     }
     Ok(len)
 }
@@ -1259,7 +1307,9 @@ fn value_to_bool(value: Value) -> BuiltinResult<bool> {
 
 fn allocate_cell_handle(value: Value) -> BuiltinResult<GcPtr<Value>> {
     runmat_gc::gc_allocate(value).map_err(|e| {
-        setfield_flow(format!("setfield: failed to allocate cell element in GC: {e}"))
+        setfield_flow(format!(
+            "setfield: failed to allocate cell element in GC: {e}"
+        ))
     })
 }
 

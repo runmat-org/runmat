@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry;
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "Invalid file identifier. Use fopen to generate a valid file ID.";
@@ -267,12 +267,10 @@ pub fn evaluate(fid_value: &Value) -> BuiltinResult<bool> {
 
     if let Err(err) = file.seek(SeekFrom::Start(position)) {
         return Err(
-            build_runtime_error(format!(
-                "feof: failed to restore file position: {err}"
-            ))
-            .with_builtin(BUILTIN_NAME)
-            .with_source(err)
-            .build(),
+            build_runtime_error(format!("feof: failed to restore file position: {err}"))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err)
+                .build(),
         );
     }
 

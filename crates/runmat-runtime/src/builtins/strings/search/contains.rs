@@ -493,7 +493,9 @@ pub(crate) mod tests {
             vec![Value::String("IgnoreCase".into())],
         )
         .unwrap_err();
-        assert!(err.to_string().contains("expected a value after 'IgnoreCase'"));
+        assert!(err
+            .to_string()
+            .contains("expected a value after 'IgnoreCase'"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

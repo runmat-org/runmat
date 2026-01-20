@@ -3,11 +3,11 @@
 use runmat_builtins::{CellArray, CharArray, StringArray, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
 
@@ -428,7 +428,8 @@ fn build_value(kind: OutputKind, data: Vec<String>, shape: Vec<usize>) -> Builti
     match kind {
         OutputKind::StringScalar => Ok(Value::String(data.into_iter().next().unwrap_or_default())),
         OutputKind::StringArray => {
-            let array = StringArray::new(data, shape).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+            let array = StringArray::new(data, shape)
+                .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
             Ok(Value::StringArray(array))
         }
         OutputKind::CellArray => {
@@ -445,12 +446,13 @@ fn build_value(kind: OutputKind, data: Vec<String>, shape: Vec<usize>) -> Builti
                     let text = data[idx].clone();
                     let chars: Vec<char> = text.chars().collect();
                     let cols_count = chars.len();
-                    let char_array =
-                        CharArray::new(chars, 1, cols_count).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+                    let char_array = CharArray::new(chars, 1, cols_count)
+                        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
                     values.push(Value::CharArray(char_array));
                 }
             }
-            make_cell(values, rows, cols).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+            make_cell(values, rows, cols)
+                .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
         }
     }
 }
@@ -472,7 +474,8 @@ fn cell_array_to_strings(cell: CellArray) -> BuiltinResult<(Vec<String>, Vec<usi
         for row in 0..rows {
             let idx = row * cols + col;
             strings.push(
-                cell_element_to_string(&data[idx]).ok_or_else(|| runtime_error_for(INPUT_TYPE_ERROR))?,
+                cell_element_to_string(&data[idx])
+                    .ok_or_else(|| runtime_error_for(INPUT_TYPE_ERROR))?,
             );
         }
     }

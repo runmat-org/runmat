@@ -4,7 +4,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::{make_cell, build_runtime_error, RuntimeError};
+use crate::{build_runtime_error, make_cell, RuntimeError};
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
@@ -231,9 +231,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn gather_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("gather")
-        .build()
+    build_runtime_error(message).with_builtin("gather").build()
 }
 
 #[runtime_builtin(

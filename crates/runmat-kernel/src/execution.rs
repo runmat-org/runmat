@@ -318,8 +318,7 @@ mod tests {
         assert!(result.error.is_some());
 
         let error = result.error.unwrap();
-        assert_eq!(error.error_type,                     "SyntaxError"
-);
+        assert_eq!(error.error_type, "SyntaxError");
         assert!(!error.message.is_empty());
     }
 

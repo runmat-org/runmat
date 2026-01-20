@@ -353,8 +353,9 @@ impl GtOperand {
             Value::String(s) => Ok(GtOperand::String(StringBuffer::scalar(s))),
             Value::StringArray(sa) => Ok(GtOperand::String(StringBuffer::from_array(sa))),
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)
-                    .map_err(|err| gt_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT))?;
+                let tensor = gpu_helpers::gather_tensor(&handle).map_err(|err| {
+                    gt_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT)
+                })?;
                 Ok(GtOperand::Numeric(NumericBuffer::from_tensor(tensor)))
             }
             Value::Complex(_, _) | Value::ComplexTensor(_) => Err(gt_error(

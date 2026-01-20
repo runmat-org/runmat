@@ -278,9 +278,10 @@ impl RegexprepOptions {
         let mut idx = 0usize;
         while idx < rest.len() {
             let raw = value_to_lower_string(&rest[idx]).ok_or_else(|| {
-                runtime_error_for(
-                    format!("{builtin}: expected option string, got {:?}", rest[idx]),
-                )
+                runtime_error_for(format!(
+                    "{builtin}: expected option string, got {:?}",
+                    rest[idx]
+                ))
             })?;
             idx += 1;
             match raw.as_str() {
@@ -914,8 +915,7 @@ fn strings_to_char_array(
         }
         data.extend(chars);
     }
-    CharArray::new(data, rows, max_cols)
-        .map_err(|e| runtime_error_for(format!("{builtin}: {e}")))
+    CharArray::new(data, rows, max_cols).map_err(|e| runtime_error_for(format!("{builtin}: {e}")))
 }
 
 fn matlab_template_to_rust(raw: &str) -> String {

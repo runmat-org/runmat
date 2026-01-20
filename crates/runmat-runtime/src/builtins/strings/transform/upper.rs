@@ -2,11 +2,11 @@
 use runmat_builtins::{CellArray, CharArray, StringArray, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, uppercase_preserving_missing};
 use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
 
@@ -240,7 +240,8 @@ fn upper_string_array(array: StringArray) -> BuiltinResult<Value> {
         .into_iter()
         .map(uppercase_preserving_missing)
         .collect::<Vec<_>>();
-    let upper_array = StringArray::new(uppered, shape).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+    let upper_array = StringArray::new(uppered, shape)
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
     Ok(Value::StringArray(upper_array))
 }
 
@@ -285,7 +286,8 @@ fn upper_cell_array(cell: CellArray) -> BuiltinResult<Value> {
             upper_values.push(upper);
         }
     }
-    make_cell(upper_values, rows, cols).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+    make_cell(upper_values, rows, cols)
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
 fn upper_cell_element(value: &Value) -> BuiltinResult<Value> {

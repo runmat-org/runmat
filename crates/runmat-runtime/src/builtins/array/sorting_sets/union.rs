@@ -14,6 +14,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{CharArray, ComplexTensor, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -21,7 +22,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -251,13 +251,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn union_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("union")
-        .build()
+    build_runtime_error(message).with_builtin("union").build()
 }
 
 #[runtime_builtin(
-
     name = "union",
     category = "array/sorting_sets",
     summary = "Combine two arrays, returning their union with MATLAB-compatible ordering and index outputs.",
@@ -315,7 +312,9 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<UnionOptions> {
                 opts.order = UnionOrder::Stable;
             }
             "legacy" | "r2012a" => {
-                return Err(union_error("union: the 'legacy' behaviour is not supported"));
+                return Err(union_error(
+                    "union: the 'legacy' behaviour is not supported",
+                ));
             }
             other => return Err(union_error(format!("union: unrecognised option '{other}'"))),
         }
@@ -349,8 +348,7 @@ fn union_gpu_mixed(
     gpu_is_a: bool,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     let tensor_gpu = gpu_helpers::gather_tensor(&handle_gpu)?;
-    let tensor_other = tensor::value_into_tensor_for("union", other)
-        .map_err(|e| union_error(e))?;
+    let tensor_other = tensor::value_into_tensor_for("union", other).map_err(|e| union_error(e))?;
     if gpu_is_a {
         union_numeric(tensor_gpu, tensor_other, opts)
     } else {
@@ -388,35 +386,39 @@ fn union_host(a: Value, b: Value, opts: &UnionOptions) -> crate::BuiltinResult<U
             union_string(astring, bstring, opts)
         }
         (Value::StringArray(astring), Value::String(b)) => {
-            let bstring =
-                StringArray::new(vec![b], vec![1, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+            let bstring = StringArray::new(vec![b], vec![1, 1])
+                .map_err(|e| union_error(format!("union: {e}")))?;
             union_string(astring, bstring, opts)
         }
         (Value::String(a), Value::StringArray(bstring)) => {
-            let astring =
-                StringArray::new(vec![a], vec![1, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+            let astring = StringArray::new(vec![a], vec![1, 1])
+                .map_err(|e| union_error(format!("union: {e}")))?;
             union_string(astring, bstring, opts)
         }
         (Value::String(a), Value::String(b)) => {
-            let astring =
-                StringArray::new(vec![a], vec![1, 1]).map_err(|e| union_error(format!("union: {e}")))?;
-            let bstring =
-                StringArray::new(vec![b], vec![1, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+            let astring = StringArray::new(vec![a], vec![1, 1])
+                .map_err(|e| union_error(format!("union: {e}")))?;
+            let bstring = StringArray::new(vec![b], vec![1, 1])
+                .map_err(|e| union_error(format!("union: {e}")))?;
             union_string(astring, bstring, opts)
         }
 
         // Fallback to numeric (includes tensors, logical arrays, ints, bools, doubles)
         (left, right) => {
-            let tensor_a = tensor::value_into_tensor_for("union", left)
-                .map_err(|e| union_error(e))?;
-            let tensor_b = tensor::value_into_tensor_for("union", right)
-                .map_err(|e| union_error(e))?;
+            let tensor_a =
+                tensor::value_into_tensor_for("union", left).map_err(|e| union_error(e))?;
+            let tensor_b =
+                tensor::value_into_tensor_for("union", right).map_err(|e| union_error(e))?;
             union_numeric(tensor_a, tensor_b, opts)
         }
     }
 }
 
-fn union_numeric(a: Tensor, b: Tensor, opts: &UnionOptions) -> crate::BuiltinResult<UnionEvaluation> {
+fn union_numeric(
+    a: Tensor,
+    b: Tensor,
+    opts: &UnionOptions,
+) -> crate::BuiltinResult<UnionEvaluation> {
     if opts.rows {
         union_numeric_rows(a, b, opts)
     } else {
@@ -494,12 +496,14 @@ fn union_numeric_rows(
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     if a.shape.len() != 2 || b.shape.len() != 2 {
-        return Err(union_error("union: 'rows' option requires 2-D numeric matrices"));
+        return Err(union_error(
+            "union: 'rows' option requires 2-D numeric matrices",
+        ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(
-            union_error("union: inputs must have the same number of columns when using 'rows'"),
-        );
+        return Err(union_error(
+            "union: inputs must have the same number of columns when using 'rows'",
+        ));
     }
     let rows_a = a.shape[0];
     let cols = a.shape[1];
@@ -634,12 +638,14 @@ fn union_complex_rows(
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     if a.shape.len() != 2 || b.shape.len() != 2 {
-        return Err(union_error("union: 'rows' option requires 2-D complex matrices"));
+        return Err(union_error(
+            "union: 'rows' option requires 2-D complex matrices",
+        ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(
-            union_error("union: inputs must have the same number of columns when using 'rows'"),
-        );
+        return Err(union_error(
+            "union: inputs must have the same number of columns when using 'rows'",
+        ));
     }
     let rows_a = a.shape[0];
     let cols = a.shape[1];
@@ -707,7 +713,11 @@ fn union_complex_rows(
     assemble_complex_row_union(entries, opts, cols)
 }
 
-fn union_char(a: CharArray, b: CharArray, opts: &UnionOptions) -> crate::BuiltinResult<UnionEvaluation> {
+fn union_char(
+    a: CharArray,
+    b: CharArray,
+    opts: &UnionOptions,
+) -> crate::BuiltinResult<UnionEvaluation> {
     if opts.rows {
         union_char_rows(a, b, opts)
     } else {
@@ -784,9 +794,9 @@ fn union_char_rows(
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     if a.cols != b.cols {
-        return Err(
-            union_error("union: inputs must have the same number of columns when using 'rows'"),
-        );
+        return Err(union_error(
+            "union: inputs must have the same number of columns when using 'rows'",
+        ));
     }
     let rows_a = a.rows;
     let rows_b = b.rows;
@@ -919,12 +929,14 @@ fn union_string_rows(
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     if a.shape.len() != 2 || b.shape.len() != 2 {
-        return Err(union_error("union: 'rows' option requires 2-D string arrays"));
+        return Err(union_error(
+            "union: 'rows' option requires 2-D string arrays",
+        ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(
-            union_error("union: inputs must have the same number of columns when using 'rows'"),
-        );
+        return Err(union_error(
+            "union: inputs must have the same number of columns when using 'rows'",
+        ));
     }
     let rows_a = a.shape[0];
     let cols = a.shape[1];
@@ -1002,10 +1014,12 @@ impl UnionEvaluation {
 
     pub fn from_union_result(result: UnionResult) -> crate::BuiltinResult<Self> {
         let UnionResult { values, ia, ib } = result;
-        let values_tensor =
-            Tensor::new(values.data, values.shape).map_err(|e| union_error(format!("union: {e}")))?;
-        let ia_tensor = Tensor::new(ia.data, ia.shape).map_err(|e| union_error(format!("union: {e}")))?;
-        let ib_tensor = Tensor::new(ib.data, ib.shape).map_err(|e| union_error(format!("union: {e}")))?;
+        let values_tensor = Tensor::new(values.data, values.shape)
+            .map_err(|e| union_error(format!("union: {e}")))?;
+        let ia_tensor =
+            Tensor::new(ia.data, ia.shape).map_err(|e| union_error(format!("union: {e}")))?;
+        let ib_tensor =
+            Tensor::new(ib.data, ib.shape).map_err(|e| union_error(format!("union: {e}")))?;
         Ok(UnionEvaluation::new(
             tensor::tensor_into_value(values_tensor),
             ia_tensor,
@@ -1015,8 +1029,8 @@ impl UnionEvaluation {
 
     pub fn into_numeric_union_result(self) -> crate::BuiltinResult<UnionResult> {
         let UnionEvaluation { values, ia, ib } = self;
-        let values_tensor = tensor::value_into_tensor_for("union", values)
-            .map_err(|e| union_error(e))?;
+        let values_tensor =
+            tensor::value_into_tensor_for("union", values).map_err(|e| union_error(e))?;
         Ok(UnionResult {
             values: HostTensorOwned {
                 data: values_tensor.data,
@@ -1188,12 +1202,14 @@ fn assemble_numeric_union(
         }
     }
 
-    let value_tensor =
-        Tensor::new(values, vec![order.len(), 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let value_tensor = Tensor::new(values, vec![order.len(), 1])
+        .map_err(|e| union_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
-    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ia_tensor =
+        Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ib_tensor =
+        Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         tensor::tensor_into_value(value_tensor),
@@ -1237,12 +1253,14 @@ fn assemble_numeric_row_union(
         }
     }
 
-    let value_tensor =
-        Tensor::new(values, vec![unique_rows, cols]).map_err(|e| union_error(format!("union: {e}")))?;
+    let value_tensor = Tensor::new(values, vec![unique_rows, cols])
+        .map_err(|e| union_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
-    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ia_tensor =
+        Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ib_tensor =
+        Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         tensor::tensor_into_value(value_tensor),
@@ -1278,12 +1296,14 @@ fn assemble_complex_union(
         }
     }
 
-    let value_tensor =
-        ComplexTensor::new(values, vec![order.len(), 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let value_tensor = ComplexTensor::new(values, vec![order.len(), 1])
+        .map_err(|e| union_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
-    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ia_tensor =
+        Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ib_tensor =
+        Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         complex_tensor_into_value(value_tensor),
@@ -1327,12 +1347,14 @@ fn assemble_complex_row_union(
         }
     }
 
-    let value_tensor =
-        ComplexTensor::new(values, vec![unique_rows, cols]).map_err(|e| union_error(format!("union: {e}")))?;
+    let value_tensor = ComplexTensor::new(values, vec![unique_rows, cols])
+        .map_err(|e| union_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
-    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ia_tensor =
+        Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ib_tensor =
+        Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         complex_tensor_into_value(value_tensor),
@@ -1368,11 +1390,14 @@ fn assemble_char_union(
         }
     }
 
-    let value_array = CharArray::new(values, order.len(), 1).map_err(|e| union_error(format!("union: {e}")))?;
+    let value_array =
+        CharArray::new(values, order.len(), 1).map_err(|e| union_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
-    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ia_tensor =
+        Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ib_tensor =
+        Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         Value::CharArray(value_array),
@@ -1416,12 +1441,14 @@ fn assemble_char_row_union(
         }
     }
 
-    let value_array =
-        CharArray::new(values, unique_rows, cols).map_err(|e| union_error(format!("union: {e}")))?;
+    let value_array = CharArray::new(values, unique_rows, cols)
+        .map_err(|e| union_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
-    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ia_tensor =
+        Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ib_tensor =
+        Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         Value::CharArray(value_array),
@@ -1457,12 +1484,14 @@ fn assemble_string_union(
         }
     }
 
-    let value_array =
-        StringArray::new(values, vec![order.len(), 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let value_array = StringArray::new(values, vec![order.len(), 1])
+        .map_err(|e| union_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
-    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ia_tensor =
+        Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ib_tensor =
+        Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         Value::StringArray(value_array),
@@ -1506,12 +1535,14 @@ fn assemble_string_row_union(
         }
     }
 
-    let value_array =
-        StringArray::new(values, vec![unique_rows, cols]).map_err(|e| union_error(format!("union: {e}")))?;
+    let value_array = StringArray::new(values, vec![unique_rows, cols])
+        .map_err(|e| union_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
-    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ia_tensor =
+        Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ib_tensor =
+        Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         Value::StringArray(value_array),

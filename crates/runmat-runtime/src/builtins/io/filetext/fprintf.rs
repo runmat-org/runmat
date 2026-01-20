@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::io::filetext::registry::{self, FileInfo};
 use crate::console::{record_console_output, ConsoleStream};
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
@@ -354,7 +354,8 @@ pub fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
         data_args.push(v);
     }
 
-    let format_string = decode_escape_sequences("fprintf", &raw_format).map_err(map_control_flow)?;
+    let format_string =
+        decode_escape_sequences("fprintf", &raw_format).map_err(map_control_flow)?;
     let flattened_args = flatten_arguments(&data_args, "fprintf").map_err(map_control_flow)?;
     let rendered = format_with_repetition(&format_string, &flattened_args)?;
     let bytes = map_string_result(encode_output(&rendered, target.encoding_label()))?;

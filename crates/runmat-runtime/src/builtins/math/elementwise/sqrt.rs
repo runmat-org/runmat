@@ -9,13 +9,13 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const ZERO_EPS: f64 = 1e-12;
 
@@ -254,7 +254,9 @@ fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
         Value::Complex(re, im) => Ok(sqrt_complex_value(re, im)),
         Value::ComplexTensor(ct) => sqrt_complex_tensor(ct),
         Value::CharArray(ca) => sqrt_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => Err(builtin_error("sqrt: expected numeric input")),
+        Value::String(_) | Value::StringArray(_) => {
+            Err(builtin_error("sqrt: expected numeric input"))
+        }
         other => sqrt_real(other),
     }
 }

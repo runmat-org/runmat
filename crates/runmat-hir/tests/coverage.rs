@@ -1,9 +1,9 @@
-use runmat_hir::{lower, HirExprKind, HirProgram, HirStmt, Type};
-use runmat_parser::parse_simple as parse;
+use runmat_hir::{lower, HirExprKind, HirProgram, HirStmt, LoweringContext, Type};
+use runmat_parser::parse;
 
 fn lower_src(src: &str) -> HirProgram {
     let ast = parse(src).unwrap();
-    lower(&ast).unwrap()
+    lower(&ast, &LoweringContext::empty()).unwrap().hir
 }
 
 #[test]
@@ -204,7 +204,9 @@ fn methods_members_handles_and_anon() {
         _ => panic!(),
     }
     match &prog.body[3] {
-        HirStmt::ExprStmt(expr, true, _) => assert!(matches!(expr.kind, HirExprKind::FuncHandle(_))),
+        HirStmt::ExprStmt(expr, true, _) => {
+            assert!(matches!(expr.kind, HirExprKind::FuncHandle(_)))
+        }
         _ => panic!(),
     }
     match &prog.body[4] {

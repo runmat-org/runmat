@@ -16,7 +16,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "csvread";
 
@@ -385,9 +385,7 @@ fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
             if sa.data.len() == 1 {
                 normalize_path(&sa.data[0])
             } else {
-                Err(csvread_error(
-                    "csvread: string array inputs must be scalar",
-                ))
+                Err(csvread_error("csvread: string array inputs must be scalar"))
             }
         }
         Value::CharArray(_) => Err(csvread_error(

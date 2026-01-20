@@ -4,12 +4,12 @@ use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
-use thiserror::Error;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::MutexGuard;
 #[cfg(test)]
 use std::sync::Once;
 use std::sync::{Arc, Mutex};
+use thiserror::Error;
 
 use super::common::{default_figure, ERR_PLOTTING_UNAVAILABLE};
 use super::engine::render_figure;

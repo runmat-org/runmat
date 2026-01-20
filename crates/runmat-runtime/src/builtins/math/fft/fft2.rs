@@ -184,7 +184,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "fft2";
 
 fn fft2_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build()
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(
@@ -300,9 +302,7 @@ fn parse_fft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usiz
             let len = parse_length(&scalar, BUILTIN_NAME)?;
             Ok((len, len))
         }
-        Value::ComplexTensor(_) => {
-            Err(fft2_error("fft2: size vector must contain real values"))
-        }
+        Value::ComplexTensor(_) => Err(fft2_error("fft2: size vector must contain real values")),
         Value::GpuTensor(_) => Err(fft2_error(
             "fft2: size vector must be numeric and host-resident",
         )),
@@ -322,10 +322,7 @@ fn parse_fft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usiz
     }
 }
 
-fn parse_length_pair(
-    data: &[f64],
-    builtin: &str,
-) -> BuiltinResult<(Option<usize>, Option<usize>)> {
+fn parse_length_pair(data: &[f64], builtin: &str) -> BuiltinResult<(Option<usize>, Option<usize>)> {
     match data.len() {
         0 => Ok((None, None)),
         1 => {
@@ -485,8 +482,9 @@ pub(crate) mod tests {
     #[test]
     fn fft2_rejects_boolean_length_argument() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let err =
-            error_message(fft2_builtin(Value::Tensor(tensor), vec![Value::Bool(true)]).unwrap_err());
+        let err = error_message(
+            fft2_builtin(Value::Tensor(tensor), vec![Value::Bool(true)]).unwrap_err(),
+        );
         assert!(err.contains("numeric"));
     }
 

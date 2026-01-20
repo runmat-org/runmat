@@ -15,7 +15,6 @@ use runmat_accelerate_api::{
     SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{Tensor, Value};
-use runmat_runtime::RuntimeError;
 use runmat_runtime::builtins::array::sorting_sets::unique;
 use runmat_runtime::builtins::common::broadcast::{
     broadcast_index as runtime_broadcast_index, broadcast_shapes as runtime_broadcast_shapes,
@@ -25,6 +24,7 @@ use runmat_runtime::builtins::stats::summary::{
     corrcoef_from_tensors as runtime_corrcoef_from_tensors,
     cov_from_tensors as runtime_cov_from_tensors, CovWeightSpec,
 };
+use runmat_runtime::RuntimeError;
 
 use runmat_runtime::builtins::math::linalg::ops::{
     dot_host_real_for_provider, mldivide_host_real_for_provider, mrdivide_host_real_for_provider,
@@ -1907,8 +1907,9 @@ impl AccelProvider for InProcessProvider {
         let host = self.download(matrix)?;
         let tensor = Tensor::new(host.data.clone(), host.shape.clone())
             .map_err(|e| anyhow!("corrcoef: {e}"))?;
-        let result = runtime_corrcoef_from_tensors(tensor, None, options.normalization, options.rows)
-            .map_err(|flow| runtime_flow_to_anyhow("corrcoef", flow))?;
+        let result =
+            runtime_corrcoef_from_tensors(tensor, None, options.normalization, options.rows)
+                .map_err(|flow| runtime_flow_to_anyhow("corrcoef", flow))?;
         let view = HostTensorView {
             data: &result.data,
             shape: &result.shape,

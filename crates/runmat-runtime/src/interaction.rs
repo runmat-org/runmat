@@ -93,10 +93,9 @@ pub fn request_line(prompt: &str, echo: bool) -> Result<String, RuntimeError> {
     if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
         return match response.map_err(|err| build_runtime_error(err).build())? {
             InteractionResponse::Line(value) => Ok(value),
-            InteractionResponse::KeyPress => Err(build_runtime_error(
-                "queued keypress response used for line request",
-            )
-            .build()),
+            InteractionResponse::KeyPress => {
+                Err(build_runtime_error("queued keypress response used for line request").build())
+            }
         };
     }
     if let Some(handler) = handler_slot().read().ok().and_then(|slot| slot.clone()) {
@@ -104,13 +103,15 @@ pub fn request_line(prompt: &str, echo: bool) -> Result<String, RuntimeError> {
             prompt,
             kind: InteractionKind::Line { echo },
         }) {
-            InteractionDecision::Respond(result) => match result.map_err(|err| build_runtime_error(err).build())? {
-                InteractionResponse::Line(value) => Ok(value),
-                InteractionResponse::KeyPress => Err(build_runtime_error(
-                    "interaction handler returned keypress for line request",
-                )
-                .build()),
-            },
+            InteractionDecision::Respond(result) => {
+                match result.map_err(|err| build_runtime_error(err).build())? {
+                    InteractionResponse::Line(value) => Ok(value),
+                    InteractionResponse::KeyPress => Err(build_runtime_error(
+                        "interaction handler returned keypress for line request",
+                    )
+                    .build()),
+                }
+            }
         }
     } else {
         default_read_line(prompt, echo).map_err(|err| build_runtime_error(err).build())
@@ -120,10 +121,9 @@ pub fn request_line(prompt: &str, echo: bool) -> Result<String, RuntimeError> {
 pub fn wait_for_key(prompt: &str) -> Result<(), RuntimeError> {
     if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
         return match response.map_err(|err| build_runtime_error(err).build())? {
-            InteractionResponse::Line(_) => Err(build_runtime_error(
-                "queued line response used for keypress request",
-            )
-            .build()),
+            InteractionResponse::Line(_) => {
+                Err(build_runtime_error("queued line response used for keypress request").build())
+            }
             InteractionResponse::KeyPress => Ok(()),
         };
     }
@@ -132,13 +132,15 @@ pub fn wait_for_key(prompt: &str) -> Result<(), RuntimeError> {
             prompt,
             kind: InteractionKind::KeyPress,
         }) {
-            InteractionDecision::Respond(result) => match result.map_err(|err| build_runtime_error(err).build())? {
-                InteractionResponse::Line(_) => Err(build_runtime_error(
-                    "interaction handler returned line value for keypress request",
-                )
-                .build()),
-                InteractionResponse::KeyPress => Ok(()),
-            },
+            InteractionDecision::Respond(result) => {
+                match result.map_err(|err| build_runtime_error(err).build())? {
+                    InteractionResponse::Line(_) => Err(build_runtime_error(
+                        "interaction handler returned line value for keypress request",
+                    )
+                    .build()),
+                    InteractionResponse::KeyPress => Ok(()),
+                }
+            }
         }
     } else {
         default_wait_for_key(prompt).map_err(|err| build_runtime_error(err).build())

@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::console::{record_console_output, ConsoleStream};
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -280,13 +280,12 @@ fn extract_path(value: &Value) -> BuiltinResult<String> {
 
 fn expand_path(raw: &str) -> BuiltinResult<PathBuf> {
     if raw == "~" {
-        return home_directory()
-            .ok_or_else(|| cd_error("cd: unable to resolve home directory"));
+        return home_directory().ok_or_else(|| cd_error("cd: unable to resolve home directory"));
     }
 
     if let Some(stripped) = raw.strip_prefix("~/").or_else(|| raw.strip_prefix("~\\")) {
-        let home = home_directory()
-            .ok_or_else(|| cd_error("cd: unable to resolve home directory"))?;
+        let home =
+            home_directory().ok_or_else(|| cd_error("cd: unable to resolve home directory"))?;
         if stripped.is_empty() {
             return Ok(home);
         }
@@ -369,7 +368,6 @@ pub(crate) mod tests {
             let _ = env::set_current_dir(&self.original);
         }
     }
-
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

@@ -235,9 +235,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn flip_error_for(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(builtin)
-        .build()
+    build_runtime_error(message).with_builtin(builtin).build()
 }
 
 #[runtime_builtin(
@@ -370,13 +368,16 @@ fn parse_dims_value(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
         Value::Tensor(t) => parse_dims_tensor(t),
         Value::LogicalArray(la) => {
             let tensor = tensor::logical_to_tensor(la).map_err(|e| {
-                flip_error_for("flip", format!("flip: unable to parse dimension vector: {e}"))
+                flip_error_for(
+                    "flip",
+                    format!("flip: unable to parse dimension vector: {e}"),
+                )
             })?;
             parse_dims_tensor(&tensor)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
-            let dim = tensor::parse_dimension(value, "flip")
-                .map_err(|e| flip_error_for("flip", e))?;
+            let dim =
+                tensor::parse_dimension(value, "flip").map_err(|e| flip_error_for("flip", e))?;
             Ok(vec![dim])
         }
         Value::GpuTensor(_) => Err(flip_error_for(
@@ -386,16 +387,17 @@ fn parse_dims_value(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
         Value::StringArray(sa) => {
             if sa.data.len() == 1 {
                 let tmp = Value::StringArray(sa.clone());
-                parse_direction(&tmp)?.ok_or_else(|| {
-                    flip_error_for("flip", "flip: dimension vector must be numeric")
-                })
+                parse_direction(&tmp)?
+                    .ok_or_else(|| flip_error_for("flip", "flip: dimension vector must be numeric"))
             } else {
-                Err(flip_error_for("flip", "flip: dimension vector must be numeric"))
+                Err(flip_error_for(
+                    "flip",
+                    "flip: dimension vector must be numeric",
+                ))
             }
         }
-        Value::String(_) | Value::CharArray(_) => parse_direction(value)?.ok_or_else(|| {
-            flip_error_for("flip", "flip: unknown direction string")
-        }),
+        Value::String(_) | Value::CharArray(_) => parse_direction(value)?
+            .ok_or_else(|| flip_error_for("flip", "flip: unknown direction string")),
         _ => Err(flip_error_for(
             "flip",
             "flip: dimension vector must be numeric or a direction string",
@@ -413,7 +415,10 @@ fn parse_dims_tensor(tensor: &Tensor) -> crate::BuiltinResult<Vec<usize>> {
     let mut dims = Vec::with_capacity(tensor.data.len());
     for entry in &tensor.data {
         if !entry.is_finite() {
-            return Err(flip_error_for("flip", "flip: dimension indices must be finite"));
+            return Err(flip_error_for(
+                "flip",
+                "flip: dimension indices must be finite",
+            ));
         }
         let rounded = entry.round();
         if (rounded - entry).abs() > f64::EPSILON {
@@ -423,7 +428,10 @@ fn parse_dims_tensor(tensor: &Tensor) -> crate::BuiltinResult<Vec<usize>> {
             ));
         }
         if rounded < 1.0 {
-            return Err(flip_error_for("flip", "flip: dimension indices must be >= 1"));
+            return Err(flip_error_for(
+                "flip",
+                "flip: dimension indices must be >= 1",
+            ));
         }
         dims.push(rounded as usize);
     }
@@ -578,8 +586,7 @@ pub(crate) fn flip_char_array_with(
             out[dest_idx] = array.data[src_idx];
         }
     }
-    CharArray::new(out, rows, cols)
-        .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
+    CharArray::new(out, rows, cols).map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
 }
 
 pub(crate) fn flip_gpu(handle: GpuTensorHandle, dims: &[usize]) -> crate::BuiltinResult<Value> {

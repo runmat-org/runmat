@@ -4,13 +4,13 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -237,7 +237,9 @@ fn conj_builtin(value: Value) -> BuiltinResult<Value> {
         Value::Complex(re, im) => conj_complex_scalar(re, im),
         Value::ComplexTensor(ct) => conj_complex_tensor(ct),
         Value::CharArray(ca) => conj_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => Err(builtin_error("conj: expected numeric input")),
+        Value::String(_) | Value::StringArray(_) => {
+            Err(builtin_error("conj: expected numeric input"))
+        }
         x @ (Value::Tensor(_)
         | Value::LogicalArray(_)
         | Value::Num(_)
@@ -298,12 +300,12 @@ fn conj_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     }
     if all_real {
         let real: Vec<f64> = data.into_iter().map(|(re, _)| re).collect();
-        let tensor = Tensor::new(real, shape.clone())
-            .map_err(|e| builtin_error(format!("conj: {e}")))?;
+        let tensor =
+            Tensor::new(real, shape.clone()).map_err(|e| builtin_error(format!("conj: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     } else {
-        let tensor = ComplexTensor::new(data, shape)
-            .map_err(|e| builtin_error(format!("conj: {e}")))?;
+        let tensor =
+            ComplexTensor::new(data, shape).map_err(|e| builtin_error(format!("conj: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }

@@ -144,8 +144,7 @@ pub fn gather_tensor_from_gpu(
     let value = Value::GpuTensor(handle);
     let gathered = crate::gather_if_needed(&value)
         .map_err(|flow| map_control_flow_with_builtin(flow, context))?;
-    Tensor::try_from(&gathered)
-        .map_err(|e| plotting_error(context, format!("{context}: {e}")))
+    Tensor::try_from(&gathered).map_err(|e| plotting_error(context, format!("{context}: {e}")))
 }
 
 pub fn tensor_to_surface_grid(

@@ -2,15 +2,17 @@
 //!
 //! Implements language-style tensor indexing and access patterns.
 
-use runmat_builtins::{Tensor, Value};
 use crate::{build_runtime_error, RuntimeError};
+use runmat_builtins::{Tensor, Value};
 
 fn indexing_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).build()
 }
 
 fn indexing_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
-    build_runtime_error(message).with_identifier(identifier).build()
+    build_runtime_error(message)
+        .with_identifier(identifier)
+        .build()
 }
 
 /// Get a single element from a tensor (1-based indexing like language)
@@ -63,8 +65,7 @@ pub fn matrix_get_row(tensor: &Tensor, row: usize) -> Result<Tensor, RuntimeErro
     for c in 0..tensor.cols() {
         row_data.push(tensor.data[(row - 1) + c * tensor.rows()]);
     }
-    Tensor::new_2d(row_data, 1, tensor.cols())
-        .map_err(|err| indexing_error(err))
+    Tensor::new_2d(row_data, 1, tensor.cols()).map_err(|err| indexing_error(err))
 }
 
 /// Get a column from a tensor
@@ -85,8 +86,7 @@ pub fn matrix_get_col(tensor: &Tensor, col: usize) -> Result<Tensor, RuntimeErro
     for row in 0..tensor.rows() {
         col_data.push(tensor.data[row + (col - 1) * tensor.rows()]);
     }
-    Tensor::new_2d(col_data, tensor.rows(), 1)
-        .map_err(|err| indexing_error(err))
+    Tensor::new_2d(col_data, tensor.rows(), 1).map_err(|err| indexing_error(err))
 }
 
 /// Array indexing operation (used by all interpreters/compilers)
@@ -124,9 +124,7 @@ pub fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, RuntimeE
                 let cols = h.shape.get(1).copied().unwrap_or(1);
                 if row < 1 || row > rows || col < 1 || col > cols {
                     return Err(indexing_error_with_identifier(
-                        format!(
-                            "Index ({row}, {col}) out of bounds for {rows}x{cols} tensor"
-                        ),
+                        format!("Index ({row}, {col}) out of bounds for {rows}x{cols} tensor"),
                         "MATLAB:IndexOutOfBounds",
                     ));
                 }

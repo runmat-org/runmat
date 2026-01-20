@@ -1,6 +1,7 @@
 use crate::functions::{Bytecode, ExecutionContext, UserFunction};
 use crate::gc_roots::InterpretContext;
 use crate::instr::{EmitLabel, Instr};
+use miette::{SourceOffset, SourceSpan};
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::fusion_exec::{
     execute_centered_gram, execute_elementwise, execute_explained_variance,
@@ -17,13 +18,14 @@ use runmat_accelerate::{
     active_group_plan_clone, value_is_all_keyword, FusionKind, ReductionAxes, ShapeInfo,
     ValueOrigin, VarKind,
 };
-use miette::{SourceOffset, SourceSpan};
 use runmat_builtins::{Type, Value};
 use runmat_runtime::{
+    build_runtime_error,
     builtins::common::tensor,
     builtins::stats::random::stochastic_evolution::stochastic_evolution_host,
-    build_runtime_error, gather_if_needed, RuntimeError,
+    gather_if_needed,
     workspace::{self as runtime_workspace, WorkspaceResolver},
+    RuntimeError,
 };
 use runmat_thread_local::runmat_thread_local;
 #[cfg(not(target_arch = "wasm32"))]
@@ -669,10 +671,7 @@ fn build_slice_plan(
     })
 }
 
-fn gather_string_slice(
-    sa: &runmat_builtins::StringArray,
-    plan: &SlicePlan,
-) -> VmResult<Value> {
+fn gather_string_slice(sa: &runmat_builtins::StringArray, plan: &SlicePlan) -> VmResult<Value> {
     if plan.indices.is_empty() {
         let empty = runmat_builtins::StringArray::new(Vec::new(), plan.output_shape.clone())
             .map_err(|e| format!("Slice error: {e}"))?;
@@ -711,10 +710,7 @@ enum StringAssignView {
     },
 }
 
-fn build_string_rhs_view(
-    rhs: &Value,
-    selection_lengths: &[usize],
-) -> VmResult<StringAssignView> {
+fn build_string_rhs_view(rhs: &Value, selection_lengths: &[usize]) -> VmResult<StringAssignView> {
     let dims = selection_lengths.len().max(1);
     match rhs {
         Value::String(s) => Ok(StringAssignView::Scalar(s.clone())),
@@ -1154,10 +1150,7 @@ fn set_workspace_variable(name: &str, value: Value, vars: &mut Vec<Value>) -> Vm
     result
 }
 
-fn assign_loaded_variables(
-    vars: &mut Vec<Value>,
-    entries: &[(String, Value)],
-) -> VmResult<()> {
+fn assign_loaded_variables(vars: &mut Vec<Value>, entries: &[(String, Value)]) -> VmResult<()> {
     for (name, value) in entries {
         set_workspace_variable(name, value.clone(), vars)?;
     }
@@ -1337,7 +1330,7 @@ async fn run_interpreter(
         current_function_name,
         call_counts,
         #[cfg(feature = "native-accel")]
-        fusion_plan: _,
+            fusion_plan: _,
         bytecode,
     } = state;
     CALL_COUNTS.with(|cc| {
@@ -1651,16 +1644,16 @@ async fn run_interpreter(
                             body: remapped_body,
                             var_types: func_var_types,
                         };
-                        let func_bytecode =
-                            crate::compile_with_functions(&func_program, &bytecode.functions)?;
+                        let func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
                         // Merge nested functions into current execution context for future closure calls
                         for (k, v) in func_bytecode.functions.iter() {
                             context.functions.insert(k.clone(), v.clone());
                         }
-                        let func_result_vars = match interpret_function(&func_bytecode, func_vars).await {
-                            Ok(v) => v,
-                            Err(e) => vm_bail!(e),
-                        };
+                        let func_result_vars =
+                            match interpret_function(&func_bytecode, func_vars).await {
+                                Ok(v) => v,
+                                Err(e) => vm_bail!(e),
+                            };
                         if let Some(output_var_id) = func.outputs.first() {
                             let local_output_index =
                                 var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
@@ -2250,8 +2243,7 @@ async fn run_interpreter(
                             Err(_) => {
                                 let (a_acc, b_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                                stack
-                                    .push(call_builtin_vm!("rdivide", &[a_acc, b_acc])?)
+                                stack.push(call_builtin_vm!("rdivide", &[a_acc, b_acc])?)
                             }
                         }
                     }
@@ -2266,8 +2258,7 @@ async fn run_interpreter(
                             Err(_) => {
                                 let (a_acc, b_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                                stack
-                                    .push(call_builtin_vm!("rdivide", &[a_acc, b_acc])?)
+                                stack.push(call_builtin_vm!("rdivide", &[a_acc, b_acc])?)
                             }
                         }
                     }
@@ -2330,8 +2321,7 @@ async fn run_interpreter(
                             Err(_) => {
                                 let (b_acc, a_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a)?;
-                                stack
-                                    .push(call_builtin_vm!("rdivide", &[b_acc, a_acc])?)
+                                stack.push(call_builtin_vm!("rdivide", &[b_acc, a_acc])?)
                             }
                         }
                     }
@@ -2346,8 +2336,7 @@ async fn run_interpreter(
                             Err(_) => {
                                 let (b_acc, a_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a)?;
-                                stack
-                                    .push(call_builtin_vm!("rdivide", &[b_acc, a_acc])?)
+                                stack.push(call_builtin_vm!("rdivide", &[b_acc, a_acc])?)
                             }
                         }
                     }
@@ -3370,8 +3359,7 @@ async fn run_interpreter(
                                         .iter()
                                         .map(|v| Value::Num((v).try_into().unwrap_or(0.0)))
                                         .collect();
-                                    let cell =
-                                        call_builtin_vm!("__make_cell", &idx_vals)?;
+                                    let cell = call_builtin_vm!("__make_cell", &idx_vals)?;
                                     let v = match call_builtin_vm!(
                                         "call_method",
                                         &[
@@ -3621,8 +3609,7 @@ async fn run_interpreter(
                     body: remapped_body,
                     var_types: func_var_types,
                 };
-                let func_bytecode =
-                    crate::compile_with_functions(&func_program, &bytecode.functions)?;
+                let func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
                 // Make nested closures visible to outer frames
                 for (k, v) in func_bytecode.functions.iter() {
                     context.functions.insert(k.clone(), v.clone());
@@ -3725,12 +3712,9 @@ async fn run_interpreter(
                         vec![(*ca.data[(ir - 1) * ca.cols + (ic - 1)]).clone()]
                     }
                     (Value::Object(obj), _) => {
-                        let cell = runmat_builtins::CellArray::new(
-                            indices.clone(),
-                            1,
-                            indices.len(),
-                        )
-                        .map_err(|e| format!("subsref build error: {e}"))?;
+                        let cell =
+                            runmat_builtins::CellArray::new(indices.clone(), 1, indices.len())
+                                .map_err(|e| format!("subsref build error: {e}"))?;
                         let v = match call_builtin_vm!(
                             "call_method",
                             &[
@@ -3798,8 +3782,7 @@ async fn run_interpreter(
                     body: remapped_body,
                     var_types: func_var_types,
                 };
-                let func_bytecode =
-                    crate::compile_with_functions(&func_program, &bytecode.functions)?;
+                let func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
                 // Make nested closures visible to outer frames
                 for (k, v) in func_bytecode.functions.iter() {
                     context.functions.insert(k.clone(), v.clone());
@@ -3965,8 +3948,7 @@ async fn run_interpreter(
                     body: remapped_body,
                     var_types: func_var_types,
                 };
-                let func_bytecode =
-                    crate::compile_with_functions(&func_program, &bytecode.functions)?;
+                let func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
                 let func_result_vars = match interpret_function_with_counts(
                     &func_bytecode,
                     func_vars,
@@ -3974,7 +3956,8 @@ async fn run_interpreter(
                     1,
                     arg_count,
                 )
-                .await {
+                .await
+                {
                     Ok(v) => v,
                     Err(e) => {
                         if let Some((catch_pc, catch_var)) = try_stack.pop() {
@@ -4202,8 +4185,7 @@ async fn run_interpreter(
                     body: remapped_body,
                     var_types: func_var_types,
                 };
-                let func_bytecode =
-                    crate::compile_with_functions(&func_program, &bytecode.functions)?;
+                let func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
                 let func_result_vars = match interpret_function_with_counts(
                     &func_bytecode,
                     func_vars,
@@ -4211,7 +4193,8 @@ async fn run_interpreter(
                     out_count,
                     arg_count,
                 )
-                .await {
+                .await
+                {
                     Ok(v) => v,
                     Err(e) => {
                         if let Some((catch_pc, catch_var)) = try_stack.pop() {
@@ -4607,13 +4590,11 @@ async fn run_interpreter(
                         0 => continue,
                         1 => {
                             if !eval.is_positive_definite() {
-                                vm_bail!(
-                                    runmat_runtime::build_runtime_error(
-                                        "Matrix must be positive definite.",
-                                    )
-                                    .with_builtin("chol")
-                                    .build()
-                                );
+                                vm_bail!(runmat_runtime::build_runtime_error(
+                                    "Matrix must be positive definite.",
+                                )
+                                .with_builtin("chol")
+                                .build());
                             }
                             stack.push(eval.factor());
                             continue;
@@ -4797,10 +4778,10 @@ async fn run_interpreter(
                         3 => {
                             stack.push(eval.right());
                             stack.push(eval.diagonal());
-                                let left = match eval.left() {
-                                    Ok(value) => value,
-                                    Err(err) => vm_bail!(err),
-                                };
+                            let left = match eval.left() {
+                                Ok(value) => value,
+                                Err(err) => vm_bail!(err),
+                            };
 
                             stack.push(left);
                             continue;
@@ -9093,7 +9074,8 @@ async fn run_interpreter(
                                     other => {
                                         return Err(format!(
                                             "Unsupported index type for object: {other:?}"
-                                        ).into())
+                                        )
+                                        .into())
                                     }
                                 }
                             }
@@ -9244,7 +9226,6 @@ async fn run_interpreter(
                             Ok(v) => stack.push(v),
                             Err(e) => vm_bail!(e),
                         }
-
                     }
                     Value::Cell(ca) => match indices.len() {
                         1 => {
@@ -9319,7 +9300,11 @@ async fn run_interpreter(
                                     }
                                     values.push((*ca.data[(r - 1) * ca.cols + (c - 1)]).clone());
                                 }
-                                _ => return Err("Unsupported number of cell indices".to_string().into()),
+                                _ => {
+                                    return Err("Unsupported number of cell indices"
+                                        .to_string()
+                                        .into())
+                                }
                             }
                         }
                         // Pad or truncate to out_count
@@ -9560,7 +9545,9 @@ async fn run_interpreter(
                                             .map_err(|e| format!("gather rhs: {e}"))?;
                                         Ok(host.data[0])
                                     } else {
-                                        Err("No acceleration provider registered".to_string().into())
+                                        Err("No acceleration provider registered"
+                                            .to_string()
+                                            .into())
                                     }
                                 }
                                 _ => rhs
@@ -9608,7 +9595,9 @@ async fn run_interpreter(
                             t.data[idx] = val;
                             stack.push(Value::Tensor(t));
                         } else {
-                            return Err("Only 1D/2D scalar assignment supported".to_string().into());
+                            return Err("Only 1D/2D scalar assignment supported"
+                                .to_string()
+                                .into());
                         }
                     }
                     Value::GpuTensor(h) => {
@@ -9689,7 +9678,9 @@ async fn run_interpreter(
                                 t.data[k] = val;
                             }
                         } else {
-                            return Err("Only 1D/2D scalar assignment supported".to_string().into());
+                            return Err("Only 1D/2D scalar assignment supported"
+                                .to_string()
+                                .into());
                         }
                         let view = runmat_accelerate_api::HostTensorView {
                             data: &t.data,
@@ -9822,10 +9813,7 @@ async fn run_interpreter(
                             if p.is_dependent {
                                 // Call get.<field>(obj)
                                 let getter = format!("get.{field}");
-                                match call_builtin_vm!(
-                                    &getter,
-                                    &[Value::Object(obj.clone())],
-                                ) {
+                                match call_builtin_vm!(&getter, &[Value::Object(obj.clone())],) {
                                     Ok(v) => {
                                         stack.push(v);
                                         continue;
@@ -10460,7 +10448,9 @@ fn scalar_from_value_scalar(value: &Value, label: &str) -> VmResult<f64> {
 fn parse_steps_value(value: &Value) -> VmResult<u32> {
     let raw = scalar_from_value_scalar(value, "stochastic_evolution steps")?;
     if !raw.is_finite() || raw < 0.0 {
-        return Err("stochastic_evolution: steps must be a non-negative scalar".to_string().into());
+        return Err("stochastic_evolution: steps must be a non-negative scalar"
+            .to_string()
+            .into());
     }
     Ok(raw.round() as u32)
 }
@@ -10677,7 +10667,9 @@ fn try_execute_fusion_group(
                 plan.stack_pattern
             );
         }
-        return Err("fusion: stack underflow gathering inputs".to_string().into());
+        return Err("fusion: stack underflow gathering inputs"
+            .to_string()
+            .into());
     }
     let available = pattern_len;
     let slice_start = stack.len() - available;
@@ -11482,7 +11474,10 @@ pub async fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, RuntimeError> 
     }
 }
 
-pub async fn interpret_function(bytecode: &Bytecode, vars: Vec<Value>) -> Result<Vec<Value>, RuntimeError> {
+pub async fn interpret_function(
+    bytecode: &Bytecode,
+    vars: Vec<Value>,
+) -> Result<Vec<Value>, RuntimeError> {
     // Delegate to the counted variant with anonymous name and zero counts
     interpret_function_with_counts(bytecode, vars, "<anonymous>", 0, 0).await
 }

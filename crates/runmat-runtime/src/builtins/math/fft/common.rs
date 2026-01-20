@@ -407,9 +407,7 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
             if !is_vector_shape(&tensor.shape) && !tensor.data.is_empty() {
                 return Err(builtin_error(
                     builtin,
-                    format!(
-                        "{builtin}: dimension vectors must be row or column vectors"
-                    ),
+                    format!("{builtin}: dimension vectors must be row or column vectors"),
                 ));
             }
             let mut dims = Vec::with_capacity(tensor.data.len());
@@ -441,9 +439,7 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
             if !is_vector_shape(&array.shape) && !array.data.is_empty() {
                 return Err(builtin_error(
                     builtin,
-                    format!(
-                        "{builtin}: dimension masks must be row or column vectors"
-                    ),
+                    format!("{builtin}: dimension masks must be row or column vectors"),
                 ));
             }
             let mut dims = Vec::new();

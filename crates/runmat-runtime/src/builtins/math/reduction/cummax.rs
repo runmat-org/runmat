@@ -285,7 +285,9 @@ fn parse_arguments(
                 if dim.is_some() {
                     return Err(cummax_error("cummax: dimension specified more than once"));
                 }
-                dim = Some(tensor::parse_dimension(value, "cummax").map_err(|err| cummax_error(err))?);
+                dim = Some(
+                    tensor::parse_dimension(value, "cummax").map_err(|err| cummax_error(err))?,
+                );
             }
             Value::Tensor(t) if t.data.is_empty() => {
                 // MATLAB allows [] placeholders; ignore them.
@@ -332,14 +334,20 @@ fn parse_arguments(
                             nan_set = true;
                         }
                         "" => {
-                            return Err(cummax_error("cummax: empty string option is not supported"));
+                            return Err(cummax_error(
+                                "cummax: empty string option is not supported",
+                            ));
                         }
                         other => {
-                            return Err(cummax_error(format!("cummax: unrecognised option '{other}'")));
+                            return Err(cummax_error(format!(
+                                "cummax: unrecognised option '{other}'"
+                            )));
                         }
                     }
                 } else {
-                    return Err(cummax_error(format!("cummax: unsupported argument type {value:?}")));
+                    return Err(cummax_error(format!(
+                        "cummax: unsupported argument type {value:?}"
+                    )));
                 }
             }
         }
@@ -439,8 +447,8 @@ fn cummax_tensor(
         return Err(cummax_error("cummax: dimension must be >= 1"));
     }
     if tensor.data.is_empty() {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummax_error(format!("cummax: {e}")))?;
+        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
+            .map_err(|e| cummax_error(format!("cummax: {e}")))?;
         return Ok((tensor.clone(), indices));
     }
     if dim > tensor.shape.len() {
@@ -451,8 +459,8 @@ fn cummax_tensor(
     let dim_index = dim - 1;
     let segment_len = tensor.shape[dim_index];
     if segment_len == 0 {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummax_error(format!("cummax: {e}")))?;
+        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
+            .map_err(|e| cummax_error(format!("cummax: {e}")))?;
         return Ok((tensor.clone(), indices));
     }
 
@@ -578,10 +586,10 @@ fn cummax_tensor(
         }
     }
 
-    let values_tensor =
-        Tensor::new(values_out, tensor.shape.clone()).map_err(|e| cummax_error(format!("cummax: {e}")))?;
-    let indices_tensor =
-        Tensor::new(indices_out, tensor.shape.clone()).map_err(|e| cummax_error(format!("cummax: {e}")))?;
+    let values_tensor = Tensor::new(values_out, tensor.shape.clone())
+        .map_err(|e| cummax_error(format!("cummax: {e}")))?;
+    let indices_tensor = Tensor::new(indices_out, tensor.shape.clone())
+        .map_err(|e| cummax_error(format!("cummax: {e}")))?;
     Ok((values_tensor, indices_tensor))
 }
 
@@ -595,8 +603,8 @@ fn cummax_complex_tensor(
         return Err(cummax_error("cummax: dimension must be >= 1"));
     }
     if tensor.data.is_empty() {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummax_error(format!("cummax: {e}")))?;
+        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
+            .map_err(|e| cummax_error(format!("cummax: {e}")))?;
         return Ok((tensor.clone(), indices));
     }
     if dim > tensor.shape.len() {
@@ -607,8 +615,8 @@ fn cummax_complex_tensor(
     let dim_index = dim - 1;
     let segment_len = tensor.shape[dim_index];
     if segment_len == 0 {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummax_error(format!("cummax: {e}")))?;
+        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
+            .map_err(|e| cummax_error(format!("cummax: {e}")))?;
         return Ok((tensor.clone(), indices));
     }
 
@@ -736,10 +744,10 @@ fn cummax_complex_tensor(
         }
     }
 
-    let values_tensor =
-        ComplexTensor::new(values_out, tensor.shape.clone()).map_err(|e| cummax_error(format!("cummax: {e}")))?;
-    let indices_tensor =
-        Tensor::new(indices_out, tensor.shape.clone()).map_err(|e| cummax_error(format!("cummax: {e}")))?;
+    let values_tensor = ComplexTensor::new(values_out, tensor.shape.clone())
+        .map_err(|e| cummax_error(format!("cummax: {e}")))?;
+    let indices_tensor = Tensor::new(indices_out, tensor.shape.clone())
+        .map_err(|e| cummax_error(format!("cummax: {e}")))?;
     Ok((values_tensor, indices_tensor))
 }
 

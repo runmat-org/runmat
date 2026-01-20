@@ -196,9 +196,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn reshape_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("reshape")
-        .build()
+    build_runtime_error(message).with_builtin("reshape").build()
 }
 
 #[runtime_builtin(
@@ -294,11 +292,7 @@ fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
     }
 }
 
-fn reshape_complex_scalar(
-    re: f64,
-    im: f64,
-    dims: &[usize],
-) -> crate::BuiltinResult<Value> {
+fn reshape_complex_scalar(re: f64, im: f64, dims: &[usize]) -> crate::BuiltinResult<Value> {
     let total: usize = dims.iter().copied().product();
     if total != 1 {
         return Err(reshape_error(format!(
@@ -317,11 +311,17 @@ fn reshape_complex_scalar(
 
 fn reshape_char_array(ca: CharArray, dims: &[usize]) -> crate::BuiltinResult<Value> {
     let (rows, cols) = match dims.len() {
-        0 => return Err(reshape_error("reshape: size vector must contain at least one element")),
+        0 => {
+            return Err(reshape_error(
+                "reshape: size vector must contain at least one element",
+            ))
+        }
         1 => (dims[0], 1),
         2 => (dims[0], dims[1]),
         _ => {
-            return Err(reshape_error("reshape: char arrays currently support at most two dimensions"))
+            return Err(reshape_error(
+                "reshape: char arrays currently support at most two dimensions",
+            ))
         }
     };
     CharArray::new(ca.data, rows, cols)
@@ -331,11 +331,17 @@ fn reshape_char_array(ca: CharArray, dims: &[usize]) -> crate::BuiltinResult<Val
 
 fn reshape_cell_array(ca: CellArray, dims: &[usize]) -> crate::BuiltinResult<Value> {
     let (rows, cols) = match dims.len() {
-        0 => return Err(reshape_error("reshape: size vector must contain at least one element")),
+        0 => {
+            return Err(reshape_error(
+                "reshape: size vector must contain at least one element",
+            ))
+        }
         1 => (dims[0], 1),
         2 => (dims[0], dims[1]),
         _ => {
-            return Err(reshape_error("reshape: cell arrays currently support at most two dimensions"))
+            return Err(reshape_error(
+                "reshape: cell arrays currently support at most two dimensions",
+            ))
         }
     };
     CellArray::new_handles(ca.data, rows, cols)
@@ -397,10 +403,14 @@ fn parse_size_arguments(args: &[Value]) -> crate::BuiltinResult<Vec<DimToken>> {
 
 fn parse_size_vector(t: &Tensor) -> crate::BuiltinResult<Vec<DimToken>> {
     if !is_vector(t) {
-        return Err(reshape_error("reshape: size vector must be a row or column vector"));
+        return Err(reshape_error(
+            "reshape: size vector must be a row or column vector",
+        ));
     }
     if t.data.is_empty() {
-        return Err(reshape_error("reshape: size vector must contain at least one element"));
+        return Err(reshape_error(
+            "reshape: size vector must contain at least one element",
+        ));
     }
     t.data.iter().map(|&v| parse_dim_value(v)).collect()
 }
@@ -410,7 +420,9 @@ fn parse_size_scalar(value: &Value) -> crate::BuiltinResult<DimToken> {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 0 {
-                return Err(reshape_error("reshape: size arguments must be nonnegative integers"));
+                return Err(reshape_error(
+                    "reshape: size arguments must be nonnegative integers",
+                ));
             }
             Ok(DimToken::Known(raw as usize))
         }
@@ -456,7 +468,9 @@ fn parse_dim_value(raw: f64) -> crate::BuiltinResult<DimToken> {
         return Err(reshape_error("reshape: size arguments must be integers"));
     }
     if rounded < 0.0 {
-        return Err(reshape_error("reshape: size arguments must be nonnegative integers"));
+        return Err(reshape_error(
+            "reshape: size arguments must be nonnegative integers",
+        ));
     }
     if rounded > (usize::MAX as f64) {
         return Err(reshape_error("reshape: size argument is too large"));
@@ -473,7 +487,9 @@ fn parse_num_scalar(raw: f64) -> crate::BuiltinResult<usize> {
         return Err(reshape_error("reshape: size arguments must be integers"));
     }
     if rounded < 0.0 {
-        return Err(reshape_error("reshape: size arguments must be nonnegative integers"));
+        return Err(reshape_error(
+            "reshape: size arguments must be nonnegative integers",
+        ));
     }
     if rounded > (usize::MAX as f64) {
         return Err(reshape_error("reshape: size argument is too large"));
@@ -481,12 +497,11 @@ fn parse_num_scalar(raw: f64) -> crate::BuiltinResult<usize> {
     Ok(rounded as usize)
 }
 
-fn finalize_dimensions(
-    tokens: Vec<DimToken>,
-    numel: usize,
-) -> crate::BuiltinResult<Vec<usize>> {
+fn finalize_dimensions(tokens: Vec<DimToken>, numel: usize) -> crate::BuiltinResult<Vec<usize>> {
     if tokens.is_empty() {
-        return Err(reshape_error("reshape: size vector must contain at least one element"));
+        return Err(reshape_error(
+            "reshape: size vector must contain at least one element",
+        ));
     }
 
     let mut dims = Vec::with_capacity(tokens.len());
@@ -507,7 +522,9 @@ fn finalize_dimensions(
             }
             DimToken::Auto => {
                 if auto_index.is_some() {
-                    return Err(reshape_error("reshape: can only specify a single [] dimension"));
+                    return Err(reshape_error(
+                        "reshape: can only specify a single [] dimension",
+                    ));
                 }
                 auto_index = Some(idx);
                 dims.push(1); // placeholder
@@ -518,9 +535,9 @@ fn finalize_dimensions(
     if let Some(auto) = auto_index {
         if known_product == 0 {
             if numel != 0 {
-                    return Err(reshape_error(format!(
-                        "reshape: product of dimensions (0) must equal numel(A) ({numel})"
-                    )));
+                return Err(reshape_error(format!(
+                    "reshape: product of dimensions (0) must equal numel(A) ({numel})"
+                )));
             }
             dims[auto] = 0;
         } else if !numel.is_multiple_of(known_product) {

@@ -3,13 +3,13 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -213,7 +213,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "real";
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build()
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(
@@ -230,7 +232,9 @@ fn real_builtin(value: Value) -> BuiltinResult<Value> {
         Value::Complex(re, _) => Ok(Value::Num(re)),
         Value::ComplexTensor(ct) => real_complex_tensor(ct),
         Value::CharArray(ca) => real_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => Err(builtin_error("real: expected numeric input")),
+        Value::String(_) | Value::StringArray(_) => {
+            Err(builtin_error("real: expected numeric input"))
+        }
         x @ (Value::Tensor(_)
         | Value::LogicalArray(_)
         | Value::Num(_)
@@ -266,8 +270,8 @@ fn real_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn real_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let data = ct.data.iter().map(|&(re, _)| re).collect::<Vec<_>>();
-    let tensor = Tensor::new(data, ct.shape.clone())
-        .map_err(|e| builtin_error(format!("real: {e}")))?;
+    let tensor =
+        Tensor::new(data, ct.shape.clone()).map_err(|e| builtin_error(format!("real: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 

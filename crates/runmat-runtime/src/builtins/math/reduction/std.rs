@@ -8,7 +8,6 @@ const NAME: &str = "std";
 
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -16,6 +15,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::dispatcher;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -212,7 +212,6 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may offer reduce_std_dim/reduce_std implementations; host fallback ensures correctness when they are unavailable.",
 };
 
-
 fn std_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
 }
@@ -351,15 +350,11 @@ impl IntClass {
 
     fn to_value(self, scalar: f64) -> BuiltinResult<Value> {
         if scalar.is_nan() {
-            return Err(std_error(
-                "std: cannot represent NaN as an integer output",
-            ));
+            return Err(std_error("std: cannot represent NaN as an integer output"));
         }
         let rounded = scalar.round();
         if !rounded.is_finite() {
-            return Err(std_error(
-                "std: integer output overflowed the target type",
-            ));
+            return Err(std_error("std: integer output overflowed the target type"));
         }
         Ok(match self {
             IntClass::I8 => Value::Int(IntValue::I8(rounded as i8)),
@@ -512,9 +507,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     "std: 'all' cannot be combined with an explicit dimension",
                 ));
             }
-            return Err(std_error(
-                "std: multiple dimension specifications provided",
-            ));
+            return Err(std_error("std: multiple dimension specifications provided"));
         }
 
         return Err(std_error(format!("std: unrecognised argument {arg:?}")));
@@ -560,9 +553,7 @@ fn parse_normalization(value: &Value) -> BuiltinResult<NormParse> {
             _ => Ok(NormParse::NotMatched),
         },
         Value::Num(n) => parse_normalization_scalar(*n),
-        Value::GpuTensor(_) => Err(std_error(
-            "std: normalisation flag must reside on the host",
-        )),
+        Value::GpuTensor(_) => Err(std_error("std: normalisation flag must reside on the host")),
         _ => Ok(NormParse::NotMatched),
     }
 }
@@ -597,8 +588,8 @@ fn parse_axes(value: &Value) -> BuiltinResult<Option<StdAxes>> {
                 return Ok(Some(StdAxes::Default));
             }
             if t.data.len() == 1 {
-                let dim = tensor::parse_dimension(&Value::Num(t.data[0]), "std")
-                    .map_err(std_error)?;
+                let dim =
+                    tensor::parse_dimension(&Value::Num(t.data[0]), "std").map_err(std_error)?;
                 return Ok(Some(StdAxes::Dim(dim)));
             }
             let dims = parse_dimension_vector(t)?;
@@ -621,9 +612,7 @@ fn parse_axes(value: &Value) -> BuiltinResult<Option<StdAxes>> {
             let dim = tensor::parse_dimension(value, "std").map_err(std_error)?;
             Ok(Some(StdAxes::Dim(dim)))
         }
-        Value::GpuTensor(_) => Err(std_error(
-            "std: dimension arguments cannot be GPU tensors",
-        )),
+        Value::GpuTensor(_) => Err(std_error("std: dimension arguments cannot be GPU tensors")),
         Value::Bool(_) => Err(std_error("std: dimension must be numeric")),
         _ => Ok(None),
     }
@@ -642,9 +631,7 @@ fn parse_dimension_vector(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
     let mut dims = Vec::with_capacity(tensor.data.len());
     for &val in &tensor.data {
         if !val.is_finite() {
-            return Err(std_error(
-                "std: dimension entries must be finite integers",
-            ));
+            return Err(std_error("std: dimension entries must be finite integers"));
         }
         let rounded = val.round();
         if (rounded - val).abs() > f64::EPSILON {
@@ -712,8 +699,7 @@ fn std_tensor_reduce(
     let out_len = tensor::element_count(&output_shape);
     if tensor.data.is_empty() {
         let fill = vec![f64::NAN; out_len];
-        return Tensor::new(fill, output_shape)
-            .map_err(|e| std_error(format!("std: {e}")));
+        return Tensor::new(fill, output_shape).map_err(|e| std_error(format!("std: {e}")));
     }
 
     let mut counts = vec![0usize; out_len];
@@ -1053,8 +1039,8 @@ fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value>
             Value::GpuTensor(_) => Ok(value),
             Value::Tensor(tensor) => upload_tensor(tensor),
             Value::Num(n) => {
-                let tensor = Tensor::new(vec![n], vec![1, 1])
-                    .map_err(|e| std_error(format!("std: {e}")))?;
+                let tensor =
+                    Tensor::new(vec![n], vec![1, 1]).map_err(|e| std_error(format!("std: {e}")))?;
                 upload_tensor(tensor)
             }
             Value::LogicalArray(logical) => {
@@ -1147,8 +1133,8 @@ fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
             class: PrototypeClass::Complex,
         }),
         other => {
-            let gathered = dispatcher::gather_if_needed(other)
-                .map_err(|e| std_error(format!("std: {e}")))?;
+            let gathered =
+                dispatcher::gather_if_needed(other).map_err(|e| std_error(format!("std: {e}")))?;
             analyse_like_prototype(&gathered)
         }
     }
@@ -1317,8 +1303,11 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = std_builtin(Value::Tensor(tensor), vec![Value::Tensor(weights)]).unwrap_err();
         assert!(
-            err.message().contains("std: dimension entries must be integers")
-                || err.message().contains("std: dimension vector must not be empty"),
+            err.message()
+                .contains("std: dimension entries must be integers")
+                || err
+                    .message()
+                    .contains("std: dimension vector must not be empty"),
             "unexpected error message: {err}"
         );
     }

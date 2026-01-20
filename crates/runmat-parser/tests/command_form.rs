@@ -1,4 +1,7 @@
-use runmat_parser::{parse_simple as parse, Expr, Stmt};
+use runmat_parser::{Expr, Stmt};
+
+mod parse;
+use parse::parse;
 
 #[test]
 fn command_form_basic() {
@@ -24,7 +27,8 @@ fn command_form_not_triggered_by_assignment_or_index() {
     // Not command-form when followed by '('
     let program = parse("foo(1,2)").unwrap();
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::Index(_, _, _), _, _) | Stmt::ExprStmt(Expr::FuncCall(_, _, _), _, _) => {}
+        Stmt::ExprStmt(Expr::Index(_, _, _), _, _)
+        | Stmt::ExprStmt(Expr::FuncCall(_, _, _), _, _) => {}
         _ => panic!("expected call/index"),
     }
 }

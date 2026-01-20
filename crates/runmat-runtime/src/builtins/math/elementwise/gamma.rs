@@ -9,13 +9,13 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const PI: f64 = std::f64::consts::PI;
 const SQRT_TWO_PI: f64 = 2.506_628_274_631_000_5;
@@ -301,8 +301,7 @@ fn gamma_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     for &v in &tensor.data {
         data.push(gamma_real_scalar(v));
     }
-    Tensor::new(data, tensor.shape.clone())
-        .map_err(|e| builtin_error(format!("gamma: {e}")))
+    Tensor::new(data, tensor.shape.clone()).map_err(|e| builtin_error(format!("gamma: {e}")))
 }
 
 fn gamma_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -467,7 +466,9 @@ fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> 
 
 fn convert_to_gpu_real(value: Value) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        builtin_error("gamma: GPU output requested via 'like' but no acceleration provider is active")
+        builtin_error(
+            "gamma: GPU output requested via 'like' but no acceleration provider is active",
+        )
     })?;
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),

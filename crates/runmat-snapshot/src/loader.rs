@@ -526,11 +526,11 @@ impl SnapshotLoader {
                 );
                 // Use a placeholder function that returns an error
                 dispatch_table.push(|_args| {
-                    Err(runmat_async::runtime_error(
-                        "Function not available in current runtime",
+                    Err(
+                        runmat_async::runtime_error("Function not available in current runtime")
+                            .build()
+                            .into(),
                     )
-                    .build()
-                    .into())
                 });
             }
         }

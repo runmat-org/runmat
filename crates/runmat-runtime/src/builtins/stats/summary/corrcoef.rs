@@ -6,13 +6,13 @@ use runmat_accelerate_api::{
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor::{self, value_to_string};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "corrcoef";
 
@@ -286,9 +286,7 @@ impl CorrcoefArgs {
                             rows = parse_rows_option(&choice)?;
                         }
                         _ => {
-                            return Err(builtin_error(format!(
-                                "corrcoef: unknown option '{key}'"
-                            )))
+                            return Err(builtin_error(format!("corrcoef: unknown option '{key}'")))
                         }
                     }
                 }
@@ -430,9 +428,7 @@ fn parse_normalization(value: Value) -> BuiltinResult<CorrcoefNormalization> {
         },
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(builtin_error(
-                    "corrcoef: normalization flag must be finite",
-                ));
+                return Err(builtin_error("corrcoef: normalization flag must be finite"));
             }
             let rounded = n.round();
             if (rounded - n).abs() > 1.0e-12 {
@@ -574,12 +570,14 @@ fn corrcoef_dense(matrix: &Matrix, normalization: CorrcoefNormalization) -> Buil
     let mut result = vec![f64::NAN; cols * cols];
     let rows = matrix.rows;
     if rows == 0 {
-        return Tensor::new(result, vec![cols, cols]).map_err(|e| builtin_error(format!("corrcoef: {e}")));
+        return Tensor::new(result, vec![cols, cols])
+            .map_err(|e| builtin_error(format!("corrcoef: {e}")));
     }
 
     let denom = normalization_denominator(normalization, rows);
     if denom <= 0.0 {
-        return Tensor::new(result, vec![cols, cols]).map_err(|e| builtin_error(format!("corrcoef: {e}")));
+        return Tensor::new(result, vec![cols, cols])
+            .map_err(|e| builtin_error(format!("corrcoef: {e}")));
     }
 
     let mut means = vec![0.0; cols];
@@ -670,7 +668,8 @@ fn corrcoef_pairwise(
 ) -> BuiltinResult<Tensor> {
     let cols = matrix.cols;
     if cols == 0 {
-        return Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| builtin_error(format!("corrcoef: {e}")));
+        return Tensor::new(Vec::new(), vec![0, 0])
+            .map_err(|e| builtin_error(format!("corrcoef: {e}")));
     }
     let mut result = vec![f64::NAN; cols * cols];
     for col in 0..cols {

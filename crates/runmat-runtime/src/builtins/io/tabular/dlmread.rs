@@ -19,7 +19,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "dlmread";
 
@@ -487,9 +487,7 @@ fn delimiter_from_numeric(value: f64) -> BuiltinResult<DelimiterSpec> {
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err(dlmread_error(
-            "dlmread: delimiter code must be an integer",
-        ));
+        return Err(dlmread_error("dlmread: delimiter code must be an integer"));
     }
     delimiter_from_ascii(rounded as i64)
 }
@@ -500,9 +498,8 @@ fn delimiter_from_ascii(value: i64) -> BuiltinResult<DelimiterSpec> {
             "dlmread: delimiter code must be within Unicode range",
         ));
     }
-    let ch = char::from_u32(value as u32).ok_or_else(|| {
-        dlmread_error("dlmread: delimiter code does not map to a Unicode scalar")
-    })?;
+    let ch = char::from_u32(value as u32)
+        .ok_or_else(|| dlmread_error("dlmread: delimiter code does not map to a Unicode scalar"))?;
     Ok(DelimiterSpec::Char(ch))
 }
 
@@ -515,8 +512,7 @@ fn value_to_start_index(value: &Value, name: &str) -> BuiltinResult<usize> {
                     "dlmread: {name} must be a non-negative integer"
                 )));
             }
-            usize::try_from(raw)
-                .map_err(|_| dlmread_error(format!("dlmread: {name} is too large")))
+            usize::try_from(raw).map_err(|_| dlmread_error(format!("dlmread: {name} is too large")))
         }
         Value::Num(n) => {
             if !n.is_finite() {
@@ -574,10 +570,7 @@ fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
     Ok(Path::new(&expanded).to_path_buf())
 }
 
-fn read_dlm_rows(
-    path: &Path,
-    delimiter: &DelimiterSpec,
-) -> BuiltinResult<(Vec<Vec<f64>>, usize)> {
+fn read_dlm_rows(path: &Path, delimiter: &DelimiterSpec) -> BuiltinResult<(Vec<Vec<f64>>, usize)> {
     let file = File::open(path).map_err(|err| {
         dlmread_error_with_source(
             format!("dlmread: unable to open '{}': {err}", path.display()),
@@ -785,9 +778,7 @@ fn non_negative_index(value: f64, position: usize) -> BuiltinResult<usize> {
         return Err(dlmread_error("dlmread: Range indices must be finite"));
     }
     if value < 0.0 {
-        return Err(dlmread_error(
-            "dlmread: Range indices must be non-negative",
-        ));
+        return Err(dlmread_error("dlmread: Range indices must be non-negative"));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {

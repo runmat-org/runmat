@@ -19,7 +19,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -353,9 +353,8 @@ fn parse_invocation(values: &[Value]) -> BuiltinResult<ParsedInvocation> {
 }
 
 fn normalise_path(value: &Value) -> BuiltinResult<PathBuf> {
-    let raw = value_to_string_scalar(value).ok_or_else(|| {
-        load_error("load: filename must be a character vector or string scalar")
-    })?;
+    let raw = value_to_string_scalar(value)
+        .ok_or_else(|| load_error("load: filename must be a character vector or string scalar"))?;
     let mut path = PathBuf::from(raw);
     if path.extension().is_none() {
         path.set_extension("mat");
@@ -379,9 +378,9 @@ fn select_variables(
     let mut selected = Vec::new();
 
     for name in &request.variables {
-        let value = by_name
-            .get(name.as_str())
-            .ok_or_else(|| load_error(format!("load: variable '{name}' was not found in the file")))?;
+        let value = by_name.get(name.as_str()).ok_or_else(|| {
+            load_error(format!("load: variable '{name}' was not found in the file"))
+        })?;
         insert_or_replace(&mut selected, name, (*value).clone());
     }
 
@@ -445,10 +444,7 @@ pub(crate) fn read_mat_file(path: &Path) -> BuiltinResult<Vec<(String, Value)>> 
 
     let mut header = [0u8; MAT_HEADER_LEN];
     reader.read_exact(&mut header).map_err(|err| {
-        load_error_with_source(
-            format!("load: failed to read MAT-file header: {err}"),
-            err,
-        )
+        load_error_with_source(format!("load: failed to read MAT-file header: {err}"), err)
     })?;
     if header[126] != b'I' || header[127] != b'M' {
         return Err(load_error("load: file is not a MATLAB Level-5 MAT-file"));
@@ -584,7 +580,9 @@ fn parse_logical_array(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> BuiltinR
     let elem = read_tagged(cursor, false)?
         .ok_or_else(|| load_error("load: logical array missing data block"))?;
     if elem.data_type != MI_UINT8 {
-        return Err(load_error("load: logical arrays must be stored as MI_UINT8"));
+        return Err(load_error(
+            "load: logical arrays must be stored as MI_UINT8",
+        ));
     }
     Ok(MatArray {
         class: MatClass::Logical,
@@ -597,7 +595,9 @@ fn parse_char_array(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> BuiltinResu
     let elem = read_tagged(cursor, false)?
         .ok_or_else(|| load_error("load: character array missing data block"))?;
     if elem.data_type != MI_UINT16 {
-        return Err(load_error("load: character data must be stored as MI_UINT16"));
+        return Err(load_error(
+            "load: character data must be stored as MI_UINT16",
+        ));
     }
     if elem.data.len() % 2 != 0 {
         return Err(load_error("load: malformed character data"));
@@ -743,8 +743,8 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
                 let ch = char::from_u32(code as u32).unwrap_or('\u{FFFD}');
                 chars.push(ch);
             }
-            let char_array = CharArray::new(chars, rows, cols)
-                .map_err(|e| load_error(format!("load: {e}")))?;
+            let char_array =
+                CharArray::new(chars, rows, cols).map_err(|e| load_error(format!("load: {e}")))?;
             Ok(Value::CharArray(char_array))
         }
         MatData::Cell { elements } => {
@@ -776,8 +776,7 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
                     row_major[rm_idx] = converted[cm_idx].clone();
                 }
             }
-            make_cell(row_major, rows, cols)
-                .map_err(|err| load_error(format!("load: {err}")))
+            make_cell(row_major, rows, cols).map_err(|err| load_error(format!("load: {err}")))
         }
         MatData::Struct {
             field_names,
@@ -936,19 +935,13 @@ fn read_tagged<R: Read>(reader: &mut R, allow_eof: bool) -> BuiltinResult<Option
         let length = u32::from_le_bytes(len_bytes) as usize;
         let mut data = vec![0u8; length];
         reader.read_exact(&mut data).map_err(|err| {
-            load_error_with_source(
-                format!("load: failed to read MAT element body: {err}"),
-                err,
-            )
+            load_error_with_source(format!("load: failed to read MAT element body: {err}"), err)
         })?;
         let padding = (8 - (length % 8)) % 8;
         if padding != 0 {
             let mut pad = vec![0u8; padding];
             reader.read_exact(&mut pad).map_err(|err| {
-                load_error_with_source(
-                    format!("load: failed to read MAT padding: {err}"),
-                    err,
-                )
+                load_error_with_source(format!("load: failed to read MAT padding: {err}"), err)
             })?;
         }
         Ok(Some(TaggedData {

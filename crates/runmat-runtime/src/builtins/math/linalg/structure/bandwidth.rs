@@ -312,7 +312,10 @@ fn value_into_tensor_for(name: &str, value: Value) -> BuiltinResult<Tensor> {
             .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
         other => Err(runtime_error(
             name,
-            format!("{name}: unsupported input type {:?}; expected numeric or logical values", other),
+            format!(
+                "{name}: unsupported input type {:?}; expected numeric or logical values",
+                other
+            ),
         )),
     }
 }
@@ -607,7 +610,10 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 1, 2]).unwrap();
         let err = bandwidth_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err();
         let message = err.to_string();
-        assert!(message.contains("2-D"), "unexpected error message: {message}");
+        assert!(
+            message.contains("2-D"),
+            "unexpected error message: {message}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

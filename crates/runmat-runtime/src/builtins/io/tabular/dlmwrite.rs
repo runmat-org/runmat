@@ -21,7 +21,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "dlmwrite";
 
@@ -287,8 +287,8 @@ fn dlmwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> crate::Bu
     let options = parse_arguments(&gathered_args)?;
 
     let gathered_data = gather_if_needed(&data).map_err(map_control_flow)?;
-    let tensor = tensor::value_into_tensor_for("dlmwrite", gathered_data)
-        .map_err(dlmwrite_error)?;
+    let tensor =
+        tensor::value_into_tensor_for("dlmwrite", gathered_data).map_err(dlmwrite_error)?;
     ensure_matrix_shape(&tensor)?;
 
     let bytes = write_dlm(&path, &tensor, &options)?;
@@ -513,8 +513,8 @@ fn is_numeric_scalar(value: &Value) -> bool {
 }
 
 fn parse_offset_value(value: &Value, context: &str) -> BuiltinResult<usize> {
-    let scalar = extract_scalar(value)
-        .map_err(|e| dlmwrite_error(format!("dlmwrite: {context} {e}")))?;
+    let scalar =
+        extract_scalar(value).map_err(|e| dlmwrite_error(format!("dlmwrite: {context} {e}")))?;
     if !scalar.is_finite() {
         return Err(dlmwrite_error(format!(
             "dlmwrite: {context} must be finite"
@@ -527,9 +527,7 @@ fn parse_offset_value(value: &Value, context: &str) -> BuiltinResult<usize> {
         )));
     }
     if rounded < 0.0 {
-        return Err(dlmwrite_error(format!(
-            "dlmwrite: {context} must be >= 0"
-        )));
+        return Err(dlmwrite_error(format!("dlmwrite: {context} must be >= 0")));
     }
     Ok(rounded as usize)
 }
@@ -547,9 +545,7 @@ fn parse_precision_value(value: &Value) -> BuiltinResult<PrecisionSpec> {
         }
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(dlmwrite_error(
-                    "dlmwrite: precision scalar must be finite",
-                ));
+                return Err(dlmwrite_error("dlmwrite: precision scalar must be finite"));
             }
             let rounded = n.round();
             if (rounded - n).abs() > 1e-9 {
@@ -629,9 +625,7 @@ fn parse_append_value(value: &Value) -> BuiltinResult<bool> {
             parse_bool_string(&text)
         }
         Value::StringArray(sa) if sa.data.len() == 1 => parse_bool_string(&sa.data[0]),
-        _ => Err(dlmwrite_error(
-            "dlmwrite: append value must be logical",
-        )),
+        _ => Err(dlmwrite_error("dlmwrite: append value must be logical")),
     }
 }
 
@@ -768,10 +762,7 @@ fn write_dlm(path: &Path, tensor: &Tensor, options: &DlmWriteOptions) -> Builtin
 
     if rows == 0 || cols == 0 {
         file.flush().map_err(|err| {
-            dlmwrite_error_with_source(
-                format!("dlmwrite: failed to flush output ({err})"),
-                err,
-            )
+            dlmwrite_error_with_source(format!("dlmwrite: failed to flush output ({err})"), err)
         })?;
         return Ok(bytes);
     }
@@ -789,27 +780,18 @@ fn write_dlm(path: &Path, tensor: &Tensor, options: &DlmWriteOptions) -> Builtin
         let line = fields.join(&options.delimiter);
         if !line.is_empty() {
             file.write_all(line.as_bytes()).map_err(|err| {
-                dlmwrite_error_with_source(
-                    format!("dlmwrite: failed to write data ({err})"),
-                    err,
-                )
+                dlmwrite_error_with_source(format!("dlmwrite: failed to write data ({err})"), err)
             })?;
             bytes += line.len();
         }
         file.write_all(newline.as_bytes()).map_err(|err| {
-            dlmwrite_error_with_source(
-                format!("dlmwrite: failed to write newline ({err})"),
-                err,
-            )
+            dlmwrite_error_with_source(format!("dlmwrite: failed to write newline ({err})"), err)
         })?;
         bytes += newline.len();
     }
 
     file.flush().map_err(|err| {
-        dlmwrite_error_with_source(
-            format!("dlmwrite: failed to flush output ({err})"),
-            err,
-        )
+        dlmwrite_error_with_source(format!("dlmwrite: failed to flush output ({err})"), err)
     })?;
     Ok(bytes)
 }
@@ -841,10 +823,7 @@ fn write_blank_row(
     let line = fields.join(delimiter);
     if !line.is_empty() {
         file.write_all(line.as_bytes()).map_err(|err| {
-            dlmwrite_error_with_source(
-                format!("dlmwrite: failed to write offset row ({err})"),
-                err,
-            )
+            dlmwrite_error_with_source(format!("dlmwrite: failed to write offset row ({err})"), err)
         })?;
         bytes += line.len();
     }

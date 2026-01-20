@@ -12,7 +12,6 @@ use super::contour::{
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 
-
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -128,12 +127,8 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             }
         }
 
-        let grid = tensor_to_surface_grid(
-            z_input.into_tensor(name)?,
-            x_axis.len(),
-            y_axis.len(),
-            name,
-        )?;
+        let grid =
+            tensor_to_surface_grid(z_input.into_tensor(name)?, x_axis.len(), y_axis.len(), name)?;
         let fill_plot = build_contour_fill_plot(
             name,
             &x_axis,

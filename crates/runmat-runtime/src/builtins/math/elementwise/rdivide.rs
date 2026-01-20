@@ -5,7 +5,6 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
@@ -14,6 +13,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -404,14 +404,15 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| builtin_error(format!("rdivide: {e}")))?;
+            let tensor = Tensor::new(vec![n], vec![1, 1])
+                .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
         Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 })),
         Value::LogicalArray(logical) => {
-            let tensor =
-                tensor::logical_to_tensor(&logical).map_err(|e| builtin_error(format!("rdivide: {e}")))?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::CharArray(chars) => {
@@ -487,13 +488,13 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
             let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
-            let tensor =
-                ComplexTensor::new(data, t.shape.clone()).map_err(|e| builtin_error(format!("rdivide: {e}")))?;
+            let tensor = ComplexTensor::new(data, t.shape.clone())
+                .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
         }
         Value::LogicalArray(logical) => {
-            let tensor =
-                tensor::logical_to_tensor(&logical).map_err(|e| builtin_error(format!("rdivide: {e}")))?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
             real_to_complex(Value::Tensor(tensor))
         }
         Value::CharArray(chars) => {
@@ -641,8 +642,8 @@ fn rdivide_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 fn rdivide_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
-    let plan =
-        BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| builtin_error(format!("rdivide: {err}")))?;
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|err| builtin_error(format!("rdivide: {err}")))?;
     if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
@@ -652,14 +653,14 @@ fn rdivide_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
         out[out_idx] = lhs.data[idx_lhs] / rhs.data[idx_rhs];
     }
-    let tensor =
-        Tensor::new(out, plan.output_shape().to_vec()).map_err(|e| builtin_error(format!("rdivide: {e}")))?;
+    let tensor = Tensor::new(out, plan.output_shape().to_vec())
+        .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
 fn rdivide_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
-    let plan =
-        BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| builtin_error(format!("rdivide: {err}")))?;
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|err| builtin_error(format!("rdivide: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
@@ -678,8 +679,8 @@ fn rdivide_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinR
 }
 
 fn rdivide_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> {
-    let plan =
-        BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| builtin_error(format!("rdivide: {err}")))?;
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|err| builtin_error(format!("rdivide: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
@@ -698,8 +699,8 @@ fn rdivide_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Valu
 }
 
 fn rdivide_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
-    let plan =
-        BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| builtin_error(format!("rdivide: {err}")))?;
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|err| builtin_error(format!("rdivide: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
@@ -729,21 +730,26 @@ fn classify_operand(value: Value) -> BuiltinResult<RdivideOperand> {
             Tensor::new(vec![n], vec![1, 1]).map_err(|e| builtin_error(format!("rdivide: {e}")))?,
         )),
         Value::Int(i) => Ok(RdivideOperand::Real(
-            Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| builtin_error(format!("rdivide: {e}")))?,
+            Tensor::new(vec![i.to_f64()], vec![1, 1])
+                .map_err(|e| builtin_error(format!("rdivide: {e}")))?,
         )),
         Value::Bool(b) => Ok(RdivideOperand::Real(
             Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
                 .map_err(|e| builtin_error(format!("rdivide: {e}")))?,
         )),
         Value::LogicalArray(logical) => Ok(RdivideOperand::Real(
-            tensor::logical_to_tensor(&logical).map_err(|e| builtin_error(format!("rdivide: {e}")))?,
+            tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(format!("rdivide: {e}")))?,
         )),
         Value::CharArray(chars) => Ok(RdivideOperand::Real(char_array_to_tensor(&chars)?)),
         Value::Complex(re, im) => Ok(RdivideOperand::Complex(
-            ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| builtin_error(format!("rdivide: {e}")))?,
+            ComplexTensor::new(vec![(re, im)], vec![1, 1])
+                .map_err(|e| builtin_error(format!("rdivide: {e}")))?,
         )),
         Value::ComplexTensor(ct) => Ok(RdivideOperand::Complex(ct)),
-        Value::GpuTensor(_) => Err(builtin_error("rdivide: internal error converting GPU value")),
+        Value::GpuTensor(_) => Err(builtin_error(
+            "rdivide: internal error converting GPU value",
+        )),
         other => Err(builtin_error(format!(
             "rdivide: unsupported operand type {:?}; expected numeric or logical data",
             other
@@ -753,7 +759,8 @@ fn classify_operand(value: Value) -> BuiltinResult<RdivideOperand> {
 
 fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-    Tensor::new(data, vec![chars.rows, chars.cols]).map_err(|e| builtin_error(format!("rdivide: {e}")))
+    Tensor::new(data, vec![chars.rows, chars.cols])
+        .map_err(|e| builtin_error(format!("rdivide: {e}")))
 }
 
 fn extract_scalar_f64(value: &Value) -> BuiltinResult<Option<f64>> {
@@ -780,8 +787,8 @@ fn gpu_scalar_value(handle: &GpuTensorHandle) -> BuiltinResult<Option<f64>> {
     if !is_scalar_shape(&handle.shape) {
         return Ok(None);
     }
-    let tensor = gpu_helpers::gather_tensor(handle)
-        .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
+    let tensor =
+        gpu_helpers::gather_tensor(handle).map_err(|e| builtin_error(format!("rdivide: {e}")))?;
     Ok(tensor.data.first().copied())
 }
 
@@ -1032,7 +1039,10 @@ pub(crate) mod tests {
         let lhs = Value::Num(2.0);
         let rhs = Value::Num(4.0);
         let err = rdivide_builtin(lhs, rhs, vec![Value::from("like")]).unwrap_err();
-        assert!(err.message().contains("prototype"), "unexpected error: {err}");
+        assert!(
+            err.message().contains("prototype"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

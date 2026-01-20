@@ -4,7 +4,6 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -14,6 +13,7 @@ use crate::builtins::common::{
     broadcast::BroadcastPlan, gpu_helpers, map_control_flow_with_builtin,
     random_args::complex_tensor_into_value, random_args::keyword_of, tensor,
 };
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -255,7 +255,6 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("power").build()
 }
 
-
 #[runtime_builtin(
     name = "power",
     category = "math/elementwise",
@@ -288,14 +287,18 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
                 Err(builtin_error("power: expected prototype after 'like'"))
             } else {
-                Err(builtin_error("power: unsupported option; only 'like' is accepted"))
+                Err(builtin_error(
+                    "power: unsupported option; only 'like' is accepted",
+                ))
             }
         }
         2 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
                 Ok(OutputTemplate::Like(args[1].clone()))
             } else {
-                Err(builtin_error("power: unsupported option; only 'like' is accepted"))
+                Err(builtin_error(
+                    "power: unsupported option; only 'like' is accepted",
+                ))
             }
         }
         _ => Err(builtin_error("power: too many input arguments")),
@@ -355,7 +358,8 @@ fn power_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
 }
 
 fn power_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| builtin_error(format!("power: {err}")))?;
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|err| builtin_error(format!("power: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("power: {e}")))?;
@@ -367,13 +371,14 @@ fn power_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinRes
         let (br, bi) = rhs.data[idx_rhs];
         out[out_idx] = complex_pow_scalar(ar, ai, br, bi);
     }
-    let tensor =
-        ComplexTensor::new(out, plan.output_shape().to_vec()).map_err(|e| builtin_error(format!("power: {e}")))?;
+    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+        .map_err(|e| builtin_error(format!("power: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
 fn power_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| builtin_error(format!("power: {err}")))?;
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|err| builtin_error(format!("power: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("power: {e}")))?;
@@ -385,13 +390,14 @@ fn power_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value>
         let exponent = rhs.data[idx_rhs];
         out[out_idx] = complex_pow_scalar(ar, ai, exponent, 0.0);
     }
-    let tensor =
-        ComplexTensor::new(out, plan.output_shape().to_vec()).map_err(|e| builtin_error(format!("power: {e}")))?;
+    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+        .map_err(|e| builtin_error(format!("power: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
 fn power_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| builtin_error(format!("power: {err}")))?;
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|err| builtin_error(format!("power: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("power: {e}")))?;
@@ -403,8 +409,8 @@ fn power_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value>
         let (br, bi) = rhs.data[idx_rhs];
         out[out_idx] = complex_pow_scalar(base, 0.0, br, bi);
     }
-    let tensor =
-        ComplexTensor::new(out, plan.output_shape().to_vec()).map_err(|e| builtin_error(format!("power: {e}")))?;
+    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+        .map_err(|e| builtin_error(format!("power: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -420,18 +426,21 @@ fn classify_operand(value: Value) -> BuiltinResult<PowerOperand> {
             Tensor::new(vec![n], vec![1, 1]).map_err(|e| builtin_error(format!("power: {e}")))?,
         )),
         Value::Int(i) => Ok(PowerOperand::Real(
-            Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| builtin_error(format!("power: {e}")))?,
+            Tensor::new(vec![i.to_f64()], vec![1, 1])
+                .map_err(|e| builtin_error(format!("power: {e}")))?,
         )),
         Value::Bool(b) => Ok(PowerOperand::Real(
             Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
                 .map_err(|e| builtin_error(format!("power: {e}")))?,
         )),
         Value::LogicalArray(logical) => Ok(PowerOperand::Real(
-            tensor::logical_to_tensor(&logical).map_err(|e| builtin_error(format!("power: {e}")))?,
+            tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(format!("power: {e}")))?,
         )),
         Value::CharArray(chars) => Ok(PowerOperand::Real(char_array_to_tensor(&chars)?)),
         Value::Complex(re, im) => Ok(PowerOperand::Complex(
-            ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| builtin_error(format!("power: {e}")))?,
+            ComplexTensor::new(vec![(re, im)], vec![1, 1])
+                .map_err(|e| builtin_error(format!("power: {e}")))?,
         )),
         Value::ComplexTensor(ct) => Ok(PowerOperand::Complex(ct)),
         Value::GpuTensor(_) => Err(builtin_error("power: internal GPU operand escape")),
@@ -444,7 +453,8 @@ fn classify_operand(value: Value) -> BuiltinResult<PowerOperand> {
 
 fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-    Tensor::new(data, vec![chars.rows, chars.cols]).map_err(|e| builtin_error(format!("power: {e}")))
+    Tensor::new(data, vec![chars.rows, chars.cols])
+        .map_err(|e| builtin_error(format!("power: {e}")))
 }
 
 fn power_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
@@ -637,7 +647,8 @@ fn value_to_real_tensor_for_gpu(value: &Value) -> BuiltinResult<Option<Tensor>> 
             Tensor::new(vec![*n], vec![1, 1]).map_err(|e| builtin_error(format!("power: {e}")))?,
         )),
         Value::Int(i) => Ok(Some(
-            Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| builtin_error(format!("power: {e}")))?,
+            Tensor::new(vec![i.to_f64()], vec![1, 1])
+                .map_err(|e| builtin_error(format!("power: {e}")))?,
         )),
         Value::Bool(b) => Ok(Some(
             Tensor::new(vec![if *b { 1.0 } else { 0.0 }], vec![1, 1])
@@ -722,18 +733,21 @@ fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value>
         DevicePreference::Gpu => match value {
             Value::GpuTensor(_) => Ok(value),
             Value::Tensor(t) => upload_tensor(t),
-            Value::Num(n) => {
-                upload_tensor(Tensor::new(vec![n], vec![1, 1]).map_err(|e| builtin_error(format!("power: {e}")))?)
-            }
+            Value::Num(n) => upload_tensor(
+                Tensor::new(vec![n], vec![1, 1])
+                    .map_err(|e| builtin_error(format!("power: {e}")))?,
+            ),
             Value::Int(i) => upload_tensor(
-                Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| builtin_error(format!("power: {e}")))?,
+                Tensor::new(vec![i.to_f64()], vec![1, 1])
+                    .map_err(|e| builtin_error(format!("power: {e}")))?,
             ),
             Value::Bool(b) => upload_tensor(
                 Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
                     .map_err(|e| builtin_error(format!("power: {e}")))?,
             ),
             Value::LogicalArray(l) => {
-                let tensor = tensor::logical_to_tensor(&l).map_err(|e| builtin_error(format!("power: {e}")))?;
+                let tensor = tensor::logical_to_tensor(&l)
+                    .map_err(|e| builtin_error(format!("power: {e}")))?;
                 upload_tensor(tensor)
             }
             other => Err(builtin_error(format!(
@@ -766,12 +780,13 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
             let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
-            let tensor =
-                ComplexTensor::new(data, t.shape.clone()).map_err(|e| builtin_error(format!("power: {e}")))?;
+            let tensor = ComplexTensor::new(data, t.shape.clone())
+                .map_err(|e| builtin_error(format!("power: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
         }
         Value::LogicalArray(l) => {
-            let tensor = tensor::logical_to_tensor(&l).map_err(|e| builtin_error(format!("power: {e}")))?;
+            let tensor =
+                tensor::logical_to_tensor(&l).map_err(|e| builtin_error(format!("power: {e}")))?;
             real_to_complex(Value::Tensor(tensor))
         }
         Value::Bool(b) => real_to_complex(Value::Num(if b { 1.0 } else { 0.0 })),
@@ -820,9 +835,8 @@ fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
             class: PrototypeClass::Complex,
         }),
         other => {
-            let gathered =
-                crate::dispatcher::gather_if_needed(other)
-                    .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+            let gathered = crate::dispatcher::gather_if_needed(other)
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
             analyse_like_prototype(&gathered)
         }
     }

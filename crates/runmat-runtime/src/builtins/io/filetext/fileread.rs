@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 use runmat_filesystem as fs;
 
 #[cfg_attr(
@@ -241,8 +241,8 @@ fn fileread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
     let bytes = read_all(&resolved)?;
     let chars = decode_bytes(bytes, encoding)?;
     let cols = chars.len();
-    let char_array = CharArray::new(chars, 1, cols)
-        .map_err(|e| fileread_error(format!("fileread: {e}")))?;
+    let char_array =
+        CharArray::new(chars, 1, cols).map_err(|e| fileread_error(format!("fileread: {e}")))?;
     Ok(Value::CharArray(char_array))
 }
 
@@ -335,7 +335,9 @@ fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
             if sa.data.len() == 1 {
                 normalize_path(&sa.data[0])
             } else {
-                Err(fileread_error("fileread: string array inputs must be scalar"))
+                Err(fileread_error(
+                    "fileread: string array inputs must be scalar",
+                ))
             }
         }
         other => Err(fileread_error(format!(
@@ -353,10 +355,14 @@ fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
 
 fn read_all(path: &Path) -> BuiltinResult<Vec<u8>> {
     fs::read(path).map_err(|err| {
-        build_runtime_error(format!("fileread: unable to read '{}': {}", path.display(), err))
-            .with_builtin(BUILTIN_NAME)
-            .with_source(err)
-            .build()
+        build_runtime_error(format!(
+            "fileread: unable to read '{}': {}",
+            path.display(),
+            err
+        ))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err)
+        .build()
     })
 }
 
@@ -423,7 +429,6 @@ pub(crate) mod tests {
     }
 
     fn unique_path(prefix: &str) -> PathBuf {
-
         let millis = unix_timestamp_ms();
         let mut path = std::env::temp_dir();
         path.push(format!("runmat_{prefix}_{}_{}", std::process::id(), millis));

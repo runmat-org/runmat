@@ -480,14 +480,14 @@ fn coeffs_to_value(coeffs: &[Complex64], orientation: Orientation) -> BuiltinRes
     if coeffs.iter().all(|c| c.im.abs() <= EPS) {
         let data: Vec<f64> = coeffs.iter().map(|c| c.re).collect();
         let shape = orientation.shape_for_len(data.len());
-        let tensor = Tensor::new(data, shape)
-            .map_err(|e| polyder_error(format!("polyder: {e}")))?;
+        let tensor =
+            Tensor::new(data, shape).map_err(|e| polyder_error(format!("polyder: {e}")))?;
         Ok(tensor_into_value(tensor))
     } else {
         let data: Vec<(f64, f64)> = coeffs.iter().map(|c| (c.re, c.im)).collect();
         let shape = orientation.shape_for_len(data.len());
-        let tensor = ComplexTensor::new(data, shape)
-            .map_err(|e| polyder_error(format!("polyder: {e}")))?;
+        let tensor =
+            ComplexTensor::new(data, shape).map_err(|e| polyder_error(format!("polyder: {e}")))?;
         Ok(complex_tensor_into_value(tensor))
     }
 }

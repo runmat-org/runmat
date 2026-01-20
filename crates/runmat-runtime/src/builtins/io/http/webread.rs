@@ -17,7 +17,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::json::jsondecode::decode_json_text;
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 const DEFAULT_USER_AGENT: &str = "RunMat webread/0.0";
@@ -198,9 +198,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 fn webread_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("webread")
-        .build()
+    build_runtime_error(message).with_builtin("webread").build()
 }
 
 fn remap_webread_flow<F>(err: RuntimeError, message: F) -> RuntimeError
@@ -422,7 +420,9 @@ fn execute_request(
         .map(|s| !s.is_empty())
         .unwrap_or(false);
     if password_present && !username_present {
-        return Err(webread_error("webread: Password requires a Username option"));
+        return Err(webread_error(
+            "webread: Password requires a Username option",
+        ));
     }
 
     let mut url = Url::parse(url_text).map_err(|err| {
@@ -503,10 +503,7 @@ fn map_json_error(err: RuntimeError) -> RuntimeError {
     let message = if let Some(rest) = err.message().strip_prefix("jsondecode: ") {
         format!("webread: failed to parse JSON response ({rest})")
     } else {
-        format!(
-            "webread: failed to parse JSON response ({})",
-            err.message()
-        )
+        format!("webread: failed to parse JSON response ({})", err.message())
     };
     build_runtime_error(message)
         .with_builtin("webread")

@@ -14,6 +14,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{CharArray, ComplexTensor, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -21,7 +22,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -222,13 +222,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn setdiff_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("setdiff")
-        .build()
+    build_runtime_error(message).with_builtin("setdiff").build()
 }
 
 #[runtime_builtin(
-
     name = "setdiff",
     category = "array/sorting_sets",
     summary = "Return the values that appear in the first input but not the second.",
@@ -243,7 +240,6 @@ fn setdiff_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult
 
 /// Evaluate the `setdiff` builtin once and expose all outputs.
 pub fn evaluate(a: Value, b: Value, rest: &[Value]) -> crate::BuiltinResult<SetdiffEvaluation> {
-
     let opts = parse_options(rest)?;
     match (a, b) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
@@ -271,7 +267,9 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<SetdiffOptions> {
             "sorted" => {
                 if let Some(prev) = seen_order {
                     if prev != SetdiffOrder::Sorted {
-                        return Err(setdiff_error("setdiff: cannot combine 'sorted' with 'stable'"));
+                        return Err(setdiff_error(
+                            "setdiff: cannot combine 'sorted' with 'stable'",
+                        ));
                     }
                 }
                 seen_order = Some(SetdiffOrder::Sorted);
@@ -280,16 +278,24 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<SetdiffOptions> {
             "stable" => {
                 if let Some(prev) = seen_order {
                     if prev != SetdiffOrder::Stable {
-                        return Err(setdiff_error("setdiff: cannot combine 'sorted' with 'stable'"));
+                        return Err(setdiff_error(
+                            "setdiff: cannot combine 'sorted' with 'stable'",
+                        ));
                     }
                 }
                 seen_order = Some(SetdiffOrder::Stable);
                 opts.order = SetdiffOrder::Stable;
             }
             "legacy" | "r2012a" => {
-                return Err(setdiff_error("setdiff: the 'legacy' behaviour is not supported"));
+                return Err(setdiff_error(
+                    "setdiff: the 'legacy' behaviour is not supported",
+                ));
             }
-            other => return Err(setdiff_error(format!("setdiff: unrecognised option '{other}'"))),
+            other => {
+                return Err(setdiff_error(format!(
+                    "setdiff: unrecognised option '{other}'"
+                )))
+            }
         }
     }
 
@@ -321,8 +327,8 @@ fn setdiff_gpu_mixed(
     gpu_is_a: bool,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     let gpu_tensor = gpu_helpers::gather_tensor(&handle_gpu)?;
-    let other_tensor = tensor::value_into_tensor_for("setdiff", other)
-        .map_err(|e| setdiff_error(e))?;
+    let other_tensor =
+        tensor::value_into_tensor_for("setdiff", other).map_err(|e| setdiff_error(e))?;
     if gpu_is_a {
         setdiff_numeric(gpu_tensor, other_tensor, opts)
     } else {
@@ -330,7 +336,11 @@ fn setdiff_gpu_mixed(
     }
 }
 
-fn setdiff_host(a: Value, b: Value, opts: &SetdiffOptions) -> crate::BuiltinResult<SetdiffEvaluation> {
+fn setdiff_host(
+    a: Value,
+    b: Value,
+    opts: &SetdiffOptions,
+) -> crate::BuiltinResult<SetdiffEvaluation> {
     match (a, b) {
         (Value::ComplexTensor(at), Value::ComplexTensor(bt)) => setdiff_complex(at, bt, opts),
         (Value::ComplexTensor(at), Value::Complex(re, im)) => {
@@ -357,28 +367,28 @@ fn setdiff_host(a: Value, b: Value, opts: &SetdiffOptions) -> crate::BuiltinResu
             setdiff_string(astring, bstring, opts)
         }
         (Value::StringArray(astring), Value::String(b)) => {
-            let bstring =
-                StringArray::new(vec![b], vec![1, 1]).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+            let bstring = StringArray::new(vec![b], vec![1, 1])
+                .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
             setdiff_string(astring, bstring, opts)
         }
         (Value::String(a), Value::StringArray(bstring)) => {
-            let astring =
-                StringArray::new(vec![a], vec![1, 1]).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+            let astring = StringArray::new(vec![a], vec![1, 1])
+                .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
             setdiff_string(astring, bstring, opts)
         }
         (Value::String(a), Value::String(b)) => {
-            let astring =
-                StringArray::new(vec![a], vec![1, 1]).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
-            let bstring =
-                StringArray::new(vec![b], vec![1, 1]).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+            let astring = StringArray::new(vec![a], vec![1, 1])
+                .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+            let bstring = StringArray::new(vec![b], vec![1, 1])
+                .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
             setdiff_string(astring, bstring, opts)
         }
 
         (left, right) => {
-            let tensor_a = tensor::value_into_tensor_for("setdiff", left)
-                .map_err(|e| setdiff_error(e))?;
-            let tensor_b = tensor::value_into_tensor_for("setdiff", right)
-                .map_err(|e| setdiff_error(e))?;
+            let tensor_a =
+                tensor::value_into_tensor_for("setdiff", left).map_err(|e| setdiff_error(e))?;
+            let tensor_b =
+                tensor::value_into_tensor_for("setdiff", right).map_err(|e| setdiff_error(e))?;
             setdiff_numeric(tensor_a, tensor_b, opts)
         }
     }
@@ -446,12 +456,14 @@ fn setdiff_numeric_rows(
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     if a.shape.len() != 2 || b.shape.len() != 2 {
-        return Err(setdiff_error("setdiff: 'rows' option requires 2-D numeric matrices"));
+        return Err(setdiff_error(
+            "setdiff: 'rows' option requires 2-D numeric matrices",
+        ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(
-            setdiff_error("setdiff: inputs must have the same number of columns when using 'rows'"),
-        );
+        return Err(setdiff_error(
+            "setdiff: inputs must have the same number of columns when using 'rows'",
+        ));
     }
 
     let rows_a = a.shape[0];
@@ -547,12 +559,14 @@ fn setdiff_complex_rows(
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     if a.shape.len() != 2 || b.shape.len() != 2 {
-        return Err(setdiff_error("setdiff: 'rows' option requires 2-D complex matrices"));
+        return Err(setdiff_error(
+            "setdiff: 'rows' option requires 2-D complex matrices",
+        ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(
-            setdiff_error("setdiff: inputs must have the same number of columns when using 'rows'"),
-        );
+        return Err(setdiff_error(
+            "setdiff: inputs must have the same number of columns when using 'rows'",
+        ));
     }
 
     let rows_a = a.shape[0];
@@ -655,9 +669,9 @@ fn setdiff_char_rows(
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     if a.cols != b.cols {
-        return Err(
-            setdiff_error("setdiff: inputs must have the same number of columns when using 'rows'"),
-        );
+        return Err(setdiff_error(
+            "setdiff: inputs must have the same number of columns when using 'rows'",
+        ));
     }
 
     let rows_a = a.rows;
@@ -752,12 +766,14 @@ fn setdiff_string_rows(
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     if a.shape.len() != 2 || b.shape.len() != 2 {
-        return Err(setdiff_error("setdiff: 'rows' option requires 2-D string arrays"));
+        return Err(setdiff_error(
+            "setdiff: 'rows' option requires 2-D string arrays",
+        ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(
-            setdiff_error("setdiff: inputs must have the same number of columns when using 'rows'"),
-        );
+        return Err(setdiff_error(
+            "setdiff: inputs must have the same number of columns when using 'rows'",
+        ));
     }
 
     let rows_a = a.shape[0];
@@ -824,9 +840,10 @@ fn assemble_numeric_setdiff(
         ia.push((entry.index + 1) as f64);
     }
 
-    let value_tensor =
-        Tensor::new(values, vec![order.len(), 1]).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
-    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+    let value_tensor = Tensor::new(values, vec![order.len(), 1])
+        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
+        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
 
     Ok(SetdiffEvaluation::new(
         Value::Tensor(value_tensor),
@@ -864,9 +881,10 @@ fn assemble_numeric_row_setdiff(
         ia.push((entry.row_index + 1) as f64);
     }
 
-    let value_tensor =
-        Tensor::new(values, vec![unique_rows, cols]).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
-    let ia_tensor = Tensor::new(ia, vec![unique_rows, 1]).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+    let value_tensor = Tensor::new(values, vec![unique_rows, cols])
+        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![unique_rows, 1])
+        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
 
     Ok(SetdiffEvaluation::new(
         Value::Tensor(value_tensor),
@@ -896,9 +914,10 @@ fn assemble_complex_setdiff(
         ia.push((entry.index + 1) as f64);
     }
 
-    let value_tensor =
-        ComplexTensor::new(values, vec![order.len(), 1]).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
-    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+    let value_tensor = ComplexTensor::new(values, vec![order.len(), 1])
+        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
+        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
 
     Ok(SetdiffEvaluation::new(
         complex_tensor_into_value(value_tensor),
@@ -936,9 +955,10 @@ fn assemble_complex_row_setdiff(
         ia.push((entry.row_index + 1) as f64);
     }
 
-    let value_tensor =
-        ComplexTensor::new(values, vec![unique_rows, cols]).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
-    let ia_tensor = Tensor::new(ia, vec![unique_rows, 1]).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+    let value_tensor = ComplexTensor::new(values, vec![unique_rows, cols])
+        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![unique_rows, 1])
+        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
 
     Ok(SetdiffEvaluation::new(
         complex_tensor_into_value(value_tensor),
@@ -968,9 +988,10 @@ fn assemble_char_setdiff(
         ia.push((entry.index + 1) as f64);
     }
 
-    let value_array =
-        CharArray::new(values, order.len(), 1).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
-    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+    let value_array = CharArray::new(values, order.len(), 1)
+        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
+        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
 
     Ok(SetdiffEvaluation::new(
         Value::CharArray(value_array),
@@ -1008,9 +1029,10 @@ fn assemble_char_row_setdiff(
         ia.push((entry.row_index + 1) as f64);
     }
 
-    let value_array =
-        CharArray::new(values, unique_rows, cols).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
-    let ia_tensor = Tensor::new(ia, vec![unique_rows, 1]).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+    let value_array = CharArray::new(values, unique_rows, cols)
+        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![unique_rows, 1])
+        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
 
     Ok(SetdiffEvaluation::new(
         Value::CharArray(value_array),
@@ -1040,9 +1062,10 @@ fn assemble_string_setdiff(
         ia.push((entry.index + 1) as f64);
     }
 
-    let value_array =
-        StringArray::new(values, vec![order.len(), 1]).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
-    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+    let value_array = StringArray::new(values, vec![order.len(), 1])
+        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
+        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
 
     Ok(SetdiffEvaluation::new(
         Value::StringArray(value_array),
@@ -1080,9 +1103,10 @@ fn assemble_string_row_setdiff(
         ia.push((entry.row_index + 1) as f64);
     }
 
-    let value_array =
-        StringArray::new(values, vec![unique_rows, cols]).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
-    let ia_tensor = Tensor::new(ia, vec![unique_rows, 1]).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+    let value_array = StringArray::new(values, vec![unique_rows, cols])
+        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![unique_rows, 1])
+        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
 
     Ok(SetdiffEvaluation::new(
         Value::StringArray(value_array),
@@ -1195,9 +1219,10 @@ impl SetdiffEvaluation {
 
     pub fn from_setdiff_result(result: SetdiffResult) -> crate::BuiltinResult<Self> {
         let SetdiffResult { values, ia } = result;
-        let values_tensor =
-            Tensor::new(values.data, values.shape).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
-        let ia_tensor = Tensor::new(ia.data, ia.shape).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+        let values_tensor = Tensor::new(values.data, values.shape)
+            .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+        let ia_tensor =
+            Tensor::new(ia.data, ia.shape).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
         Ok(SetdiffEvaluation::new(
             Value::Tensor(values_tensor),
             ia_tensor,
@@ -1206,8 +1231,8 @@ impl SetdiffEvaluation {
 
     pub fn into_numeric_setdiff_result(self) -> crate::BuiltinResult<SetdiffResult> {
         let SetdiffEvaluation { values, ia } = self;
-        let values_tensor = tensor::value_into_tensor_for("setdiff", values)
-            .map_err(|e| setdiff_error(e))?;
+        let values_tensor =
+            tensor::value_into_tensor_for("setdiff", values).map_err(|e| setdiff_error(e))?;
         Ok(SetdiffResult {
             values: HostTensorOwned {
                 data: values_tensor.data,

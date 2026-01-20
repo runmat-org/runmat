@@ -192,9 +192,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn isfield_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("isfield")
-        .build()
+    build_runtime_error(message).with_builtin("isfield").build()
 }
 
 #[runtime_builtin(
@@ -312,7 +310,8 @@ fn evaluate_scalar(struct_value: &StructValue, names: ParsedNames) -> BuiltinRes
                     0
                 });
             }
-            let logical = LogicalArray::new(bits, shape).map_err(|e| isfield_flow(format!("isfield: {e}")))?;
+            let logical = LogicalArray::new(bits, shape)
+                .map_err(|e| isfield_flow(format!("isfield: {e}")))?;
             Ok(Value::LogicalArray(logical))
         }
     }
@@ -327,7 +326,8 @@ fn evaluate_struct_array(cell: &CellArray, names: ParsedNames) -> BuiltinResult<
             for name in names {
                 bits.push(if fields.contains(&name) { 1 } else { 0 });
             }
-            let logical = LogicalArray::new(bits, shape).map_err(|e| isfield_flow(format!("isfield: {e}")))?;
+            let logical = LogicalArray::new(bits, shape)
+                .map_err(|e| isfield_flow(format!("isfield: {e}")))?;
             Ok(Value::LogicalArray(logical))
         }
     }
@@ -352,14 +352,18 @@ fn struct_array_field_intersection(cell: &CellArray) -> BuiltinResult<HashSet<St
     let mut iter = cell.data.iter();
     let first = unsafe { &*iter.next().unwrap().as_raw() };
     let Value::Struct(first_struct) = first else {
-        return Err(isfield_flow("isfield: struct array elements must be structs"));
+        return Err(isfield_flow(
+            "isfield: struct array elements must be structs",
+        ));
     };
     let mut fields: HashSet<String> = first_struct.fields.keys().cloned().collect();
 
     for handle in iter {
         let value = unsafe { &*handle.as_raw() };
         let Value::Struct(struct_value) = value else {
-            return Err(isfield_flow("isfield: struct array elements must be structs"));
+            return Err(isfield_flow(
+                "isfield: struct array elements must be structs",
+            ));
         };
         fields.retain(|name| struct_value.fields.contains_key(name));
         if fields.is_empty() {
@@ -585,7 +589,8 @@ pub(crate) mod tests {
     fn isfield_invalid_name_type_errors() {
         let mut st = StructValue::new();
         st.fields.insert("alpha".into(), Value::Num(1.0));
-        let err = error_message(isfield_builtin(Value::Struct(st), Value::from(5_i32)).unwrap_err());
+        let err =
+            error_message(isfield_builtin(Value::Struct(st), Value::from(5_i32)).unwrap_err());
         assert!(err.contains("field names must be strings"));
     }
 

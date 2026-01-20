@@ -485,8 +485,9 @@ impl EqOperand {
                 Ok(EqOperand::Numeric(NumericBuffer::from_char_array(array)))
             }
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)
-                    .map_err(|err| eq_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT))?;
+                let tensor = gpu_helpers::gather_tensor(&handle).map_err(|err| {
+                    eq_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT)
+                })?;
                 Ok(EqOperand::Numeric(NumericBuffer::from_tensor(tensor)))
             }
             unsupported => Err(eq_error(

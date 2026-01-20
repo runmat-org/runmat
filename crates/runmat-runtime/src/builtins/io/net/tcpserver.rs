@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 use thiserror::Error;
 
 use std::collections::HashMap;
@@ -335,7 +335,8 @@ pub(crate) fn tcpserver_builtin(
 
     let host = string_scalar(&address, "tcpserver address")
         .map_err(|err| tcpserver_flow(MESSAGE_ID_INVALID_ADDRESS, err.to_string()))?;
-    let port = parse_port(&port).map_err(|err| tcpserver_flow(MESSAGE_ID_INVALID_PORT, err.to_string()))?;
+    let port = parse_port(&port)
+        .map_err(|err| tcpserver_flow(MESSAGE_ID_INVALID_PORT, err.to_string()))?;
 
     let options = parse_name_value_pairs(rest)?;
 

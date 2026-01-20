@@ -4,13 +4,13 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::build_runtime_error;
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::build_runtime_error;
 
 const MIN_RATIO_TOL: f64 = f64::EPSILON * 8.0;
 const MAX_RATIO_TOL: f64 = 1e-9;
@@ -236,7 +236,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Sequence generation is treated as a sink; it does not participate in fusion.",
 };
 
-
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("colon").build()
 }
@@ -249,9 +248,15 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::colon"
 )]
-fn colon_builtin(start: Value, step_or_end: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn colon_builtin(
+    start: Value,
+    step_or_end: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err(builtin_error("colon: expected two or three input arguments"));
+        return Err(builtin_error(
+            "colon: expected two or three input arguments",
+        ));
     }
 
     let start_scalar = parse_real_scalar("colon", start)?;
@@ -296,7 +301,6 @@ fn colon_builtin(start: Value, step_or_end: Value, rest: Vec<Value>) -> crate::B
     }
 }
 
-
 fn build_sequence(
     start: f64,
     step: f64,
@@ -305,7 +309,9 @@ fn build_sequence(
     char_mode: bool,
 ) -> crate::BuiltinResult<Value> {
     if !start.is_finite() || !step.is_finite() || !stop.is_finite() {
-        return Err(builtin_error("colon: inputs must be finite numeric scalars"));
+        return Err(builtin_error(
+            "colon: inputs must be finite numeric scalars",
+        ));
     }
     if step == 0.0 {
         return Err(builtin_error("colon: increment must be nonzero"));
@@ -417,7 +423,9 @@ fn plan_progression(start: f64, step: f64, stop: f64) -> crate::BuiltinResult<Pr
     }
 
     if approx.is_infinite() || approx > usize::MAX as f64 {
-        return Err(builtin_error("colon: sequence length exceeds platform limits"));
+        return Err(builtin_error(
+            "colon: sequence length exceeds platform limits",
+        ));
     }
 
     let floor = approx.floor();
@@ -608,8 +616,7 @@ fn build_char_sequence(data: Vec<f64>) -> crate::BuiltinResult<Value> {
         chars.push(ch);
     }
 
-    let array =
-        CharArray::new(chars, 1, len).map_err(|e| builtin_error(format!("colon: {e}")))?;
+    let array = CharArray::new(chars, 1, len).map_err(|e| builtin_error(format!("colon: {e}")))?;
     Ok(Value::CharArray(array))
 }
 
@@ -898,7 +905,8 @@ pub(crate) mod tests {
         let err = colon_builtin(start, Value::Num(1.5), vec![stop])
             .expect_err("colon should reject fractional char steps");
         assert!(
-            err.message().contains("character sequence requires integer"),
+            err.message()
+                .contains("character sequence requires integer"),
             "unexpected error message: {err}"
         );
     }

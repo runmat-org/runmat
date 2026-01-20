@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const DOT_NAME: &str = "dot";
 
@@ -274,8 +274,10 @@ fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value>
         let result = dot_complex_tensor(&lhs_complex, &rhs_complex, dim)?;
         complex_tensor_into_value(result)
     } else {
-        let lhs_tensor = tensor::value_into_tensor_for(DOT_NAME, lhs_host).map_err(builtin_error)?;
-        let rhs_tensor = tensor::value_into_tensor_for(DOT_NAME, rhs_host).map_err(builtin_error)?;
+        let lhs_tensor =
+            tensor::value_into_tensor_for(DOT_NAME, lhs_host).map_err(builtin_error)?;
+        let rhs_tensor =
+            tensor::value_into_tensor_for(DOT_NAME, rhs_host).map_err(builtin_error)?;
         let result = dot_real_tensor(&lhs_tensor, &rhs_tensor, dim)?;
         tensor::tensor_into_value(result)
     };
@@ -286,7 +288,6 @@ fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value>
         Ok(value)
     }
 }
-
 
 fn value_is_complex(value: &Value) -> bool {
     matches!(value, Value::Complex(_, _) | Value::ComplexTensor(_))
@@ -314,8 +315,7 @@ fn value_into_complex_tensor(value: Value) -> BuiltinResult<ComplexTensor> {
             real_tensor_to_complex(&tensor)
         }
         Value::LogicalArray(logical) => {
-            let tensor =
-                tensor::logical_to_tensor(&logical).map_err(|e| builtin_error(e))?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(|e| builtin_error(e))?;
             real_tensor_to_complex(&tensor)
         }
         other => Err(builtin_error(format!(
@@ -530,8 +530,7 @@ fn promote_result_to_gpu(value: Value) -> BuiltinResult<Value> {
             promote_result_to_gpu(Value::Tensor(tensor))
         }
         Value::LogicalArray(logical) => {
-            let tensor =
-                tensor::logical_to_tensor(&logical).map_err(|e| builtin_error(e))?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(|e| builtin_error(e))?;
             promote_result_to_gpu(Value::Tensor(tensor))
         }
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),

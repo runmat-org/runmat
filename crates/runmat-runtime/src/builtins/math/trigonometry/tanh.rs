@@ -275,8 +275,7 @@ fn tanh_real(value: Value) -> BuiltinResult<Value> {
 
 fn tanh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.tanh()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
-        .map_err(|e| runtime_error_for(format!("tanh: {e}")))
+    Tensor::new(data, tensor.shape.clone()).map_err(|e| runtime_error_for(format!("tanh: {e}")))
 }
 
 fn tanh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {

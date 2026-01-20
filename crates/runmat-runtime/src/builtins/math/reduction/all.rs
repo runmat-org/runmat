@@ -720,7 +720,9 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, ReductionNaN
     for arg in args {
         if is_all_token(arg) {
             if !matches!(spec, ReductionSpec::Default) {
-                return Err(all_error("all: 'all' cannot be combined with dimension arguments"));
+                return Err(all_error(
+                    "all: 'all' cannot be combined with dimension arguments",
+                ));
             }
             spec = ReductionSpec::All;
             continue;
@@ -734,18 +736,24 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, ReductionNaN
         }
         let dims = parse_dimensions(arg)?;
         if dims.is_empty() {
-            return Err(all_error("all: dimension vector must contain at least one entry"));
+            return Err(all_error(
+                "all: dimension vector must contain at least one entry",
+            ));
         }
         if dims.len() == 1 {
             if matches!(spec, ReductionSpec::Default) {
                 spec = ReductionSpec::Dim(dims[0]);
             } else {
-                return Err(all_error("all: multiple dimension specifications are not supported"));
+                return Err(all_error(
+                    "all: multiple dimension specifications are not supported",
+                ));
             }
         } else if matches!(spec, ReductionSpec::Default) {
             spec = ReductionSpec::VecDim(dims);
         } else {
-            return Err(all_error("all: multiple dimension specifications are not supported"));
+            return Err(all_error(
+                "all: multiple dimension specifications are not supported",
+            ));
         }
     }
 

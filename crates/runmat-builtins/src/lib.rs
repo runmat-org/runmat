@@ -1,6 +1,5 @@
 pub use inventory;
 use runmat_gc_api::GcPtr;
-use runmat_async;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;

@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 use runmat_filesystem as vfs;
 use std::collections::HashSet;
@@ -375,7 +375,9 @@ fn remove_directory(segments: &mut Vec<String>, raw: &str) -> BuiltinResult<bool
             if !meta.is_dir() {
                 Err(rmpath_error(format!("rmpath: '{raw}' is not a folder")))
             } else {
-                Err(rmpath_error(format!("rmpath: folder '{raw}' not on search path")))
+                Err(rmpath_error(format!(
+                    "rmpath: folder '{raw}' not on search path"
+                )))
             }
         }
         Err(_) => Err(rmpath_error(format!("rmpath: folder '{raw}' not found"))),
@@ -486,7 +488,6 @@ pub(crate) mod tests {
         let normalized = normalize_pathbuf(dir);
         path_to_string(&normalized)
     }
-
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

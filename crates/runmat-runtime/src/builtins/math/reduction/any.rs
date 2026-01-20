@@ -228,7 +228,6 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute device-side OR reductions; runtimes gather to host when hooks are unavailable.",
 };
 
-
 fn any_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
 }
@@ -373,7 +372,9 @@ fn reduce_dims_gpu(
         }
         let next = if omit_nan {
             // Build truth mask: (!isnan(current)) && (current != 0)
-            let zeros = provider.zeros_like(&current).map_err(|e| any_error(format!("any: {e}")))?;
+            let zeros = provider
+                .zeros_like(&current)
+                .map_err(|e| any_error(format!("any: {e}")))?;
             let ne_zero = provider
                 .elem_ne(&current, &zeros)
                 .map_err(|e| any_error(format!("any: {e}")))?;
@@ -381,7 +382,9 @@ fn reduce_dims_gpu(
             let is_nan = provider
                 .logical_isnan(&current)
                 .map_err(|e| any_error(format!("any: {e}")))?;
-            let not_nan = provider.logical_not(&is_nan).map_err(|e| any_error(format!("any: {e}")))?;
+            let not_nan = provider
+                .logical_not(&is_nan)
+                .map_err(|e| any_error(format!("any: {e}")))?;
             let _ = provider.free(&is_nan);
             let truth = provider
                 .logical_and(&ne_zero, &not_nan)
@@ -394,7 +397,9 @@ fn reduce_dims_gpu(
                 .reduce_sum_dim(&truth, axis)
                 .map_err(|e| any_error(format!("any: {e}")))?;
             let _ = provider.free(&truth);
-            let zeros_out = provider.zeros_like(&summed).map_err(|e| any_error(format!("any: {e}")))?;
+            let zeros_out = provider
+                .zeros_like(&summed)
+                .map_err(|e| any_error(format!("any: {e}")))?;
             let gt_zero = provider
                 .elem_gt(&summed, &zeros_out)
                 .map_err(|e| any_error(format!("any: {e}")))?;
@@ -430,7 +435,9 @@ fn reduce_dims_gpu(
         return Ok(None);
     }
 
-    let host = provider.download(&current).map_err(|e| any_error(format!("any: {e}")))?;
+    let host = provider
+        .download(&current)
+        .map_err(|e| any_error(format!("any: {e}")))?;
     let _ = provider.free(&current);
     for owned in intermediates {
         let _ = provider.free(&owned);
@@ -767,7 +774,9 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, ReductionNaN
     for arg in args {
         if is_all_token(arg) {
             if !matches!(spec, ReductionSpec::Default) {
-                return Err(any_error("any: 'all' cannot be combined with dimension arguments"));
+                return Err(any_error(
+                    "any: 'all' cannot be combined with dimension arguments",
+                ));
             }
             spec = ReductionSpec::All;
             continue;
@@ -781,18 +790,24 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, ReductionNaN
         }
         let dims = parse_dimensions(arg)?;
         if dims.is_empty() {
-            return Err(any_error("any: dimension vector must contain at least one entry"));
+            return Err(any_error(
+                "any: dimension vector must contain at least one entry",
+            ));
         }
         if dims.len() == 1 {
             if matches!(spec, ReductionSpec::Default) {
                 spec = ReductionSpec::Dim(dims[0]);
             } else {
-                return Err(any_error("any: multiple dimension specifications are not supported"));
+                return Err(any_error(
+                    "any: multiple dimension specifications are not supported",
+                ));
             }
         } else if matches!(spec, ReductionSpec::Default) {
             spec = ReductionSpec::VecDim(dims);
         } else {
-            return Err(any_error("any: multiple dimension specifications are not supported"));
+            return Err(any_error(
+                "any: multiple dimension specifications are not supported",
+            ));
         }
     }
 

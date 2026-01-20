@@ -235,7 +235,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "deconv";
 
 fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build()
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(
@@ -552,8 +554,9 @@ fn convert_output(
         Ok(Value::Complex(re, im))
     } else {
         let complex_data: Vec<(f64, f64)> = data.into_iter().map(|c| (c.re, c.im)).collect();
-        let tensor = ComplexTensor::new(complex_data, shape)
-            .map_err(|e| runtime_error_for(format!("deconv: failed to build complex tensor: {e}")))?;
+        let tensor = ComplexTensor::new(complex_data, shape).map_err(|e| {
+            runtime_error_for(format!("deconv: failed to build complex tensor: {e}"))
+        })?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
