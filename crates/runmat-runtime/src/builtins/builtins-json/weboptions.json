@@ -119,8 +119,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/io/http/weboptions.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/http/weboptions.rs"
   },
   "gpu_residency": "No. `weboptions` gathers any GPU-resident values automatically and always returns a host struct. HTTP builtins ignore GPU residency for metadata.",
   "gpu_behavior": [

@@ -45,22 +45,22 @@
     {
       "description": "Removing several fields with a cell array of names",
       "input": "cfg = struct(\"mode\", \"fast\", \"rate\", 60, \"debug\", true);\ncfg = rmfield(cfg, {\"rate\", \"debug\"});\nfieldnames(cfg)",
-      "output": "ans =\n  1\u00d71 cell array\n    {'mode'}"
+      "output": "ans =\n  1×1 cell array\n    {'mode'}"
     },
     {
       "description": "Removing a field from every element of a struct array",
       "input": "people = struct(\"name\", {\"Ada\", \"Grace\"}, \"id\", {101, 102}, \"email\", {\"ada@example.com\", \"grace@example.com\"});\ntrimmed = rmfield(people, \"email\");\nfieldnames(trimmed)",
-      "output": "ans =\n  2\u00d71 cell array\n    {'id'}\n    {'name'}"
+      "output": "ans =\n  2×1 cell array\n    {'id'}\n    {'name'}"
     },
     {
       "description": "Supplying a string array of field names to delete",
       "input": "stats = struct(\"mean\", 10, \"median\", 9, \"stdev\", 2);\nnames = [\"mean\", \"median\"];\nreduced = rmfield(stats, names);\nfieldnames(reduced)",
-      "output": "ans =\n  1\u00d71 cell array\n    {'stdev'}"
+      "output": "ans =\n  1×1 cell array\n    {'stdev'}"
     },
     {
       "description": "Conditionally removing optional fields",
       "input": "record = struct(\"id\", 7, \"notes\", \"draft\");\nif isfield(record, \"notes\")\n    record = rmfield(record, \"notes\");\nend\nfieldnames(record)",
-      "output": "ans =\n  1\u00d71 cell array\n    {'id'}"
+      "output": "ans =\n  1×1 cell array\n    {'id'}"
     }
   ],
   "faqs": [
@@ -70,7 +70,7 @@
     },
     {
       "question": "What argument types can I use for the field names?",
-      "answer": "You can pass character vectors, string scalars, string arrays, or cell arrays whose elements are strings or character vectors. Mixing these forms in a single call is supported\u2014`rmfield` concatenates all supplied names into one list."
+      "answer": "You can pass character vectors, string scalars, string arrays, or cell arrays whose elements are strings or character vectors. Mixing these forms in a single call is supported—`rmfield` concatenates all supplied names into one list."
     },
     {
       "question": "What happens if a field is missing?",
@@ -112,11 +112,11 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/structs/core/rmfield.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/structs/core/rmfield.rs"
   },
   "gpu_residency": "No additional residency management is required. `rmfield` leaves existing GPU tensors untouched and never gathers or uploads buffers. Subsequent GPU-aware builtins decide whether to keep values on the device.",
   "gpu_behavior": [
-    "`rmfield` performs metadata updates on the host. Values that already reside on the GPU\u2014such as `gpuArray` tensors stored in other fields\u2014stay on the device. Because this builtin only rewrites struct metadata it does not require or invoke acceleration provider hooks."
+    "`rmfield` performs metadata updates on the host. Values that already reside on the GPU—such as `gpuArray` tensors stored in other fields—stay on the device. Because this builtin only rewrites struct metadata it does not require or invoke acceleration provider hooks."
   ]
 }

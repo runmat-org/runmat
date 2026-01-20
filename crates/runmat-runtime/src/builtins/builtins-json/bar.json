@@ -45,8 +45,8 @@
   "faqs": [],
   "links": [],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/bar.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/bar.rs"
   },
   "gpu_residency": "`bar` terminates fusion graphs. Single-precision gpuArray vectors reuse provider buffers via the shared WebGPU context; other precisions gather to the host before plotting."
 }

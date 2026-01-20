@@ -36,8 +36,8 @@
   "faqs": [],
   "links": [],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/surfc.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/surfc.rs"
   },
   "gpu_behavior": [
     "Single-precision gpuArrays stream directly into the shared WebGPU renderer.",

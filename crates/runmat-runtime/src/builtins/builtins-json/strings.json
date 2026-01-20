@@ -137,8 +137,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/strings.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/strings.rs"
   },
   "gpu_behavior": [
     "`strings` never allocates data on the GPU. Size arguments that reside on a GPU are automatically gathered to the host before validation, and the resulting string array always lives in host memory. `\"like\"` prototypes follow the same rule—they are gathered before their shape is inspected. No provider hooks are required, so the GPU metadata marks the builtin as a gather-only operation."

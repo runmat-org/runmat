@@ -28,12 +28,12 @@
     "unit": "builtins::array::introspection::size::tests",
     "integration": "builtins::array::introspection::size::tests::size_gpu_tensor_uses_handle_shape"
   },
-  "description": "`size(A)` reports the length of every dimension of `A`. The return value is always a row vector describing the current shape, with scalars reported as `1\u00d71`. This matches MathWorks MATLAB semantics for scalars, vectors, matrices, N-D arrays, strings, chars, tables, and cells.",
+  "description": "`size(A)` reports the length of every dimension of `A`. The return value is always a row vector describing the current shape, with scalars reported as `1×1`. This matches MathWorks MATLAB semantics for scalars, vectors, matrices, N-D arrays, strings, chars, tables, and cells.",
   "behaviors": [
-    "`size(A)` returns a `1\u00d7N` row vector listing the extents of each dimension.",
+    "`size(A)` returns a `1×N` row vector listing the extents of each dimension.",
     "`size(A, dim)` returns the extent of the specified dimension as a scalar. Dimensions outside the current rank return `1`.",
     "`size(A, dims)` accepts a vector of dimensions and returns the corresponding extents.",
-    "Column and row vectors are distinguished by the tensor metadata: `size(A)` yields `[m n]` for `m\u00d7n` matrices, `[1 n]` for row vectors, and `[m 1]` for column vectors.",
+    "Column and row vectors are distinguished by the tensor metadata: `size(A)` yields `[m n]` for `m×n` matrices, `[1 n]` for row vectors, and `[m 1]` for column vectors.",
     "Character arrays return `[rows cols]`; string scalars return `[1 1]`.",
     "Cell arrays and struct scalars follow MATLAB's array semantics.",
     "Empty dimensions (zeros) are preserved in the output vector.",
@@ -119,8 +119,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/array/introspection/size.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/introspection/size.rs"
   },
   "gpu_behavior": [
     "When a value already resides on the GPU, `size` reads the shape metadata carried by the GPU tensor handle. No kernels are launched and no device data is gathered. If a provider does not populate the shape field on its handles, RunMat falls back to materialising the tensor on the host so the answer stays correct. The builtin never allocates device memory and always returns a host double array, making it safe to call inside fused GPU expressions without breaking residency."

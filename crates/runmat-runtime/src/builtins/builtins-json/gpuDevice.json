@@ -102,8 +102,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/acceleration/gpu/gpudevice.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/acceleration/gpu/gpudevice.rs"
   },
   "gpu_residency": "`gpuDevice` purely reports metadata and does not change residency. Arrays remain on the GPU or CPU exactly as they were prior to the call. Use `gpuArray`, `gather`, and the planner-controlled automatic residency features to move data as needed."
 }

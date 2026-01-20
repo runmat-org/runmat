@@ -32,9 +32,9 @@
     "unit": "builtins::array::shape::squeeze::tests",
     "integration": "builtins::array::shape::squeeze::tests::squeeze_gpu_roundtrip"
   },
-  "description": "`squeeze(A)` removes singleton (dimension size equal to one) dimensions from `A`. The result keeps MATLAB's row/column vector semantics\u20142-D matrices stay 2-D, and higher-rank arrays collapse down until only meaningful axes remain.",
+  "description": "`squeeze(A)` removes singleton (dimension size equal to one) dimensions from `A`. The result keeps MATLAB's row/column vector semantics—2-D matrices stay 2-D, and higher-rank arrays collapse down until only meaningful axes remain.",
   "behaviors": [
-    "Dimensions greater than two drop all size-one axes. If exactly one dimension remains, the output becomes an `N \u00d7 1` column vector.",
+    "Dimensions greater than two drop all size-one axes. If exactly one dimension remains, the output becomes an `N × 1` column vector.",
     "Two-dimensional inputs (row/column vectors and matrices) are returned unchanged.",
     "Zero-length dimensions are preserved; only length-one axes are removed.",
     "Scalar values remain scalars.",
@@ -79,7 +79,7 @@
     },
     {
       "question": "What happens when every dimension is singleton?",
-      "answer": "The result becomes a `1 \u00d7 1` array. Scalars (e.g., plain doubles) remain scalars."
+      "answer": "The result becomes a `1 × 1` array. Scalars (e.g., plain doubles) remain scalars."
     },
     {
       "question": "Does `squeeze` affect zero-length dimensions?",
@@ -141,8 +141,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/array/shape/squeeze.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/squeeze.rs"
   },
   "gpu_behavior": [
     "When a GPU provider is active, RunMat calls the provider's `reshape` hook to update tensor metadata without copying data. Providers that do not override `reshape` fall back to the in-process behaviour, simply updating the handle shape locally. If a handle advertises no shape, RunMat downloads metadata once to infer dimensions before applying `squeeze`."

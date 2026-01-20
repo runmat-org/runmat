@@ -48,17 +48,17 @@
     {
       "description": "Updating every element of a string array",
       "input": "labels = [\"GPU planner\", \"CPU planner\"];\nupdated = strrep(labels, \"planner\", \"pipeline\");",
-      "output": "updated = 2\u00d71 string\n    \"GPU pipeline\"\n    \"CPU pipeline\""
+      "output": "updated = 2×1 string\n    \"GPU pipeline\"\n    \"CPU pipeline\""
     },
     {
       "description": "Preserving rectangular shape in character arrays",
       "input": "chars = char(\"alpha\", \"beta \");\nout = strrep(chars, \"a\", \"A\");",
-      "output": "out =\n\n  2\u00d75 char array\n\n    'AlphA'\n    'betA '"
+      "output": "out =\n\n  2×5 char array\n\n    'AlphA'\n    'betA '"
     },
     {
       "description": "Applying replacements inside a cell array of character vectors",
       "input": "C = {'Kernel Fusion', 'GPU Planner'};\nrenamed = strrep(C, ' ', '_');",
-      "output": "renamed = 1\u00d72 cell array\n    {'Kernel_Fusion'}    {'GPU_Planner'}"
+      "output": "renamed = 1×2 cell array\n    {'Kernel_Fusion'}    {'GPU_Planner'}"
     },
     {
       "description": "Inserting text with an empty search pattern",
@@ -68,7 +68,7 @@
     {
       "description": "Leaving missing string values untouched",
       "input": "vals = [\"RunMat\", \"<missing>\", \"Accelerate\"];\nout = strrep(vals, \"RunMat\", \"RUNMAT\");",
-      "output": "out = 1\u00d73 string\n    \"RUNMAT\"    <missing>    \"Accelerate\""
+      "output": "out = 1×3 string\n    \"RUNMAT\"    <missing>    \"Accelerate\""
     },
     {
       "description": "Replacing substrings gathered from GPU inputs",
@@ -133,11 +133,11 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/strrep.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/strrep.rs"
   },
-  "gpu_residency": "No. `strrep` registers as a sink with RunMat Accelerate, so the fusion planner never keeps its inputs or outputs on the GPU. Even if you start with GPU data, the runtime gathers it automatically\u2014manual `gpuArray` or `gather` calls are unnecessary.",
+  "gpu_residency": "No. `strrep` registers as a sink with RunMat Accelerate, so the fusion planner never keeps its inputs or outputs on the GPU. Even if you start with GPU data, the runtime gathers it automatically—manual `gpuArray` or `gather` calls are unnecessary.",
   "gpu_behavior": [
-    "RunMat treats text replacement as a CPU-first workflow:\n\n1. The builtin is registered as an Accelerate *sink*, so the planner gathers any GPU-resident inputs (string arrays, char arrays, or cell contents) back to host memory before work begins. 2. Replacements are computed entirely on the CPU, mirroring MATLAB\u2019s behaviour and avoiding GPU/device divergence in string handling. 3. Results are returned as host values (string array, char array, or cell array). Residency is never pushed back to the GPU, keeping semantics deterministic regardless of the active provider."
+    "RunMat treats text replacement as a CPU-first workflow:\n\n1. The builtin is registered as an Accelerate *sink*, so the planner gathers any GPU-resident inputs (string arrays, char arrays, or cell contents) back to host memory before work begins. 2. Replacements are computed entirely on the CPU, mirroring MATLAB’s behaviour and avoiding GPU/device divergence in string handling. 3. Results are returned as host values (string array, char array, or cell array). Residency is never pushed back to the GPU, keeping semantics deterministic regardless of the active provider."
   ]
 }

@@ -124,8 +124,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/math/poly/polyint.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/poly/polyint.rs"
   },
   "gpu_residency": "You usually do **not** need to call `gpuArray` just for `polyint`. When inputs already live on the GPU and a provider is active, RunMat keeps the data on the device and executes the integration there for real-valued coefficients. For complex inputs, or when no provider hook is available, the runtime falls back to the host implementation transparently.",
   "gpu_behavior": [

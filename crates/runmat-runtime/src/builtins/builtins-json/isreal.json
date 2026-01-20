@@ -120,8 +120,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/logical/tests/isreal.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/tests/isreal.rs"
   },
   "gpu_residency": "Normally you do **not** need to call `gpuArray` explicitly. RunMat's auto-offload planner tracks when tensors already reside on the GPU and keeps them there. `isreal` simply inspects storage metadata and returns a host logical scalar, gathering device data only as a fallback.",
   "gpu_behavior": [

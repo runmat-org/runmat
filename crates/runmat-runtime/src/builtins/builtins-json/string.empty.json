@@ -146,8 +146,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/string.empty.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/string.empty.rs"
   },
   "gpu_residency": "No. `string.empty` allocates metadata for an empty string array entirely on the host. Because the result contains no elements and string scalars are host-only, there is nothing to transfer to or from the GPU. Using `gpuArray` with `string.empty` has no effect and is unnecessary.",
   "gpu_behavior": [

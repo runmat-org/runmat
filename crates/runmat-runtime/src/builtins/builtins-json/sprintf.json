@@ -118,7 +118,7 @@
     },
     {
       "question": "How are empty inputs handled?",
-      "answer": "If all argument arrays are empty, `sprintf` returns an empty character array (`1\u00d70`). If the format string itself is empty, the result is also empty."
+      "answer": "If all argument arrays are empty, `sprintf` returns an empty character array (`1×0`). If the format string itself is empty, the result is also empty."
     },
     {
       "question": "What happens with multi-row character arrays?",
@@ -144,8 +144,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/sprintf.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/sprintf.rs"
   },
   "gpu_behavior": [
     "`sprintf` is a residency sink. When inputs include GPU tensors, RunMat gathers them back to host memory via the active acceleration provider before executing the formatter. Formatting itself runs entirely on the CPU, ensuring consistent behaviour regardless of device availability."

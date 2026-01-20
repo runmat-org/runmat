@@ -49,22 +49,22 @@
     {
       "description": "Combine numeric arrays element-wise with logical AND",
       "input": "A = [1 0 2 0];\nB = [3 4 0 0];\nC = and(A, B)",
-      "output": "C =\n  1\u00d74 logical array\n     1     0     0     0"
+      "output": "C =\n  1×4 logical array\n     1     0     0     0"
     },
     {
       "description": "Apply logical AND with automatic scalar expansion",
       "input": "mask = [1; 0; 3; 0];\nflag = and(mask, 5)",
-      "output": "flag =\n  4\u00d71 logical array\n     1\n     0\n     1\n     0"
+      "output": "flag =\n  4×1 logical array\n     1\n     0\n     1\n     0"
     },
     {
       "description": "Use logical AND with character arrays",
       "input": "lhs = ['R' 'u' 'n'];\nrhs = ['R' 'u' 0];\nmatch = and(lhs, rhs)",
-      "output": "match =\n  1\u00d73 logical array\n     1     1     0"
+      "output": "match =\n  1×3 logical array\n     1     1     0"
     },
     {
       "description": "Run logical AND directly on the GPU",
       "input": "G1 = gpuArray([0 2 0 4]);\nG2 = gpuArray([1 0 3 4]);\ndeviceResult = and(G1, G2)\nhostResult = gather(deviceResult)",
-      "output": "deviceResult =\n  1\u00d74 gpuArray logical array\n     0     0     0     1\nhostResult =\n  1\u00d74 logical array\n     0     0     0     1"
+      "output": "deviceResult =\n  1×4 gpuArray logical array\n     0     0     0     1\nhostResult =\n  1×4 logical array\n     0     0     0     1"
     }
   ],
   "faqs": [
@@ -104,8 +104,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/logical/bit/and.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/bit/and.rs"
   },
   "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's native auto-offload logic moves data to the GPU when a fused expression benefits from device execution, and results stay resident until you gather them or the planner needs host access. Call `gpuArray` only when you want to seed residency manually, or when you are porting MATLAB code that already uses explicit device transfers.",
   "gpu_behavior": [

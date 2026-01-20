@@ -145,8 +145,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/math/poly/polyder.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/poly/polyder.rs"
   },
   "gpu_behavior": [
     "When a provider advertises the `polyder` hooks (the in-process and WGPU backends both do), single polynomials and the product/quotient forms execute fully on the GPU. Outputs preserve the orientation of the leading input while trimming leading zeros exactly as the CPU path does. If the provider declines the request—because the coefficients are complex or the backend lacks support— RunMat automatically gathers the inputs and falls back to the CPU reference implementation to preserve MATLAB compatibility."

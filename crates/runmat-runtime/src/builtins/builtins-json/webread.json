@@ -46,7 +46,7 @@
     "Additional name-value pairs that do not match an option are appended to the query string using percent-encoding. A leading struct or cell array argument can also supply query parameters.",
     "`ContentType 'auto'` (default) inspects the `Content-Type` response header to choose between JSON, text, or binary decoding. Explicit `ContentType 'json'`, `'text'`, or `'binary'` override the detection logic.",
     "JSON responses are parsed with the same rules as `jsondecode`, producing doubles, logicals, strings, structs, and cell arrays that match MATLAB semantics.",
-    "Text responses preserve the server-provided character encoding (UTF-8 with automatic decoding of exotic charsets exposed in the HTTP headers). Binary payloads return `1\u00d7N` double arrays whose entries store byte values in the range 0\u2013255.",
+    "Text responses preserve the server-provided character encoding (UTF-8 with automatic decoding of exotic charsets exposed in the HTTP headers). Binary payloads return `1×N` double arrays whose entries store byte values in the range 0–255.",
     "HTTP errors (non-2xx status codes), timeouts, TLS failures, and parsing problems raise descriptive MATLAB-style errors."
   ],
   "examples": [
@@ -99,11 +99,11 @@
     },
     {
       "question": "How are binary responses represented?",
-      "answer": "Binary payloads return `1\u00d7N` double arrays whose elements are byte values. Convert them to the desired integer type (for example `uint8`) before further processing."
+      "answer": "Binary payloads return `1×N` double arrays whose elements are byte values. Convert them to the desired integer type (for example `uint8`) before further processing."
     },
     {
       "question": "What happens when the server returns an error status?",
-      "answer": "Non-success HTTP status codes raise `webread: request to \u2026 failed with HTTP status XYZ`. Inspect the remote server logs or response headers for additional diagnostics."
+      "answer": "Non-success HTTP status codes raise `webread: request to … failed with HTTP status XYZ`. Inspect the remote server logs or response headers for additional diagnostics."
     },
     {
       "question": "Does `webread` support compressed responses?",
@@ -133,8 +133,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/io/http/webread.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/http/webread.rs"
   },
   "gpu_residency": "No. `webread` gathers any GPU-resident values before contacting the network and produces host results. Keeping inputs on the GPU offers no benefit because HTTP/TLS stacks operate on the CPU.",
   "gpu_behavior": [

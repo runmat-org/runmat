@@ -32,7 +32,7 @@
   },
   "description": "`string(x)` converts scalars, arrays, and text-like inputs into MATLAB string arrays whose elements are string scalars. Numeric and logical values are formatted using MATLAB's short-`g` style, character arrays are split by row, and existing string arrays pass through unchanged.",
   "behaviors": [
-    "Scalar inputs return a `1\u00d71` string array containing the converted value.",
+    "Scalar inputs return a `1×1` string array containing the converted value.",
     "Numeric and logical arrays preserve the original shape while converting each element.",
     "Character arrays turn into columnar string arrays with one row per original row.",
     "Cell arrays must contain text-like or scalar numeric values; each cell becomes one string scalar.",
@@ -49,32 +49,32 @@
     {
       "description": "Turning A Numeric Row Vector Into Strings",
       "input": "values = string([3.14159 2.71828 1.41421]);",
-      "output": "values = 1\u00d73 string\n    \"3.1416\"    \"2.7183\"    \"1.4142\""
+      "output": "values = 1×3 string\n    \"3.1416\"    \"2.7183\"    \"1.4142\""
     },
     {
       "description": "Converting A Character Matrix Into A String Array",
       "input": "C = ['North '; 'South '; 'East  '; 'West  '];\nregions = string(C);",
-      "output": "regions = 4\u00d71 string\n    \"North \"\n    \"South \"\n    \"East  \"\n    \"West  \""
+      "output": "regions = 4×1 string\n    \"North \"\n    \"South \"\n    \"East  \"\n    \"West  \""
     },
     {
       "description": "Converting Logical Data To String Scalars",
       "input": "flags = string(logical([1 0 1 0]));",
-      "output": "flags = 1\u00d74 string\n    \"true\"    \"false\"    \"true\"    \"false\""
+      "output": "flags = 1×4 string\n    \"true\"    \"false\"    \"true\"    \"false\""
     },
     {
       "description": "Creating Strings From A Cell Array Of Mixed Scalars",
       "input": "C = {true, 17, \"runmat\"};\nS = string(C);",
-      "output": "S = 1\u00d73 string\n    \"true\"    \"17\"    \"runmat\""
+      "output": "S = 1×3 string\n    \"true\"    \"17\"    \"runmat\""
     },
     {
       "description": "Formatting Numbers With A Template",
       "input": "labels = string(\"Trial %d\", 1:4);",
-      "output": "labels = 1\u00d74 string\n    \"Trial 1\"    \"Trial 2\"    \"Trial 3\"    \"Trial 4\""
+      "output": "labels = 1×4 string\n    \"Trial 1\"    \"Trial 2\"    \"Trial 3\"    \"Trial 4\""
     },
     {
       "description": "Converting GPU-Resident Numeric Data To Strings",
       "input": "G = gpuArray([10 20 30]);\nlabels = string(G);",
-      "output": "labels = 1\u00d73 string\n    \"10\"    \"20\"    \"30\""
+      "output": "labels = 1×3 string\n    \"10\"    \"20\"    \"30\""
     }
   ],
   "faqs": [
@@ -104,7 +104,7 @@
     },
     {
       "question": "What happens with empty inputs?",
-      "answer": "Empty inputs return empty string arrays following MATLAB's dimension rules\u2014for example, `string([])` yields a `0\u00d70` string array, and `string(char.empty(0,5))` yields a `0\u00d71` string array."
+      "answer": "Empty inputs return empty string arrays following MATLAB's dimension rules—for example, `string([])` yields a `0×0` string array, and `string(char.empty(0,5))` yields a `0×1` string array."
     },
     {
       "question": "Why does `string` error on structs or handle objects?",
@@ -138,10 +138,10 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/string.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/string.rs"
   },
   "gpu_behavior": [
-    "`string` is a residency sink. When the input contains GPU tensors, RunMat gathers the data back to host memory before performing the conversion. Providers do not need bespoke kernels\u2014the CPU path is authoritative and ensures identical formatting across devices."
+    "`string` is a residency sink. When the input contains GPU tensors, RunMat gathers the data back to host memory before performing the conversion. Providers do not need bespoke kernels—the CPU path is authoritative and ensures identical formatting across devices."
   ]
 }

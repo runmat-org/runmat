@@ -33,7 +33,7 @@
   "description": "`disp` prints the contents of a variable to the Command Window without including the variable name. RunMat mirrors MATLAB behaviour for numeric, logical, string, character, struct, cell, and gpuArray inputs so scripts and diagnostic utilities behave identically.",
   "behaviors": [
     "Accepts exactly one input argument; additional arguments raise a MATLAB-compatible error.",
-    "Numeric, logical, and complex arrays respect MATLAB\u2019s column-major layout with right-aligned columns that honour the active numeric format.",
+    "Numeric, logical, and complex arrays respect MATLAB’s column-major layout with right-aligned columns that honour the active numeric format.",
     "N-D arrays (with three or more dimensions) display one 2-D slice at a time with MATLAB-style `(:,:,[...]) =` headers so each page mirrors the Command Window output.",
     "Text inputs follow MATLAB conventions:",
     "Character arrays print each row as plain text without surrounding quotes.",
@@ -136,11 +136,11 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/io/disp.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/disp.rs"
   },
-  "gpu_residency": "`disp` is a side-effecting sink. When the input (or nested values) reside on the GPU, RunMat gathers them to host memory using the active acceleration provider. Providers do not need to implement special hooks\u2014the builtin always renders on the CPU before writing to standard output.",
+  "gpu_residency": "`disp` is a side-effecting sink. When the input (or nested values) reside on the GPU, RunMat gathers them to host memory using the active acceleration provider. Providers do not need to implement special hooks—the builtin always renders on the CPU before writing to standard output.",
   "gpu_behavior": [
-    "`disp` is a side-effecting sink. When the input (or nested values) reside on the GPU, RunMat gathers them to host memory using the active acceleration provider. Providers do not need to implement special hooks\u2014the builtin always renders on the CPU before writing to standard output."
+    "`disp` is a side-effecting sink. When the input (or nested values) reside on the GPU, RunMat gathers them to host memory using the active acceleration provider. Providers do not need to implement special hooks—the builtin always renders on the CPU before writing to standard output."
   ]
 }

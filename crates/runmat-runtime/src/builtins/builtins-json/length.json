@@ -31,11 +31,11 @@
   "description": "`length(A)` returns the length of the largest dimension of `A`. Scalars report `1`, column vectors report their row count, row vectors return their column count, and rectangular matrices yield the larger of their row or column dimensions. For higher-rank arrays, the function returns the maximum extent across every dimension.",
   "behaviors": [
     "The result is always a double-precision scalar.",
-    "Empty arrays report `0` when every dimension is zero; otherwise the maximum non-zero dimension is reported (e.g., `0\u00d75` arrays have length `5`).",
+    "Empty arrays report `0` when every dimension is zero; otherwise the maximum non-zero dimension is reported (e.g., `0×5` arrays have length `5`).",
     "Character arrays and string arrays follow their array dimensions, not the number of code points.",
-    "Cell arrays use their MATLAB array shape (`rows \u00d7 cols`) with the maximum dimension returned.",
+    "Cell arrays use their MATLAB array shape (`rows × cols`) with the maximum dimension returned.",
     "GPU-resident arrays are inspected without gathering when the provider populates shape metadata on the tensor handle; otherwise, RunMat gathers once to recover the correct dimensions.",
-    "Arguments that are not arrays (scalars, logicals, strings, handle objects) are treated as `1\u00d71`."
+    "Arguments that are not arrays (scalars, logicals, strings, handle objects) are treated as `1×1`."
   ],
   "examples": [
     {
@@ -71,7 +71,7 @@
     },
     {
       "question": "What does `length` return for scalars?",
-      "answer": "Scalars are treated as `1\u00d71`, so `length(scalar)` returns `1`."
+      "answer": "Scalars are treated as `1×1`, so `length(scalar)` returns `1`."
     },
     {
       "question": "How does `length` behave for empty arrays?",
@@ -91,7 +91,7 @@
     },
     {
       "question": "What about string arrays?",
-      "answer": "String arrays are treated like any other array. String scalars are `1\u00d71`, so `length(\"abc\")` returns `1`. Use `strlength` if you need the number of characters in each element."
+      "answer": "String arrays are treated like any other array. String scalars are `1×1`, so `length(\"abc\")` returns `1`. Use `strlength` if you need the number of characters in each element."
     },
     {
       "question": "Is `length` safe to use inside fused GPU expressions?",
@@ -113,8 +113,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/array/introspection/length.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/introspection/length.rs"
   },
   "gpu_behavior": [
     "`length` is a metadata query. When the input is a GPU tensor, RunMat looks at the shape embedded in the GPU handle (`GpuTensorHandle.shape`). If the active provider leaves that metadata empty, the runtime invokes `provider.download(handle)` a single time to recover the shape, ensuring MATLAB-compatible behaviour. No GPU kernels are launched and no device buffers are allocated by this builtin."

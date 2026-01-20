@@ -101,8 +101,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/acceleration/gpu/gpuinfo.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/acceleration/gpu/gpuinfo.rs"
   },
   "gpu_residency": "`gpuInfo` is a pure metadata query and never changes residency. Arrays stay wherever they already live (GPU or CPU). Use `gpuArray`, `gather`, or RunMat Accelerate's auto-offload heuristics to move data between devices as needed."
 }

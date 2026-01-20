@@ -31,7 +31,7 @@
   "description": "`isempty(A)` returns logical `true` when the MATLAB value `A` contains zero elements. It mirrors MATLAB's behaviour across numeric arrays, logical arrays, character arrays, string arrays, cell arrays, structs, GPU tensors, and handle-like values.",
   "behaviors": [
     "Arrays are empty when any dimension is zero (`prod(size(A)) == 0`).",
-    "Character arrays report empty when either dimension is zero. String scalars are never empty (`\"\"` is a `1\u00d71` string array whose content may be empty, but it still counts as one element).",
+    "Character arrays report empty when either dimension is zero. String scalars are never empty (`\"\"` is a `1×1` string array whose content may be empty, but it still counts as one element).",
     "Cell arrays, struct arrays, and tables (future work) follow their MATLAB dimensions; `cell(0, n)` is empty, while `cell(1, 1)` is not.",
     "Scalars, logical values, numeric scalars, function handles, objects, and handle objects always return `false` because they occupy one element.",
     "GPU tensors rely on device-provided shape metadata to avoid unnecessary transfers. If metadata is missing, RunMat gathers once to confirm the shape."
@@ -75,11 +75,11 @@
     },
     {
       "question": "Why is `isempty(\"\")` false but `isempty('')` true?",
-      "answer": "String scalars are `1\u00d71` arrays that hold text content, so they are not empty even when the text has length zero. Character arrays store individual characters; the empty char literal `''` has zero columns, so it is empty."
+      "answer": "String scalars are `1×1` arrays that hold text content, so they are not empty even when the text has length zero. Character arrays store individual characters; the empty char literal `''` has zero columns, so it is empty."
     },
     {
       "question": "How does `isempty` treat structs and objects?",
-      "answer": "Structs follow their array dimensions. A scalar struct (`1\u00d71`) is not empty, while a `0\u00d70` struct array is empty. Value objects and handle objects are always treated as scalar values, so `isempty` returns `false`."
+      "answer": "Structs follow their array dimensions. A scalar struct (`1×1`) is not empty, while a `0×0` struct array is empty. Value objects and handle objects are always treated as scalar values, so `isempty` returns `false`."
     },
     {
       "question": "Can `isempty` be used inside GPU-fused expressions?",
@@ -117,8 +117,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/array/introspection/isempty.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/introspection/isempty.rs"
   },
   "gpu_behavior": [
     "`isempty` does not launch GPU kernels. For GPU-resident tensors (`gpuArray` values), RunMat inspects the shape stored in the `GpuTensorHandle`. When the active provider omits that metadata, the runtime downloads the tensor once to maintain MATLAB-compatible results. The builtin always returns a host logical scalar and does not allocate device memory, so it is safe in fused GPU expressions."

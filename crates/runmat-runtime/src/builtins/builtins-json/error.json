@@ -96,8 +96,8 @@
   ],
   "links": [],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/diagnostics/error.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/diagnostics/error.rs"
   },
   "gpu_residency": "`error` is a control-flow builtin and never executes on the GPU. When formatting messages that include GPU-resident arrays (for example, via `%g` or `%s` specifiers), RunMat first gathers those values back to host memory so that the final diagnostic message accurately reflects the data the user passed.",
   "gpu_behavior": [

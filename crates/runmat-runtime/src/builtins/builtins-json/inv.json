@@ -127,8 +127,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/math/linalg/solve/inv.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/solve/inv.rs"
   },
   "gpu_residency": "You typically do not need to move data manually. If `A` already resides on the GPU and the provider implements `inv`, the computation stays on the device. Providers without a native kernel (including the current WGPU backend) download `A`, compute the inverse on the host, and re-upload the result, so subsequent GPU code continues to operate on device-resident data. `gpuArray` remains available for compatibility and for explicitly seeding GPU residency.",
   "gpu_behavior": [

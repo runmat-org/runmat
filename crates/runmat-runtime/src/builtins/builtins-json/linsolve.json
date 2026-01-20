@@ -119,8 +119,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/math/linalg/solve/linsolve.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/solve/linsolve.rs"
   },
   "gpu_residency": "No additional residency management is required. When both operands already reside on the GPU, RunMat executes the provider's `linsolve` hook. The current WGPU backend gathers the data to the host, runs the shared solver, and re-uploads the output automatically, so downstream GPU work keeps its residency. Providers that implement an on-device kernel can execute entirely on the GPU without any MATLAB-level changes.",
   "gpu_behavior": [

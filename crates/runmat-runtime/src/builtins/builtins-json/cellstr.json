@@ -106,8 +106,8 @@
   ],
   "links": [],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/cells/core/cellstr.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/cells/core/cellstr.rs"
   },
   "gpu_residency": "No. `cellstr` executes on the host. If the input originates from the GPU (for example, a cell array whose elements were gathered lazily), RunMat performs the gather automatically before formatting the text. The output always resides on the CPU heap, mirroring MATLAB where cell arrays of text are CPU-managed containers.",
   "gpu_behavior": [

@@ -34,7 +34,7 @@
     "unit": "builtins::math::signal::filter::tests",
     "integration": "builtins::math::signal::filter::tests::filter_gpu_matches_cpu"
   },
-  "description": "`filter` evaluates the causal linear difference equation\n\n```\na(1) * y(n) = b(1) * x(n) + b(2) * x(n-1) + \u2026 + b(nb) * x(n-nb+1)\n              - a(2) * y(n-1) - \u2026 - a(na) * y(n-na+1)\n```\n\nwith MATLAB-compatible handling of scalars, row/column vectors, N-D tensors, complex numbers, and user-supplied initial conditions. RunMat normalises the coefficients internally so that `a(1)` becomes `1`, mirroring MATLAB.",
+  "description": "`filter` evaluates the causal linear difference equation\n\n```\na(1) * y(n) = b(1) * x(n) + b(2) * x(n-1) + … + b(nb) * x(n-nb+1)\n              - a(2) * y(n-1) - … - a(na) * y(n-na+1)\n```\n\nwith MATLAB-compatible handling of scalars, row/column vectors, N-D tensors, complex numbers, and user-supplied initial conditions. RunMat normalises the coefficients internally so that `a(1)` becomes `1`, mirroring MATLAB.",
   "behaviors": [
     "`filter(b, a, X)` applies the filter along the first non-singleton dimension of `X` (column-wise for matrices).",
     "The numerator `b` and denominator `a` must be non-empty vectors. `a(1)` must be non-zero; the runtime divides both coefficient vectors by `a(1)` automatically.",
@@ -113,7 +113,7 @@
       "answer": "Call `[y, zf] = filter(...)` on each chunk and pass `zf` as the fourth argument for the next chunk. The example above shows the pattern."
     },
     {
-      "question": "Can I accelerate filtering with the planner\u2019s auto-offload?",
+      "question": "Can I accelerate filtering with the planner’s auto-offload?",
       "answer": "The planner leverages the same provider hook under the hood. As long as the operands are real and the provider implements `iir_filter`, auto-offload keeps the filter on the GPU."
     }
   ],
@@ -136,11 +136,11 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/filter.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/filter.rs"
   },
   "gpu_behavior": [
     "The input signal already resides on the GPU (for example, via `gpuArray`) and all operands are real-valued.",
-    "The active provider implements `iir_filter` (both the in-process provider and the WGPU backend do).\n\nUnder those conditions the entire evaluation\u2014including final-state propagation\u2014stays on the device. If the hook is absent, or if any operand is complex, RunMat transparently gathers to the host, evaluates the filter with the scalar reference implementation, and returns MATLAB-compatible results. Auto-offload and fusion residency reuse the same hook, so high-level code does not need to differentiate between CPU and GPU execution."
+    "The active provider implements `iir_filter` (both the in-process provider and the WGPU backend do).\n\nUnder those conditions the entire evaluation—including final-state propagation—stays on the device. If the hook is absent, or if any operand is complex, RunMat transparently gathers to the host, evaluates the filter with the scalar reference implementation, and returns MATLAB-compatible results. Auto-offload and fusion residency reuse the same hook, so high-level code does not need to differentiate between CPU and GPU execution."
   ]
 }

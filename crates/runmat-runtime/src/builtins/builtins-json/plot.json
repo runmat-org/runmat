@@ -45,8 +45,8 @@
   "faqs": [],
   "links": [],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/plot.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/plot.rs"
   },
   "gpu_residency": "`plot` terminates fusion graphs. If the inputs are `single` gpuArrays and the shared plotter device is active, their buffers are consumed zero-copy by the renderer. Otherwise the tensors are gathered before plotting, matching MATLAB semantics."
 }

@@ -33,7 +33,7 @@
     "Field names must satisfy the MATLAB `isvarname` rules: they start with a letter or underscore and contain only letters, digits, or underscores.",
     "The last occurrence of a repeated field name wins and overwrites earlier values.",
     "String scalars, character vectors, and single-element string arrays are accepted as field names.",
-    "`struct()` returns a scalar struct with no fields, while `struct([])` yields a `0\u00d70` struct array.",
+    "`struct()` returns a scalar struct with no fields, while `struct([])` yields a `0×0` struct array.",
     "When any value input is a cell array, every cell array input must share the same size. Non-cell inputs are replicated across every element of the resulting struct array.",
     "Passing an existing struct or struct array (`struct(S)`) creates a deep copy; the original data is untouched."
   ],
@@ -105,11 +105,11 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/structs/core/struct.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/structs/core/struct.rs"
   },
   "gpu_residency": "Usually not. RunMat's planner keeps GPU values resident as long as downstream operations can profit from them. You can still seed GPU residency explicitly with `gpuArray` for MATLAB compatibility; the handles remain untouched inside the struct until another builtin decides to gather or operate on them.",
   "gpu_behavior": [
-    "`struct` performs all bookkeeping on the host. GPU-resident values\u2014such as tensors created with `gpuArray`\u2014are stored as-is inside the resulting struct or struct array. No kernels are launched and no data is implicitly gathered back to the CPU."
+    "`struct` performs all bookkeeping on the host. GPU-resident values—such as tensors created with `gpuArray`—are stored as-is inside the resulting struct or struct array. No kernels are launched and no data is implicitly gathered back to the CPU."
   ]
 }

@@ -33,7 +33,7 @@
     "unit": "builtins::acceleration::gpu::pagefun::tests",
     "integration": "builtins::acceleration::gpu::pagefun::tests::pagefun_gpu_roundtrip_mtimes"
   },
-  "description": "`pagefun(func, A, B, \u2026)` applies the MATLAB operator referenced by `func` to every page of the supplied arrays. Pages are the two leading dimensions of the inputs; the third and higher dimensions index the individual pages. The inputs must agree in all trailing dimensions, allowing singleton expansion.",
+  "description": "`pagefun(func, A, B, …)` applies the MATLAB operator referenced by `func` to every page of the supplied arrays. Pages are the two leading dimensions of the inputs; the third and higher dimensions index the individual pages. The inputs must agree in all trailing dimensions, allowing singleton expansion.",
   "behaviors": [
     "Accepts function handles, builtin names (character vectors or string scalars), and validates that the requested operator is supported.",
     "The first two dimensions of each input form the matrix operated on by the builtin. Dimensions three and up identify individual pages. Inputs with fewer pages are broadcast so long as the page extent is `1`.",
@@ -97,8 +97,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/acceleration/gpu/pagefun.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/acceleration/gpu/pagefun.rs"
   },
   "gpu_residency": "No. RunMat's auto-offload planner migrates tensors to the GPU when beneficial. When you explicitly pass `gpuArray` inputs, `pagefun` keeps numeric results on the device whenever all operands were device-resident and the provider can accept uploads. Complex outputs remain host-resident until device buffers for complex doubles ship.",
   "gpu_behavior": [

@@ -123,8 +123,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/structs/core/getfield.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/structs/core/getfield.rs"
   },
   "gpu_residency": "You do not have to move data between CPU and GPU explicitly when calling `getfield`. The builtin works entirely with metadata and returns handles or tensors in whatever memory space they already inhabit.",
   "gpu_behavior": [

@@ -51,22 +51,22 @@
     {
       "description": "Create a finite mask for a numeric matrix",
       "input": "A = [1 NaN; Inf 4];\nmask = isfinite(A);",
-      "output": "mask =\n  2\u00d72 logical array\n     1     0\n     0     1"
+      "output": "mask =\n  2×2 logical array\n     1     0\n     0     1"
     },
     {
       "description": "Identify finite components in a complex array",
       "input": "Z = [1+2i Inf+0i 3+NaNi];\nmask = isfinite(Z);",
-      "output": "mask =\n  1\u00d73 logical array\n     1     0     0"
+      "output": "mask =\n  1×3 logical array\n     1     0     0"
     },
     {
       "description": "Apply `isfinite` to character data",
       "input": "chars = ['R' 'u' 'n'];\nmask = isfinite(chars);",
-      "output": "mask =\n  1\u00d73 logical array\n     1     1     1"
+      "output": "mask =\n  1×3 logical array\n     1     1     1"
     },
     {
       "description": "Run `isfinite` directly on the GPU",
       "input": "G = gpuArray([1 -Inf 5]);\nmask_gpu = isfinite(G);\nmask = gather(mask_gpu);",
-      "output": "mask =\n  1\u00d73 logical array\n     1     0     1"
+      "output": "mask =\n  1×3 logical array\n     1     0     1"
     }
   ],
   "faqs": [
@@ -118,8 +118,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/logical/tests/isfinite.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/tests/isfinite.rs"
   },
   "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's auto-offload planner keeps tensors on the GPU across fused expressions when that improves performance. You can still seed residency manually with `gpuArray` for compatibility with MATLAB scripts or when you want fine-grained control over data movement.",
   "gpu_behavior": [

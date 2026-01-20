@@ -49,22 +49,22 @@
     {
       "description": "Negating a logical mask to find the complement",
       "input": "mask = [true false true];\ninverseMask = not(mask)",
-      "output": "inverseMask =\n  1\u00d73 logical array\n     0     1     0"
+      "output": "inverseMask =\n  1×3 logical array\n     0     1     0"
     },
     {
       "description": "Turning nonzero numeric entries into false values",
       "input": "A = [0 1 2 0];\nB = not(A)",
-      "output": "B =\n  1\u00d74 logical array\n     1     0     0     1"
+      "output": "B =\n  1×4 logical array\n     1     0     0     1"
     },
     {
       "description": "Flipping zero and nonzero character codes",
       "input": "chars = ['A' 0 'C'];\nflags = not(chars)",
-      "output": "flags =\n  1\u00d73 logical array\n     0     1     0"
+      "output": "flags =\n  1×3 logical array\n     0     1     0"
     },
     {
       "description": "Performing logical NOT directly on the GPU",
       "input": "G = gpuArray([0 4 0 9]);\ndeviceResult = not(G);\nhostResult = gather(deviceResult)",
-      "output": "deviceResult =\n  1\u00d74 gpuArray logical array\n     1     0     1     0\nhostResult =\n  1\u00d74 logical array\n     1     0     1     0"
+      "output": "deviceResult =\n  1×4 gpuArray logical array\n     1     0     1     0\nhostResult =\n  1×4 logical array\n     1     0     1     0"
     }
   ],
   "faqs": [
@@ -116,8 +116,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/logical/bit/not.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/bit/not.rs"
   },
   "gpu_residency": "You usually do **not** have to call `gpuArray` manually. RunMat's auto-offload planner moves data to the GPU when a fused expression benefits from device execution. The `not` builtin preserves existing residency; results remain on the GPU until you gather them or another operation requires host access. Use `gpuArray` when porting MATLAB code that already does so explicitly or when you want to pin tensors to the GPU ahead of time.",
   "gpu_behavior": [

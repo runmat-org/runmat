@@ -113,8 +113,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/structs/core/setfield.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/structs/core/setfield.rs"
   },
   "gpu_residency": "You do not have to move data explicitly when assigning into structs. If a field contains a GPU tensor, `setfield` gathers it to host memory so the mutation can be performed safely. Subsequent operations decide whether to migrate it back to the GPU.",
   "gpu_behavior": [

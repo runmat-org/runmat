@@ -139,8 +139,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/io/json/jsondecode.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/json/jsondecode.rs"
   },
   "gpu_residency": "You rarely need to manage residency manually. The auto-offload planner gathers GPU-resident text for `jsondecode` automatically. For MATLAB compatibility, you can still call `gather` yourself, but it is not required, and fusion graphs terminate at `jsondecode` so downstream results always live on the host.",
   "gpu_behavior": [

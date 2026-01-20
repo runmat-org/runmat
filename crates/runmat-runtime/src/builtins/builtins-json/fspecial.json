@@ -44,12 +44,12 @@
     "`\"average\"`: rectangular mean filter with optional size argument.",
     "`\"disk\"`: circular averaging filter parameterised by radius.",
     "`\"gaussian\"`: Gaussian low-pass filter with optional size and standard deviation.",
-    "`\"laplacian\"`: 3\u00d73 Laplacian operator controlled by `alpha` (0 \u2264 alpha \u2264 1).",
+    "`\"laplacian\"`: 3×3 Laplacian operator controlled by `alpha` (0 ≤ alpha ≤ 1).",
     "`\"log\"`: Laplacian of Gaussian with optional size and `sigma`.",
     "`\"motion\"`: motion blur kernel with controllable length and angle (rounded to odd kernel width).",
-    "`\"prewitt\"`: 3\u00d73 horizontal Prewitt edge detector.",
-    "`\"sobel\"`: 3\u00d73 horizontal Sobel edge detector.",
-    "`\"unsharp\"`: 3\u00d73 unsharp masking filter with optional `alpha`."
+    "`\"prewitt\"`: 3×3 horizontal Prewitt edge detector.",
+    "`\"sobel\"`: 3×3 horizontal Sobel edge detector.",
+    "`\"unsharp\"`: 3×3 unsharp masking filter with optional `alpha`."
   ],
   "examples": [
     {
@@ -92,7 +92,7 @@
     },
     {
       "question": "How do I specify the kernel size?",
-      "answer": "Most filters accept a scalar size or a two-element `[rows cols]` vector. When omitted, MATLAB-compatible defaults are used (for example, 3\u00d73 for average/gaussian/laplacian/prewitt/sobel/unsharp)."
+      "answer": "Most filters accept a scalar size or a two-element `[rows cols]` vector. When omitted, MATLAB-compatible defaults are used (for example, 3×3 for average/gaussian/laplacian/prewitt/sobel/unsharp)."
     },
     {
       "question": "What happens if I provide invalid parameters?",
@@ -122,8 +122,8 @@
     }
   ],
   "source": {
-    "label": "",
-    "url": ""
+    "label": "`crates/runmat-runtime/src/builtins/image/filters/fspecial.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/fspecial.rs"
   },
   "gpu_behavior": [
     "When an acceleration provider is active, `fspecial` can materialise supported kernels directly on the GPU. Opt-in by setting `RUNMAT_ACCEL_FSPECIAL_DEVICE=1`. If the provider exports the `fspecial` hook (the WGPU backend covers average, gaussian, laplacian, prewitt, sobel, and unsharp), the builtin returns a `gpuArray` handle that remains device-resident for downstream fusion. Kernels without acceleration support and providers lacking the hook automatically fall back to the host path with identical numerical results."
