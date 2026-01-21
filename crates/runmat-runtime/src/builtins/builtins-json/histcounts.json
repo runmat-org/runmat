@@ -1,0 +1,140 @@
+{
+  "title": "histcounts",
+  "category": "stats/hist",
+  "keywords": [
+    "histcounts",
+    "histogram",
+    "binning",
+    "normalization",
+    "probability",
+    "cdf",
+    "gpu"
+  ],
+  "summary": "Count observations in numeric arrays using configurable histogram bins.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/histcounts.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": true,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Falls back to host execution today; providers can implement a custom histogram kernel via the `histcounts` hook."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::hist::histcounts::tests",
+    "integration": "builtins::stats::hist::histcounts::tests::histcounts_gpu_roundtrip",
+    "gpu": "builtins::stats::hist::histcounts::tests::histcounts_wgpu_roundtrip"
+  },
+  "description": "`histcounts` tallies the number of elements that fall within each histogram bin. Bins can be specified explicitly, derived from a target bin width, or chosen by the default heuristics so that both simple and advanced workflows mirror MathWorks MATLAB semantics.",
+  "behaviors": [
+    "`histcounts(X)` flattens numeric or logical inputs column-major and returns a row vector of counts spread across ten equal-width bins spanning the data range.",
+    "`histcounts(X, N)` partitions the data into `N` equally spaced bins.",
+    "`histcounts(X, edges)` counts observations using the supplied bin edges.",
+    "Name/value pairs such as `'BinWidth'`, `'BinLimits'`, `'NumBins'`, `'BinEdges'`, `'BinMethod'`, and `'Normalization'` follow MATLAB's precedence rules and validation logic.",
+    "Values outside the bin limits are excluded. The last bin includes its upper edge while all other bins are half-open on the right.",
+    "`NaN` values are ignored; `Inf` and `-Inf` participate when the edges cover them."
+  ],
+  "examples": [
+    {
+      "description": "Counting values with custom bin counts",
+      "input": "data = [1 2 2 4 5 7];\n[counts, edges] = histcounts(data, 3);",
+      "output": "counts = [3 1 2];\nedges  = [1 3 5 7];"
+    },
+    {
+      "description": "Using explicit bin edges",
+      "input": "edges = [0 1 2 3];\ncounts = histcounts([0.1 0.5 0.9 1.2 1.8 2.1], edges);",
+      "output": "counts = [3 2 1];"
+    },
+    {
+      "description": "Setting bin width and limits",
+      "input": "[counts, edges] = histcounts([5 7 8 10 12], 'BinWidth', 2, 'BinLimits', [4 12]);",
+      "output": "counts = [1 1 1 2];\nedges  = [4 6 8 10 12];"
+    },
+    {
+      "description": "Choosing an automatic binning method",
+      "input": "[counts, edges] = histcounts(randn(1, 500), 'BinMethod', 'sturges');",
+      "output": "numel(counts) = ceil(log2(500) + 1);   % 10 bins"
+    },
+    {
+      "description": "Normalising counts to probabilities",
+      "input": "counts = histcounts([0.2 0.4 1.1 1.4 1.8 2.5], [0 1 2 3], 'Normalization', 'probability');",
+      "output": "counts = [0.3333 0.5000 0.1667];"
+    },
+    {
+      "description": "Building a cumulative distribution",
+      "input": "counts = histcounts([1 2 2 3], [0 1 2 3], 'Normalization', 'cdf');",
+      "output": "counts = [0 0.25 1];"
+    },
+    {
+      "description": "Counting values stored on a GPU array",
+      "input": "G = gpuArray([0.5 1.5 2.5]);\n[counts, edges] = histcounts(G, [0 1 2 3]);   % counts/edges return as CPU arrays",
+      "output": "counts = [1 1 1];\nedges  = [0 1 2 3];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why does the last bin include its upper edge?",
+      "answer": "To match MATLAB semantics each bin is `[left, right)` except for the final bin, which is `[left, right]`. This ensures the maximum finite value is always counted."
+    },
+    {
+      "question": "How are `NaN` values handled?",
+      "answer": "They are ignored entirely and do not contribute to any bin count. Infinite values participate as long as the bin edges include them."
+    },
+    {
+      "question": "What happens when all observations are identical?",
+      "answer": "RunMat mirrors MATLAB by collapsing the histogram to a single bin centred on the shared value unless you explicitly supply edges, limits, or a bin width."
+    },
+    {
+      "question": "Does `histcounts` support non-double inputs?",
+      "answer": "Yes. Logical inputs are promoted to doubles, integer types are converted to `double`, and gpuArray inputs are gathered to host memory in this release."
+    },
+    {
+      "question": "Can I request both `'BinEdges'` and `'BinWidth'`?",
+      "answer": "No. Bin specifications are mutually exclusive\u2014choose one of `'BinEdges'`, `'BinWidth'`, or `'NumBins'`, optionally constrained by `'BinLimits'`."
+    },
+    {
+      "question": "How do probability and PDF normalisations differ?",
+      "answer": "`'probability'` scales counts so that they sum to one. `'pdf'` divides by both bin width and the total count, matching MATLAB's probability-density definition."
+    },
+    {
+      "question": "Do outputs stay on the GPU when the input is a `gpuArray`?",
+      "answer": "Until specialised provider hooks land, RunMat gathers GPU data to the CPU and returns host-resident outputs. Use `gather` only for clarity; the values are already in host memory."
+    }
+  ],
+  "links": [
+    {
+      "label": "linspace",
+      "url": "./linspace"
+    },
+    {
+      "label": "sum",
+      "url": "./sum"
+    },
+    {
+      "label": "mean",
+      "url": "./mean"
+    },
+    {
+      "label": "rand",
+      "url": "./rand"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/stats/hist/histcounts.rs",
+    "url": "crates/runmat-runtime/src/builtins/stats/hist/histcounts.rs"
+  },
+  "gpu_behavior": [
+    "When the input arrives as a `gpuArray`, RunMat gathers the samples to host memory, executes the CPU reference implementation, and materialises the results as ordinary tensors. The builtin is registered as a sink, so fusion plans flush residency before histogramming and the outputs always live on the host today. The acceleration layer exposes a `histcounts` provider hook; once GPU kernels are implemented, existing code will pick up device-side execution automatically."
+  ]
+}

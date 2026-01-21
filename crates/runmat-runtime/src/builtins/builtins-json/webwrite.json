@@ -1,0 +1,141 @@
+{
+  "title": "webwrite",
+  "category": "io/http",
+  "keywords": [
+    "webwrite",
+    "http post",
+    "rest client",
+    "json upload",
+    "form post",
+    "binary upload"
+  ],
+  "summary": "Send data to web services using HTTP POST/PUT requests and return the response.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/webwrite.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "webwrite gathers gpuArray inputs and executes entirely on the CPU networking stack."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::http::webwrite::tests",
+    "integration": [
+      "builtins::io::http::webwrite::tests::webwrite_posts_form_data_by_default",
+      "builtins::io::http::webwrite::tests::webwrite_sends_json_when_media_type_json",
+      "builtins::io::http::webwrite::tests::webwrite_applies_basic_auth_and_custom_headers",
+      "builtins::io::http::webwrite::tests::webwrite_supports_query_parameters",
+      "builtins::io::http::webwrite::tests::webwrite_binary_payload_respected"
+    ]
+  },
+  "description": "`webwrite` sends data to an HTTP or HTTPS endpoint using methods such as `POST`, `PUT`, `PATCH`, or `DELETE`. It mirrors MATLAB behaviour: request bodies are created from MATLAB values (structs, cells, strings, numeric tensors), request headers come from `weboptions` style arguments, and the response is decoded the same way as `webread`.",
+  "behaviors": [
+    "The first input is an absolute URL supplied as a character vector or string scalar.",
+    "The second input supplies the request body. Structs and two-column cell arrays become `application/x-www-form-urlencoded` payloads. Character vectors / strings are sent as UTF-8 text, and other MATLAB values default to JSON encoding via `jsonencode`.",
+    "Name-value arguments (or an options struct) accept the same fields as MATLAB `weboptions`: `ContentType`, `MediaType`, `Timeout`, `HeaderFields`, `Username`, `Password`, `UserAgent`, `RequestMethod`, and `QueryParameters`.",
+    "`ContentType` controls how the response is parsed (`\"auto\"` by default). Set it to `\"json\"`, `\"text\"`, or `\"binary\"` to force JSON decoding, text return, or raw byte vectors.",
+    "`MediaType` sets the outbound `Content-Type` header. When omitted, RunMat chooses a sensible default (`application/x-www-form-urlencoded`, `application/json`, `text/plain; charset=utf-8`, or `application/octet-stream`) based on the payload.",
+    "Query parameters can be appended through the `QueryParameters` option or by including additional, unrecognised name-value pairs. Parameter values follow MATLAB scalar rules.",
+    "HTTP errors, timeouts, TLS verification problems, and JSON encoding issues raise MATLAB-style errors with descriptive text."
+  ],
+  "examples": [
+    {
+      "description": "Posting form fields to a REST endpoint",
+      "input": "payload = struct(\"name\", \"Ada\", \"score\", 42);\nopts = struct(\"ContentType\", \"json\");          % expect JSON response\nreply = webwrite(\"https://api.example.com/submit\", payload, opts);\ndisp(reply.status)",
+      "output": "    \"ok\""
+    },
+    {
+      "description": "Sending JSON payloads",
+      "input": "body = struct(\"title\", \"RunMat\", \"stars\", 5);\nopts = struct(\"MediaType\", \"application/json\", \"ContentType\", \"json\");\nresp = webwrite(\"https://api.example.com/projects\", body, opts);"
+    },
+    {
+      "description": "Uploading plain text",
+      "input": "message = \"Hello from RunMat!\";\nreply = webwrite(\"https://api.example.com/echo\", message, ...\n                 \"MediaType\", \"text/plain\", \"ContentType\", \"text\");"
+    },
+    {
+      "description": "Uploading raw binary data",
+      "input": "bytes = uint8([1 2 3 4 5]);\nwebwrite(\"https://api.example.com/upload\", bytes, ...\n         \"ContentType\", \"binary\", \"MediaType\", \"application/octet-stream\");"
+    },
+    {
+      "description": "Supplying credentials, custom headers, and query parameters",
+      "input": "headers = struct(\"X-Client\", \"RunMat\", \"Accept\", \"application/json\");\nopts = struct(\"Username\", \"ada\", \"Password\", \"lovelace\", ...\n              \"HeaderFields\", headers, ...\n              \"QueryParameters\", struct(\"verbose\", true));\nprofile = webwrite(\"https://api.example.com/me\", struct(), opts);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which HTTP methods are supported?",
+      "answer": "`webwrite` defaults to `POST`. Supply `\"RequestMethod\",\"put\"` (or `\"patch\"`, `\"delete\"`) to use other verbs."
+    },
+    {
+      "question": "How do I send JSON?",
+      "answer": "Set `\"MediaType\",\"application/json\"` (optionally via a struct) or `\"ContentType\",\"json\"`. RunMat serialises the payload with `jsonencode` and sets the appropriate `Content-Type`."
+    },
+    {
+      "question": "How are form posts encoded?",
+      "answer": "Struct inputs and two-column cell arrays are turned into `application/x-www-form-urlencoded` bodies. Field values must be scalar text or numbers."
+    },
+    {
+      "question": "Can I post binary data?",
+      "answer": "Yes. Provide numeric tensors (`double`, integer, or logical) and set `\"ContentType\",\"binary\"` or `\"MediaType\",\"application/octet-stream\"`. Values must be in the 0–255 range."
+    },
+    {
+      "question": "What controls the response decoding?",
+      "answer": "`ContentType` mirrors `webread`: `\"auto\"` inspects response headers, while `\"json\"`, `\"text\"`, and `\"binary\"` force the output format."
+    },
+    {
+      "question": "How do I add custom headers?",
+      "answer": "Use `\"HeaderFields\", struct(\"Header-Name\",\"value\",...)` or a two-column cell array. Header names must be valid HTTP tokens."
+    },
+    {
+      "question": "Does `webwrite` follow redirects?",
+      "answer": "Yes. The underlying `reqwest` client follows redirects with the same credentials and headers."
+    },
+    {
+      "question": "Can I send query parameters and a body simultaneously?",
+      "answer": "Yes. Provide a `QueryParameters` struct/cell in the options. Parameters are percent-encoded and appended to the URL before the request is issued."
+    },
+    {
+      "question": "How do timeouts work?",
+      "answer": "`Timeout` accepts a scalar number of seconds. The default is 60 s. Requests exceeding the limit raise `webwrite: request to <url> timed out`."
+    },
+    {
+      "question": "What happens with GPU inputs?",
+      "answer": "They are gathered before serialisation. The function is marked as a sink to break fusion graphs and ensure residency is released."
+    }
+  ],
+  "links": [
+    {
+      "label": "webread",
+      "url": "./webread"
+    },
+    {
+      "label": "jsonencode",
+      "url": "./jsonencode"
+    },
+    {
+      "label": "jsondecode",
+      "url": "./jsondecode"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/http/webwrite.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/http/webwrite.rs"
+  },
+  "gpu_residency": "No. `webwrite` executes on the CPU. Any GPU values are automatically gathered before serialising the payload, and results are created on the host. Manually gathering is unnecessary.",
+  "gpu_behavior": [
+    "`webwrite` is a sink in the execution graph. Any GPU-resident inputs (for example tensors inside structs or cell arrays) are gathered to host memory before encoding the request body. Network I/O always runs on the CPU; fusion plans are terminated with `ResidencyPolicy::GatherImmediately`."
+  ]
+}

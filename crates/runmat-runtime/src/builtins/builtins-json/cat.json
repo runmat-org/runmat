@@ -1,0 +1,124 @@
+{
+  "title": "cat",
+  "category": "array/shape",
+  "keywords": [
+    "cat",
+    "concatenate",
+    "array",
+    "dimension",
+    "gpu"
+  ],
+  "summary": "Concatenate arrays along a specified dimension while preserving MATLAB semantics.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Runs on the GPU when the provider offers a native cat hook; otherwise RunMat gathers, concatenates on the host, and uploads the result back to the device."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::cat::tests",
+    "integration": "builtins::array::shape::cat::tests::cat_gpu_roundtrip"
+  },
+  "description": "`cat(dim, A1, A2, \u2026)` concatenates arrays along the dimension `dim`, producing a new array whose slices along that dimension are the input arrays. The result preserves column-major ordering and shares MATLAB's rules for implicit singleton expansion.",
+  "behaviors": [
+    "`dim` is 1-based and must be a positive integer.",
+    "All inputs must be the same class (double, logical, complex, char, string, or cell).",
+    "Dimensions other than `dim` must match exactly; missing higher dimensions are treated as size `1` automatically.",
+    "The size along `dim` becomes the sum of the corresponding sizes from each input.",
+    "Empty inputs participate naturally\u2014if any dimension is zero, the result is empty.",
+    "`gpuArray` inputs stay on the device when an acceleration provider is registered.",
+    "Append an optional `'like', prototype` pair to request output that matches the prototype's device residency; numeric prototypes may be host tensors or `gpuArray` handles, while logical prototypes must remain on the CPU."
+  ],
+  "examples": [
+    {
+      "description": "Concatenating matrices by stacking rows",
+      "input": "A = [1 2; 3 4];\nB = [5 6; 7 8];\nC = cat(1, A, B);",
+      "output": "C =\n     1     2\n     3     4\n     5     6\n     7     8"
+    },
+    {
+      "description": "Concatenating matrices by appending columns",
+      "input": "left = [1 3; 2 4];\nright = [10 30; 20 40];\nwide = cat(2, left, right);",
+      "output": "wide =\n     1     3    10    30\n     2     4    20    40"
+    },
+    {
+      "description": "Building a 3-D array from 2-D slices",
+      "input": "slice1 = magic(3);\nslice2 = eye(3);\ncube = cat(3, slice1, slice2);"
+    },
+    {
+      "description": "Concatenating logical masks without type changes",
+      "input": "row = logical([1 0 1]);\nmask = cat(1, row, ~row);",
+      "output": "mask =\n   1   0   1\n   0   1   0"
+    },
+    {
+      "description": "Joining character arrays into wider text rows",
+      "input": "lhs = ['Run' ; 'GPU'];\nrhs = ['Mat'; 'Fun'];\nwords = cat(2, lhs, rhs);",
+      "output": "words =\n    RunMat\n    GPUFun"
+    },
+    {
+      "description": "Concatenating string arrays along rows",
+      "input": "names = [\"alpha\" \"beta\"];\nmore = [\"gamma\" \"delta\"];\ncombined = cat(1, names, more);"
+    },
+    {
+      "description": "Appending cell array columns for table-like data",
+      "input": "cols1 = {1, 2; 'a', 'b'};\ncols2 = {3, 4; 'c', 'd'};\ntableCells = cat(2, cols1, cols2);"
+    },
+    {
+      "description": "Keeping gpuArray inputs on the device",
+      "input": "G1 = gpuArray(rand(256, 256));\nG2 = gpuArray(rand(256, 256));\nstacked = cat(3, G1, G2);"
+    },
+    {
+      "description": "Requesting GPU output with the `'like'` prototype",
+      "input": "G = gpuArray(rand(3, 3));\nH = cat(3, zeros(3, 3), ones(3, 3), \"like\", G);"
+    },
+    {
+      "description": "Concatenating complex arrays preserves imaginary parts",
+      "input": "z1 = complex([1 2], [3 4]);\nz2 = complex([5 6], [7 8]);\njoined = cat(2, z1, z2);"
+    },
+    {
+      "description": "Combining empty inputs yields an empty result",
+      "input": "emptyRow = zeros(0, 3);\ncombo = cat(1, emptyRow, emptyRow);"
+    }
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "`reshape`",
+      "url": "./reshape"
+    },
+    {
+      "label": "`permute`",
+      "url": "./permute"
+    },
+    {
+      "label": "`squeeze`",
+      "url": "./squeeze"
+    },
+    {
+      "label": "`gpuArray`",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "`gather`",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/array/shape/cat.rs",
+    "url": "crates/runmat-runtime/src/builtins/array/shape/cat.rs"
+  },
+  "gpu_behavior": [
+    "When every input is a `gpuArray`, RunMat first calls the active provider's `AccelProvider::cat` hook to concatenate the buffers directly on the device. Providers that do not expose this hook trigger a transparent fallback: the operands are gathered to the host, concatenated with the same rules as CPU arrays, and uploaded back to the originating device so downstream work still sees a `gpuArray`. The `'like'` prototype is honoured during fallback, ensuring the final residency matches your request. Mixing host arrays with `gpuArray` inputs is not supported\u2014convert explicitly with `gpuArray` / `gather` to control residency."
+  ]
+}

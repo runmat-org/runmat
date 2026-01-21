@@ -66,7 +66,7 @@ All three panels are resizable—drag the borders to adjust.
 
 When you first open RunMat Desktop, a demo file (`demo.m`) is already loaded:
 
-```matlab
+```matlab:runnable
 a = 0:pi/100:2*pi;
 
 b = sin(a);
@@ -205,7 +205,7 @@ See the [Language Coverage](LANGUAGE_COVERAGE.md) guide for supported features.
 
 Use `input()` for interactive prompts:
 
-```matlab
+```matlab:runnable
 name = input('Enter your name: ', 's');
 fprintf('Hello, %s!\n', name);
 ```

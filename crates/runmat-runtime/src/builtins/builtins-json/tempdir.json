@@ -1,0 +1,146 @@
+{
+  "title": "tempdir",
+  "category": "io/repl_fs",
+  "keywords": [
+    "tempdir",
+    "temporary folder",
+    "temp directory",
+    "system temp",
+    "temporary path"
+  ],
+  "summary": "Return the absolute path to the system temporary folder with a trailing file separator.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/tempdir.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host CPU. When scripts store path tokens on the GPU, RunMat gathers them automatically before interacting with the filesystem."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::tempdir::tests",
+    "integration": "builtins::io::repl_fs::tempdir::tests::tempdir_points_to_existing_directory"
+  },
+  "description": "`tempdir` returns the absolute path of the operating system's temporary folder. The returned path always ends with the platform-specific file separator (`/` on macOS and Linux, `\\` on Windows) so it is safe to concatenate file names directly, matching MATLAB behaviour.",
+  "behaviors": [
+    "The builtin accepts no input arguments; providing any arguments raises `tempdir: too many input arguments`.",
+    "The output is a character row vector (`1\u00d7N`) for compatibility with historical MATLAB code. Convert it with `string(tempdir)` if you prefer string scalars.",
+    "The path reflects the process environment, honouring variables such as `TMPDIR` (macOS/Linux) or `TMP`/`TEMP` (Windows).",
+    "When the OS reports a temporary folder that lacks a trailing separator, RunMat appends one automatically to mirror MATLAB.",
+    "The directory is not created or cleaned automatically; RunMat relies on the operating system to manage the folder lifecycle.",
+    "If RunMat cannot determine the temporary folder (rare), the builtin raises an error containing the operating system message."
+  ],
+  "examples": [
+    {
+      "description": "Get The System Temporary Folder Path",
+      "input": "folder = tempdir();\ndisp(folder);",
+      "output": "C:\\Users\\alex\\AppData\\Local\\Temp\\"
+    },
+    {
+      "description": "Combine `tempdir` With `tempname` To Build Unique Paths",
+      "input": "uniqueFile = fullfile(tempdir(), \"runmat-session.log\");\nfid = fopen(uniqueFile, \"w\");\nfprintf(fid, \"Temporary log created at %s\\n\", datetime);\nfclose(fid);",
+      "output": "% Creates runmat-session.log inside the system temporary folder"
+    },
+    {
+      "description": "Create A Temporary Working Subfolder",
+      "input": "workDir = fullfile(tempdir(), \"mytask\");\nif ~exist(workDir, \"dir\")\n    mkdir(workDir);\nend\ndisp(workDir);",
+      "output": "% Prints the path to tempdir/mytask and creates the folder if needed"
+    },
+    {
+      "description": "Verify That `tempdir` Appends A File Separator",
+      "input": "folder = tempdir();\nendsWithSeparator = folder(end) == filesep;\ndisp(endsWithSeparator);",
+      "output": "     1"
+    },
+    {
+      "description": "Use `tempdir` When Creating Temporary Zip Archives",
+      "input": "archive = fullfile(tempdir(), \"results.zip\");\nzip(archive, \"results\");\ndisp(archive);",
+      "output": "% Displays the full path to results.zip inside the system temp folder"
+    },
+    {
+      "description": "Log Temporary Folder Usage For Debugging",
+      "input": "fprintf(\"RunMat temp folder: %s\\n\", tempdir());",
+      "output": "% Prints something like:\n%   RunMat temp folder: /tmp/"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why does `tempdir` return a character vector instead of a string scalar?",
+      "answer": "MATLAB has historically returned character vectors. RunMat mirrors that behaviour for compatibility; wrap the result in `string(...)` when you need a string scalar."
+    },
+    {
+      "question": "Does the path include a trailing separator?",
+      "answer": "Yes. RunMat appends the platform-specific file separator when necessary so you can safely concatenate file names."
+    },
+    {
+      "question": "What happens if the temporary folder does not exist?",
+      "answer": "RunMat reports the folder reported by the operating system. Most platforms guarantee the folder exists; if not, subsequent calls such as `mkdir` can create it."
+    },
+    {
+      "question": "Can I change the temporary folder location?",
+      "answer": "Yes. Set `TMPDIR` (macOS/Linux) or `TEMP`/`TMP` (Windows) before starting RunMat. `tempdir` will honour those environment variables, just like MATLAB."
+    },
+    {
+      "question": "Will `tempdir` ever create or clean files automatically?",
+      "answer": "No. The builtin only reports the path. Cleanup policies remain the responsibility of the operating system or your code."
+    },
+    {
+      "question": "Is `tempdir` thread-safe?",
+      "answer": "Yes. Querying the temporary folder is read-only and does not modify global state."
+    },
+    {
+      "question": "Does `tempdir` work inside deployed or sandboxed environments?",
+      "answer": "As long as the process has permission to query the environment, it returns the best-effort location supplied by the OS."
+    },
+    {
+      "question": "Can I call `tempdir` on the GPU?",
+      "answer": "No. The function is host-only, but it also never transfers data to or from the GPU."
+    },
+    {
+      "question": "Does `tempdir` normalize path separators?",
+      "answer": "RunMat preserves the operating system\u2019s separators (backslash on Windows, slash elsewhere) to maintain MATLAB compatibility."
+    },
+    {
+      "question": "What if I pass arguments to `tempdir` by mistake?",
+      "answer": "RunMat raises `tempdir: too many input arguments`, matching MATLAB\u2019s diagnostic."
+    }
+  ],
+  "links": [
+    {
+      "label": "mkdir",
+      "url": "./mkdir"
+    },
+    {
+      "label": "rmdir",
+      "url": "./rmdir"
+    },
+    {
+      "label": "delete",
+      "url": "./delete"
+    },
+    {
+      "label": "dir",
+      "url": "./dir"
+    },
+    {
+      "label": "pwd",
+      "url": "./pwd"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/tempdir.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/tempdir.rs"
+  },
+  "gpu_residency": "No. `tempdir` is always a host operation. There is nothing to gain by moving data to the GPU, and no acceleration provider needs to implement hooks for this builtin.",
+  "gpu_behavior": [
+    "`tempdir` performs no GPU work. It queries the host environment and surfaces the result as a character array. The builtin registers a CPU-only GPU spec so the fusion planner treats it as a host-side operation. Scripts that accidentally store paths on the GPU have nothing to worry about\u2014`tempdir` has no inputs to gather."
+  ]
+}

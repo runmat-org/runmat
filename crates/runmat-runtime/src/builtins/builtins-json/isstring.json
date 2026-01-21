@@ -1,0 +1,136 @@
+{
+  "title": "isstring",
+  "category": "introspection",
+  "keywords": [
+    "isstring",
+    "string array",
+    "type checking",
+    "string scalar",
+    "logical predicate",
+    "gpuArray"
+  ],
+  "summary": "Return true when a value is a MATLAB string array (including string scalars).",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/isstring.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Inspects metadata on the host; gpuArray inputs are classified without kernel launches."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::isstring::tests",
+    "integration": "builtins::introspection::isstring::tests::isstring_gpu_inputs_return_false"
+  },
+  "description": "`tf = isstring(x)` returns a logical scalar `true` when `x` is a MATLAB string array (including string scalars and empty string arrays) and logical `false` otherwise. Use it when you need to validate arguments, branch on string support, or distinguish strings from other text representations.",
+  "behaviors": [
+    "String scalars such as `\"RunMat\"` and string arrays like `[\"alpha\", \"beta\"]` both return `logical(1)`.",
+    "Empty string arrays produced by `strings(0)` or `string.empty(...)` are still recognised as the string type, so they return `logical(1)`.",
+    "Character arrays created with single quotes (`'text'`), cell arrays of character vectors, numeric tensors, logical masks, structs, tables, and other non-string containers return `logical(0)`.",
+    "gpuArray inputs currently store numeric or logical tensors in RunMat, so `isstring(gpuArray(...))` returns `logical(0)`, matching MATLAB\u2019s behaviour.",
+    "The result is always a host logical scalar, making it easy to use for argument validation, control-flow guards, or input parsing."
+  ],
+  "examples": [
+    {
+      "description": "Checking if a string scalar is recognised",
+      "input": "tf = isstring(\"RunMat\");",
+      "output": "tf = logical(1)"
+    },
+    {
+      "description": "Detecting string arrays with multiple elements",
+      "input": "values = [\"alpha\", \"beta\", \"gamma\"];\ntf = isstring(values);",
+      "output": "tf = logical(1)"
+    },
+    {
+      "description": "Distinguishing strings from character vectors",
+      "input": "tf_string = isstring(\"hello\");\ntf_char   = isstring('hello');",
+      "output": "tf_string = logical(1)\ntf_char   = logical(0)"
+    },
+    {
+      "description": "Confirming that empty string arrays are still strings",
+      "input": "emptyStrs = strings(0, 2);\ntf = isstring(emptyStrs);",
+      "output": "tf = logical(1)"
+    },
+    {
+      "description": "Recognising that numeric and logical arrays are not strings",
+      "input": "numbers = [1 2 3];\nmask = true(1, 3);\ntf_numbers = isstring(numbers);\ntf_mask = isstring(mask);",
+      "output": "tf_numbers = logical(0)\ntf_mask = logical(0)"
+    },
+    {
+      "description": "Validating cell arrays of character vectors",
+      "input": "cells = {'a', 'b', 'c'};\ntf = isstring(cells);",
+      "output": "tf = logical(0)"
+    },
+    {
+      "description": "Inspecting gpuArray inputs without transfers",
+      "input": "G = gpuArray(ones(2, 2));\ntf = isstring(G);",
+      "output": "tf = logical(0)"
+    },
+    {
+      "description": "Using `isstring` in argument validation",
+      "input": "function greet(name)\n    if ~isstring(name)\n        error(\"Name must be provided as a string.\");\n    end\n    disp(\"Hello \" + name + \"!\");\nend\n\ngreet(\"RunMat\");\n% greet(42); % throws \"Name must be provided as a string.\"",
+      "output": "Hello RunMat!"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `isstring` return true for empty string arrays?",
+      "answer": "Yes. Empty string arrays are still of type string, so `isstring(strings(0))` returns `logical(1)`."
+    },
+    {
+      "question": "How is `isstring` different from `ischar`?",
+      "answer": "`isstring` recognises MATLAB\u2019s modern string type introduced in R2016b. `ischar` recognises legacy character arrays created with single quotes. Only `isstring` returns `true` for double-quoted values."
+    },
+    {
+      "question": "What about string arrays stored inside cell arrays?",
+      "answer": "Cell arrays are containers, so `isstring({'a', 'b'})` returns `logical(0)`. Use `iscellstr` or `all(isstring(cells))` to validate the contents instead."
+    },
+    {
+      "question": "Can gpuArray hold string data in RunMat?",
+      "answer": "Not currently. gpuArray values hold numeric or logical tensors, so `isstring` always reports `logical(0)` for device-resident data."
+    },
+    {
+      "question": "Does `isstring` inspect array contents element by element?",
+      "answer": "No. It only checks the value\u2019s type metadata, so the cost is constant regardless of array size."
+    }
+  ],
+  "links": [
+    {
+      "label": "ischar",
+      "url": "./ischar"
+    },
+    {
+      "label": "isa",
+      "url": "./isa"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "convertStringsToChars",
+      "url": "./convertStringsToChars"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/isstring.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/isstring.rs"
+  },
+  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nIn RunMat, the fusion planner keeps residency on GPU in branches of fused expressions. As such, calling `isstring` on a gpuArray result leaves the device allocation untouched while still answering the question using metadata only.\n\nTo preserve backwards compatibility with MathWorks MATLAB, and for when you want to explicitly bootstrap GPU residency, you can call `gpuArray` explicitly to move data to the GPU if you want to be explicit about the residency.\n\nSince MathWorks MATLAB does not have a fusion planner, and they kept their parallel execution toolbox separate from the core language, as their toolbox is a separate commercial product, MathWorks MATLAB users need to call `gpuArray` to move data to the GPU manually whereas RunMat users can rely on the fusion planner to keep data on the GPU automatically.",
+  "gpu_behavior": [
+    "`isstring` runs entirely from metadata. When you pass a gpuArray, RunMat inspects the handle and returns `logical(0)` because device buffers do not yet store string data. No kernels are launched, and no host\u2194device transfers occur, so the device allocation remains resident for subsequent operations."
+  ]
+}

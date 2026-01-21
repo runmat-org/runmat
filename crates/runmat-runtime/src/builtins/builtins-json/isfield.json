@@ -1,0 +1,126 @@
+{
+  "title": "isfield",
+  "category": "structs/core",
+  "keywords": [
+    "isfield",
+    "struct",
+    "struct array",
+    "field existence",
+    "metadata"
+  ],
+  "summary": "Test whether a struct or struct array defines specific field names.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Metadata-only; executes entirely on the host. GPU tensors stored inside structs remain resident."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::structs::core::isfield::tests",
+    "integration": "runmat_ignition::functions::struct_isfield_multi_and_fieldnames"
+  },
+  "description": "`tf = isfield(S, name)` returns a logical value that indicates whether the struct `S` defines the field `name`. When `name` is a string array or a cell array of names, `isfield` returns a logical array with the same size, reporting the result for each requested field.",
+  "behaviors": [
+    "Works with scalar structs and struct arrays created with `struct`, `load`, or similar builtins.",
+    "Accepts character vectors, string scalars, string arrays, or cell arrays containing character vectors and/or string scalars for the `name` argument.",
+    "Returns a scalar logical (`true`/`false`) when `name` is a single string or char vector.",
+    "Returns a logical array that matches the size of `name` when it is a string array or cell array.",
+    "If the first argument is not a struct or struct array, the result is `false` (or a logical array of `false` values) without raising an error.",
+    "Empty struct arrays yield `false` for every queried name because they do not carry field metadata once the elements have been removed."
+  ],
+  "examples": [
+    {
+      "description": "Checking whether a struct defines a single field",
+      "input": "s = struct(\"name\", \"Ada\", \"score\", 42);\nhasScore = isfield(s, \"score\");",
+      "output": "hasScore =\n  logical\n   1"
+    },
+    {
+      "description": "Testing multiple field names at once",
+      "input": "s = struct(\"name\", \"Ada\", \"score\", 42);\nnames = {\"name\", \"department\"; \"score\", \"email\"};\nmask = isfield(s, names);",
+      "output": "mask =\n  2×2 logical array\n     1     0\n     1     0"
+    },
+    {
+      "description": "Inspecting a struct array that shares a common schema",
+      "input": "people = struct(\"name\", {\"Ada\", \"Grace\"}, \"id\", {101, 102});\nidxMask = isfield(people, [\"id\", \"department\"]);",
+      "output": "idxMask =\n  1×2 logical array\n     1     0"
+    },
+    {
+      "description": "Using `isfield` before accessing optional configuration fields",
+      "input": "cfg = struct(\"mode\", \"fast\");\nif ~isfield(cfg, \"rate\")\n    cfg.rate = 60;\nend"
+    },
+    {
+      "description": "Mixing string scalars and character vectors in a cell array",
+      "input": "opts = struct(\"Solver\", \"cg\", \"MaxIter\", 200);\nqueries = {\"Solver\", \"Tolerances\"; \"MaxIter\", \"History\"};\npresent = isfield(opts, queries);"
+    },
+    {
+      "description": "Behaviour when the input is not a struct",
+      "input": "value = 42;\ntf = isfield(value, \"anything\");",
+      "output": "tf =\n  logical\n   0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What argument types does `isfield` accept for field names?",
+      "answer": "Character vectors, string scalars, string arrays, and cell arrays that contain character vectors or string scalars. Passing other types raises an error."
+    },
+    {
+      "question": "Does `isfield` error when the first input is not a struct?",
+      "answer": "No. It returns `false` (or a logical array of `false`) to mirror MATLAB's behaviour. Use `isstruct` if you need to guard against non-struct inputs before calling `isfield`."
+    },
+    {
+      "question": "How do struct arrays affect the result?",
+      "answer": "Every element of the struct array must contain the queried field. If any element is missing the field, the result is `false` for that name."
+    },
+    {
+      "question": "What happens with empty struct arrays?",
+      "answer": "Empty struct arrays do not retain field metadata in RunMat yet, so `isfield` returns `false` for all queries. This matches MATLAB when the struct has no defined fields."
+    },
+    {
+      "question": "Are field name comparisons case-sensitive?",
+      "answer": "Yes. Field names are compared using exact, case-sensitive matches, just like MATLAB."
+    },
+    {
+      "question": "Does `isfield` gather GPU data?",
+      "answer": "No. The builtin only inspects field metadata and leaves GPU-resident tensors untouched."
+    }
+  ],
+  "links": [
+    {
+      "label": "fieldnames",
+      "url": "./fieldnames"
+    },
+    {
+      "label": "struct",
+      "url": "./struct"
+    },
+    {
+      "label": "isprop",
+      "url": "./isprop"
+    },
+    {
+      "label": "getfield",
+      "url": "./getfield"
+    },
+    {
+      "label": "setfield",
+      "url": "./setfield"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/structs/core/isfield.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/structs/core/isfield.rs"
+  },
+  "gpu_residency": "`isfield` is metadata-only. It neither moves nor inspects the contents of GPU tensors that might live inside the struct. You do not need to call `gpuArray` or `gather` to use the builtin; residency is preserved automatically.",
+  "gpu_behavior": [
+    "`isfield` performs metadata checks entirely on the host. It never gathers or copies GPU tensors that may be stored inside the struct; it only inspects the host-side descriptors that record field names. No acceleration provider hooks are required."
+  ]
+}

@@ -14,7 +14,7 @@ VM ops are one way to add semantics to the bytecode instructions that can annota
 
 For example, Stochastic Evolution is a stateful math idiom that is fairly canonical pattern we expect to see anywhere someone is simulating geometric Brownian motion or lognormal asset paths (Monte Carlo pricing, stochastic volatility backtests, particle filters, etc.). The instruction takes the form of:
 
-```matlab
+```matlab:runnable
 for t = 1:T
     Z = randn(M, 1, 'single');              % draw standard normals
     S = S .* exp(drift + scale .* Z);
@@ -41,7 +41,7 @@ The obvious next question is why don't we just have the fusion planner in RunMat
 
 E.g. the following loop:
 
-```matlab
+```matlab:runnable
 for i = 1:N
     x = x + a * x;
 end

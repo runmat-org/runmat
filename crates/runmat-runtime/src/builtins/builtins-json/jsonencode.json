@@ -1,0 +1,163 @@
+{
+  "title": "jsonencode",
+  "category": "io/json",
+  "keywords": [
+    "jsonencode",
+    "json",
+    "serialization",
+    "struct to json",
+    "pretty print json",
+    "gpu gather"
+  ],
+  "summary": "Serialize MATLAB values to UTF-8 JSON text with MATLAB-compatible defaults.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/jsonencode.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "jsonencode gathers GPU-resident data to host memory before serialisation and executes entirely on the CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::json::jsonencode::tests",
+    "integration": [
+      "builtins::io::json::jsonencode::tests::jsonencode_struct_round_trip",
+      "builtins::io::json::jsonencode::tests::jsonencode_gpu_tensor_gathers_host_data",
+      "builtins::io::json::jsonencode::tests::jsonencode_struct_options_enable_pretty_print",
+      "builtins::io::json::jsonencode::tests::jsonencode_convert_inf_and_nan_controls_null_output",
+      "builtins::io::json::jsonencode::tests::jsonencode_char_array_zero_rows_is_empty_array",
+      "builtins::io::json::jsonencode::tests::jsonencode_gpu_tensor_wgpu_gathers_host_data"
+    ]
+  },
+  "description": "Convert `NaN`, `Inf`, `-Inf` to `null`. Set `false` to raise an error when these values are encountered.",
+  "behaviors": [
+    "Returns a 1\u00d7N character array containing UTF-8 encoded JSON text.",
+    "Numeric and logical arrays become JSON arrays, preserving MATLAB column-major ordering.",
+    "Scalars encode as bare numbers/strings rather than single-element arrays.",
+    "Struct scalars become JSON objects; struct arrays become JSON arrays of objects.",
+    "Cell arrays map to JSON arrays, with nested arrays when the cell is 2-D.",
+    "String arrays and char arrays become JSON strings (1 element) or arrays of strings (multiple rows).",
+    "By default, `NaN`, `Inf`, and `-Inf` values encode as `null`. Set `'ConvertInfAndNaN'` to `false` to raise an error instead.",
+    "Pretty printing is disabled by default; enable it with the `'PrettyPrint'` option.",
+    "Inputs that reside on the GPU are gathered back to host memory automatically."
+  ],
+  "examples": [
+    {
+      "description": "Converting a MATLAB struct to JSON",
+      "input": "person = struct('name', 'Ada', 'age', 37);\nencoded = jsonencode(person);",
+      "output": "encoded = '{\"age\":37,\"name\":\"Ada\"}'"
+    },
+    {
+      "description": "Serialising a matrix with pretty printing",
+      "input": "A = magic(3);\nencoded = jsonencode(A, 'PrettyPrint', true);",
+      "output": "encoded =\n'[\n    [8,1,6],\n    [3,5,7],\n    [4,9,2]\n]'"
+    },
+    {
+      "description": "Encoding nested cell arrays",
+      "input": "C = {struct('task','encode','ok',true), {'nested', 42}};\nencoded = jsonencode(C);",
+      "output": "encoded = '[{\"ok\":true,\"task\":\"encode\"},[\"nested\",42]]'"
+    },
+    {
+      "description": "Handling NaN and Inf values",
+      "input": "data = [1 NaN Inf];\nencoded = jsonencode(data);",
+      "output": "encoded = '[1,null,null]'"
+    },
+    {
+      "description": "Rejecting NaN when ConvertInfAndNaN is false",
+      "input": "try\n    jsonencode(data, 'ConvertInfAndNaN', false);\ncatch err\n    disp(err.message);\nend",
+      "output": "jsonencode: ConvertInfAndNaN must be true to encode NaN or Inf values"
+    },
+    {
+      "description": "Serialising GPU-resident tensors",
+      "input": "G = gpuArray(eye(2));\nencoded = jsonencode(G);",
+      "output": "encoded = '[[1,0],[0,1]]'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What MATLAB types does `jsonencode` support?",
+      "answer": "Numeric, logical, string, char, struct, cell, and table-like structs are supported. Unsupported types such as function handles or opaque objects raise an error."
+    },
+    {
+      "question": "Why are my field names sorted alphabetically?",
+      "answer": "RunMat sorts struct field names to produce deterministic JSON (matching MATLAB when fields are stored as scalar structs)."
+    },
+    {
+      "question": "How are complex numbers encoded?",
+      "answer": "Complex scalars become objects with `real` and `imag` fields. Complex arrays become arrays of those objects, mirroring MATLAB."
+    },
+    {
+      "question": "Does `jsonencode` return a character array or string?",
+      "answer": "It returns a row character array (`char`) for MATLAB compatibility. Use `string(jsonencode(x))` if you prefer string scalars."
+    },
+    {
+      "question": "Can I pretty-print nested structures?",
+      "answer": "Yes. Pass `'PrettyPrint', true` to `jsonencode`. Indentation uses four spaces per nesting level, just like MATLAB's pretty-print mode."
+    },
+    {
+      "question": "How are empty arrays encoded?",
+      "answer": "Empty numeric, logical, char, and string arrays become `[]`. Empty structs become `{}` if scalar, or `[]` if they are empty arrays of structs."
+    },
+    {
+      "question": "Does `jsonencode` preserve MATLAB column-major ordering?",
+      "answer": "Yes. Arrays are emitted in MATLAB's logical row/column order, so reshaping on decode reproduces the original layout."
+    },
+    {
+      "question": "What happens when ConvertInfAndNaN is false?",
+      "answer": "Encountering `NaN`, `Inf`, or `-Inf` raises `jsonencode: ConvertInfAndNaN must be true to encode NaN or Inf values`."
+    },
+    {
+      "question": "How do I control the newline style?",
+      "answer": "`jsonencode` always emits `\\n` (LF) line endings when `PrettyPrint` is enabled, regardless of platform, matching MATLAB's behaviour."
+    },
+    {
+      "question": "Are Unicode characters escaped?",
+      "answer": "Printable Unicode characters are emitted verbatim. Control characters and quotes are escaped using standard JSON escape sequences."
+    }
+  ],
+  "links": [
+    {
+      "label": "jsondecode",
+      "url": "./jsondecode"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/json/jsonencode.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/json/jsonencode.rs"
+  },
+  "jsonencode_options": [
+    {
+      "name": "PrettyPrint",
+      "type": "logical",
+      "default": "false",
+      "description": "Emit indented, multi-line JSON output."
+    },
+    {
+      "name": "ConvertInfAndNaN",
+      "type": "logical",
+      "default": "true",
+      "description": "Convert `NaN`, `Inf`, `-Inf` to `null`. Set `false` to raise an error when these values are encountered."
+    }
+  ],
+  "gpu_residency": "For most workflows you do not need to call `gpuArray` explicitly before using `jsonencode`. The auto-offload planner and fusion system keep track of residency, so any GPU-backed tensors that flow into `jsonencode` are gathered automatically as part of this sink operation. If you prefer to control residency manually\u2014or need MATLAB parity\u2014you can still wrap data with `gpuArray` and call `gather` explicitly before serialising.",
+  "gpu_behavior": [
+    "`jsonencode` never launches GPU kernels. When the input contains `gpuArray` data, RunMat gathers those values back to host memory via the active acceleration provider and then serialises on the CPU. If no provider is registered, the builtin propagates the same gather error used by other residency sinks (`gather: no acceleration provider registered`)."
+  ]
+}

@@ -1,0 +1,140 @@
+{
+  "title": "split",
+  "category": "strings/transform",
+  "keywords": [
+    "split",
+    "string split",
+    "text split",
+    "delimiters",
+    "collapse delimiters",
+    "include delimiters"
+  ],
+  "summary": "Split strings, character arrays, and cell arrays into substrings using delimiters.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/split.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Executes on the CPU; GPU-resident arguments are gathered to host memory prior to splitting."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::transform::split::tests",
+    "integration": "builtins::strings::transform::split::tests::split_cell_array_mixed_inputs"
+  },
+  "description": "`split(text)` breaks text into substrings separated by delimiters. The input can be a string scalar, string array, character array, or a cell array of character vectors\u2014`split` mirrors MATLAB behaviour across each of these representations. When you omit the delimiter argument, `split` collapses whitespace runs and returns the remaining tokens as a string array.",
+  "behaviors": [
+    "The default delimiter is whitespace (`isspace`), and consecutive whitespace is treated as a single separator (equivalent to `'CollapseDelimiters', true`).",
+    "When you supply explicit delimiters, they can be a string scalar, string array, character array (rows), or a cell array of character vectors. Delimiters are matched left to right and the longest delimiter wins when several candidates match at the same position.",
+    "`'CollapseDelimiters'` controls whether consecutive delimiters generate empty substrings. The default is `false` when you specify explicit delimiters and `true` when you rely on the whitespace default.",
+    "`'IncludeDelimiters'` inserts the matched delimiters as separate elements in the output string array.",
+    "Outputs are string arrays. For scalar inputs, the result is a row vector. For string/character arrays, the first dimension matches the number of rows in the input and additional columns are appended to accommodate the longest token list. Missing values are padded with `<missing>`.",
+    "Missing string scalars propagate unchanged."
+  ],
+  "examples": [
+    {
+      "description": "Split A String On Whitespace",
+      "input": "txt = \"RunMat Accelerate Planner\";\npieces = split(txt);",
+      "output": "pieces = 1\u00d73 string\n    \"RunMat\"    \"Accelerate\"    \"Planner\""
+    },
+    {
+      "description": "Split A String Using A Custom Delimiter",
+      "input": "csv = \"alpha,beta,gamma\";\ntokens = split(csv, \",\");",
+      "output": "tokens = 1\u00d73 string\n    \"alpha\"    \"beta\"    \"gamma\""
+    },
+    {
+      "description": "Include Delimiters In The Output",
+      "input": "expr = \"A+B-C\";\nsegments = split(expr, [\"+\", \"-\"], \"IncludeDelimiters\", true);",
+      "output": "segments = 1\u00d75 string\n    \"A\"    \"+\"    \"B\"    \"-\"    \"C\""
+    },
+    {
+      "description": "Preserve Empty Segments When CollapseDelimiters Is False",
+      "input": "values = \"one,,three,\";\nparts = split(values, \",\", \"CollapseDelimiters\", false);",
+      "output": "parts = 1\u00d74 string\n    \"one\"    \"\"    \"three\"    \"\""
+    },
+    {
+      "description": "Split Each Row Of A Character Array",
+      "input": "rows = char(\"GPU Accelerate\", \"Ignition Interpreter\");\nresult = split(rows);",
+      "output": "result = 2\u00d72 string\n    \"GPU\"          \"Accelerate\"\n    \"Ignition\"     \"Interpreter\""
+    },
+    {
+      "description": "Split Elements Of A Cell Array",
+      "input": "C = {'RunMat Snapshot'; \"Fusion Planner\"};\nout = split(C, \" \");",
+      "output": "out = 2\u00d72 string\n    \"RunMat\"    \"Snapshot\"\n    \"Fusion\"    \"Planner\""
+    },
+    {
+      "description": "Handle Missing String Inputs",
+      "input": "names = [\"RunMat\", \"<missing>\", \"Accelerate Engine\"];\nsplit_names = split(names);",
+      "output": "split_names = 3\u00d72 string\n    \"RunMat\"        \"<missing>\"\n    \"<missing>\"     \"<missing>\"\n    \"Accelerate\"    \"Engine\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What delimiters does `split` use by default?",
+      "answer": "When you omit the second argument, `split` treats any Unicode whitespace as a delimiter and collapses consecutive whitespace runs so they produce a single split point."
+    },
+    {
+      "question": "How do explicit delimiters change the defaults?",
+      "answer": "Providing explicit delimiters switches the default for `'CollapseDelimiters'` to `false`, matching MATLAB. You can override that behaviour with a name-value pair."
+    },
+    {
+      "question": "What happens when `'IncludeDelimiters'` is `true`?",
+      "answer": "Matched delimiters are inserted between tokens in the output string array, preserving their original order. Tokens still expand to fill rows and columns, with missing values used for padding."
+    },
+    {
+      "question": "How is the output sized for string arrays?",
+      "answer": "The number of rows matches the input. Columns are added to accommodate the longest token list observed across all elements. Shorter rows are padded with `<missing>`."
+    },
+    {
+      "question": "How does `split` handle missing strings?",
+      "answer": "Missing string scalars propagate unchanged. When padding is required, `<missing>` is used so MATLAB and RunMat stay aligned."
+    },
+    {
+      "question": "Can I provide empty delimiters?",
+      "answer": "No. Empty delimiters are disallowed, matching MATLAB's input validation. Specify at least one character per delimiter."
+    },
+    {
+      "question": "Which argument types are accepted as delimiters?",
+      "answer": "You may pass string scalars, string arrays, character arrays (each row is a delimiter), or cell arrays containing string scalars or character vectors."
+    }
+  ],
+  "links": [
+    {
+      "label": "strsplit",
+      "url": "./strsplit"
+    },
+    {
+      "label": "replace",
+      "url": "./replace"
+    },
+    {
+      "label": "lower",
+      "url": "./lower"
+    },
+    {
+      "label": "upper",
+      "url": "./upper"
+    },
+    {
+      "label": "strip",
+      "url": "./strip"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/split.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/split.rs"
+  },
+  "gpu_residency": "String manipulation currently runs on the host. If text data lives on the GPU (for example after a gathered computation), `split` automatically fetches it. You never need to move text explicitly before calling this builtin.",
+  "gpu_behavior": [
+    "`split` executes on the CPU. When the input or delimiter arguments reside on the GPU, RunMat gathers them to host memory before performing the split so the results match MATLAB exactly. Providers do not need to implement custom kernels for this builtin today."
+  ]
+}

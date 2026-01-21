@@ -27,7 +27,7 @@ It runs on whatever GPU you have — NVIDIA, AMD, Apple Silicon, Intel — throu
 
 This means a you can write math like:
 
-```matlab
+```matlab:runnable
 x  = 0:0.01:4*pi;
 y0 = sin(x) .* exp(-x / 10);
 y1 = y0 .* cos(x / 4) + 0.25 .* (y0 .^ 2);

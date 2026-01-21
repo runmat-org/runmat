@@ -1,0 +1,139 @@
+{
+  "title": "median",
+  "category": "math/reduction",
+  "keywords": [
+    "median",
+    "reduction",
+    "omitnan",
+    "includenan",
+    "statistics",
+    "gpu"
+  ],
+  "summary": "Median of scalars, vectors, matrices, or N-D tensors.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": true,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Executes on-device when providers expose median reducers; otherwise falls back to host for compatibility."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::reduction::median::tests",
+    "integration": "builtins::math::reduction::median::tests::median_gpu_provider_roundtrip"
+  },
+  "description": "`median(x)` returns the middle value of scalars, vectors, matrices, and higher-dimensional tensors. When no dimension is supplied, the reduction runs along the first non-singleton dimension.",
+  "behaviors": [
+    "`median(X)` on an `m \u00d7 n` matrix returns a row vector (`1 \u00d7 n`) containing the column medians.",
+    "`median(X, 2)` returns a column vector (`m \u00d7 1`) containing the row medians.",
+    "`median(X, 'all')` reduces across every element in `X` and returns a scalar.",
+    "`median(X, vecdim)` accepts a row or column vector of dimensions (for example `[1 3]`) and reduces each listed axis in a single call while preserving the others.",
+    "Even-length slices return the average of the two center elements after sorting.",
+    "Logical inputs are promoted to double precision (`true \u2192 1.0`, `false \u2192 0.0`) before computing the median.",
+    "`median(..., 'omitnan')` ignores `NaN` values; if every element is `NaN`, the result is `NaN`.",
+    "`median(..., 'includenan')` (default) propagates `NaN` when any value in the slice is `NaN`.",
+    "Empty slices return `NaN` values that preserve MATLAB-compatible shape semantics.",
+    "Dimensions larger than `ndims(X)` leave the input unchanged."
+  ],
+  "examples": [
+    {
+      "description": "Finding the median of an odd-length vector",
+      "input": "x = [7 2 9 4 5];\nm = median(x);",
+      "output": "m = 5;"
+    },
+    {
+      "description": "Computing the median of an even-length vector with averaging",
+      "input": "x = [1 4 9 10];\nm = median(x);",
+      "output": "m = 6.5;"
+    },
+    {
+      "description": "Column-wise median of a matrix",
+      "input": "A = [1 3 5; 7 9 11; 2 4 6];\ncolMedians = median(A);",
+      "output": "colMedians = [2 4 6];"
+    },
+    {
+      "description": "Row medians while ignoring NaN values",
+      "input": "A = [1 NaN 3; 4 5 NaN];\nrowMedians = median(A, 2, 'omitnan');",
+      "output": "rowMedians = [2; 4.5];"
+    },
+    {
+      "description": "Median of all elements in a matrix",
+      "input": "A = reshape(1:6, [3 2]);\noverall = median(A, 'all');",
+      "output": "overall = 3.5;"
+    },
+    {
+      "description": "Median of all elements on a GPU-backed tensor",
+      "input": "G = gpuArray(randn(2048, 2048));\noverall = median(G, 'omitnan');\nresult = gather(overall);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I use the `median` function?",
+      "answer": "Use `median` when you need a robust measure of central tendency that resists outliers better than the mean."
+    },
+    {
+      "question": "How are NaN values handled?",
+      "answer": "Use `'omitnan'` to ignore `NaN` entries. The default `'includenan'` propagates `NaN` if any element in the slice is `NaN`."
+    },
+    {
+      "question": "Does `median` convert logical values?",
+      "answer": "Yes. Logical arrays are converted to double precision before the median is taken, matching MATLAB."
+    },
+    {
+      "question": "What happens with even-length slices?",
+      "answer": "Even-length slices return the arithmetic mean of the two middle values after sorting, matching MATLAB behaviour."
+    },
+    {
+      "question": "Can I compute the median along a specific dimension?",
+      "answer": "Yes. Pass a dimension index (`>= 1`) as the second argument: `median(A, 2)` reduces across rows."
+    },
+    {
+      "question": "What if I ask for a dimension larger than `ndims(A)`?",
+      "answer": "RunMat treats trailing dimensions as having size 1, so the result is the original array unchanged."
+    },
+    {
+      "question": "Does `median` fully execute on the GPU today?",
+      "answer": "When the active provider implements the `reduce_median*` hooks (e.g., the WGPU backend), the reduction stays on the device. Otherwise the runtime gathers to the CPU to guarantee MATLAB-compatible semantics."
+    }
+  ],
+  "links": [
+    {
+      "label": "mean",
+      "url": "./mean"
+    },
+    {
+      "label": "sum",
+      "url": "./sum"
+    },
+    {
+      "label": "prod",
+      "url": "./prod"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/median.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/median.rs"
+  },
+  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nIn RunMat, the fusion planner keeps residency on GPU in branches of fused expressions. As such, in the above example, the result of the `median` call will already be on the GPU when the fusion planner has detected a net benefit to operating the fused expression it is part of on the GPU.\n\nTo preserve backwards compatibility with MathWorks MATLAB, and for when you want to explicitly bootstrap GPU residency, you can call `gpuArray` explicitly to move data to the GPU if you want to be explicit about the residency.\n\nSince MathWorks MATLAB does not have a fusion planner, and they kept their parallel execution toolbox separate from the core language, as their toolbox is a separate commercial product, MathWorks MATLAB users need to call `gpuArray` to move data to the GPU manually whereas RunMat users can rely on the fusion planner to keep data on the GPU automatically.",
+  "gpu_behavior": [
+    "When RunMat Accelerate is active, tensors that already live on the GPU remain on the device. The runtime asks providers for a dedicated median reduction. If the provider cannot supply one or cannot honour `omitnan`, RunMat gathers GPU data back to the host and executes the CPU path to preserve MATLAB semantics (including even-length averaging and ordering ties)."
+  ]
+}

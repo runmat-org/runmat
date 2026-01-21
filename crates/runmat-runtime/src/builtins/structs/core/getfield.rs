@@ -14,182 +14,6 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "getfield",
-        builtin_path = "crate::builtins::structs::core::getfield"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "getfield"
-category: "structs/core"
-keywords: ["getfield", "struct", "struct array", "object property", "metadata"]
-summary: "Access a field or property from structs, struct arrays, or MATLAB-style objects."
-references: []
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Runs on the host. Values that already reside on the GPU stay resident; no kernels are dispatched."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::structs::core::getfield::tests"
-  integration: "runmat_ignition::tests::functions::member_get_set_and_method_call_skeleton"
----
-
-# What does the `getfield` function do in MATLAB / RunMat?
-`value = getfield(S, field)` returns the contents of `S.field`. RunMat matches MATLAB by
-supporting nested field access, struct arrays (via index cells), and MATLAB-style objects
-created with `new_object`.
-
-## How does the `getfield` function behave in MATLAB / RunMat?
-- Field names must be character vectors or string scalars. Several field names in a row
-  navigate nested structs: `getfield(S, "outer", "inner")` is equivalent to
-  `S.outer.inner`.
-- When `S` is a struct array, `getfield(S, "field")` examines the first element by default.
-  Provide indices in a cell array to target another element:
-  `getfield(S, {k}, "field")` yields `S(k).field`.
-- After a field name you may supply an index cell to subscript the field value, e.g.
-  `getfield(S, "values", {row, col})`. Each position accepts positive integers or the
-  keyword `end` to reference the last element in that dimension.
-- MATLAB-style objects honour property attributes: static or private properties raise errors,
-  while dependent properties invoke `get.<name>` when available.
-- Handle objects dereference to their underlying instance automatically. Deleted handles raise
-  the standard MATLAB-style error.
-- `MException` values expose the `message`, `identifier`, and `stack` fields for compatibility
-  with MATLAB error handling.
-
-## `getfield` Function GPU Execution Behaviour
-`getfield` is metadata-only. When structs or objects contain GPU tensors, the tensors
-remain on the device. The builtin manipulates only the host-side metadata and does not
-dispatch GPU kernels or gather buffers back to the CPU. Results inherit residency from the
-values being returned.
-
-## Examples of using the `getfield` function in MATLAB / RunMat
-
-### Reading a scalar struct field
-```matlab
-stats = struct("mean", 42, "stdev", 3.5);
-mu = getfield(stats, "mean");
-```
-
-Expected output:
-```matlab
-mu = 42
-```
-
-### Navigating nested structs with multiple field names
-```matlab
-cfg = struct("solver", struct("name", "cg", "tolerance", 1e-6));
-tol = getfield(cfg, "solver", "tolerance");
-```
-
-Expected output:
-```matlab
-tol = 1.0000e-06
-```
-
-### Accessing an element of a struct array
-```matlab
-people = struct("name", {"Ada", "Grace"}, "id", {101, 102});
-lastId = getfield(people, {2}, "id");
-```
-
-Expected output:
-```matlab
-lastId = 102
-```
-
-### Reading the first element of a struct array automatically
-```matlab
-people = struct("name", {"Ada", "Grace"}, "id", {101, 102});
-firstName = getfield(people, "name");
-```
-
-Expected output:
-```matlab
-firstName = "Ada"
-```
-
-### Using `end` to reference the last item in a field
-```matlab
-series = struct("values", {1:5});
-lastValue = getfield(series, "values", {"end"});
-```
-
-Expected output:
-```matlab
-lastValue = 5
-```
-
-### Indexing into a numeric field value
-```matlab
-measurements = struct("values", {[1 2 3; 4 5 6]});
-entry = getfield(measurements, "values", {2, 3});
-```
-
-Expected output:
-```matlab
-entry = 6
-```
-
-### Gathering the exception message from a try/catch block
-```matlab
-try
-    error("MATLAB:domainError", "Bad input");
-catch e
-    msg = getfield(e, "message");
-end
-```
-
-Expected output:
-```matlab
-msg = 'Bad input'
-```
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-You do not have to move data between CPU and GPU explicitly when calling `getfield`. The
-builtin works entirely with metadata and returns handles or tensors in whatever memory space
-they already inhabit.
-
-## FAQ
-
-### Does `getfield` work on non-struct values?
-No. The first argument must be a scalar struct, a struct array (possibly empty), an object
-instance created with `new_object`, a handle object, or an `MException`. Passing other
-types raises an error.
-
-### How do I access nested struct fields?
-Provide every level explicitly: `getfield(S, "parent", "child", "leaf")` traverses the same
-path as `S.parent.child.leaf`.
-
-### How do I read from a struct array?
-Supply a cell array of indices before the first field name. For example,
-`getfield(S, {3}, "value")` mirrors `S(3).value`. Indices are one-based like MATLAB.
-
-### Can I index the value stored in a field?
-Yes. You may supply scalars or `end` inside the index cell to reference elements of the
-field value.
-
-### Do dependent properties run their getter methods?
-Yes. If a property is marked `Dependent` and a `get.propertyName` builtin exists, `getfield`
-invokes it. Otherwise the backing field `<property>_backing` is inspected.
-
-### What happens when I query a deleted handle object?
-RunMat mirrors MATLAB by raising `Invalid or deleted handle object 'ClassName'.`
-
-## See Also
-[fieldnames](./fieldnames), [isfield](./isfield), [setfield](./setfield), [struct](./struct), [class](./class)
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::getfield")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "getfield",
@@ -889,8 +713,6 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
 
-    use crate::builtins::common::test_support;
-
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_scalar_struct() {
@@ -987,13 +809,6 @@ pub(crate) mod tests {
         assert_eq!(cell.cols, 1);
         let first = unsafe { &*cell.data[0].as_raw() }.clone();
         assert_eq!(first, Value::String("demo.m:5".to_string()));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

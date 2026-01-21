@@ -127,7 +127,7 @@ Let’s look at a concrete example. Imagine you are sketching a simple linear al
 **In MATLAB:**
 The code is almost a direct transcription of the board:
 
-```matlab
+```matlab:runnable
 X = [1, 2, 3];
 Y = [1, 2, 3; ...
      4, 5, 6; ...

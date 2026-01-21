@@ -1,0 +1,136 @@
+{
+  "title": "isscalar",
+  "category": "array/introspection",
+  "keywords": [
+    "isscalar",
+    "scalar",
+    "metadata query",
+    "gpu",
+    "logical"
+  ],
+  "summary": "Return true when a value has exactly one element and unit dimensions.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Inspects tensor metadata on GPU handles; gathers only when metadata is missing."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::introspection::isscalar::tests",
+    "integration": "builtins::array::introspection::isscalar::tests::isscalar_gpu_tensor_checks_dimensions"
+  },
+  "description": "`isscalar(A)` returns logical `true` when an input has exactly one element and every visible dimension equals one. The builtin mirrors MATLAB behaviour across numeric values, logical arrays, strings, character arrays, cells, structs, GPU tensors, and handle-like values.",
+  "behaviors": [
+    "`isscalar` is true if and only if `numel(A) == 1` **and** every entry of `size(A)` equals `1`.",
+    "Numeric, logical, and complex scalars (`42`, `true`, `3+4i`) satisfy both conditions.",
+    "Row, column, or higher-dimensional vectors (e.g. `[1 2 3]`, `zeros(2,1)`) are not scalar because at least one dimension exceeds one.",
+    "String scalars (`\"hello\"`, `\"\"`) are scalar because they are `1×1` string arrays. Character arrays must be `1×1` to count as scalar—`'h'` is scalar, while `'runmat'` (`1×6`) is not.",
+    "Cell arrays, structs, objects, and handle objects are scalar when their MATLAB dimensions are `1×1`, regardless of the contents they wrap.",
+    "Empty arrays (`[]`, `cell(0,1)`, strings of size `0×1`) are **not** scalar because they contain zero elements even if some dimensions equal one.",
+    "GPU tensors rely on the shape metadata stored in their `GpuTensorHandle`. If a provider omits that metadata, RunMat gathers once to confirm the dimensions before answering."
+  ],
+  "examples": [
+    {
+      "description": "Checking if a numeric value is scalar",
+      "input": "tf = isscalar(42);",
+      "output": "tf = logical(1)"
+    },
+    {
+      "description": "Detecting that a row vector is not scalar",
+      "input": "tf = isscalar([1 2 3]);",
+      "output": "tf = logical(0)"
+    },
+    {
+      "description": "Verifying scalar status of string vs char arrays",
+      "input": "tf_string = isscalar(\"hello\");\ntf_char = isscalar('h');\ntf_char_row = isscalar('runmat');",
+      "output": "tf_string = logical(1)\ntf_char = logical(1)\ntf_char_row = logical(0)"
+    },
+    {
+      "description": "Identifying that an empty array is not scalar",
+      "input": "tf_empty = isscalar([]);",
+      "output": "tf_empty = logical(0)"
+    },
+    {
+      "description": "Confirming that single-element cell arrays are scalar",
+      "input": "C = {pi};\ntf_cell = isscalar(C);",
+      "output": "tf_cell = logical(1)"
+    },
+    {
+      "description": "Inspecting a GPU-resident tensor",
+      "input": "G = gpuArray(ones(1,1));\ntf_gpu = isscalar(G);",
+      "output": "tf_gpu = logical(1)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `isscalar([])` return true?",
+      "answer": "No. Empty arrays contain zero elements, so `isscalar([])` returns `false`."
+    },
+    {
+      "question": "Are string scalars considered scalar even when the text is empty?",
+      "answer": "Yes. A string scalar is a `1×1` array regardless of its text, so `isscalar(\"\")` returns `true`."
+    },
+    {
+      "question": "How does `isscalar` treat GPU arrays?",
+      "answer": "It checks the metadata exposed by the `GpuTensorHandle`. If the provider omits shape metadata, RunMat downloads the tensor once to obtain it and then answers on the host."
+    },
+    {
+      "question": "What about objects or structs?",
+      "answer": "Objects and structs are scalar when their array dimensions are `1×1`. The contents do not affect the result."
+    },
+    {
+      "question": "Is a 1-by-1-by-1 array scalar?",
+      "answer": "Yes. Any array whose `numel` equals 1 and whose dimensions are all ones is considered scalar."
+    },
+    {
+      "question": "Do character arrays behave differently from strings?",
+      "answer": "Yes. Character arrays reflect their matrix dimensions. `'abc'` is `1×3`, so `isscalar('abc')` returns `false`."
+    },
+    {
+      "question": "Will `isscalar` trigger GPU computation?",
+      "answer": "No. It is a metadata query and never launches GPU kernels. At most it might gather data when metadata is unavailable."
+    },
+    {
+      "question": "Can I rely on `isscalar` inside fused expressions?",
+      "answer": "Yes. The builtin returns a host logical scalar and the fusion planner treats it as a metadata operation."
+    }
+  ],
+  "links": [
+    {
+      "label": "isempty",
+      "url": "./isempty"
+    },
+    {
+      "label": "numel",
+      "url": "./numel"
+    },
+    {
+      "label": "size",
+      "url": "./size"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/introspection/isscalar.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/introspection/isscalar.rs"
+  },
+  "gpu_behavior": [
+    "`isscalar` never launches GPU kernels. For `gpuArray` inputs the builtin first inspects the shape stored in the `GpuTensorHandle`. When the active acceleration provider omits that metadata, RunMat performs a single gather to compute `numel` and dimensions on the host. The builtin always returns a host logical scalar, so fusion planning treats it as a metadata query instead of a device-side kernel."
+  ]
+}

@@ -62,7 +62,6 @@ impl AppContext {
         model: Option<String>,
         use_codex: bool,
         show_diff: bool,
-        show_doc: bool,
     ) -> Result<()> {
         // If a category was provided, attempt to generate a skeleton builtin before proceeding.
         if let Some(cat) = category {
@@ -101,15 +100,6 @@ impl AppContext {
             }
         );
         println!("\nPrompt:\n{}", ctx.prompt);
-        if show_doc {
-            if let Some(doc) = &ctx.doc_markdown {
-                println!("\nDocumentation (DOC_MD):\n{}", doc);
-            }
-        } else if ctx.doc_markdown.is_some() {
-            println!(
-                "\n[runmatfunc] Documentation excerpt hidden (rerun with --show-doc to display)."
-            );
-        }
         println!("\nRelevant sources:");
         for path in &ctx.source_paths {
             println!("- {}", path.display());

@@ -1,0 +1,147 @@
+{
+  "title": "hypot",
+  "category": "math/elementwise",
+  "keywords": [
+    "hypot",
+    "euclidean norm",
+    "distance",
+    "gpu",
+    "elementwise"
+  ],
+  "summary": "Element-wise Euclidean norm sqrt(x.^2 + y.^2) with MATLAB-compatible broadcasting.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/hypot.html"
+  ],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Runs entirely on the GPU when the provider implements elem_hypot; otherwise the runtime gathers inputs and falls back to the CPU path."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::hypot::tests",
+    "integration": "builtins::math::elementwise::hypot::tests::hypot_gpu_provider_roundtrip",
+    "gpu": "builtins::math::elementwise::hypot::tests::hypot_wgpu_matches_cpu_elementwise"
+  },
+  "description": "`z = hypot(x, y)` computes the element-wise Euclidean norm `sqrt(|x|.^2 + |y|.^2)` with overflow-resistant arithmetic. It accepts scalars, vectors, matrices, N-D tensors, and complex inputs, following MATLAB's implicit expansion (broadcasting) rules.",
+  "behaviors": [
+    "Real inputs return non-negative doubles even when the operands are negative.",
+    "Complex arguments are converted to their magnitudes before forming `sqrt(|x|.^2 + |y|.^2)`, matching MATLAB's definition since R2020b.",
+    "Scalars broadcast across the other operand when shapes are compatible; otherwise an error is raised.",
+    "Empty inputs propagate emptiness according to MATLAB's size rules.",
+    "`Inf` operands return `Inf`; `NaN` operands propagate `NaN`."
+  ],
+  "examples": [
+    {
+      "description": "Computing the hypotenuse of two scalars",
+      "input": "result = hypot(3, 4);",
+      "output": "result = 5;"
+    },
+    {
+      "description": "Using `hypot` with vectors and implicit expansion",
+      "input": "x = [-3, 0, 4];\ny = 4;\nnorms = hypot(x, y);",
+      "output": "norms = [5 4 5];"
+    },
+    {
+      "description": "Calculating per-element distances between two matrices",
+      "input": "X = [1 2; 3 4];\nY = [0 1; 1 0];\ndist = hypot(X, Y);",
+      "output": "dist = [1.0000 2.2361; 3.1623 4.0000];"
+    },
+    {
+      "description": "Working with complex numbers",
+      "input": "a = [1+2i, 3-4i];\nb = [2-1i, -1+1i];\nmag = hypot(a, b);",
+      "output": "mag = [3.1623 5.1962];"
+    },
+    {
+      "description": "Applying `hypot` to character data",
+      "input": "codes = hypot('A', zeros(1, 1));",
+      "output": "codes = 65.0000;"
+    },
+    {
+      "description": "Executing `hypot` on GPU arrays",
+      "input": "Gx = gpuArray([3 4; 5 12]);\nGy = gpuArray([4 3; 12 5]);\ndistance_gpu = hypot(Gx, Gy);\ndistance = gather(distance_gpu);",
+      "output": "distance = [5 5; 13 13];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `hypot` overflow for large inputs?",
+      "answer": "No. Like MATLAB, RunMat uses a stable algorithm that scales the operands to avoid overflow and underflow. Very large inputs return finite results when mathematically possible."
+    },
+    {
+      "question": "What happens when the inputs are negative?",
+      "answer": "`hypot` always returns a non-negative result because it squares the magnitudes first. Signs on the inputs only matter when NaN or Inf is involved."
+    },
+    {
+      "question": "Can I mix real and complex inputs?",
+      "answer": "Yes. Complex inputs are converted to magnitudes before forming the norm, so you can freely combine real, complex, and logical data."
+    },
+    {
+      "question": "Does `hypot` accept logical or character arrays?",
+      "answer": "Yes. Logical values map to `0` and `1`, while character arrays use their Unicode code points (as doubles), matching MATLAB semantics."
+    },
+    {
+      "question": "How does broadcasting work?",
+      "answer": "The function applies MATLAB's implicit expansion: singleton dimensions expand to match the other operand. If a non-singleton dimension differs, RunMat raises a dimension mismatch error."
+    },
+    {
+      "question": "Are GPU results identical to CPU results?",
+      "answer": "For double precision providers the results match bit-for-bit. Single precision providers (e.g., `wgpu` in F32 mode) may differ by typical floating-point rounding."
+    },
+    {
+      "question": "What if only one operand lives on the GPU?",
+      "answer": "The runtime gathers the GPU operand, computes the norm on the host, and continues execution. Future providers may implement scalar expansion directly on the device."
+    },
+    {
+      "question": "Does `hypot` allocate a new array?",
+      "answer": "Yes. The builtin returns a fresh tensor. Fusion may elide intermediate buffers when the expression participates in a larger GPU kernel."
+    },
+    {
+      "question": "How can I compute the magnitude of a vector of components?",
+      "answer": "Use `hypot` repeatedly: `hypot(x, hypot(y, z))` computes the Euclidean norm of `(x, y, z)` element-wise without manual squaring."
+    }
+  ],
+  "links": [
+    {
+      "label": "sqrt",
+      "url": "./sqrt"
+    },
+    {
+      "label": "abs",
+      "url": "./abs"
+    },
+    {
+      "label": "sin",
+      "url": "./sin"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/hypot.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/hypot.rs"
+  },
+  "gpu_residency": "Manual `gpuArray` calls are typically unnecessary. RunMat's planner keeps tensors on the GPU when profitable and automatically gathers data when the active provider lacks `elem_hypot`. You can still force residency with explicit `gpuArray`/`gather` to mirror MATLAB workflows or when interoperating with custom kernels.",
+  "gpu_behavior": [
+    "**Hook available and shapes match:** the Euclidean norm executes in a single fused GPU kernel.",
+    "**Hook missing or implicit expansion required:** RunMat gathers the data to the host, computes the MATLAB-compatible result, and reuses the host tensor downstream.",
+    "**Fusion-enabled expressions:** the fusion planner can emit a WGSL `hypot(a, b)` node so long as the active provider marks the group as supported; otherwise the execution seamlessly falls back to the host path.\n\nProviders can implement `elem_hypot` by emitting a single WGSL/compute shader that calls `hypot(a, b)`; the included WGPU backend demonstrates this pattern."
+  ]
+}

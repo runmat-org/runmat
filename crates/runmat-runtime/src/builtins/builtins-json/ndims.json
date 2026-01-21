@@ -1,0 +1,123 @@
+{
+  "title": "ndims",
+  "category": "array/introspection",
+  "keywords": [
+    "ndims",
+    "number of dimensions",
+    "array rank",
+    "gpu metadata",
+    "MATLAB compatibility"
+  ],
+  "summary": "Return the number of dimensions of scalars, vectors, matrices, and N-D arrays.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Reads tensor metadata from handles; falls back to host when provider metadata is missing."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::introspection::ndims::tests",
+    "integration": "builtins::array::introspection::ndims::tests::ndims_gpu_tensor_reads_shape"
+  },
+  "description": "`ndims(A)` returns the number of dimensions (rank) of `A`, following MATLAB conventions. Scalars, vectors, matrices, and N-D tensors always report at least two dimensions; higher-rank arrays report their full dimension count. This behaviour matches MathWorks MATLAB for numeric, logical, char, string, cell, struct, and GPU arrays.",
+  "behaviors": [
+    "Scalars and vectors return `2`, because MATLAB treats them as `1×1` or `1×N`.",
+    "Matrices return `2` unless they have trailing dimensions beyond the second.",
+    "N-D arrays return the length of their dimension vector after trailing singleton dimensions are preserved.",
+    "Character arrays, string arrays, logical arrays, complex arrays, and cell arrays all follow their MATLAB array shape metadata.",
+    "GPU tensors report their rank without gathering when the provider populates shape metadata on the handle. When metadata is missing, RunMat downloads the tensor once to preserve correctness.",
+    "Objects, scalars, and other non-array values return `2`, consistent with MATLAB's scalar rules."
+  ],
+  "examples": [
+    {
+      "description": "Checking how many dimensions a scalar has",
+      "input": "n = ndims(42);",
+      "output": "n = 2;"
+    },
+    {
+      "description": "Counting the dimensions of a matrix",
+      "input": "A = rand(5, 3);\nr = ndims(A);",
+      "output": "r = 2;"
+    },
+    {
+      "description": "Detecting 3-D array dimensionality",
+      "input": "V = rand(4, 5, 6);\nr = ndims(V);",
+      "output": "r = 3;"
+    },
+    {
+      "description": "Finding ndims for gpuArray data without gathering",
+      "input": "G = gpuArray(ones(16, 32, 2));\nr = ndims(G);",
+      "output": "r = 3;"
+    },
+    {
+      "description": "Understanding ndims with cell arrays",
+      "input": "C = {1, 2, 3; 4, 5, 6};\nr = ndims(C);",
+      "output": "r = 2;"
+    },
+    {
+      "description": "Verifying ndims on string arrays",
+      "input": "S = [\"alpha\"; \"beta\"; \"gamma\"];\nr = ndims(S);",
+      "output": "r = 2;"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why does `ndims` return 2 for scalars and vectors?",
+      "answer": "MATLAB treats scalars and vectors as 2-D arrays (`1×1` or `1×N`). RunMat mirrors this behaviour, so `ndims(5)` and `ndims([1 2 3])` both return `2`."
+    },
+    {
+      "question": "Does `ndims` ignore trailing singleton dimensions?",
+      "answer": "No. MATLAB preserves trailing singletons when reporting the rank. If your tensor was explicitly created with size `10×1×1×4`, `ndims` returns `4`."
+    },
+    {
+      "question": "How does `ndims` behave for GPU tensors?",
+      "answer": "The runtime inspects shape metadata stored in the GPU tensor handle. When the provider populates that field, no gathering occurs. If metadata is absent, RunMat downloads the tensor to keep the answer correct."
+    },
+    {
+      "question": "Can I call `ndims` on cell arrays and structs?",
+      "answer": "Yes. `ndims` inspects the MATLAB array shape of the container, so cell arrays and struct arrays report their grid dimensions."
+    },
+    {
+      "question": "What about objects or scalars like strings and logical values?",
+      "answer": "Objects and scalar values follow MATLAB scalar rules and return `2`. Use specialised functions (like `isobject`) when you need more information about their type."
+    },
+    {
+      "question": "Does `ndims` participate in GPU fusion?",
+      "answer": "No. `ndims` returns a host scalar immediately and performs no computation on the GPU. It is safe to use inside expressions that also run on the GPU because it does not allocate device memory."
+    }
+  ],
+  "links": [
+    {
+      "label": "size",
+      "url": "./size"
+    },
+    {
+      "label": "length",
+      "url": "./length"
+    },
+    {
+      "label": "numel",
+      "url": "./numel"
+    },
+    {
+      "label": "MathWorks ndims reference",
+      "url": "https://www.mathworks.com/help/matlab/ref/ndims.html"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/introspection/ndims.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/introspection/ndims.rs"
+  },
+  "gpu_behavior": [
+    "`ndims` is a metadata query. When the input resides on the GPU, RunMat inspects the shape stored in `GpuTensorHandle.shape`. No kernels are launched, no buffers are allocated, and residency is not altered. If a provider leaves the shape empty, the runtime downloads the tensor a single time to reconstruct its dimensions before returning a host scalar. The builtin therefore preserves fusion pipelines while still providing MATLAB-compatible answers."
+  ]
+}

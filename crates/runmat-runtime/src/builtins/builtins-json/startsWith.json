@@ -1,0 +1,142 @@
+{
+  "title": "startsWith",
+  "category": "strings/search",
+  "keywords": [
+    "startswith",
+    "prefix",
+    "string array",
+    "ignorecase",
+    "text search"
+  ],
+  "summary": "Check whether text inputs start with specific patterns using MATLAB-compatible broadcasting and case handling.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/startswith.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "matlab",
+    "notes": "Runs on the CPU; GPU-resident inputs are gathered automatically so behaviour matches MATLAB."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::search::startswith::tests",
+    "integration": "builtins::strings::search::startswith::tests::startswith_cell_array_patterns"
+  },
+  "description": "`startsWith(str, pattern)` returns a logical result indicating whether each element of `str` begins with the corresponding text in `pattern`. The builtin supports string arrays, character vectors/arrays, and cell arrays of character vectors, mirroring MATLAB's implicit expansion semantics.",
+  "behaviors": [
+    "Accepts text inputs as string scalars/arrays, character vectors/arrays, or cell arrays of character vectors.",
+    "Accepts patterns in the same formats; scalar inputs expand across the other argument following MATLAB broadcast rules.",
+    "Missing strings (`<missing>`) never match any pattern.",
+    "Empty patterns (`\"\"` or `''`) always match non-missing text elements.",
+    "Patterns that are `<missing>` never match and therefore return `false`.",
+    "Character arrays treat each row as an independent element; zero-row character arrays yield empty outputs.",
+    "The optional `IgnoreCase` flag can be supplied either as a trailing scalar or via the `'IgnoreCase', value` name-value pair. It accepts logical/numeric scalars and the strings `'on'`, `'off'`, `'true'`, and `'false'` (default is case-sensitive).",
+    "Returns a logical scalar when the broadcasted size is one element, otherwise returns a logical array."
+  ],
+  "examples": [
+    {
+      "description": "Determine whether a string starts with a prefix",
+      "input": "tf = startsWith(\"RunMat Accelerate\", \"RunMat\");",
+      "output": "tf = logical\n   1"
+    },
+    {
+      "description": "Perform a case-insensitive prefix check",
+      "input": "tf = startsWith(\"RunMat\", \"run\", 'IgnoreCase', true);",
+      "output": "tf = logical\n   1"
+    },
+    {
+      "description": "Ignore case using the legacy logical flag",
+      "input": "tf = startsWith(\"RUNMAT\", \"run\", true);",
+      "output": "tf = logical\n   1"
+    },
+    {
+      "description": "Apply a scalar prefix to every element of a string array",
+      "input": "labels = [\"alpha\" \"beta\" \"gamma\"];\ntf = startsWith(labels, \"a\");",
+      "output": "tf = 1\u00d73 logical array\n   1   0   0"
+    },
+    {
+      "description": "Match element-wise prefixes with implicit expansion",
+      "input": "names = [\"hydrogen\"; \"helium\"; \"lithium\"];\nprefixes = [\"hyd\"; \"hel\"; \"lit\"];\ntf = startsWith(names, prefixes);",
+      "output": "tf = 3\u00d71 logical array\n   1\n   1\n   1"
+    },
+    {
+      "description": "Test prefixes for a cell array of character vectors",
+      "input": "C = {'Mercury', 'Venus', 'Mars'};\ntf = startsWith(C, 'M');",
+      "output": "tf = 1\u00d73 logical array\n   1   0   1"
+    },
+    {
+      "description": "Provide multiple prefixes as a column vector",
+      "input": "tf = startsWith(\"saturn\", ['s'; 'n'; 'x']);",
+      "output": "tf = 3\u00d71 logical array\n   1\n   0\n   0"
+    },
+    {
+      "description": "Handle empty and missing values",
+      "input": "texts = [\"\", \"<missing>\"];\ntf = startsWith(texts, \"\");",
+      "output": "tf = 1\u00d72 logical array\n   1   0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What types can I pass to `startsWith`?",
+      "answer": "Use string scalars/arrays, character vectors/arrays, or cell arrays of character vectors for both arguments. Mixed combinations are accepted, and RunMat performs MATLAB-style implicit expansion when the array sizes differ."
+    },
+    {
+      "question": "How do I ignore letter case?",
+      "answer": "Supply `'IgnoreCase', true` (or `'on'`) after the pattern argument. The option is case-insensitive, so `'ignorecase'` also works. The default is `false`, matching MATLAB."
+    },
+    {
+      "question": "What happens with empty patterns?",
+      "answer": "Empty patterns (`\"\"` or `''`) always match non-missing text elements. When the text element is missing (`<missing>`), the result is `false`."
+    },
+    {
+      "question": "Can I provide multiple prefixes at once?",
+      "answer": "Yes. Provide `pattern` as a string array, character array, or cell array of character vectors. RunMat applies implicit expansion so that scalar inputs expand across the other argument automatically."
+    },
+    {
+      "question": "How are missing strings treated?",
+      "answer": "Missing string scalars (displayed as `<missing>`) never match any pattern and produce `false` in the result. Use `ismissing` if you need to handle missing values separately."
+    },
+    {
+      "question": "Does `startsWith` run on the GPU?",
+      "answer": "No. The builtin executes on the CPU. If inputs reside on the GPU (for example, after other accelerated operations), RunMat gathers them automatically so behaviour matches MATLAB."
+    },
+    {
+      "question": "Does `startsWith` preserve the input shape?",
+      "answer": "Yes. The output is a logical array whose shape reflects the MATLAB-style implicit expansion result. When that shape contains exactly one element, the builtin returns a logical scalar."
+    }
+  ],
+  "links": [
+    {
+      "label": "`contains`",
+      "url": "./contains"
+    },
+    {
+      "label": "`endsWith`",
+      "url": "./endsWith"
+    },
+    {
+      "label": "`regexp`",
+      "url": "./regexp"
+    },
+    {
+      "label": "`regexpi`",
+      "url": "./regexpi"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/search/startswith.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/search/startswith.rs"
+  },
+  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\n`startsWith` always executes on the host, but RunMat's runtime automatically gathers any GPU-resident inputs before evaluating the prefix check. Because the builtin registers a `ResidencyPolicy::GatherImmediately`, the planner gathers device handles eagerly and computes the logical result on the CPU. You may still call `gpuArray` manually for compatibility with MATLAB code; the runtime gathers the inputs just in time, so results match MATLAB precisely.",
+  "gpu_behavior": [
+    "`startsWith` performs host-side prefix comparison. When inputs currently live on the GPU, RunMat gathers them back to the host before evaluation so the behaviour is identical to MATLAB. No acceleration provider hooks are required for this builtin."
+  ]
+}

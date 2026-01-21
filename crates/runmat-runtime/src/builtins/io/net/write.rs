@@ -21,145 +21,6 @@ const MESSAGE_ID_TIMEOUT: &str = "MATLAB:write:Timeout";
 const MESSAGE_ID_CONNECTION_CLOSED: &str = "MATLAB:write:ConnectionClosed";
 const MESSAGE_ID_INTERNAL: &str = "MATLAB:write:InternalError";
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "write",
-        builtin_path = "crate::builtins::io::net::write"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "write"
-category: "io/net"
-keywords: ["write", "tcpclient", "networking", "socket", "binary data", "text"]
-summary: "Write numeric or text data to a remote host through a MATLAB-compatible tcpclient struct."
-references:
-  - https://www.mathworks.com/help/matlab/ref/tcpclient.write.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "All TCP writes execute on the host CPU. GPU-resident arguments are gathered automatically before socket I/O."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 3
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::io::net::write::tests"
----
-
-# What does the `write` function do in MATLAB / RunMat?
-`write(t, data)` transmits binary or textual data over the TCP/IP client returned by `tcpclient` (or `accept`).
-The builtin mirrors MATLAB’s `write` behaviour so existing socket code continues working without modification.
-It honours the client’s configured `Timeout`, applies the `ByteOrder` property when encoding multi-byte values,
-and accepts the optional `datatype` argument used throughout MATLAB’s I/O APIs.
-
-## How does the `write` function behave in MATLAB / RunMat?
-- `write(t, data)` converts `data` to unsigned 8-bit integers (the MATLAB default) and sends the bytes to the peer.
-  The return value is the number of elements written when the caller requests an output argument.
-- `write(t, data, datatype)` encodes the payload using the supplied MATLAB datatype token.
-  Supported values mirror MATLAB: `"uint8"` (default), `"int8"`, `"uint16"`, `"int16"`, `"uint32"`, `"int32"`,
-  `"uint64"`, `"int64"`, `"single"`, `"double"`, `"char"`, and `"string"`. Numeric conversions saturate to the
-  destination range just like MATLAB cast operations. `"char"` treats values as single-byte character codes and
-  `"string"` encodes UTF-8 text.
-- The client’s `ByteOrder` property controls how multi-byte numeric values are serialised. `"little-endian"` is
-  the default, while `"big-endian"` matches the traditional network byte order.
-- When the socket cannot send the entire payload before the timeout expires, `write` raises `MATLAB:write:Timeout`.
-  If the peer closes the connection before or during the transfer the builtin raises `MATLAB:write:ConnectionClosed`
-  and marks the client as disconnected.
-- Inputs that originate on the GPU are gathered back to the host automatically before any bytes are written.
-
-## `write` Function GPU Execution Behaviour
-Networking occurs on the host CPU. If `data` or the tcpclient struct resides on the GPU, RunMat gathers the values
-to host memory before converting them to bytes. Acceleration providers are not involved and the resulting payload
-remains on the CPU. Providers that support residency tracking automatically mark any gathered tensors as released.
-
-## Examples of using the `write` function in MATLAB / RunMat
-
-### Sending an array of bytes to an echo service
-```matlab
-client = tcpclient("127.0.0.1", 50000);
-count = write(client, uint8(1:4));
-```
-Expected output when an output argument is requested:
-```matlab
-count =
-     4
-```
-
-### Writing doubles with explicit byte order
-```matlab
-client = tcpclient("localhost", 50001, "ByteOrder", "big-endian");
-values = [1.5 2.5 3.5];
-write(client, values, "double");
-```
-The remote peer receives 24 bytes representing the doubles in big-endian order.
-
-### Transmitting ASCII text
-```matlab
-client = tcpclient("127.0.0.1", 50002);
-write(client, "RunMat TCP", "char");
-```
-Expected payload (one byte per character):
-```
-52 117 110 77 97 116 32 84 67 80
-```
-
-### Sending UTF-8 encoded strings
-```matlab
-client = tcpclient("127.0.0.1", 50003);
-write(client, "Διακριτό", "string");
-```
-The builtin encodes the Unicode text as UTF-8 before sending it across the socket.
-
-### Handling connection closures
-```matlab
-client = tcpclient("example.com", 12345, "Timeout", 0.25);
-try
-    write(client, uint8([1 2 3 4]));
-catch err
-    disp(err.identifier)
-end
-```
-Expected output when the peer closes the connection abruptly:
-```matlab
-MATLAB:write:ConnectionClosed
-```
-
-## FAQ
-
-### How many output values does `write` return?
-When the caller requests an output, the builtin returns the number of elements written (after datatype conversion).
-This mirrors the behaviour of MATLAB’s numeric I/O routines. If no output is requested, the value is discarded.
-
-### Does `write` support complex numbers?
-No. The input must be real. Pass separate real and imaginary parts or convert to a byte representation manually.
-
-### How are values rounded when converting to integer datatypes?
-Floating-point inputs are rounded to the nearest integer and then saturated to the target range, matching MATLAB
-casts (for example `uint8(255.7)` becomes `256 → 255`, `int8(-128.2)` becomes `-128`).
-
-### What happens to GPU-resident tensors?
-They are gathered automatically before the write. Networking is a CPU-only subsystem, so the resulting data is sent
-from host memory and any temporary handles are released after the transfer.
-
-### Can I stream large payloads?
-Yes. `write` loops until the entire payload has been sent or an error occurs. Large payloads honour the client’s
-timeout and byte-order settings.
-
-## See also
-[tcpclient](./tcpclient), [accept](./accept), [read](./read), [readline](./readline)
-
-## Source & feedback
-- Implementation: [`crates/runmat-runtime/src/builtins/io/net/write.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/write.rs)
-- Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) if you encounter behavioural
-  differences from MATLAB.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::write")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "write",
@@ -817,7 +678,6 @@ fn is_connection_closed_error(err: &io::Error) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
     use crate::builtins::io::net::accept::{
         configure_stream, insert_client, remove_client_for_test,
     };
@@ -974,12 +834,5 @@ pub(crate) mod tests {
         remove_client_for_test(id);
         barrier.wait();
         handle.join().expect("join");
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_compile() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

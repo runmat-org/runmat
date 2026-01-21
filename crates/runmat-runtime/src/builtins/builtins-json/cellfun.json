@@ -1,0 +1,144 @@
+{
+  "title": "cellfun",
+  "category": "cells/core",
+  "keywords": [
+    "cellfun",
+    "cell arrays",
+    "functional programming",
+    "uniformoutput",
+    "errorhandler"
+  ],
+  "summary": "Apply a function to every element of one or more cell arrays, mirroring MATLAB's cellfun behaviour.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "cellfun executes on the host. GPU-resident elements are gathered automatically before the callback is invoked."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::cells::core::cellfun::tests",
+    "integration": "builtins::cells::core::cellfun::tests::cellfun_error_handler_recovers"
+  },
+  "description": "`cellfun` maps a function over one or more cell arrays. Each cell's contents become inputs to the supplied function handle (or builtin name), and the results are collected either into a numeric/logical/complex array (`'UniformOutput', true`, the default) or into a new cell array (`'UniformOutput', false`). RunMat follows MATLAB's semantics for result collection, broadcasting extra arguments, the `'ErrorHandler'` hook, and the `'UniformOutput'` toggle.",
+  "behaviors": [
+    "All cell array inputs must share the same size. Extra arguments that are **not** cell arrays are treated as constants and forwarded to every invocation.",
+    "The callback may be supplied as a function handle (`@sin`), an anonymous function, or one of MATLAB's short string identifiers (for example `'isempty'` or `'isclass'`).",
+    "With `'UniformOutput', true` (default) the callback must return scalars (numeric, logical, or complex). The results are packed into an array that mirrors the cell array shape. Mixed real/complex outputs automatically promote to complex.",
+    "With `'UniformOutput', false` the callback may return arbitrary values; RunMat stores them in a new cell array that matches the input dimensions.",
+    "`'ErrorHandler', handler` intercepts runtime errors. When the callback throws, RunMat calls `handler(errStruct, cellValue1, cellValue2, ..., extraArg1, extraArg2, ...)`. The structure contains the fields `identifier`, `message`, `index` (1-based linear index), and `indices` (1\u00d7N vector of subscripts). The handler's return value is inserted into the result.",
+    "GPU values inside the cells are gathered to host memory before the callback runs so that uniform outputs can be materialised in CPU tensors today."
+  ],
+  "examples": [
+    {
+      "description": "Computing string lengths across a cell array",
+      "input": "C = {'apple', 'banana', 'cherry'};\nlengths = cellfun(@length, C);",
+      "output": "lengths =\n     5     6     6"
+    },
+    {
+      "description": "Mapping across two cell arrays in lockstep",
+      "input": "A = {1, 2, 3};\nB = {4, 5, 6};\ntotals = cellfun(@plus, A, B);",
+      "output": "totals =\n     5     7     9"
+    },
+    {
+      "description": "Keeping non-scalar outputs as cells",
+      "input": "names = {'Ada', 'Linus', 'Katherine'};\nupper = cellfun(@upper, names, 'UniformOutput', false);",
+      "output": "upper =\n  1\u00d73 cell array\n    {'ADA'}    {'LINUS'}    {'KATHERINE'}"
+    },
+    {
+      "description": "Supplying additional arguments alongside each cell",
+      "input": "C = {magic(3), eye(3)};\ndiag3 = cellfun('size', C, 2);",
+      "output": "diag3 =\n     3     3"
+    },
+    {
+      "description": "Handling callback failures with `'ErrorHandler'`",
+      "input": "C = {'42', 'NaN', '3.14'};\nhandler = @(err, value) NaN;\nnumbers = cellfun(@str2double, C, 'ErrorHandler', handler);",
+      "output": "numbers =\n   42     NaN    3.1400"
+    },
+    {
+      "description": "Using builtin short names instead of function handles",
+      "input": "cells = {[], 1:5, zeros(0, 3)};\nempty_flags = cellfun('isempty', cells);",
+      "output": "empty_flags =\n     1     0     1"
+    },
+    {
+      "description": "Returning rich metadata in the error handler",
+      "input": "cells = {1, 'two', 3};\neh = @(err, value) sprintf('%s @ %d', err.identifier, err.index);\nresults = cellfun(@(x) x + 1, cells, 'UniformOutput', false, 'ErrorHandler', eh);",
+      "output": "results =\n  1\u00d73 cell array\n    {[2]}    {'MATLAB:UndefinedFunction @ 2'}    {[4]}"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `cellfun` modify the original cell array?",
+      "answer": "No. The builtin reads the cell contents, calls the supplied function, and returns a new array. The original cell array is never mutated."
+    },
+    {
+      "question": "What happens when the callback returns mixed real and complex values?",
+      "answer": "RunMat promotes the entire output to a complex array when `'UniformOutput', true`. Real results are converted to complex numbers with zero imaginary parts to match MATLAB."
+    },
+    {
+      "question": "Can the callback return strings or structs?",
+      "answer": "Yes, but you must specify `'UniformOutput', false`. That tells RunMat to collect results into a cell array rather than forcing scalar concatenation."
+    },
+    {
+      "question": "Are GPU arrays supported?",
+      "answer": "Yes. Inputs that live on the GPU are automatically gathered before the callback executes so the function can operate on host values. The final result is host-resident today."
+    },
+    {
+      "question": "How are errors reported to `'ErrorHandler'`?",
+      "answer": "The handler receives a structure with `identifier`, `message`, `index`, and `indices` fields followed by the values that triggered the error. Returning a value from the handler lets execution continue; rethrowing propagates the failure just like MATLAB."
+    },
+    {
+      "question": "Do extra non-cell arguments need to be the same size as the cells?",
+      "answer": "No. Extra arguments are treated as constants and forwarded unchanged for every element. Only the cell array inputs must agree on size."
+    },
+    {
+      "question": "Can `cellfun` be used with anonymous functions that capture variables?",
+      "answer": "Absolutely. Captures are forwarded to the generated closure before the cell elements, so anonymous functions behave the same way they do in MATLAB."
+    },
+    {
+      "question": "What are the default output types for empty inputs?",
+      "answer": "When the cell arrays are empty and `'UniformOutput', true`, RunMat returns an empty double array (size matches the input). For `'UniformOutput', false`, the result is an empty cell array."
+    },
+    {
+      "question": "Does `cellfun` support MATLAB's `'isclass'` short name?",
+      "answer": "Yes. RunMat maps `'isclass'` to the `class` builtin internally so you can write `cellfun('isclass', C, 'double')` just like in MATLAB."
+    }
+  ],
+  "links": [
+    {
+      "label": "cell",
+      "url": "./cell"
+    },
+    {
+      "label": "cell2mat",
+      "url": "./cell2mat"
+    },
+    {
+      "label": "mat2cell",
+      "url": "./mat2cell"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/cells/core/cellfun.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/cells/core/cellfun.rs"
+  },
+  "gpu_behavior": [
+    "`cellfun` itself is a host operation. RunMat gathers GPU-resident inputs before calling the callback and stores the outputs on the host. This guarantees deterministic behaviour even when the callback returns GPU arrays. Future acceleration hooks can elide the gather step when providers support nested callbacks, but no provider work is required for correctness today."
+  ]
+}

@@ -1,0 +1,146 @@
+{
+  "title": "atan2",
+  "category": "math/trigonometry",
+  "keywords": [
+    "atan2",
+    "inverse tangent",
+    "quadrant aware",
+    "gpu",
+    "arctangent"
+  ],
+  "summary": "Quadrant-aware inverse tangent atan2(y, x) with MATLAB-compatible broadcasting.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/atan2.html"
+  ],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Executes on the GPU when the provider implements elem_atan2 for shape-matched inputs; otherwise the runtime gathers operands and falls back to the host."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::trigonometry::atan2::tests",
+    "integration": "builtins::math::trigonometry::atan2::tests::atan2_gpu_provider_roundtrip",
+    "gpu": "builtins::math::trigonometry::atan2::tests::atan2_wgpu_matches_cpu_elementwise"
+  },
+  "description": "`theta = atan2(y, x)` computes the four-quadrant inverse tangent of the point `(x, y)`. It returns angles in radians covering the range `(-pi, pi]`, giving robust results even when `x` is zero.",
+  "behaviors": [
+    "Inputs can be scalars, vectors, matrices, or N-D tensors of real numeric, logical, or character data. MATLAB-style implicit expansion (broadcasting) applies when shapes are compatible.",
+    "`atan2` treats `y` as the numerator and `x` as the denominator: `atan2(Y, X)` equals `atan(Y ./ X)` but keeps the correct quadrant and handles zero denominators.",
+    "Logical inputs are cast to `double`, character arrays use their Unicode code points, and integer inputs are promoted to `double`, mirroring MATLAB promotion rules.",
+    "Complex inputs are **not** supported; MATLAB raises an error and RunMat matches that behaviour.",
+    "`atan2(0, 0)` returns `0`. `atan2(\u00b10, -0)` follows IEEE-754 semantics, matching MATLAB for signed zeros and infinities.",
+    "`atan2(NaN, x)` or `atan2(y, NaN)` returns `NaN`; inputs containing `Inf` combinations follow IEEE-754 quadrant semantics exactly like MATLAB.",
+    "The output always has double precision and the same size as the broadcasted inputs."
+  ],
+  "examples": [
+    {
+      "description": "Computing the polar angle of a point",
+      "input": "theta = atan2(4, 3);",
+      "output": "theta = 0.9273"
+    },
+    {
+      "description": "Determining quadrants for a vector of coordinates",
+      "input": "Y = [-1 0 1];\nX = [-1 -1 -1];\nangles = atan2(Y, X);",
+      "output": "angles = [-2.3562 -3.1416 2.3562]"
+    },
+    {
+      "description": "Broadcasting a scalar denominator across a matrix",
+      "input": "A = [1 2 3; 4 5 6];\nangles = atan2(A, 2);",
+      "output": "angles =\n    0.4636    0.7854    0.9828\n    1.1071    1.1903    1.2490"
+    },
+    {
+      "description": "Handling zero numerators and signed zeros",
+      "input": "theta = atan2([0 -0], [-2 0]);",
+      "output": "theta = [pi 0]"
+    },
+    {
+      "description": "Executing `atan2` on the GPU",
+      "input": "Gy = gpuArray([1 1; -1 -1]);\nGx = gpuArray([1 -1; 1 -1]);\nangles_gpu = atan2(Gy, Gx);\nangles = gather(angles_gpu);",
+      "output": "angles =\n    0.7854    2.3562\n   -0.7854   -2.3562"
+    },
+    {
+      "description": "Converting character data to angles",
+      "input": "theta = atan2('A', 100);",
+      "output": "theta = 0.5720"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What is the range of values returned by `atan2`?",
+      "answer": "Angles are given in radians and span the open/closed interval `(-pi, pi]`. Use `rad2deg` if you prefer degrees."
+    },
+    {
+      "question": "Can I supply complex inputs?",
+      "answer": "No. MATLAB raises an error for complex inputs, and so does RunMat. Convert complex data to magnitude/phase first if needed."
+    },
+    {
+      "question": "Does `atan2` preserve the shape of the inputs?",
+      "answer": "Yes. After implicit expansion, the output shape matches the broadcasted size of `Y` and `X`."
+    },
+    {
+      "question": "How are logical or character inputs handled?",
+      "answer": "Logical values map to `0` and `1`, and character arrays use their Unicode code point values (as doubles) before computing the angle."
+    },
+    {
+      "question": "What happens when `x` is zero?",
+      "answer": "`atan2` still returns a finite result using the sign of `y`. For example, `atan2(1, 0)` returns `pi/2`, and `atan2(-1, 0)` returns `-pi/2`."
+    },
+    {
+      "question": "Are GPU and CPU results identical?",
+      "answer": "Double-precision providers match CPU results exactly. Single-precision providers can differ by routine IEEE rounding. RunMat automatically promotes to double when materialising host tensors to mirror MATLAB."
+    },
+    {
+      "question": "How can I compute angles in degrees?",
+      "answer": "Call `rad2deg(atan2(y, x))` or multiply the result by `180/pi`."
+    }
+  ],
+  "links": [
+    {
+      "label": "atan",
+      "url": "./atan"
+    },
+    {
+      "label": "hypot",
+      "url": "./hypot"
+    },
+    {
+      "label": "sin",
+      "url": "./sin"
+    },
+    {
+      "label": "tan",
+      "url": "./tan"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/trigonometry/atan2.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/atan2.rs"
+  },
+  "gpu_residency": "RunMat's planner keeps tensors on the GPU whenever profitable. Explicit `gpuArray` calls are optional\u2014use them only when you need to control residency for interoperability. When `elem_atan2` is unavailable, RunMat automatically gathers data to the CPU, performs the computation, and re-uploads results only when downstream consumers demand GPU residency.",
+  "gpu_behavior": [
+    "When both operands already reside on the GPU and the active provider implements the `elem_atan2` hook, RunMat executes the operation entirely on the device without reformatting buffers.",
+    "If shapes require implicit expansion or the provider lacks `elem_atan2`, RunMat transparently gathers both tensors to the host, computes the result with the reference CPU implementation, and continues execution.",
+    "When GPU work completes in single precision (because the provider only exposes 32-bit buffers), RunMat promotes the results to double precision whenever the data is materialised on the host so the observable behaviour still matches MATLAB.",
+    "Fusion-aware expressions (for example, `sin(atan2(y, x))`) can still emit a combined WGSL kernel; the fusion planner recognises `atan2` as a binary elementwise primitive."
+  ]
+}

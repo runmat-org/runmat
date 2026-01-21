@@ -11,165 +11,6 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "cos",
-        builtin_path = "crate::builtins::math::trigonometry::cos"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "cos"
-category: "math/trigonometry"
-keywords: ["cos", "cosine", "trigonometry", "elementwise", "gpu", "like"]
-summary: "Cosine of scalars, vectors, matrices, complex numbers, or character arrays with MATLAB broadcasting and GPU acceleration."
-references: []
-gpu_support:
-  elementwise: true
-  reduction: false
-  precisions: ["f32", "f64"]
-  broadcasting: "matlab"
-  notes: "Prefers provider unary_cos hooks; falls back to the host path when a provider is unavailable or cannot service the operand type."
-fusion:
-  elementwise: true
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::math::trigonometry::cos::tests"
-  integration: "builtins::math::trigonometry::cos::tests::cos_gpu_provider_roundtrip"
----
-
-# What does the `cos` function do in MATLAB / RunMat?
-`y = cos(x)` evaluates the cosine of each element in `x`, interpreting angles in radians while preserving MATLAB’s column-major layout and broadcasting rules.
-
-## How does the `cos` function behave in MATLAB / RunMat?
-- Operates on scalars, vectors, matrices, and N-D tensors with MATLAB-compatible implicit expansion.
-- Logical and integer inputs are promoted to double precision before evaluation so downstream arithmetic matches MATLAB’s numeric tower.
-- Complex values use the analytic extension `cos(a + bi) = cos(a)cosh(b) - i·sin(a)sinh(b)` while propagating `NaN`/`Inf` components independently.
-- Character arrays are interpreted through their Unicode code points and return dense double arrays that mirror MATLAB’s behaviour.
-- Appending `'like', prototype` mirrors the prototype’s class and residency (host or GPU), re-uploading the result when a device prototype is supplied.
-- Empty inputs and singleton dimensions are preserved without introducing extraneous allocations.
-
-## `cos` Function GPU Execution Behaviour
-- With RunMat Accelerate active, tensors remain on the device and execute through the provider’s `unary_cos` hook (or fused elementwise kernels) without leaving GPU memory.
-- If the provider declines the operation—for example, when only CPU precision is available or the operand type is unsupported—RunMat transparently gathers to the host, computes the result, and reapplies the requested residency rules (including `'like'` prototypes).
-- Fusion planning keeps neighbouring elementwise operators grouped, reducing host↔device transfers even when an intermediate fallback occurs.
-
-## Examples of using the `cos` function in MATLAB / RunMat
-
-### Cosine of zero
-
-```matlab
-y = cos(0);
-```
-
-Expected output:
-
-```matlab
-y = 1
-```
-
-### Cosine of evenly spaced angles
-
-```matlab
-theta = linspace(0, 2*pi, 5);
-values = cos(theta);
-```
-
-Expected output:
-
-```matlab
-values = [1 0.3090 -0.8090 -0.8090 0.3090]
-```
-
-### Cosine of complex data
-
-```matlab
-z = cos(1 + 2i);
-```
-
-Expected output:
-
-```matlab
-z = 2.0327 - 3.0519i
-```
-
-### Cosine on a GPU tensor without manual residency
-
-```matlab
-A = reshape(0:5, [3 2]);
-result = cos(A);        % planner keeps the tensor on device when beneficial
-```
-
-Expected output (after `gather(result)`):
-
-```matlab
-result =
-    1.0000   -0.9899
-    0.5403   -0.6536
-   -0.4161    0.2837
-```
-
-### Keeping results on the GPU with a `'like'` prototype
-
-```matlab
-proto = gpuArray.zeros(1, 1, 'single');
-angles = [0 pi/2 pi];
-deviceResult = cos(angles, 'like', proto);
-```
-
-Expected output (after `gather(deviceResult)`):
-
-```matlab
-deviceResult = single([1 0 -1])
-```
-
-### Matching a host prototype while inputs live on the GPU
-
-```matlab
-G = gpuArray([0 1 2]);
-hostLike = cos(G, 'like', zeros(1, 'double'));
-```
-
-Expected output:
-
-```matlab
-hostLike = [1 0.5403 -0.4161]
-```
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-You usually do **not** need to call `gpuArray` in RunMat. The fusion planner keeps tensors on the GPU whenever it is profitable and the provider exposes the required kernels. Explicit `gpuArray` / `gather` calls remain available for compatibility with MathWorks MATLAB workflows and for interacting with legacy code that relies on manual residency control.
-
-## FAQ
-
-### When should I use the `cos` function?
-Use `cos` whenever you need the cosine of angles expressed in radians—whether those angles are scalars, vectors, matrices, or higher-dimensional tensors.
-
-### Does `cos` promote inputs to double precision?
-Yes. Unless you request otherwise with `'like'`, RunMat promotes numeric inputs to double precision, matching MATLAB’s default behaviour.
-
-### How does `cos` handle complex inputs?
-Complex numbers follow MATLAB’s analytic definition `cos(a + bi) = cos(a)cosh(b) - i·sin(a)sinh(b)` so both the real and imaginary parts are handled correctly.
-
-### What happens if the GPU provider lacks `unary_cos`?
-RunMat gathers the tensor to the host, evaluates cosine with the CPU reference path, and then reapplies residency rules. If a `'like'` prototype targets the GPU, the result is uploaded back before returning.
-
-### Can I rely on MATLAB broadcasting rules?
-Yes. Scalar and singleton dimensions implicitly expand just as they do in MATLAB.
-
-### Does `cos` work with character arrays?
-Yes. Character arrays are converted to their Unicode code points before cosine is evaluated, and the result is returned as a dense double array of the same size.
-
-## See Also
-[sin](./sin), [tan](./tan), [gpuArray](./gpuarray), [gather](./gather)
-
-## Source & Feedback
-- The full source code for the implementation of the `cos` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/cos.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/cos.rs)
-- Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
-"#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::cos")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -372,10 +213,9 @@ fn convert_to_host_like(value: Value) -> Result<Value, String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, StringArray, Tensor};
-
-    use crate::builtins::common::test_support;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -601,13 +441,6 @@ pub(crate) mod tests {
         let err =
             cos_builtin(Value::Num(0.0), vec![Value::from("invalid")]).expect_err("expected error");
         assert!(err.contains("unrecognised argument"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

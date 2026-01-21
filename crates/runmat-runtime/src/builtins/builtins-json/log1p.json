@@ -1,0 +1,135 @@
+{
+  "title": "log1p",
+  "category": "math/elementwise",
+  "keywords": [
+    "log1p",
+    "log(1+x)",
+    "natural logarithm",
+    "elementwise",
+    "gpu",
+    "precision"
+  ],
+  "summary": "Accurate element-wise computation of log(1 + x) for scalars, vectors, matrices, or N-D tensors.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Falls back to the host when the provider lacks unary_log1p or reduce_min, or when complex outputs are required."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::log1p::tests",
+    "integration": "builtins::math::elementwise::log1p::tests::log1p_gpu_provider_roundtrip"
+  },
+  "description": "`Y = log1p(X)` evaluates `log(1 + X)` element-wise with high accuracy for values of `X` close to zero. It mirrors MATLAB semantics across scalars, vectors, matrices, logical arrays, character arrays, and complex inputs.",
+  "behaviors": [
+    "Logical inputs are promoted to double precision (`true -> 1.0`, `false -> 0.0`) before execution.",
+    "Character arrays are interpreted as their numeric code points and return dense double tensors.",
+    "Values equal to `-1` yield `-Inf`, matching MATLAB's handling of `log(0)`.",
+    "Inputs smaller than `-1` promote to complex outputs: `log1p(-2)` returns `0 + i\u03c0`.",
+    "Complex inputs follow MATLAB's definition by computing the natural logarithm of `1 + z`.",
+    "Existing GPU tensors remain on the device when the registered provider implements `unary_log1p` alongside `reduce_min`. RunMat queries the device-side minimum to confirm the data stays within the real-valued domain; otherwise it gathers to the host, computes the exact result, and preserves residency metadata."
+  ],
+  "examples": [
+    {
+      "description": "Protecting precision when adding tiny percentages",
+      "input": "delta = 1e-12;\nvalue = log1p(delta);",
+      "output": "value = 9.999999999995e-13;"
+    },
+    {
+      "description": "Computing log-growth factors from percentage changes",
+      "input": "rates = [-0.25 -0.10 0 0.10 0.25];\ngrowth = log1p(rates);",
+      "output": "growth = [-0.2877 -0.1054 0 0.0953 0.2231];"
+    },
+    {
+      "description": "Handling the branch cut at x = -1",
+      "input": "y = log1p(-1);",
+      "output": "y = -Inf;"
+    },
+    {
+      "description": "Obtaining complex results for inputs less than -1",
+      "input": "data = [-2 -3 -5];\nresult = log1p(data);",
+      "output": "result = [0.0000 + 3.1416i, 0.6931 + 3.1416i, 1.3863 + 3.1416i];"
+    },
+    {
+      "description": "Executing log1p on GPU arrays with automatic residency",
+      "input": "G = gpuArray(linspace(-0.5, 0.5, 5));\nout = log1p(G);\nrealResult = gather(out);",
+      "output": "realResult = [-0.6931 -0.2877 0 0.2231 0.4055];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I prefer `log1p` over `log(1 + x)`?",
+      "answer": "Use `log1p` whenever `x` can be very close to zero. It avoids catastrophic cancellation and matches MATLAB's high-accuracy results for tiny magnitudes."
+    },
+    {
+      "question": "Does `log1p` change my tensor's shape?",
+      "answer": "No. The output has the same shape as the input, subject to MATLAB broadcasting semantics."
+    },
+    {
+      "question": "How are logical arrays handled?",
+      "answer": "Logical values convert to doubles before applying `log1p`, so `log1p([true false])` yields a double array `[log(2), 0]`."
+    },
+    {
+      "question": "What about inputs smaller than `-1`?",
+      "answer": "Values less than `-1` promote to complex results (`log(1 + x)` on the complex branch), matching MATLAB's behavior."
+    },
+    {
+      "question": "How does `log1p` interact with complex numbers?",
+      "answer": "Complex scalars and tensors compute `log(1 + z)` using the principal branch, returning both real and imaginary parts just like MATLAB."
+    },
+    {
+      "question": "What happens when the GPU provider lacks `unary_log1p`?",
+      "answer": "RunMat gathers the tensor to the host, computes the result in double precision, and returns it. This ensures users always see MATLAB-compatible behavior without manual residency management."
+    },
+    {
+      "question": "Is double precision guaranteed?",
+      "answer": "Yes. RunMat stores dense numeric tensors in double precision (`f64`). GPU providers may choose single precision internally but convert back to double when returning data to the runtime."
+    },
+    {
+      "question": "Can `log1p` participate in fusion?",
+      "answer": "Yes. The fusion planner recognizes `log1p` as an element-wise op. Providers that support fused kernels can materialize `log(1 + x)` directly in generated WGSL."
+    }
+  ],
+  "links": [
+    {
+      "label": "log",
+      "url": "./log"
+    },
+    {
+      "label": "expm1",
+      "url": "./expm1"
+    },
+    {
+      "label": "sin",
+      "url": "./sin"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/log1p.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/log1p.rs"
+  },
+  "gpu_residency": "```matlab:runnable\nG = gpuArray(linspace(-0.5, 0.5, 5));\nout = log1p(G);\nrealResult = gather(out);\n```\n\nExpected output:\n\n```matlab\nrealResult = [-0.6931 -0.2877 0 0.2231 0.4055];\n```",
+  "gpu_behavior": [
+    "RunMat Accelerate keeps tensors resident on the GPU whenever the provider exposes the `unary_log1p` hook together with `reduce_min`. The runtime uses the device-side minimum to ensure that `1 + X` stays non-negative; when complex outputs are required or either hook is missing, RunMat automatically gathers the tensor, computes on the CPU using double precision, and returns the result with the expected MATLAB semantics."
+  ]
+}

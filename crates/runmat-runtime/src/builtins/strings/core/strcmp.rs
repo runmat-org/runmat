@@ -12,156 +12,6 @@ use crate::builtins::common::tensor;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
 use crate::gather_if_needed;
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "strcmp",
-        builtin_path = "crate::builtins::strings::core::strcmp"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "strcmp"
-category: "strings/core"
-keywords: ["strcmp", "string compare", "text equality", "cell array", "character vector"]
-summary: "Compare text inputs for exact equality with MATLAB-compatible implicit expansion across text types."
-references:
-  - https://www.mathworks.com/help/matlab/ref/strcmp.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "matlab"
-  notes: "Executes on the CPU; GPU-resident inputs are gathered automatically so results match MATLAB behaviour exactly."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 2
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::strings::core::strcmp::tests"
-  integration: "builtins::strings::core::strcmp::tests::strcmp_cell_array_scalar"
----
-
-# What does the `strcmp` function do in MATLAB / RunMat?
-`strcmp(a, b)` returns logical `true` when two pieces of text match exactly and `false` otherwise.
-It accepts string arrays, character vectors/arrays, and cell arrays of character vectors, mirroring MATLAB semantics.
-
-## How does the `strcmp` function behave in MATLAB / RunMat?
-- **Accepted text types**: Works with string scalars/arrays, character vectors or matrices created with `char`, and cell arrays of character vectors. Mixed combinations are converted automatically, matching MATLAB.
-- **Implicit expansion**: Scalar inputs expand to the shape of the other operand, producing element-wise comparisons for higher-dimensional arrays.
-- **Character arrays**: Rows are compared individually. The result is a column vector whose length equals the number of rows in the character array.
-- **Cell arrays**: Each cell is treated as a text scalar. Scalar cell arrays expand across the other operand before comparison.
-- **Missing strings**: String elements equal to `missing` compare unequal to everything, including other `missing` values.
-- **Result form**: A single logical scalar is returned for scalar comparisons; otherwise you receive a logical array using column-major MATLAB layout.
-- **Case sensitivity**: Matching is case-sensitive. Use `strcmpi` for case-insensitive comparisons.
-
-## `strcmp` Function GPU Execution Behaviour
-`strcmp` is registered as an acceleration sink. When either input resides on the GPU, RunMat gathers both
-operands back to host memory before comparing them so the results match MATLAB exactly. Providers do not
-need to implement custom kernels, and the logical result is always returned on the CPU.
-
-## Examples of using the `strcmp` function in MATLAB / RunMat
-
-### Compare Two Equal Strings
-```matlab
-tf = strcmp("RunMat", "RunMat");
-```
-Expected output:
-```matlab
-tf = logical
-   1
-```
-
-### Compare String Array With Scalar Text
-```matlab
-names = ["red" "green" "blue"];
-tf = strcmp(names, "green");
-```
-Expected output:
-```matlab
-tf = 1×3 logical array
-   0   1   0
-```
-
-### Compare Character Array Rows
-```matlab
-labels = char("cat", "dog", "cat");
-tf = strcmp(labels, "cat");
-```
-Expected output:
-```matlab
-tf = 3×1 logical array
-   1
-   0
-   1
-```
-
-### Compare Two Cell Arrays Of Character Vectors
-```matlab
-C1 = {'apple', 'pear', 'grape'};
-C2 = {'apple', 'peach', 'grape'};
-tf = strcmp(C1, C2);
-```
-Expected output:
-```matlab
-tf = 1×3 logical array
-   1   0   1
-```
-
-### Handle Missing Strings
-```matlab
-vals = ["alpha" missing];
-tf = strcmp(vals, "alpha");
-```
-Expected output:
-```matlab
-tf = 1×2 logical array
-   1   0
-```
-
-### Implicit Expansion With Column Vector Text
-```matlab
-patterns = char("north", "south");
-tf = strcmp(patterns, ["north" "east"]);
-```
-Expected output:
-```matlab
-tf = 2×2 logical array
-   1   0
-   0   0
-```
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-You normally do **not** need to call `gpuArray`. If you do, RunMat gathers the operands before computing `strcmp`
-so the output matches MATLAB. The result always lives on the host because this builtin inspects text data.
-
-## FAQ
-
-### What types can I pass to `strcmp`?
-Use string arrays, character vectors/arrays, or cell arrays of character vectors. Mixed combinations are accepted and follow MATLAB's implicit expansion rules.
-
-### Does `strcmp` ignore letter case?
-No. `strcmp` is case-sensitive. Use `strcmpi` for case-insensitive comparisons.
-
-### What happens when the inputs contain missing strings?
-Missing string scalars compare unequal to every value (including other missing strings), so the result is `false`.
-
-### Can `strcmp` compare matrices of characters?
-Yes. Character arrays compare row-by-row, returning a column vector whose entries tell you whether each row matches.
-
-### Does `strcmp` return numeric or logical results?
-It returns logical results. Scalars become logical scalars (`Value::Bool`), while arrays are returned as logical arrays.
-
-## See Also
-[string](./string), [char](./char), [contains](./contains), [startswith](./startswith), [strlength](./strlength)
-
-## Source & Feedback
-- Implementation: [`crates/runmat-runtime/src/builtins/strings/core/strcmp.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/strcmp.rs)
-- Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strcmp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strcmp",
@@ -230,7 +80,6 @@ fn evaluate_strcmp(left: &TextCollection, right: &TextCollection) -> Result<Valu
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -396,12 +245,5 @@ pub(crate) mod tests {
         let err =
             strcmp_builtin(Value::Num(1.0), Value::String("a".into())).expect_err("invalid type");
         assert!(err.contains("first argument must be text"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

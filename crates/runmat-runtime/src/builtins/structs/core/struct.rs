@@ -7,151 +7,6 @@ use crate::builtins::common::spec::{
 use runmat_builtins::{CellArray, CharArray, StructValue, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "struct",
-        builtin_path = "crate::builtins::structs::core::r#struct"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "struct"
-category: "structs/core"
-keywords: ["struct", "structure", "name-value", "record", "struct array"]
-summary: "Create scalar structs or struct arrays from name/value pairs."
-references: []
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Struct construction runs on the host. GPU tensors stay as handles inside the resulting struct or struct array."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 0
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::structs::core::r#struct::tests"
-  integration: "builtins::structs::core::r#struct::tests::struct_preserves_gpu_handles_with_registered_provider"
----
-
-# What does the `struct` function do in MATLAB / RunMat?
-`S = struct(...)` creates scalar structs or struct arrays by pairing field names with values. The
-inputs can be simple name/value pairs, existing structs, or cell arrays whose elements are expanded
-into struct array entries.
-
-## How does the `struct` function behave in MATLAB / RunMat?
-- Field names must satisfy the MATLAB `isvarname` rules: they start with a letter or underscore and
-  contain only letters, digits, or underscores.
-- The last occurrence of a repeated field name wins and overwrites earlier values.
-- String scalars, character vectors, and single-element string arrays are accepted as field names.
-- `struct()` returns a scalar struct with no fields, while `struct([])` yields a `0×0` struct array.
-- When any value input is a cell array, every cell array input must share the same size. Non-cell
-  inputs are replicated across every element of the resulting struct array.
-- Passing an existing struct or struct array (`struct(S)`) creates a deep copy; the original data is
-  untouched.
-
-## `struct` Function GPU Execution Behaviour
-`struct` performs all bookkeeping on the host. GPU-resident values—such as tensors created with
-`gpuArray`—are stored as-is inside the resulting struct or struct array. No kernels are launched and
-no data is implicitly gathered back to the CPU.
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-Usually not. RunMat's planner keeps GPU values resident as long as downstream operations can profit
-from them. You can still seed GPU residency explicitly with `gpuArray` for MATLAB compatibility; the
-handles remain untouched inside the struct until another builtin decides to gather or operate on
-them.
-
-## Examples
-
-### Creating a simple structure for named fields
-```matlab
-s = struct("name", "Ada", "score", 42);
-disp(s.name);
-disp(s.score);
-```
-
-Expected output:
-```matlab
-Ada
-    42
-```
-
-### Building a struct array from paired cell inputs
-```matlab
-names = {"Ada", "Grace"};
-ages = {36, 45};
-people = struct("name", names, "age", ages);
-{people.name}
-```
-
-Expected output:
-```matlab
-    {'Ada'}    {'Grace'}
-```
-
-### Broadcasting scalars across a struct array
-```matlab
-ids = struct("id", {101, 102, 103}, "department", "Research");
-{ids.department}
-```
-
-Expected output:
-```matlab
-    {'Research'}    {'Research'}    {'Research'}
-```
-
-### Copying an existing structure
-```matlab
-a = struct("id", 7, "label", "demo");
-b = struct(a);
-b.id = 8;
-disp([a.id b.id]);
-```
-
-Expected output:
-```matlab
-     7     8
-```
-
-### Building an empty struct array
-```matlab
-s = struct([]);
-disp(size(s));
-```
-
-Expected output:
-```matlab
-     0     0
-```
-
-## FAQ
-
-### Do field names have to be valid identifiers?
-Yes. RunMat mirrors MATLAB and requires names to satisfy `isvarname`. Names must begin with a letter
-or underscore and may contain letters, digits, and underscores.
-
-### How do I create a struct array?
-Provide one or more value arguments as cell arrays with identical sizes. Each cell contributes the
-value for the corresponding struct element. Non-cell values are replicated across all elements.
-
-### What happens when the same field name appears more than once?
-The last value wins; earlier values for the same field are overwritten.
-
-### Does `struct` gather GPU data back to the CPU?
-No. GPU tensors remain device-resident handles inside the resulting struct or struct array.
-
-### Can I pass non-string objects as field names?
-No. Field names must be provided as string scalars, character vectors, or single-element string
-arrays. Passing other types raises an error.
-
-## See Also
-[load](./load), [whos](./whos), [gpuArray](./gpuarray), [gather](./gather)
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::r#struct")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "struct",
@@ -400,7 +255,6 @@ pub(crate) mod tests {
     use runmat_accelerate_api::GpuTensorHandle;
     use runmat_builtins::{CellArray, IntValue, StringArray, StructValue, Tensor};
 
-    use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
 
@@ -686,13 +540,6 @@ pub(crate) mod tests {
             panic!("expected struct value");
         };
         assert!(matches!(s.fields.get("gpu"), Some(Value::GpuTensor(h)) if h == &handle));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 
     fn expect_struct_array(value: Value) -> Vec<StructValue> {

@@ -24,167 +24,6 @@ const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 const DEFAULT_USER_AGENT: &str = "RunMat webwrite/0.0";
 
 #[allow(clippy::too_many_lines)]
-#[runmat_macros::register_doc_text(
-    name = "webwrite",
-    builtin_path = "crate::builtins::io::http::webwrite"
-)]
-pub const DOC_MD: &str = r#"---
-title: "webwrite"
-category: "io/http"
-keywords: ["webwrite", "http post", "rest client", "json upload", "form post", "binary upload"]
-summary: "Send data to web services using HTTP POST/PUT requests and return the response."
-references:
-  - https://www.mathworks.com/help/matlab/ref/webwrite.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "webwrite gathers gpuArray inputs and executes entirely on the CPU networking stack."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::io::http::webwrite::tests"
-  integration:
-    - "builtins::io::http::webwrite::tests::webwrite_posts_form_data_by_default"
-    - "builtins::io::http::webwrite::tests::webwrite_sends_json_when_media_type_json"
-    - "builtins::io::http::webwrite::tests::webwrite_applies_basic_auth_and_custom_headers"
-    - "builtins::io::http::webwrite::tests::webwrite_supports_query_parameters"
-    - "builtins::io::http::webwrite::tests::webwrite_binary_payload_respected"
----
-
-# What does the `webwrite` function do in MATLAB / RunMat?
-`webwrite` sends data to an HTTP or HTTPS endpoint using methods such as `POST`, `PUT`,
-`PATCH`, or `DELETE`. It mirrors MATLAB behaviour: request bodies are created from MATLAB
-values (structs, cells, strings, numeric tensors), request headers come from `weboptions`
-style arguments, and the response is decoded the same way as `webread`.
-
-## How does the `webwrite` function behave in MATLAB / RunMat?
-- The first input is an absolute URL supplied as a character vector or string scalar.
-- The second input supplies the request body. Structs and two-column cell arrays become
-  `application/x-www-form-urlencoded` payloads. Character vectors / strings are sent as UTF-8
-  text, and other MATLAB values default to JSON encoding via `jsonencode`.
-- Name-value arguments (or an options struct) accept the same fields as MATLAB `weboptions`:
-  `ContentType`, `MediaType`, `Timeout`, `HeaderFields`, `Username`, `Password`,
-  `UserAgent`, `RequestMethod`, and `QueryParameters`.
-- `ContentType` controls how the response is parsed (`"auto"` by default). Set it to `"json"`,
-  `"text"`, or `"binary"` to force JSON decoding, text return, or raw byte vectors.
-- `MediaType` sets the outbound `Content-Type` header. When omitted, RunMat chooses
-  a sensible default (`application/x-www-form-urlencoded`, `application/json`,
-  `text/plain; charset=utf-8`, or `application/octet-stream`) based on the payload.
-- Query parameters can be appended through the `QueryParameters` option or by including
-  additional, unrecognised name-value pairs. Parameter values follow MATLAB scalar rules.
-- HTTP errors, timeouts, TLS verification problems, and JSON encoding issues raise
-  MATLAB-style errors with descriptive text.
-
-## `webwrite` Function GPU Execution Behaviour
-`webwrite` is a sink in the execution graph. Any GPU-resident inputs (for example tensors
-inside structs or cell arrays) are gathered to host memory before encoding the request body.
-Network I/O always runs on the CPU; fusion plans are terminated with
-`ResidencyPolicy::GatherImmediately`.
-
-## Examples of using the `webwrite` function in MATLAB / RunMat
-
-### Posting form fields to a REST endpoint
-```matlab
-payload = struct("name", "Ada", "score", 42);
-opts = struct("ContentType", "json");          % expect JSON response
-reply = webwrite("https://api.example.com/submit", payload, opts);
-disp(reply.status)
-```
-Expected output:
-```matlab
-    "ok"
-```
-
-### Sending JSON payloads
-```matlab
-body = struct("title", "RunMat", "stars", 5);
-opts = struct("MediaType", "application/json", "ContentType", "json");
-resp = webwrite("https://api.example.com/projects", body, opts);
-```
-`resp` is decoded from JSON into structs, doubles, logicals, or strings.
-
-### Uploading plain text
-```matlab
-message = "Hello from RunMat!";
-reply = webwrite("https://api.example.com/echo", message, ...
-                 "MediaType", "text/plain", "ContentType", "text");
-```
-`reply` holds the echoed character vector.
-
-### Uploading raw binary data
-```matlab
-bytes = uint8([1 2 3 4 5]);
-webwrite("https://api.example.com/upload", bytes, ...
-         "ContentType", "binary", "MediaType", "application/octet-stream");
-```
-The body is transmitted verbatim as bytes.
-
-### Supplying credentials, custom headers, and query parameters
-```matlab
-headers = struct("X-Client", "RunMat", "Accept", "application/json");
-opts = struct("Username", "ada", "Password", "lovelace", ...
-              "HeaderFields", headers, ...
-              "QueryParameters", struct("verbose", true));
-profile = webwrite("https://api.example.com/me", struct(), opts);
-```
-`profile` contains the decoded JSON profile while the request carries Basic Auth credentials
-and custom headers.
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-No. `webwrite` executes on the CPU. Any GPU values are automatically gathered before serialising
-the payload, and results are created on the host. Manually gathering is unnecessary.
-
-## FAQ
-
-1. **Which HTTP methods are supported?**  
-   `webwrite` defaults to `POST`. Supply `"RequestMethod","put"` (or `"patch"`, `"delete"`) to
-   use other verbs.
-
-2. **How do I send JSON?**  
-   Set `"MediaType","application/json"` (optionally via a struct) or `"ContentType","json"`.
-   RunMat serialises the payload with `jsonencode` and sets the appropriate `Content-Type`.
-
-3. **How are form posts encoded?**  
-   Struct inputs and two-column cell arrays are turned into
-   `application/x-www-form-urlencoded` bodies. Field values must be scalar text or numbers.
-
-4. **Can I post binary data?**  
-   Yes. Provide numeric tensors (`double`, integer, or logical) and set `"ContentType","binary"`
-   or `"MediaType","application/octet-stream"`. Values must be in the 0–255 range.
-
-5. **What controls the response decoding?**  
-   `ContentType` mirrors `webread`: `"auto"` inspects response headers, while `"json"`,
-   `"text"`, and `"binary"` force the output format.
-
-6. **How do I add custom headers?**  
-   Use `"HeaderFields", struct("Header-Name","value",...)` or a two-column cell array.
-   Header names must be valid HTTP tokens.
-
-7. **Does `webwrite` follow redirects?**  
-   Yes. The underlying `reqwest` client follows redirects with the same credentials and headers.
-
-8. **Can I send query parameters and a body simultaneously?**  
-   Yes. Provide a `QueryParameters` struct/cell in the options. Parameters are percent-encoded
-   and appended to the URL before the request is issued.
-
-9. **How do timeouts work?**  
-   `Timeout` accepts a scalar number of seconds. The default is 60 s. Requests exceeding the
-   limit raise `webwrite: request to <url> timed out`.
-
-10. **What happens with GPU inputs?**  
-    They are gathered before serialisation. The function is marked as a sink to break fusion
-    graphs and ensure residency is released.
-
-## See Also
-[webread](./webread), [jsonencode](./jsonencode), [jsondecode](./jsondecode), [gpuArray](./gpuarray)
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::http::webwrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "webwrite",
@@ -995,8 +834,6 @@ pub(crate) mod tests {
     use std::sync::mpsc;
     use std::thread;
 
-    use crate::builtins::common::test_support;
-
     fn spawn_server<F>(handler: F) -> String
     where
         F: FnOnce(TcpStream) + Send + 'static,
@@ -1279,12 +1116,5 @@ pub(crate) mod tests {
         let headers_lower = headers.to_ascii_lowercase();
         assert!(headers_lower.contains("content-type: application/octet-stream"));
         assert_eq!(body, vec![1, 2, 3, 255]);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

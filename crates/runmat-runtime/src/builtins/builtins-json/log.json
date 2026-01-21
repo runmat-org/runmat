@@ -1,0 +1,136 @@
+{
+  "title": "log",
+  "category": "math/elementwise",
+  "keywords": [
+    "log",
+    "natural logarithm",
+    "elementwise",
+    "gpu",
+    "complex"
+  ],
+  "summary": "Natural logarithm of scalars, vectors, matrices, or N-D tensors.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Falls back to the host implementation when the provider lacks unary_log or when the result requires complex values."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::log::tests",
+    "integration": "builtins::math::elementwise::log::tests::log_gpu_provider_roundtrip",
+    "gpu": "builtins::math::elementwise::log::tests::log_wgpu_matches_cpu_elementwise"
+  },
+  "description": "`Y = log(X)` computes the natural logarithm of every element in `X`, extending MATLAB semantics to real, logical, character, and complex inputs. Negative real values are promoted to complex results so that `log(-1)` yields `0 + i\u03c0`.",
+  "behaviors": [
+    "`log(X)` applies the operation element-wise with MATLAB broadcasting rules.",
+    "Logical values convert to doubles (`true \u2192 1.0`, `false \u2192 0.0`) before the logarithm is taken.",
+    "Character arrays are interpreted as their numeric code points and return dense double tensors.",
+    "Negative real values produce complex results: `log([-1 1])` returns `[0 + i\u03c0, 0]`.",
+    "Complex inputs follow MATLAB's definition: `log(a + bi) = log(|a + bi|) + i\u00b7atan2(b, a)`.",
+    "`log(0)` returns `-Inf`, matching MATLAB's handling of the logarithm singularity at zero."
+  ],
+  "examples": [
+    {
+      "description": "Natural log of a positive scalar",
+      "input": "y = log(exp(3));",
+      "output": "y = 3;"
+    },
+    {
+      "description": "Understanding log of zero",
+      "input": "value = log(0);",
+      "output": "value = -Inf;"
+    },
+    {
+      "description": "Taking the logarithm of negative values",
+      "input": "data = [-1 -2 -4];\nresult = log(data);",
+      "output": "result = [0.0000 + 3.1416i, 0.6931 + 3.1416i, 1.3863 + 3.1416i];"
+    },
+    {
+      "description": "Applying log to complex numbers",
+      "input": "z = [1+2i, -1+pi*i];\nw = log(z);",
+      "output": "w = [0.8047 + 1.1071i, 1.1447 + 1.2626i];"
+    },
+    {
+      "description": "Element-wise log on a matrix living on the GPU",
+      "input": "G = gpuArray([1 2; 4 8]);\nout = log(G);\nresult = gather(out);",
+      "output": "result = [0.0000 0.6931; 1.3863 2.0794];"
+    },
+    {
+      "description": "Logging character codes from a string",
+      "input": "C = 'ABC';\nvalues = log(C);",
+      "output": "values = [4.1744 4.1897 4.2047];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I use the `log` function?",
+      "answer": "Use `log` whenever you need the natural logarithm of your data\u2014for example, to linearize exponential growth, compute likelihoods, or transform multiplicative relationships into additive ones."
+    },
+    {
+      "question": "What happens if the input contains zeros?",
+      "answer": "`log(0)` returns negative infinity (`-Inf`). Entire tensors follow the same rule element-wise."
+    },
+    {
+      "question": "How are negative real numbers handled?",
+      "answer": "Negative values automatically promote to complex results: `log(-x)` returns `log(x) + i\u03c0`. This matches MATLAB behaviour and avoids losing information compared with returning `NaN`."
+    },
+    {
+      "question": "What about tiny floating-point noise producing small negative numbers?",
+      "answer": "Values that are numerically negative (e.g., `-1e-15`) are treated just like other negatives and promote to complex outputs. Use `abs` or `max` to clip values if you require a purely real result."
+    },
+    {
+      "question": "Does the GPU implementation support complex outputs?",
+      "answer": "Providers currently operate on real buffers. When complex results are required, RunMat gathers data to the host to compute the exact result and keeps residency metadata consistent."
+    },
+    {
+      "question": "Does `log` accept complex inputs directly?",
+      "answer": "Yes. Complex scalars and tensors follow the MATLAB definition using magnitude and phase (`log(|z|) + i\u00b7angle(z)`)."
+    }
+  ],
+  "links": [
+    {
+      "label": "exp",
+      "url": "./exp"
+    },
+    {
+      "label": "expm1",
+      "url": "./expm1"
+    },
+    {
+      "label": "abs",
+      "url": "./abs"
+    },
+    {
+      "label": "angle",
+      "url": "./angle"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/log.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/log.rs"
+  },
+  "gpu_residency": "You typically do **not** need to call `gpuArray` yourself. The auto-offload planner tracks residency and keeps tensors on the GPU when profitable. When your expression produces complex results (e.g., negative inputs to `log`), RunMat will gather the data automatically and still return exactly the MATLAB-compatible output. You can force explicit residency with `gpuArray` and `gather` if you want to mirror MathWorks MATLAB workflows.",
+  "gpu_behavior": [
+    "RunMat Accelerate keeps tensors on the GPU when the active provider implements `unary_log` *and* `reduce_min`. The runtime queries the device-side minimum to confirm that all values are non-negative, so positive datasets stay resident and can participate in fused elementwise kernels. When complex outputs are required or the provider cannot supply these hooks, RunMat gathers the tensor to the host, computes the exact MATLAB-compatible result (including complex promotion), updates residency metadata, and returns the host-resident value."
+  ]
+}

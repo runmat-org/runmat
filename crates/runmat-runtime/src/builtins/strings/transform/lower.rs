@@ -10,165 +10,6 @@ use crate::builtins::common::spec::{
 use crate::builtins::strings::common::{char_row_to_string_slice, lowercase_preserving_missing};
 use crate::{gather_if_needed, make_cell};
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "lower",
-        builtin_path = "crate::builtins::strings::transform::lower"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "lower"
-category: "strings/transform"
-keywords: ["lower", "lowercase", "convert to lowercase", "string case", "character arrays"]
-summary: "Convert strings, character arrays, and cell arrays of character vectors to lowercase."
-references:
-  - https://www.mathworks.com/help/matlab/ref/lower.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Runs on the CPU; if any element lives on the GPU, RunMat gathers it before converting."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::strings::transform::lower::tests"
-  integration: "builtins::strings::transform::lower::tests::lower_cell_array_mixed_content"
----
-
-# What does the `lower` function do in MATLAB / RunMat?
-`lower(text)` converts every alphabetic character in `text` to lowercase. It accepts string scalars,
-string arrays, character arrays, and cell arrays of character vectors, mirroring MATLAB behaviour.
-Non-alphabetic characters are returned unchanged.
-
-## How does the `lower` function behave in MATLAB / RunMat?
-- String inputs stay as strings. String arrays preserve their size, orientation, and missing values.
-- Character arrays are processed row by row. The result remains a rectangular char array; if any row
-  grows after lowercasing (for example because `'İ'` expands), the array widens and shorter rows are padded with spaces.
-- Cell arrays must contain string scalars or character vectors. The result is a cell array of the same size
-  with each element converted to lowercase, and other types raise MATLAB-compatible errors.
-- Missing string scalars (`string(missing)`) remain missing and are returned as `<missing>`.
-- Inputs that are numeric, logical, structs, or GPU tensors raise MATLAB-compatible type errors.
-
-## `lower` Function GPU Execution Behaviour
-`lower` executes on the CPU. When the input (or any nested element) resides on the GPU, RunMat gathers it
-to host memory before performing the conversion so results remain identical to MATLAB. Providers do not
-need to implement custom kernels for this builtin.
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-RunMat automatically keeps string data on the host for now. If text originates from GPU-based computations
-(for example as numeric code points stored on the device), `lower` gathers those values before applying the
-transformation, so you never need to call `gpuArray` explicitly for this builtin.
-
-## Examples of using the `lower` function in MATLAB / RunMat
-
-### Convert A String Scalar To Lowercase
-```matlab
-txt = "RunMat";
-result = lower(txt);
-```
-Expected output:
-```matlab
-result = "runmat"
-```
-
-### Lowercase Each Element Of A String Array
-```matlab
-labels = ["NORTH" "South"; "EaSt" "WEST"];
-lowered = lower(labels);
-```
-Expected output:
-```matlab
-lowered = 2×2 string
-    "north"    "south"
-    "east"     "west"
-```
-
-### Lowercase Character Array Rows While Preserving Shape
-```matlab
-animals = char("CAT", "DOGE");
-result = lower(animals);
-```
-Expected output:
-```matlab
-result =
-
-  2×4 char array
-
-    'cat '
-    'doge'
-```
-
-### Lowercase A Cell Array Of Character Vectors
-```matlab
-C = {'HELLO', 'World'};
-out = lower(C);
-```
-Expected output:
-```matlab
-out = 1×2 cell array
-    {'hello'}    {'world'}
-```
-
-### Keep Missing Strings As Missing
-```matlab
-vals = string(["DATA" "<missing>" "GPU"]);
-converted = lower(vals);
-```
-Expected output:
-```matlab
-converted = 1×3 string
-    "data"    <missing>    "gpu"
-```
-
-### Lowercase Text Stored On A GPU Input
-```matlab
-codes = gpuArray(uint16('RUNMAT'));
-txt = char(gather(codes));
-result = lower(txt);
-```
-Expected output:
-```matlab
-result = 'runmat'
-```
-
-## FAQ
-
-### Does `lower` change non-alphabetic characters?
-No. Digits, punctuation, whitespace, and symbols remain untouched. Only alphabetic code points that have
-distinct lowercase forms are converted.
-
-### What happens to character array dimensions?
-RunMat lowers each row independently and pads with spaces when a lowercase mapping increases the row length.
-This mirrors MATLAB’s behaviour so the result always has rectangular dimensions.
-
-### Can I pass numeric arrays to `lower`?
-No. Passing numeric, logical, or struct inputs raises a MATLAB-compatible error. Convert the data to a string
-or character array first (for example with `string` or `char`).
-
-### How are missing strings handled?
-Missing string scalars remain `<missing>` and are returned unchanged. This matches MATLAB’s handling of
-missing values in text processing functions.
-
-### Will `lower` ever execute on the GPU?
-Not today. The builtin gathers GPU-resident data automatically and performs the conversion on the CPU so the
-results match MATLAB exactly. Providers may add device-side kernels in the future, but the behaviour will stay
-compatible.
-
-## See Also
-[upper](./upper), [string](./string), [char](./char), [regexprep](./regexprep), [strcmpi](./strcmpi)
-
-## Source & Feedback
-- Implementation: [`crates/runmat-runtime/src/builtins/strings/transform/lower.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/lower.rs)
-- Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::lower")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "lower",
@@ -290,7 +131,6 @@ fn lower_cell_element(value: &Value) -> Result<Value, String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -459,12 +299,5 @@ pub(crate) mod tests {
         let err = lower_builtin(Value::GpuTensor(handle.clone())).unwrap_err();
         assert_eq!(err, ARG_TYPE_ERROR);
         provider.free(&handle).ok();
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

@@ -1,0 +1,147 @@
+{
+  "title": "ind2sub",
+  "category": "array/indexing",
+  "keywords": [
+    "ind2sub",
+    "linear index",
+    "subscripts",
+    "column major",
+    "gpu",
+    "nd indexing"
+  ],
+  "summary": "Convert MATLAB column-major linear indices into per-dimension subscript arrays.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "When the active provider implements the `ind2sub` hook (WGPU today), conversions run entirely on the GPU. Other providers fall back to the host and re-upload the results."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::indexing::ind2sub::tests",
+    "integration": "builtins::array::indexing::ind2sub::tests::ind2sub_gpu_roundtrip"
+  },
+  "description": "`ind2sub(siz, idx)` converts MATLAB's 1-based column-major linear indices back into the individual subscripts for each dimension specified in `siz`.",
+  "behaviors": [
+    "The size vector `siz` supplies one extent per dimension. Each entry must be a positive integer.",
+    "`idx` can be a scalar or an array of any shape; every element must be a positive integer within `prod(siz)`.",
+    "The result is always a 1\u00d7N cell array (N is `numel(siz)`). Each cell contains a double array that matches the shape of `idx`.",
+    "Non-integer, complex, NaN, Inf, or out-of-range indices raise MATLAB-compatible errors.",
+    "Empty inputs produce empty outputs with matching shapes.",
+    "When called with multiple outputs (`[i,j,k] = ind2sub(...)`) RunMat unpacks the cell array automatically, mirroring MATLAB semantics."
+  ],
+  "examples": [
+    {
+      "description": "Recovering row and column subscripts from a matrix index",
+      "input": "[row, col] = ind2sub([3 4], 8);",
+      "output": "row = 2;\ncol = 3;"
+    },
+    {
+      "description": "Extracting multiple matrix indices at once",
+      "input": "idx = [7 8 9];\n[rows, cols] = ind2sub([3 5], idx);",
+      "output": "rows = [1 2 3];\ncols = [3 3 3];"
+    },
+    {
+      "description": "Converting indices for a 3-D volume",
+      "input": "idx = [3 11];\n[r, c, p] = ind2sub([2 3 4], idx);",
+      "output": "r = [1 1];\nc = [2 3];\np = [1 2];"
+    },
+    {
+      "description": "Keeping indices on the GPU",
+      "input": "rows = gpuArray([1; 2; 3]);\ncols = gpuArray([4; 4; 4]);\nlin = sub2ind([3 4], rows, cols);\nsubs = ind2sub([3 4], lin);  % subs{1} and subs{2} remain gpuArray values\nclass(subs{1})\nclass(subs{2})",
+      "output": "ans =\n    'gpuArray'\n\nans =\n    'gpuArray'"
+    },
+    {
+      "description": "Using a single output cell for flexible unpacking",
+      "input": "subs = ind2sub(size(magic(4)), 6:9);\n% Access with subs{1}, subs{2}, ...",
+      "output": "subs =\n  1\u00d72 cell array\n    {1\u00d74 double}    {1\u00d74 double}"
+    },
+    {
+      "description": "Validating index ranges before reshaping",
+      "input": "idx = 1:numel(A);\n[i, j] = ind2sub(size(A), idx);\nB = accumarray([i(:) j(:)], A(:));"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What types does `ind2sub` accept for `idx`?",
+      "answer": "Numeric and logical inputs are accepted. Logical arrays are treated as double precision (with `true \u2192 1`, `false \u2192 0`); complex values are rejected."
+    },
+    {
+      "question": "Can `siz` contain zeros?",
+      "answer": "No. Each element of `siz` must be a positive integer, matching MATLAB behaviour."
+    },
+    {
+      "question": "How are errors reported for invalid indices?",
+      "answer": "Indices that are non-integer, non-positive, or exceed `prod(siz)` raise errors matching MATLAB's wording (e.g., \"Index exceeds number of array elements. Index must not exceed \u2026\")."
+    },
+    {
+      "question": "What shape do the output arrays have?",
+      "answer": "Each output array matches the shape of `idx`. Scalars produce scalar doubles; vectors remain vectors; higher-dimensional shapes are preserved."
+    },
+    {
+      "question": "Does `ind2sub` support GPU arrays?",
+      "answer": "Yes. With the WGPU provider the conversion happens entirely on the GPU, including validation. Other providers gather the data to the host, compute the subscripts, and upload them back to the device automatically."
+    },
+    {
+      "question": "Can I request fewer outputs than dimensions?",
+      "answer": "Yes. In a multi-output context RunMat provides as many outputs as requested in order, just like MATLAB. Any additional dimensions are still available inside the single-output cell if you need them."
+    },
+    {
+      "question": "How does `ind2sub` relate to `sub2ind`?",
+      "answer": "They are inverse operations: `sub2ind` turns subscripts into linear indices, while `ind2sub` recovers subscripts from those linear indices."
+    },
+    {
+      "question": "Does `ind2sub` allocate full copies of the outputs?",
+      "answer": "Yes. Each subscript array is materialised as a dense double array matching the shape of `idx`, mirroring MATLAB semantics."
+    },
+    {
+      "question": "What happens with empty inputs?",
+      "answer": "Empty index arrays produce empty subscript arrays with the same shape."
+    },
+    {
+      "question": "Can I use `ind2sub` with more dimensions than two?",
+      "answer": "Definitely\u2014`ind2sub` works for any number of dimensions represented in `siz`."
+    }
+  ],
+  "links": [
+    {
+      "label": "sub2ind",
+      "url": "./sub2ind"
+    },
+    {
+      "label": "size",
+      "url": "./size"
+    },
+    {
+      "label": "find",
+      "url": "./find"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/indexing/ind2sub.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/indexing/ind2sub.rs"
+  },
+  "gpu_residency": "You typically do **not** need to convert tensors manually. When the active provider implements the `ind2sub` hook (WGPU today), the entire conversion stays on the GPU. Otherwise RunMat gathers the inputs, performs validation on the host, and uploads the resulting subscript arrays back to the device so downstream kernels or fusion plans can continue using them without additional `gather` calls.",
+  "gpu_behavior": [
+    "When a WGPU-backed provider is active, `ind2sub` executes entirely on the GPU. The shader mirrors MATLAB's validation rules, rejecting non-integer, non-positive, or out-of-range indices with the same diagnostic messages as the CPU path. Providers that do not yet implement the hook fall back to the host implementation; after computing the subscripts RunMat uploads the results back to the active provider so downstream fused kernels continue operating on device-resident data."
+  ]
+}

@@ -1,0 +1,129 @@
+{
+  "title": "sin",
+  "category": "math/trigonometry",
+  "keywords": [
+    "sin",
+    "sine",
+    "trigonometry",
+    "gpu",
+    "elementwise",
+    "like"
+  ],
+  "summary": "Sine of scalars, vectors, matrices, complex numbers, or character arrays with MATLAB broadcasting and GPU acceleration.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Prefers provider unary_sin hooks; falls back to the host path when a provider is unavailable or cannot service the operand type."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::trigonometry::sin::tests",
+    "integration": "builtins::math::trigonometry::sin::tests::sin_gpu_provider_roundtrip"
+  },
+  "description": "`y = sin(x)` evaluates the sine of each element in `x`, using radians and preserving MATLAB\u2019s column-major layout and broadcasting rules.",
+  "behaviors": [
+    "Operates on scalars, vectors, matrices, and N-D tensors with MATLAB-compatible implicit expansion.",
+    "Logical and integer inputs are promoted to double precision before evaluation so that downstream arithmetic matches MATLAB\u2019s numeric tower.",
+    "Complex values use the analytic extension `sin(a + bi) = sin(a)cosh(b) + i\u00b7cos(a)sinh(b)` while propagating `NaN`/`Inf` components independently.",
+    "Character arrays are interpreted through their Unicode code points and return dense double arrays that mirror MATLAB\u2019s behaviour.",
+    "Appending `'like', prototype` mirrors the prototype\u2019s class and residency (host or GPU), re-uploading the result when a device prototype is supplied.",
+    "Empty inputs and singleton dimensions are preserved without introducing extraneous allocations."
+  ],
+  "examples": [
+    {
+      "description": "Computing the sine of a scalar",
+      "input": "y = sin(pi/2);",
+      "output": "y = 1"
+    },
+    {
+      "description": "Computing the sine of a vector",
+      "input": "angles = [0 pi/6 pi/4 pi/3];\nvalues = sin(angles);",
+      "output": "values = [0 0.5 0.7071 0.8660]"
+    },
+    {
+      "description": "Computing the sine of a complex number",
+      "input": "z = sin(1 + 2i);",
+      "output": "z = 3.1658 + 1.9596i"
+    },
+    {
+      "description": "Computing the sine of a matrix on a GPU",
+      "input": "A = reshape(0:5, [3 2]);\nG = gpuArray(A);\nR = sin(G);\nresult = gather(R);",
+      "output": "result =\n         0    0.1411\n    0.8415   -0.7568\n    0.9093   -0.9589"
+    },
+    {
+      "description": "Keeping results on the GPU with a `'like'` prototype",
+      "input": "proto = gpuArray.zeros(1, 1, 'single');\nangles = [0 pi/2];\ndeviceResult = sin(angles, 'like', proto);\ngathered = gather(deviceResult);",
+      "output": "gathered =\n  1x2 single\n     0     1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I use the `sin` function?",
+      "answer": "Whenever you need the elementwise sine for signals, control systems, geometry, or any workflow that depends on periodic functions across scalars, vectors, or higher-dimensional tensors."
+    },
+    {
+      "question": "Does `sin` expect radians or degrees?",
+      "answer": "Radians are required, just like in MATLAB. Use `sin(deg2rad(theta))` or the `sind` builtin if you want to work in degrees."
+    },
+    {
+      "question": "How are logical, integer, or character inputs handled?",
+      "answer": "Logical and integer inputs are promoted to double precision before evaluation, and character arrays are converted to their Unicode code points. The result is always floating-point, matching MATLAB\u2019s behaviour."
+    },
+    {
+      "question": "Can the result stay on the GPU automatically?",
+      "answer": "Yes. If your inputs are already on the GPU\u2014or you pass `'like', gpuArray(\u2026)`\u2014RunMat keeps the output on the device. When a fallback is required, the runtime re-uploads the result so downstream consumers still see a GPU tensor."
+    },
+    {
+      "question": "What happens if the provider does not implement `unary_sin`?",
+      "answer": "RunMat gathers the tensor to the host, computes `sin` with the reference implementation, and applies the requested residency rules (including `'like'` re-uploads) before returning."
+    },
+    {
+      "question": "Does `sin` support complex numbers?",
+      "answer": "Absolutely. Real and imaginary parts are handled according to the analytic extension, and NaNs/Infs propagate component-wise exactly as in MATLAB."
+    },
+    {
+      "question": "Can I use complex prototypes with `'like'`?",
+      "answer": "Not yet. Provide real-valued prototypes (host or GPU) when using `'like'`; complex prototypes raise a descriptive error so you can fall back to the default output rules."
+    }
+  ],
+  "links": [
+    {
+      "label": "cos",
+      "url": "./cos"
+    },
+    {
+      "label": "tan",
+      "url": "./tan"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/trigonometry/sin.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/sin.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. The fusion planner keeps tensors on the GPU whenever the active provider exposes the necessary kernels (such as `unary_sin`). Manual `gpuArray` / `gather` calls remain supported for MATLAB compatibility or when you need to pin residency before interacting with external code.",
+  "gpu_behavior": [
+    "With RunMat Accelerate active, tensors remain on the device and execute through the provider\u2019s `unary_sin` hook (or fused elementwise kernels) without leaving GPU memory.",
+    "If the provider declines the operation\u2014for example, when only CPU precision is available or the operand type is unsupported\u2014RunMat transparently gathers to the host, computes the result, and reapplies the requested residency rules (including `'like'` prototypes).",
+    "Fusion planning keeps neighbouring elementwise operators grouped, reducing host\u2194device transfers even when an intermediate fallback occurs."
+  ]
+}
