@@ -31,6 +31,39 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
     return "";
   }
 
+  // A simple rehype plugin to normalize matlab:runnable to matlab for highlighting
+  // while preserving the runnable state in a data attribute.
+  const rehypeRunnable = () => (tree: any) => {
+    function visit(node: any) {
+      if (node.type === 'element' && (node.tagName === 'pre' || node.tagName === 'code')) {
+        const classNames = node.properties?.className;
+        const classes = Array.isArray(classNames) ? classNames : typeof classNames === 'string' ? [classNames] : [];
+        
+        let foundRunnable = false;
+        const newClasses = classes.map((cls: any) => {
+          if (typeof cls === 'string' && cls.startsWith('language-matlab')) {
+            const spec = cls.replace(/^language-/, '');
+            const parts = spec.split(':');
+            if (parts.includes('runnable')) {
+              foundRunnable = true;
+              return 'language-matlab';
+            }
+          }
+          return cls;
+        });
+
+        if (foundRunnable) {
+          node.properties.className = newClasses;
+          node.properties['data-runnable'] = 'true';
+        }
+      }
+      if (node.children) {
+        node.children.forEach(visit);
+      }
+    }
+    visit(tree);
+  };
+
   const mergeClassNames = (...classes: Array<string | null | undefined | false>) =>
     classes.filter(Boolean).join(' ');
 
@@ -162,34 +195,18 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
         return <>{children}</>;
       }
 
-      // Strict check for the runnable language tag in class names.
       // Different plugins/configurations place the language class on the 'pre' or the 'code' child.
       const childrenArray = React.Children.toArray(children);
 
-      const getLanguageSpec = (className?: string) => {
-        if (!className) return null;
-        return className
-          .split(/\s+/)
-          .map(cls => cls.startsWith('language-') ? cls.replace(/^language-/, '') : null)
-          .find(Boolean) as string | null;
-      };
-
-      const isRunnableLanguage = (className?: string) => {
-        const spec = getLanguageSpec(className);
-        if (!spec) return false;
-        const [language, ...tags] = spec.split(':');
-        return language === 'matlab' && tags.includes('runnable');
-      };
-
-      let isRunnable = isRunnableLanguage((props as { className?: string })?.className);
+      // We rely on the rehypeRunnable plugin to have tagged runnable blocks with data-runnable.
+      let isRunnable = (props as any)['data-runnable'] === 'true';
 
       const hasCodeBlock = childrenArray.some((child) => {
         if (React.isValidElement(child)) {
           const childType = typeof child.type === 'string' ? child.type : null;
-          const childProps = child.props as { className?: string; children?: React.ReactNode };
+          const childProps = child.props as { className?: string; children?: React.ReactNode; 'data-runnable'?: string };
           
-          const childClassName = childProps?.className || '';
-          if (isRunnableLanguage(childClassName)) {
+          if (childProps['data-runnable'] === 'true') {
             isRunnable = true;
           }
 
@@ -197,6 +214,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
             return true; 
           }
           
+          const childClassName = childProps?.className || '';
           // Check for wrappers added by rehype-prism-plus or other plugins
           if (childClassName.includes('code-highlight') || 
               childClassName.includes('rehype-code-wrapper')) {
@@ -288,22 +306,6 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (/^\s*```/.test(line)) {
-        if (!inFence) {
-          // Check for "expected output" followed by 1 or 2 empty lines
-          let j = i - 1;
-          let emptyLines = 0;
-          while (j >= 0 && lines[j].trim() === "") {
-            emptyLines++;
-            j--;
-          }
-          if (j >= 0 && /expected (output|behaviour)|returns/i.test(lines[j]) && emptyLines <= 2) {
-            // Inject a Zero-Width Space (U+200B) at the start of the first line of code content
-            // This marker survives MDX/Prism transformations and can be detected in the pre component.
-            if (i + 1 < lines.length) {
-              lines[i+1] = '\u200B' + lines[i+1];
-            }
-          }
-        }
         inFence = !inFence;
         continue;
       }
@@ -336,10 +338,13 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       options={{
         mdxOptions: {
           remarkPlugins: [remarkGfm],
-          rehypePlugins: [[rehypePrism, { 
-            ignoreMissing: true,
-            defaultLanguage: 'plaintext',
-          }]],
+          rehypePlugins: [
+            rehypeRunnable,
+            [rehypePrism, { 
+              ignoreMissing: true,
+              defaultLanguage: 'plaintext',
+            }]
+          ],
           development: process.env.NODE_ENV !== 'production',
         },
       }}
