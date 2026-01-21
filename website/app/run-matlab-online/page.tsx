@@ -264,76 +264,114 @@ export default function MatlabOnlinePage() {
               supported browsers.
             </p>
           </div>
-          <div className="mx-auto mt-10 grid gap-6 md:grid-cols-2">
-            <Card className="border border-border/60 bg-[#0E1421] shadow-lg">
-              <CardHeader className="border-b border-border/60">
-                <CardTitle>Key differences from MATLAB Online</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-5 text-muted-foreground">
-                <div className="flex items-start gap-3">
-                  <span className="mt-1 inline-flex items-center justify-center text-sm text-purple-200">
-                    ✓
+          <div className="mx-auto mt-10 max-w-5xl space-y-6">
+            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/15 via-[#0E1421] to-[#0A0F1C] p-8 shadow-lg">
+              <div className="text-center space-y-2">
+                <h3 className="text-xl md:text-2xl font-semibold text-foreground">
+                  How RunMat addresses these challenges
+                </h3>
+              </div>
+              <div className="mt-8 grid gap-6 md:grid-cols-2">
+                <div className="flex items-start gap-4">
+                  <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-200">
+                    <CheckCircle className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="font-medium text-foreground">No account required.</p>
+                    <p className="font-medium text-foreground">No account required</p>
+                    <p className="text-sm text-muted-foreground">Open the sandbox and start coding immediately.</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-4">
+                  <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-200">
+                    <Clock className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <p className="font-medium text-foreground">No usage limits</p>
                     <p className="text-sm text-muted-foreground">
-                      Open the sandbox and start coding immediately.
+                      No monthly caps, no execution timeouts, no idle disconnects.
                     </p>
                   </div>
                 </div>
-                <div className="flex items-start gap-3">
-                  <span className="mt-1 inline-flex items-center justify-center text-sm text-purple-200">
-                    ✓
+                <div className="flex items-start gap-4">
+                  <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-200">
+                    <Code2 className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="font-medium text-foreground">No idle timeouts or hour caps.</p>
+                    <p className="font-medium text-foreground">Client-side execution</p>
                     <p className="text-sm text-muted-foreground">
-                      No 15-minute disconnects, no 20 hrs/month limits. Run as long as you need.
+                      Your code runs locally in your browser, not on a remote server.
                     </p>
                   </div>
                 </div>
-                <div className="flex items-start gap-3">
-                  <span className="mt-1 inline-flex items-center justify-center text-sm text-purple-200">
-                    ✓
+                <div className="flex items-start gap-4">
+                  <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-200">
+                    <Zap className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="font-medium text-foreground">Client-side execution.</p>
+                    <p className="font-medium text-foreground">GPU acceleration</p>
                     <p className="text-sm text-muted-foreground">
-                      Your code runs locally in your browser, not on a remote server. Nothing is uploaded.
+                      WebGPU-enabled browsers can accelerate computations automatically.
                     </p>
                   </div>
                 </div>
-                <div className="flex items-start gap-3">
-                  <span className="mt-1 inline-flex items-center justify-center text-sm text-purple-200">
-                    ✓
+                <div className="flex items-start gap-4">
+                  <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-200">
+                    <Info className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="font-medium text-foreground">GPU acceleration on your hardware.</p>
+                    <p className="font-medium text-foreground">Free &amp; open source</p>
                     <p className="text-sm text-muted-foreground">
-                      RunMat uses your local GPU via WebGPU. MATLAB Online runs on cloud servers and cannot access your GPU.
+                      MIT-licensed runtime, community-developed, and always accessible.
                     </p>
                   </div>
                 </div>
-                <div className="flex items-start gap-3">
-                  <span className="mt-1 inline-flex items-center justify-center text-sm text-purple-200">
-                    ✓
+                <div className="flex items-start gap-4">
+                  <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-200">
+                    <Globe className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="font-medium text-foreground">Open-source runtime.</p>
+                    <p className="font-medium text-foreground">Works offline</p>
                     <p className="text-sm text-muted-foreground">
-                      The core runtime is MIT-licensed and community-developed.
+                      After initial load, runs without internet connection.
                     </p>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-            <Card className="border border-purple-500/30 bg-[#0E1421] shadow-lg">
-              <CardHeader className="border-b border-border/60">
-                <CardTitle>Compatibility and resources</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4 text-muted-foreground">
-                <Card className="bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/40">
-                  <CardContent className="pt-6 text-sm">
+                <div className="flex items-start gap-4">
+                  <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-200">
+                    <AlertTriangle className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <p className="font-medium text-foreground">Live syntax validation</p>
+                    <p className="text-sm text-muted-foreground">Red underlines highlight errors before you run.</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-4">
+                  <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-200">
+                    <FileText className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <p className="font-medium text-foreground">Tracing &amp; logging</p>
+                    <p className="text-sm text-muted-foreground">Detailed execution trace and console output.</p>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-8 flex justify-center">
+                <Button
+                  size="lg"
+                  asChild
+                  className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200"
+                >
+                  <Link href="/sandbox">Try RunMat in Your Browser →</Link>
+                </Button>
+              </div>
+            </div>
+            <div className="grid gap-6 md:grid-cols-2">
+              <Card className="border border-border/60 bg-[#0E1421] shadow-lg">
+                <CardHeader className="border-b border-border/60">
+                  <CardTitle>Compatibility and coverage</CardTitle>
+                </CardHeader>
+                <CardContent className="text-sm text-muted-foreground space-y-3">
+                  <p>
                     RunMat focuses on MATLAB-compatible syntax for core numerical workflows. See the{" "}
                     <Link href="/docs/language-coverage" className="underline">
                       language coverage guide
@@ -343,11 +381,16 @@ export default function MatlabOnlinePage() {
                       function reference
                     </Link>{" "}
                     for current support.
-                  </CardContent>
-                </Card>
-                <Card className="bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/40">
-                  <CardContent className="pt-6 text-sm">
-                    For performance context, review the{" "}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="border border-border/60 bg-[#0E1421] shadow-lg">
+                <CardHeader className="border-b border-border/60">
+                  <CardTitle>Performance context</CardTitle>
+                </CardHeader>
+                <CardContent className="text-sm text-muted-foreground space-y-3">
+                  <p>
+                    Review the{" "}
                     <Link href="/benchmarks" className="underline">
                       benchmarks
                     </Link>{" "}
@@ -355,11 +398,11 @@ export default function MatlabOnlinePage() {
                     <Link href="/docs/how-it-works" className="underline">
                       how RunMat works
                     </Link>{" "}
-                    under the hood.
-                  </CardContent>
-                </Card>
-              </CardContent>
-            </Card>
+                    under the hood for detailed performance insights.
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
           </div>
           <div className="mx-auto mt-8 grid gap-6 md:grid-cols-3">
             <Link href="/docs" className="block">
@@ -537,6 +580,18 @@ export default function MatlabOnlinePage() {
                     </span>
                     Core matrix operations
                   </li>
+                  <li className="flex items-start gap-3 text-green-300">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-[11px] text-green-300">
+                      ✓
+                    </span>
+                    Live syntax validation
+                  </li>
+                  <li className="flex items-start gap-3 text-green-300">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-[11px] text-green-300">
+                      ✓
+                    </span>
+                    Execution tracing &amp; logging
+                  </li>
                   <li className="flex items-start gap-3 text-muted-foreground">
                     <span className="mt-0.5 inline-flex items-center justify-center text-[11px] text-muted-foreground">
                       –
@@ -653,6 +708,18 @@ export default function MatlabOnlinePage() {
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-green-300">•</span>
                   <p>Simple 2D plotting (line, scatter)</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="mt-1 text-green-300">•</span>
+                  <p>Live syntax validation (red underlines for errors)</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="mt-1 text-green-300">•</span>
+                  <p>Execution tracing and console logging</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="mt-1 text-green-300">•</span>
+                  <p>Async code execution (non-blocking runs)</p>
                 </div>
               </CardContent>
             </Card>
