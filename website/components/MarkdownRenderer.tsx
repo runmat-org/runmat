@@ -33,14 +33,18 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
 
   // A simple rehype plugin to normalize matlab:runnable to matlab for highlighting
   // while preserving the runnable state in a data attribute.
-  const rehypeRunnable = () => (tree: any) => {
-    function visit(node: any) {
-      if (node.type === 'element' && (node.tagName === 'pre' || node.tagName === 'code')) {
-        const classNames = node.properties?.className;
+  const rehypeRunnable = () => (tree: { children?: unknown[] }) => {
+    function visit(node: unknown) {
+      if (!node || typeof node !== 'object') return;
+      const n = node as Record<string, unknown>;
+
+      if (n.type === 'element' && (n.tagName === 'pre' || n.tagName === 'code')) {
+        const props = n.properties as Record<string, unknown> | undefined;
+        const classNames = props?.className;
         const classes = Array.isArray(classNames) ? classNames : typeof classNames === 'string' ? [classNames] : [];
         
         let foundRunnable = false;
-        const newClasses = classes.map((cls: any) => {
+        const newClasses = classes.map((cls: unknown) => {
           if (typeof cls === 'string' && cls.startsWith('language-matlab')) {
             const spec = cls.replace(/^language-/, '');
             const parts = spec.split(':');
@@ -52,13 +56,13 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
           return cls;
         });
 
-        if (foundRunnable) {
-          node.properties.className = newClasses;
-          node.properties['data-runnable'] = 'true';
+        if (foundRunnable && props) {
+          props.className = newClasses;
+          props['data-runnable'] = 'true';
         }
       }
-      if (node.children) {
-        node.children.forEach(visit);
+      if (Array.isArray(n.children)) {
+        n.children.forEach(visit);
       }
     }
     visit(tree);
