@@ -128,7 +128,6 @@ pub(super) fn clear_registry_for_test() {
     guard.next_id = 0;
 }
 
-
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(

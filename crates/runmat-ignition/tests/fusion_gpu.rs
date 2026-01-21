@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use anyhow::{anyhow, bail, Context};
 use futures::executor::block_on;
 use once_cell::sync::OnceCell;

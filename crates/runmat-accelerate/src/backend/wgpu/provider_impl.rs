@@ -16582,7 +16582,7 @@ impl AccelProvider for WgpuProvider {
 
             log::trace!("wgpu download map_async success id={}", h.buffer_id);
             map_result.map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
-            return finish_readback(staging, size_bytes);
+            finish_readback(staging, size_bytes)
         }
     }
     fn free(&self, h: &GpuTensorHandle) -> Result<()> {

@@ -148,7 +148,8 @@ fn to_signature_out(b: &BuiltinFunction) -> BuiltinSignatureOut {
 
 fn main() {
     // Touch a symbol from the lib to force link so inventory items are pulled in
-    let _touch: fn(&str, &[Value]) -> Result<Value, String> = runmat_runtime::call_builtin;
+    let _touch: fn(&str, &[Value]) -> Result<Value, runmat_runtime::RuntimeError> =
+        runmat_runtime::call_builtin;
     let args = Args::parse();
     use std::collections::{BTreeMap, BTreeSet};
     // Parse DOC_MD frontmatter from inventory texts if present

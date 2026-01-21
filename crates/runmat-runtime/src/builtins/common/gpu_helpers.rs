@@ -25,7 +25,7 @@ pub async fn gather_tensor_async(
     match gathered {
         Value::Tensor(t) => Ok(t),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
-            .map_err(|e| build_runtime_error(format!("gather: {e}")).build().into()),
+            .map_err(|e| build_runtime_error(format!("gather: {e}")).build()),
         Value::LogicalArray(la) => {
             let data: Vec<f64> = la
                 .data
@@ -33,13 +33,11 @@ pub async fn gather_tensor_async(
                 .map(|&b| if b != 0 { 1.0 } else { 0.0 })
                 .collect();
             Tensor::new(data, la.shape.clone())
-                .map_err(|e| build_runtime_error(format!("gather: {e}")).build().into())
+                .map_err(|e| build_runtime_error(format!("gather: {e}")).build())
         }
-        other => Err(
-            build_runtime_error(format!("gather: unexpected value kind {other:?}"))
-                .build()
-                .into(),
-        ),
+        other => {
+            Err(build_runtime_error(format!("gather: unexpected value kind {other:?}")).build())
+        }
     }
 }
 

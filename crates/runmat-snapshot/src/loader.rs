@@ -530,8 +530,7 @@ impl SnapshotLoader {
                         Err(runmat_async::runtime_error(
                             "Function not available in current runtime",
                         )
-                        .build()
-                        .into())
+                        .build())
                     })
                 });
             }

@@ -1204,25 +1204,27 @@ pub(crate) mod tests {
     fn fspecial_laplacian_alpha() {
         let args = vec![Value::from(0.2)];
         let result = block_on(fspecial_builtin(Value::from("laplacian"), args)).unwrap();
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
-                let expected = [
-                    0.16666666666666669,
-                    0.6666666666666667,
-                    0.16666666666666669,
-                    0.6666666666666667,
-                    -3.3333333333333335,
-                    0.6666666666666667,
-                    0.16666666666666669,
-                    0.6666666666666667,
-                    0.16666666666666669,
-                ];
-                for (idx, value) in t.data.iter().enumerate() {
-                    assert_close(*value, expected[idx], 1e-12);
-                }
+        let t = match result {
+            Value::Tensor(t) => t,
+            Value::GpuTensor(h) => {
+                crate::builtins::common::test_support::gather(Value::GpuTensor(h)).expect("gather")
             }
             other => panic!("expected tensor, got {other:?}"),
+        };
+        assert_eq!(t.shape, vec![3, 3]);
+        let expected = [
+            0.16666666666666669,
+            0.6666666666666667,
+            0.16666666666666669,
+            0.6666666666666667,
+            -3.3333333333333335,
+            0.6666666666666667,
+            0.16666666666666669,
+            0.6666666666666667,
+            0.16666666666666669,
+        ];
+        for (idx, value) in t.data.iter().enumerate() {
+            assert_close(*value, expected[idx], 1e-12);
         }
     }
 
@@ -1230,14 +1232,16 @@ pub(crate) mod tests {
     #[test]
     fn fspecial_unsharp_default() {
         let result = block_on(fspecial_builtin(Value::from("unsharp"), Vec::new())).unwrap();
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
-                let sum: f64 = t.data.iter().sum();
-                assert_close(sum, 1.0, 1e-12);
+        let t = match result {
+            Value::Tensor(t) => t,
+            Value::GpuTensor(h) => {
+                crate::builtins::common::test_support::gather(Value::GpuTensor(h)).expect("gather")
             }
             other => panic!("expected tensor, got {other:?}"),
-        }
+        };
+        assert_eq!(t.shape, vec![3, 3]);
+        let sum: f64 = t.data.iter().sum();
+        assert_close(sum, 1.0, 1e-12);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -256,15 +256,15 @@ impl<'a, 'ast> Visit<'ast> for BuiltinReturnCollector<'a> {
         }
 
         // Coerce the *function body* tail expression (only the outermost block).
-        if let Some(syn::Stmt::Expr(expr)) = i.block.stmts.last() {
-            if should_wrap(expr) {
-                let replacement = wrap_expr(self.content, expr.span(), self.line_offsets);
-                self.edits.push(Edit {
-                    start: replacement.0,
-                    end: replacement.1,
-                    replacement: replacement.2,
-                });
-            }
+        if let Some(syn::Stmt::Expr(expr)) = i.block.stmts.last()
+            && should_wrap(expr)
+        {
+            let replacement = wrap_expr(self.content, expr.span(), self.line_offsets);
+            self.edits.push(Edit {
+                start: replacement.0,
+                end: replacement.1,
+                replacement: replacement.2,
+            });
         }
 
         // Visit nested expressions so we catch `return ...;` and `Err(...)` anywhere
@@ -275,17 +275,17 @@ impl<'a, 'ast> Visit<'ast> for BuiltinReturnCollector<'a> {
     }
 
     fn visit_expr_return(&mut self, i: &'ast syn::ExprReturn) {
-        if self.coerce_returns && self.in_builtin {
-            if let Some(inner) = &i.expr {
-                if should_wrap(inner) {
-                    let replacement = wrap_expr(self.content, inner.span(), self.line_offsets);
-                    self.edits.push(Edit {
-                        start: replacement.0,
-                        end: replacement.1,
-                        replacement: replacement.2,
-                    });
-                }
-            }
+        if self.coerce_returns
+            && self.in_builtin
+            && let Some(inner) = &i.expr
+            && should_wrap(inner)
+        {
+            let replacement = wrap_expr(self.content, inner.span(), self.line_offsets);
+            self.edits.push(Edit {
+                start: replacement.0,
+                end: replacement.1,
+                replacement: replacement.2,
+            });
         }
         syn::visit::visit_expr_return(self, i);
     }
@@ -294,23 +294,21 @@ impl<'a, 'ast> Visit<'ast> for BuiltinReturnCollector<'a> {
         if self.coerce_returns && self.in_builtin {
             // Convert `Err(<string-ish>)` into `Err((<string-ish>).into())` so BuiltinResult
             // functions return `RuntimeControlFlow::Error(...)` instead of `String`.
-            if let syn::Expr::Path(p) = i.func.as_ref() {
-                if let Some(seg) = p.path.segments.last() {
-                    if seg.ident == "Err" {
-                        if let Some(arg0) = i.args.first() {
-                            let span = arg0.span();
-                            let start = span_start(span, self.line_offsets);
-                            let end = span_end(span, self.line_offsets);
-                            let original = self.content.get(start..end).unwrap_or("").to_string();
-                            let replacement = format!("({original}).into()");
-                            self.edits.push(Edit {
-                                start,
-                                end,
-                                replacement,
-                            });
-                        }
-                    }
-                }
+            if let syn::Expr::Path(p) = i.func.as_ref()
+                && let Some(seg) = p.path.segments.last()
+                && seg.ident == "Err"
+                && let Some(arg0) = i.args.first()
+            {
+                let span = arg0.span();
+                let start = span_start(span, self.line_offsets);
+                let end = span_end(span, self.line_offsets);
+                let original = self.content.get(start..end).unwrap_or("").to_string();
+                let replacement = format!("({original}).into()");
+                self.edits.push(Edit {
+                    start,
+                    end,
+                    replacement,
+                });
             }
         }
         syn::visit::visit_expr_call(self, i);
@@ -380,10 +378,10 @@ fn should_wrap(expr: &syn::Expr) -> bool {
         syn::Expr::ForLoop(_) | syn::Expr::While(_) | syn::Expr::Loop(_) => false,
         // Don't wrap Ok(...) / Err(...); those are already correct.
         syn::Expr::Call(call) => {
-            if let syn::Expr::Path(p) = call.func.as_ref() {
-                if let Some(seg) = p.path.segments.last() {
-                    return seg.ident != "Ok" && seg.ident != "Err";
-                }
+            if let syn::Expr::Path(p) = call.func.as_ref()
+                && let Some(seg) = p.path.segments.last()
+            {
+                return seg.ident != "Ok" && seg.ident != "Err";
             }
             true
         }
@@ -391,14 +389,12 @@ fn should_wrap(expr: &syn::Expr) -> bool {
         syn::Expr::Path(_) => true,
         syn::Expr::MethodCall(mc) => {
             // If it's already `...map_err(Into::into)`, don't wrap again.
-            if mc.method == "map_err" {
-                if let Some(arg) = mc.args.first() {
-                    if let syn::Expr::Path(p) = arg {
-                        if p.path.segments.iter().any(|s| s.ident == "Into") {
-                            return false;
-                        }
-                    }
-                }
+            if mc.method == "map_err"
+                && let Some(arg) = mc.args.first()
+                && let syn::Expr::Path(p) = arg
+                && p.path.segments.iter().any(|s| s.ident == "Into")
+            {
+                return false;
             }
             true
         }
@@ -410,23 +406,21 @@ fn should_wrap(expr: &syn::Expr) -> bool {
 fn should_wrap_result_expr(expr: &syn::Expr) -> bool {
     match expr {
         syn::Expr::Call(call) => {
-            if let syn::Expr::Path(p) = call.func.as_ref() {
-                if let Some(seg) = p.path.segments.last() {
-                    return seg.ident != "Ok" && seg.ident != "Err";
-                }
+            if let syn::Expr::Path(p) = call.func.as_ref()
+                && let Some(seg) = p.path.segments.last()
+            {
+                return seg.ident != "Ok" && seg.ident != "Err";
             }
             true
         }
         syn::Expr::MethodCall(mc) => {
             // If it's already `...map_err(Into::into)`, don't wrap again.
-            if mc.method == "map_err" {
-                if let Some(arg) = mc.args.first() {
-                    if let syn::Expr::Path(p) = arg {
-                        if p.path.segments.iter().any(|s| s.ident == "Into") {
-                            return false;
-                        }
-                    }
-                }
+            if mc.method == "map_err"
+                && let Some(arg) = mc.args.first()
+                && let syn::Expr::Path(p) = arg
+                && p.path.segments.iter().any(|s| s.ident == "Into")
+            {
+                return false;
             }
             true
         }
@@ -486,31 +480,29 @@ impl<'a, 'ast> Visit<'ast> for BadControlFlowStringifyFixer<'a> {
     }
 
     fn visit_expr_try(&mut self, i: &'ast syn::ExprTry) {
-        if self.in_builtin {
+        if self.in_builtin
+            && let syn::Expr::MethodCall(mc) = i.expr.as_ref()
+            && mc.method == "map_err"
+            && mc.args.len() == 1
+            && let syn::Expr::Closure(cl) = mc.args.first().unwrap()
+            && closure_converts_runtime_control_flow_to_string(cl)
+        {
             // Match: `<recv>.map_err(<closure>)?` where closure is `|e: RuntimeControlFlow| e.to_string()/String::from(e)`
-            if let syn::Expr::MethodCall(mc) = i.expr.as_ref() {
-                if mc.method == "map_err" && mc.args.len() == 1 {
-                    if let syn::Expr::Closure(cl) = mc.args.first().unwrap() {
-                        if closure_converts_runtime_control_flow_to_string(cl) {
-                            let start = span_start(i.span(), self.line_offsets);
-                            let end = span_end(i.span(), self.line_offsets);
-                            let recv_span = mc.receiver.span();
-                            let recv_start = span_start(recv_span, self.line_offsets);
-                            let recv_end = span_end(recv_span, self.line_offsets);
-                            let recv_src = self
-                                .content
-                                .get(recv_start..recv_end)
-                                .unwrap_or("")
-                                .to_string();
-                            self.edits.push(Edit {
-                                start,
-                                end,
-                                replacement: format!("{recv_src}?"),
-                            });
-                        }
-                    }
-                }
-            }
+            let start = span_start(i.span(), self.line_offsets);
+            let end = span_end(i.span(), self.line_offsets);
+            let recv_span = mc.receiver.span();
+            let recv_start = span_start(recv_span, self.line_offsets);
+            let recv_end = span_end(recv_span, self.line_offsets);
+            let recv_src = self
+                .content
+                .get(recv_start..recv_end)
+                .unwrap_or("")
+                .to_string();
+            self.edits.push(Edit {
+                start,
+                end,
+                replacement: format!("{recv_src}?"),
+            });
         }
         syn::visit::visit_expr_try(self, i);
     }
@@ -652,45 +644,45 @@ impl<'a, 'ast> Visit<'ast> for LocalResultPromoter<'a> {
     fn visit_expr_method_call(&mut self, i: &'ast syn::ExprMethodCall) {
         // Detect `.map_err(Into::into)` call sites to local helper functions.
         // Only consider wrappers occurring inside `#[runtime_builtin]` functions to keep this conservative.
-        if self.in_builtin && i.method == "map_err" && i.args.len() == 1 {
-            if let syn::Expr::Path(p) = i.args.first().unwrap() {
-                if p.path.segments.iter().any(|s| s.ident == "Into") {
-                    // receiver can be `foo(...)` or `(foo(...))`
-                    let receiver = i.receiver.as_ref();
-                    let call_expr = match receiver {
-                        syn::Expr::Call(c) => Some(c),
-                        syn::Expr::Paren(p) => match p.expr.as_ref() {
-                            syn::Expr::Call(c) => Some(c),
-                            _ => None,
-                        },
-                        _ => None,
-                    };
-                    if let Some(call) = call_expr {
-                        if let syn::Expr::Path(func_path) = call.func.as_ref() {
-                            if let Some(seg) = func_path.path.segments.last() {
-                                let name = seg.ident.to_string();
-                                if self.fns.iter().any(|f| f.name == name) {
-                                    self.promote.insert(name);
-                                    // Replace the whole method call with just the receiver source.
-                                    let start = span_start(i.span(), self.line_offsets);
-                                    let end = span_end(i.span(), self.line_offsets);
-                                    let recv_span = receiver.span();
-                                    let recv_start = span_start(recv_span, self.line_offsets);
-                                    let recv_end = span_end(recv_span, self.line_offsets);
-                                    let recv_src = self
-                                        .content
-                                        .get(recv_start..recv_end)
-                                        .unwrap_or("")
-                                        .to_string();
-                                    self.edits.push(Edit {
-                                        start,
-                                        end,
-                                        replacement: recv_src,
-                                    });
-                                }
-                            }
-                        }
-                    }
+        if self.in_builtin
+            && i.method == "map_err"
+            && i.args.len() == 1
+            && let syn::Expr::Path(p) = i.args.first().unwrap()
+            && p.path.segments.iter().any(|s| s.ident == "Into")
+        {
+            // receiver can be `foo(...)` or `(foo(...))`
+            let receiver = i.receiver.as_ref();
+            let call_expr = match receiver {
+                syn::Expr::Call(c) => Some(c),
+                syn::Expr::Paren(p) => match p.expr.as_ref() {
+                    syn::Expr::Call(c) => Some(c),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(call) = call_expr
+                && let syn::Expr::Path(func_path) = call.func.as_ref()
+                && let Some(seg) = func_path.path.segments.last()
+            {
+                let name = seg.ident.to_string();
+                if self.fns.iter().any(|f| f.name == name) {
+                    self.promote.insert(name);
+                    // Replace the whole method call with just the receiver source.
+                    let start = span_start(i.span(), self.line_offsets);
+                    let end = span_end(i.span(), self.line_offsets);
+                    let recv_span = receiver.span();
+                    let recv_start = span_start(recv_span, self.line_offsets);
+                    let recv_end = span_end(recv_span, self.line_offsets);
+                    let recv_src = self
+                        .content
+                        .get(recv_start..recv_end)
+                        .unwrap_or("")
+                        .to_string();
+                    self.edits.push(Edit {
+                        start,
+                        end,
+                        replacement: recv_src,
+                    });
                 }
             }
         }
@@ -700,25 +692,22 @@ impl<'a, 'ast> Visit<'ast> for LocalResultPromoter<'a> {
 
     fn visit_expr_call(&mut self, i: &'ast syn::ExprCall) {
         // Inside promoted helper: convert `Err(<string-ish>)` -> `Err((<string-ish>).into())`.
-        if self.in_promoted_fn.is_some() {
-            if let syn::Expr::Path(p) = i.func.as_ref() {
-                if let Some(seg) = p.path.segments.last() {
-                    if seg.ident == "Err" {
-                        if let Some(arg0) = i.args.first() {
-                            let span = arg0.span();
-                            let start = span_start(span, self.line_offsets);
-                            let end = span_end(span, self.line_offsets);
-                            let original = self.content.get(start..end).unwrap_or("").to_string();
-                            let replacement = format!("({original}).into()");
-                            self.edits.push(Edit {
-                                start,
-                                end,
-                                replacement,
-                            });
-                        }
-                    }
-                }
-            }
+        if self.in_promoted_fn.is_some()
+            && let syn::Expr::Path(p) = i.func.as_ref()
+            && let Some(seg) = p.path.segments.last()
+            && seg.ident == "Err"
+            && let Some(arg0) = i.args.first()
+        {
+            let span = arg0.span();
+            let start = span_start(span, self.line_offsets);
+            let end = span_end(span, self.line_offsets);
+            let original = self.content.get(start..end).unwrap_or("").to_string();
+            let replacement = format!("({original}).into()");
+            self.edits.push(Edit {
+                start,
+                end,
+                replacement,
+            });
         }
         syn::visit::visit_expr_call(self, i);
     }

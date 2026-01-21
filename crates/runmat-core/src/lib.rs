@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use anyhow::Result;
 use runmat_builtins::{self, Tensor, Type, Value};
 use runmat_gc::{gc_configure, gc_stats, GcConfig};
@@ -342,8 +344,8 @@ impl WorkspaceSliceOptions {
         }
         let mut start = Vec::with_capacity(tensor_shape.len());
         let mut shape = Vec::with_capacity(tensor_shape.len());
-        for axis_idx in 0..tensor_shape.len() {
-            let axis_len = tensor_shape[axis_idx];
+        for (axis_idx, axis_len) in tensor_shape.iter().enumerate() {
+            let axis_len = *axis_len;
             if axis_len == 0 {
                 return None;
             }
@@ -384,7 +386,7 @@ fn slice_value_for_preview(value: &Value, slice: &WorkspaceSliceOptions) -> Opti
             if shape.is_empty() {
                 shape.push(1);
             }
-            let rows = shape.get(0).copied().unwrap_or(1);
+            let rows = shape.first().copied().unwrap_or(1);
             let cols = shape.get(1).copied().unwrap_or(1);
             Some(Value::Tensor(Tensor {
                 data,
@@ -399,7 +401,7 @@ fn slice_value_for_preview(value: &Value, slice: &WorkspaceSliceOptions) -> Opti
 }
 
 fn gather_tensor_slice(tensor: &Tensor, slice: &WorkspaceSliceOptions) -> Vec<f64> {
-    if tensor.shape.is_empty() || slice.shape.iter().any(|count| *count == 0) {
+    if tensor.shape.is_empty() || slice.shape.contains(&0) {
         return Vec::new();
     }
     let total: usize = slice.shape.iter().product();

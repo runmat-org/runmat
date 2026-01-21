@@ -582,7 +582,10 @@ pub(crate) mod tests {
         crate::workspace::test_guard()
     }
 
-    fn test_guard() -> (std::sync::MutexGuard<'static, ()>, std::sync::MutexGuard<'static, ()>) {
+    fn test_guard() -> (
+        std::sync::MutexGuard<'static, ()>,
+        std::sync::MutexGuard<'static, ()>,
+    ) {
         let workspace = workspace_guard();
         let fs_lock = REPL_FS_TEST_LOCK
             .lock()

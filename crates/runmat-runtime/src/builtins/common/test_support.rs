@@ -66,12 +66,10 @@ pub fn gather(value: Value) -> Result<Tensor, crate::RuntimeError> {
     };
 
     #[cfg(not(target_arch = "wasm32"))]
-    let gathered = std::thread::spawn(move || {
+    let gathered = {
         let _guard = runmat_accelerate_api::ThreadProviderGuard::set(provider);
-        block_on(crate::dispatcher::gather_if_needed_async(&value))
-    })
-    .join()
-    .map_err(|_| build_runtime_error("gather: join error").build())??;
+        block_on(crate::dispatcher::gather_if_needed_async(&value))?
+    };
 
     #[cfg(target_arch = "wasm32")]
     let gathered = block_on(crate::dispatcher::gather_if_needed_async(&value))?;

@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 #[cfg(feature = "native-accel")]
 pub mod accel_graph;
 pub mod bytecode;

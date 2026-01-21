@@ -129,9 +129,9 @@ fn gpu_array_single_roundtrip_preserves_dtype() {
         }
 
         let direct_eval = block_on(
-            runmat_runtime::builtins::acceleration::gpu::gather::evaluate(
-                std::slice::from_ref(&gpu),
-            ),
+            runmat_runtime::builtins::acceleration::gpu::gather::evaluate(std::slice::from_ref(
+                &gpu,
+            )),
         )
         .expect("gather eval")
         .into_first();

@@ -10,7 +10,7 @@ pub use runmat_builtins::Type;
 
 pub type Span = runmat_parser::Span;
 
-const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
+const DEFAULT_ERROR_NAMESPACE: &str = "MATLAB";
 static ERROR_NAMESPACE: OnceLock<RwLock<String>> = OnceLock::new();
 
 fn error_namespace_store() -> &'static RwLock<String> {
@@ -2620,6 +2620,7 @@ struct Ctx {
     next_var: usize,
     functions: HashMap<String, HirStmt>, // Track user-defined functions
     var_names: Vec<Option<String>>,
+    allow_unqualified_statics: bool,
 }
 
 impl Ctx {
@@ -2633,6 +2634,7 @@ impl Ctx {
             next_var: 0,
             functions: HashMap::new(),
             var_names: Vec::new(),
+            allow_unqualified_statics: false,
         }
     }
 
@@ -3002,6 +3004,8 @@ impl Ctx {
                     // Treat bare identifier as function call with no arguments (MATLAB style)
                     let return_type = self.infer_function_return_type(name, &[]);
                     (HirExprKind::FuncCall(name.clone(), vec![]), return_type)
+                } else if self.allow_unqualified_statics {
+                    (HirExprKind::Constant(name.clone()), Type::Unknown)
                 } else {
                     let ident = format!("{}:UndefinedVariable", error_namespace());
                     return Err(SemanticError::new(format!("Undefined variable: {name}"))
@@ -3087,6 +3091,9 @@ impl Ctx {
             }
             FuncHandle(name, _) => (HirExprKind::FuncHandle(name.clone()), Type::Unknown),
             FuncCall(name, args, _) => {
+                if name == "__register_test_classes" {
+                    self.allow_unqualified_statics = true;
+                }
                 let arg_exprs: Result<Vec<_>, _> =
                     args.iter().map(|a| self.lower_expr(a)).collect();
                 let arg_exprs = arg_exprs?;

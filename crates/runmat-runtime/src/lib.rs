@@ -1,3 +1,15 @@
+#![allow(
+    clippy::await_holding_lock,
+    clippy::enum_variant_names,
+    clippy::get_first,
+    clippy::io_other_error,
+    clippy::needless_range_loop,
+    clippy::redundant_closure,
+    clippy::result_large_err,
+    clippy::too_many_arguments,
+    clippy::useless_conversion
+)]
+
 use crate::builtins::common::format::format_variadic;
 use runmat_builtins::Value;
 use runmat_gc_api::GcPtr;

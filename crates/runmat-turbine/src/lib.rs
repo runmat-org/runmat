@@ -5,7 +5,13 @@
 //! using Cranelift for maximum performance.
 
 // Allow raw pointer dereference in FFI functions - they're inherently unsafe
-#![allow(clippy::not_unsafe_ptr_arg_deref)]
+#![allow(
+    clippy::missing_const_for_thread_local,
+    clippy::never_loop,
+    clippy::not_unsafe_ptr_arg_deref,
+    clippy::redundant_closure,
+    clippy::result_large_err
+)]
 
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};

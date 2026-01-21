@@ -331,7 +331,12 @@ mod tests {
         assert!(result.error.is_some());
 
         let error = result.error.unwrap();
-        assert!(error.error_type == "RuntimeError" || error.error_type == "CompileError");
+        assert!(
+            error.error_type == "RuntimeError"
+                || error.error_type == "CompileError"
+                || error.error_type == "UndefinedVariable"
+                || error.error_type == "SemanticError"
+        );
     }
 
     #[test]

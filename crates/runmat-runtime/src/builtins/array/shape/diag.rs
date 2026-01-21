@@ -64,7 +64,9 @@ async fn diag_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     match gathered {
         Value::Tensor(tensor) => diag_tensor_value(tensor, offset).map(Value::Tensor),
         Value::LogicalArray(array) => diag_logical_value(array, offset).map(Value::LogicalArray),
-        Value::ComplexTensor(tensor) => diag_complex_value(tensor, offset).map(Value::ComplexTensor),
+        Value::ComplexTensor(tensor) => {
+            diag_complex_value(tensor, offset).map(Value::ComplexTensor)
+        }
         other => Err(diag_error(
             MESSAGE_ID_INVALID_INPUT,
             format!("diag: unsupported input {other:?}"),
@@ -168,12 +170,7 @@ fn matrix_dims(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
     Ok((rows, cols))
 }
 
-fn diag_matrix_from_vector<T: Copy>(
-    data: &[T],
-    len: usize,
-    offset: isize,
-    zero: T,
-) -> Vec<T> {
+fn diag_matrix_from_vector<T: Copy>(data: &[T], len: usize, offset: isize, zero: T) -> Vec<T> {
     let shift = offset.unsigned_abs();
     let size = len + shift;
     let mut out = vec![zero; size * size];
@@ -188,12 +185,7 @@ fn diag_matrix_from_vector<T: Copy>(
     out
 }
 
-fn diag_vector_from_matrix<T: Copy>(
-    data: &[T],
-    rows: usize,
-    cols: usize,
-    offset: isize,
-) -> Vec<T> {
+fn diag_vector_from_matrix<T: Copy>(data: &[T], rows: usize, cols: usize, offset: isize) -> Vec<T> {
     let shift = offset.unsigned_abs();
     let (start_row, start_col) = if offset >= 0 {
         (0usize, shift)

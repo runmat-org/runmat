@@ -439,7 +439,7 @@ fn log_fusion_span_window(
 }
 
 // Namespace used for error identifiers (e.g., "RunMat:..." or custom override)
-pub const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
+pub const DEFAULT_ERROR_NAMESPACE: &str = "MATLAB";
 
 type VmResult<T> = Result<T, RuntimeError>;
 
@@ -1441,7 +1441,7 @@ pub async fn interpret_with_vars(
     current_function_name: Option<&str>,
 ) -> VmResult<InterpreterOutcome> {
     let state = InterpreterState::new(bytecode.clone(), initial_vars, current_function_name);
-    match run_interpreter(state, initial_vars).await {
+    match Box::pin(run_interpreter(state, initial_vars)).await {
         Ok(outcome) => Ok(outcome),
         Err(err) => {
             let err = attach_span_from_pc(bytecode, err);
@@ -1798,7 +1798,7 @@ async fn run_interpreter(
                             context.functions.insert(k.clone(), v.clone());
                         }
                         let func_result_vars =
-                            match interpret_function(&func_bytecode, func_vars).await {
+                            match Box::pin(interpret_function(&func_bytecode, func_vars)).await {
                                 Ok(v) => v,
                                 Err(e) => vm_bail!(e),
                             };
@@ -3071,7 +3071,8 @@ async fn run_interpreter(
                             }
                             if path.last().map(|s| s.as_str()) == Some(name.as_str()) {
                                 let qual = path.join(".");
-                                let qual_args = accel_prepare_args(&qual, &prepared_primary).await?;
+                                let qual_args =
+                                    accel_prepare_args(&qual, &prepared_primary).await?;
                                 match call_builtin_vm!(&qual, &qual_args) {
                                     Ok(value) => specific_matches.push((qual, qual_args, value)),
                                     Err(_err) => {}
@@ -3108,7 +3109,8 @@ async fn run_interpreter(
                                 }
                                 qual.push('.');
                                 qual.push_str(&name);
-                                let qual_args = accel_prepare_args(&qual, &prepared_primary).await?;
+                                let qual_args =
+                                    accel_prepare_args(&qual, &prepared_primary).await?;
                                 match call_builtin_vm!(&qual, &qual_args) {
                                     Ok(value) => wildcard_matches.push((qual, qual_args, value)),
                                     Err(_err) => {}
@@ -3764,10 +3766,11 @@ async fn run_interpreter(
                 for (k, v) in func_bytecode.functions.iter() {
                     context.functions.insert(k.clone(), v.clone());
                 }
-                let func_result_vars = match interpret_function(&func_bytecode, func_vars).await {
-                    Ok(v) => v,
-                    Err(e) => vm_bail!(e),
-                };
+                let func_result_vars =
+                    match Box::pin(interpret_function(&func_bytecode, func_vars)).await {
+                        Ok(v) => v,
+                        Err(e) => vm_bail!(e),
+                    };
                 if let Some(output_var_id) = func.outputs.first() {
                     let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
                     if local_output_index < func_result_vars.len() {
@@ -3937,10 +3940,11 @@ async fn run_interpreter(
                 for (k, v) in func_bytecode.functions.iter() {
                     context.functions.insert(k.clone(), v.clone());
                 }
-                let func_result_vars = match interpret_function(&func_bytecode, func_vars).await {
-                    Ok(v) => v,
-                    Err(e) => vm_bail!(e),
-                };
+                let func_result_vars =
+                    match Box::pin(interpret_function(&func_bytecode, func_vars)).await {
+                        Ok(v) => v,
+                        Err(e) => vm_bail!(e),
+                    };
                 if let Some(output_var_id) = func.outputs.first() {
                     let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
                     if local_output_index < func_result_vars.len() {
@@ -4466,14 +4470,13 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "meshgrid" {
-                    let eval = match runmat_runtime::builtins::array::creation::meshgrid::evaluate(
-                        &args,
-                    )
-                    .await
-                    {
-                        Ok(eval) => eval,
-                        Err(err) => vm_bail!(err),
-                    };
+                    let eval =
+                        match runmat_runtime::builtins::array::creation::meshgrid::evaluate(&args)
+                            .await
+                        {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
                     if out_count == 0 {
                         continue;
                     }
@@ -5314,15 +5317,16 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "sortrows" && !args.is_empty() {
-                    let eval = match runmat_runtime::builtins::array::sorting_sets::sortrows::evaluate(
-                        args[0].clone(),
-                        &args[1..],
-                    )
-                    .await
-                    {
-                        Ok(eval) => eval,
-                        Err(err) => vm_bail!(err),
-                    };
+                    let eval =
+                        match runmat_runtime::builtins::array::sorting_sets::sortrows::evaluate(
+                            args[0].clone(),
+                            &args[1..],
+                        )
+                        .await
+                        {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
                     if out_count == 0 {
                         continue;
                     }
@@ -5339,16 +5343,17 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "ismember" && args.len() >= 2 {
-                    let eval = match runmat_runtime::builtins::array::sorting_sets::ismember::evaluate(
-                        args[0].clone(),
-                        args[1].clone(),
-                        &args[2..],
-                    )
-                    .await
-                    {
-                        Ok(eval) => eval,
-                        Err(err) => vm_bail!(err),
-                    };
+                    let eval =
+                        match runmat_runtime::builtins::array::sorting_sets::ismember::evaluate(
+                            args[0].clone(),
+                            args[1].clone(),
+                            &args[2..],
+                        )
+                        .await
+                        {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
                     if out_count == 0 {
                         continue;
                     }
@@ -5367,16 +5372,17 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "intersect" && args.len() >= 2 {
-                    let eval = match runmat_runtime::builtins::array::sorting_sets::intersect::evaluate(
-                        args[0].clone(),
-                        args[1].clone(),
-                        &args[2..],
-                    )
-                    .await
-                    {
-                        Ok(eval) => eval,
-                        Err(err) => vm_bail!(err),
-                    };
+                    let eval =
+                        match runmat_runtime::builtins::array::sorting_sets::intersect::evaluate(
+                            args[0].clone(),
+                            args[1].clone(),
+                            &args[2..],
+                        )
+                        .await
+                        {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
                     if out_count == 0 {
                         continue;
                     }
@@ -5535,15 +5541,16 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "unique" && !args.is_empty() {
-                    let eval = match runmat_runtime::builtins::array::sorting_sets::unique::evaluate(
-                        args[0].clone(),
-                        &args[1..],
-                    )
-                    .await
-                    {
-                        Ok(eval) => eval,
-                        Err(err) => vm_bail!(err),
-                    };
+                    let eval =
+                        match runmat_runtime::builtins::array::sorting_sets::unique::evaluate(
+                            args[0].clone(),
+                            &args[1..],
+                        )
+                        .await
+                        {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
                     if out_count == 0 {
                         continue;
                     }
@@ -5778,7 +5785,7 @@ async fn run_interpreter(
                             &[
                                 Value::Object(obj),
                                 Value::String("subsref".to_string()),
-                                Value::String("()".to_string()),
+                                Value::String("{}".to_string()),
                                 Value::Cell(cell),
                             ],
                         ) {
@@ -5835,7 +5842,7 @@ async fn run_interpreter(
                             &[
                                 Value::Object(obj),
                                 Value::String("subsref".to_string()),
-                                Value::String("()".to_string()),
+                                Value::String("{}".to_string()),
                                 Value::Cell(cell),
                             ],
                         ) {
@@ -9440,7 +9447,7 @@ async fn run_interpreter(
                             &[
                                 Value::Object(obj),
                                 Value::String("subsref".to_string()),
-                                Value::String("()".to_string()),
+                                Value::String("{}".to_string()),
                                 cell,
                             ],
                         ) {
