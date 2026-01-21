@@ -413,7 +413,7 @@ impl RunMatWasm {
     }
 
     #[wasm_bindgen(js_name = materializeVariable)]
-    pub fn materialize_variable(
+    pub async fn materialize_variable(
         &self,
         selector: JsValue,
         options: JsValue,
@@ -425,6 +425,7 @@ impl RunMatWasm {
             let mut session = self.session.borrow_mut();
             let value = session
                 .materialize_variable(target, opts)
+                .await
                 .map_err(|err| js_error(&format!("materializeVariable failed: {err}")))?;
             let payload = MaterializedVariablePayload::from(value);
             return serde_wasm_bindgen::to_value(&payload).map_err(|err| {

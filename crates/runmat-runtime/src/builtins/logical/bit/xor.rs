@@ -401,6 +401,11 @@ pub(crate) mod tests {
     fn run_xor(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         block_on(super::xor_builtin(lhs, rhs))
     }
+
+    #[cfg(feature = "wgpu")]
+    fn run_xor_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+        block_on(xor_host(lhs, rhs))
+    }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::IntValue;

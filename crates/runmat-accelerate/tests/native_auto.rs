@@ -1,5 +1,6 @@
 use std::sync::Once;
 
+use futures::executor::block_on;
 use runmat_accelerate::simple_provider::register_inprocess_provider;
 use runmat_accelerate::{prepare_builtin_args, promote_binary, BinaryOp};
 use runmat_builtins::{Tensor, Value};
@@ -37,6 +38,6 @@ fn gather_occurs_for_sink_builtins() {
     let tensor = make_tensor(4);
     let value = Value::Tensor(tensor.clone());
     let (gpu, _) = promote_binary(BinaryOp::Elementwise, &value, &value).expect("promote");
-    let prepared = prepare_builtin_args("disp", &[gpu]).expect("prepare");
+    let prepared = block_on(prepare_builtin_args("disp", &[gpu])).expect("prepare");
     assert!(matches!(prepared.as_slice(), [Value::Tensor(_)]));
 }

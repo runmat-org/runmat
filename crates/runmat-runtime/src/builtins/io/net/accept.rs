@@ -50,8 +50,19 @@ struct TcpClientRegistry {
 
 static TCP_CLIENT_REGISTRY: OnceCell<Mutex<TcpClientRegistry>> = OnceCell::new();
 
+#[cfg(test)]
+static TCP_CLIENT_TEST_GUARD: OnceCell<Mutex<()>> = OnceCell::new();
+
 fn client_registry() -> &'static Mutex<TcpClientRegistry> {
     TCP_CLIENT_REGISTRY.get_or_init(|| Mutex::new(TcpClientRegistry::default()))
+}
+
+#[cfg(test)]
+pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+    TCP_CLIENT_TEST_GUARD
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap()
 }
 
 pub(crate) fn insert_client(
@@ -724,9 +735,14 @@ pub(crate) mod tests {
         }
     }
 
+    fn net_guard() -> std::sync::MutexGuard<'static, ()> {
+        super::test_guard()
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_rejects_non_struct() {
+        let _guard = net_guard();
         let err = run_accept(Value::Num(1.0), Vec::new()).unwrap_err();
         assert_error_identifier(err, MESSAGE_ID_INVALID_SERVER);
     }
@@ -734,6 +750,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_establishes_client_connection() {
+        let _guard = net_guard();
         let server_value = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
@@ -775,6 +792,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_times_out_when_no_client_connects() {
+        let _guard = net_guard();
         let server_value = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
@@ -793,6 +811,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_rejects_invalid_timeout_name_value() {
+        let _guard = net_guard();
         let server_value = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
@@ -811,6 +830,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
+        let _guard = net_guard();
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
@@ -818,6 +838,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_respects_per_call_timeout_override() {
+        let _guard = net_guard();
         let server_value = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),

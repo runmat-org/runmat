@@ -1103,11 +1103,11 @@ pub(crate) mod tests {
             return;
         }
         let tensor = Tensor::new(vec![0.0, 0.0, 2.0, 0.0, 0.0, 0.0], vec![2, 3]).unwrap();
-        let cpu = all_host(
+        let cpu = block_on(all_host(
             Value::Tensor(tensor.clone()),
             ReductionSpec::Default,
             ReductionNaN::Include,
-        )
+        ))
         .unwrap();
         let view = HostTensorView {
             data: &tensor.data,
@@ -1157,11 +1157,11 @@ pub(crate) mod tests {
             return;
         }
         let tensor = Tensor::new(vec![f64::NAN, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
-        let cpu = all_host(
+        let cpu = block_on(all_host(
             Value::Tensor(tensor.clone()),
             ReductionSpec::Default,
             ReductionNaN::Omit,
-        )
+        ))
         .unwrap();
         let view = HostTensorView {
             data: &tensor.data,

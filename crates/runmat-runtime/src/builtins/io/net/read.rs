@@ -810,9 +810,14 @@ pub(crate) mod tests {
         futures::executor::block_on(read_builtin(client, rest))
     }
 
+    fn net_guard() -> std::sync::MutexGuard<'static, ()> {
+        crate::builtins::io::net::accept::test_guard()
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn read_reads_requested_uint8_values() {
+        let _guard = net_guard();
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
         let port = listener.local_addr().unwrap().port();
         let handle = thread::spawn(move || {
@@ -839,6 +844,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn read_without_count_drains_available_bytes() {
+        let _guard = net_guard();
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
         let port = listener.local_addr().unwrap().port();
         let handle = thread::spawn(move || {
@@ -866,6 +872,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn read_respects_timeout() {
+        let _guard = net_guard();
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
         let port = listener.local_addr().unwrap().port();
         let _handle = thread::spawn(move || {
@@ -888,6 +895,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
+        let _guard = net_guard();
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }

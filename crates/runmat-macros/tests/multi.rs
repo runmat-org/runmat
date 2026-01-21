@@ -1,8 +1,5 @@
-use runmat_async::RuntimeError;
 use runmat_builtins::builtin_functions;
 use runmat_macros::runtime_builtin;
-
-type BuiltinResult<T> = Result<T, RuntimeError>;
 
 mod inner {
     use super::*;

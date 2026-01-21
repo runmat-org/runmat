@@ -551,6 +551,18 @@ pub(crate) mod tests {
 
     static WHICH_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
+    fn workspace_guard() -> std::sync::MutexGuard<'static, ()> {
+        crate::workspace::test_guard()
+    }
+
+    fn test_guard() -> (std::sync::MutexGuard<'static, ()>, std::sync::MutexGuard<'static, ()>) {
+        let workspace = workspace_guard();
+        let which = WHICH_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        (workspace, which)
+    }
+
     fn which_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::which_builtin(args))
     }
@@ -589,9 +601,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_reports_builtin() {
-        let _lock = WHICH_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
         let value = which_builtin(vec![Value::from("sin")]).expect("which");
         let text = String::try_from(&value).expect("string result");
         assert!(
@@ -603,9 +613,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_variable_search_respects_workspace() {
-        let _lock = WHICH_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
         ensure_test_resolver();
         set_workspace(&[("answer", Value::Num(42.0))]);
 
@@ -616,9 +624,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_finds_files() {
-        let _lock = WHICH_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
         let temp = tempdir().expect("tempdir");
         let script_path = temp.path().join("script.m");
         File::create(&script_path)
@@ -641,9 +647,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_all_returns_cell_array() {
-        let _lock = WHICH_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
         let value = which_builtin(vec![Value::from("sin"), Value::from("-all")]).expect("which");
         match value {
             Value::Cell(cell) => assert!(!cell.data.is_empty()),
@@ -654,9 +658,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_not_found_message() {
-        let _lock = WHICH_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
         let value = which_builtin(vec![Value::from("definitely_missing")]).expect("which");
         let text = String::try_from(&value).expect("string");
         assert_eq!(text, "'definitely_missing' not found.");
@@ -665,9 +667,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_parses_leading_option() {
-        let _lock = WHICH_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
         let value = which_builtin(vec![Value::from("-all"), Value::from("sin")]).expect("which");
         match value {
             Value::Cell(cell) => assert!(!cell.data.is_empty()),
@@ -678,9 +678,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_allows_uppercase_and_repeated_flags() {
-        let _lock = WHICH_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
         let value = which_builtin(vec![
             Value::from("-BUILTIN"),
             Value::from("-builtin"),
@@ -697,9 +695,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_conflicting_flags_error() {
-        let _lock = WHICH_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
         let err = which_builtin(vec![
             Value::from("-var"),
             Value::from("-builtin"),
@@ -716,9 +712,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_invalid_flag_error() {
-        let _lock = WHICH_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
         let err = which_builtin(vec![Value::from("-nope"), Value::from("sin")]).unwrap_err();
         let message = error_message(err);
         assert!(
@@ -730,9 +724,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_requires_name_argument() {
-        let _lock = WHICH_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
         let err = which_builtin(vec![]).unwrap_err();
         let message = error_message(err);
         assert_eq!(message, ERROR_NOT_ENOUGH_ARGS);
@@ -741,9 +733,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_errors_on_non_string_name() {
-        let _lock = WHICH_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
         let err = which_builtin(vec![Value::Num(4.0)]).unwrap_err();
         let message = error_message(err);
         assert_eq!(message, ERROR_NAME_ARG);
@@ -752,9 +742,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_errors_on_too_many_arguments() {
-        let _lock = WHICH_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
         let err = which_builtin(vec![
             Value::from("sin"),
             Value::from("cos"),
@@ -768,9 +756,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_accepts_char_and_string_array_inputs() {
-        let _lock = WHICH_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
         let char_value = Value::CharArray(CharArray::new_row("sin"));
         let char_result = which_builtin(vec![char_value]).expect("which char");
         let char_text = String::try_from(&char_result).expect("string");
@@ -792,9 +778,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_file_option_finds_directories() {
-        let _lock = WHICH_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
         let temp = tempdir().expect("tempdir");
         let subdir = temp.path().join("helpers");
         std::fs::create_dir_all(&subdir).expect("create dir");
@@ -815,6 +799,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
+        let (_guard, _lock) = test_guard();
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }

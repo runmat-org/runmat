@@ -15,9 +15,6 @@ use std::collections::HashMap;
 use std::net::{SocketAddr, TcpListener};
 use std::sync::{Arc, Mutex};
 
-#[cfg(test)]
-use once_cell::sync::Lazy;
-
 const MESSAGE_ID_INVALID_ADDRESS: &str = "MATLAB:tcpserver:InvalidAddress";
 const MESSAGE_ID_INVALID_PORT: &str = "MATLAB:tcpserver:InvalidPort";
 const MESSAGE_ID_INVALID_NAME_VALUE: &str = "MATLAB:tcpserver:InvalidNameValue";
@@ -131,8 +128,6 @@ pub(super) fn clear_registry_for_test() {
     guard.next_id = 0;
 }
 
-#[cfg(test)]
-static TCP_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 #[cfg_attr(
     feature = "doc_export",
@@ -680,12 +675,14 @@ pub(crate) mod tests {
         futures::executor::block_on(tcpserver_builtin(address, port, rest))
     }
 
+    fn net_guard() -> std::sync::MutexGuard<'static, ()> {
+        crate::builtins::io::net::accept::test_guard()
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_accepts_loopback_connection() {
-        let _lock = TCP_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let _guard = net_guard();
 
         let result = run_tcpserver(
             Value::from("127.0.0.1"),
@@ -710,9 +707,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_applies_timeout_option() {
-        let _lock = TCP_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let _guard = net_guard();
 
         let result = run_tcpserver(
             Value::from("localhost"),
@@ -734,9 +729,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_supports_custom_name() {
-        let _lock = TCP_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let _guard = net_guard();
 
         let result = run_tcpserver(
             Value::from("127.0.0.1"),
@@ -758,9 +751,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_accepts_byte_order_option() {
-        let _lock = TCP_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let _guard = net_guard();
 
         let result = run_tcpserver(
             Value::from("127.0.0.1"),
@@ -782,6 +773,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_rejects_invalid_byte_order() {
+        let _guard = net_guard();
         let err = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(8000)),
@@ -794,9 +786,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_accepts_scalar_tensor_port() {
-        let _lock = TCP_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let _guard = net_guard();
 
         let tensor_port = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
         let result = run_tcpserver(
@@ -831,6 +821,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_requires_name_value_pairs() {
+        let _guard = net_guard();
         let err = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(9000)),
@@ -843,9 +834,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_stores_userdata() {
-        let _lock = TCP_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let _guard = net_guard();
 
         let mut user_struct_value = StructValue::new();
         user_struct_value
@@ -870,6 +859,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
+        let _guard = net_guard();
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
@@ -877,9 +867,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_times_out_connect_attempt() {
-        let _lock = TCP_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let _guard = net_guard();
 
         let result = run_tcpserver(
             Value::from("127.0.0.1"),

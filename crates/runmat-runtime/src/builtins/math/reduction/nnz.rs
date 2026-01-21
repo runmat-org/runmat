@@ -731,7 +731,7 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let gpu = nnz_gpu(handle, Some(1)).expect("nnz");
+        let gpu = futures::executor::block_on(nnz_gpu(handle, Some(1))).expect("nnz");
         match (cpu, gpu) {
             (Value::Tensor(ct), Value::Tensor(gt)) => {
                 assert_eq!(gt.shape, ct.shape);

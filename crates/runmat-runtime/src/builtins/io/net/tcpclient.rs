@@ -574,9 +574,14 @@ pub(crate) mod tests {
         futures::executor::block_on(tcpclient_builtin(host, port, rest))
     }
 
+    fn net_guard() -> std::sync::MutexGuard<'static, ()> {
+        crate::builtins::io::net::accept::test_guard()
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpclient_connects_to_loopback_server() {
+        let _guard = net_guard();
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind loopback");
         let port = listener.local_addr().expect("local addr").port();
 
@@ -610,6 +615,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpclient_applies_name_value_options() {
+        let _guard = net_guard();
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind loopback");
         let port = listener.local_addr().expect("local addr").port();
         let handle = thread::spawn(move || {
@@ -670,6 +676,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpclient_rejects_invalid_port() {
+        let _guard = net_guard();
         let err = run_tcpclient(
             Value::from("localhost"),
             Value::Int(IntValue::I32(70000)),
@@ -682,6 +689,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpclient_reports_connection_failure() {
+        let _guard = net_guard();
         // Assume nothing listens on port 65000.
         let err = run_tcpclient(
             Value::from("127.0.0.1"),
@@ -695,6 +703,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
+        let _guard = net_guard();
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }

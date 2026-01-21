@@ -1,8 +1,5 @@
-use runmat_async::RuntimeError;
 use runmat_builtins::{builtin_functions, CellArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
-
-type BuiltinResult<T> = Result<T, RuntimeError>;
 
 #[runtime_builtin(name = "add", builtin_path = "tests::add")]
 fn add(x: i32, y: i32) -> Result<i32, String> {

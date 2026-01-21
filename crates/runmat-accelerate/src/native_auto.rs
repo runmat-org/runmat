@@ -18,7 +18,7 @@ use log::{debug, info, trace, warn};
 use once_cell::sync::{Lazy, OnceCell};
 use runmat_accelerate_api::{AccelProvider, ApiDeviceInfo, HostTensorView, ProviderPrecision};
 use runmat_builtins::{builtin_functions, AccelTag, Tensor, Value};
-use runmat_runtime::gather_if_needed;
+use runmat_runtime::gather_if_needed_async;
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_CPU_ELEM_PER_ELEM: f64 = 1.0e-7;
@@ -1095,7 +1095,7 @@ impl NativeAutoOffload {
         }
     }
 
-    fn prepare_builtin(&self, name: &str, args: &[Value]) -> Result<Vec<Value>> {
+    async fn prepare_builtin(&self, name: &str, args: &[Value]) -> Result<Vec<Value>> {
         if !self.enabled {
             return Ok(args.to_vec());
         }
@@ -1108,7 +1108,7 @@ impl NativeAutoOffload {
         }
         if let Some(policy) = builtin_policy(name) {
             if policy.is_sink {
-                return gather_args(args);
+                return gather_args(args).await;
             }
 
             let mut processed = args.to_vec();
@@ -1234,13 +1234,13 @@ fn is_empty_placeholder_value(value: &Value) -> bool {
     }
 }
 
-fn gather_args(args: &[Value]) -> Result<Vec<Value>> {
+async fn gather_args(args: &[Value]) -> Result<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
         if let Value::GpuTensor(handle) = value {
             fusion_residency::clear(handle);
         }
-        out.push(gather_if_needed(value).map_err(|e| anyhow!(e))?);
+        out.push(gather_if_needed_async(value).await.map_err(|e| anyhow!(e))?);
     }
     Ok(out)
 }
@@ -1975,17 +1975,17 @@ pub fn promote_unary(op: UnaryOp, value: &Value) -> Result<Value> {
     }
 }
 
-pub fn prepare_builtin_args(name: &str, args: &[Value]) -> Result<Vec<Value>> {
+pub async fn prepare_builtin_args(name: &str, args: &[Value]) -> Result<Vec<Value>> {
     if let Some(policy) = builtin_policy(name) {
         if policy.is_sink {
-            return gather_args(args);
+            return gather_args(args).await;
         }
     }
     if !auto_enabled() {
         return Ok(args.to_vec());
     }
     if let Some(auto) = global() {
-        auto.prepare_builtin(name, args)
+        auto.prepare_builtin(name, args).await
     } else {
         Ok(args.to_vec())
     }

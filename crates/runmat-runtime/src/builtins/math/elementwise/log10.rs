@@ -581,7 +581,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .expect("upload");
-        let gpu_value = log10_gpu(handle).expect("gpu log10");
+        let gpu_value = block_on(log10_gpu(handle)).expect("gpu log10");
         let gathered = test_support::gather(gpu_value).expect("gather");
         match cpu {
             Value::Tensor(ct) => {

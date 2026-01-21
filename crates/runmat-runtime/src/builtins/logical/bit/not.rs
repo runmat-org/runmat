@@ -371,6 +371,11 @@ pub(crate) mod tests {
     fn run_not(value: Value) -> BuiltinResult<Value> {
         block_on(super::not_builtin(value))
     }
+
+    #[cfg(feature = "wgpu")]
+    fn run_not_host(value: Value) -> BuiltinResult<Value> {
+        block_on(not_host(value))
+    }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor};

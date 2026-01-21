@@ -370,16 +370,16 @@ pub(crate) mod tests {
     use crate::builtins::io::net::accept::{accept_builtin, client_handle};
     use crate::builtins::io::net::tcpclient::tcpclient_builtin;
     use crate::builtins::io::net::tcpserver::{server_handle, tcpserver_builtin};
-    use once_cell::sync::Lazy;
     use runmat_builtins::{
         CellArray, CharArray, IntValue, StringArray, StructValue, Tensor, Value,
     };
     use std::net::{TcpListener, TcpStream};
-    use std::sync::Mutex;
     use std::thread;
     use std::time::Duration;
 
-    static TEST_GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+    fn net_guard() -> std::sync::MutexGuard<'static, ()> {
+        crate::builtins::io::net::accept::test_guard()
+    }
 
     fn client_id(value: &Value) -> u64 {
         match value {
@@ -482,7 +482,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_tcpclient_releases_handle() {
-        let _lock = TEST_GUARD.lock().unwrap();
+        let _guard = net_guard();
 
         let client = spawn_loopback_client();
 
@@ -498,7 +498,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_tcpserver_releases_listener_and_clients() {
-        let _lock = TEST_GUARD.lock().unwrap();
+        let _guard = net_guard();
 
         let server = spawn_tcp_server();
         let sid = server_id(&server);
@@ -517,7 +517,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_multiple_handles_in_single_call() {
-        let _lock = TEST_GUARD.lock().unwrap();
+        let _guard = net_guard();
 
         let standalone_client = spawn_loopback_client();
         let standalone_id = client_id(&standalone_client);
@@ -546,7 +546,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_returns_zero_when_no_resources() {
-        let _lock = TEST_GUARD.lock().unwrap();
+        let _guard = net_guard();
 
         let _ = run_close(Vec::new()).expect("initial cleanup");
         let status = run_close(Vec::new()).expect("close without resources");
@@ -556,7 +556,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_string_clients_option() {
-        let _lock = TEST_GUARD.lock().unwrap();
+        let _guard = net_guard();
 
         let client_a = spawn_loopback_client();
         let client_b = spawn_loopback_client();
@@ -575,7 +575,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_string_servers_option() {
-        let _lock = TEST_GUARD.lock().unwrap();
+        let _guard = net_guard();
 
         let server = spawn_tcp_server();
         let sid = server_id(&server);
@@ -591,7 +591,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_string_all_option() {
-        let _lock = TEST_GUARD.lock().unwrap();
+        let _guard = net_guard();
 
         let standalone = spawn_loopback_client();
         let standalone_id = client_id(&standalone);
@@ -614,7 +614,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_char_array_command() {
-        let _lock = TEST_GUARD.lock().unwrap();
+        let _guard = net_guard();
 
         let client = spawn_loopback_client();
         let cid = client_id(&client);
@@ -627,7 +627,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_cell_array_arguments() {
-        let _lock = TEST_GUARD.lock().unwrap();
+        let _guard = net_guard();
 
         let client = spawn_loopback_client();
         let client_id_value = client_id(&client);
@@ -648,7 +648,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_invalid_argument_errors() {
-        let _lock = TEST_GUARD.lock().unwrap();
+        let _guard = net_guard();
 
         let err = run_close(vec![Value::Num(13.0)]).unwrap_err();
         assert_error_identifier(err, MESSAGE_ID_INVALID_ARGUMENT);
@@ -666,7 +666,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_invalid_struct_errors() {
-        let _lock = TEST_GUARD.lock().unwrap();
+        let _guard = net_guard();
 
         let st = StructValue::new();
         let err = run_close(vec![Value::Struct(st)]).unwrap_err();
@@ -676,7 +676,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_empty_array_argument_returns_zero() {
-        let _lock = TEST_GUARD.lock().unwrap();
+        let _guard = net_guard();
 
         let empty = Tensor::new(vec![], vec![0]).expect("empty tensor");
         let status = run_close(vec![Value::Tensor(empty)]).expect("close empty tensor");
@@ -687,7 +687,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn close_with_wgpu_provider_active() {
-        let _lock = TEST_GUARD.lock().unwrap();
+        let _guard = net_guard();
 
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
@@ -704,6 +704,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
+        let _guard = net_guard();
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }

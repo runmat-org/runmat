@@ -1109,7 +1109,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = minus_gpu_pair(h.clone(), h).unwrap();
+        let gpu = block_on(minus_gpu_pair(h.clone(), h)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
             Value::Tensor(ct) => {

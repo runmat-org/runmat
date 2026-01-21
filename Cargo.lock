@@ -6431,6 +6431,7 @@ dependencies = [
 name = "runmat-runtime-integration-tests"
 version = "0.2.8"
 dependencies = [
+ "futures",
  "inventory",
  "runmat-accelerate",
  "runmat-accelerate-api",

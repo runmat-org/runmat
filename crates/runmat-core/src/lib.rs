@@ -1640,7 +1640,7 @@ impl RunMatSession {
     }
 
     /// Materialize a workspace variable for inspection (optionally identified by preview token).
-    pub fn materialize_variable(
+    pub async fn materialize_variable(
         &mut self,
         target: WorkspaceMaterializeTarget,
         options: WorkspaceMaterializeOptions,
@@ -1667,9 +1667,11 @@ impl RunMatSession {
             WorkspaceResidency::Cpu
         };
         let host_value = if is_gpu {
-            gpu_helpers::gather_value(&value).map_err(|err| {
-                anyhow::anyhow!("Failed to gather gpuArray '{name}' for preview: {err}")
-            })?
+            gpu_helpers::gather_value_async(&value)
+                .await
+                .map_err(|err| {
+                    anyhow::anyhow!("Failed to gather gpuArray '{name}' for preview: {err}")
+                })?
         } else {
             value.clone()
         };

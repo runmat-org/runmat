@@ -466,7 +466,8 @@ pub(crate) mod tests {
             shape: &host.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let permuted_gpu = permute_gpu("ipermute", handle, &order_vec).expect("permute gpu");
+        let permuted_gpu =
+            block_on(permute_gpu("ipermute", handle, &order_vec)).expect("permute gpu");
         let gpu = ipermute_builtin(permuted_gpu, Value::Tensor(order)).expect("gpu ipermute");
         let gathered = test_support::gather(gpu).expect("gather");
 

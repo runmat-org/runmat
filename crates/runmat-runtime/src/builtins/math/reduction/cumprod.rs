@@ -864,12 +864,12 @@ pub(crate) mod tests {
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload");
-        let gpu_value = cumprod_gpu(
+        let gpu_value = block_on(cumprod_gpu(
             handle,
             Some(1),
             CumprodDirection::Forward,
             CumprodNanMode::Include,
-        )
+        ))
         .expect("cumprod gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
 
@@ -904,12 +904,12 @@ pub(crate) mod tests {
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload");
-        let gpu_value = cumprod_gpu(
+        let gpu_value = block_on(cumprod_gpu(
             handle,
             Some(1),
             CumprodDirection::Reverse,
             CumprodNanMode::Omit,
-        )
+        ))
         .expect("cumprod gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
 

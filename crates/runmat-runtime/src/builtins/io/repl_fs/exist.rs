@@ -578,6 +578,18 @@ pub(crate) mod tests {
         futures::executor::block_on(super::exist_builtin(name, rest))
     }
 
+    fn workspace_guard() -> std::sync::MutexGuard<'static, ()> {
+        crate::workspace::test_guard()
+    }
+
+    fn test_guard() -> (std::sync::MutexGuard<'static, ()>, std::sync::MutexGuard<'static, ()>) {
+        let workspace = workspace_guard();
+        let fs_lock = REPL_FS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        (workspace, fs_lock)
+    }
+
     runmat_thread_local! {
         static TEST_WORKSPACE: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
     }
@@ -625,9 +637,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_workspace_variables() {
-        let _lock = REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
         ensure_test_resolver();
         set_workspace(&[("alpha", Value::Num(1.0))]);
 
@@ -638,9 +648,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_builtins() {
-        let _lock = REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
 
         let value = exist_builtin(Value::from("sin"), Vec::new()).expect("exist");
         assert_eq!(value, Value::Num(5.0));
@@ -653,9 +661,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_files_and_mex() {
-        let _lock = REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
         ensure_test_resolver();
 
         let temp = tempdir().expect("tempdir");
@@ -680,9 +686,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_directories() {
-        let _lock = REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
 
         let temp = tempdir().expect("tempdir");
         let _guard = DirGuard::new();
@@ -699,9 +703,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_class_files_and_packages() {
-        let _lock = REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
 
         let temp = tempdir().expect("tempdir");
         let _guard = DirGuard::new();
@@ -728,9 +730,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_invalid_type_raises_error() {
-        let _lock = REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
 
         let err = exist_builtin(Value::from("foo"), vec![Value::from("unknown")])
             .expect_err("expected error");
@@ -740,9 +740,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_errors_on_non_text_name() {
-        let _lock = REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
 
         let err = exist_builtin(Value::Num(5.0), Vec::new()).expect_err("expected error");
         assert_eq!(err.message(), ERROR_NAME_ARG);
@@ -751,9 +749,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_handle_returns_zero_for_non_handle() {
-        let _lock = REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
 
         let value =
             exist_builtin(Value::Num(17.0), vec![Value::from("handle")]).expect("exist handle");
@@ -763,6 +759,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
+        let (_guard, _lock) = test_guard();
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }

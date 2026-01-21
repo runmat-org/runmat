@@ -553,6 +553,11 @@ pub(crate) mod tests {
         block_on(super::ge_builtin(lhs, rhs))
     }
 
+    #[cfg(feature = "wgpu")]
+    fn run_ge_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+        block_on(ge_host(lhs, rhs))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ge_scalar_true_for_equal_values() {

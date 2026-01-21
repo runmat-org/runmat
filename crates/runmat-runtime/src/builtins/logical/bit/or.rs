@@ -399,6 +399,11 @@ pub(crate) mod tests {
     fn run_or(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         block_on(super::or_builtin(lhs, rhs))
     }
+
+    #[cfg(feature = "wgpu")]
+    fn run_or_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+        block_on(or_host(lhs, rhs))
+    }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::IntValue;

@@ -644,8 +644,15 @@ fn permutation_sign(permutation: &[usize]) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    #[cfg(feature = "wgpu")]
+    use futures::executor::block_on;
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn det_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::det_builtin(value))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

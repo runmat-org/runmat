@@ -721,7 +721,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = factorial_gpu(handle).expect("gpu");
+        let gpu = block_on(factorial_gpu(handle)).expect("gpu");
         let gathered = test_support::gather(gpu).expect("gather");
         let cpu_tensor = match cpu {
             Value::Tensor(t) => t,

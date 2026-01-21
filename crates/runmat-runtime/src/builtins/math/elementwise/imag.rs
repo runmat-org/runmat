@@ -451,7 +451,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = imag_gpu(h).unwrap();
+        let gpu = block_on(imag_gpu(h)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         let cpu_tensor = match cpu {
             Value::Tensor(t) => t,

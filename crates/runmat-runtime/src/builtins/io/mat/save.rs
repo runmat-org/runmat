@@ -981,6 +981,10 @@ pub(crate) mod tests {
         });
     }
 
+    fn workspace_guard() -> std::sync::MutexGuard<'static, ()> {
+        crate::workspace::test_guard()
+    }
+
     fn assert_error_contains<T>(result: crate::BuiltinResult<T>, snippet: &str) {
         match result {
             Err(err) => {
@@ -1019,6 +1023,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_numeric_variable() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[("A", Value::Num(42.0))]);
         let dir = tempdir().unwrap();
@@ -1043,6 +1048,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_string_array_variable_names() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[
             ("A", Value::Num(1.0)),
@@ -1068,6 +1074,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_char_matrix_variable_names() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[
             ("foo", Value::Num(10.0)),
@@ -1093,6 +1100,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_struct_fields() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         let mut opts_struct = StructValue::new();
         opts_struct
@@ -1123,6 +1131,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_struct_field_selection() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         let mut opts_struct = StructValue::new();
         opts_struct
@@ -1155,6 +1164,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_missing_variable_errors() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[]);
         let result = block_on(save_builtin(vec![
@@ -1167,6 +1177,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_regex_variable_selection() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[
             ("alpha", Value::Num(1.0)),
@@ -1193,6 +1204,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_regex_requires_pattern() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[("foo", Value::Num(1.0))]);
         let result = block_on(save_builtin(vec![Value::from("-regexp")]));
@@ -1202,6 +1214,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_unsupported_option_errors() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[("foo", Value::Num(1.0))]);
         let result = block_on(save_builtin(vec![
@@ -1215,6 +1228,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_defaults_to_matlab_mat() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         let _lock = lock_env_override();
         set_workspace(&[("answer", Value::Num(7.0))]);
@@ -1241,6 +1255,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_struct_without_filename_defaults_to_matlab_mat() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         let _lock = lock_env_override();
         let mut payload_struct = StructValue::new();
@@ -1275,6 +1290,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_gpu_tensor_roundtrip() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -1310,6 +1326,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn save_wgpu_tensor_roundtrip() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),

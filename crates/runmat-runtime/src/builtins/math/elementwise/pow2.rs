@@ -678,7 +678,7 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let gpu_value = pow2_gpu(handle).expect("pow2 gpu");
+        let gpu_value = block_on(pow2_gpu(handle)).expect("pow2 gpu");
         let gpu = test_support::gather(gpu_value).expect("gather gpu result");
 
         let tol = match provider.precision() {
@@ -721,7 +721,7 @@ pub(crate) mod tests {
         };
         let m_handle = provider.upload(&m_view).expect("upload mantissa");
         let e_handle = provider.upload(&e_view).expect("upload exponent");
-        let gpu_value = pow2_gpu_scale(m_handle, e_handle).expect("pow2 gpu scale");
+        let gpu_value = block_on(pow2_gpu_scale(m_handle, e_handle)).expect("pow2 gpu scale");
         let gpu = test_support::gather(gpu_value).expect("gather gpu scale result");
 
         let tol = match provider.precision() {

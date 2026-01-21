@@ -610,6 +610,11 @@ pub(crate) mod tests {
         block_on(super::ne_builtin(lhs, rhs))
     }
 
+    #[cfg(feature = "wgpu")]
+    fn run_ne_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+        block_on(ne_host(lhs, rhs))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_scalar_true() {

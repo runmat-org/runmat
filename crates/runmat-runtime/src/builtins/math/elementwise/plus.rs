@@ -1114,7 +1114,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view_r)
             .unwrap();
-        let gpu = plus_gpu_pair(ha, hb).unwrap();
+        let gpu = block_on(plus_gpu_pair(ha, hb)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
             Value::Tensor(t) => assert_eq!(gathered.data, t.data),

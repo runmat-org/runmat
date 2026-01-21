@@ -903,7 +903,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .expect("upload");
-        let gpu_value = median_gpu(handle, &args_dim1).expect("gpu median");
+        let gpu_value = block_on(median_gpu(handle, &args_dim1)).expect("gpu median");
         let gathered = test_support::gather(gpu_value).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
@@ -926,7 +926,7 @@ pub(crate) mod tests {
         };
         let cpu_all =
             median_host(Value::Tensor(tensor.clone()), &args_all).expect("cpu median all");
-        let gpu_all = median_gpu(
+        let gpu_all = block_on(median_gpu(
             runmat_accelerate_api::provider()
                 .unwrap()
                 .upload(&runmat_accelerate_api::HostTensorView {
@@ -935,7 +935,7 @@ pub(crate) mod tests {
                 })
                 .expect("upload"),
             &args_all,
-        )
+        ))
         .expect("gpu median all");
         let gathered_all = test_support::gather(gpu_all).expect("gather");
         match cpu_all {

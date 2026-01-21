@@ -3,8 +3,6 @@ use runmat_builtins::{builtin_functions, Tensor, Value};
 use runmat_macros::runtime_builtin;
 use runmat_runtime::call_builtin;
 
-type BuiltinResult<T> = runmat_runtime::BuiltinResult<T>;
-
 #[runtime_builtin(name = "double", builtin_path = "tests::double_fn")]
 fn double_fn(x: i32) -> Result<i32, String> {
     Ok(x * 2)

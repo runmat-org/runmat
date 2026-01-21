@@ -484,9 +484,14 @@ pub(crate) mod tests {
         futures::executor::block_on(readline_builtin(client, rest))
     }
 
+    fn net_guard() -> std::sync::MutexGuard<'static, ()> {
+        crate::builtins::io::net::accept::test_guard()
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_returns_line_without_terminator() {
+        let _guard = net_guard();
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
         let port = listener.local_addr().unwrap().port();
         let handle = thread::spawn(move || {
@@ -510,6 +515,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_strips_crlf_pairs() {
+        let _guard = net_guard();
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
         let port = listener.local_addr().unwrap().port();
         let handle = thread::spawn(move || {
@@ -533,6 +539,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_returns_empty_matrix_on_timeout() {
+        let _guard = net_guard();
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
         let port = listener.local_addr().unwrap().port();
         let _handle = thread::spawn(move || {
@@ -560,6 +567,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_buffers_partial_data_across_timeouts() {
+        let _guard = net_guard();
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
         let port = listener.local_addr().unwrap().port();
         let handle = thread::spawn(move || {
@@ -612,6 +620,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_returns_partial_line_on_connection_close() {
+        let _guard = net_guard();
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
         let port = listener.local_addr().unwrap().port();
         let handle = thread::spawn(move || {
@@ -642,6 +651,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_errors_on_additional_arguments() {
+        let _guard = net_guard();
         let err = run_readline(Value::Num(42.0), vec![Value::Num(1.0)])
             .expect_err("expected invalid argument error");
         assert_error_identifier(err, MESSAGE_ID_INVALID_ARGUMENTS);
@@ -650,6 +660,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_rejects_non_struct_argument() {
+        let _guard = net_guard();
         let err =
             run_readline(Value::Num(5.0), Vec::new()).expect_err("expected invalid client error");
         assert_error_identifier(err, MESSAGE_ID_INVALID_CLIENT);
@@ -658,6 +669,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_errors_when_not_connected() {
+        let _guard = net_guard();
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
         let port = listener.local_addr().unwrap().port();
         let handle = thread::spawn(move || {
@@ -688,6 +700,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
+        let _guard = net_guard();
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }

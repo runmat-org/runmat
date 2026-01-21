@@ -522,6 +522,11 @@ pub(crate) mod tests {
         block_on(super::gt_builtin(lhs, rhs))
     }
 
+    #[cfg(feature = "wgpu")]
+    fn run_gt_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+        block_on(gt_host(lhs, rhs))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gt_scalar_true() {

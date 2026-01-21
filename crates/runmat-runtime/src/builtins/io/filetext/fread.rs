@@ -1333,6 +1333,11 @@ pub(crate) mod tests {
         futures::executor::block_on(fclose::evaluate(args))
     }
 
+    #[cfg(feature = "wgpu")]
+    fn run_call_builtin(name: &str, args: &[Value]) -> BuiltinResult<Value> {
+        crate::call_builtin(name, args)
+    }
+
     fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
         registry::test_guard()
     }

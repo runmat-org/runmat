@@ -1487,14 +1487,14 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = sum_gpu(
+        let gpu = block_on(sum_gpu(
             h,
             &ParsedArguments {
                 selection: DimSelection::Dim(1),
                 nan_mode: ReductionNaN::Include,
                 output: OutputTemplate::Double,
             },
-        )
+        ))
         .unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
