@@ -11,9 +11,9 @@ import {
   type BuiltinDocFAQ,
   type BuiltinDocJsonEncodeOption,
 } from '@/lib/builtins';
-import { MarkdownRenderer } from '@/components/MarkdownRenderer';
+import { BuiltinDocRenderer, type BuiltinDocBlock, type BuiltinDocInlineNode } from '@/components/BuiltinDocRenderer';
 import { slugifyHeading } from '@/lib/utils';
-import { builtinMetadataForSlug } from './meta';
+import { builtinMetadataForSlug, builtinJsonLD } from './meta';
 import { BuiltinMetadataChips } from '@/components/BuiltinMetadataChips';
 
 export const dynamic = 'force-static';
@@ -35,11 +35,16 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
   if (!b) return notFound();
   const doc = getBuiltinDocBySlug(slug);
   if (!doc) return notFound();
-  const source = renderBuiltinDoc(doc);
-  const toc = extractHeadings(source);
+  const blocks = renderBuiltinDocBlocks(doc);
+  const toc = extractHeadingsFromBlocks(blocks);
   const metadata = getBuiltinMetadata(b);
+
   return (
     <>
+    <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: builtinJsonLD(slug) }}
+    />
       <div className="container mx-auto px-4 md:px-6 pt-8">
         <p className="mb-4 text-muted-foreground leading-relaxed break-words">
           <Link href="/docs/matlab-function-reference" className="text-muted-foreground hover:text-foreground transition-colors">
@@ -51,7 +56,7 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
       <div className="container mx-auto px-4 md:px-6 pb-8">
       <div className="grid gap-8 lg:grid-cols-[1fr_280px]">
         <article className="prose dark:prose-invert max-w-none prose-headings:font-semibold prose-h2:mt-8 prose-h2:mb-3 prose-h3:mt-6 prose-h3:mb-2 prose-pre:bg-muted prose-pre:border prose-pre:rounded-md prose-code:bg-muted prose-code:border prose-code:rounded-sm">
-          <MarkdownRenderer source={source} />
+          <BuiltinDocRenderer blocks={blocks} />
         </article>
         {toc.length > 0 && (
           <aside className="hidden lg:block sticky top-24 h-max text-sm">
@@ -71,228 +76,308 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
   );
 }
 
-function renderBuiltinDoc(doc: BuiltinDocEntry): string {
-  const lines: string[] = [];
+type TocEntry = { id: string; text: string; depth: number };
+
+type FenceInfo = {
+  language?: string;
+  runnable?: boolean;
+};
+
+function renderBuiltinDocBlocks(doc: BuiltinDocEntry): BuiltinDocBlock[] {
+  const blocks: BuiltinDocBlock[] = [];
   const title = doc.title.trim();
-  const descriptionHeader = `# What does the \`${title}\` function do in MATLAB / RunMat?`;
+  const descriptionHeader = `What does the \`${title}\` function do in MATLAB / RunMat?`;
   const behaviorHeader = `How does the \`${title}\` function behave in MATLAB / RunMat?`;
   const examplesHeader = doc.examples && doc.examples.length === 1
     ? `Example of using \`${title}\` in MATLAB / RunMat`
     : `Examples of using \`${title}\` in MATLAB / RunMat`;
 
   if (hasText(doc.description)) {
-    lines.push(descriptionHeader);
-    lines.push('');
-    lines.push(...renderDescriptionBlock(doc.description));
+    blocks.push(createHeading(1, parseInline(descriptionHeader)));
+    blocks.push(...parseMarkdownBlocks(doc.description, { splitListDashes: true }));
   }
 
   if (doc.syntax?.example?.input) {
-    pushSection(lines, toSentenceCase('syntax'), [
-      ...renderCodeBlock(doc.syntax.example.input),
-      ...renderList(doc.syntax.points, true),
-    ]);
+    blocks.push(createHeading(2, parseInline(toSentenceCase('syntax'))));
+    blocks.push(createCodeBlock(doc.syntax.example.input, { language: 'matlab' }));
+    const syntaxList = renderListBlock(doc.syntax.points);
+    if (syntaxList) blocks.push(syntaxList);
   }
 
   if (doc.behaviors && doc.behaviors.length > 0) {
-    pushSection(lines, behaviorHeader, renderList(doc.behaviors, true));
+    blocks.push(createHeading(2, parseInline(behaviorHeader)));
+    const behaviorList = renderListBlock(doc.behaviors);
+    if (behaviorList) blocks.push(behaviorList);
   }
 
   if (doc.options && doc.options.length > 0) {
-    pushSection(lines, toSentenceCase('options'), renderList(doc.options, true));
+    blocks.push(createHeading(2, parseInline(toSentenceCase('options'))));
+    const optionsList = renderListBlock(doc.options);
+    if (optionsList) blocks.push(optionsList);
   }
 
   if (doc.jsonencode_options && doc.jsonencode_options.length > 0) {
-    pushSection(lines, toSentenceCase('jsonencode_options'), renderJsonEncodeOptions(doc.jsonencode_options));
+    blocks.push(createHeading(2, parseInline(toSentenceCase('jsonencode_options'))));
+    blocks.push(renderJsonEncodeOptionsTable(doc.jsonencode_options));
   }
 
   if (doc.gpu_behavior && doc.gpu_behavior.length > 0) {
-    pushSection(lines, toGPUCase('gpu_behavior'), renderParagraphs(doc.gpu_behavior));
+    blocks.push(createHeading(2, parseInline(toGPUCase('gpu_behavior'))));
+    blocks.push(...renderParagraphBlocks(doc.gpu_behavior));
   }
 
   if (hasText(doc.gpu_residency)) {
-    pushSection(lines, toGPUCase('gpu_residency'), renderMarkdownBlock(doc.gpu_residency));
+    blocks.push(createHeading(2, parseInline(toGPUCase('gpu_residency'))));
+    blocks.push(...parseMarkdownBlocks(doc.gpu_residency));
   }
 
   if (doc.examples && doc.examples.length > 0) {
-    const exampleLines: string[] = [];
-    for (const example of doc.examples) {
-      if (exampleLines.length > 0) exampleLines.push('');
-      exampleLines.push(...renderExample(example));
-    }
-    pushSection(lines, examplesHeader, exampleLines);
+    blocks.push(createHeading(2, parseInline(examplesHeader)));
+    blocks.push(...renderExamples(doc.examples));
   }
 
   if (doc.faqs && doc.faqs.length > 0) {
-    pushSection(lines, 'FAQ', renderFaqs(doc.faqs));
+    blocks.push(createHeading(2, parseInline('FAQ')));
+    blocks.push(...renderFaqs(doc.faqs));
   }
 
   if (doc.links && doc.links.length > 0) {
-    const formattedLinks = formatLinks(doc.links);
-    if (formattedLinks) {
-      pushSection(lines, 'See also', [formattedLinks]);
+    const linkInline = renderSeeAlsoLinks(doc.links);
+    if (linkInline.length > 0) {
+      blocks.push(createHeading(2, parseInline('See also')));
+      blocks.push({ type: 'paragraph', content: linkInline });
     }
   }
 
   if (doc.source && hasText(doc.source.url)) {
-    pushSection(lines, 'Source & Feedback', renderSourceSection(doc.source));
+    blocks.push(createHeading(2, parseInline('Source & Feedback')));
+    const sourceList = renderSourceSection(doc.source);
+    if (sourceList) blocks.push(sourceList);
   }
 
-  return lines.join('\n');
+  return blocks;
 }
 
-function renderExample(example: BuiltinDocExample): string[] {
-  const lines: string[] = [];
-  const description = example.description?.trim();
-  if (description) {
-    lines.push(`### ${escapeMarkdownText(description)}`);
-    lines.push('');
+function renderExamples(examples: BuiltinDocExample[]): BuiltinDocBlock[] {
+  const blocks: BuiltinDocBlock[] = [];
+  for (const example of examples) {
+    const description = example.description?.trim();
+    if (description) {
+      blocks.push(createHeading(3, parseInline(description)));
+    }
+    blocks.push(createCodeBlock(example.input, { language: 'matlab', runnable: true }));
+    if (hasText(example.output)) {
+      blocks.push({ type: 'paragraph', content: [textNode('Expected output:')] });
+      blocks.push(createCodeBlock(example.output, { language: 'matlab' }));
+    }
   }
-  lines.push(...renderRunnableCodeBlock(example.input));
-  if (hasText(example.output)) {
-    lines.push('');
-    lines.push('Expected output:');
-    lines.push('');
-    lines.push(...renderCodeBlock(example.output));
-  }
-  return lines;
+  return blocks;
 }
 
-function renderFaqs(faqs: BuiltinDocFAQ[]): string[] {
-  const lines: string[] = [];
+function renderFaqs(faqs: BuiltinDocFAQ[]): BuiltinDocBlock[] {
+  const blocks: BuiltinDocBlock[] = [];
   for (const faq of faqs) {
-    if (lines.length > 0) lines.push('');
-    lines.push(`### ${escapeMarkdownText(faq.question)}`);
-    lines.push('');
-    lines.push(...renderMarkdownBlock(faq.answer));
+    blocks.push(createHeading(3, parseInline(faq.question)));
+    blocks.push(...parseMarkdownBlocks(faq.answer));
   }
-  return lines;
+  return blocks;
 }
 
-function renderSourceSection(source: BuiltinDocLink): string[] {
-  const lines: string[] = [];
+function renderSourceSection(source: BuiltinDocLink): BuiltinDocBlock | null {
   const url = resolveSourceUrl(source.url);
   const label = source.label && source.label.trim() ? source.label.trim() : url;
+  const items: BuiltinDocInlineNode[][] = [];
   if (url) {
-    lines.push(`- Source code: [${label}](${url})`);
+    items.push([
+      textNode('Source code: '),
+      { type: 'link', label: [textNode(label)], href: url },
+    ]);
   }
-  lines.push('- Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new) with a minimal reproduction.');
-  return lines;
+  items.push([
+    textNode('Found a bug? '),
+    { type: 'link', label: [textNode('Open an issue')], href: 'https://github.com/runmat-org/runmat/issues/new' },
+    textNode(' with a minimal reproduction.'),
+  ]);
+  if (items.length === 0) return null;
+  return { type: 'list', ordered: false, items };
 }
 
-function renderJsonEncodeOptions(options: BuiltinDocJsonEncodeOption[]): string[] {
-  const lines: string[] = [];
-  lines.push('| Name | Type | Default | Description |');
-  lines.push('| ---- | ---- | ------- | ----------- |');
-  for (const option of options) {
-    const name = wrapInlineCode(option.name);
-    const defaultValue = wrapInlineCode(option.default);
-    lines.push(`| ${escapeTableCell(name)} | ${escapeTableCell(option.type)} | ${escapeTableCell(defaultValue)} | ${escapeTableCell(option.description)} |`);
-  }
-  return lines;
+function renderJsonEncodeOptionsTable(options: BuiltinDocJsonEncodeOption[]): BuiltinDocBlock {
+  return {
+    type: 'table',
+    headers: [
+      [textNode('Name')],
+      [textNode('Type')],
+      [textNode('Default')],
+      [textNode('Description')],
+    ],
+    rows: options.map(option => [
+      [inlineCodeOrText(option.name)],
+      parseInline(option.type),
+      [inlineCodeOrText(option.default)],
+      parseInline(option.description),
+    ]),
+  };
 }
 
-function renderList(items: string[] | undefined, prefixDash = false): string[] {
-  if (!items || items.length === 0) return [];
-  if (!prefixDash) {
-    return items
-      .map((item) => escapeMarkdownText(item.trim()))
-      .filter(Boolean);
-  }
-  return items
-    .map((item) => escapeMarkdownText(item.trim()))
-    .filter(Boolean)
-    .map((item) => `- ${item}`);
+function renderListBlock(items: string[] | undefined): BuiltinDocBlock | null {
+  if (!items || items.length === 0) return null;
+  return {
+    type: 'list',
+    ordered: false,
+    items: items
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => parseInline(item)),
+  };
 }
 
-function renderParagraphs(items: string[]): string[] {
+function renderParagraphBlocks(items: string[]): BuiltinDocBlock[] {
   const paragraphs: string[] = [];
   for (const item of items) {
     const lines = splitMarkdown(item).map((line) => line.trim()).filter(Boolean);
     paragraphs.push(...lines);
   }
-  const out: string[] = [];
-  for (const paragraph of paragraphs) {
-    if (out.length > 0) out.push('');
-    out.push(escapeMarkdownText(paragraph));
-  }
-  return out;
+  return paragraphs.map((paragraph) => ({
+    type: 'paragraph',
+    content: parseInline(paragraph),
+  }));
 }
 
-function renderRunnableCodeBlock(code: string): string[] {
-    const lines: string[] = [];
-    lines.push('```matlab:runnable');
-    lines.push(...splitMarkdown(code));
-    lines.push('```');
-    return lines;
+function createCodeBlock(code: string, info: FenceInfo): BuiltinDocBlock {
+  const lines = splitMarkdown(code);
+  return {
+    type: 'code',
+    language: info.language ?? 'plaintext',
+    runnable: info.runnable,
+    content: lines.join('\n'),
+  };
 }
 
-function renderCodeBlock(code: string): string[] {
-  const lines: string[] = [];
-  lines.push('```matlab');
-  lines.push(...splitMarkdown(code));
-  lines.push('```');
-  return lines;
-}
+function parseMarkdownBlocks(text: string, options?: { splitListDashes?: boolean }): BuiltinDocBlock[] {
+  const lines = splitMarkdown(text);
+  if (lines.length === 0) return [];
 
-function renderMarkdownBlock(text: string): string[] {
-  return splitMarkdown(text).map((line) => escapeMarkdownText(line));
-}
-
-function renderDescriptionBlock(text: string): string[] {
-  const rawLines = splitMarkdown(text);
-  const out: string[] = [];
+  const blocks: BuiltinDocBlock[] = [];
+  let paragraphLines: string[] = [];
+  let listItems: string[] = [];
   let inFence = false;
-  for (const rawLine of rawLines) {
+  let fenceLang = '';
+  let fenceLines: string[] = [];
+
+  const flushParagraph = () => {
+    if (paragraphLines.length === 0) return;
+    const paragraphText = paragraphLines.join(' ').trim();
+    if (paragraphText) {
+      blocks.push({ type: 'paragraph', content: parseInline(paragraphText) });
+    }
+    paragraphLines = [];
+  };
+
+  const flushList = () => {
+    if (listItems.length === 0) return;
+    blocks.push({
+      type: 'list',
+      ordered: false,
+      items: listItems.map((item) => parseInline(item)),
+    });
+    listItems = [];
+  };
+
+  const flushFence = () => {
+    const info = normalizeFenceInfo(fenceLang);
+    blocks.push({
+      type: 'code',
+      language: info.language ?? 'plaintext',
+      runnable: info.runnable,
+      content: fenceLines.join('\n'),
+    });
+    fenceLines = [];
+    fenceLang = '';
+  };
+
+  for (const rawLine of lines) {
     const line = rawLine.replace(/\s+$/, '');
     const trimmed = line.trim();
+
     if (trimmed.startsWith('```')) {
-      inFence = !inFence;
-      out.push(line);
+      if (inFence) {
+        flushFence();
+        inFence = false;
+      } else {
+        flushParagraph();
+        flushList();
+        inFence = true;
+        fenceLang = trimmed.slice(3).trim();
+      }
       continue;
     }
-    if (!inFence && line.startsWith('- ')) {
-      const content = line.slice(2);
-      const parts = content.split(' - ').map((part) => part.trim()).filter(Boolean);
-      if (parts.length > 1) {
-        for (const part of parts) {
-          out.push(`- ${part}`);
-        }
-        continue;
-      }
+
+    if (inFence) {
+      fenceLines.push(line);
+      continue;
     }
-    out.push(line);
+
+    if (!trimmed) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+
+    const headingMatch = /^(#{1,6})\s+(.+)$/.exec(trimmed);
+    if (headingMatch) {
+      flushParagraph();
+      flushList();
+      const level = headingMatch[1].length as 1 | 2 | 3 | 4 | 5 | 6;
+      blocks.push(createHeading(level, parseInline(headingMatch[2])));
+      continue;
+    }
+
+    if (trimmed.startsWith('- ')) {
+      flushParagraph();
+      const content = trimmed.slice(2);
+      listItems.push(...splitListItemContent(content, options?.splitListDashes));
+      continue;
+    }
+
+    paragraphLines.push(trimmed);
   }
-  return out.map((line) => escapeMarkdownText(line));
+
+  if (inFence) flushFence();
+  flushParagraph();
+  flushList();
+
+  return blocks;
 }
 
-function splitMarkdown(text: string): string[] {
-  return text.trim().split(/\r?\n/);
+function splitListItemContent(content: string, shouldSplit?: boolean): string[] {
+  const trimmed = content.trim();
+  if (!shouldSplit) return [trimmed];
+  const parts = trimmed
+    .split(' - ')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length > 1) return parts;
+  return [trimmed];
 }
 
-function pushMarkdown(lines: string[], text: string): void {
-  const block = renderMarkdownBlock(text);
-  if (block.length === 0) return;
-  lines.push(...block);
-}
-
-function pushSection(lines: string[], header: string, body: string[]): void {
-  if (!body || body.length === 0) return;
-  if (lines.length > 0) lines.push('');
-  lines.push(`## ${header}`);
-  lines.push('');
-  lines.push(...body);
-}
-
-function formatLinks(links: BuiltinDocLink[]): string {
-  return links
+function renderSeeAlsoLinks(links: BuiltinDocLink[]): BuiltinDocInlineNode[] {
+  const nodes: BuiltinDocInlineNode[] = [];
+  const entries = links
     .map((link) => {
       const url = link.url?.trim();
       const label = link.label?.trim() || url;
-      if (!url || !label) return '';
-      return `[${label}](${url})`;
+      if (!url || !label) return null;
+      return { url, label };
     })
-    .filter(Boolean)
-    .join(', ');
+    .filter((entry): entry is { url: string; label: string } => Boolean(entry));
+
+  entries.forEach((entry, index) => {
+    if (index > 0) nodes.push(textNode(', '));
+    nodes.push({ type: 'link', label: parseInline(entry.label), href: entry.url });
+  });
+
+  return nodes;
 }
 
 function resolveSourceUrl(url: string): string {
@@ -303,64 +388,114 @@ function resolveSourceUrl(url: string): string {
   return `https://github.com/runmat-org/runmat/blob/main/${trimmed}`;
 }
 
-function escapeTableCell(value: string): string {
-  return String(value ?? '').replace(/\|/g, '\\|');
-}
-
-function wrapInlineCode(value: string): string {
-  const trimmed = String(value ?? '').trim();
-  if (!trimmed) return '';
-  if (trimmed.startsWith('`') && trimmed.endsWith('`')) return trimmed;
-  return `\`${trimmed}\``;
-}
-
 function toSentenceCase(value: string): string {
   const spaced = value.replace(/_/g, ' ');
   return spaced.charAt(0).toUpperCase() + spaced.slice(1).toLowerCase();
 }
 
 function toGPUCase(value: string): string {
-    const parts = value.split('_');
-    return parts.map(p => (p.toLowerCase() === 'gpu') ? p.toUpperCase() : p.toLowerCase()).join(' ');
+  const parts = value.split('_');
+  return parts.map(p => (p.toLowerCase() === 'gpu') ? p.toUpperCase() : p.toLowerCase()).join(' ');
 }
 
 function hasText(value?: string | null): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function escapeMarkdownText(value: string): string {
-  let result = '';
-  let inCode = false;
-  for (let i = 0; i < value.length; i += 1) {
-    const char = value[i];
-    if (char === '`') {
-      inCode = !inCode;
-      result += char;
-      continue;
-    }
-    if (!inCode && (char === '<' || char === '>')) {
-      result += char === '<' ? '&lt;' : '&gt;';
-      continue;
-    }
-    result += char;
-  }
-  return result;
-}
-
-function extractHeadings(md: string): { id: string; text: string; depth: number }[] {
-  const lines = md.split(/\r?\n/);
-  const out: { id: string; text: string; depth: number }[] = [];
-  let inFence = false;
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (/^```/.test(line)) { inFence = !inFence; continue; }
-    if (inFence) continue;
-    const m = /^(#{2,6})\s+(.+)$/.exec(line);
-    if (!m) continue;
-    const depth = m[1].length; // 2..6
-    const text = m[2].replace(/`/g, '');
-    const id = slugifyHeading(text);
-    out.push({ id, text, depth });
+function extractHeadingsFromBlocks(blocks: BuiltinDocBlock[]): TocEntry[] {
+  const out: TocEntry[] = [];
+  for (const block of blocks) {
+    if (block.type !== 'heading') continue;
+    if (block.level < 2 || block.level > 6) continue;
+    const text = inlineToPlainText(block.text).replace(/`/g, '');
+    const id = block.id ?? slugifyHeading(text);
+    out.push({ id, text, depth: block.level });
   }
   return out;
+}
+
+function splitMarkdown(text: string): string[] {
+  if (!text || !text.trim()) return [];
+  return text.trim().split(/\r?\n/);
+}
+
+function normalizeFenceInfo(language: string): FenceInfo {
+  if (!language) return { language: 'plaintext' };
+  const parts = language.split(':').map((part) => part.trim()).filter(Boolean);
+  const base = parts[0] ?? 'plaintext';
+  return {
+    language: base,
+    runnable: parts.includes('runnable'),
+  };
+}
+
+function parseInline(text: string): BuiltinDocInlineNode[] {
+  if (!text) return [];
+  const nodes: BuiltinDocInlineNode[] = [];
+  let index = 0;
+
+  while (index < text.length) {
+    const char = text[index];
+    if (char === '`') {
+      const end = text.indexOf('`', index + 1);
+      if (end !== -1) {
+        const value = text.slice(index + 1, end);
+        nodes.push({ type: 'code', value });
+        index = end + 1;
+        continue;
+      }
+    }
+
+    if (char === '[') {
+      const closeBracket = text.indexOf(']', index + 1);
+      const openParen = closeBracket !== -1 ? text.indexOf('(', closeBracket + 1) : -1;
+      const closeParen = openParen !== -1 ? text.indexOf(')', openParen + 1) : -1;
+      if (closeBracket !== -1 && openParen === closeBracket + 1 && closeParen !== -1) {
+        const label = text.slice(index + 1, closeBracket);
+        const href = text.slice(openParen + 1, closeParen).trim();
+        nodes.push({ type: 'link', label: parseInline(label), href });
+        index = closeParen + 1;
+        continue;
+      }
+    }
+
+    const nextBacktick = text.indexOf('`', index);
+    const nextLink = text.indexOf('[', index);
+    let nextIndex = text.length;
+    if (nextBacktick !== -1) nextIndex = Math.min(nextIndex, nextBacktick);
+    if (nextLink !== -1) nextIndex = Math.min(nextIndex, nextLink);
+    if (nextIndex === index) {
+      nodes.push(textNode(text[index]));
+      index += 1;
+      continue;
+    }
+    const value = text.slice(index, nextIndex);
+    if (value) nodes.push(textNode(value));
+    index = nextIndex;
+  }
+
+  return nodes;
+}
+
+function inlineToPlainText(nodes: BuiltinDocInlineNode[]): string {
+  return nodes.map((node) => {
+    if (node.type === 'text' || node.type === 'code') return node.value;
+    if (node.type === 'link') return inlineToPlainText(node.label);
+    return '';
+  }).join('');
+}
+
+function createHeading(level: 1 | 2 | 3 | 4 | 5 | 6, text: BuiltinDocInlineNode[]): BuiltinDocBlock {
+  const id = slugifyHeading(inlineToPlainText(text).replace(/`/g, ''));
+  return { type: 'heading', level, text, id };
+}
+
+function textNode(value: string): BuiltinDocInlineNode {
+  return { type: 'text', value };
+}
+
+function inlineCodeOrText(value: string): BuiltinDocInlineNode {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return textNode('');
+  return { type: 'code', value: trimmed };
 }
