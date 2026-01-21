@@ -477,8 +477,7 @@ pub(crate) mod tests {
             let mut file = fs::File::create(&path).unwrap();
             writeln!(&mut file, "data").unwrap();
         }
-        let eval =
-            run_fopen(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
+        let eval = run_fopen(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
         let fid = eval.as_open().unwrap().fid;
         assert!(fid >= 3.0, "expected valid file identifier");
         (fid, path)

@@ -736,10 +736,9 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                 field_names.sort();
                 let mut field_values = Vec::with_capacity(field_names.len());
                 for field in &field_names {
-                    let val = struct_value
-                        .fields
-                        .get(field)
-                        .ok_or_else(|| save_error(format!("save: missing struct field '{field}'")))?;
+                    let val = struct_value.fields.get(field).ok_or_else(|| {
+                        save_error(format!("save: missing struct field '{field}'"))
+                    })?;
                     let gathered = gather_if_needed_async(val).await?;
                     field_values.push(convert_value(gathered).await?);
                 }
@@ -1253,7 +1252,11 @@ pub(crate) mod tests {
         let target = dir.path().join("matlab_struct.mat");
         let target_str = target.to_string_lossy().to_string();
         let _env = EnvOverride::set("RUNMAT_SAVE_DEFAULT_PATH", &target_str);
-        block_on(save_builtin(vec![Value::from("-struct"), Value::from("payload")])).unwrap();
+        block_on(save_builtin(vec![
+            Value::from("-struct"),
+            Value::from("payload"),
+        ]))
+        .unwrap();
 
         assert!(
             target.exists(),

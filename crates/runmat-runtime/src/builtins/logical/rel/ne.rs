@@ -701,8 +701,8 @@ pub(crate) mod tests {
                 target: runmat_gc_api::GcPtr::from_raw(raw_b),
                 valid: true,
             };
-            let result = run_ne(Value::HandleObject(handle_a), Value::HandleObject(handle_b))
-                .expect("ne");
+            let result =
+                run_ne(Value::HandleObject(handle_a), Value::HandleObject(handle_b)).expect("ne");
             assert_eq!(result, Value::Bool(true));
         }
     }

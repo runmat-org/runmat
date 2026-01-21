@@ -29,50 +29,52 @@ fn gather_if_needed_async_impl<'a>(
     Box::pin(async move {
         match value {
             Value::GpuTensor(handle) => {
-            // In parallel test runs, ensure the WGPU provider is reasserted for WGPU handles.
-            #[cfg(all(test, feature = "wgpu"))]
-            {
-                if handle.device_id != 0 {
-                    let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                // In parallel test runs, ensure the WGPU provider is reasserted for WGPU handles.
+                #[cfg(all(test, feature = "wgpu"))]
+                {
+                    if handle.device_id != 0 {
+                        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                         runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
                     );
-                }
-            }
-            let provider = runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
-                build_runtime_error("gather: no acceleration provider registered").build()
-            })?;
-            let is_logical = runmat_accelerate_api::handle_is_logical(handle);
-            let host = match provider.download(handle) {
-                Ok(host) => host,
-                Err(err) => {
-                    return Err(build_runtime_error(format!("gather: {err}")).build());
-                }
-            };
-            runmat_accelerate_api::clear_residency(handle);
-            let runmat_accelerate_api::HostTensorOwned { data, shape } = host;
-            if is_logical {
-                let bits: Vec<u8> = data.iter().map(|&v| if v != 0.0 { 1 } else { 0 }).collect();
-                let logical = LogicalArray::new(bits, shape)
-                    .map_err(|e| build_runtime_error(format!("gather: {e}")).build())?;
-                Ok(Value::LogicalArray(logical))
-            } else {
-                let mut data = data;
-                let precision = runmat_accelerate_api::handle_precision(handle)
-                    .unwrap_or_else(|| provider.precision());
-                if matches!(precision, runmat_accelerate_api::ProviderPrecision::F32) {
-                    for value in &mut data {
-                        *value = (*value as f32) as f64;
                     }
                 }
-                let dtype = match precision {
-                    runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
-                    runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
+                let provider =
+                    runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
+                        build_runtime_error("gather: no acceleration provider registered").build()
+                    })?;
+                let is_logical = runmat_accelerate_api::handle_is_logical(handle);
+                let host = match provider.download(handle) {
+                    Ok(host) => host,
+                    Err(err) => {
+                        return Err(build_runtime_error(format!("gather: {err}")).build());
+                    }
                 };
-                let tensor = Tensor::new_with_dtype(data, shape, dtype)
-                    .map_err(|e| build_runtime_error(format!("gather: {e}")).build())?;
-                Ok(Value::Tensor(tensor))
+                runmat_accelerate_api::clear_residency(handle);
+                let runmat_accelerate_api::HostTensorOwned { data, shape } = host;
+                if is_logical {
+                    let bits: Vec<u8> =
+                        data.iter().map(|&v| if v != 0.0 { 1 } else { 0 }).collect();
+                    let logical = LogicalArray::new(bits, shape)
+                        .map_err(|e| build_runtime_error(format!("gather: {e}")).build())?;
+                    Ok(Value::LogicalArray(logical))
+                } else {
+                    let mut data = data;
+                    let precision = runmat_accelerate_api::handle_precision(handle)
+                        .unwrap_or_else(|| provider.precision());
+                    if matches!(precision, runmat_accelerate_api::ProviderPrecision::F32) {
+                        for value in &mut data {
+                            *value = (*value as f32) as f64;
+                        }
+                    }
+                    let dtype = match precision {
+                        runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
+                        runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
+                    };
+                    let tensor = Tensor::new_with_dtype(data, shape, dtype)
+                        .map_err(|e| build_runtime_error(format!("gather: {e}")).build())?;
+                    Ok(Value::Tensor(tensor))
+                }
             }
-        }
             Value::Cell(ca) => {
                 let mut gathered = Vec::with_capacity(ca.data.len());
                 for ptr in &ca.data {

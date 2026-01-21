@@ -225,10 +225,10 @@ async fn normalize_condition_value(condition: Value) -> crate::BuiltinResult<Val
             gpu_helpers::gather_value_async(&gpu_value)
                 .await
                 .map_err(|flow| {
-                remap_assert_flow(flow, INVALID_INPUT_IDENTIFIER, |err| {
-                    format!("assert: {}", err.message())
+                    remap_assert_flow(flow, INVALID_INPUT_IDENTIFIER, |err| {
+                        format!("assert: {}", err.message())
+                    })
                 })
-            })
         }
         other => Ok(other),
     }

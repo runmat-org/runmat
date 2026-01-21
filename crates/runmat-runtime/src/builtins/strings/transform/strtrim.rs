@@ -9,9 +9,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{
-    build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError,
-};
+use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -460,8 +458,7 @@ pub(crate) mod tests {
     #[test]
     fn strtrim_char_array_zero_rows_stable() {
         let array = CharArray::new(Vec::new(), 0, 0).unwrap();
-        let result =
-            run_strtrim(Value::CharArray(array.clone())).expect("strtrim 0x0 char");
+        let result = run_strtrim(Value::CharArray(array.clone())).expect("strtrim 0x0 char");
         assert_eq!(result, Value::CharArray(array));
     }
 

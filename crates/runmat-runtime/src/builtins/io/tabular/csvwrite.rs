@@ -264,16 +264,24 @@ async fn csvwrite_builtin(
     data: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let filename_value = gather_if_needed_async(&filename).await.map_err(map_control_flow)?;
+    let filename_value = gather_if_needed_async(&filename)
+        .await
+        .map_err(map_control_flow)?;
     let path = resolve_path(&filename_value)?;
 
     let mut gathered_offsets = Vec::with_capacity(rest.len());
     for value in &rest {
-        gathered_offsets.push(gather_if_needed_async(value).await.map_err(map_control_flow)?);
+        gathered_offsets.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     let (row_offset, col_offset) = parse_offsets(&gathered_offsets)?;
 
-    let gathered_data = gather_if_needed_async(&data).await.map_err(map_control_flow)?;
+    let gathered_data = gather_if_needed_async(&data)
+        .await
+        .map_err(map_control_flow)?;
     let tensor =
         tensor::value_into_tensor_for("csvwrite", gathered_data).map_err(csvwrite_error)?;
     ensure_matrix_shape(&tensor)?;

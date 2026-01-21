@@ -453,10 +453,7 @@ fn repmat_cell_array(cell: &CellArray, reps: &[usize]) -> crate::BuiltinResult<C
     CellArray::new(values, rows, cols).map_err(|e| repmat_error(format!("repmat: {e}")))
 }
 
-async fn repmat_gpu_tensor(
-    handle: GpuTensorHandle,
-    reps: &[usize],
-) -> crate::BuiltinResult<Value> {
+async fn repmat_gpu_tensor(handle: GpuTensorHandle, reps: &[usize]) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(tiled) = provider.repmat(&handle, reps) {
             return Ok(Value::GpuTensor(tiled));

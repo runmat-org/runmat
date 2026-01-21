@@ -418,8 +418,7 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.fields.insert("name".to_string(), Value::from("Ada"));
         st.fields.insert("score".to_string(), Value::Num(42.0));
-        let result =
-            run_rmfield(Value::Struct(st), vec![Value::from("score")]).expect("rmfield");
+        let result = run_rmfield(Value::Struct(st), vec![Value::from("score")]).expect("rmfield");
         let Value::Struct(updated) = result else {
             panic!("expected struct result");
         };
@@ -495,8 +494,7 @@ pub(crate) mod tests {
         )
         .expect("struct array");
 
-        let result =
-            run_rmfield(Value::Cell(array), vec![Value::from("score")]).expect("rmfield");
+        let result = run_rmfield(Value::Cell(array), vec![Value::from("score")]).expect("rmfield");
         let Value::Cell(updated) = result else {
             panic!("expected struct array");
         };
@@ -537,9 +535,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_rejects_non_struct_inputs() {
-        let err = error_message(
-            run_rmfield(Value::Num(1.0), vec![Value::from("field")]).unwrap_err(),
-        );
+        let err =
+            error_message(run_rmfield(Value::Num(1.0), vec![Value::from("field")]).unwrap_err());
         assert!(
             err.contains("expected struct or struct array"),
             "unexpected error: {err}"
@@ -551,8 +548,7 @@ pub(crate) mod tests {
     fn rmfield_produces_error_for_empty_field_name() {
         let mut st = StructValue::new();
         st.fields.insert("data".to_string(), Value::Num(1.0));
-        let err =
-            error_message(run_rmfield(Value::Struct(st), vec![Value::from("")]).unwrap_err());
+        let err = error_message(run_rmfield(Value::Struct(st), vec![Value::from("")]).unwrap_err());
         assert!(
             err.contains("field names must be nonempty"),
             "unexpected error: {err}"
@@ -652,8 +648,7 @@ pub(crate) mod tests {
             .insert("gpu".to_string(), Value::GpuTensor(handle.clone()));
         st.fields.insert("remove".to_string(), Value::Num(5.0));
 
-        let result =
-            run_rmfield(Value::Struct(st), vec![Value::from("remove")]).expect("rmfield");
+        let result = run_rmfield(Value::Struct(st), vec![Value::from("remove")]).expect("rmfield");
 
         let Value::Struct(updated) = result else {
             panic!("expected struct result");

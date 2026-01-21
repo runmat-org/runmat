@@ -989,7 +989,10 @@ pub(crate) mod tests {
             let eval = evaluate(&[Value::GpuTensor(x_handle), Value::GpuTensor(y_handle)])
                 .expect("meshgrid");
             assert!(matches!(eval_first(&eval).expect("X"), Value::GpuTensor(_)));
-            assert!(matches!(eval_second(&eval).expect("Y"), Value::GpuTensor(_)));
+            assert!(matches!(
+                eval_second(&eval).expect("Y"),
+                Value::GpuTensor(_)
+            ));
         });
     }
 

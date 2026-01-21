@@ -327,7 +327,10 @@ pub(crate) mod tests {
     #[test]
     fn numeric_tensors_return_true() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        assert_eq!(run_isnumeric(Value::Tensor(tensor)).unwrap(), Value::Bool(true));
+        assert_eq!(
+            run_isnumeric(Value::Tensor(tensor)).unwrap(),
+            Value::Bool(true)
+        );
 
         let complex = ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![2, 1]).unwrap();
         assert_eq!(
@@ -339,7 +342,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn non_numeric_types_return_false() {
-        assert_eq!(run_isnumeric(Value::Bool(true)).unwrap(), Value::Bool(false));
+        assert_eq!(
+            run_isnumeric(Value::Bool(true)).unwrap(),
+            Value::Bool(false)
+        );
 
         let logical = LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
         assert_eq!(
@@ -348,9 +354,15 @@ pub(crate) mod tests {
         );
 
         let chars = CharArray::new("rm".chars().collect(), 1, 2).unwrap();
-        assert_eq!(run_isnumeric(Value::CharArray(chars)).unwrap(), Value::Bool(false));
+        assert_eq!(
+            run_isnumeric(Value::CharArray(chars)).unwrap(),
+            Value::Bool(false)
+        );
 
-        assert_eq!(run_isnumeric(Value::String("runmat".into())).unwrap(), Value::Bool(false));
+        assert_eq!(
+            run_isnumeric(Value::String("runmat".into())).unwrap(),
+            Value::Bool(false)
+        );
         assert_eq!(
             run_isnumeric(Value::Struct(StructValue::new())).unwrap(),
             Value::Bool(false)
@@ -363,9 +375,15 @@ pub(crate) mod tests {
         );
         let cell =
             CellArray::new(vec![Value::Num(1.0), Value::Bool(false)], 1, 2).expect("cell array");
-        assert_eq!(run_isnumeric(Value::Cell(cell)).unwrap(), Value::Bool(false));
+        assert_eq!(
+            run_isnumeric(Value::Cell(cell)).unwrap(),
+            Value::Bool(false)
+        );
         let object = ObjectInstance::new("runmat.MockObject".into());
-        assert_eq!(run_isnumeric(Value::Object(object)).unwrap(), Value::Bool(false));
+        assert_eq!(
+            run_isnumeric(Value::Object(object)).unwrap(),
+            Value::Bool(false)
+        );
         assert_eq!(
             run_isnumeric(Value::FunctionHandle("runmat_fun".into())).unwrap(),
             Value::Bool(false)
@@ -374,13 +392,19 @@ pub(crate) mod tests {
             function_name: "anon".into(),
             captures: vec![Value::Num(1.0)],
         };
-        assert_eq!(run_isnumeric(Value::Closure(closure)).unwrap(), Value::Bool(false));
+        assert_eq!(
+            run_isnumeric(Value::Closure(closure)).unwrap(),
+            Value::Bool(false)
+        );
         let handle = HandleRef {
             class_name: "runmat.Handle".into(),
             target: GcPtr::null(),
             valid: true,
         };
-        assert_eq!(run_isnumeric(Value::HandleObject(handle)).unwrap(), Value::Bool(false));
+        assert_eq!(
+            run_isnumeric(Value::HandleObject(handle)).unwrap(),
+            Value::Bool(false)
+        );
         let listener = Listener {
             id: 1,
             target: GcPtr::null(),
@@ -389,13 +413,19 @@ pub(crate) mod tests {
             enabled: true,
             valid: true,
         };
-        assert_eq!(run_isnumeric(Value::Listener(listener)).unwrap(), Value::Bool(false));
+        assert_eq!(
+            run_isnumeric(Value::Listener(listener)).unwrap(),
+            Value::Bool(false)
+        );
         assert_eq!(
             run_isnumeric(Value::ClassRef("pkg.Class".into())).unwrap(),
             Value::Bool(false)
         );
         let mex = MException::new("MATLAB:mock".into(), "message".into());
-        assert_eq!(run_isnumeric(Value::MException(mex)).unwrap(), Value::Bool(false));
+        assert_eq!(
+            run_isnumeric(Value::MException(mex)).unwrap(),
+            Value::Bool(false)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

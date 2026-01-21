@@ -597,10 +597,7 @@ fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, V
     Some((out, reps_a, reps_b))
 }
 
-async fn ldivide_gpu_host_left(
-    divisor: GpuTensorHandle,
-    numerator: Value,
-) -> BuiltinResult<Value> {
+async fn ldivide_gpu_host_left(divisor: GpuTensorHandle, numerator: Value) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&numerator)? {
             if let Ok(handle) = provider.scalar_rdiv(&divisor, scalar) {

@@ -569,8 +569,7 @@ pub(crate) mod tests {
     #[test]
     fn le_string_array_against_scalar() {
         let array = StringArray::new(vec!["apple".into(), "carrot".into()], vec![1, 2]).unwrap();
-        let result =
-            run_le(Value::StringArray(array), Value::String("banana".into())).expect("le");
+        let result = run_le(Value::StringArray(array), Value::String("banana".into())).expect("le");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![1, 2]);

@@ -517,7 +517,10 @@ fn value_to_single_string(value: &Value) -> Option<String> {
     }
 }
 
-async fn parse_pattern(value: &Value, expectation: &PatternExpectation) -> BuiltinResult<PatternSpec> {
+async fn parse_pattern(
+    value: &Value,
+    expectation: &PatternExpectation,
+) -> BuiltinResult<PatternSpec> {
     let expected_len = expectation.len();
     match value {
         Value::String(text) => Ok(PatternSpec::Scalar(text.chars().collect())),
@@ -941,8 +944,8 @@ pub(crate) mod tests {
             1,
         )
         .unwrap();
-        let err = run_strip(Value::StringArray(strings), vec![Value::Cell(cell_pattern)])
-            .unwrap_err();
+        let err =
+            run_strip(Value::StringArray(strings), vec![Value::Cell(cell_pattern)]).unwrap_err();
         assert_eq!(err.to_string(), SIZE_MISMATCH_ERROR);
     }
 

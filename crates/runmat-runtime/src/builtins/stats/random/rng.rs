@@ -641,8 +641,11 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
-        let err = block_on(rng_builtin(vec![Value::from("default"), Value::from("philox")]))
-            .unwrap_err();
+        let err = block_on(rng_builtin(vec![
+            Value::from("default"),
+            Value::from("philox"),
+        ]))
+        .unwrap_err();
         let message = err.to_string();
         assert!(
             message.contains("generator 'philox' is not supported")

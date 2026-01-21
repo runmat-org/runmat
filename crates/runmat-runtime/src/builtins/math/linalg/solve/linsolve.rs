@@ -255,7 +255,11 @@ async fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinRe
 }
 
 /// Evaluate `linsolve`, returning both the solution and the estimated reciprocal condition number.
-pub async fn evaluate(lhs: Value, rhs: Value, options: SolveOptions) -> BuiltinResult<LinsolveEval> {
+pub async fn evaluate(
+    lhs: Value,
+    rhs: Value,
+    options: SolveOptions,
+) -> BuiltinResult<LinsolveEval> {
     if let Some(eval) = try_gpu_linsolve(&lhs, &rhs, &options)? {
         return Ok(eval);
     }
@@ -1103,11 +1107,7 @@ pub(crate) mod tests {
         assert!((actual - expected).abs() < 1e-12);
     }
 
-    fn evaluate_args(
-        a: Value,
-        b: Value,
-        rest: &[Value],
-    ) -> Result<LinsolveEval, RuntimeError> {
+    fn evaluate_args(a: Value, b: Value, rest: &[Value]) -> Result<LinsolveEval, RuntimeError> {
         block_on(super::evaluate_args(a, b, rest))
     }
 

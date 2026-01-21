@@ -1337,7 +1337,6 @@ pub(crate) mod tests {
         registry::test_guard()
     }
 
-
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_reads_default_double() {
@@ -1451,8 +1450,7 @@ pub(crate) mod tests {
         .expect("fopen");
         let fid = open.as_open().unwrap().fid as i32;
 
-        let eval =
-            run_evaluate(&Value::Num(fid as f64), &[Value::from("*char")]).expect("fread");
+        let eval = run_evaluate(&Value::Num(fid as f64), &[Value::from("*char")]).expect("fread");
         assert_eq!(eval.count(), 3);
         match eval.data() {
             Value::CharArray(ca) => {
@@ -1631,8 +1629,7 @@ pub(crate) mod tests {
         let fid = open.as_open().unwrap().fid as i32;
 
         let proto = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
-        let gpu_proto =
-            run_call_builtin("gpuArray", &[Value::Tensor(proto)]).expect("gpuArray");
+        let gpu_proto = run_call_builtin("gpuArray", &[Value::Tensor(proto)]).expect("gpuArray");
 
         let args = vec![
             Value::Num(1.0),

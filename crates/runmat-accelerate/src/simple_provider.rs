@@ -4543,7 +4543,10 @@ impl AccelProvider for InProcessProvider {
             args.push(Value::from("vector"));
         }
         let eval = block_on_runtime(
-            runmat_runtime::builtins::math::linalg::factor::qr::evaluate(Value::Tensor(tensor), &args),
+            runmat_runtime::builtins::math::linalg::factor::qr::evaluate(
+                Value::Tensor(tensor),
+                &args,
+            ),
         )
         .map_err(|err| runtime_flow_to_anyhow("qr", err))?;
 

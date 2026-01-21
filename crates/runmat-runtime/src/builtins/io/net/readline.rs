@@ -650,8 +650,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_rejects_non_struct_argument() {
-        let err = run_readline(Value::Num(5.0), Vec::new())
-            .expect_err("expected invalid client error");
+        let err =
+            run_readline(Value::Num(5.0), Vec::new()).expect_err("expected invalid client error");
         assert_error_identifier(err, MESSAGE_ID_INVALID_CLIENT);
     }
 

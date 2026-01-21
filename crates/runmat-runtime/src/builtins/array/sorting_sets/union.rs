@@ -1647,16 +1647,11 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor, Value};
 
-
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
     }
 
-    fn evaluate_sync(
-        a: Value,
-        b: Value,
-        rest: &[Value],
-    ) -> crate::BuiltinResult<UnionEvaluation> {
+    fn evaluate_sync(a: Value, b: Value, rest: &[Value]) -> crate::BuiltinResult<UnionEvaluation> {
         futures::executor::block_on(evaluate(a, b, rest))
     }
 
@@ -1686,12 +1681,8 @@ pub(crate) mod tests {
     fn union_numeric_stable_order() {
         let a = Tensor::new(vec![5.0, 7.0, 1.0], vec![3, 1]).unwrap();
         let b = Tensor::new(vec![3.0, 2.0, 4.0], vec![3, 1]).unwrap();
-        let eval = evaluate_sync(
-            Value::Tensor(a),
-            Value::Tensor(b),
-            &[Value::from("stable")],
-        )
-        .expect("union");
+        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("stable")])
+            .expect("union");
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.data, vec![5.0, 7.0, 1.0, 3.0, 2.0, 4.0]);
@@ -1727,12 +1718,8 @@ pub(crate) mod tests {
     fn union_numeric_rows_sorted() {
         let a = Tensor::new(vec![1.0, 3.0, 1.0, 2.0, 4.0, 2.0], vec![3, 2]).unwrap();
         let b = Tensor::new(vec![3.0, 5.0, 4.0, 6.0], vec![2, 2]).unwrap();
-        let eval = evaluate_sync(
-            Value::Tensor(a),
-            Value::Tensor(b),
-            &[Value::from("rows")],
-        )
-        .expect("union");
+        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+            .expect("union");
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 2]);
@@ -1776,8 +1763,7 @@ pub(crate) mod tests {
     fn union_char_elements() {
         let a = CharArray::new(vec!['m', 'z', 'm', 'a'], 2, 2).unwrap();
         let b = CharArray::new(vec!['a', 'x', 'm', 'a'], 2, 2).unwrap();
-        let eval =
-            evaluate_sync(Value::CharArray(a), Value::CharArray(b), &[]).expect("union");
+        let eval = evaluate_sync(Value::CharArray(a), Value::CharArray(b), &[]).expect("union");
         match eval.values_value() {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 4);
@@ -1897,8 +1883,7 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let err = error_message(
-            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
-                .unwrap_err(),
+            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")]).unwrap_err(),
         );
         assert!(err.contains("same number of columns"));
     }
@@ -1967,12 +1952,8 @@ pub(crate) mod tests {
         };
         let handle_a = provider.upload(&view_a).expect("upload A");
         let handle_b = provider.upload(&view_b).expect("upload B");
-        let gpu_eval = evaluate_sync(
-            Value::GpuTensor(handle_a),
-            Value::GpuTensor(handle_b),
-            &[],
-        )
-        .expect("union");
+        let gpu_eval = evaluate_sync(Value::GpuTensor(handle_a), Value::GpuTensor(handle_b), &[])
+            .expect("union");
         let gpu_values = tensor::value_into_tensor_for("union", gpu_eval.values_value()).unwrap();
         let gpu_ia = tensor::value_into_tensor_for("union", gpu_eval.ia_value()).unwrap();
         let gpu_ib = tensor::value_into_tensor_for("union", gpu_eval.ib_value()).unwrap();

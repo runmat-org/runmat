@@ -356,7 +356,9 @@ async fn parse_boundaries_option(args: &[Value]) -> BuiltinResult<Option<Boundar
         if !name.eq_ignore_ascii_case("boundaries") {
             return Err(runtime_error_for(OPTION_NAME_ERROR));
         }
-        let value = gather_if_needed_async(&args[idx + 1]).await.map_err(map_flow)?;
+        let value = gather_if_needed_async(&args[idx + 1])
+            .await
+            .map_err(map_flow)?;
         let value_str =
             value_to_string(&value).ok_or_else(|| runtime_error_for(OPTION_VALUE_ERROR))?;
         let parsed_mode = if value_str.eq_ignore_ascii_case("inclusive") {

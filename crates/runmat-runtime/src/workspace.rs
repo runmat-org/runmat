@@ -21,7 +21,9 @@ static TEST_WORKSPACE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 /// Register the workspace resolver. Ignition installs this once during
 /// initialization so that language builtins can query variables lazily.
 pub fn register_workspace_resolver(resolver: WorkspaceResolver) {
-    let mut guard = RESOLVER.write().unwrap_or_else(|poison| poison.into_inner());
+    let mut guard = RESOLVER
+        .write()
+        .unwrap_or_else(|poison| poison.into_inner());
     *guard = Some(resolver);
 }
 

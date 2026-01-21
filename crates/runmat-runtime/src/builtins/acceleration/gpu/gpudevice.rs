@@ -450,9 +450,7 @@ pub(crate) mod tests {
     #[test]
     fn gpu_device_out_of_range_index_errors() {
         test_support::with_test_provider(|_| {
-            let err = call(vec![Value::Num(2.0)])
-                .unwrap_err()
-                .to_string();
+            let err = call(vec![Value::Num(2.0)]).unwrap_err().to_string();
             assert!(
                 err.contains("gpuDevice: GPU device with index 2 not available"),
                 "unexpected error: {err}"
@@ -464,9 +462,7 @@ pub(crate) mod tests {
     #[test]
     fn gpu_device_unsupported_argument_errors() {
         test_support::with_test_provider(|_| {
-            let err = call(vec![Value::from("status")])
-                .unwrap_err()
-                .to_string();
+            let err = call(vec![Value::from("status")]).unwrap_err().to_string();
             assert_eq!(err, ERR_UNSUPPORTED_ARGUMENT);
         });
     }
@@ -475,9 +471,7 @@ pub(crate) mod tests {
     #[test]
     fn gpu_device_reset_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
-            let err = call(vec![Value::from(" RESET ")])
-                .unwrap_err()
-                .to_string();
+            let err = call(vec![Value::from(" RESET ")]).unwrap_err().to_string();
             assert_eq!(err, ERR_RESET_NOT_SUPPORTED);
         });
     }
@@ -487,9 +481,7 @@ pub(crate) mod tests {
     fn gpu_device_reset_char_array_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
             let chars = runmat_builtins::CharArray::new("reset".chars().collect(), 1, 5).unwrap();
-            let err = call(vec![Value::CharArray(chars)])
-                .unwrap_err()
-                .to_string();
+            let err = call(vec![Value::CharArray(chars)]).unwrap_err().to_string();
             assert_eq!(err, ERR_RESET_NOT_SUPPORTED);
         });
     }
@@ -499,9 +491,7 @@ pub(crate) mod tests {
     fn gpu_device_empty_array_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
             let empty = runmat_builtins::Tensor::zeros(vec![0, 0]);
-            let err = call(vec![Value::Tensor(empty)])
-                .unwrap_err()
-                .to_string();
+            let err = call(vec![Value::Tensor(empty)]).unwrap_err().to_string();
             assert_eq!(err, ERR_RESET_NOT_SUPPORTED);
         });
     }

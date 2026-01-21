@@ -496,8 +496,7 @@ pub(crate) mod tests {
     fn timeit_supports_zero_outputs() {
         COUNTER_ZERO_OUTPUTS.store(0, Ordering::SeqCst);
         let args = vec![Value::Int(IntValue::I32(0))];
-        let _ =
-            block_on(timeit_builtin(zero_outputs_handle(), args)).expect("timeit zero outputs");
+        let _ = block_on(timeit_builtin(zero_outputs_handle(), args)).expect("timeit zero outputs");
         assert!(
             COUNTER_ZERO_OUTPUTS.load(Ordering::SeqCst) >= MIN_SAMPLE_COUNT,
             "expected at least {} invocations",

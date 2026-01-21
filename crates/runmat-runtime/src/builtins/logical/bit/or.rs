@@ -406,8 +406,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn or_of_booleans() {
-        assert_eq!(run_or(Value::Bool(true), Value::Bool(false)).unwrap(), Value::Bool(true));
-        assert_eq!(run_or(Value::Bool(false), Value::Bool(false)).unwrap(), Value::Bool(false));
+        assert_eq!(
+            run_or(Value::Bool(true), Value::Bool(false)).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            run_or(Value::Bool(false), Value::Bool(false)).unwrap(),
+            Value::Bool(false)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -444,8 +450,7 @@ pub(crate) mod tests {
     fn or_char_arrays() {
         let lhs = CharArray::new(vec!['R', 'u', '\0'], 1, 3).unwrap();
         let rhs = CharArray::new(vec!['R', '\0', 'n'], 1, 3).unwrap();
-        let result =
-            run_or(Value::CharArray(lhs), Value::CharArray(rhs)).expect("or char arrays");
+        let result = run_or(Value::CharArray(lhs), Value::CharArray(rhs)).expect("or char arrays");
         match result {
             Value::LogicalArray(arr) => {
                 assert_eq!(arr.shape, vec![1, 3]);
@@ -530,8 +535,7 @@ pub(crate) mod tests {
             let gpu_lhs = provider.upload(&lhs_view).expect("upload lhs");
             let gpu_rhs = provider.upload(&rhs_view).expect("upload rhs");
 
-            let result =
-                run_or(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs)).expect("or");
+            let result = run_or(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs)).expect("or");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
             assert_eq!(gathered.data, vec![0.0, 1.0, 0.0, 1.0]);

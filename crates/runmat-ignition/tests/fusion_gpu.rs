@@ -2661,12 +2661,10 @@ fn explained_variance_matches_cpu() {
             if let Value::Tensor(ref q_t_tensor) = q_t_value {
                 println!("q_t tensor data {:?}", q_t_tensor.data);
             }
-            let tmp_via_runtime =
-                futures::executor::block_on(runmat_runtime::matrix::value_matmul(
-                    &q_t_value,
-                    &g_tensor_value,
-                ))
-                .expect("q' * g via runtime");
+            let tmp_via_runtime = futures::executor::block_on(
+                runmat_runtime::matrix::value_matmul(&q_t_value, &g_tensor_value),
+            )
+            .expect("q' * g via runtime");
             if let Value::Tensor(ref tmp_tensor) = tmp_via_runtime {
                 println!("tmp via runtime {:?}", tmp_tensor.data);
             }

@@ -1017,8 +1017,7 @@ pub(crate) mod tests {
     fn cov_two_vectors() {
         let x = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
         let y = Tensor::new(vec![10.0, 11.0, 9.0, 12.0], vec![4, 1]).unwrap();
-        let result =
-            block_on(cov_builtin(Value::Tensor(x), vec![Value::Tensor(y)])).expect("cov");
+        let result = block_on(cov_builtin(Value::Tensor(x), vec![Value::Tensor(y)])).expect("cov");
         let tensor = match result {
             Value::Tensor(t) => t,
             other => panic!("expected tensor result, got {other:?}"),
@@ -1044,8 +1043,11 @@ pub(crate) mod tests {
         )
         .unwrap();
         let weights = Tensor::new(vec![1.0, 1.0, 1.0, 2.0, 2.0], vec![5, 1]).unwrap();
-        let result = block_on(cov_builtin(Value::Tensor(tensor), vec![Value::Tensor(weights)]))
-            .expect("cov");
+        let result = block_on(cov_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Tensor(weights)],
+        ))
+        .expect("cov");
         let tensor = match result {
             Value::Tensor(t) => t,
             other => panic!("expected tensor result, got {other:?}"),
@@ -1080,8 +1082,11 @@ pub(crate) mod tests {
             vec![4, 3],
         )
         .unwrap();
-        let result = block_on(cov_builtin(Value::Tensor(tensor), vec![Value::from("omitrows")]))
-            .expect("cov");
+        let result = block_on(cov_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from("omitrows")],
+        ))
+        .expect("cov");
         let tensor = match result {
             Value::Tensor(t) => t,
             other => panic!("expected tensor result, got {other:?}"),
@@ -1112,9 +1117,11 @@ pub(crate) mod tests {
             vec![3, 3],
         )
         .unwrap();
-        let result =
-            block_on(cov_builtin(Value::Tensor(tensor), vec![Value::from("partialrows")]))
-                .expect("cov");
+        let result = block_on(cov_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from("partialrows")],
+        ))
+        .expect("cov");
         let tensor = match result {
             Value::Tensor(t) => t,
             other => panic!("expected tensor result, got {other:?}"),
@@ -1198,8 +1205,7 @@ pub(crate) mod tests {
         };
         let handle = provider.upload(&view).expect("upload");
 
-        let gpu_value =
-            block_on(cov_builtin(Value::GpuTensor(handle), Vec::new())).expect("cov");
+        let gpu_value = block_on(cov_builtin(Value::GpuTensor(handle), Vec::new())).expect("cov");
         let gathered = test_support::gather(gpu_value).expect("gather");
 
         assert_tensor_close(&gathered, &cpu_tensor.data, 1.0e-6);

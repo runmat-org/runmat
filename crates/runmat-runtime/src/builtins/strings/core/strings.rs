@@ -296,7 +296,9 @@ async fn parse_arguments(args: Vec<Value>) -> BuiltinResult<ParsedStrings> {
 
     let mut idx = 0;
     while idx < args.len() {
-        let host = gather_if_needed_async(&args[idx]).await.map_err(remap_strings_flow)?;
+        let host = gather_if_needed_async(&args[idx])
+            .await
+            .map_err(remap_strings_flow)?;
         if let Some(keyword) = keyword_of(&host) {
             match keyword.as_str() {
                 "like" => {
@@ -310,7 +312,9 @@ async fn parse_arguments(args: Vec<Value>) -> BuiltinResult<ParsedStrings> {
                             "{FN_NAME}: expected prototype after 'like'"
                         )));
                     };
-                    let proto = gather_if_needed_async(proto_raw).await.map_err(remap_strings_flow)?;
+                    let proto = gather_if_needed_async(proto_raw)
+                        .await
+                        .map_err(remap_strings_flow)?;
                     like_proto = Some(proto);
                     idx += 2;
                     continue;

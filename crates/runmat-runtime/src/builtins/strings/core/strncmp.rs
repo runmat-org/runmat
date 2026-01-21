@@ -202,9 +202,15 @@ fn remap_strncmp_flow(err: RuntimeError) -> RuntimeError {
     builtin_path = "crate::builtins::strings::core::strncmp"
 )]
 async fn strncmp_builtin(a: Value, b: Value, n: Value) -> crate::BuiltinResult<Value> {
-    let a = gather_if_needed_async(&a).await.map_err(remap_strncmp_flow)?;
-    let b = gather_if_needed_async(&b).await.map_err(remap_strncmp_flow)?;
-    let n = gather_if_needed_async(&n).await.map_err(remap_strncmp_flow)?;
+    let a = gather_if_needed_async(&a)
+        .await
+        .map_err(remap_strncmp_flow)?;
+    let b = gather_if_needed_async(&b)
+        .await
+        .map_err(remap_strncmp_flow)?;
+    let n = gather_if_needed_async(&n)
+        .await
+        .map_err(remap_strncmp_flow)?;
 
     let limit = parse_prefix_length(n)?;
     let left = TextCollection::from_argument(FN_NAME, a, "first argument")?;

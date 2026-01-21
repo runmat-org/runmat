@@ -231,7 +231,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::stats::hist::histcounts"
 )]
 async fn histcounts_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    evaluate(data, &rest).await.map(|eval| eval.into_counts_value())
+    evaluate(data, &rest)
+        .await
+        .map(|eval| eval.into_counts_value())
 }
 
 /// Evaluate `histcounts` once and surface both primary outputs.
@@ -1130,8 +1132,11 @@ pub(crate) mod tests {
     #[test]
     fn histcounts_basic_numbins() {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0, 5.0, 7.0], vec![6, 1]).unwrap();
-        let eval = block_on(evaluate(Value::Tensor(tensor), &[Value::Int(IntValue::I32(3))]))
-            .expect("histcounts");
+        let eval = block_on(evaluate(
+            Value::Tensor(tensor),
+            &[Value::Int(IntValue::I32(3))],
+        ))
+        .expect("histcounts");
         let (counts_val, edges_val) = eval.into_pair();
         assert_eq!(values_from_tensor(counts_val), vec![3.0, 1.0, 2.0]);
         assert_eq!(values_from_tensor(edges_val), vec![1.0, 3.0, 5.0, 7.0]);
@@ -1201,8 +1206,11 @@ pub(crate) mod tests {
     #[test]
     fn histcounts_handles_nan() {
         let data = Tensor::new(vec![1.0, f64::NAN, 2.0, f64::NAN, 3.0], vec![5, 1]).unwrap();
-        let eval = block_on(evaluate(Value::Tensor(data), &[Value::Int(IntValue::I32(3))]))
-            .expect("histcounts");
+        let eval = block_on(evaluate(
+            Value::Tensor(data),
+            &[Value::Int(IntValue::I32(3))],
+        ))
+        .expect("histcounts");
         let (counts_val, _) = eval.into_pair();
         assert_eq!(values_from_tensor(counts_val), vec![1.0, 1.0, 1.0]);
     }

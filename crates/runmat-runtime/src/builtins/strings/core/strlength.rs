@@ -208,7 +208,9 @@ fn remap_strlength_flow(err: RuntimeError) -> RuntimeError {
     builtin_path = "crate::builtins::strings::core::strlength"
 )]
 async fn strlength_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    let gathered = gather_if_needed_async(&value).await.map_err(remap_strlength_flow)?;
+    let gathered = gather_if_needed_async(&value)
+        .await
+        .map_err(remap_strlength_flow)?;
     match gathered {
         Value::StringArray(array) => strlength_string_array(array),
         Value::String(text) => Ok(Value::Num(string_scalar_length(&text))),

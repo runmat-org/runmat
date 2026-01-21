@@ -452,8 +452,7 @@ pub(crate) mod tests {
         let mut fields = StructValue::new();
         fields.fields.insert("name".to_string(), Value::Num(1.0));
         fields.fields.insert("Name".to_string(), Value::Num(2.0));
-        let Value::Cell(cell) = run_fieldnames(Value::Struct(fields)).expect("fieldnames")
-        else {
+        let Value::Cell(cell) = run_fieldnames(Value::Struct(fields)).expect("fieldnames") else {
             panic!("expected cell array result");
         };
         let collected = cell_strings(&cell);

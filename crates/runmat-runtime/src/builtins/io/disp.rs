@@ -976,11 +976,9 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = futures::executor::block_on(disp_builtin(
-                Value::GpuTensor(handle),
-                Vec::new(),
-            ))
-            .expect("disp should succeed");
+            let result =
+                futures::executor::block_on(disp_builtin(Value::GpuTensor(handle), Vec::new()))
+                    .expect("disp should succeed");
             assert_eq!(result, Value::Tensor(Tensor::zeros(vec![0, 0])));
         });
     }

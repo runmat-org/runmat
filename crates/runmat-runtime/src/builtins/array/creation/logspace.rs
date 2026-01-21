@@ -235,7 +235,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::logspace"
 )]
-async fn logspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn logspace_builtin(
+    start: Value,
+    stop: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(builtin_error(
             "logspace: expected two or three input arguments",
@@ -528,7 +532,11 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::IntValue;
 
-    fn logspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    fn logspace_builtin(
+        start: Value,
+        stop: Value,
+        rest: Vec<Value>,
+    ) -> crate::BuiltinResult<Value> {
         block_on(super::logspace_builtin(start, stop, rest))
     }
 

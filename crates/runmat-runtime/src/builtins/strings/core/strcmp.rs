@@ -208,8 +208,12 @@ fn remap_strcmp_flow(err: RuntimeError) -> RuntimeError {
     builtin_path = "crate::builtins::strings::core::strcmp"
 )]
 async fn strcmp_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
-    let a = gather_if_needed_async(&a).await.map_err(remap_strcmp_flow)?;
-    let b = gather_if_needed_async(&b).await.map_err(remap_strcmp_flow)?;
+    let a = gather_if_needed_async(&a)
+        .await
+        .map_err(remap_strcmp_flow)?;
+    let b = gather_if_needed_async(&b)
+        .await
+        .map_err(remap_strcmp_flow)?;
     let left = TextCollection::from_argument("strcmp", a, "first argument")?;
     let right = TextCollection::from_argument("strcmp", b, "second argument")?;
     evaluate_strcmp(&left, &right)

@@ -259,7 +259,11 @@ fn circshift_error(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::circshift"
 )]
-async fn circshift_builtin(value: Value, shift: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn circshift_builtin(
+    value: Value,
+    shift: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(circshift_error("circshift: too many input arguments"));
     }

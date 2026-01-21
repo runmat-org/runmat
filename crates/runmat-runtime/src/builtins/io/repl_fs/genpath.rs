@@ -275,7 +275,9 @@ fn generate_from_root(root: &Value, excludes: Option<&Value>) -> BuiltinResult<V
 async fn gather_arguments(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
     let mut gathered = Vec::with_capacity(args.len());
     for value in args {
-        let host_value = gather_if_needed_async(&value).await.map_err(map_control_flow)?;
+        let host_value = gather_if_needed_async(&value)
+            .await
+            .map_err(map_control_flow)?;
         gathered.push(host_value);
     }
     Ok(gathered)

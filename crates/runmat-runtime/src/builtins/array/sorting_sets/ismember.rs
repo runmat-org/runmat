@@ -909,7 +909,6 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::Tensor;
 
-
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
 
@@ -1078,8 +1077,7 @@ pub(crate) mod tests {
     #[test]
     fn rejects_unknown_option() {
         let err = error_message(
-            evaluate_sync(Value::Num(1.0), Value::Num(1.0), &[Value::from("stable")])
-                .unwrap_err(),
+            evaluate_sync(Value::Num(1.0), Value::Num(1.0), &[Value::from("stable")]).unwrap_err(),
         );
         assert!(err.contains("unrecognised option"));
     }
@@ -1106,8 +1104,7 @@ pub(crate) mod tests {
         let a = Value::Bool(true);
         let logical_b =
             LogicalArray::new(vec![1, 0], vec![2, 1]).expect("logical array construction");
-        let eval =
-            evaluate_sync(a, Value::LogicalArray(logical_b), &[]).expect("ismember");
+        let eval = evaluate_sync(a, Value::LogicalArray(logical_b), &[]).expect("ismember");
         assert_eq!(eval.mask_value(), Value::Bool(true));
         assert_eq!(eval.loc_value(), Value::Num(1.0));
     }

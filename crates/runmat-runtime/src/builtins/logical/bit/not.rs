@@ -399,12 +399,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_complex_scalar() {
-        let result =
-            run_not(Value::Complex(0.0, 0.0)).expect("not complex zero should succeed");
+        let result = run_not(Value::Complex(0.0, 0.0)).expect("not complex zero should succeed");
         assert_eq!(result, Value::Bool(true));
 
-        let result =
-            run_not(Value::Complex(1.0, 0.0)).expect("not complex nonzero should succeed");
+        let result = run_not(Value::Complex(1.0, 0.0)).expect("not complex nonzero should succeed");
         assert_eq!(result, Value::Bool(false));
     }
 
@@ -457,16 +455,10 @@ pub(crate) mod tests {
     #[test]
     fn not_tensor_scalar_returns_bool() {
         let tensor = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
-        assert_eq!(
-            run_not(Value::Tensor(tensor)).unwrap(),
-            Value::Bool(false)
-        );
+        assert_eq!(run_not(Value::Tensor(tensor)).unwrap(), Value::Bool(false));
 
         let tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
-        assert_eq!(
-            run_not(Value::Tensor(tensor)).unwrap(),
-            Value::Bool(true)
-        );
+        assert_eq!(run_not(Value::Tensor(tensor)).unwrap(), Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

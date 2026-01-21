@@ -1367,7 +1367,6 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, StringArray, Tensor, Value};
 
-
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
     }
@@ -1420,9 +1419,8 @@ pub(crate) mod tests {
     fn setdiff_numeric_rows_sorted() {
         let a = Tensor::new(vec![1.0, 3.0, 1.0, 2.0, 4.0, 2.0], vec![3, 2]).unwrap();
         let b = Tensor::new(vec![3.0, 5.0, 4.0, 6.0], vec![2, 2]).unwrap();
-        let eval =
-            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
-                .expect("setdiff");
+        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+            .expect("setdiff");
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
@@ -1451,8 +1449,7 @@ pub(crate) mod tests {
     fn setdiff_char_elements() {
         let a = CharArray::new(vec!['m', 'z', 'm', 'a'], 2, 2).unwrap();
         let b = CharArray::new(vec!['a', 'x', 'm', 'a'], 2, 2).unwrap();
-        let eval =
-            evaluate_sync(Value::CharArray(a), Value::CharArray(b), &[]).expect("setdiff");
+        let eval = evaluate_sync(Value::CharArray(a), Value::CharArray(b), &[]).expect("setdiff");
         match eval.values_value() {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 1);
@@ -1561,9 +1558,8 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![8.0, 4.0, 2.0, 4.0], vec![4, 1]).unwrap();
         let b = Tensor::new(vec![2.0, 5.0], vec![2, 1]).unwrap();
 
-        let cpu_eval =
-            evaluate_sync(Value::Tensor(a.clone()), Value::Tensor(b.clone()), &[])
-                .expect("setdiff");
+        let cpu_eval = evaluate_sync(Value::Tensor(a.clone()), Value::Tensor(b.clone()), &[])
+            .expect("setdiff");
         let cpu_values = tensor::value_into_tensor_for("setdiff", cpu_eval.values_value()).unwrap();
         let cpu_ia = tensor::value_into_tensor_for("setdiff", cpu_eval.ia_value()).unwrap();
 
@@ -1578,9 +1574,8 @@ pub(crate) mod tests {
         };
         let handle_a = provider.upload(&view_a).expect("upload A");
         let handle_b = provider.upload(&view_b).expect("upload B");
-        let gpu_eval =
-            evaluate_sync(Value::GpuTensor(handle_a), Value::GpuTensor(handle_b), &[])
-                .expect("setdiff");
+        let gpu_eval = evaluate_sync(Value::GpuTensor(handle_a), Value::GpuTensor(handle_b), &[])
+            .expect("setdiff");
         let gpu_values = tensor::value_into_tensor_for("setdiff", gpu_eval.values_value()).unwrap();
         let gpu_ia = tensor::value_into_tensor_for("setdiff", gpu_eval.ia_value()).unwrap();
 

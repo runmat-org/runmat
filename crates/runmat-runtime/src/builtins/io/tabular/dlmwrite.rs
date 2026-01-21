@@ -281,16 +281,24 @@ async fn dlmwrite_builtin(
     data: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let gathered_path = gather_if_needed_async(&filename).await.map_err(map_control_flow)?;
+    let gathered_path = gather_if_needed_async(&filename)
+        .await
+        .map_err(map_control_flow)?;
     let path = resolve_path(&gathered_path)?;
 
     let mut gathered_args = Vec::with_capacity(rest.len());
     for value in &rest {
-        gathered_args.push(gather_if_needed_async(value).await.map_err(map_control_flow)?);
+        gathered_args.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     let options = parse_arguments(&gathered_args)?;
 
-    let gathered_data = gather_if_needed_async(&data).await.map_err(map_control_flow)?;
+    let gathered_data = gather_if_needed_async(&data)
+        .await
+        .map_err(map_control_flow)?;
     let tensor =
         tensor::value_into_tensor_for("dlmwrite", gathered_data).map_err(dlmwrite_error)?;
     ensure_matrix_shape(&tensor)?;

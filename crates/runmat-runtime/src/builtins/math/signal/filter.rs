@@ -1652,5 +1652,4 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         assert!(!test_support::doc_examples(DOC_MD).is_empty());
     }
-
 }

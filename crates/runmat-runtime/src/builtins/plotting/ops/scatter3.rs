@@ -583,12 +583,7 @@ pub(crate) mod tests {
         ensure_plot_test_env();
     }
 
-    fn scatter3_builtin(
-        x: Value,
-        y: Value,
-        z: Value,
-        rest: Vec<Value>,
-    ) -> BuiltinResult<String> {
+    fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> BuiltinResult<String> {
         block_on(super::scatter3_builtin(x, y, z, rest))
     }
 

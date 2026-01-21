@@ -408,9 +408,18 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_of_booleans() {
-        assert_eq!(run_xor(Value::Bool(true), Value::Bool(false)).unwrap(), Value::Bool(true));
-        assert_eq!(run_xor(Value::Bool(true), Value::Bool(true)).unwrap(), Value::Bool(false));
-        assert_eq!(run_xor(Value::Bool(false), Value::Bool(false)).unwrap(), Value::Bool(false));
+        assert_eq!(
+            run_xor(Value::Bool(true), Value::Bool(false)).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            run_xor(Value::Bool(true), Value::Bool(true)).unwrap(),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            run_xor(Value::Bool(false), Value::Bool(false)).unwrap(),
+            Value::Bool(false)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -433,8 +442,7 @@ pub(crate) mod tests {
     fn xor_logical_array_inputs() {
         let left = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
         let right = LogicalArray::new(vec![0, 1, 1], vec![3, 1]).unwrap();
-        let result =
-            run_xor(Value::LogicalArray(left), Value::LogicalArray(right)).expect("xor");
+        let result = run_xor(Value::LogicalArray(left), Value::LogicalArray(right)).expect("xor");
         match result {
             Value::LogicalArray(arr) => {
                 assert_eq!(arr.shape, vec![3, 1]);

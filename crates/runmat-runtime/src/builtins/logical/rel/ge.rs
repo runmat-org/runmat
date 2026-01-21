@@ -614,8 +614,7 @@ pub(crate) mod tests {
     #[test]
     fn ge_string_array_against_scalar() {
         let array = StringArray::new(vec!["apple".into(), "banana".into()], vec![1, 2]).unwrap();
-        let result =
-            run_ge(Value::StringArray(array), Value::String("banana".into())).expect("ge");
+        let result = run_ge(Value::StringArray(array), Value::String("banana".into())).expect("ge");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![1, 2]);

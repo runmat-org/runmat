@@ -587,5 +587,4 @@ pub(crate) mod tests {
     fn mpower_builtin(base: Value, exponent: Value) -> BuiltinResult<Value> {
         block_on(super::mpower_builtin(base, exponent))
     }
-
 }

@@ -492,7 +492,8 @@ pub(crate) mod tests {
     fn integer_scalar_is_accepted() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
-        let result = block_on(pause_builtin(vec![Value::Int(IntValue::I32(0))])).expect("pause(int)");
+        let result =
+            block_on(pause_builtin(vec![Value::Int(IntValue::I32(0))])).expect("pause(int)");
         match result {
             Value::Tensor(t) => assert_eq!(t.data.len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
@@ -549,7 +550,8 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap();
         reset_state(true);
         let logical = LogicalArray::new(vec![1u8], vec![1, 1]).unwrap();
-        let result = block_on(pause_builtin(vec![Value::LogicalArray(logical)])).expect("pause(true)");
+        let result =
+            block_on(pause_builtin(vec![Value::LogicalArray(logical)])).expect("pause(true)");
         match result {
             Value::Tensor(t) => assert_eq!(t.data.len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),

@@ -186,13 +186,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 async fn weboptions_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut gathered = Vec::with_capacity(rest.len());
     for value in rest {
-        gathered.push(
-            gather_if_needed_async(&value)
-                .await
-                .map_err(|flow| {
-                    remap_weboptions_flow(flow, |err| format!("weboptions: {}", err.message()))
-                })?,
-        );
+        gathered.push(gather_if_needed_async(&value).await.map_err(|flow| {
+            remap_weboptions_flow(flow, |err| format!("weboptions: {}", err.message()))
+        })?);
     }
     let mut queue: VecDeque<Value> = gathered.into();
     let mut options = default_options_struct();

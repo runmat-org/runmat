@@ -334,8 +334,7 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result =
-                block_on(gather_builtin(vec![Value::GpuTensor(handle)])).expect("gather");
+            let result = block_on(gather_builtin(vec![Value::GpuTensor(handle)])).expect("gather");
             match result {
                 Value::Tensor(host) => {
                     assert_eq!(host.shape, tensor.shape);
@@ -358,8 +357,7 @@ pub(crate) mod tests {
             };
             let handle = provider.upload(&view).expect("upload");
             runmat_accelerate_api::set_handle_logical(&handle, true);
-            let result =
-                block_on(gather_builtin(vec![Value::GpuTensor(handle)])).expect("gather");
+            let result = block_on(gather_builtin(vec![Value::GpuTensor(handle)])).expect("gather");
             match result {
                 Value::LogicalArray(logical) => {
                     assert_eq!(logical.shape, vec![2, 2]);

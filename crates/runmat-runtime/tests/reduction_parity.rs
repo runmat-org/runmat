@@ -88,8 +88,11 @@ fn nlms_style_column_reductions_match_reference() {
     let w_value = Value::Tensor(tensor_from_f32(&w_vals, &[rows, cols]));
 
     // sum(x .* x, 1, 'native')
-    let xx = block_on(rt::call_builtin_async("times", &[x_value.clone(), x_value.clone()]))
-        .expect("times");
+    let xx = block_on(rt::call_builtin_async(
+        "times",
+        &[x_value.clone(), x_value.clone()],
+    ))
+    .expect("times");
     let sum_xx_args = [xx, Value::Num(1.0), Value::from("native")];
     let sum_xx = block_on(rt::call_builtin_async("sum", &sum_xx_args)).expect("sum");
     let sum_xx_tensor = expect_tensor(sum_xx);
@@ -107,8 +110,11 @@ fn nlms_style_column_reductions_match_reference() {
     assert_close(&sum_xx_tensor.data, &expected_xx, 1e-6);
 
     // sum(x .* W, 1, 'native')
-    let xw = block_on(rt::call_builtin_async("times", &[x_value.clone(), w_value.clone()]))
-        .expect("times");
+    let xw = block_on(rt::call_builtin_async(
+        "times",
+        &[x_value.clone(), w_value.clone()],
+    ))
+    .expect("times");
     let sum_xw_args = [xw, Value::Num(1.0), Value::from("native")];
     let sum_xw = block_on(rt::call_builtin_async("sum", &sum_xw_args)).expect("sum");
     let sum_xw_tensor = expect_tensor(sum_xw);

@@ -941,8 +941,8 @@ pub(crate) mod tests {
 
         let tensor = Tensor::new(vec![1.5, -2.25], vec![2, 1]).unwrap();
         let args = vec![Value::from("double")];
-        let eval = run_evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args)
-            .expect("fwrite");
+        let eval =
+            run_evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args).expect("fwrite");
         assert_eq!(eval.count(), 2);
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
@@ -973,8 +973,8 @@ pub(crate) mod tests {
 
         let tensor = Tensor::new(vec![258.0, 772.0], vec![2, 1]).unwrap();
         let args = vec![Value::from("uint16")];
-        let eval = run_evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args)
-            .expect("fwrite");
+        let eval =
+            run_evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args).expect("fwrite");
         assert_eq!(eval.count(), 2);
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
@@ -999,8 +999,8 @@ pub(crate) mod tests {
 
         let tensor = Tensor::new(vec![10.0, 20.0, 30.0], vec![3, 1]).unwrap();
         let args = vec![Value::from("uint8"), Value::Num(1.0)];
-        let eval = run_evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args)
-            .expect("fwrite");
+        let eval =
+            run_evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args).expect("fwrite");
         assert_eq!(eval.count(), 3);
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();

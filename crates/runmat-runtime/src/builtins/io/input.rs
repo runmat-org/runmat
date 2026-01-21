@@ -226,11 +226,11 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
     call_builtin_async("str2double", &[Value::String(trimmed.to_string())])
         .await
         .map_err(|err| {
-        let message = err.message().to_string();
-        build_runtime_error(format!("MATLAB:input:InvalidNumericExpression ({message})"))
-            .with_source(err)
-            .build()
-    })
+            let message = err.message().to_string();
+            build_runtime_error(format!("MATLAB:input:InvalidNumericExpression ({message})"))
+                .with_source(err)
+                .build()
+        })
 }
 
 #[cfg(test)]
@@ -252,8 +252,7 @@ pub(crate) mod tests {
         push_queued_response(Ok(InteractionResponse::Line("RunMat".into())));
         let prompt = Value::CharArray(CharArray::new_row("Name: "));
         let mode = Value::String("s".to_string());
-        let value =
-            futures::executor::block_on(input_builtin(vec![prompt, mode])).expect("input");
+        let value = futures::executor::block_on(input_builtin(vec![prompt, mode])).expect("input");
         assert_eq!(value, Value::CharArray(CharArray::new_row("RunMat")));
     }
 

@@ -223,7 +223,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::linspace"
 )]
-async fn linspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn linspace_builtin(
+    start: Value,
+    stop: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(builtin_error(
             "linspace: expected at most three input arguments",
@@ -499,7 +503,11 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor};
 
-    fn linspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    fn linspace_builtin(
+        start: Value,
+        stop: Value,
+        rest: Vec<Value>,
+    ) -> crate::BuiltinResult<Value> {
         block_on(super::linspace_builtin(start, stop, rest))
     }
 

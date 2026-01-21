@@ -240,9 +240,7 @@ async fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRes
     }
 
     match (a, b) {
-        (Value::GpuTensor(left), Value::GpuTensor(right)) => {
-            Ok(kron_gpu_gpu(left, right).await?)
-        }
+        (Value::GpuTensor(left), Value::GpuTensor(right)) => Ok(kron_gpu_gpu(left, right).await?),
         (Value::GpuTensor(left), right) => Ok(kron_gpu_mixed_left(left, right).await?),
         (left, Value::GpuTensor(right)) => Ok(kron_gpu_mixed_right(left, right).await?),
         (left, right) => Ok(kron_host(left, right)?),

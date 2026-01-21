@@ -341,7 +341,11 @@ fn update_environment(name: &str, value: &str) -> SetenvResult {
 async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed_async(value).await.map_err(map_control_flow)?);
+        out.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     Ok(out)
 }

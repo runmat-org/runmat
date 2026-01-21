@@ -479,8 +479,8 @@ async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
             real_to_complex(Value::Tensor(tensor)).await
         }
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
-                .await?;
+            let gathered =
+                gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
             real_to_complex(gathered).await
         }
         other => Err(builtin_error(format!(

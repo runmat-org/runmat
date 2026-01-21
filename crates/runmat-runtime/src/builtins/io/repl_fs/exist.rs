@@ -232,9 +232,15 @@ async fn exist_builtin(name: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         return Err(exist_error("exist: too many input arguments"));
     }
 
-    let name_host = gather_if_needed_async(&name).await.map_err(map_control_flow)?;
+    let name_host = gather_if_needed_async(&name)
+        .await
+        .map_err(map_control_flow)?;
     let type_value = match rest.first() {
-        Some(value) => Some(gather_if_needed_async(value).await.map_err(map_control_flow)?),
+        Some(value) => Some(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        ),
         None => None,
     };
 

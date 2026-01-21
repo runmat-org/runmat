@@ -1317,7 +1317,8 @@ async fn elementwise_min(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
             elementwise_real_or_complex(Value::Tensor(t), other, comparison)
         }
         (other, Value::GpuTensor(handle)) => {
-            if let Some(eval) = elementwise_min_gpu_scalar_right(&other, &handle, comparison).await {
+            if let Some(eval) = elementwise_min_gpu_scalar_right(&other, &handle, comparison).await
+            {
                 return Ok(eval);
             }
             let t = gpu_helpers::gather_tensor_async(&handle)

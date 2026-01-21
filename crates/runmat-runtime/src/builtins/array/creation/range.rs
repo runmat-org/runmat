@@ -442,7 +442,7 @@ async fn range_gpu(
         }
     }
     let Some(provider) = runmat_accelerate_api::provider() else {
-            return range_gpu_fallback(&handle, selection, nan_mode).await;
+        return range_gpu_fallback(&handle, selection, nan_mode).await;
     };
 
     let resolved = resolve_dims(&handle.shape, &selection)?;

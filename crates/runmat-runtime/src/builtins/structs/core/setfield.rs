@@ -531,7 +531,11 @@ async fn assign_into_object(
     Ok(Value::Object(object))
 }
 
-async fn assign_into_cell(cell: CellArray, steps: &[FieldStep], rhs: Value) -> BuiltinResult<Value> {
+async fn assign_into_cell(
+    cell: CellArray,
+    steps: &[FieldStep],
+    rhs: Value,
+) -> BuiltinResult<Value> {
     let (first, rest) = steps
         .split_first()
         .expect("steps is non-empty when assign_into_cell is called");

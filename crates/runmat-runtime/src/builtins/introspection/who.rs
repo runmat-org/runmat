@@ -885,11 +885,8 @@ pub(crate) mod tests {
         ensure_shared_resolver();
         test_support::with_test_provider(|_| {
             shared_set_workspace(&[], &[]);
-            let gpu_scalar = block_on(crate::call_builtin_async(
-                "gpuArray",
-                &[Value::Num(3.0)],
-            ))
-            .expect("gpu");
+            let gpu_scalar =
+                block_on(crate::call_builtin_async("gpuArray", &[Value::Num(3.0)])).expect("gpu");
             shared_set_workspace(&[("shared_gpu", gpu_scalar)], &["shared_gpu"]);
 
             let value = who_builtin(vec![Value::from("global")]).expect("who");

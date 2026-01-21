@@ -1137,8 +1137,7 @@ pub(crate) mod tests {
             )
             .unwrap(),
         );
-        let result =
-            run_regexprep(subject, patterns, replacements, Vec::new()).expect("regexprep");
+        let result = run_regexprep(subject, patterns, replacements, Vec::new()).expect("regexprep");
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.data.len(), 1);
@@ -1210,8 +1209,7 @@ pub(crate) mod tests {
             Value::StringArray(StringArray::new(vec!["a".into(), "o".into()], vec![2, 1]).unwrap());
         let replacements =
             Value::StringArray(StringArray::new(vec!["A".into(), "O".into()], vec![2, 1]).unwrap());
-        let result =
-            run_regexprep(subject, patterns, replacements, Vec::new()).expect("regexprep");
+        let result = run_regexprep(subject, patterns, replacements, Vec::new()).expect("regexprep");
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.data, vec!["cAt".to_string(), "dOg".to_string()]);
@@ -1361,8 +1359,8 @@ pub(crate) mod tests {
         let replacements = Value::StringArray(
             StringArray::new(vec!["A".into(), "O".into(), "U".into()], vec![3, 1]).unwrap(),
         );
-        let err = run_regexprep(subject, patterns, replacements, Vec::new())
-            .expect_err("expected error");
+        let err =
+            run_regexprep(subject, patterns, replacements, Vec::new()).expect_err("expected error");
         let message = err.message().to_string();
         assert!(
             message.contains("replacement sequence is incompatible with element-wise patterns"),

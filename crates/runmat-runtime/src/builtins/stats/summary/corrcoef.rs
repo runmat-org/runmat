@@ -874,8 +874,8 @@ pub(crate) mod tests {
             vec![Value::Tensor(right.clone())],
         ))
         .expect("corrcoef");
-        let via_combined =
-            block_on(corrcoef_builtin(Value::Tensor(combined), Vec::new())).expect("corrcoef combined");
+        let via_combined = block_on(corrcoef_builtin(Value::Tensor(combined), Vec::new()))
+            .expect("corrcoef combined");
 
         let expected_tensor = match via_combined {
             Value::Tensor(t) => t,
@@ -972,8 +972,8 @@ pub(crate) mod tests {
             vec![3, 2],
         )
         .unwrap();
-        let unbiased =
-            block_on(corrcoef_builtin(Value::Tensor(tensor.clone()), Vec::new())).expect("unbiased");
+        let unbiased = block_on(corrcoef_builtin(Value::Tensor(tensor.clone()), Vec::new()))
+            .expect("unbiased");
         let biased = block_on(corrcoef_builtin(
             Value::Tensor(tensor),
             vec![Value::Int(IntValue::I32(1))],
@@ -1032,8 +1032,11 @@ pub(crate) mod tests {
     fn corrcoef_mismatched_rows_errors() {
         let left = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
         let right = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = block_on(corrcoef_builtin(Value::Tensor(left), vec![Value::Tensor(right)]))
-            .expect_err("expected mismatch error");
+        let err = block_on(corrcoef_builtin(
+            Value::Tensor(left),
+            vec![Value::Tensor(right)],
+        ))
+        .expect_err("expected mismatch error");
         assert_flow_message(err, "same number of rows");
     }
 
@@ -1041,8 +1044,11 @@ pub(crate) mod tests {
     #[test]
     fn corrcoef_invalid_flag_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = block_on(corrcoef_builtin(Value::Tensor(tensor), vec![Value::Num(2.5)]))
-            .expect_err("expected invalid flag error");
+        let err = block_on(corrcoef_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Num(2.5)],
+        ))
+        .expect_err("expected invalid flag error");
         assert_flow_message(err, "normalization flag");
     }
 

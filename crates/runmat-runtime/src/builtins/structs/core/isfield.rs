@@ -593,8 +593,7 @@ pub(crate) mod tests {
     fn isfield_invalid_name_type_errors() {
         let mut st = StructValue::new();
         st.fields.insert("alpha".into(), Value::Num(1.0));
-        let err =
-            error_message(run_isfield(Value::Struct(st), Value::from(5_i32)).unwrap_err());
+        let err = error_message(run_isfield(Value::Struct(st), Value::from(5_i32)).unwrap_err());
         assert!(err.contains("field names must be strings"));
     }
 
@@ -604,9 +603,8 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.fields.insert("alpha".into(), Value::Num(1.0));
         let matrix = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
-        let err = error_message(
-            run_isfield(Value::Struct(st), Value::CharArray(matrix)).unwrap_err(),
-        );
+        let err =
+            error_message(run_isfield(Value::Struct(st), Value::CharArray(matrix)).unwrap_err());
         assert!(err.contains("field names must be strings"));
     }
 

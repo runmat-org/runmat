@@ -1004,8 +1004,7 @@ pub(crate) mod tests {
             Value::from("json"),
         ];
 
-        let result =
-            run_webread(Value::from(url.clone()), args).expect("webread query parameters");
+        let result = run_webread(Value::from(url.clone()), args).expect("webread query parameters");
         assert!(matches!(result, Value::Struct(_)));
 
         let request = rx.recv().expect("request log");
@@ -1034,8 +1033,7 @@ pub(crate) mod tests {
     #[test]
     fn webread_rejects_non_positive_timeout() {
         let args = vec![Value::from("Timeout"), Value::Num(0.0)];
-        let err =
-            run_webread(Value::from("https://example.com"), args).expect_err("timeout error");
+        let err = run_webread(Value::from("https://example.com"), args).expect_err("timeout error");
         let err = error_message(err);
         assert!(
             err.contains("Timeout must be a finite, positive scalar"),
@@ -1047,8 +1045,7 @@ pub(crate) mod tests {
     #[test]
     fn webread_rejects_password_without_username() {
         let args = vec![Value::from("Password"), Value::from("secret")];
-        let err =
-            run_webread(Value::from("https://example.com"), args).expect_err("auth error");
+        let err = run_webread(Value::from("https://example.com"), args).expect_err("auth error");
         let err = error_message(err);
         assert!(
             err.contains("Password requires a Username"),
@@ -1060,8 +1057,7 @@ pub(crate) mod tests {
     #[test]
     fn webread_rejects_unsupported_content_type() {
         let args = vec![Value::from("ContentType"), Value::from("table")];
-        let err =
-            run_webread(Value::from("https://example.com"), args).expect_err("format error");
+        let err = run_webread(Value::from("https://example.com"), args).expect_err("format error");
         let err = error_message(err);
         assert!(
             err.contains("unsupported ContentType"),
@@ -1080,8 +1076,7 @@ pub(crate) mod tests {
         .expect("make cell");
 
         let args = vec![Value::from("HeaderFields"), cell];
-        let err =
-            run_webread(Value::from("https://example.com"), args).expect_err("header error");
+        let err = run_webread(Value::from("https://example.com"), args).expect_err("header error");
         let err = error_message(err);
         assert!(
             err.contains("HeaderFields cell array must have exactly two columns"),

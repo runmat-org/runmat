@@ -709,8 +709,11 @@ pub(crate) mod tests {
         );
         // Build GPU prototype via gpuArray
         let proto = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
-        let g = block_on(crate::call_builtin_async("gpuArray", &[Value::Tensor(proto)]))
-            .expect("gpuArray");
+        let g = block_on(crate::call_builtin_async(
+            "gpuArray",
+            &[Value::Tensor(proto)],
+        ))
+        .expect("gpuArray");
         let args = vec![Value::Num(2.0), Value::Num(2.0), Value::from("like"), g];
         let result = block_on(ones_builtin(args)).expect("ones like gpu");
         match result {

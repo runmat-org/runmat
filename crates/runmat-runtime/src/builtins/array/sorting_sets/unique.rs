@@ -1515,7 +1515,6 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor, Value};
 
-
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
     }
@@ -1832,8 +1831,8 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let eval = evaluate_sync(Value::GpuTensor(handle), &[Value::from("stable")])
-                .expect("unique");
+            let eval =
+                evaluate_sync(Value::GpuTensor(handle), &[Value::from("stable")]).expect("unique");
             let values = eval.into_values_value();
             match values {
                 Value::Tensor(t) => assert_eq!(t.data, vec![5.0, 3.0, 1.0]),
@@ -1850,8 +1849,7 @@ pub(crate) mod tests {
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
         let tensor = Tensor::new(vec![5.0, 3.0, 5.0, 1.0, 2.0], vec![5, 1]).unwrap();
-        let host_eval =
-            evaluate_sync(Value::Tensor(tensor.clone()), &[]).expect("host unique");
+        let host_eval = evaluate_sync(Value::Tensor(tensor.clone()), &[]).expect("host unique");
         let (host_values, host_ia, host_ic) = host_eval.into_triple();
 
         let provider = runmat_accelerate_api::provider().expect("provider registered");
@@ -1860,8 +1858,7 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let gpu_eval =
-            evaluate_sync(Value::GpuTensor(handle.clone()), &[]).expect("gpu unique");
+        let gpu_eval = evaluate_sync(Value::GpuTensor(handle.clone()), &[]).expect("gpu unique");
         let (gpu_values, gpu_ia, gpu_ic) = gpu_eval.into_triple();
         let _ = provider.free(&handle);
 
@@ -1937,8 +1934,7 @@ pub(crate) mod tests {
     #[test]
     fn unique_handles_empty_rows() {
         let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
-        let eval =
-            evaluate_sync(Value::Tensor(tensor), &[Value::from("rows")]).expect("unique");
+        let eval = evaluate_sync(Value::Tensor(tensor), &[Value::from("rows")]).expect("unique");
         let (values, ia, ic) = eval.into_triple();
         match values {
             Value::Tensor(t) => {

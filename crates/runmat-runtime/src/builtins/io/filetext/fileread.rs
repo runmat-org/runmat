@@ -521,8 +521,7 @@ pub(crate) mod tests {
         let path = unique_path("fileread_empty");
         fs::File::create(&path).expect("create empty file");
 
-        let result =
-            run_fileread(Value::from(path.to_string_lossy().to_string()), Vec::new())
+        let result = run_fileread(Value::from(path.to_string_lossy().to_string()), Vec::new())
             .expect("fileread");
         match result {
             Value::CharArray(ca) => {
@@ -541,8 +540,7 @@ pub(crate) mod tests {
     fn fileread_errors_when_file_missing() {
         let path = unique_path("fileread_missing");
         let err = unwrap_error_message(
-            run_fileread(Value::from(path.to_string_lossy().to_string()), Vec::new())
-                .unwrap_err(),
+            run_fileread(Value::from(path.to_string_lossy().to_string()), Vec::new()).unwrap_err(),
         );
         assert!(
             err.contains("unable to read"),
@@ -558,8 +556,7 @@ pub(crate) mod tests {
         file.write_all(&[0xFF, 0x61, 0x00]).expect("write bytes");
         drop(file);
 
-        let result =
-            run_fileread(Value::from(path.to_string_lossy().to_string()), Vec::new())
+        let result = run_fileread(Value::from(path.to_string_lossy().to_string()), Vec::new())
             .expect("fileread");
         match result {
             Value::CharArray(ca) => {

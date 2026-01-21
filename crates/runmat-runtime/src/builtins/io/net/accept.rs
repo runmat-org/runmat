@@ -365,10 +365,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "accept,tcpserver,tcpclient",
     builtin_path = "crate::builtins::io::net::accept"
 )]
-pub(crate) async fn accept_builtin(
-    server: Value,
-    rest: Vec<Value>,
-) -> crate::BuiltinResult<Value> {
+pub(crate) async fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let server = gather_if_needed_async(&server).await?;
     let server_id = extract_server_id(&server)?;
 

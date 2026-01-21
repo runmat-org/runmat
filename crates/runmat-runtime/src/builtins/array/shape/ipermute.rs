@@ -397,12 +397,8 @@ pub(crate) mod tests {
             let handle = provider.upload(&view).expect("upload");
             let order_vec = parse_order_argument("ipermute", Value::Tensor(order.clone()))
                 .expect("parse order");
-            let permuted = futures::executor::block_on(permute_gpu(
-                "ipermute",
-                handle,
-                &order_vec,
-            ))
-            .expect("permute gpu");
+            let permuted = futures::executor::block_on(permute_gpu("ipermute", handle, &order_vec))
+                .expect("permute gpu");
             let restored = ipermute_builtin(permuted, Value::Tensor(order)).expect("ipermute gpu");
             let gathered = test_support::gather(restored).expect("gather");
             assert_eq!(gathered.shape, host.shape);

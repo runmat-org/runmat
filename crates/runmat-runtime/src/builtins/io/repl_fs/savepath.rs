@@ -503,7 +503,11 @@ fn tensor_to_string(tensor: &Tensor) -> BuiltinResult<String> {
 async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut gathered = Vec::with_capacity(args.len());
     for value in args {
-        gathered.push(gather_if_needed_async(value).await.map_err(map_control_flow)?);
+        gathered.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     Ok(gathered)
 }

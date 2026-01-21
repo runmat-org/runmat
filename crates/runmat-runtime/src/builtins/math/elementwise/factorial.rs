@@ -435,11 +435,9 @@ async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
 
 async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => {
-            gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-                .await
-                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))
-        }
+        Value::GpuTensor(handle) => gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME)),
         other => Ok(other),
     }
 }

@@ -222,11 +222,10 @@ async fn subsasgn_dispatch(
     match &obj {
         Value::Object(o) => {
             let qualified = format!("{}.subsasgn", o.class_name);
-            Ok(crate::call_builtin_async(
-                &qualified,
-                &[obj, Value::String(kind), payload, rhs],
+            Ok(
+                crate::call_builtin_async(&qualified, &[obj, Value::String(kind), payload, rhs])
+                    .await?,
             )
-            .await?)
         }
         Value::HandleObject(h) => {
             let target = unsafe { &*h.target.as_raw() };
@@ -235,30 +234,21 @@ async fn subsasgn_dispatch(
                 _ => h.class_name.clone(),
             };
             let qualified = format!("{class_name}.subsasgn");
-            Ok(crate::call_builtin_async(
-                &qualified,
-                &[obj, Value::String(kind), payload, rhs],
+            Ok(
+                crate::call_builtin_async(&qualified, &[obj, Value::String(kind), payload, rhs])
+                    .await?,
             )
-            .await?)
         }
         other => Err((format!("subsasgn: receiver must be object, got {other:?}")).into()),
     }
 }
 
 #[runmat_macros::runtime_builtin(name = "subsref", builtin_path = "crate")]
-async fn subsref_dispatch(
-    obj: Value,
-    kind: String,
-    payload: Value,
-) -> crate::BuiltinResult<Value> {
+async fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
     match &obj {
         Value::Object(o) => {
             let qualified = format!("{}.subsref", o.class_name);
-            Ok(crate::call_builtin_async(
-                &qualified,
-                &[obj, Value::String(kind), payload],
-            )
-            .await?)
+            Ok(crate::call_builtin_async(&qualified, &[obj, Value::String(kind), payload]).await?)
         }
         Value::HandleObject(h) => {
             let target = unsafe { &*h.target.as_raw() };
@@ -267,11 +257,7 @@ async fn subsref_dispatch(
                 _ => h.class_name.clone(),
             };
             let qualified = format!("{class_name}.subsref");
-            Ok(crate::call_builtin_async(
-                &qualified,
-                &[obj, Value::String(kind), payload],
-            )
-            .await?)
+            Ok(crate::call_builtin_async(&qualified, &[obj, Value::String(kind), payload]).await?)
         }
         other => Err((format!("subsref: receiver must be object, got {other:?}")).into()),
     }
@@ -762,11 +748,7 @@ async fn pkgg_foo() -> crate::BuiltinResult<Value> {
 }
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.subsref", builtin_path = "crate")]
-async fn overidx_subsref(
-    obj: Value,
-    kind: String,
-    payload: Value,
-) -> crate::BuiltinResult<Value> {
+async fn overidx_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
     // Simple sentinel implementation: return different values for '.' vs '()'
     match (obj, kind.as_str(), payload) {
         (Value::Object(_), "()", Value::Cell(_)) => Ok(Value::Num(99.0)),

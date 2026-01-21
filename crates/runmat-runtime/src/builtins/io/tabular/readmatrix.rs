@@ -1325,9 +1325,11 @@ pub(crate) mod tests {
         let path = unique_path("readmatrix_header");
         fs::write(&path, "time,value\n0,10\n1,12\n").expect("write sample file");
         let args = vec![Value::from("NumHeaderLines"), Value::Int(IntValue::I32(1))];
-        let result =
-            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
-                .expect("readmatrix");
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            args,
+        ))
+        .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -1344,9 +1346,11 @@ pub(crate) mod tests {
         let path = unique_path("readmatrix_tab");
         fs::write(&path, "1\t2\t3\n4\t5\t6\n").expect("write sample file");
         let args = vec![Value::from("Delimiter"), Value::from("tab")];
-        let result =
-            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
-                .expect("readmatrix");
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            args,
+        ))
+        .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
@@ -1363,9 +1367,11 @@ pub(crate) mod tests {
         let path = unique_path("readmatrix_range_string");
         fs::write(&path, "11,12,13\n21,22,23\n31,32,33\n").expect("write sample file");
         let args = vec![Value::from("Range"), Value::from("B2:C3")];
-        let result =
-            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
-                .expect("readmatrix");
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            args,
+        ))
+        .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -1383,9 +1389,11 @@ pub(crate) mod tests {
         fs::write(&path, "11,12,13\n21,22,23\n31,32,33\n").expect("write sample file");
         let range = Tensor::new(vec![2.0, 2.0, 3.0, 3.0], vec![1, 4]).expect("range tensor");
         let args = vec![Value::from("Range"), Value::Tensor(range)];
-        let result =
-            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
-                .expect("readmatrix");
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            args,
+        ))
+        .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -1404,9 +1412,11 @@ pub(crate) mod tests {
         let strings = StringArray::new(vec!["NA".to_string(), "missing".to_string()], vec![1, 2])
             .expect("string array");
         let args = vec![Value::from("TreatAsMissing"), Value::StringArray(strings)];
-        let result =
-            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
-                .expect("readmatrix");
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            args,
+        ))
+        .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
@@ -1432,9 +1442,11 @@ pub(crate) mod tests {
             Value::from("ThousandsSeparator"),
             Value::from("."),
         ];
-        let result =
-            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
-                .expect("readmatrix");
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            args,
+        ))
+        .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
@@ -1452,9 +1464,11 @@ pub(crate) mod tests {
         let path = unique_path("readmatrix_empty_value");
         fs::write(&path, "1,,3\n4,,6\n").expect("write sample file");
         let args = vec![Value::from("EmptyValue"), Value::Num(0.0)];
-        let result =
-            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
-                .expect("readmatrix");
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            args,
+        ))
+        .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
@@ -1478,9 +1492,11 @@ pub(crate) mod tests {
             .fields
             .insert("NumHeaderLines".to_string(), Value::Int(IntValue::I32(1)));
         let args = vec![Value::Struct(options_struct)];
-        let result =
-            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
-                .expect("readmatrix");
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            args,
+        ))
+        .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -1542,9 +1558,11 @@ pub(crate) mod tests {
         let path = unique_path("readmatrix_output_logical");
         fs::write(&path, "0,1,-3\nNaN,0,5\n").expect("write sample file");
         let args = vec![Value::from("OutputType"), Value::from("logical")];
-        let result =
-            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
-                .expect("readmatrix");
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            args,
+        ))
+        .expect("readmatrix");
         match result {
             Value::LogicalArray(arr) => {
                 assert_eq!(arr.shape, vec![2, 3]);
@@ -1562,9 +1580,11 @@ pub(crate) mod tests {
         fs::write(&path, "1,0\n0,5\n").expect("write sample file");
         let proto = LogicalArray::new(vec![1], vec![1]).expect("logical prototype");
         let args = vec![Value::from("Like"), Value::LogicalArray(proto)];
-        let result =
-            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
-                .expect("readmatrix");
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            args,
+        ))
+        .expect("readmatrix");
         match result {
             Value::LogicalArray(arr) => {
                 assert_eq!(arr.shape, vec![2, 2]);
@@ -1588,9 +1608,11 @@ pub(crate) mod tests {
             };
             let handle = provider.upload(&view).expect("upload prototype");
             let args = vec![Value::from("Like"), Value::GpuTensor(handle.clone())];
-            let result =
-                block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
-                    .expect("readmatrix");
+            let result = block_on(readmatrix_builtin(
+                Value::from(path.to_string_lossy().to_string()),
+                args,
+            ))
+            .expect("readmatrix");
             assert!(
                 matches!(result, Value::GpuTensor(_)),
                 "expected GPU tensor result, got {result:?}"
@@ -1611,9 +1633,8 @@ pub(crate) mod tests {
         let chars: Vec<char> = text.chars().collect();
         let len = chars.len();
         let char_array = CharArray::new(chars, 1, len).expect("char array");
-        let result =
-            block_on(readmatrix_builtin(Value::CharArray(char_array), Vec::new()))
-                .expect("readmatrix");
+        let result = block_on(readmatrix_builtin(Value::CharArray(char_array), Vec::new()))
+            .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);

@@ -627,11 +627,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::{CharArray, Tensor};
 
-    fn colon_builtin(
-        start: Value,
-        stop: Value,
-        rest: Vec<Value>,
-    ) -> crate::BuiltinResult<Value> {
+    fn colon_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::colon_builtin(start, stop, rest))
     }
 

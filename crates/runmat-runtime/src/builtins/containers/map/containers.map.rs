@@ -1638,7 +1638,6 @@ pub(crate) mod tests {
         block_on(super::containers_map_keys(map))
     }
 
-
     fn containers_map_is_key(map: Value, key_spec: Value) -> BuiltinResult<Value> {
         block_on(super::containers_map_is_key(map, key_spec))
     }

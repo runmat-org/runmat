@@ -14,9 +14,7 @@ use crate::builtins::io::filetext::{
     helpers::{char_array_value, extract_scalar_string, normalize_encoding_label},
     registry::{self, FileInfo, RegisteredFile},
 };
-use crate::{
-    build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError,
-};
+use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 use runmat_filesystem::OpenOptions;
 
 #[cfg_attr(
@@ -918,9 +916,8 @@ pub(crate) mod tests {
         fs::write(&native_path, "native").unwrap();
         fs::write(&be_path, "be").unwrap();
 
-        let native_eval =
-            run_evaluate(&[Value::from(native_path.to_string_lossy().to_string())])
-                .expect("native");
+        let native_eval = run_evaluate(&[Value::from(native_path.to_string_lossy().to_string())])
+            .expect("native");
         let native_fid = native_eval.as_open().unwrap().fid;
 
         let be_eval = run_evaluate(&[
@@ -931,8 +928,8 @@ pub(crate) mod tests {
         .expect("ieee-be");
         let be_fid = be_eval.as_open().unwrap().fid;
 
-        let list_eval = run_evaluate(&[Value::from("all"), Value::from("ieee-be")])
-            .expect("fopen all filter");
+        let list_eval =
+            run_evaluate(&[Value::from("all"), Value::from("ieee-be")]).expect("fopen all filter");
         let list = list_eval.as_list().expect("list result");
         assert_eq!(list.handles.data.len(), 1);
         assert!((list.handles.data[0] - be_fid).abs() < f64::EPSILON);
@@ -1060,8 +1057,7 @@ pub(crate) mod tests {
         registry::reset_for_tests();
         let path = unique_path("fopen_outputs");
         fs::write(&path, "check").unwrap();
-        let eval =
-            run_evaluate(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
+        let eval = run_evaluate(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
         let outputs = eval.outputs();
         assert_eq!(outputs.len(), 4);
         assert!(matches!(outputs[0], Value::Num(_)));

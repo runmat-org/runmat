@@ -1040,8 +1040,11 @@ pub(crate) mod tests {
     #[test]
     fn jsonencode_convert_inf_and_nan_controls_null_output() {
         let tensor = Tensor::new(vec![1.0, f64::NAN], vec![1, 2]).expect("tensor");
-        let encoded = block_on(jsonencode_builtin(Value::Tensor(tensor.clone()), Vec::new()))
-            .expect("jsonencode");
+        let encoded = block_on(jsonencode_builtin(
+            Value::Tensor(tensor.clone()),
+            Vec::new(),
+        ))
+        .expect("jsonencode");
         assert_eq!(as_string(encoded), "[1,null]");
 
         let err = block_on(jsonencode_builtin(
@@ -1066,8 +1069,8 @@ pub(crate) mod tests {
     #[test]
     fn jsonencode_char_array_zero_rows_is_empty_array() {
         let chars = CharArray::new(Vec::new(), 0, 3).expect("char array");
-        let encoded = block_on(jsonencode_builtin(Value::CharArray(chars), Vec::new()))
-            .expect("jsonencode");
+        let encoded =
+            block_on(jsonencode_builtin(Value::CharArray(chars), Vec::new())).expect("jsonencode");
         assert_eq!(as_string(encoded), "[]");
     }
 
@@ -1075,8 +1078,8 @@ pub(crate) mod tests {
     #[test]
     fn jsonencode_char_array_empty_strings_per_row() {
         let chars = CharArray::new(Vec::new(), 2, 0).expect("char array");
-        let encoded = block_on(jsonencode_builtin(Value::CharArray(chars), Vec::new()))
-            .expect("jsonencode");
+        let encoded =
+            block_on(jsonencode_builtin(Value::CharArray(chars), Vec::new())).expect("jsonencode");
         let encoded_str = as_string(encoded);
         assert_eq!(encoded_str, "[\"\",\"\"]");
     }
@@ -1086,8 +1089,8 @@ pub(crate) mod tests {
     fn jsonencode_string_array_matrix() {
         let sa = StringArray::new(vec!["alpha".to_string(), "beta".to_string()], vec![2, 1])
             .expect("string array");
-        let encoded = block_on(jsonencode_builtin(Value::StringArray(sa), Vec::new()))
-            .expect("jsonencode");
+        let encoded =
+            block_on(jsonencode_builtin(Value::StringArray(sa), Vec::new())).expect("jsonencode");
         assert_eq!(as_string(encoded), "[\"alpha\",\"beta\"]");
     }
 
@@ -1095,8 +1098,8 @@ pub(crate) mod tests {
     #[test]
     fn jsonencode_complex_tensor_outputs_objects() {
         let ct = ComplexTensor::new(vec![(1.0, 2.0), (3.5, -4.0)], vec![2, 1]).expect("complex");
-        let encoded = block_on(jsonencode_builtin(Value::ComplexTensor(ct), Vec::new()))
-            .expect("jsonencode");
+        let encoded =
+            block_on(jsonencode_builtin(Value::ComplexTensor(ct), Vec::new())).expect("jsonencode");
         assert_eq!(
             as_string(encoded),
             "[{\"real\":1,\"imag\":2},{\"real\":3.5,\"imag\":-4}]"
@@ -1113,9 +1116,8 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let encoded =
-                block_on(jsonencode_builtin(Value::GpuTensor(handle), Vec::new()))
-                    .expect("jsonencode");
+            let encoded = block_on(jsonencode_builtin(Value::GpuTensor(handle), Vec::new()))
+                .expect("jsonencode");
             assert_eq!(as_string(encoded), "[[1,0],[0,1]]");
         });
     }
@@ -1136,8 +1138,8 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let encoded = block_on(jsonencode_builtin(Value::GpuTensor(handle), Vec::new()))
-            .expect("jsonencode");
+        let encoded =
+            block_on(jsonencode_builtin(Value::GpuTensor(handle), Vec::new())).expect("jsonencode");
         assert_eq!(as_string(encoded), "[1,2,3]");
     }
 

@@ -670,8 +670,8 @@ pub(crate) mod tests {
         };
         let provider = runmat_accelerate_api::provider().unwrap();
         let handle = provider.upload(&view).expect("upload");
-        let result = block_on(rand_like(&Value::GpuTensor(handle), &[2, 2]))
-            .expect("rand like gpu");
+        let result =
+            block_on(rand_like(&Value::GpuTensor(handle), &[2, 2])).expect("rand like gpu");
         match result {
             Value::GpuTensor(h) => {
                 let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather to host");

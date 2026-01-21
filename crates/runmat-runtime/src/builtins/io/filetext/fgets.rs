@@ -762,8 +762,7 @@ pub(crate) mod tests {
     }
 
     fn fopen_path(path: &Path) -> FopenHandle {
-        let eval =
-            run_fopen(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
+        let eval = run_fopen(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
         let open = eval.as_open().expect("open outputs");
         assert!(open.fid >= 3.0);
         FopenHandle {

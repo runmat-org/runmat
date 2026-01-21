@@ -4435,14 +4435,13 @@ async fn run_interpreter(
                 }
                 args.reverse();
                 if name == "gather" {
-                    let eval = match runmat_runtime::builtins::acceleration::gpu::gather::evaluate(
-                        &args,
-                    )
-                    .await
-                    {
-                        Ok(eval) => eval,
-                        Err(err) => vm_bail!(err),
-                    };
+                    let eval =
+                        match runmat_runtime::builtins::acceleration::gpu::gather::evaluate(&args)
+                            .await
+                        {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
                     let len = eval.len();
                     if out_count == 0 {
                         continue;
@@ -4599,12 +4598,11 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "mkdir" {
-                    let eval = match runmat_runtime::builtins::io::repl_fs::mkdir::evaluate(&args)
-                        .await
-                    {
-                        Ok(eval) => eval,
-                        Err(err) => vm_bail!(err),
-                    };
+                    let eval =
+                        match runmat_runtime::builtins::io::repl_fs::mkdir::evaluate(&args).await {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
                     if out_count == 0 {
                         continue;
                     }
@@ -4639,13 +4637,14 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "savepath" {
-                    let eval =
-                        match runmat_runtime::builtins::io::repl_fs::savepath::evaluate(&args)
-                            .await
-                        {
-                            Ok(eval) => eval,
-                            Err(err) => vm_bail!(err),
-                        };
+                    let eval = match runmat_runtime::builtins::io::repl_fs::savepath::evaluate(
+                        &args,
+                    )
+                    .await
+                    {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
                     if out_count == 0 {
                         continue;
                     }
@@ -4660,13 +4659,14 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "copyfile" {
-                    let eval =
-                        match runmat_runtime::builtins::io::repl_fs::copyfile::evaluate(&args)
-                            .await
-                        {
-                            Ok(eval) => eval,
-                            Err(err) => vm_bail!(err),
-                        };
+                    let eval = match runmat_runtime::builtins::io::repl_fs::copyfile::evaluate(
+                        &args,
+                    )
+                    .await
+                    {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
                     if out_count == 0 {
                         continue;
                     }
@@ -4681,13 +4681,14 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "movefile" {
-                    let eval =
-                        match runmat_runtime::builtins::io::repl_fs::movefile::evaluate(&args)
-                            .await
-                        {
-                            Ok(eval) => eval,
-                            Err(err) => vm_bail!(err),
-                        };
+                    let eval = match runmat_runtime::builtins::io::repl_fs::movefile::evaluate(
+                        &args,
+                    )
+                    .await
+                    {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
                     if out_count == 0 {
                         continue;
                     }
@@ -4702,12 +4703,11 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "rmdir" {
-                    let eval = match runmat_runtime::builtins::io::repl_fs::rmdir::evaluate(&args)
-                        .await
-                    {
-                        Ok(eval) => eval,
-                        Err(err) => vm_bail!(err),
-                    };
+                    let eval =
+                        match runmat_runtime::builtins::io::repl_fs::rmdir::evaluate(&args).await {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
                     if out_count == 0 {
                         continue;
                     }
@@ -4965,15 +4965,14 @@ async fn run_interpreter(
                 }
                 // Special-case for 'find' to support [i,j,v] = find(A)
                 if name == "find" && !args.is_empty() {
-                    let eval = match block_on(
-                        runmat_runtime::builtins::array::indexing::find::evaluate(
+                    let eval =
+                        match block_on(runmat_runtime::builtins::array::indexing::find::evaluate(
                             args[0].clone(),
                             &args[1..],
-                        ),
-                    ) {
-                        Ok(eval) => eval,
-                        Err(err) => vm_bail!(err),
-                    };
+                        )) {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
                     if out_count == 0 {
                         continue;
                     }
@@ -5070,15 +5069,19 @@ async fn run_interpreter(
                     }
                     if out_count <= 1 {
                         let result = match args.len() {
-                            1 => runmat_runtime::builtins::math::poly::polyder::derivative_single(
-                                args[0].clone(),
-                            )
-                            .await,
-                            2 => runmat_runtime::builtins::math::poly::polyder::derivative_product(
-                                args[0].clone(),
-                                args[1].clone(),
-                            )
-                            .await,
+                            1 => {
+                                runmat_runtime::builtins::math::poly::polyder::derivative_single(
+                                    args[0].clone(),
+                                )
+                                .await
+                            }
+                            2 => {
+                                runmat_runtime::builtins::math::poly::polyder::derivative_product(
+                                    args[0].clone(),
+                                    args[1].clone(),
+                                )
+                                .await
+                            }
                             _ => vm_bail!("polyder: too many input arguments.".to_string()),
                         };
                         match result {
@@ -5293,9 +5296,9 @@ async fn run_interpreter(
                             &args[1..],
                         ),
                     ) {
-                            Ok(eval) => eval,
-                            Err(err) => vm_bail!(err),
-                        };
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
                     if out_count == 0 {
                         continue;
                     }
@@ -5319,9 +5322,9 @@ async fn run_interpreter(
                             &args[2..],
                         ),
                     ) {
-                            Ok(eval) => eval,
-                            Err(err) => vm_bail!(err),
-                        };
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
                     if out_count == 0 {
                         continue;
                     }
@@ -5347,9 +5350,9 @@ async fn run_interpreter(
                             &args[2..],
                         ),
                     ) {
-                            Ok(eval) => eval,
-                            Err(err) => vm_bail!(err),
-                        };
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
                     if out_count == 0 {
                         continue;
                     }
@@ -5703,8 +5706,7 @@ async fn run_interpreter(
                         .pop()
                         .ok_or(mex("StackUnderflow", "stack underflow"))?)
                         .try_into()?;
-                    let range_result =
-                        runmat_runtime::create_range(start, Some(step), end).await?;
+                    let range_result = runmat_runtime::create_range(start, Some(step), end).await?;
                     stack.push(range_result);
                 } else {
                     let end: f64 = (&stack

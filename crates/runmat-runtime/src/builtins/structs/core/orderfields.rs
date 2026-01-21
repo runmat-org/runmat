@@ -693,8 +693,8 @@ pub(crate) mod tests {
         let data = vec!['b', 'a', 't', 'c', 'a', 't', 'a', 'n', 't'];
         let char_array = CharArray::new(data, 3, 3).expect("char array");
 
-        let result = run_orderfields(Value::Struct(st), vec![Value::CharArray(char_array)])
-            .expect("order");
+        let result =
+            run_orderfields(Value::Struct(st), vec![Value::CharArray(char_array)]).expect("order");
         let Value::Struct(sorted) = result else {
             panic!("expected struct result");
         };
@@ -915,9 +915,8 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.fields.insert("x".to_string(), Value::Num(1.0));
 
-        let err = error_message(
-            run_orderfields(Value::Struct(st), vec![Value::Num(1.0)]).unwrap_err(),
-        );
+        let err =
+            error_message(run_orderfields(Value::Struct(st), vec![Value::Num(1.0)]).unwrap_err());
         assert!(
             err.contains("unrecognised ordering argument"),
             "unexpected error: {err}"

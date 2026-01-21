@@ -257,7 +257,9 @@ fn default_temp_directory() -> BuiltinResult<PathBuf> {
 }
 
 async fn gather_argument(value: &Value) -> BuiltinResult<Value> {
-    gather_if_needed_async(value).await.map_err(map_control_flow)
+    gather_if_needed_async(value)
+        .await
+        .map_err(map_control_flow)
 }
 
 fn parse_folder_argument(value: &Value) -> BuiltinResult<PathBuf> {

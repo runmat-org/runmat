@@ -1048,7 +1048,6 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Value};
 
-
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
     }

@@ -670,8 +670,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_invalid_subject_type() {
-        let err =
-            run_endswith(Value::Num(1.0), Value::String("a".into()), Vec::new()).unwrap_err();
+        let err = run_endswith(Value::Num(1.0), Value::String("a".into()), Vec::new()).unwrap_err();
         assert!(err.to_string().contains("first argument must be text"));
     }
 

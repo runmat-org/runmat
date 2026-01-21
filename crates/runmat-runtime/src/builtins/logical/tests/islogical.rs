@@ -292,7 +292,10 @@ pub(crate) mod tests {
     #[test]
     fn logical_scalars_report_true() {
         assert_eq!(run_islogical(Value::Bool(true)).unwrap(), Value::Bool(true));
-        assert_eq!(run_islogical(Value::Bool(false)).unwrap(), Value::Bool(true));
+        assert_eq!(
+            run_islogical(Value::Bool(false)).unwrap(),
+            Value::Bool(true)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -309,7 +312,10 @@ pub(crate) mod tests {
     #[test]
     fn numeric_values_report_false() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        assert_eq!(run_islogical(Value::Tensor(tensor)).unwrap(), Value::Bool(false));
+        assert_eq!(
+            run_islogical(Value::Tensor(tensor)).unwrap(),
+            Value::Bool(false)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -325,7 +331,10 @@ pub(crate) mod tests {
     #[test]
     fn char_arrays_report_false() {
         let chars = CharArray::new("rm".chars().collect(), 1, 2).unwrap();
-        assert_eq!(run_islogical(Value::CharArray(chars)).unwrap(), Value::Bool(false));
+        assert_eq!(
+            run_islogical(Value::CharArray(chars)).unwrap(),
+            Value::Bool(false)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

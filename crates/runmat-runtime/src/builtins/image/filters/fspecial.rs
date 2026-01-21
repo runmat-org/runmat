@@ -1280,8 +1280,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_disk_negative_radius_errors() {
-        let err = block_on(fspecial_builtin(Value::from("disk"), vec![Value::from(-1.0)]))
-            .expect_err("fspecial should error");
+        let err = block_on(fspecial_builtin(
+            Value::from("disk"),
+            vec![Value::from(-1.0)],
+        ))
+        .expect_err("fspecial should error");
         assert!(error_message(err).contains("non-negative"));
     }
 
@@ -1326,21 +1329,23 @@ pub(crate) mod tests {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
-        let gpu_tensor = match block_on(fspecial_builtin(Value::from("gaussian"), Vec::new())).unwrap() {
-            Value::GpuTensor(handle) => {
-                test_support::gather(Value::GpuTensor(handle)).expect("gather gpu result")
-            }
-            Value::Tensor(t) => t,
-            other => panic!("unexpected result {other:?}"),
-        };
+        let gpu_tensor =
+            match block_on(fspecial_builtin(Value::from("gaussian"), Vec::new())).unwrap() {
+                Value::GpuTensor(handle) => {
+                    test_support::gather(Value::GpuTensor(handle)).expect("gather gpu result")
+                }
+                Value::Tensor(t) => t,
+                other => panic!("unexpected result {other:?}"),
+            };
         std::env::remove_var("RUNMAT_ACCEL_FSPECIAL_DEVICE");
-        let host_tensor = match block_on(fspecial_builtin(Value::from("gaussian"), Vec::new())).unwrap() {
-            Value::Tensor(t) => t,
-            Value::GpuTensor(handle) => {
-                test_support::gather(Value::GpuTensor(handle)).expect("gather fallback")
-            }
-            other => panic!("unexpected result {other:?}"),
-        };
+        let host_tensor =
+            match block_on(fspecial_builtin(Value::from("gaussian"), Vec::new())).unwrap() {
+                Value::Tensor(t) => t,
+                Value::GpuTensor(handle) => {
+                    test_support::gather(Value::GpuTensor(handle)).expect("gather fallback")
+                }
+                other => panic!("unexpected result {other:?}"),
+            };
         assert_eq!(gpu_tensor.shape, host_tensor.shape);
         for (a, b) in gpu_tensor.data.iter().zip(host_tensor.data.iter()) {
             assert_close(*a, *b, 1e-6);

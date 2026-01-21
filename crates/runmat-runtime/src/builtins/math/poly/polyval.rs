@@ -564,8 +564,8 @@ async fn parse_option_values(rest: &[Value]) -> BuiltinResult<ParsedOptions> {
 async fn convert_coefficients(value: Value) -> BuiltinResult<(Vec<Complex64>, bool)> {
     match value {
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
-                .await?;
+            let gathered =
+                gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
             convert_coefficients(gathered).await
         }
         Value::Tensor(mut tensor) => {
@@ -753,8 +753,7 @@ async fn parse_stats(value: Value, coeff_len: usize) -> BuiltinResult<Option<Pol
     let struct_value = match value {
         Value::Struct(s) => s,
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-                .await?;
+            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
             return parse_stats(gathered, coeff_len).await;
         }
         other => {
@@ -1044,8 +1043,8 @@ async fn is_empty_value(value: &Value) -> BuiltinResult<bool> {
         Value::LogicalArray(l) => Ok(l.data.is_empty()),
         Value::Cell(ca) => Ok(ca.data.is_empty()),
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
-                .await?;
+            let gathered =
+                gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
             is_empty_value(&gathered).await
         }
         _ => Ok(false),

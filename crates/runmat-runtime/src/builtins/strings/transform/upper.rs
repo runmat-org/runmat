@@ -8,9 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, uppercase_preserving_missing};
-use crate::{
-    build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError,
-};
+use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",

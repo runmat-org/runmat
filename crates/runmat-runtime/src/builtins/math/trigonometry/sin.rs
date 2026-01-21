@@ -472,8 +472,7 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result =
-                block_on(sin_builtin(Value::GpuTensor(handle), Vec::new())).expect("sin");
+            let result = block_on(sin_builtin(Value::GpuTensor(handle), Vec::new())).expect("sin");
             let gathered = test_support::gather(result).expect("gather");
             let expected: Vec<f64> = tensor.data.iter().map(|&v| v.sin()).collect();
             assert_eq!(gathered.shape, vec![4, 1]);

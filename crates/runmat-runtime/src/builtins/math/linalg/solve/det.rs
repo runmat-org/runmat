@@ -429,92 +429,93 @@ async fn det_gpu_via_provider(
 
     let outcome = {
         async {
-        enum UpperFactor {
-            Real(Tensor),
-            Complex(ComplexTensor),
-        }
+            enum UpperFactor {
+                Real(Tensor),
+                Complex(ComplexTensor),
+            }
 
-        let upper_factor = match gpu_helpers::gather_tensor_async(&lu_result.upper).await {
-            Ok(tensor) => UpperFactor::Real(tensor),
-            Err(err) => {
-                if err.message() == "interaction pending..." {
-                    return Err(interaction_pending_error());
-                }
-                let value = Value::GpuTensor(lu_result.upper.clone());
-                match gpu_helpers::gather_value_async(&value).await {
-                    Ok(Value::Tensor(tensor)) => UpperFactor::Real(tensor),
-                    Ok(Value::ComplexTensor(tensor)) => UpperFactor::Complex(tensor),
-                    Ok(Value::Num(n)) => {
-                        let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(builtin_error)?;
-                        UpperFactor::Real(tensor)
+            let upper_factor = match gpu_helpers::gather_tensor_async(&lu_result.upper).await {
+                Ok(tensor) => UpperFactor::Real(tensor),
+                Err(err) => {
+                    if err.message() == "interaction pending..." {
+                        return Err(interaction_pending_error());
                     }
-                    Ok(_) => return Ok(None),
+                    let value = Value::GpuTensor(lu_result.upper.clone());
+                    match gpu_helpers::gather_value_async(&value).await {
+                        Ok(Value::Tensor(tensor)) => UpperFactor::Real(tensor),
+                        Ok(Value::ComplexTensor(tensor)) => UpperFactor::Complex(tensor),
+                        Ok(Value::Num(n)) => {
+                            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(builtin_error)?;
+                            UpperFactor::Real(tensor)
+                        }
+                        Ok(_) => return Ok(None),
+                        Err(err) => {
+                            if err.message() == "interaction pending..." {
+                                return Err(interaction_pending_error());
+                            }
+                            return Ok(None);
+                        }
+                    }
+                }
+            };
+
+            let pivot_tensor = match gpu_helpers::gather_tensor_async(&lu_result.perm_vector).await
+            {
+                Ok(tensor) => tensor,
+                Err(err) => {
+                    if err.message() == "interaction pending..." {
+                        return Err(interaction_pending_error());
+                    }
+                    return Ok(None);
+                }
+            };
+
+            let determinant = match upper_factor {
+                UpperFactor::Real(tensor) => match diagonal_product_real(&tensor, rows) {
+                    Ok(value) => Determinant::Real(value),
                     Err(err) => {
                         if err.message() == "interaction pending..." {
                             return Err(interaction_pending_error());
                         }
                         return Ok(None);
                     }
-                }
-            }
-        };
+                },
+                UpperFactor::Complex(tensor) => match diagonal_product_complex(&tensor, rows) {
+                    Ok((re, im)) => Determinant::Complex(re, im),
+                    Err(err) => {
+                        if err.message() == "interaction pending..." {
+                            return Err(interaction_pending_error());
+                        }
+                        return Ok(None);
+                    }
+                },
+            };
 
-        let pivot_tensor = match gpu_helpers::gather_tensor_async(&lu_result.perm_vector).await {
-            Ok(tensor) => tensor,
-            Err(err) => {
-                if err.message() == "interaction pending..." {
-                    return Err(interaction_pending_error());
-                }
-                return Ok(None);
-            }
-        };
-
-        let determinant = match upper_factor {
-            UpperFactor::Real(tensor) => match diagonal_product_real(&tensor, rows) {
-                Ok(value) => Determinant::Real(value),
+            let permutation_sign = match permutation_sign_from_tensor(&pivot_tensor, rows) {
+                Ok(value) => value,
                 Err(err) => {
                     if err.message() == "interaction pending..." {
                         return Err(interaction_pending_error());
                     }
                     return Ok(None);
                 }
-            },
-            UpperFactor::Complex(tensor) => match diagonal_product_complex(&tensor, rows) {
-                Ok((re, im)) => Determinant::Complex(re, im),
-                Err(err) => {
-                    if err.message() == "interaction pending..." {
-                        return Err(interaction_pending_error());
-                    }
-                    return Ok(None);
-                }
-            },
-        };
+            };
 
-        let permutation_sign = match permutation_sign_from_tensor(&pivot_tensor, rows) {
-            Ok(value) => value,
-            Err(err) => {
-                if err.message() == "interaction pending..." {
-                    return Err(interaction_pending_error());
-                }
-                return Ok(None);
+            let determinant = determinant.apply_sign(permutation_sign);
+
+            match determinant {
+                Determinant::Real(value) => match upload_scalar(provider, value) {
+                    Ok(handle) => Ok(Some(Value::GpuTensor(handle))),
+                    Err(err) => {
+                        if err.message() == "interaction pending..." {
+                            Err(interaction_pending_error())
+                        } else {
+                            Ok(None)
+                        }
+                    }
+                },
+                Determinant::Complex(re, im) => Ok(Some(Value::Complex(re, im))),
             }
-        };
-
-        let determinant = determinant.apply_sign(permutation_sign);
-
-        match determinant {
-            Determinant::Real(value) => match upload_scalar(provider, value) {
-                Ok(handle) => Ok(Some(Value::GpuTensor(handle))),
-                Err(err) => {
-                    if err.message() == "interaction pending..." {
-                        Err(interaction_pending_error())
-                    } else {
-                        Ok(None)
-                    }
-                }
-            },
-            Determinant::Complex(re, im) => Ok(Some(Value::Complex(re, im))),
-        }
         }
         .await
     };
@@ -707,5 +708,4 @@ pub(crate) mod tests {
             "gpu det {det_gpu} differs from cpu det {cpu_det}"
         );
     }
-
 }

@@ -1411,5 +1411,4 @@ pub(crate) mod tests {
             assert!(!blocks.is_empty());
         }
     }
-
 }

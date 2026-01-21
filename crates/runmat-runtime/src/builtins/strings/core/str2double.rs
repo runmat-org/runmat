@@ -239,7 +239,9 @@ fn remap_str2double_flow(err: RuntimeError) -> RuntimeError {
     builtin_path = "crate::builtins::strings::core::str2double"
 )]
 async fn str2double_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    let gathered = gather_if_needed_async(&value).await.map_err(remap_str2double_flow)?;
+    let gathered = gather_if_needed_async(&value)
+        .await
+        .map_err(remap_str2double_flow)?;
     match gathered {
         Value::String(text) => Ok(Value::Num(parse_numeric_scalar(&text))),
         Value::StringArray(array) => str2double_string_array(array),

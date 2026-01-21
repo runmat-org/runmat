@@ -623,8 +623,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_invalid_pattern_type() {
-        let err = run_startswith(Value::String("foo".into()), Value::Num(1.0), Vec::new())
-            .unwrap_err();
+        let err =
+            run_startswith(Value::String("foo".into()), Value::Num(1.0), Vec::new()).unwrap_err();
         assert!(
             err.to_string().contains("pattern must be text"),
             "expected pattern type error, got: {err}"
@@ -635,8 +635,8 @@ pub(crate) mod tests {
     #[test]
     fn startswith_cell_invalid_element_error() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
-        let err = run_startswith(Value::Cell(cell), Value::String("a".into()), Vec::new())
-            .unwrap_err();
+        let err =
+            run_startswith(Value::Cell(cell), Value::String("a".into()), Vec::new()).unwrap_err();
         assert!(err.to_string().contains("cell array elements"));
     }
 

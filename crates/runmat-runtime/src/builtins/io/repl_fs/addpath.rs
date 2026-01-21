@@ -257,7 +257,11 @@ async fn addpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed_async(value).await.map_err(map_control_flow)?);
+        out.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     Ok(out)
 }
@@ -411,7 +415,9 @@ async fn collect_strings(value: &Value, output: &mut Vec<String>) -> BuiltinResu
         Value::Cell(cell) => {
             for ptr in &cell.data {
                 let inner = (*ptr).clone();
-                let gathered = gather_if_needed_async(&inner).await.map_err(map_control_flow)?;
+                let gathered = gather_if_needed_async(&inner)
+                    .await
+                    .map_err(map_control_flow)?;
                 collect_strings(&gathered, output).await?;
             }
             Ok(())

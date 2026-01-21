@@ -485,7 +485,11 @@ fn randi_logical(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value
 }
 
 #[async_recursion::async_recursion(?Send)]
-async fn randi_like(proto: &Value, bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value> {
+async fn randi_like(
+    proto: &Value,
+    bounds: &Bounds,
+    shape: &[usize],
+) -> crate::BuiltinResult<Value> {
     match proto {
         Value::GpuTensor(handle) => randi_like_gpu(handle, bounds, shape).await,
         Value::LogicalArray(_) | Value::Bool(_) => randi_logical(bounds, shape),
@@ -840,8 +844,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_logical_requires_binary_bounds() {
-        let err = block_on(randi_builtin(vec![Value::Num(3.0), Value::from("logical")]))
-            .unwrap_err();
+        let err =
+            block_on(randi_builtin(vec![Value::Num(3.0), Value::from("logical")])).unwrap_err();
         let message = err.to_string();
         assert!(message.contains("logical output requires"));
     }
@@ -871,8 +875,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_like_requires_prototype() {
-        let err = block_on(randi_builtin(vec![Value::Num(5.0), Value::from("like")]))
-            .unwrap_err();
+        let err = block_on(randi_builtin(vec![Value::Num(5.0), Value::from("like")])).unwrap_err();
         let message = err.to_string();
         assert!(message.contains("expected prototype"));
     }

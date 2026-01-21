@@ -48,7 +48,10 @@ pub async fn gather_tensor_from_gpu_async(
     Tensor::try_from(&gathered).map_err(|e| plotting_error(name, format!("{name}: {e}")))
 }
 
-pub fn gather_tensor_from_gpu(handle: GpuTensorHandle, name: &'static str) -> BuiltinResult<Tensor> {
+pub fn gather_tensor_from_gpu(
+    handle: GpuTensorHandle,
+    name: &'static str,
+) -> BuiltinResult<Tensor> {
     block_on(gather_tensor_from_gpu_async(handle, name))
 }
 

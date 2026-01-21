@@ -333,8 +333,8 @@ fn internal_error(name: &str, message: impl Into<String>) -> RuntimeError {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::IntValue;
     use futures::executor::block_on;
+    use runmat_builtins::IntValue;
 
     fn run_isinf(value: Value) -> BuiltinResult<Value> {
         block_on(super::isinf_builtin(value))

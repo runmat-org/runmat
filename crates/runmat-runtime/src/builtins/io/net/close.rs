@@ -538,8 +538,8 @@ pub(crate) mod tests {
         assert!(client_handle(accepted_id).is_none());
         assert!(server_handle(sid).is_none());
 
-        let second = run_close(vec![standalone_client, accepted, server])
-            .expect("close resources again");
+        let second =
+            run_close(vec![standalone_client, accepted, server]).expect("close resources again");
         assert_eq!(second, Value::Num(0.0));
     }
 

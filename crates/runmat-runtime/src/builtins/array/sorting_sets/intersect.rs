@@ -1458,7 +1458,6 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
 
-
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
     }

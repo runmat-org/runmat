@@ -602,8 +602,8 @@ pub(crate) mod tests {
     fn strcat_char_array_multiple_rows_concatenates_per_row() {
         let first = CharArray::new(vec!['A', ' ', 'B', 'C'], 2, 2).expect("char");
         let second = CharArray::new(vec!['X', 'Y', 'Z', ' '], 2, 2).expect("char");
-        let result = run_strcat(vec![Value::CharArray(first), Value::CharArray(second)])
-            .expect("strcat");
+        let result =
+            run_strcat(vec![Value::CharArray(first), Value::CharArray(second)]).expect("strcat");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
@@ -620,8 +620,8 @@ pub(crate) mod tests {
     fn strcat_char_array_trims_trailing_spaces() {
         let first = CharArray::new_row("GPU ");
         let second = CharArray::new_row(" Accel  ");
-        let result = run_strcat(vec![Value::CharArray(first), Value::CharArray(second)])
-            .expect("strcat");
+        let result =
+            run_strcat(vec![Value::CharArray(first), Value::CharArray(second)]).expect("strcat");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);

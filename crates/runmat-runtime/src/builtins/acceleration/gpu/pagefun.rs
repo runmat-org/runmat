@@ -1017,8 +1017,7 @@ pub(crate) mod tests {
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        ;
+        );
         let result = block_on(result).expect("pagefun");
         match result {
             Value::Tensor(t) => {
@@ -1038,8 +1037,7 @@ pub(crate) mod tests {
             Value::from("@mtimes"),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        ;
+        );
         let result = block_on(result).expect("pagefun");
         match result {
             Value::Tensor(t) => {
@@ -1059,8 +1057,7 @@ pub(crate) mod tests {
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        ;
+        );
         let result = block_on(result).expect("pagefun");
         match result {
             Value::Tensor(t) => {
@@ -1084,8 +1081,7 @@ pub(crate) mod tests {
             Value::from("@mtimes"),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        ;
+        );
         let result = block_on(result).expect("pagefun");
         match result {
             Value::Tensor(t) => {
@@ -1106,8 +1102,7 @@ pub(crate) mod tests {
             Value::CharArray(func),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        ;
+        );
         let result = block_on(result).expect("pagefun char array");
         match result {
             Value::Tensor(t) => {
@@ -1128,8 +1123,7 @@ pub(crate) mod tests {
             Value::StringArray(strings),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        ;
+        );
         let result = block_on(result).expect("pagefun string array");
         match result {
             Value::Tensor(t) => {
@@ -1150,8 +1144,7 @@ pub(crate) mod tests {
             Value::CharArray(chars),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        ;
+        );
         let err = block_on(err).expect_err("expected multi-row char array error");
         assert!(
             err.contains("char array"),
@@ -1170,8 +1163,7 @@ pub(crate) mod tests {
             Value::StringArray(strings),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        ;
+        );
         let err = block_on(err).expect_err("expected multi-element string array error");
         assert!(
             err.contains("string array"),
@@ -1194,8 +1186,7 @@ pub(crate) mod tests {
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        ;
+        );
         let err = block_on(err).expect_err("expected page dimension mismatch");
         assert!(
             err.contains("page dimension"),
@@ -1212,8 +1203,7 @@ pub(crate) mod tests {
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        ;
+        );
         let err = block_on(err).expect_err("expected dimension mismatch");
         assert!(
             err.contains("inner matrix dimensions"),
@@ -1244,8 +1234,7 @@ pub(crate) mod tests {
                 Value::FunctionHandle("mtimes".into()),
                 Value::GpuTensor(lhs),
                 vec![Value::GpuTensor(rhs)],
-            )
-            ;
+            );
             let result = block_on(result).expect("pagefun");
 
             let gathered = test_support::gather(result).expect("gather");
@@ -1312,8 +1301,7 @@ pub(crate) mod tests {
             Value::FunctionHandle("mtimes".into()),
             Value::GpuTensor(lhs_handle.clone()),
             vec![Value::GpuTensor(rhs_handle.clone())],
-        )
-        ;
+        );
         let builtin_value = block_on(builtin_value).expect("pagefun builtin on GPU");
         let builtin_tensor = test_support::gather(builtin_value).expect("gather builtin");
 
@@ -1321,8 +1309,7 @@ pub(crate) mod tests {
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(lhs.clone()),
             vec![Value::Tensor(rhs.clone())],
-        )
-        ;
+        );
         let expected_value = block_on(expected_value).expect("pagefun host baseline");
         let expected_tensor = match expected_value {
             Value::Tensor(t) => t,

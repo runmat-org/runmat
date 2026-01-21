@@ -713,8 +713,7 @@ pub(crate) mod tests {
             };
             let a = provider.upload(&view).expect("upload");
             let b = provider.upload(&view).expect("upload");
-            let result =
-                run_eq(Value::GpuTensor(a), Value::GpuTensor(b)).expect("gpu eq succeeds");
+            let result = run_eq(Value::GpuTensor(a), Value::GpuTensor(b)).expect("gpu eq succeeds");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
             assert_eq!(gathered.data, vec![1.0, 1.0, 1.0]);
@@ -752,7 +751,8 @@ pub(crate) mod tests {
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let cpu = run_eq_host(Value::Tensor(tensor.clone()), Value::Tensor(tensor.clone())).unwrap();
+        let cpu =
+            run_eq_host(Value::Tensor(tensor.clone()), Value::Tensor(tensor.clone())).unwrap();
         let view = HostTensorView {
             data: &tensor.data,
             shape: &tensor.shape,

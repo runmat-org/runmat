@@ -995,8 +995,7 @@ pub(crate) mod tests {
     fn getfield_scalar_struct() {
         let mut st = StructValue::new();
         st.fields.insert("answer".to_string(), Value::Num(42.0));
-        let value =
-            run_getfield(Value::Struct(st), vec![Value::from("answer")]).expect("getfield");
+        let value = run_getfield(Value::Struct(st), vec![Value::from("answer")]).expect("getfield");
         assert_eq!(value, Value::Num(42.0));
     }
 
@@ -1046,8 +1045,7 @@ pub(crate) mod tests {
     fn getfield_object_property() {
         let mut obj = ObjectInstance::new("TestClass".to_string());
         obj.properties.insert("value".to_string(), Value::Num(7.0));
-        let result =
-            run_getfield(Value::Object(obj), vec![Value::from("value")]).expect("object");
+        let result = run_getfield(Value::Object(obj), vec![Value::from("value")]).expect("object");
         assert_eq!(result, Value::Num(7.0));
     }
 
@@ -1079,8 +1077,7 @@ pub(crate) mod tests {
         let mut ex = MException::new("MATLAB:Test".to_string(), "failure".to_string());
         ex.stack.push("demo.m:5".to_string());
         ex.stack.push("main.m:1".to_string());
-        let stack =
-            run_getfield(Value::MException(ex), vec![Value::from("stack")]).expect("stack");
+        let stack = run_getfield(Value::MException(ex), vec![Value::from("stack")]).expect("stack");
         let Value::Cell(cell) = stack else {
             panic!("expected cell array");
         };
@@ -1215,8 +1212,7 @@ pub(crate) mod tests {
         obj.properties
             .insert("p_backing".to_string(), Value::Num(42.0));
 
-        let result =
-            run_getfield(Value::Object(obj), vec![Value::from("p")]).expect("dependent");
+        let result = run_getfield(Value::Object(obj), vec![Value::from("p")]).expect("dependent");
         assert_eq!(result, Value::Num(42.0));
     }
 

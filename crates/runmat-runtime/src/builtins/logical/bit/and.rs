@@ -401,8 +401,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_of_booleans() {
-        assert_eq!(run_and(Value::Bool(true), Value::Bool(false)).unwrap(), Value::Bool(false));
-        assert_eq!(run_and(Value::Bool(true), Value::Bool(true)).unwrap(), Value::Bool(true));
+        assert_eq!(
+            run_and(Value::Bool(true), Value::Bool(false)).unwrap(),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            run_and(Value::Bool(true), Value::Bool(true)).unwrap(),
+            Value::Bool(true)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
