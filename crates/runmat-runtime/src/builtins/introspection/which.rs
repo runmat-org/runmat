@@ -21,7 +21,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{
-    build_runtime_error, dispatcher::gather_if_needed, make_cell, BuiltinResult, RuntimeError,
+    build_runtime_error, dispatcher::gather_if_needed_async, make_cell, BuiltinResult, RuntimeError,
 };
 
 const ERROR_NOT_ENOUGH_ARGS: &str = "which: not enough input arguments";
@@ -220,7 +220,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::introspection::which"
 )]
-fn which_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn which_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         return Err(which_error(ERROR_NOT_ENOUGH_ARGS));
     }
@@ -229,7 +229,7 @@ fn which_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut options = WhichOptions::default();
 
     for arg in args {
-        let gathered = gather_if_needed(&arg).map_err(which_flow)?;
+        let gathered = gather_if_needed_async(&arg).await.map_err(which_flow)?;
         let text = value_to_string_scalar(&gathered).ok_or_else(|| {
             if name.is_none() {
                 which_error(ERROR_NAME_ARG)
@@ -537,7 +537,8 @@ fn push_unique(results: &mut Vec<String>, seen: &mut HashSet<String>, entry: Str
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use once_cell::sync::{Lazy, OnceCell};
+    use futures::executor::block_on;
+    use once_cell::sync::Lazy;
     use runmat_builtins::{CharArray, StringArray, Value};
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
@@ -550,23 +551,24 @@ pub(crate) mod tests {
 
     static WHICH_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
+    fn which_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::which_builtin(args))
+    }
+
     runmat_thread_local! {
         static TEST_WORKSPACE: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
     }
 
     fn ensure_test_resolver() {
-        static INIT: OnceCell<()> = OnceCell::new();
-        INIT.get_or_init(|| {
-            crate::workspace::register_workspace_resolver(crate::workspace::WorkspaceResolver {
-                lookup: |name| TEST_WORKSPACE.with(|slot| slot.borrow().get(name).cloned()),
-                snapshot: || {
-                    let mut entries: Vec<(String, Value)> =
-                        TEST_WORKSPACE.with(|slot| slot.borrow().clone().into_iter().collect());
-                    entries.sort_by(|a, b| a.0.cmp(&b.0));
-                    entries
-                },
-                globals: || Vec::new(),
-            });
+        crate::workspace::register_workspace_resolver(crate::workspace::WorkspaceResolver {
+            lookup: |name| TEST_WORKSPACE.with(|slot| slot.borrow().get(name).cloned()),
+            snapshot: || {
+                let mut entries: Vec<(String, Value)> =
+                    TEST_WORKSPACE.with(|slot| slot.borrow().clone().into_iter().collect());
+                entries.sort_by(|a, b| a.0.cmp(&b.0));
+                entries
+            },
+            globals: || Vec::new(),
         });
     }
 

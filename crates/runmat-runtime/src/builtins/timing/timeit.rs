@@ -175,15 +175,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "helper",
     builtin_path = "crate::builtins::timing::timeit"
 )]
-fn timeit_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn timeit_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let requested_outputs = parse_num_outputs(&rest)?;
     let callable = prepare_callable(func, requested_outputs)?;
 
     // Warm-up once to catch early errors and pay one-time JIT costs.
-    callable.invoke()?;
+    callable.invoke().await?;
 
-    let loop_count = determine_loop_count(&callable)?;
-    let samples = collect_samples(&callable, loop_count)?;
+    let loop_count = determine_loop_count(&callable).await?;
+    let samples = collect_samples(&callable, loop_count).await?;
     if samples.is_empty() {
         return Ok(Value::Num(0.0));
     }
@@ -232,10 +232,10 @@ fn parse_non_negative_integer(value: &Value) -> Result<usize, crate::RuntimeErro
     }
 }
 
-fn determine_loop_count(callable: &TimeitCallable) -> Result<usize, crate::RuntimeError> {
+async fn determine_loop_count(callable: &TimeitCallable) -> Result<usize, crate::RuntimeError> {
     let mut loops = 1usize;
     loop {
-        let elapsed = run_batch(callable, loops)?;
+        let elapsed = run_batch(callable, loops).await?;
         if elapsed >= TARGET_BATCH_SECONDS
             || elapsed >= MAX_BATCH_SECONDS
             || loops >= LOOP_COUNT_LIMIT
@@ -249,13 +249,13 @@ fn determine_loop_count(callable: &TimeitCallable) -> Result<usize, crate::Runti
     }
 }
 
-fn collect_samples(
+async fn collect_samples(
     callable: &TimeitCallable,
     loop_count: usize,
 ) -> Result<Vec<f64>, crate::RuntimeError> {
     let mut samples = Vec::with_capacity(MIN_SAMPLE_COUNT);
     while samples.len() < MIN_SAMPLE_COUNT {
-        let elapsed = run_batch(callable, loop_count)?;
+        let elapsed = run_batch(callable, loop_count).await?;
         let per_iter = elapsed / loop_count as f64;
         samples.push(per_iter);
         if samples.len() >= MAX_SAMPLE_COUNT || elapsed >= MAX_BATCH_SECONDS {
@@ -265,10 +265,13 @@ fn collect_samples(
     Ok(samples)
 }
 
-fn run_batch(callable: &TimeitCallable, loop_count: usize) -> Result<f64, crate::RuntimeError> {
+async fn run_batch(
+    callable: &TimeitCallable,
+    loop_count: usize,
+) -> Result<f64, crate::RuntimeError> {
     let start = Instant::now();
     for _ in 0..loop_count {
-        let value = callable.invoke()?;
+        let value = callable.invoke().await?;
         drop(value);
     }
     Ok(start.elapsed().as_secs_f64())
@@ -305,20 +308,18 @@ struct TimeitCallable {
 }
 
 impl TimeitCallable {
-    fn invoke(&self) -> Result<Value, crate::RuntimeError> {
+    async fn invoke(&self) -> Result<Value, crate::RuntimeError> {
         // The runtime currently treats all builtin invocations as returning a single `Value`.
         // The optional `num_outputs` flag is stored so future multi-output support can
         // request the correct number of outputs when dispatching through `feval`.
         // For now, we invoke the handle normally and drop whatever value is produced.
         if let Some(0) = self.num_outputs {
-            let value = crate::call_builtin("feval", std::slice::from_ref(&self.handle))?;
+            let value =
+                crate::call_builtin_async("feval", std::slice::from_ref(&self.handle)).await?;
             drop(value);
             Ok(Value::Num(0.0))
         } else {
-            Ok(crate::call_builtin(
-                "feval",
-                std::slice::from_ref(&self.handle),
-            )?)
+            Ok(crate::call_builtin_async("feval", std::slice::from_ref(&self.handle)).await?)
         }
     }
 }
@@ -389,6 +390,7 @@ fn parse_handle_string(text: &str) -> Result<String, crate::RuntimeError> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
     use runmat_builtins::IntValue;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -403,7 +405,7 @@ pub(crate) mod tests {
         name = "__timeit_helper_counter_default",
         builtin_path = "crate::builtins::timing::timeit::tests"
     )]
-    fn helper_counter_default() -> crate::BuiltinResult<Value> {
+    async fn helper_counter_default() -> crate::BuiltinResult<Value> {
         COUNTER_DEFAULT.fetch_add(1, Ordering::SeqCst);
         Ok(Value::Num(1.0))
     }
@@ -412,7 +414,7 @@ pub(crate) mod tests {
         name = "__timeit_helper_counter_outputs",
         builtin_path = "crate::builtins::timing::timeit::tests"
     )]
-    fn helper_counter_outputs() -> crate::BuiltinResult<Value> {
+    async fn helper_counter_outputs() -> crate::BuiltinResult<Value> {
         COUNTER_NUM_OUTPUTS.fetch_add(1, Ordering::SeqCst);
         Ok(Value::Num(1.0))
     }
@@ -421,7 +423,7 @@ pub(crate) mod tests {
         name = "__timeit_helper_counter_invalid",
         builtin_path = "crate::builtins::timing::timeit::tests"
     )]
-    fn helper_counter_invalid() -> crate::BuiltinResult<Value> {
+    async fn helper_counter_invalid() -> crate::BuiltinResult<Value> {
         COUNTER_INVALID.fetch_add(1, Ordering::SeqCst);
         Ok(Value::Num(1.0))
     }
@@ -430,7 +432,7 @@ pub(crate) mod tests {
         name = "__timeit_helper_zero_outputs",
         builtin_path = "crate::builtins::timing::timeit::tests"
     )]
-    fn helper_counter_zero_outputs() -> crate::BuiltinResult<Value> {
+    async fn helper_counter_zero_outputs() -> crate::BuiltinResult<Value> {
         COUNTER_ZERO_OUTPUTS.fetch_add(1, Ordering::SeqCst);
         Ok(Value::Num(0.0))
     }
@@ -464,7 +466,7 @@ pub(crate) mod tests {
     #[test]
     fn timeit_measures_time() {
         COUNTER_DEFAULT.store(0, Ordering::SeqCst);
-        let result = timeit_builtin(default_handle(), Vec::new()).expect("timeit");
+        let result = block_on(timeit_builtin(default_handle(), Vec::new())).expect("timeit");
         match result {
             Value::Num(v) => assert!(v >= 0.0),
             other => panic!("expected numeric result, got {other:?}"),
@@ -481,7 +483,7 @@ pub(crate) mod tests {
     fn timeit_accepts_num_outputs_argument() {
         COUNTER_NUM_OUTPUTS.store(0, Ordering::SeqCst);
         let args = vec![Value::Int(IntValue::I32(3))];
-        let _ = timeit_builtin(outputs_handle(), args).expect("timeit numOutputs");
+        let _ = block_on(timeit_builtin(outputs_handle(), args)).expect("timeit numOutputs");
         assert!(
             COUNTER_NUM_OUTPUTS.load(Ordering::SeqCst) >= MIN_SAMPLE_COUNT,
             "expected at least {} invocations",
@@ -494,7 +496,8 @@ pub(crate) mod tests {
     fn timeit_supports_zero_outputs() {
         COUNTER_ZERO_OUTPUTS.store(0, Ordering::SeqCst);
         let args = vec![Value::Int(IntValue::I32(0))];
-        let _ = timeit_builtin(zero_outputs_handle(), args).expect("timeit zero outputs");
+        let _ =
+            block_on(timeit_builtin(zero_outputs_handle(), args)).expect("timeit zero outputs");
         assert!(
             COUNTER_ZERO_OUTPUTS.load(Ordering::SeqCst) >= MIN_SAMPLE_COUNT,
             "expected at least {} invocations",
@@ -509,7 +512,8 @@ pub(crate) mod tests {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
-        let result = timeit_builtin(default_handle(), Vec::new()).expect("timeit with wgpu");
+        let result =
+            block_on(timeit_builtin(default_handle(), Vec::new())).expect("timeit with wgpu");
         match result {
             Value::Num(v) => assert!(v >= 0.0),
             other => panic!("expected numeric result, got {other:?}"),
@@ -519,7 +523,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_rejects_non_function_input() {
-        let err = timeit_builtin(Value::Num(1.0), Vec::new()).unwrap_err();
+        let err = block_on(timeit_builtin(Value::Num(1.0), Vec::new())).unwrap_err();
         assert_timeit_error_contains(err, "function");
     }
 
@@ -527,7 +531,7 @@ pub(crate) mod tests {
     #[test]
     fn timeit_rejects_invalid_num_outputs() {
         COUNTER_INVALID.store(0, Ordering::SeqCst);
-        let err = timeit_builtin(invalid_handle(), vec![Value::Num(-1.0)]).unwrap_err();
+        let err = block_on(timeit_builtin(invalid_handle(), vec![Value::Num(-1.0)])).unwrap_err();
         assert_timeit_error_contains(err, "nonnegative");
         assert_eq!(COUNTER_INVALID.load(Ordering::SeqCst), 0);
     }
@@ -535,8 +539,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_rejects_extra_arguments() {
-        let err =
-            timeit_builtin(default_handle(), vec![Value::from(1.0), Value::from(2.0)]).unwrap_err();
+        let err = block_on(timeit_builtin(
+            default_handle(),
+            vec![Value::from(1.0), Value::from(2.0)],
+        ))
+        .unwrap_err();
         assert_timeit_error_contains(err, "too many");
     }
 

@@ -207,10 +207,10 @@ enum CumsumNanMode {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::cumsum"
 )]
-fn cumsum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn cumsum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let (dim, direction, nan_mode) = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => cumsum_gpu(handle, dim, direction, nan_mode),
+        Value::GpuTensor(handle) => cumsum_gpu(handle, dim, direction, nan_mode).await,
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| cumsum_error(format!("cumsum: {e}")))?;
@@ -331,7 +331,7 @@ fn cumsum_host(
     Ok(tensor::tensor_into_value(result))
 }
 
-fn cumsum_gpu(
+async fn cumsum_gpu(
     handle: GpuTensorHandle,
     dim: Option<usize>,
     direction: CumsumDirection,
@@ -346,7 +346,7 @@ fn cumsum_gpu(
         }
     }
     if matches!(direction, CumsumDirection::Reverse) && matches!(nan_mode, CumsumNanMode::Omit) {
-        let tensor = gpu_helpers::gather_tensor(&handle)?;
+        let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&tensor.shape));
         let result = cumsum_tensor(&tensor, fallback_dim, direction, nan_mode)?;
         return Ok(tensor::tensor_into_value(result));
@@ -388,7 +388,7 @@ fn cumsum_gpu(
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let result = cumsum_tensor(&tensor, fallback_dim, direction, nan_mode)?;
     Ok(tensor::tensor_into_value(result))
 }
@@ -620,7 +620,12 @@ fn dim_product(dims: &[usize]) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor as BuiltinsTensor};
+
+    fn cumsum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::cumsum_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

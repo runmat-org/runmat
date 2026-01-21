@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const MESSAGE_ID_OS_ERROR: &str = "MATLAB:MKDIR:OSError";
 const MESSAGE_ID_DIRECTORY_EXISTS: &str = "MATLAB:MKDIR:DirectoryExists";
@@ -235,14 +235,14 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::mkdir"
 )]
-fn mkdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(&args)?;
+async fn mkdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(&args).await?;
     Ok(eval.first_output())
 }
 
 /// Evaluate `mkdir` once and expose all outputs.
-pub fn evaluate(args: &[Value]) -> BuiltinResult<MkdirResult> {
-    let gathered = gather_arguments(args)?;
+pub async fn evaluate(args: &[Value]) -> BuiltinResult<MkdirResult> {
+    let gathered = gather_arguments(args).await?;
     match gathered.len() {
         0 => Err(mkdir_error("mkdir: not enough input arguments")),
         1 => create_from_single(&gathered[0]),
@@ -420,10 +420,10 @@ fn extract_folder_name(value: &Value, error_message: &str) -> BuiltinResult<Stri
     }
 }
 
-fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
+async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(map_control_flow)?);
+        out.push(gather_if_needed_async(value).await.map_err(map_control_flow)?);
     }
     Ok(out)
 }
@@ -441,6 +441,14 @@ pub(crate) mod tests {
     use std::fs;
     use std::fs::File;
     use tempfile::tempdir;
+
+    fn mkdir_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::mkdir_builtin(args))
+    }
+
+    fn evaluate(args: &[Value]) -> BuiltinResult<MkdirResult> {
+        futures::executor::block_on(super::evaluate(args))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

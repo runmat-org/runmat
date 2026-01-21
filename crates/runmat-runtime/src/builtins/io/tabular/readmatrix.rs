@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "readmatrix";
 
@@ -268,20 +268,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::tabular::readmatrix"
 )]
-fn readmatrix_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let path_value = gather_if_needed(&path).map_err(map_control_flow)?;
-    let options = parse_options(&rest)?;
+async fn readmatrix_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let path_value = gather_if_needed_async(&path)
+        .await
+        .map_err(map_control_flow)?;
+    let options = parse_options(&rest).await?;
     options.validate()?;
     let resolved = resolve_path(&path_value)?;
     let tensor = read_numeric_matrix(&resolved, &options)?;
     finalize_output(tensor, &options)
 }
 
-fn parse_options(args: &[Value]) -> BuiltinResult<ReadMatrixOptions> {
+async fn parse_options(args: &[Value]) -> BuiltinResult<ReadMatrixOptions> {
     let mut options = ReadMatrixOptions::default();
     let mut index = 0usize;
     if let Some(Value::Struct(struct_value)) = args.get(index) {
-        parse_struct_options(struct_value, &mut options)?;
+        parse_struct_options(struct_value, &mut options).await?;
         index += 1;
     }
     while index < args.len() {
@@ -290,32 +292,40 @@ fn parse_options(args: &[Value]) -> BuiltinResult<ReadMatrixOptions> {
                 "readmatrix: name/value inputs must appear in pairs",
             ));
         }
-        let name_value = gather_if_needed(&args[index]).map_err(map_control_flow)?;
+        let name_value = gather_if_needed_async(&args[index])
+            .await
+            .map_err(map_control_flow)?;
         let name = option_name_from_value(&name_value)?;
         let value = &args[index + 1];
-        apply_option(&mut options, &name, value)?;
+        apply_option(&mut options, &name, value).await?;
         index += 2;
     }
     Ok(options)
 }
 
-fn parse_struct_options(
+async fn parse_struct_options(
     struct_value: &runmat_builtins::StructValue,
     options: &mut ReadMatrixOptions,
 ) -> BuiltinResult<()> {
     for (name, value) in &struct_value.fields {
-        apply_option(options, name, value)?;
+        apply_option(options, name, value).await?;
     }
     Ok(())
 }
 
-fn apply_option(options: &mut ReadMatrixOptions, name: &str, value: &Value) -> BuiltinResult<()> {
+async fn apply_option(
+    options: &mut ReadMatrixOptions,
+    name: &str,
+    value: &Value,
+) -> BuiltinResult<()> {
     let lowered = name.trim().to_ascii_lowercase();
     let is_like = lowered == "like";
     let effective_value = if is_like {
         value.clone()
     } else {
-        gather_if_needed(value).map_err(map_control_flow)?
+        gather_if_needed_async(value)
+            .await
+            .map_err(map_control_flow)?
     };
     if name.eq_ignore_ascii_case("Delimiter") {
         let delimiter = parse_delimiter(&effective_value)?;
@@ -328,7 +338,7 @@ fn apply_option(options: &mut ReadMatrixOptions, name: &str, value: &Value) -> B
         return Ok(());
     }
     if name.eq_ignore_ascii_case("TreatAsMissing") {
-        let tokens = parse_treat_as_missing(&effective_value)?;
+        let tokens = parse_treat_as_missing(&effective_value).await?;
         for token in tokens {
             options.add_missing_token(&token);
         }
@@ -504,39 +514,42 @@ fn value_to_f64(value: &Value, context: &str) -> BuiltinResult<f64> {
     }
 }
 
-fn parse_treat_as_missing(value: &Value) -> BuiltinResult<Vec<String>> {
-    match value {
-        Value::String(s) => Ok(vec![s.clone()]),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(vec![ca.data.iter().collect()]),
-        Value::StringArray(sa) => Ok(sa.data.clone()),
-        Value::Num(n) => Ok(vec![format_numeric_token(*n)]),
-        Value::Int(i) => Ok(vec![format!("{}", i.to_i64())]),
-        Value::Tensor(t) => {
-            if t.data.len() == 1 {
-                Ok(vec![format_numeric_token(t.data[0])])
-            } else {
-                Err(readmatrix_error(
-                    "readmatrix: TreatAsMissing entries must be scalar values",
+async fn parse_treat_as_missing(value: &Value) -> BuiltinResult<Vec<String>> {
+    let mut out = Vec::new();
+    let mut stack = vec![value.clone()];
+    while let Some(value) = stack.pop() {
+        match value {
+            Value::String(s) => out.push(s),
+            Value::CharArray(ca) if ca.rows == 1 => out.push(ca.data.iter().collect()),
+            Value::StringArray(sa) => out.extend(sa.data),
+            Value::Num(n) => out.push(format_numeric_token(n)),
+            Value::Int(i) => out.push(format!("{}", i.to_i64())),
+            Value::Tensor(t) => {
+                if t.data.len() == 1 {
+                    out.push(format_numeric_token(t.data[0]));
+                } else {
+                    return Err(readmatrix_error(
+                        "readmatrix: TreatAsMissing entries must be scalar values",
+                    ));
+                }
+            }
+            Value::Cell(cell) => {
+                for handle in &cell.data {
+                    let inner = unsafe { &*handle.as_raw() };
+                    let gathered = gather_if_needed_async(inner)
+                        .await
+                        .map_err(map_control_flow)?;
+                    stack.push(gathered);
+                }
+            }
+            _ => {
+                return Err(readmatrix_error(
+                    "readmatrix: TreatAsMissing values must be strings or numeric scalars",
                 ))
             }
         }
-        Value::Cell(_) => {
-            let nested = Vec::<Value>::try_from(value).map_err(|_| {
-                readmatrix_error("readmatrix: TreatAsMissing cell arrays must contain scalars")
-            })?;
-            let mut out = Vec::new();
-            for entry in nested {
-                let gathered = gather_if_needed(&entry).map_err(map_control_flow)?;
-                for token in parse_treat_as_missing(&gathered)? {
-                    out.push(token);
-                }
-            }
-            Ok(out)
-        }
-        _ => Err(readmatrix_error(
-            "readmatrix: TreatAsMissing values must be strings or numeric scalars",
-        )),
     }
+    Ok(out)
 }
 
 fn format_numeric_token(value: f64) -> String {
@@ -1270,6 +1283,7 @@ fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
     use runmat_time::unix_timestamp_ms;
     use std::fs;
 
@@ -1290,9 +1304,11 @@ pub(crate) mod tests {
     fn readmatrix_reads_csv_data() {
         let path = unique_path("readmatrix_csv");
         fs::write(&path, "1,2,3\n4,5,6\n").expect("write sample file");
-        let result =
-            readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new())
-                .expect("readmatrix");
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            Vec::new(),
+        ))
+        .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
@@ -1309,8 +1325,9 @@ pub(crate) mod tests {
         let path = unique_path("readmatrix_header");
         fs::write(&path, "time,value\n0,10\n1,12\n").expect("write sample file");
         let args = vec![Value::from("NumHeaderLines"), Value::Int(IntValue::I32(1))];
-        let result = readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args)
-            .expect("readmatrix");
+        let result =
+            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
+                .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -1327,8 +1344,9 @@ pub(crate) mod tests {
         let path = unique_path("readmatrix_tab");
         fs::write(&path, "1\t2\t3\n4\t5\t6\n").expect("write sample file");
         let args = vec![Value::from("Delimiter"), Value::from("tab")];
-        let result = readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args)
-            .expect("readmatrix");
+        let result =
+            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
+                .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
@@ -1345,8 +1363,9 @@ pub(crate) mod tests {
         let path = unique_path("readmatrix_range_string");
         fs::write(&path, "11,12,13\n21,22,23\n31,32,33\n").expect("write sample file");
         let args = vec![Value::from("Range"), Value::from("B2:C3")];
-        let result = readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args)
-            .expect("readmatrix");
+        let result =
+            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
+                .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -1364,8 +1383,9 @@ pub(crate) mod tests {
         fs::write(&path, "11,12,13\n21,22,23\n31,32,33\n").expect("write sample file");
         let range = Tensor::new(vec![2.0, 2.0, 3.0, 3.0], vec![1, 4]).expect("range tensor");
         let args = vec![Value::from("Range"), Value::Tensor(range)];
-        let result = readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args)
-            .expect("readmatrix");
+        let result =
+            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
+                .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -1384,8 +1404,9 @@ pub(crate) mod tests {
         let strings = StringArray::new(vec!["NA".to_string(), "missing".to_string()], vec![1, 2])
             .expect("string array");
         let args = vec![Value::from("TreatAsMissing"), Value::StringArray(strings)];
-        let result = readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args)
-            .expect("readmatrix");
+        let result =
+            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
+                .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
@@ -1411,8 +1432,9 @@ pub(crate) mod tests {
             Value::from("ThousandsSeparator"),
             Value::from("."),
         ];
-        let result = readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args)
-            .expect("readmatrix");
+        let result =
+            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
+                .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
@@ -1430,8 +1452,9 @@ pub(crate) mod tests {
         let path = unique_path("readmatrix_empty_value");
         fs::write(&path, "1,,3\n4,,6\n").expect("write sample file");
         let args = vec![Value::from("EmptyValue"), Value::Num(0.0)];
-        let result = readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args)
-            .expect("readmatrix");
+        let result =
+            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
+                .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
@@ -1455,8 +1478,9 @@ pub(crate) mod tests {
             .fields
             .insert("NumHeaderLines".to_string(), Value::Int(IntValue::I32(1)));
         let args = vec![Value::Struct(options_struct)];
-        let result = readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args)
-            .expect("readmatrix");
+        let result =
+            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
+                .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -1472,8 +1496,11 @@ pub(crate) mod tests {
     fn readmatrix_errors_on_non_numeric_field() {
         let path = unique_path("readmatrix_error");
         fs::write(&path, "1,abc,3\n").expect("write sample file");
-        let err = readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new())
-            .expect_err("readmatrix should fail");
+        let err = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            Vec::new(),
+        ))
+        .expect_err("readmatrix should fail");
         let message = err.message().to_string();
         assert!(
             message.contains("unable to parse numeric value"),
@@ -1487,9 +1514,11 @@ pub(crate) mod tests {
     fn readmatrix_returns_empty_on_no_data() {
         let path = unique_path("readmatrix_empty");
         File::create(&path).expect("create file");
-        let result =
-            readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new())
-                .expect("readmatrix");
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            Vec::new(),
+        ))
+        .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
@@ -1513,8 +1542,9 @@ pub(crate) mod tests {
         let path = unique_path("readmatrix_output_logical");
         fs::write(&path, "0,1,-3\nNaN,0,5\n").expect("write sample file");
         let args = vec![Value::from("OutputType"), Value::from("logical")];
-        let result = readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args)
-            .expect("readmatrix");
+        let result =
+            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
+                .expect("readmatrix");
         match result {
             Value::LogicalArray(arr) => {
                 assert_eq!(arr.shape, vec![2, 3]);
@@ -1532,8 +1562,9 @@ pub(crate) mod tests {
         fs::write(&path, "1,0\n0,5\n").expect("write sample file");
         let proto = LogicalArray::new(vec![1], vec![1]).expect("logical prototype");
         let args = vec![Value::from("Like"), Value::LogicalArray(proto)];
-        let result = readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args)
-            .expect("readmatrix");
+        let result =
+            block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
+                .expect("readmatrix");
         match result {
             Value::LogicalArray(arr) => {
                 assert_eq!(arr.shape, vec![2, 2]);
@@ -1557,8 +1588,9 @@ pub(crate) mod tests {
             };
             let handle = provider.upload(&view).expect("upload prototype");
             let args = vec![Value::from("Like"), Value::GpuTensor(handle.clone())];
-            let result = readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args)
-                .expect("readmatrix");
+            let result =
+                block_on(readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args))
+                    .expect("readmatrix");
             assert!(
                 matches!(result, Value::GpuTensor(_)),
                 "expected GPU tensor result, got {result:?}"
@@ -1580,7 +1612,8 @@ pub(crate) mod tests {
         let len = chars.len();
         let char_array = CharArray::new(chars, 1, len).expect("char array");
         let result =
-            readmatrix_builtin(Value::CharArray(char_array), Vec::new()).expect("readmatrix");
+            block_on(readmatrix_builtin(Value::CharArray(char_array), Vec::new()))
+                .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
@@ -1596,9 +1629,11 @@ pub(crate) mod tests {
     fn readmatrix_handles_quoted_fields() {
         let path = unique_path("readmatrix_quotes");
         fs::write(&path, "\"1\",\"2\",\"3\"\n").expect("write sample file");
-        let result =
-            readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new())
-                .expect("readmatrix");
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            Vec::new(),
+        ))
+        .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
@@ -1614,9 +1649,11 @@ pub(crate) mod tests {
     fn readmatrix_preserves_negative_infinity() {
         let path = unique_path("readmatrix_infinity");
         fs::write(&path, "-Inf,Inf,NaN\n").expect("write sample file");
-        let result =
-            readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new())
-                .expect("readmatrix");
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            Vec::new(),
+        ))
+        .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
@@ -1634,9 +1671,11 @@ pub(crate) mod tests {
     fn readmatrix_supports_whitespace_delimiter() {
         let path = unique_path("readmatrix_whitespace");
         fs::write(&path, "1 2 3\n4 5 6\n").expect("write sample file");
-        let result =
-            readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new())
-                .expect("readmatrix");
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            Vec::new(),
+        ))
+        .expect("readmatrix");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);

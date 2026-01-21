@@ -196,8 +196,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::math::linalg::factor::qr"
 )]
-fn qr_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(value, &rest)?;
+async fn qr_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(value, &rest).await?;
     Ok(eval.r())
 }
 
@@ -267,18 +267,20 @@ struct QrOptions {
 }
 
 /// Evaluate the builtin with full access to multiple outputs.
-pub fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<QrEval> {
+pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<QrEval> {
     let options = parse_options(args)?;
     match value {
         Value::GpuTensor(handle) => {
             if let Some(eval) = evaluate_gpu(&handle, &options)? {
                 return Ok(eval);
             }
-            let tensor = gpu_helpers::gather_tensor(&handle).map_err(with_qr_context)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(with_qr_context)?;
             let prefer_gpu = runmat_accelerate_api::provider().is_some();
-            evaluate_host_value(Value::Tensor(tensor), options, prefer_gpu)
+            evaluate_host_value(Value::Tensor(tensor), options, prefer_gpu).await
         }
-        other => evaluate_host_value(other, options, false),
+        other => evaluate_host_value(other, options, false).await,
     }
 }
 
@@ -335,12 +337,12 @@ fn evaluate_gpu(handle: &GpuTensorHandle, options: &QrOptions) -> BuiltinResult<
     }
 }
 
-fn evaluate_host_value(
+async fn evaluate_host_value(
     value: Value,
     options: QrOptions,
     prefer_gpu: bool,
 ) -> BuiltinResult<QrEval> {
-    let matrix = extract_matrix(value)?;
+    let matrix = extract_matrix(value).await?;
     let components = qr_factor(matrix)?;
     assemble_eval(components, options, prefer_gpu)
 }
@@ -409,7 +411,7 @@ fn is_zero_scalar(value: &Value) -> bool {
     }
 }
 
-fn extract_matrix(value: Value) -> BuiltinResult<ColMajorMatrix> {
+async fn extract_matrix(value: Value) -> BuiltinResult<ColMajorMatrix> {
     match value {
         Value::Tensor(t) => ColMajorMatrix::from_tensor(&t),
         Value::ComplexTensor(ct) => ColMajorMatrix::from_complex_tensor(&ct),
@@ -425,7 +427,9 @@ fn extract_matrix(value: Value) -> BuiltinResult<ColMajorMatrix> {
             0.0,
         ))),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle).map_err(with_qr_context)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(with_qr_context)?;
             ColMajorMatrix::from_tensor(&tensor)
         }
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
@@ -890,6 +894,7 @@ const EPS_CLEAN: f64 = 1.0e-12;
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::Tensor as Matrix;
 
     fn tensor_from_value(value: Value) -> Matrix {
@@ -1152,5 +1157,13 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn qr_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::qr_builtin(value, rest))
+    }
+
+    fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<QrEval> {
+        block_on(super::evaluate(value, args))
     }
 }

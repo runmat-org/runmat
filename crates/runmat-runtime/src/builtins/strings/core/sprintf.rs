@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -254,13 +254,17 @@ fn remap_sprintf_flow(err: RuntimeError) -> RuntimeError {
     sink = true,
     builtin_path = "crate::builtins::strings::core::sprintf"
 )]
-fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let gathered_spec = gather_if_needed(&format_spec).map_err(remap_sprintf_flow)?;
+async fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let gathered_spec = gather_if_needed_async(&format_spec)
+        .await
+        .map_err(remap_sprintf_flow)?;
     let raw_format =
         extract_format_string(&gathered_spec, "sprintf").map_err(remap_sprintf_flow)?;
     let format_string =
         decode_escape_sequences("sprintf", &raw_format).map_err(remap_sprintf_flow)?;
-    let flattened_args = flatten_arguments(&rest, "sprintf").map_err(remap_sprintf_flow)?;
+    let flattened_args = flatten_arguments(&rest, "sprintf")
+        .await
+        .map_err(remap_sprintf_flow)?;
     let mut cursor = ArgCursor::new(&flattened_args);
     let mut output = String::new();
 
@@ -298,6 +302,10 @@ pub(crate) mod tests {
     use super::*;
     use crate::{builtins::common::test_support, make_cell};
     use runmat_builtins::{CharArray, IntValue, StringArray, Tensor};
+
+    fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::sprintf_builtin(format_spec, rest))
+    }
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()

@@ -255,9 +255,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::linalg::ops::trace"
 )]
-fn trace_builtin(value: Value) -> BuiltinResult<Value> {
+async fn trace_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => trace_gpu(handle),
+        Value::GpuTensor(handle) => trace_gpu(handle).await,
         Value::ComplexTensor(ct) => trace_complex_tensor(ct),
         Value::Complex(re, im) => Ok(Value::Complex(re, im)),
         Value::CharArray(ca) => trace_char_array(ca),
@@ -315,7 +315,7 @@ fn trace_char_array(ca: CharArray) -> BuiltinResult<Value> {
     Ok(Value::Num(sum))
 }
 
-fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     ensure_matrix_shape(NAME, &handle.shape)?;
     let (rows, cols) = matrix_extents_from_shape(&handle.shape);
     let diag_len = rows.min(cols);
@@ -334,7 +334,9 @@ fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle).map_err(map_control_flow)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(map_control_flow)?;
     let sum = trace_tensor_sum(&tensor);
     trace_gpu_fallback(&handle, sum)
 }
@@ -386,6 +388,7 @@ fn matrix_extents_from_shape(shape: &[usize]) -> (usize, usize) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -594,5 +597,9 @@ pub(crate) mod tests {
             .copied()
             .expect("gathered tensor should contain one element");
         assert!((expected - actual).abs() < 1e-9);
+    }
+
+    fn trace_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::trace_builtin(value))
     }
 }

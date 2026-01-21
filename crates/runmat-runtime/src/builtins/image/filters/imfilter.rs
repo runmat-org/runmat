@@ -213,17 +213,21 @@ fn filter_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
     accel = "custom-imfilter",
     builtin_path = "crate::builtins::image::filters::imfilter"
 )]
-fn imfilter_builtin(image: Value, kernel: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn imfilter_builtin(
+    image: Value,
+    kernel: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     let options = parse_imfilter_options(&rest)?;
     match (image, kernel) {
         (Value::GpuTensor(image_handle), Value::GpuTensor(filter_handle)) => {
-            imfilter_gpu(image_handle, Value::GpuTensor(filter_handle), options)
+            imfilter_gpu(image_handle, Value::GpuTensor(filter_handle), options).await
         }
         (Value::GpuTensor(image_handle), filter_value) => {
-            imfilter_gpu(image_handle, filter_value, options)
+            imfilter_gpu(image_handle, filter_value, options).await
         }
         (image_value, Value::GpuTensor(filter_handle)) => {
-            let filter_tensor = gpu_helpers::gather_tensor(&filter_handle)?;
+            let filter_tensor = gpu_helpers::gather_tensor_async(&filter_handle).await?;
             imfilter_host_value(image_value, filter_tensor, options)
         }
         (image_value, filter_value) => {
@@ -245,7 +249,7 @@ fn imfilter_host_value(
     Ok(tensor::tensor_into_value(result))
 }
 
-fn imfilter_gpu(
+async fn imfilter_gpu(
     image_handle: GpuTensorHandle,
     kernel_value: Value,
     options: ImfilterOptions,
@@ -262,10 +266,10 @@ fn imfilter_gpu(
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => {
-            let image_tensor = gpu_helpers::gather_tensor(&image_handle)?;
+            let image_tensor = gpu_helpers::gather_tensor_async(&image_handle).await?;
             return match kernel_value {
                 Value::GpuTensor(handle) => {
-                    let kernel_tensor = gpu_helpers::gather_tensor(&handle)?;
+                    let kernel_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                     let result = apply_imfilter_tensor(
                         &image_tensor,
                         &kernel_tensor,
@@ -301,7 +305,7 @@ fn imfilter_gpu(
             match provider.upload(&view) {
                 Ok(uploaded) => (uploaded.clone(), Some(uploaded), Some(tensor)),
                 Err(_) => {
-                    let image_tensor = gpu_helpers::gather_tensor(&image_handle)?;
+                    let image_tensor = gpu_helpers::gather_tensor_async(&image_handle).await?;
                     let result =
                         apply_imfilter_tensor(&image_tensor, &tensor, &options, IMFILTER_BUILTIN)?;
                     return Ok(tensor::tensor_into_value(result));
@@ -321,11 +325,11 @@ fn imfilter_gpu(
             if let Some(uploaded) = uploaded_handle {
                 let _ = provider.free(&uploaded);
             }
-            let image_tensor = gpu_helpers::gather_tensor(&image_handle)?;
+            let image_tensor = gpu_helpers::gather_tensor_async(&image_handle).await?;
             let kernel_tensor = if let Some(tensor) = kernel_tensor_for_fallback {
                 tensor
             } else {
-                gpu_helpers::gather_tensor(&kernel_handle)?
+                gpu_helpers::gather_tensor_async(&kernel_handle).await?
             };
             let result =
                 apply_imfilter_tensor(&image_tensor, &kernel_tensor, &options, IMFILTER_BUILTIN)?;
@@ -781,6 +785,7 @@ fn reflect_index(coord: isize, len: isize) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{Tensor, Value};
 
     fn simple_tensor(data: &[f64], rows: usize, cols: usize) -> Tensor {
@@ -916,11 +921,11 @@ pub(crate) mod tests {
             };
             let image_handle = provider.upload(&image_view).expect("upload image");
             let kernel_handle = provider.upload(&kernel_view).expect("upload kernel");
-            let value = imfilter_builtin(
+            let value = block_on(imfilter_builtin(
                 Value::GpuTensor(image_handle),
                 Value::GpuTensor(kernel_handle),
                 Vec::new(),
-            )
+            ))
             .expect("imfilter");
             let gathered = test_support::gather(value).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
@@ -981,11 +986,11 @@ pub(crate) mod tests {
         let manual_res =
             apply_imfilter_tensor(&image, &kernel, &manual, IMFILTER_BUILTIN).expect("imfilter");
 
-        let via_builtin = imfilter_builtin(
+        let via_builtin = block_on(imfilter_builtin(
             Value::Tensor(image.clone()),
             Value::Tensor(kernel.clone()),
             vec![Value::Num(5.0)],
-        )
+        ))
         .expect("imfilter builtin");
         let via_tensor = tensor::value_into_tensor_for("imfilter", via_builtin).expect("tensor");
         assert_eq!(manual_res.shape, via_tensor.shape);
@@ -999,11 +1004,11 @@ pub(crate) mod tests {
     fn invalid_option_string_raises_error() {
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
         let kernel = simple_tensor(&[1.0; 9], 3, 3);
-        let err = imfilter_builtin(
+        let err = block_on(imfilter_builtin(
             Value::Tensor(image),
             Value::Tensor(kernel),
             vec![Value::from("unsupported-mode")],
-        )
+        ))
         .expect_err("imfilter should error");
         assert!(error_message(err).contains("unknown option"));
     }
@@ -1014,11 +1019,11 @@ pub(crate) mod tests {
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
         let kernel = simple_tensor(&[1.0; 4], 2, 2);
         let pad = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = imfilter_builtin(
+        let err = block_on(imfilter_builtin(
             Value::Tensor(image),
             Value::Tensor(kernel),
             vec![Value::from("fill"), Value::Tensor(pad)],
-        )
+        ))
         .expect_err("imfilter should error");
         assert!(error_message(err).contains("scalar value"));
     }
@@ -1028,11 +1033,11 @@ pub(crate) mod tests {
     fn valid_with_larger_kernel_returns_empty_tensor() {
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
         let kernel = simple_tensor(&[1.0; 25], 5, 5);
-        let result = imfilter_builtin(
+        let result = block_on(imfilter_builtin(
             Value::Tensor(image),
             Value::Tensor(kernel),
             vec![Value::from("valid")],
-        )
+        ))
         .expect("imfilter");
         match result {
             Value::Tensor(t) => {
@@ -1048,17 +1053,17 @@ pub(crate) mod tests {
     fn fill_without_value_defaults_to_zero_padding() {
         let image = simple_tensor(&[1.0, 3.0, 2.0, 4.0], 2, 2);
         let kernel = simple_tensor(&[1.0, 1.0, 1.0, 1.0], 2, 2);
-        let default = imfilter_builtin(
+        let default = block_on(imfilter_builtin(
             Value::Tensor(image.clone()),
             Value::Tensor(kernel.clone()),
             Vec::new(),
-        )
+        ))
         .expect("imfilter default");
-        let fill_only = imfilter_builtin(
+        let fill_only = block_on(imfilter_builtin(
             Value::Tensor(image),
             Value::Tensor(kernel),
             vec![Value::from("fill")],
-        )
+        ))
         .expect("imfilter fill");
         assert_eq!(fill_only, default);
     }
@@ -1100,11 +1105,11 @@ pub(crate) mod tests {
         let image_handle = provider.upload(&image_view).expect("upload image");
         let kernel_handle = provider.upload(&kernel_view).expect("upload kernel");
 
-        let gpu_value = imfilter_builtin(
+        let gpu_value = block_on(imfilter_builtin(
             Value::GpuTensor(image_handle),
             Value::GpuTensor(kernel_handle),
             Vec::new(),
-        )
+        ))
         .expect("imfilter");
         let gathered = test_support::gather(gpu_value).expect("gather");
 

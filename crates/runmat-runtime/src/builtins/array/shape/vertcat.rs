@@ -232,7 +232,7 @@ fn vertcat_error(message: impl Into<String>) -> RuntimeError {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::shape::vertcat"
 )]
-fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         return empty_double();
     }
@@ -243,7 +243,7 @@ fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut forwarded = Vec::with_capacity(args.len() + 1);
     forwarded.push(Value::Int(IntValue::I32(1)));
     forwarded.extend(args);
-    match crate::call_builtin("cat", &forwarded) {
+    match crate::call_builtin_async("cat", &forwarded).await {
         Ok(value) => Ok(value),
         Err(err) => Err(adapt_cat_error(err)),
     }
@@ -275,6 +275,11 @@ fn adapt_cat_error(mut error: RuntimeError) -> RuntimeError {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::vertcat_builtin(args))
+    }
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor};
 

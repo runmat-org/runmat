@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, lowercase_preserving_missing};
-use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -222,8 +222,8 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::lower"
 )]
-fn lower_builtin(value: Value) -> BuiltinResult<Value> {
-    let gathered = gather_if_needed(&value).map_err(map_flow)?;
+async fn lower_builtin(value: Value) -> BuiltinResult<Value> {
+    let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
     match gathered {
         Value::String(text) => Ok(Value::String(lowercase_preserving_missing(text))),
         Value::StringArray(array) => lower_string_array(array),
@@ -306,10 +306,14 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    fn run_lower(value: Value) -> BuiltinResult<Value> {
+        futures::executor::block_on(lower_builtin(value))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lower_string_scalar_value() {
-        let result = lower_builtin(Value::String("RunMat".into())).expect("lower");
+        let result = run_lower(Value::String("RunMat".into())).expect("lower");
         assert_eq!(result, Value::String("runmat".into()));
     }
 
@@ -326,7 +330,7 @@ pub(crate) mod tests {
             vec![2, 2],
         )
         .unwrap();
-        let result = lower_builtin(Value::StringArray(array)).expect("lower");
+        let result = run_lower(Value::StringArray(array)).expect("lower");
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
@@ -349,7 +353,7 @@ pub(crate) mod tests {
     fn lower_char_array_multiple_rows() {
         let data: Vec<char> = vec!['C', 'A', 'T', 'D', 'O', 'G'];
         let array = CharArray::new(data, 2, 3).unwrap();
-        let result = lower_builtin(Value::CharArray(array)).expect("lower");
+        let result = run_lower(Value::CharArray(array)).expect("lower");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
@@ -364,7 +368,7 @@ pub(crate) mod tests {
     #[test]
     fn lower_char_vector_handles_padding() {
         let array = CharArray::new_row("HELLO ");
-        let result = lower_builtin(Value::CharArray(array)).expect("lower");
+        let result = run_lower(Value::CharArray(array)).expect("lower");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
@@ -381,7 +385,7 @@ pub(crate) mod tests {
     fn lower_char_array_unicode_expansion_extends_width() {
         let data: Vec<char> = vec!['İ', 'A'];
         let array = CharArray::new(data, 1, 2).unwrap();
-        let result = lower_builtin(Value::CharArray(array)).expect("lower");
+        let result = run_lower(Value::CharArray(array)).expect("lower");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
@@ -405,7 +409,7 @@ pub(crate) mod tests {
             2,
         )
         .unwrap();
-        let result = lower_builtin(Value::Cell(cell)).expect("lower");
+        let result = run_lower(Value::Cell(cell)).expect("lower");
         match result {
             Value::Cell(out) => {
                 let first = out.get(0, 0).unwrap();
@@ -420,7 +424,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lower_errors_on_invalid_input() {
-        let err = lower_builtin(Value::Num(1.0)).unwrap_err();
+        let err = run_lower(Value::Num(1.0)).unwrap_err();
         assert_eq!(err.to_string(), ARG_TYPE_ERROR);
     }
 
@@ -428,14 +432,14 @@ pub(crate) mod tests {
     #[test]
     fn lower_cell_errors_on_invalid_element() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
-        let err = lower_builtin(Value::Cell(cell)).unwrap_err();
+        let err = run_lower(Value::Cell(cell)).unwrap_err();
         assert_eq!(err.to_string(), CELL_ELEMENT_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lower_preserves_missing_string() {
-        let result = lower_builtin(Value::String("<missing>".into())).expect("lower");
+        let result = run_lower(Value::String("<missing>".into())).expect("lower");
         assert_eq!(result, Value::String("<missing>".into()));
     }
 
@@ -444,7 +448,7 @@ pub(crate) mod tests {
     fn lower_cell_allows_empty_char_vector() {
         let empty_char = CharArray::new(Vec::new(), 1, 0).unwrap();
         let cell = CellArray::new(vec![Value::CharArray(empty_char.clone())], 1, 1).unwrap();
-        let result = lower_builtin(Value::Cell(cell)).expect("lower");
+        let result = run_lower(Value::Cell(cell)).expect("lower");
         match result {
             Value::Cell(out) => {
                 let element = out.get(0, 0).unwrap();
@@ -470,7 +474,7 @@ pub(crate) mod tests {
                 shape: &shape,
             })
             .expect("upload");
-        let err = lower_builtin(Value::GpuTensor(handle.clone())).unwrap_err();
+        let err = run_lower(Value::GpuTensor(handle.clone())).unwrap_err();
         assert_eq!(err.to_string(), ARG_TYPE_ERROR);
         provider.free(&handle).ok();
     }

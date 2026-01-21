@@ -263,19 +263,19 @@ fn union_error(message: impl Into<String>) -> crate::RuntimeError {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::union"
 )]
-fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    Ok(evaluate(a, b, &rest)?.into_values_value())
+async fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    Ok(evaluate(a, b, &rest).await?.into_values_value())
 }
 
 /// Evaluate the `union` builtin once and expose all outputs.
-pub fn evaluate(a: Value, b: Value, rest: &[Value]) -> crate::BuiltinResult<UnionEvaluation> {
+pub async fn evaluate(a: Value, b: Value, rest: &[Value]) -> crate::BuiltinResult<UnionEvaluation> {
     let opts = parse_options(rest)?;
     match (a, b) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
-            union_gpu_pair(handle_a, handle_b, &opts)
+            union_gpu_pair(handle_a, handle_b, &opts).await
         }
-        (Value::GpuTensor(handle_a), other) => union_gpu_mixed(handle_a, other, &opts, true),
-        (other, Value::GpuTensor(handle_b)) => union_gpu_mixed(handle_b, other, &opts, false),
+        (Value::GpuTensor(handle_a), other) => union_gpu_mixed(handle_a, other, &opts, true).await,
+        (other, Value::GpuTensor(handle_b)) => union_gpu_mixed(handle_b, other, &opts, false).await,
         (left, right) => union_host(left, right, &opts),
     }
 }
@@ -323,7 +323,7 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<UnionOptions> {
     Ok(opts)
 }
 
-fn union_gpu_pair(
+async fn union_gpu_pair(
     handle_a: GpuTensorHandle,
     handle_b: GpuTensorHandle,
     opts: &UnionOptions,
@@ -336,18 +336,18 @@ fn union_gpu_pair(
             }
         }
     }
-    let tensor_a = gpu_helpers::gather_tensor(&handle_a)?;
-    let tensor_b = gpu_helpers::gather_tensor(&handle_b)?;
+    let tensor_a = gpu_helpers::gather_tensor_async(&handle_a).await?;
+    let tensor_b = gpu_helpers::gather_tensor_async(&handle_b).await?;
     union_numeric(tensor_a, tensor_b, opts)
 }
 
-fn union_gpu_mixed(
+async fn union_gpu_mixed(
     handle_gpu: GpuTensorHandle,
     other: Value,
     opts: &UnionOptions,
     gpu_is_a: bool,
 ) -> crate::BuiltinResult<UnionEvaluation> {
-    let tensor_gpu = gpu_helpers::gather_tensor(&handle_gpu)?;
+    let tensor_gpu = gpu_helpers::gather_tensor_async(&handle_gpu).await?;
     let tensor_other = tensor::value_into_tensor_for("union", other).map_err(|e| union_error(e))?;
     if gpu_is_a {
         union_numeric(tensor_gpu, tensor_other, opts)
@@ -1647,8 +1647,17 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor, Value};
 
+
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    fn evaluate_sync(
+        a: Value,
+        b: Value,
+        rest: &[Value],
+    ) -> crate::BuiltinResult<UnionEvaluation> {
+        futures::executor::block_on(evaluate(a, b, rest))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1656,7 +1665,7 @@ pub(crate) mod tests {
     fn union_numeric_sorted_default() {
         let a = Tensor::new(vec![5.0, 7.0, 1.0], vec![3, 1]).unwrap();
         let b = Tensor::new(vec![3.0, 1.0, 1.0], vec![3, 1]).unwrap();
-        let eval = evaluate(Value::Tensor(a), Value::Tensor(b), &[]).expect("union");
+        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("union");
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.data, vec![1.0, 3.0, 5.0, 7.0]);
@@ -1677,8 +1686,12 @@ pub(crate) mod tests {
     fn union_numeric_stable_order() {
         let a = Tensor::new(vec![5.0, 7.0, 1.0], vec![3, 1]).unwrap();
         let b = Tensor::new(vec![3.0, 2.0, 4.0], vec![3, 1]).unwrap();
-        let eval =
-            evaluate(Value::Tensor(a), Value::Tensor(b), &[Value::from("stable")]).expect("union");
+        let eval = evaluate_sync(
+            Value::Tensor(a),
+            Value::Tensor(b),
+            &[Value::from("stable")],
+        )
+        .expect("union");
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.data, vec![5.0, 7.0, 1.0, 3.0, 2.0, 4.0]);
@@ -1697,7 +1710,7 @@ pub(crate) mod tests {
     fn union_numeric_sorted_places_nan_last() {
         let a = Tensor::new(vec![f64::NAN, 1.0], vec![2, 1]).unwrap();
         let b = Tensor::new(vec![2.0, f64::NAN], vec![2, 1]).unwrap();
-        let eval = evaluate(Value::Tensor(a), Value::Tensor(b), &[]).expect("union");
+        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("union");
         let values = tensor::value_into_tensor_for("union", eval.values_value()).expect("values");
         assert_eq!(values.shape, vec![3, 1]);
         assert_eq!(values.data[0], 1.0);
@@ -1714,8 +1727,12 @@ pub(crate) mod tests {
     fn union_numeric_rows_sorted() {
         let a = Tensor::new(vec![1.0, 3.0, 1.0, 2.0, 4.0, 2.0], vec![3, 2]).unwrap();
         let b = Tensor::new(vec![3.0, 5.0, 4.0, 6.0], vec![2, 2]).unwrap();
-        let eval =
-            evaluate(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")]).expect("union");
+        let eval = evaluate_sync(
+            Value::Tensor(a),
+            Value::Tensor(b),
+            &[Value::from("rows")],
+        )
+        .expect("union");
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 2]);
@@ -1734,7 +1751,7 @@ pub(crate) mod tests {
     fn union_numeric_rows_stable_preserves_first_occurrence() {
         let a = Tensor::new(vec![1.0, 3.0, 1.0, 2.0, 4.0, 2.0], vec![3, 2]).unwrap();
         let b = Tensor::new(vec![3.0, 5.0, 1.0, 4.0, 6.0, 2.0], vec![3, 2]).unwrap();
-        let eval = evaluate(
+        let eval = evaluate_sync(
             Value::Tensor(a),
             Value::Tensor(b),
             &[Value::from("rows"), Value::from("stable")],
@@ -1759,7 +1776,8 @@ pub(crate) mod tests {
     fn union_char_elements() {
         let a = CharArray::new(vec!['m', 'z', 'm', 'a'], 2, 2).unwrap();
         let b = CharArray::new(vec!['a', 'x', 'm', 'a'], 2, 2).unwrap();
-        let eval = evaluate(Value::CharArray(a), Value::CharArray(b), &[]).expect("union");
+        let eval =
+            evaluate_sync(Value::CharArray(a), Value::CharArray(b), &[]).expect("union");
         match eval.values_value() {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 4);
@@ -1797,7 +1815,7 @@ pub(crate) mod tests {
             vec![2, 2],
         )
         .unwrap();
-        let eval = evaluate(
+        let eval = evaluate_sync(
             Value::StringArray(a),
             Value::StringArray(b),
             &[Value::from("rows"), Value::from("stable")],
@@ -1842,7 +1860,7 @@ pub(crate) mod tests {
             };
             let handle_a = provider.upload(&view_a).expect("upload A");
             let handle_b = provider.upload(&view_b).expect("upload B");
-            let eval = evaluate(
+            let eval = evaluate_sync(
                 Value::GpuTensor(handle_a),
                 Value::GpuTensor(handle_b),
                 &[Value::from("stable")],
@@ -1863,7 +1881,7 @@ pub(crate) mod tests {
         let tensor =
             Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("tensor construction failed");
         let err = error_message(
-            evaluate(
+            evaluate_sync(
                 Value::Tensor(tensor.clone()),
                 Value::Tensor(tensor),
                 &[Value::from("legacy")],
@@ -1879,7 +1897,8 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let err = error_message(
-            evaluate(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")]).unwrap_err(),
+            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+                .unwrap_err(),
         );
         assert!(err.contains("same number of columns"));
     }
@@ -1906,7 +1925,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_accepts_scalar_inputs() {
-        let eval = evaluate(Value::Int(IntValue::I32(1)), Value::Num(3.0), &[]).expect("union");
+        let eval =
+            evaluate_sync(Value::Int(IntValue::I32(1)), Value::Num(3.0), &[]).expect("union");
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.data, vec![1.0, 3.0]);
@@ -1931,7 +1951,7 @@ pub(crate) mod tests {
         let b = Tensor::new(vec![2.0, 6.0, 3.0], vec![3, 1]).unwrap();
 
         let cpu_eval =
-            evaluate(Value::Tensor(a.clone()), Value::Tensor(b.clone()), &[]).expect("union");
+            evaluate_sync(Value::Tensor(a.clone()), Value::Tensor(b.clone()), &[]).expect("union");
         let cpu_values = tensor::value_into_tensor_for("union", cpu_eval.values_value()).unwrap();
         let cpu_ia = tensor::value_into_tensor_for("union", cpu_eval.ia_value()).unwrap();
         let cpu_ib = tensor::value_into_tensor_for("union", cpu_eval.ib_value()).unwrap();
@@ -1947,8 +1967,12 @@ pub(crate) mod tests {
         };
         let handle_a = provider.upload(&view_a).expect("upload A");
         let handle_b = provider.upload(&view_b).expect("upload B");
-        let gpu_eval =
-            evaluate(Value::GpuTensor(handle_a), Value::GpuTensor(handle_b), &[]).expect("union");
+        let gpu_eval = evaluate_sync(
+            Value::GpuTensor(handle_a),
+            Value::GpuTensor(handle_b),
+            &[],
+        )
+        .expect("union");
         let gpu_values = tensor::value_into_tensor_for("union", gpu_eval.values_value()).unwrap();
         let gpu_ia = tensor::value_into_tensor_for("union", gpu_eval.ia_value()).unwrap();
         let gpu_ib = tensor::value_into_tensor_for("union", gpu_eval.ib_value()).unwrap();

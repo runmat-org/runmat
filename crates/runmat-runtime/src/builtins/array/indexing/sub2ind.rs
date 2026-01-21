@@ -230,8 +230,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::array::indexing::sub2ind"
 )]
-fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let (dims_value, dims_was_gpu) = materialize_value(dims_val, "sub2ind")?;
+async fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let (dims_value, dims_was_gpu) = materialize_value(dims_val, "sub2ind").await?;
     let dims = parse_dims(&dims_value, "sub2ind")?;
     if dims.is_empty() {
         return Err(sub2ind_error("Size vector must have at least one element."));
@@ -250,7 +250,7 @@ fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     let mut saw_gpu = dims_was_gpu;
     let mut subscripts: Vec<Tensor> = Vec::with_capacity(rest.len());
     for value in rest {
-        let (materialised, was_gpu) = materialize_value(value, "sub2ind")?;
+        let (materialised, was_gpu) = materialize_value(value, "sub2ind").await?;
         saw_gpu |= was_gpu;
         let tensor = tensor::value_into_tensor_for("sub2ind", materialised)
             .map_err(|message| sub2ind_error(message))?;
@@ -488,7 +488,12 @@ fn sub2ind_error(message: impl Into<String>) -> RuntimeError {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor, Value};
+
+    fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::sub2ind_builtin(dims_val, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

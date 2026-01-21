@@ -7,7 +7,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use super::accept::{
     close_all_clients, close_client, close_clients_for_server, CLIENT_HANDLE_FIELD,
@@ -234,7 +234,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "close,tcpclient,tcpserver,networking",
     builtin_path = "crate::builtins::io::net::close"
 )]
-fn close_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn close_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         let closed = close_everything();
         return Ok(Value::Num(if closed { 1.0 } else { 0.0 }));
@@ -242,7 +242,8 @@ fn close_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
     let mut any_closed = false;
     for raw in args {
-        let gathered = gather_if_needed(&raw)
+        let gathered = gather_if_needed_async(&raw)
+            .await
             .map_err(|flow| map_close_flow(flow, MESSAGE_ID_INVALID_ARGUMENT, "close"))?;
         any_closed |= close_value(&gathered)?;
     }
@@ -395,6 +396,22 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), Some(expected));
     }
 
+    fn run_close(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(close_builtin(args))
+    }
+
+    fn run_accept(server: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(accept_builtin(server, rest))
+    }
+
+    fn run_tcpclient(host: Value, port: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(tcpclient_builtin(host, port, rest))
+    }
+
+    fn run_tcpserver(address: Value, port: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(tcpserver_builtin(address, port, rest))
+    }
+
     fn server_id(value: &Value) -> u64 {
         match value {
             Value::Struct(st) => match st.fields.get(HANDLE_ID_FIELD) {
@@ -432,7 +449,7 @@ pub(crate) mod tests {
             thread::sleep(Duration::from_millis(10));
         });
 
-        let client = tcpclient_builtin(
+        let client = run_tcpclient(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(port as i32)),
             Vec::new(),
@@ -444,7 +461,7 @@ pub(crate) mod tests {
     }
 
     fn spawn_tcp_server() -> Value {
-        tcpserver_builtin(
+        run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
             Vec::new(),
@@ -457,7 +474,7 @@ pub(crate) mod tests {
         let connector = thread::spawn(move || {
             let _stream = TcpStream::connect((host.as_str(), port)).expect("connect client");
         });
-        let accepted = accept_builtin(server.clone(), Vec::new()).expect("accept client");
+        let accepted = run_accept(server.clone(), Vec::new()).expect("accept client");
         connector.join().expect("join connector");
         accepted
     }
@@ -470,11 +487,11 @@ pub(crate) mod tests {
         let client = spawn_loopback_client();
 
         let cid = client_id(&client);
-        let status = close_builtin(vec![client.clone()]).expect("close");
+        let status = run_close(vec![client.clone()]).expect("close");
         assert_eq!(status, Value::Num(1.0));
         assert!(client_handle(cid).is_none());
 
-        let second = close_builtin(vec![client]).expect("close again");
+        let second = run_close(vec![client]).expect("close again");
         assert_eq!(second, Value::Num(0.0));
     }
 
@@ -488,12 +505,12 @@ pub(crate) mod tests {
         let accepted = accept_from_server(&server);
         let accepted_id = client_id(&accepted);
 
-        let status = close_builtin(vec![server.clone()]).expect("close server");
+        let status = run_close(vec![server.clone()]).expect("close server");
         assert_eq!(status, Value::Num(1.0));
         assert!(client_handle(accepted_id).is_none());
         assert!(server_handle(sid).is_none());
 
-        let second = close_builtin(vec![server]).expect("close server again");
+        let second = run_close(vec![server]).expect("close server again");
         assert_eq!(second, Value::Num(0.0));
     }
 
@@ -510,7 +527,7 @@ pub(crate) mod tests {
         let accepted = accept_from_server(&server);
         let accepted_id = client_id(&accepted);
 
-        let status = close_builtin(vec![
+        let status = run_close(vec![
             standalone_client.clone(),
             accepted.clone(),
             server.clone(),
@@ -521,7 +538,7 @@ pub(crate) mod tests {
         assert!(client_handle(accepted_id).is_none());
         assert!(server_handle(sid).is_none());
 
-        let second = close_builtin(vec![standalone_client, accepted, server])
+        let second = run_close(vec![standalone_client, accepted, server])
             .expect("close resources again");
         assert_eq!(second, Value::Num(0.0));
     }
@@ -531,8 +548,8 @@ pub(crate) mod tests {
     fn close_returns_zero_when_no_resources() {
         let _lock = TEST_GUARD.lock().unwrap();
 
-        let _ = close_builtin(Vec::new()).expect("initial cleanup");
-        let status = close_builtin(Vec::new()).expect("close without resources");
+        let _ = run_close(Vec::new()).expect("initial cleanup");
+        let status = run_close(Vec::new()).expect("close without resources");
         assert_eq!(status, Value::Num(0.0));
     }
 
@@ -546,12 +563,12 @@ pub(crate) mod tests {
         let id_a = client_id(&client_a);
         let id_b = client_id(&client_b);
 
-        let status = close_builtin(vec![Value::from("clients")]).expect("close clients");
+        let status = run_close(vec![Value::from("clients")]).expect("close clients");
         assert_eq!(status, Value::Num(1.0));
         assert!(client_handle(id_a).is_none());
         assert!(client_handle(id_b).is_none());
 
-        let second = close_builtin(vec![Value::from("clients")]).expect("close clients again");
+        let second = run_close(vec![Value::from("clients")]).expect("close clients again");
         assert_eq!(second, Value::Num(0.0));
     }
 
@@ -563,11 +580,11 @@ pub(crate) mod tests {
         let server = spawn_tcp_server();
         let sid = server_id(&server);
 
-        let status = close_builtin(vec![Value::from("servers")]).expect("close servers");
+        let status = run_close(vec![Value::from("servers")]).expect("close servers");
         assert_eq!(status, Value::Num(1.0));
         assert!(server_handle(sid).is_none());
 
-        let second = close_builtin(vec![Value::from("servers")]).expect("close servers again");
+        let second = run_close(vec![Value::from("servers")]).expect("close servers again");
         assert_eq!(second, Value::Num(0.0));
     }
 
@@ -584,13 +601,13 @@ pub(crate) mod tests {
         let accepted = accept_from_server(&server);
         let accepted_id = client_id(&accepted);
 
-        let status = close_builtin(vec![Value::from("all")]).expect("close all");
+        let status = run_close(vec![Value::from("all")]).expect("close all");
         assert_eq!(status, Value::Num(1.0));
         assert!(client_handle(standalone_id).is_none());
         assert!(client_handle(accepted_id).is_none());
         assert!(server_handle(sid).is_none());
 
-        let second = close_builtin(vec![Value::from("all")]).expect("close all again");
+        let second = run_close(vec![Value::from("all")]).expect("close all again");
         assert_eq!(second, Value::Num(0.0));
     }
 
@@ -601,7 +618,7 @@ pub(crate) mod tests {
 
         let client = spawn_loopback_client();
         let cid = client_id(&client);
-        let status = close_builtin(vec![Value::CharArray(CharArray::new_row("clients"))])
+        let status = run_close(vec![Value::CharArray(CharArray::new_row("clients"))])
             .expect("close char command");
         assert_eq!(status, Value::Num(1.0));
         assert!(client_handle(cid).is_none());
@@ -621,7 +638,7 @@ pub(crate) mod tests {
 
         let cell =
             CellArray::new(vec![client, accepted, server, Value::from("clients")], 1, 4).unwrap();
-        let status = close_builtin(vec![Value::Cell(cell)]).expect("close cell inputs");
+        let status = run_close(vec![Value::Cell(cell)]).expect("close cell inputs");
         assert_eq!(status, Value::Num(1.0));
         assert!(client_handle(client_id_value).is_none());
         assert!(client_handle(accepted_id).is_none());
@@ -633,16 +650,16 @@ pub(crate) mod tests {
     fn close_invalid_argument_errors() {
         let _lock = TEST_GUARD.lock().unwrap();
 
-        let err = close_builtin(vec![Value::Num(13.0)]).unwrap_err();
+        let err = run_close(vec![Value::Num(13.0)]).unwrap_err();
         assert_error_identifier(err, MESSAGE_ID_INVALID_ARGUMENT);
 
         let multi = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
-        let err = close_builtin(vec![Value::CharArray(multi)]).unwrap_err();
+        let err = run_close(vec![Value::CharArray(multi)]).unwrap_err();
         assert_error_identifier(err, MESSAGE_ID_INVALID_ARGUMENT);
 
         let strings =
             StringArray::new(vec!["clients".to_string(), "servers".to_string()], vec![2]).unwrap();
-        let err = close_builtin(vec![Value::StringArray(strings)]).unwrap_err();
+        let err = run_close(vec![Value::StringArray(strings)]).unwrap_err();
         assert_error_identifier(err, MESSAGE_ID_INVALID_ARGUMENT);
     }
 
@@ -652,7 +669,7 @@ pub(crate) mod tests {
         let _lock = TEST_GUARD.lock().unwrap();
 
         let st = StructValue::new();
-        let err = close_builtin(vec![Value::Struct(st)]).unwrap_err();
+        let err = run_close(vec![Value::Struct(st)]).unwrap_err();
         assert_error_identifier(err, MESSAGE_ID_INVALID_HANDLE);
     }
 
@@ -662,7 +679,7 @@ pub(crate) mod tests {
         let _lock = TEST_GUARD.lock().unwrap();
 
         let empty = Tensor::new(vec![], vec![0]).expect("empty tensor");
-        let status = close_builtin(vec![Value::Tensor(empty)]).expect("close empty tensor");
+        let status = run_close(vec![Value::Tensor(empty)]).expect("close empty tensor");
         assert_eq!(status, Value::Num(0.0));
     }
 
@@ -679,7 +696,7 @@ pub(crate) mod tests {
         let client = spawn_loopback_client();
         let cid = client_id(&client);
 
-        let status = close_builtin(vec![client]).expect("close with provider active");
+        let status = run_close(vec![client]).expect("close with provider active");
         assert_eq!(status, Value::Num(1.0));
         assert!(client_handle(cid).is_none());
     }

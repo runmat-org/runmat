@@ -219,8 +219,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::math::poly::roots"
 )]
-fn roots_builtin(coefficients: Value) -> crate::BuiltinResult<Value> {
-    let coeffs = coefficients_to_complex(coefficients)?;
+async fn roots_builtin(coefficients: Value) -> crate::BuiltinResult<Value> {
+    let coeffs = coefficients_to_complex(coefficients).await?;
     let trimmed = trim_leading_zeros(coeffs);
     if trimmed.is_empty() || trimmed.len() == 1 {
         return empty_column();
@@ -229,10 +229,10 @@ fn roots_builtin(coefficients: Value) -> crate::BuiltinResult<Value> {
     roots_to_value(&roots)
 }
 
-fn coefficients_to_complex(value: Value) -> BuiltinResult<Vec<Complex64>> {
+async fn coefficients_to_complex(value: Value) -> BuiltinResult<Vec<Complex64>> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             tensor_to_complex(tensor)
         }
         Value::Tensor(tensor) => tensor_to_complex(tensor),
@@ -431,6 +431,7 @@ fn empty_column() -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{ComplexTensor, LogicalArray, Tensor};
 
@@ -624,5 +625,9 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn roots_builtin(coefficients: Value) -> BuiltinResult<Value> {
+        block_on(super::roots_builtin(coefficients))
     }
 }

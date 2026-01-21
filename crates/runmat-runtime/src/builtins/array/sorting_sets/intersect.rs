@@ -241,19 +241,27 @@ fn intersect_error(message: impl Into<String>) -> crate::RuntimeError {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::intersect"
 )]
-fn intersect_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    Ok(evaluate(a, b, &rest)?.into_values_value())
+async fn intersect_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    Ok(evaluate(a, b, &rest).await?.into_values_value())
 }
 
 /// Evaluate the `intersect` builtin once and expose all outputs.
-pub fn evaluate(a: Value, b: Value, rest: &[Value]) -> crate::BuiltinResult<IntersectEvaluation> {
+pub async fn evaluate(
+    a: Value,
+    b: Value,
+    rest: &[Value],
+) -> crate::BuiltinResult<IntersectEvaluation> {
     let opts = parse_options(rest)?;
     match (a, b) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
-            intersect_gpu_pair(handle_a, handle_b, &opts)
+            intersect_gpu_pair(handle_a, handle_b, &opts).await
         }
-        (Value::GpuTensor(handle_a), other) => intersect_gpu_mixed(handle_a, other, &opts, true),
-        (other, Value::GpuTensor(handle_b)) => intersect_gpu_mixed(handle_b, other, &opts, false),
+        (Value::GpuTensor(handle_a), other) => {
+            intersect_gpu_mixed(handle_a, other, &opts, true).await
+        }
+        (other, Value::GpuTensor(handle_b)) => {
+            intersect_gpu_mixed(handle_b, other, &opts, false).await
+        }
         (left, right) => intersect_host(left, right, &opts),
     }
 }
@@ -321,23 +329,23 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<IntersectOptions> {
     Ok(opts)
 }
 
-fn intersect_gpu_pair(
+async fn intersect_gpu_pair(
     handle_a: GpuTensorHandle,
     handle_b: GpuTensorHandle,
     opts: &IntersectOptions,
 ) -> crate::BuiltinResult<IntersectEvaluation> {
-    let tensor_a = gpu_helpers::gather_tensor(&handle_a)?;
-    let tensor_b = gpu_helpers::gather_tensor(&handle_b)?;
+    let tensor_a = gpu_helpers::gather_tensor_async(&handle_a).await?;
+    let tensor_b = gpu_helpers::gather_tensor_async(&handle_b).await?;
     intersect_numeric(tensor_a, tensor_b, opts)
 }
 
-fn intersect_gpu_mixed(
+async fn intersect_gpu_mixed(
     handle_gpu: GpuTensorHandle,
     other: Value,
     opts: &IntersectOptions,
     gpu_is_a: bool,
 ) -> crate::BuiltinResult<IntersectEvaluation> {
-    let tensor_gpu = gpu_helpers::gather_tensor(&handle_gpu)?;
+    let tensor_gpu = gpu_helpers::gather_tensor_async(&handle_gpu).await?;
     let tensor_other =
         tensor::value_into_tensor_for("intersect", other).map_err(|e| intersect_error(e))?;
     if gpu_is_a {
@@ -1450,8 +1458,17 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
 
+
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    fn evaluate_sync(
+        a: Value,
+        b: Value,
+        rest: &[Value],
+    ) -> crate::BuiltinResult<IntersectEvaluation> {
+        futures::executor::block_on(evaluate(a, b, rest))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1643,7 +1660,7 @@ pub(crate) mod tests {
     fn intersect_rejects_legacy_option() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let err = error_message(
-            evaluate(
+            evaluate_sync(
                 Value::Tensor(tensor.clone()),
                 Value::Tensor(tensor),
                 &[Value::from("legacy")],
@@ -1707,7 +1724,7 @@ pub(crate) mod tests {
             };
             let handle_a = provider.upload(&view_a).expect("upload A");
             let handle_b = provider.upload(&view_b).expect("upload B");
-            let eval = evaluate(Value::GpuTensor(handle_a), Value::GpuTensor(handle_b), &[])
+            let eval = evaluate_sync(Value::GpuTensor(handle_a), Value::GpuTensor(handle_b), &[])
                 .expect("intersect");
             let values = tensor::value_into_tensor_for("intersect", eval.values_value()).unwrap();
             assert_eq!(values.data, vec![1.0, 2.0]);
@@ -1777,7 +1794,7 @@ pub(crate) mod tests {
         };
         let handle_a = provider.upload(&view_a).expect("upload A");
         let handle_b = provider.upload(&view_b).expect("upload B");
-        let gpu_eval = evaluate(Value::GpuTensor(handle_a), Value::GpuTensor(handle_b), &[])
+        let gpu_eval = evaluate_sync(Value::GpuTensor(handle_a), Value::GpuTensor(handle_b), &[])
             .expect("intersect");
         let gpu_values =
             tensor::value_into_tensor_for("intersect", gpu_eval.values_value()).unwrap();

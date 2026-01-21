@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "Invalid file identifier. Use fopen to generate a valid file ID.";
@@ -220,14 +220,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::filetext::feof"
 )]
-fn feof_builtin(fid: Value) -> crate::BuiltinResult<Value> {
-    let at_end = evaluate(&fid)?;
+async fn feof_builtin(fid: Value) -> crate::BuiltinResult<Value> {
+    let at_end = evaluate(&fid).await?;
     Ok(Value::Bool(at_end))
 }
 
 /// Evaluate the `feof` builtin without invoking the runtime dispatcher.
-pub fn evaluate(fid_value: &Value) -> BuiltinResult<bool> {
-    let fid_host = gather_if_needed(fid_value).map_err(map_control_flow)?;
+pub async fn evaluate(fid_value: &Value) -> BuiltinResult<bool> {
+    let fid_host = gather_if_needed_async(fid_value)
+        .await
+        .map_err(map_control_flow)?;
     let fid = parse_fid(&fid_host)?;
     if fid < 0 {
         return Err(feof_error("feof: file identifier must be non-negative"));
@@ -332,9 +334,30 @@ pub(crate) mod tests {
         err.message().to_string()
     }
 
+    fn run_evaluate(fid_value: &Value) -> BuiltinResult<bool> {
+        futures::executor::block_on(evaluate(fid_value))
+    }
+
+    fn run_fopen(args: &[Value]) -> BuiltinResult<fopen::FopenEval> {
+        futures::executor::block_on(fopen::evaluate(args))
+    }
+
+    fn run_fread(fid_value: &Value, args: &[Value]) -> BuiltinResult<fread::FreadEval> {
+        futures::executor::block_on(fread::evaluate(fid_value, args))
+    }
+
+    fn run_fclose(args: &[Value]) -> BuiltinResult<fclose::FcloseEval> {
+        futures::executor::block_on(fclose::evaluate(args))
+    }
+
+    fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
+        registry::test_guard()
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_returns_false_before_reading() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("feof_false_before_read");
         {
@@ -342,23 +365,24 @@ pub(crate) mod tests {
             file.write_all(b"abc").expect("write");
         }
 
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("rb"),
         ])
         .expect("fopen");
         let fid = open.as_open().unwrap().fid as i32;
 
-        let at_end = evaluate(&Value::Num(fid as f64)).expect("feof");
+        let at_end = run_evaluate(&Value::Num(fid as f64)).expect("feof");
         assert!(!at_end);
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
         fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_returns_true_after_reading_to_end() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("feof_true_after_read");
         {
@@ -366,7 +390,7 @@ pub(crate) mod tests {
             file.write_all(&[1u8, 2, 3]).expect("write");
         }
 
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("rb"),
         ])
@@ -374,79 +398,86 @@ pub(crate) mod tests {
         let fid = open.as_open().unwrap().fid as i32;
 
         // Read the entire file to advance the file position to EOF.
-        let _ = fread::evaluate(&Value::Num(fid as f64), &Vec::new()).expect("fread");
+        let _ = run_fread(&Value::Num(fid as f64), &Vec::new()).expect("fread");
 
-        let at_end = evaluate(&Value::Num(fid as f64)).expect("feof");
+        let at_end = run_evaluate(&Value::Num(fid as f64)).expect("feof");
         assert!(at_end);
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
         fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_empty_file_is_true() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("feof_empty_file");
         File::create(&path).expect("create empty");
 
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("rb"),
         ])
         .expect("fopen");
         let fid = open.as_open().unwrap().fid as i32;
 
-        let at_end = evaluate(&Value::Num(fid as f64)).expect("feof");
+        let at_end = run_evaluate(&Value::Num(fid as f64)).expect("feof");
         assert!(at_end);
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
         fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_invalid_identifier_errors() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
-        let err = unwrap_error_message(evaluate(&Value::Num(42.0)).unwrap_err());
+        let err = unwrap_error_message(run_evaluate(&Value::Num(42.0)).unwrap_err());
         assert!(err.contains("Invalid file identifier"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_rejects_non_integer_identifier() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
-        let err = unwrap_error_message(evaluate(&Value::Num(1.5)).unwrap_err());
+        let err = unwrap_error_message(run_evaluate(&Value::Num(1.5)).unwrap_err());
         assert_eq!(err, "feof: file identifier must be an integer");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_rejects_nan_identifier() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
-        let err = unwrap_error_message(evaluate(&Value::Num(f64::NAN)).unwrap_err());
+        let err = unwrap_error_message(run_evaluate(&Value::Num(f64::NAN)).unwrap_err());
         assert_eq!(err, "feof: file identifier must be finite");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_rejects_negative_identifier() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
-        let err = unwrap_error_message(evaluate(&Value::Num(-1.0)).unwrap_err());
+        let err = unwrap_error_message(run_evaluate(&Value::Num(-1.0)).unwrap_err());
         assert_eq!(err, "feof: file identifier must be non-negative");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_rejects_non_numeric_inputs() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
-        let err = unwrap_error_message(evaluate(&Value::from("abc")).unwrap_err());
+        let err = unwrap_error_message(run_evaluate(&Value::from("abc")).unwrap_err());
         assert_eq!(err, IDENTIFIER_TYPE_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_accepts_scalar_tensor_identifier() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("feof_tensor_identifier");
         {
@@ -454,7 +485,7 @@ pub(crate) mod tests {
             file.write_all(b"data").expect("write");
         }
 
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("rb"),
         ])
@@ -462,16 +493,17 @@ pub(crate) mod tests {
         let fid = open.as_open().unwrap().fid as f64;
 
         let tensor = Tensor::new(vec![fid], vec![1]).unwrap();
-        let at_end = evaluate(&Value::Tensor(tensor)).expect("feof");
+        let at_end = run_evaluate(&Value::Tensor(tensor)).expect("feof");
         assert!(!at_end);
 
-        fclose::evaluate(&[Value::Num(fid)]).unwrap();
+        run_fclose(&[Value::Num(fid)]).unwrap();
         fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_errors_on_closed_identifier() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("feof_closed_identifier");
         {
@@ -479,16 +511,16 @@ pub(crate) mod tests {
             file.write_all(b"x").expect("write");
         }
 
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("rb"),
         ])
         .expect("fopen");
         let fid = open.as_open().unwrap().fid as f64;
 
-        fclose::evaluate(&[Value::Num(fid)]).unwrap();
+        run_fclose(&[Value::Num(fid)]).unwrap();
 
-        let err = unwrap_error_message(evaluate(&Value::Num(fid)).unwrap_err());
+        let err = unwrap_error_message(run_evaluate(&Value::Num(fid)).unwrap_err());
         assert!(err.contains("Invalid file identifier"));
 
         fs::remove_file(path).unwrap();
@@ -497,6 +529,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_accepts_gpu_identifier_via_gather() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("feof_gpu_identifier");
         {
@@ -504,7 +537,7 @@ pub(crate) mod tests {
             file.write_all(b"xyz").expect("write");
         }
 
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("rb"),
         ])
@@ -521,21 +554,22 @@ pub(crate) mod tests {
             let handle = provider.upload(&view).expect("upload");
             let value = Value::GpuTensor(handle.clone());
 
-            let at_end = evaluate(&value).expect("feof");
+            let at_end = run_evaluate(&value).expect("feof");
             assert!(!at_end);
 
             provider.free(&handle).expect("free");
         });
 
-        fclose::evaluate(&[Value::Num(fid)]).unwrap();
+        run_fclose(&[Value::Num(fid)]).unwrap();
         fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_standard_identifier_returns_false() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
-        let result = evaluate(&Value::Num(0.0)).expect("feof");
+        let result = run_evaluate(&Value::Num(0.0)).expect("feof");
         assert!(!result);
     }
 

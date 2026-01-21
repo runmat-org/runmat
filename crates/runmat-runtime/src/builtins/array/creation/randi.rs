@@ -249,9 +249,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::randi"
 )]
-fn randi_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn randi_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = ParsedRandi::parse(args)?;
-    build_output(parsed)
+    build_output(parsed).await
 }
 
 struct ParsedRandi {
@@ -440,11 +440,11 @@ impl ParsedRandi {
     }
 }
 
-fn build_output(parsed: ParsedRandi) -> crate::BuiltinResult<Value> {
+async fn build_output(parsed: ParsedRandi) -> crate::BuiltinResult<Value> {
     match parsed.template {
         OutputTemplate::Double => randi_double(&parsed.bounds, &parsed.shape),
         OutputTemplate::Logical => randi_logical(&parsed.bounds, &parsed.shape),
-        OutputTemplate::Like(proto) => randi_like(&proto, &parsed.bounds, &parsed.shape),
+        OutputTemplate::Like(proto) => randi_like(&proto, &parsed.bounds, &parsed.shape).await,
     }
 }
 
@@ -484,9 +484,10 @@ fn randi_logical(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value
     Ok(Value::LogicalArray(logical))
 }
 
-fn randi_like(proto: &Value, bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value> {
+#[async_recursion::async_recursion(?Send)]
+async fn randi_like(proto: &Value, bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value> {
     match proto {
-        Value::GpuTensor(handle) => randi_like_gpu(handle, bounds, shape),
+        Value::GpuTensor(handle) => randi_like_gpu(handle, bounds, shape).await,
         Value::LogicalArray(_) | Value::Bool(_) => randi_logical(bounds, shape),
         Value::Tensor(_) | Value::Num(_) | Value::Int(_) => randi_double(bounds, shape),
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
@@ -502,7 +503,8 @@ fn randi_like(proto: &Value, bounds: &Bounds, shape: &[usize]) -> crate::Builtin
     }
 }
 
-fn randi_like_gpu(
+#[async_recursion::async_recursion(?Send)]
+async fn randi_like_gpu(
     handle: &GpuTensorHandle,
     bounds: &Bounds,
     shape: &[usize],
@@ -528,9 +530,10 @@ fn randi_like_gpu(
         return Ok(tensor::tensor_into_value(tensor));
     }
 
-    let gathered = crate::dispatcher::gather_if_needed(&Value::GpuTensor(handle.clone()))
+    let gathered = crate::dispatcher::gather_if_needed_async(&Value::GpuTensor(handle.clone()))
+        .await
         .map_err(|e| builtin_error(format!("randi: {e}")))?;
-    randi_like(&gathered, bounds, shape)
+    randi_like(&gathered, bounds, shape).await
 }
 
 fn integer_tensor(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Tensor> {
@@ -730,6 +733,7 @@ fn shape_from_value(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
+    use futures::executor::block_on;
     use runmat_builtins::LogicalArray;
 
     fn reset_rng_clean() {
@@ -757,7 +761,7 @@ pub(crate) mod tests {
     fn randi_default_scalar() {
         let _guard = random::test_lock().lock().unwrap();
         reset_rng_clean();
-        let result = randi_builtin(vec![Value::Num(6.0)]).expect("randi");
+        let result = block_on(randi_builtin(vec![Value::Num(6.0)])).expect("randi");
         let expected = expected_sequence(&Bounds::new(1, 6).unwrap(), 1)[0] as f64;
         match result {
             Value::Num(v) => {
@@ -775,7 +779,7 @@ pub(crate) mod tests {
         reset_rng_clean();
         let bounds = Tensor::new(vec![3.0, 8.0], vec![1, 2]).unwrap();
         let args = vec![Value::Tensor(bounds), Value::Num(2.0), Value::Num(3.0)];
-        let result = randi_builtin(args).expect("randi");
+        let result = block_on(randi_builtin(args)).expect("randi");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
@@ -795,7 +799,7 @@ pub(crate) mod tests {
         reset_rng_clean();
         let proto = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
         let args = vec![Value::Num(5.0), Value::from("like"), Value::Tensor(proto)];
-        let result = randi_builtin(args).expect("randi");
+        let result = block_on(randi_builtin(args)).expect("randi");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -819,7 +823,7 @@ pub(crate) mod tests {
             Value::Num(2.0),
             Value::from("logical"),
         ];
-        let result = randi_builtin(args).expect("randi logical");
+        let result = block_on(randi_builtin(args)).expect("randi logical");
         match result {
             Value::LogicalArray(logical) => {
                 assert_eq!(logical.shape, vec![2, 2]);
@@ -836,7 +840,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_logical_requires_binary_bounds() {
-        let err = randi_builtin(vec![Value::Num(3.0), Value::from("logical")]).unwrap_err();
+        let err = block_on(randi_builtin(vec![Value::Num(3.0), Value::from("logical")]))
+            .unwrap_err();
         let message = err.to_string();
         assert!(message.contains("logical output requires"));
     }
@@ -853,7 +858,7 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::LogicalArray(proto),
         ];
-        let result = randi_builtin(args).expect("randi logical like");
+        let result = block_on(randi_builtin(args)).expect("randi logical like");
         match result {
             Value::LogicalArray(logical) => {
                 assert_eq!(logical.shape, vec![2, 3]);
@@ -866,7 +871,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_like_requires_prototype() {
-        let err = randi_builtin(vec![Value::Num(5.0), Value::from("like")]).unwrap_err();
+        let err = block_on(randi_builtin(vec![Value::Num(5.0), Value::from("like")]))
+            .unwrap_err();
         let message = err.to_string();
         assert!(message.contains("expected prototype"));
     }
@@ -882,7 +888,7 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::Tensor(proto),
         ];
-        let err = randi_builtin(args).unwrap_err();
+        let err = block_on(randi_builtin(args)).unwrap_err();
         let message = err.to_string();
         assert!(message.contains("multiple 'like' specifications"));
     }
@@ -897,7 +903,7 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::Tensor(proto),
         ];
-        let err = randi_builtin(args).unwrap_err();
+        let err = block_on(randi_builtin(args)).unwrap_err();
         let message = err.to_string();
         assert!(message.contains("cannot combine 'like' with 'logical'"));
     }
@@ -919,7 +925,7 @@ pub(crate) mod tests {
                 Value::from("like"),
                 Value::GpuTensor(handle),
             ];
-            let result = randi_builtin(args).expect("randi");
+            let result = block_on(randi_builtin(args)).expect("randi");
             match result {
                 Value::GpuTensor(gpu) => {
                     let gathered =
@@ -954,7 +960,7 @@ pub(crate) mod tests {
                 Value::from("like"),
                 Value::GpuTensor(handle),
             ];
-            let result = randi_builtin(args).expect("randi gpu override");
+            let result = block_on(randi_builtin(args)).expect("randi gpu override");
             match result {
                 Value::GpuTensor(gpu) => {
                     let gathered =
@@ -972,7 +978,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_invalid_upper_errors() {
-        let err = randi_builtin(vec![Value::Num(0.0)]).unwrap_err();
+        let err = block_on(randi_builtin(vec![Value::Num(0.0)])).unwrap_err();
         let message = err.to_string();
         assert!(message.contains("upper bound"));
     }
@@ -1006,7 +1012,7 @@ pub(crate) mod tests {
             Value::GpuTensor(handle),
         ];
 
-        let result = randi_builtin(args).expect("randi");
+        let result = block_on(randi_builtin(args)).expect("randi");
         match result {
             Value::GpuTensor(gpu) => {
                 let gathered =

@@ -222,7 +222,7 @@ fn tempdir_error(message: impl Into<String>) -> RuntimeError {
     accel = "cpu",
     builtin_path = "crate::builtins::io::repl_fs::tempdir"
 )]
-fn tempdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn tempdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !args.is_empty() {
         return Err(tempdir_error(ERR_TOO_MANY_INPUTS));
     }
@@ -257,8 +257,13 @@ fn ends_with_separator(text: &str) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::BuiltinResult;
     use std::convert::TryFrom;
     use std::path::{Path, PathBuf};
+
+    fn tempdir_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::tempdir_builtin(args))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const MESSAGE_ID_FILE_NOT_FOUND: &str = "MATLAB:DELETE:FileNotFound";
 const MESSAGE_ID_IS_DIRECTORY: &str = "MATLAB:DELETE:Directories";
@@ -225,14 +225,14 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::delete"
 )]
-fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         return Err(delete_error(
             MESSAGE_ID_INVALID_INPUT,
             "delete: missing filename input",
         ));
     }
-    let gathered = gather_arguments(&args)?;
+    let gathered = gather_arguments(&args).await?;
 
     if gathered.iter().all(is_handle_input) {
         return delete_handles(&gathered);
@@ -402,10 +402,10 @@ fn has_unbalanced(pattern: &str, open: char, close: char) -> bool {
     depth != 0
 }
 
-fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
+async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(map_control_flow)?);
+        out.push(gather_if_needed_async(value).await.map_err(map_control_flow)?);
     }
     Ok(out)
 }
@@ -549,6 +549,10 @@ pub(crate) mod tests {
     use runmat_builtins::{CharArray, StringArray, Value};
     use std::fs::File;
     use tempfile::tempdir;
+
+    fn delete_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::delete_builtin(args))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -750,14 +754,18 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_handle_returns_invalid_handle() {
-        let handle =
-            crate::new_handle_object_builtin("ReplFsDeleteTestHandle".to_string()).expect("handle");
+        let handle = futures::executor::block_on(crate::new_handle_object_builtin(
+            "ReplFsDeleteTestHandle".to_string(),
+        ))
+        .expect("handle");
         let result = delete_builtin(vec![handle]).expect("delete handle");
         match result {
             Value::HandleObject(h) => {
                 assert!(!h.valid, "handle should be marked invalid");
-                let valid_value =
-                    crate::isvalid_builtin(Value::HandleObject(h.clone())).expect("isvalid");
+                let valid_value = futures::executor::block_on(crate::isvalid_builtin(
+                    Value::HandleObject(h.clone()),
+                ))
+                .expect("isvalid");
                 match valid_value {
                     Value::Bool(flag) => assert!(!flag, "isvalid should report false after delete"),
                     other => panic!("expected bool from isvalid, got {other:?}"),
@@ -770,8 +778,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_rejects_mixed_handle_and_filename() {
-        let handle =
-            crate::new_handle_object_builtin("ReplFsDeleteTestHandle".to_string()).expect("handle");
+        let handle = futures::executor::block_on(crate::new_handle_object_builtin(
+            "ReplFsDeleteTestHandle".to_string(),
+        ))
+        .expect("handle");
         let err = delete_builtin(vec![
             handle,
             Value::from("mixed-handle-path.txt".to_string()),
@@ -783,10 +793,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_accepts_cell_of_handles() {
-        let handle_a =
-            crate::new_handle_object_builtin("ReplFsDeleteTestHandle".to_string()).expect("handle");
-        let handle_b =
-            crate::new_handle_object_builtin("ReplFsDeleteTestHandle".to_string()).expect("handle");
+        let handle_a = futures::executor::block_on(crate::new_handle_object_builtin(
+            "ReplFsDeleteTestHandle".to_string(),
+        ))
+        .expect("handle");
+        let handle_b = futures::executor::block_on(crate::new_handle_object_builtin(
+            "ReplFsDeleteTestHandle".to_string(),
+        ))
+        .expect("handle");
         let cell = crate::make_cell(vec![handle_a, handle_b], 1, 2).expect("cell of handles");
         let result = delete_builtin(vec![cell]).expect("delete handles");
         assert_eq!(result, Value::Num(0.0));

@@ -19,7 +19,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -189,8 +189,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::io::mat::load"
 )]
-fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(&args)?;
+async fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(&args).await?;
     Ok(eval.first_output())
 }
 
@@ -240,13 +240,13 @@ fn load_error_with_source(
         .build()
 }
 
-pub fn evaluate(args: &[Value]) -> BuiltinResult<LoadEval> {
+pub async fn evaluate(args: &[Value]) -> BuiltinResult<LoadEval> {
     let mut host_args = Vec::with_capacity(args.len());
     for arg in args {
-        host_args.push(gather_if_needed(arg)?);
+        host_args.push(gather_if_needed_async(arg).await?);
     }
 
-    let invocation = parse_invocation(&host_args)?;
+    let invocation = parse_invocation(&host_args).await?;
 
     let mut path_value = if let Some(path) = invocation.path_value {
         path
@@ -291,7 +291,7 @@ struct ParsedInvocation {
     regex_tokens: Vec<String>,
 }
 
-fn parse_invocation(values: &[Value]) -> BuiltinResult<ParsedInvocation> {
+async fn parse_invocation(values: &[Value]) -> BuiltinResult<ParsedInvocation> {
     let mut path_value = None;
     let mut path_was_default = false;
     let mut variables = Vec::new();
@@ -313,7 +313,7 @@ fn parse_invocation(values: &[Value]) -> BuiltinResult<ParsedInvocation> {
                         if option_token(&values[idx])?.is_some() {
                             break;
                         }
-                        let names = extract_names(&values[idx])?;
+                        let names = extract_names(&values[idx]).await?;
                         if names.is_empty() {
                             return Err(load_error(
                                 "load: '-regexp' requires non-empty pattern strings",
@@ -334,7 +334,7 @@ fn parse_invocation(values: &[Value]) -> BuiltinResult<ParsedInvocation> {
                 idx += 1;
                 continue;
             }
-            let names = extract_names(&values[idx])?;
+            let names = extract_names(&values[idx]).await?;
             variables.extend(names);
             idx += 1;
         }
@@ -833,7 +833,8 @@ fn option_token(value: &Value) -> BuiltinResult<Option<String>> {
     Ok(None)
 }
 
-fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
+#[async_recursion::async_recursion(?Send)]
+async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(s) => Ok(vec![s.clone()]),
         Value::CharArray(ca) => Ok(char_array_rows_as_strings(ca)),
@@ -852,8 +853,8 @@ fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
             Ok(names)
         }
         other => {
-            let gathered = gather_if_needed(other)?;
-            extract_names(&gathered)
+            let gathered = gather_if_needed_async(other).await?;
+            extract_names(&gathered).await
         }
     }
 }
@@ -955,7 +956,7 @@ fn read_tagged<R: Read>(reader: &mut R, allow_eof: bool) -> BuiltinResult<Option
 pub(crate) mod tests {
     use super::*;
     use crate::workspace::WorkspaceResolver;
-    use once_cell::sync::OnceCell;
+    use futures::executor::block_on;
     use runmat_builtins::StringArray;
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
@@ -967,18 +968,15 @@ pub(crate) mod tests {
     }
 
     fn ensure_test_resolver() {
-        static INIT: OnceCell<()> = OnceCell::new();
-        INIT.get_or_init(|| {
-            crate::workspace::register_workspace_resolver(WorkspaceResolver {
-                lookup: |name| TEST_WORKSPACE.with(|slot| slot.borrow().get(name).cloned()),
-                snapshot: || {
-                    let mut entries: Vec<(String, Value)> =
-                        TEST_WORKSPACE.with(|slot| slot.borrow().clone().into_iter().collect());
-                    entries.sort_by(|a, b| a.0.cmp(&b.0));
-                    entries
-                },
-                globals: || Vec::new(),
-            });
+        crate::workspace::register_workspace_resolver(WorkspaceResolver {
+            lookup: |name| TEST_WORKSPACE.with(|slot| slot.borrow().get(name).cloned()),
+            snapshot: || {
+                let mut entries: Vec<(String, Value)> =
+                    TEST_WORKSPACE.with(|slot| slot.borrow().clone().into_iter().collect());
+                entries.sort_by(|a, b| a.0.cmp(&b.0));
+                entries
+            },
+            globals: || Vec::new(),
         });
     }
 
@@ -990,6 +988,10 @@ pub(crate) mod tests {
                 map.insert((*name).to_string(), value.clone());
             }
         });
+    }
+
+    fn workspace_guard() -> std::sync::MutexGuard<'static, ()> {
+        crate::workspace::test_guard()
     }
 
     fn assert_error_contains<T>(result: crate::BuiltinResult<T>, snippet: &str) {
@@ -1008,6 +1010,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_roundtrip_numeric() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
         set_workspace(&[("A", Value::Tensor(tensor))]);
@@ -1015,10 +1018,14 @@ pub(crate) mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("numeric.mat");
         let save_arg = Value::from(path.to_string_lossy().to_string());
-        crate::call_builtin("save", std::slice::from_ref(&save_arg)).unwrap();
+        block_on(crate::call_builtin_async(
+            "save",
+            std::slice::from_ref(&save_arg),
+        ))
+        .unwrap();
 
-        let eval =
-            evaluate(&[Value::from(path.to_string_lossy().to_string())]).expect("load numeric");
+        let eval = block_on(evaluate(&[Value::from(path.to_string_lossy().to_string())]))
+            .expect("load numeric");
         let struct_value = eval.first_output();
         match struct_value {
             Value::Struct(sv) => {
@@ -1038,17 +1045,22 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_selected_variables() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[("signal", Value::Num(42.0)), ("noise", Value::Num(5.0))]);
         let dir = tempdir().unwrap();
         let path = dir.path().join("selection.mat");
         let save_arg = Value::from(path.to_string_lossy().to_string());
-        crate::call_builtin("save", std::slice::from_ref(&save_arg)).unwrap();
+        block_on(crate::call_builtin_async(
+            "save",
+            std::slice::from_ref(&save_arg),
+        ))
+        .unwrap();
 
-        let eval = evaluate(&[
+        let eval = block_on(evaluate(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("signal"),
-        ])
+        ]))
         .expect("load selection");
         let vars = eval.variables();
         assert_eq!(vars.len(), 1);
@@ -1059,6 +1071,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_regex_selection() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[
             ("w1", Value::Num(1.0)),
@@ -1068,13 +1081,17 @@ pub(crate) mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("regex.mat");
         let save_arg = Value::from(path.to_string_lossy().to_string());
-        crate::call_builtin("save", std::slice::from_ref(&save_arg)).unwrap();
+        block_on(crate::call_builtin_async(
+            "save",
+            std::slice::from_ref(&save_arg),
+        ))
+        .unwrap();
 
-        let eval = evaluate(&[
+        let eval = block_on(evaluate(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("-regexp"),
             Value::from("^w\\d$"),
-        ])
+        ]))
         .expect("load regex");
         let mut names: Vec<_> = eval.variables().iter().map(|(n, _)| n.clone()).collect();
         names.sort();
@@ -1084,18 +1101,23 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_missing_variable_errors() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[("existing", Value::Num(7.0))]);
         let dir = tempdir().unwrap();
         let path = dir.path().join("missing.mat");
         let save_arg = Value::from(path.to_string_lossy().to_string());
-        crate::call_builtin("save", std::slice::from_ref(&save_arg)).unwrap();
+        block_on(crate::call_builtin_async(
+            "save",
+            std::slice::from_ref(&save_arg),
+        ))
+        .unwrap();
 
         assert_error_contains(
-            evaluate(&[
+            block_on(evaluate(&[
                 Value::from(path.to_string_lossy().to_string()),
                 Value::from("missing"),
-            ]),
+            ])),
             "variable 'missing' was not found",
         );
     }
@@ -1103,16 +1125,21 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_string_array_roundtrip() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         let strings = StringArray::new(vec!["foo".into(), "bar".into()], vec![1, 2]).unwrap();
         set_workspace(&[("labels", Value::StringArray(strings))]);
         let dir = tempdir().unwrap();
         let path = dir.path().join("strings.mat");
         let save_arg = Value::from(path.to_string_lossy().to_string());
-        crate::call_builtin("save", std::slice::from_ref(&save_arg)).unwrap();
+        block_on(crate::call_builtin_async(
+            "save",
+            std::slice::from_ref(&save_arg),
+        ))
+        .unwrap();
 
-        let eval =
-            evaluate(&[Value::from(path.to_string_lossy().to_string())]).expect("load strings");
+        let eval = block_on(evaluate(&[Value::from(path.to_string_lossy().to_string())]))
+            .expect("load strings");
         let struct_value = eval.first_output();
         match struct_value {
             Value::Struct(sv) => {
@@ -1135,18 +1162,23 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_option_before_filename() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[("alpha", Value::Num(1.0)), ("beta", Value::Num(2.0))]);
         let dir = tempdir().unwrap();
         let path = dir.path().join("option_first.mat");
         let save_arg = Value::from(path.to_string_lossy().to_string());
-        crate::call_builtin("save", std::slice::from_ref(&save_arg)).unwrap();
+        block_on(crate::call_builtin_async(
+            "save",
+            std::slice::from_ref(&save_arg),
+        ))
+        .unwrap();
 
-        let eval = evaluate(&[
+        let eval = block_on(evaluate(&[
             Value::from("-mat"),
             Value::from(path.to_string_lossy().to_string()),
             Value::from("beta"),
-        ])
+        ]))
         .expect("load with option first");
         let vars = eval.variables();
         assert_eq!(vars.len(), 1);
@@ -1157,12 +1189,17 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_char_array_names_trimmed() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[("short", Value::Num(5.0)), ("longer", Value::Num(9.0))]);
         let dir = tempdir().unwrap();
         let path = dir.path().join("char_names.mat");
         let save_arg = Value::from(path.to_string_lossy().to_string());
-        crate::call_builtin("save", std::slice::from_ref(&save_arg)).unwrap();
+        block_on(crate::call_builtin_async(
+            "save",
+            std::slice::from_ref(&save_arg),
+        ))
+        .unwrap();
 
         let cols = 6;
         let mut data = Vec::new();
@@ -1175,10 +1212,10 @@ pub(crate) mod tests {
         }
         let name_array = CharArray::new(data, 2, cols).unwrap();
 
-        let eval = evaluate(&[
+        let eval = block_on(evaluate(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::CharArray(name_array),
-        ])
+        ]))
         .expect("load with char array names");
         let vars = eval.variables();
         assert_eq!(vars.len(), 2);
@@ -1191,18 +1228,23 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_duplicate_names_last_wins() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[("dup", Value::Num(11.0))]);
         let dir = tempdir().unwrap();
         let path = dir.path().join("duplicates.mat");
         let save_arg = Value::from(path.to_string_lossy().to_string());
-        crate::call_builtin("save", std::slice::from_ref(&save_arg)).unwrap();
+        block_on(crate::call_builtin_async(
+            "save",
+            std::slice::from_ref(&save_arg),
+        ))
+        .unwrap();
 
-        let eval = evaluate(&[
+        let eval = block_on(evaluate(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("dup"),
             Value::from("dup"),
-        ])
+        ]))
         .expect("load with duplicate names");
         let vars = eval.variables();
         assert_eq!(vars.len(), 1);
@@ -1214,6 +1256,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn load_wgpu_tensor_roundtrip() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
@@ -1242,10 +1285,10 @@ pub(crate) mod tests {
             Value::from(path.to_string_lossy().to_string()),
             Value::from("gpu_var"),
         ];
-        crate::call_builtin("save", &save_args).unwrap();
+        block_on(crate::call_builtin_async("save", &save_args)).unwrap();
 
-        let eval =
-            evaluate(&[Value::from(path.to_string_lossy().to_string())]).expect("load wgpu file");
+        let eval = block_on(evaluate(&[Value::from(path.to_string_lossy().to_string())]))
+            .expect("load wgpu file");
         let struct_value = eval.first_output();
         match struct_value {
             Value::Struct(sv) => match sv.fields.get("gpu_var") {

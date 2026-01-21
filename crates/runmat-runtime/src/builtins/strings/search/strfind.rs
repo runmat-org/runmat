@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 
@@ -217,9 +217,13 @@ const BUILTIN_NAME: &str = "strfind";
     accel = "sink",
     builtin_path = "crate::builtins::strings::search::strfind"
 )]
-fn strfind_builtin(text: Value, pattern: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let text = gather_if_needed(&text)?;
-    let pattern = gather_if_needed(&pattern)?;
+async fn strfind_builtin(
+    text: Value,
+    pattern: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let text = gather_if_needed_async(&text).await?;
+    let pattern = gather_if_needed_async(&pattern).await?;
     let force_cell_output = parse_force_cell_output(&rest)?;
 
     let subject = TextCollection::from_subject(BUILTIN_NAME, text)?;
@@ -447,10 +451,14 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, StringArray, Tensor};
 
+    fn run_strfind(text: Value, pattern: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(strfind_builtin(text, pattern, rest))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_single_match_returns_row_vector() {
-        let result = strfind_builtin(
+        let result = run_strfind(
             Value::String("saturn".into()),
             Value::String("sat".into()),
             Vec::new(),
@@ -468,7 +476,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_char_vector_matches() {
-        let result = strfind_builtin(
+        let result = run_strfind(
             Value::CharArray(CharArray::new_row("abracadabra")),
             Value::CharArray(CharArray::new_row("abra")),
             Vec::new(),
@@ -486,7 +494,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_overlapping_matches() {
-        let result = strfind_builtin(
+        let result = run_strfind(
             Value::String("aaaa".into()),
             Value::String("aa".into()),
             Vec::new(),
@@ -504,7 +512,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_empty_pattern_returns_boundaries() {
-        let result = strfind_builtin(
+        let result = run_strfind(
             Value::String("abc".into()),
             Value::String("".into()),
             Vec::new(),
@@ -527,7 +535,7 @@ pub(crate) mod tests {
             vec![3, 1],
         )
         .unwrap();
-        let result = strfind_builtin(
+        let result = run_strfind(
             Value::StringArray(strings),
             Value::String("i".into()),
             Vec::new(),
@@ -562,7 +570,7 @@ pub(crate) mod tests {
     fn strfind_pattern_array_returns_cell() {
         let patterns =
             StringArray::new(vec!["sat".into(), "turn".into(), "moon".into()], vec![1, 3]).unwrap();
-        let result = strfind_builtin(
+        let result = run_strfind(
             Value::String("saturn".into()),
             Value::StringArray(patterns),
             Vec::new(),
@@ -595,7 +603,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_force_cell_output_name_value() {
-        let result = strfind_builtin(
+        let result = run_strfind(
             Value::CharArray(CharArray::new_row("mission")),
             Value::CharArray(CharArray::new_row("s")),
             vec![Value::String("ForceCellOutput".into()), Value::Bool(true)],
@@ -617,7 +625,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_force_cell_output_numeric_value() {
-        let result = strfind_builtin(
+        let result = run_strfind(
             Value::String("mission".into()),
             Value::String("s".into()),
             vec![Value::String("ForceCellOutput".into()), Value::Num(1.0)],
@@ -639,7 +647,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_force_cell_output_off_string() {
-        let result = strfind_builtin(
+        let result = run_strfind(
             Value::String("mission".into()),
             Value::String("s".into()),
             vec![
@@ -662,7 +670,7 @@ pub(crate) mod tests {
     fn strfind_force_cell_output_non_scalar_error() {
         let option_value =
             Tensor::new(vec![1.0, 0.0], vec![1, 2]).expect("tensor construction for test");
-        let err = strfind_builtin(
+        let err = run_strfind(
             Value::String("mission".into()),
             Value::String("s".into()),
             vec![
@@ -680,7 +688,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_force_cell_output_missing_value_error() {
-        let err = strfind_builtin(
+        let err = run_strfind(
             Value::String("mission".into()),
             Value::String("s".into()),
             vec![Value::String("ForceCellOutput".into())],
@@ -696,7 +704,7 @@ pub(crate) mod tests {
     #[test]
     fn strfind_subject_cell_scalar_returns_cell() {
         let subject = CellArray::new(vec![Value::from("needle")], 1, 1).expect("cell construction");
-        let result = strfind_builtin(
+        let result = run_strfind(
             Value::Cell(subject),
             Value::String("needle".into()),
             Vec::new(),
@@ -719,7 +727,7 @@ pub(crate) mod tests {
     #[test]
     fn strfind_pattern_cell_scalar_returns_cell() {
         let pattern = CellArray::new(vec![Value::from("needle")], 1, 1).expect("cell construction");
-        let result = strfind_builtin(
+        let result = run_strfind(
             Value::String("needle".into()),
             Value::Cell(pattern),
             Vec::new(),
@@ -741,7 +749,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_missing_subject_returns_empty() {
-        let result = strfind_builtin(
+        let result = run_strfind(
             Value::String("<missing>".into()),
             Value::String("abc".into()),
             Vec::new(),
@@ -761,7 +769,7 @@ pub(crate) mod tests {
     fn strfind_missing_pattern_returns_empty_vector() {
         let patterns =
             StringArray::new(vec!["<missing>".into()], vec![1, 1]).expect("string array creation");
-        let result = strfind_builtin(
+        let result = run_strfind(
             Value::String("planet".into()),
             Value::StringArray(patterns),
             Vec::new(),
@@ -781,7 +789,7 @@ pub(crate) mod tests {
     fn strfind_char_matrix_rows() {
         let data = vec!['c', 'a', 't', 'a', 'd', 'a', 'd', 'o', 'g'];
         let array = CharArray::new(data, 3, 3).unwrap();
-        let result = strfind_builtin(
+        let result = run_strfind(
             Value::CharArray(array),
             Value::CharArray(CharArray::new_row("d")),
             Vec::new(),
@@ -811,7 +819,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_invalid_option_name_errors() {
-        let err = strfind_builtin(
+        let err = run_strfind(
             Value::String("abc".into()),
             Value::String("a".into()),
             vec![Value::String("IgnoreCase".into()), Value::Bool(true)],

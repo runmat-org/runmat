@@ -240,12 +240,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::stats::summary::cov"
 )]
-fn cov_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn cov_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let args = CovArgs::parse(value, rest)?;
     if let Some(result) = cov_try_gpu(&args)? {
         return Ok(result);
     }
-    cov_host(args)
+    cov_host(args).await
 }
 
 /// Public entry point for providers that need the reference implementation.
@@ -401,7 +401,7 @@ fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> {
     }
 }
 
-fn cov_host(args: CovArgs) -> BuiltinResult<Value> {
+async fn cov_host(args: CovArgs) -> BuiltinResult<Value> {
     let CovArgs {
         first,
         second,
@@ -410,14 +410,14 @@ fn cov_host(args: CovArgs) -> BuiltinResult<Value> {
         weight_vector,
     } = args;
 
-    let left = value_to_tensor_gather(first)?;
+    let left = value_to_tensor_gather(first).await?;
     let right = match second {
-        Some(value) => Some(value_to_tensor_gather(value)?),
+        Some(value) => Some(value_to_tensor_gather(value).await?),
         None => None,
     };
 
     let weight_spec = if let Some(weight_value) = weight_vector {
-        let vector = value_to_weight_vector(weight_value, left.rows())?;
+        let vector = value_to_weight_vector(weight_value, left.rows()).await?;
         CovWeightSpec::Vector(vector)
     } else {
         CovWeightSpec::Scalar(normalization)
@@ -427,17 +427,17 @@ fn cov_host(args: CovArgs) -> BuiltinResult<Value> {
     Ok(Value::Tensor(tensor))
 }
 
-fn value_to_tensor_gather(value: Value) -> BuiltinResult<Tensor> {
+async fn value_to_tensor_gather(value: Value) -> BuiltinResult<Tensor> {
     match value {
-        Value::GpuTensor(handle) => gpu_helpers::gather_tensor(&handle),
+        Value::GpuTensor(handle) => gpu_helpers::gather_tensor_async(&handle).await,
         Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical).map_err(builtin_error),
         other => tensor::value_into_tensor_for("cov", other).map_err(builtin_error),
     }
 }
 
-fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinResult<Vec<f64>> {
+async fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinResult<Vec<f64>> {
     let tensor = match value {
-        Value::GpuTensor(handle) => gpu_helpers::gather_tensor(&handle)?,
+        Value::GpuTensor(handle) => gpu_helpers::gather_tensor_async(&handle).await?,
         Value::LogicalArray(logical) => {
             tensor::logical_to_tensor(&logical).map_err(builtin_error)?
         }
@@ -966,6 +966,7 @@ fn set_entry(buffer: &mut [f64], dim: usize, row: usize, col: usize, value: f64)
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::Tensor;
 
     fn assert_tensor_close(actual: &Tensor, expected: &[f64], tol: f64) {
@@ -998,7 +999,7 @@ pub(crate) mod tests {
             vec![5, 3],
         )
         .unwrap();
-        let result = cov_builtin(Value::Tensor(tensor), Vec::new()).expect("cov");
+        let result = block_on(cov_builtin(Value::Tensor(tensor), Vec::new())).expect("cov");
         let tensor = match result {
             Value::Tensor(t) => t,
             other => panic!("expected tensor result, got {other:?}"),
@@ -1016,7 +1017,8 @@ pub(crate) mod tests {
     fn cov_two_vectors() {
         let x = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
         let y = Tensor::new(vec![10.0, 11.0, 9.0, 12.0], vec![4, 1]).unwrap();
-        let result = cov_builtin(Value::Tensor(x), vec![Value::Tensor(y)]).expect("cov");
+        let result =
+            block_on(cov_builtin(Value::Tensor(x), vec![Value::Tensor(y)])).expect("cov");
         let tensor = match result {
             Value::Tensor(t) => t,
             other => panic!("expected tensor result, got {other:?}"),
@@ -1042,7 +1044,8 @@ pub(crate) mod tests {
         )
         .unwrap();
         let weights = Tensor::new(vec![1.0, 1.0, 1.0, 2.0, 2.0], vec![5, 1]).unwrap();
-        let result = cov_builtin(Value::Tensor(tensor), vec![Value::Tensor(weights)]).expect("cov");
+        let result = block_on(cov_builtin(Value::Tensor(tensor), vec![Value::Tensor(weights)]))
+            .expect("cov");
         let tensor = match result {
             Value::Tensor(t) => t,
             other => panic!("expected tensor result, got {other:?}"),
@@ -1077,8 +1080,8 @@ pub(crate) mod tests {
             vec![4, 3],
         )
         .unwrap();
-        let result =
-            cov_builtin(Value::Tensor(tensor), vec![Value::from("omitrows")]).expect("cov");
+        let result = block_on(cov_builtin(Value::Tensor(tensor), vec![Value::from("omitrows")]))
+            .expect("cov");
         let tensor = match result {
             Value::Tensor(t) => t,
             other => panic!("expected tensor result, got {other:?}"),
@@ -1110,7 +1113,8 @@ pub(crate) mod tests {
         )
         .unwrap();
         let result =
-            cov_builtin(Value::Tensor(tensor), vec![Value::from("partialrows")]).expect("cov");
+            block_on(cov_builtin(Value::Tensor(tensor), vec![Value::from("partialrows")]))
+                .expect("cov");
         let tensor = match result {
             Value::Tensor(t) => t,
             other => panic!("expected tensor result, got {other:?}"),
@@ -1146,7 +1150,7 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = cov_builtin(Value::GpuTensor(handle), Vec::new()).expect("cov");
+            let result = block_on(cov_builtin(Value::GpuTensor(handle), Vec::new())).expect("cov");
             let gathered = test_support::gather(result).expect("gather");
             let expected = [
                 0.0250, 0.0075, //
@@ -1180,7 +1184,8 @@ pub(crate) mod tests {
         )
         .unwrap();
 
-        let cpu_result = cov_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("cov");
+        let cpu_result =
+            block_on(cov_builtin(Value::Tensor(tensor.clone()), Vec::new())).expect("cov");
         let cpu_tensor = match cpu_result {
             Value::Tensor(t) => t,
             other => panic!("expected tensor result, got {other:?}"),
@@ -1193,7 +1198,8 @@ pub(crate) mod tests {
         };
         let handle = provider.upload(&view).expect("upload");
 
-        let gpu_value = cov_builtin(Value::GpuTensor(handle), Vec::new()).expect("cov");
+        let gpu_value =
+            block_on(cov_builtin(Value::GpuTensor(handle), Vec::new())).expect("cov");
         let gathered = test_support::gather(gpu_value).expect("gather");
 
         assert_tensor_close(&gathered, &cpu_tensor.data, 1.0e-6);

@@ -233,9 +233,9 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::expm1"
 )]
-fn expm1_builtin(value: Value) -> BuiltinResult<Value> {
+async fn expm1_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => expm1_gpu(handle),
+        Value::GpuTensor(handle) => expm1_gpu(handle).await,
         Value::Complex(re, im) => {
             let (real, imag) = expm1_complex_parts(re, im);
             Ok(Value::Complex(real, imag))
@@ -249,13 +249,14 @@ fn expm1_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn expm1_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn expm1_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_expm1(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     Ok(tensor::tensor_into_value(expm1_tensor(tensor)?))
 }
@@ -310,7 +311,12 @@ fn expm1_complex_parts(re: f64, im: f64) -> (f64, f64) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor};
+
+    fn expm1_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::expm1_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

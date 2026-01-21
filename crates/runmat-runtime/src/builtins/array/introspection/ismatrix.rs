@@ -242,7 +242,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::array::introspection::ismatrix"
 )]
-fn ismatrix_builtin(value: Value) -> crate::BuiltinResult<Value> {
+async fn ismatrix_builtin(value: Value) -> crate::BuiltinResult<Value> {
     Ok(Value::Bool(value_is_matrix(&value)))
 }
 
@@ -254,6 +254,11 @@ fn value_is_matrix(value: &Value) -> bool {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+
+    fn ismatrix_builtin(value: Value) -> crate::BuiltinResult<Value> {
+        block_on(super::ismatrix_builtin(value))
+    }
     use runmat_builtins::{
         CellArray, CharArray, LogicalArray, ObjectInstance, StringArray, StructValue, Tensor,
     };

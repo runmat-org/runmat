@@ -16,7 +16,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "csvread";
 
@@ -286,9 +286,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::tabular::csvread"
 )]
-fn csvread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let gathered_path = gather_if_needed(&path).map_err(map_control_flow)?;
-    let options = parse_arguments(&rest)?;
+async fn csvread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let gathered_path = gather_if_needed_async(&path).await.map_err(map_control_flow)?;
+    let options = parse_arguments(&rest).await?;
     let resolved = resolve_path(&gathered_path)?;
     let (rows, max_cols) = read_csv_rows(&resolved)?;
     let subset = if let Some(range) = options.range {
@@ -307,10 +307,10 @@ struct CsvReadOptions {
     range: Option<RangeSpec>,
 }
 
-fn parse_arguments(args: &[Value]) -> BuiltinResult<CsvReadOptions> {
+async fn parse_arguments(args: &[Value]) -> BuiltinResult<CsvReadOptions> {
     let mut gathered = Vec::with_capacity(args.len());
     for value in args {
-        gathered.push(gather_if_needed(value).map_err(map_control_flow)?);
+        gathered.push(gather_if_needed_async(value).await.map_err(map_control_flow)?);
     }
     match gathered.len() {
         0 => Ok(CsvReadOptions::default()),
@@ -837,6 +837,10 @@ pub(crate) mod tests {
     use runmat_builtins::{CharArray, IntValue, Tensor as BuiltinTensor};
 
     use crate::builtins::common::test_support;
+
+    fn csvread_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::csvread_builtin(path, rest))
+    }
 
     static UNIQUE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 

@@ -226,7 +226,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::bit::xor"
 )]
-fn xor_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+async fn xor_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
         if let Some(provider) = runmat_accelerate_api::provider() {
             if let Ok(handle) = provider.logical_xor(a, b) {
@@ -234,12 +234,12 @@ fn xor_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
             }
         }
     }
-    xor_host(lhs, rhs)
+    xor_host(lhs, rhs).await
 }
 
-fn xor_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    let left = logical_buffer_from("xor", lhs)?;
-    let right = logical_buffer_from("xor", rhs)?;
+async fn xor_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    let left = logical_buffer_from("xor", lhs).await?;
+    let right = logical_buffer_from("xor", rhs).await?;
     let shape = broadcast_shapes("xor", &left.shape, &right.shape)
         .map_err(|err| builtin_error("xor", err))?;
     let total = tensor::element_count(&shape);
@@ -290,7 +290,7 @@ struct LogicalBuffer {
     shape: Vec<usize>,
 }
 
-fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalBuffer> {
+async fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalBuffer> {
     match value {
         Value::LogicalArray(array) => {
             let LogicalArray { data, shape } = array;
@@ -316,7 +316,8 @@ fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalBuffer>
         Value::ComplexTensor(tensor) => complex_tensor_to_logical_buffer(tensor),
         Value::CharArray(array) => char_array_to_logical_buffer(array),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
                 .map_err(|err| builtin_error(name, format!("{name}: {err}")))?;
             tensor_to_logical_buffer(tensor)
         }
@@ -386,6 +387,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::RuntimeError;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
 
     fn assert_error_contains(err: RuntimeError, expected: &str) {
@@ -395,6 +397,10 @@ pub(crate) mod tests {
             err.message()
         );
     }
+
+    fn run_xor(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+        block_on(super::xor_builtin(lhs, rhs))
+    }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::IntValue;
@@ -402,18 +408,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_of_booleans() {
-        assert_eq!(
-            xor_builtin(Value::Bool(true), Value::Bool(false)).unwrap(),
-            Value::Bool(true)
-        );
-        assert_eq!(
-            xor_builtin(Value::Bool(true), Value::Bool(true)).unwrap(),
-            Value::Bool(false)
-        );
-        assert_eq!(
-            xor_builtin(Value::Bool(false), Value::Bool(false)).unwrap(),
-            Value::Bool(false)
-        );
+        assert_eq!(run_xor(Value::Bool(true), Value::Bool(false)).unwrap(), Value::Bool(true));
+        assert_eq!(run_xor(Value::Bool(true), Value::Bool(true)).unwrap(), Value::Bool(false));
+        assert_eq!(run_xor(Value::Bool(false), Value::Bool(false)).unwrap(), Value::Bool(false));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -421,7 +418,7 @@ pub(crate) mod tests {
     fn xor_numeric_arrays() {
         let a = Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![3.0, 4.0, 0.0, 0.0], vec![2, 2]).unwrap();
-        let result = xor_builtin(Value::Tensor(a), Value::Tensor(b)).unwrap();
+        let result = run_xor(Value::Tensor(a), Value::Tensor(b)).unwrap();
         match result {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![2, 2]);
@@ -437,7 +434,7 @@ pub(crate) mod tests {
         let left = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
         let right = LogicalArray::new(vec![0, 1, 1], vec![3, 1]).unwrap();
         let result =
-            xor_builtin(Value::LogicalArray(left), Value::LogicalArray(right)).expect("xor");
+            run_xor(Value::LogicalArray(left), Value::LogicalArray(right)).expect("xor");
         match result {
             Value::LogicalArray(arr) => {
                 assert_eq!(arr.shape, vec![3, 1]);
@@ -452,7 +449,7 @@ pub(crate) mod tests {
     fn xor_empty_inputs() {
         let lhs = Tensor::new(Vec::<f64>::new(), vec![0, 3]).unwrap();
         let rhs = Tensor::new(Vec::<f64>::new(), vec![0, 3]).unwrap();
-        let result = xor_builtin(Value::Tensor(lhs), Value::Tensor(rhs)).expect("xor");
+        let result = run_xor(Value::Tensor(lhs), Value::Tensor(rhs)).expect("xor");
         match result {
             Value::LogicalArray(arr) => {
                 assert_eq!(arr.shape, vec![0, 3]);
@@ -466,7 +463,7 @@ pub(crate) mod tests {
     #[test]
     fn xor_scalar_broadcasts() {
         let tensor = Tensor::new(vec![1.0, 0.0, 3.0, 0.0], vec![4, 1]).unwrap();
-        let result = xor_builtin(Value::Tensor(tensor), Value::Int(IntValue::I32(1))).unwrap();
+        let result = run_xor(Value::Tensor(tensor), Value::Int(IntValue::I32(1))).unwrap();
         match result {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![4, 1]);
@@ -482,7 +479,7 @@ pub(crate) mod tests {
         let lhs = CharArray::new(vec!['R', 'u', '\0'], 1, 3).unwrap();
         let rhs = CharArray::new(vec!['R', '\0', 'n'], 1, 3).unwrap();
         let result =
-            xor_builtin(Value::CharArray(lhs), Value::CharArray(rhs)).expect("xor char arrays");
+            run_xor(Value::CharArray(lhs), Value::CharArray(rhs)).expect("xor char arrays");
         match result {
             Value::LogicalArray(arr) => {
                 assert_eq!(arr.shape, vec![1, 3]);
@@ -495,19 +492,19 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_treats_nan_as_true() {
-        let result = xor_builtin(Value::Num(f64::NAN), Value::Num(1.0)).unwrap();
+        let result = run_xor(Value::Num(f64::NAN), Value::Num(1.0)).unwrap();
         assert_eq!(result, Value::Bool(false));
-        let result = xor_builtin(Value::Num(f64::NAN), Value::Num(0.0)).unwrap();
+        let result = run_xor(Value::Num(f64::NAN), Value::Num(0.0)).unwrap();
         assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_complex_inputs() {
-        let result = xor_builtin(Value::Complex(0.0, 0.0), Value::Complex(0.0, 2.0)).unwrap();
+        let result = run_xor(Value::Complex(0.0, 0.0), Value::Complex(0.0, 2.0)).unwrap();
         assert_eq!(result, Value::Bool(true));
 
-        let result = xor_builtin(Value::Complex(1.0, 0.0), Value::Complex(0.0, 2.0)).unwrap();
+        let result = run_xor(Value::Complex(1.0, 0.0), Value::Complex(0.0, 2.0)).unwrap();
         assert_eq!(result, Value::Bool(false));
     }
 
@@ -516,14 +513,14 @@ pub(crate) mod tests {
     fn xor_size_mismatch_errors() {
         let lhs = Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![1.0, 0.0, 3.0], vec![3, 1]).unwrap();
-        let err = xor_builtin(Value::Tensor(lhs), Value::Tensor(rhs)).unwrap_err();
+        let err = run_xor(Value::Tensor(lhs), Value::Tensor(rhs)).unwrap_err();
         assert_error_contains(err, "size mismatch");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_rejects_unsupported_types() {
-        let err = xor_builtin(Value::String("runmat".into()), Value::Bool(true)).unwrap_err();
+        let err = run_xor(Value::String("runmat".into()), Value::Bool(true)).unwrap_err();
         assert_error_contains(err, "unsupported input type");
     }
 
@@ -543,7 +540,7 @@ pub(crate) mod tests {
             };
             let a = provider.upload(&view_a).unwrap();
             let b = provider.upload(&view_b).unwrap();
-            let result = xor_builtin(Value::GpuTensor(a), Value::GpuTensor(b)).unwrap();
+            let result = run_xor(Value::GpuTensor(a), Value::GpuTensor(b)).unwrap();
             let gathered = test_support::gather(result).unwrap();
             assert_eq!(gathered.shape, vec![2, 2]);
             assert_eq!(gathered.data, vec![1.0, 1.0, 1.0, 0.0]);
@@ -570,7 +567,7 @@ pub(crate) mod tests {
             let gpu_rhs = provider.upload(&view_rhs).expect("upload rhs");
 
             let result =
-                xor_builtin(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs)).expect("xor");
+                run_xor(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs)).expect("xor");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
             assert_eq!(gathered.data, vec![1.0, 0.0, 1.0, 0.0]);
@@ -590,7 +587,7 @@ pub(crate) mod tests {
         let rhs = Tensor::new(vec![1.0, 0.0, 3.0, 4.0], vec![2, 2]).unwrap();
 
         let cpu_value =
-            xor_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).expect("host xor");
+            run_xor_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).expect("host xor");
         let (expected_data, expected_shape) = match cpu_value {
             Value::LogicalArray(arr) => (arr.data.clone(), arr.shape.clone()),
             other => panic!("expected logical array, got {other:?}"),
@@ -608,7 +605,7 @@ pub(crate) mod tests {
         let gpu_rhs = provider.upload(&view_rhs).expect("upload rhs");
 
         let gpu_value =
-            xor_builtin(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs)).expect("gpu xor");
+            run_xor(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs)).expect("gpu xor");
         let gathered = test_support::gather(gpu_value).expect("gather gpu result");
 
         assert_eq!(gathered.shape, expected_shape);

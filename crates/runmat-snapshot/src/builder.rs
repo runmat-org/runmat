@@ -1216,6 +1216,10 @@ mod tests {
         let config = SnapshotConfig::default();
         let builder = SnapshotBuilder::new(config);
 
+        fn test_builtin(_args: &[runmat_builtins::Value]) -> runmat_builtins::BuiltinFuture {
+            Box::pin(async { Ok(runmat_builtins::Value::Num(0.0)) })
+        }
+
         let builtin = runmat_builtins::BuiltinFunction::new(
             "matmul",
             "Test builtin function",
@@ -1224,7 +1228,7 @@ mod tests {
             "",
             vec![],
             runmat_builtins::Type::Num,
-            |_| Ok(runmat_builtins::Value::Num(0.0)),
+            test_builtin,
             &[],
             false,
             false,

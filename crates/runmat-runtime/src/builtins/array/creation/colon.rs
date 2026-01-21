@@ -248,7 +248,7 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::colon"
 )]
-fn colon_builtin(
+async fn colon_builtin(
     start: Value,
     step_or_end: Value,
     rest: Vec<Value>,
@@ -259,10 +259,10 @@ fn colon_builtin(
         ));
     }
 
-    let start_scalar = parse_real_scalar("colon", start)?;
+    let start_scalar = parse_real_scalar("colon", start).await?;
 
     if rest.is_empty() {
-        let stop_scalar = parse_real_scalar("colon", step_or_end)?;
+        let stop_scalar = parse_real_scalar("colon", step_or_end).await?;
         let step = default_step(start_scalar.value, stop_scalar.value);
         let char_mode =
             start_scalar.origin == ScalarOrigin::Char && stop_scalar.origin == ScalarOrigin::Char;
@@ -279,11 +279,11 @@ fn colon_builtin(
             char_mode,
         )
     } else {
-        let step_scalar = parse_real_scalar("colon", step_or_end)?;
+        let step_scalar = parse_real_scalar("colon", step_or_end).await?;
         if step_scalar.value == 0.0 {
             return Err(builtin_error("colon: increment must be nonzero"));
         }
-        let stop_scalar = parse_real_scalar("colon", rest[0].clone())?;
+        let stop_scalar = parse_real_scalar("colon", rest[0].clone()).await?;
         let char_mode =
             start_scalar.origin == ScalarOrigin::Char && stop_scalar.origin == ScalarOrigin::Char;
         let explicit_gpu = if char_mode {
@@ -481,10 +481,10 @@ fn tolerance(start: f64, step: f64, stop: f64) -> f64 {
     tol.max(f64::EPSILON)
 }
 
-fn parse_real_scalar(name: &str, value: Value) -> crate::BuiltinResult<ParsedScalar> {
+async fn parse_real_scalar(name: &str, value: Value) -> crate::BuiltinResult<ParsedScalar> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             let scalar = tensor_scalar(name, &tensor)?;
             Ok(ParsedScalar {
                 value: scalar,
@@ -624,7 +624,16 @@ fn build_char_sequence(data: Vec<f64>) -> crate::BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{CharArray, Tensor};
+
+    fn colon_builtin(
+        start: Value,
+        stop: Value,
+        rest: Vec<Value>,
+    ) -> crate::BuiltinResult<Value> {
+        block_on(super::colon_builtin(start, stop, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

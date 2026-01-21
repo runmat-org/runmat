@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -238,8 +238,8 @@ fn remap_str2double_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     builtin_path = "crate::builtins::strings::core::str2double"
 )]
-fn str2double_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    let gathered = gather_if_needed(&value).map_err(remap_str2double_flow)?;
+async fn str2double_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    let gathered = gather_if_needed_async(&value).await.map_err(remap_str2double_flow)?;
     match gathered {
         Value::String(text) => Ok(Value::Num(parse_numeric_scalar(&text))),
         Value::StringArray(array) => str2double_string_array(array),
@@ -334,6 +334,10 @@ fn parse_numeric_scalar(text: &str) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+
+    fn str2double_builtin(value: Value) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::str2double_builtin(value))
+    }
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()

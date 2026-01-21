@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::{helpers::extract_scalar_string, registry};
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
@@ -284,8 +284,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::filetext::fread"
 )]
-fn fread_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(&fid, &rest)?;
+async fn fread_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(&fid, &rest).await?;
     Ok(eval.first_output())
 }
 
@@ -331,8 +331,8 @@ impl FreadEval {
     }
 }
 
-pub fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadEval> {
-    let fid_host = gather_value(fid_value)?;
+pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadEval> {
+    let fid_host = gather_value(fid_value).await?;
     let fid = map_string_result(parse_fid(&fid_host))?;
     if fid < 0 {
         return Err(fread_error("fread: file identifier must be non-negative"));
@@ -355,10 +355,22 @@ pub fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadEval> {
     let (size_arg, precision_arg, skip_arg, machine_arg, like_arg) =
         classify_arguments(&arg_refs).map_err(|e| fread_error(format!("fread: {e}")))?;
 
-    let size_host = size_arg.map(gather_value).transpose()?;
-    let precision_host = precision_arg.map(gather_value).transpose()?;
-    let skip_host = skip_arg.map(gather_value).transpose()?;
-    let machine_host = machine_arg.map(gather_value).transpose()?;
+    let size_host = match size_arg {
+        Some(value) => Some(gather_value(value).await?),
+        None => None,
+    };
+    let precision_host = match precision_arg {
+        Some(value) => Some(gather_value(value).await?),
+        None => None,
+    };
+    let skip_host = match skip_arg {
+        Some(value) => Some(gather_value(value).await?),
+        None => None,
+    };
+    let machine_host = match machine_arg {
+        Some(value) => Some(gather_value(value).await?),
+        None => None,
+    };
 
     let size_spec = map_string_result(parse_size(size_host.as_ref()))?;
     let precision = map_string_result(parse_precision(precision_host.as_ref()))?;
@@ -379,8 +391,10 @@ pub fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadEval> {
     Ok(eval)
 }
 
-fn gather_value(value: &Value) -> BuiltinResult<Value> {
-    gather_if_needed(value).map_err(map_control_flow)
+async fn gather_value(value: &Value) -> BuiltinResult<Value> {
+    gather_if_needed_async(value)
+        .await
+        .map_err(map_control_flow)
 }
 
 fn parse_fid(value: &Value) -> Result<i32, String> {
@@ -1307,23 +1321,41 @@ pub(crate) mod tests {
         err.message().to_string()
     }
 
+    fn run_evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadEval> {
+        futures::executor::block_on(evaluate(fid_value, rest))
+    }
+
+    fn run_fopen(args: &[Value]) -> BuiltinResult<fopen::FopenEval> {
+        futures::executor::block_on(fopen::evaluate(args))
+    }
+
+    fn run_fclose(args: &[Value]) -> BuiltinResult<fclose::FcloseEval> {
+        futures::executor::block_on(fclose::evaluate(args))
+    }
+
+    fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
+        registry::test_guard()
+    }
+
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_reads_default_double() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_default_double");
         let mut file = File::create(&path).expect("create");
         file.write_all(&1.5f64.to_le_bytes()).expect("write");
         drop(file);
 
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("rb"),
         ])
         .expect("fopen");
         let fid = open.as_open().unwrap().fid as i32;
 
-        let eval = evaluate(&Value::Num(fid as f64), &Vec::new()).expect("fread");
+        let eval = run_evaluate(&Value::Num(fid as f64), &Vec::new()).expect("fread");
         assert_eq!(eval.count(), 1);
         match eval.data() {
             Value::Tensor(t) => {
@@ -1333,20 +1365,21 @@ pub(crate) mod tests {
             other => panic!("unexpected result {other:?}"),
         }
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
         fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_uint8_vector_with_count() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_uint8_vector");
         let mut file = File::create(&path).expect("create");
         file.write_all(&[1u8, 2, 3, 4, 5]).expect("write");
         drop(file);
 
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("rb"),
         ])
@@ -1354,7 +1387,7 @@ pub(crate) mod tests {
         let fid = open.as_open().unwrap().fid as i32;
 
         let args = vec![Value::Num(4.0), Value::from("uint8")];
-        let eval = evaluate(&Value::Num(fid as f64), &args).expect("fread");
+        let eval = run_evaluate(&Value::Num(fid as f64), &args).expect("fread");
         assert_eq!(eval.count(), 4);
         match eval.data() {
             Value::Tensor(t) => {
@@ -1364,20 +1397,21 @@ pub(crate) mod tests {
             other => panic!("unexpected result {other:?}"),
         }
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
         fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_uint8_matrix_with_padding() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_uint8_matrix");
         let mut file = File::create(&path).expect("create");
         file.write_all(&[1u8, 2, 3, 4, 5]).expect("write");
         drop(file);
 
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("rb"),
         ])
@@ -1386,7 +1420,7 @@ pub(crate) mod tests {
 
         let size_tensor = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
         let args = vec![Value::Tensor(size_tensor), Value::from("uint8")];
-        let eval = evaluate(&Value::Num(fid as f64), &args).expect("fread");
+        let eval = run_evaluate(&Value::Num(fid as f64), &args).expect("fread");
         assert_eq!(eval.count(), 5);
         match eval.data() {
             Value::Tensor(t) => {
@@ -1396,27 +1430,29 @@ pub(crate) mod tests {
             other => panic!("unexpected result {other:?}"),
         }
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
         fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_char_output() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_char_output");
         let mut file = File::create(&path).expect("create");
         file.write_all(b"abc").expect("write");
         drop(file);
 
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("rb"),
         ])
         .expect("fopen");
         let fid = open.as_open().unwrap().fid as i32;
 
-        let eval = evaluate(&Value::Num(fid as f64), &[Value::from("*char")]).expect("fread");
+        let eval =
+            run_evaluate(&Value::Num(fid as f64), &[Value::from("*char")]).expect("fread");
         assert_eq!(eval.count(), 3);
         match eval.data() {
             Value::CharArray(ca) => {
@@ -1428,20 +1464,21 @@ pub(crate) mod tests {
             other => panic!("unexpected result {other:?}"),
         }
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
         fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_like_logical_output() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_like_logical_output");
         let mut file = File::create(&path).expect("create");
         file.write_all(&[0u8, 3, 0, 4]).expect("write");
         drop(file);
 
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("rb"),
         ])
@@ -1455,7 +1492,7 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::LogicalArray(prototype),
         ];
-        let eval = evaluate(&Value::Num(fid as f64), &args).expect("fread");
+        let eval = run_evaluate(&Value::Num(fid as f64), &args).expect("fread");
         assert_eq!(eval.count(), 2);
         match eval.data() {
             Value::LogicalArray(array) => {
@@ -1465,20 +1502,21 @@ pub(crate) mod tests {
             other => panic!("expected logical array, got {other:?}"),
         }
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
         fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_like_requires_prototype() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_like_requires_prototype");
         let mut file = File::create(&path).expect("create");
         file.write_all(&[1u8, 2, 3, 4]).expect("write");
         drop(file);
 
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("rb"),
         ])
@@ -1486,23 +1524,24 @@ pub(crate) mod tests {
         let fid = open.as_open().unwrap().fid as i32;
 
         let args = vec![Value::from("like")];
-        let err = unwrap_error_message(evaluate(&Value::Num(fid as f64), &args).unwrap_err());
+        let err = unwrap_error_message(run_evaluate(&Value::Num(fid as f64), &args).unwrap_err());
         assert!(err.contains("expected prototype after 'like'"));
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
         fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_like_char_requires_precision() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_like_char_requires_precision");
         let mut file = File::create(&path).expect("create");
         file.write_all(&[65u8]).expect("write");
         drop(file);
 
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("rb"),
         ])
@@ -1515,16 +1554,17 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::CharArray(CharArray::new_row("A")),
         ];
-        let err = unwrap_error_message(evaluate(&Value::Num(fid as f64), &args).unwrap_err());
+        let err = unwrap_error_message(run_evaluate(&Value::Num(fid as f64), &args).unwrap_err());
         assert!(err.contains("character prototypes require"));
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
         fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_like_gpu_provider_roundtrip() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_like_gpu_provider_roundtrip");
         let mut file = File::create(&path).expect("create");
@@ -1532,7 +1572,7 @@ pub(crate) mod tests {
         drop(file);
 
         test_support::with_test_provider(|provider| {
-            let open = fopen::evaluate(&[
+            let open = run_fopen(&[
                 Value::from(path.to_string_lossy().to_string()),
                 Value::from("rb"),
             ])
@@ -1552,7 +1592,7 @@ pub(crate) mod tests {
                 Value::from("like"),
                 Value::GpuTensor(handle),
             ];
-            let eval = evaluate(&Value::Num(fid as f64), &args).expect("fread");
+            let eval = run_evaluate(&Value::Num(fid as f64), &args).expect("fread");
             match eval.data() {
                 Value::GpuTensor(result) => {
                     let gathered =
@@ -1562,7 +1602,7 @@ pub(crate) mod tests {
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
 
-            fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+            run_fclose(&[Value::Num(fid as f64)]).unwrap();
         });
 
         fs::remove_file(path).unwrap();
@@ -1572,6 +1612,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn fread_wgpu_like_uploads_gpu() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_wgpu_like_uploads_gpu");
         let mut file = File::create(&path).expect("create");
@@ -1582,7 +1623,7 @@ pub(crate) mod tests {
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
 
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("rb"),
         ])
@@ -1590,7 +1631,8 @@ pub(crate) mod tests {
         let fid = open.as_open().unwrap().fid as i32;
 
         let proto = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
-        let gpu_proto = crate::call_builtin("gpuArray", &[Value::Tensor(proto)]).expect("gpuArray");
+        let gpu_proto =
+            run_call_builtin("gpuArray", &[Value::Tensor(proto)]).expect("gpuArray");
 
         let args = vec![
             Value::Num(1.0),
@@ -1598,7 +1640,7 @@ pub(crate) mod tests {
             Value::from("like"),
             gpu_proto,
         ];
-        let eval = evaluate(&Value::Num(fid as f64), &args).expect("fread");
+        let eval = run_evaluate(&Value::Num(fid as f64), &args).expect("fread");
         match eval.data() {
             Value::GpuTensor(handle) => {
                 let gathered =
@@ -1608,20 +1650,21 @@ pub(crate) mod tests {
             other => panic!("expected gpu tensor, got {other:?}"),
         }
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
         fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_skip_bytes() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_skip_bytes");
         let mut file = File::create(&path).expect("create");
         file.write_all(&[1u8, 2, 3, 4, 5, 6]).expect("write");
         drop(file);
 
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("rb"),
         ])
@@ -1629,7 +1672,7 @@ pub(crate) mod tests {
         let fid = open.as_open().unwrap().fid as i32;
 
         let args = vec![Value::Num(3.0), Value::from("uint8"), Value::Num(1.0)];
-        let eval = evaluate(&Value::Num(fid as f64), &args).expect("fread");
+        let eval = run_evaluate(&Value::Num(fid as f64), &args).expect("fread");
         assert_eq!(eval.count(), 3);
         match eval.data() {
             Value::Tensor(t) => {
@@ -1638,20 +1681,21 @@ pub(crate) mod tests {
             other => panic!("unexpected result {other:?}"),
         }
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
         fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_big_endian_machine_format() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_big_endian");
         let mut file = File::create(&path).expect("create");
         file.write_all(&[0x01, 0x02, 0x03, 0x04]).expect("write");
         drop(file);
 
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("rb"),
             Value::from("ieee-be"),
@@ -1660,7 +1704,7 @@ pub(crate) mod tests {
         let fid = open.as_open().unwrap().fid as i32;
 
         let args = vec![Value::Num(2.0), Value::from("uint16")];
-        let eval = evaluate(&Value::Num(fid as f64), &args).expect("fread");
+        let eval = run_evaluate(&Value::Num(fid as f64), &args).expect("fread");
         assert_eq!(eval.count(), 2);
         match eval.data() {
             Value::Tensor(t) => {
@@ -1670,15 +1714,16 @@ pub(crate) mod tests {
             other => panic!("unexpected result {other:?}"),
         }
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
         fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_invalid_fid_errors() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
-        let err = unwrap_error_message(evaluate(&Value::Num(9999.0), &Vec::new()).unwrap_err());
+        let err = unwrap_error_message(run_evaluate(&Value::Num(9999.0), &Vec::new()).unwrap_err());
         assert!(err.contains("Invalid file identifier"));
     }
 

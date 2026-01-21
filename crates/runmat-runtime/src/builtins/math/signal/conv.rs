@@ -261,13 +261,13 @@ fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     builtin_path = "crate::builtins::math::signal::conv"
 )]
-fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mode = parse_mode(&rest)?;
     if let Some(device_value) = try_conv_gpu(&a, &b, mode)? {
         return Ok(device_value);
     }
-    let lhs = normalize_input(a)?;
-    let rhs = normalize_input(b)?;
+    let lhs = normalize_input(a).await?;
+    let rhs = normalize_input(b).await?;
     let orientation = output_orientation(&lhs, &rhs);
 
     if lhs.len == 0 || rhs.len == 0 {
@@ -408,10 +408,11 @@ fn try_conv_gpu(a: &Value, b: &Value, mode: ConvMode) -> BuiltinResult<Option<Va
     }
 }
 
-fn normalize_input(value: Value) -> BuiltinResult<ConvInput> {
+async fn normalize_input(value: Value) -> BuiltinResult<ConvInput> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
                 .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
             convert_tensor(tensor)
         }
@@ -597,6 +598,7 @@ fn convert_output(data: Vec<Complex<f64>>, orientation: Orientation) -> BuiltinR
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
@@ -889,5 +891,9 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::conv_builtin(a, b, rest))
     }
 }

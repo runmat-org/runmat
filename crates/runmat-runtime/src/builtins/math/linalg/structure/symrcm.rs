@@ -247,7 +247,7 @@ fn runtime_error(name: &str, message: impl Into<String>) -> RuntimeError {
     accel = "graph",
     builtin_path = "crate::builtins::math::linalg::structure::symrcm"
 )]
-fn symrcm_builtin(matrix: Value) -> crate::BuiltinResult<Value> {
+async fn symrcm_builtin(matrix: Value) -> crate::BuiltinResult<Value> {
     match matrix {
         Value::ComplexTensor(ct) => {
             let ordering = symrcm_host_complex_tensor(&ct)?;
@@ -259,7 +259,7 @@ fn symrcm_builtin(matrix: Value) -> crate::BuiltinResult<Value> {
             let ordering = symrcm_host_complex_tensor(&tensor)?;
             Ok(permutation_to_value(&ordering)?)
         }
-        Value::GpuTensor(handle) => symrcm_gpu(handle),
+        Value::GpuTensor(handle) => symrcm_gpu(handle).await,
         other => {
             let tensor = value_into_tensor_for(BUILTIN_NAME, other)?;
             let ordering = symrcm_host_real_tensor(&tensor)?;
@@ -298,7 +298,7 @@ fn logical_to_tensor(name: &str, logical: &LogicalArray) -> BuiltinResult<Tensor
         .map_err(|e| runtime_error(name, format!("{name}: {e}")))
 }
 
-fn symrcm_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn symrcm_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         match provider.sym_rcm(&handle) {
             Ok(ordering) => return permutation_to_value(&ordering),
@@ -308,7 +308,7 @@ fn symrcm_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let ordering = symrcm_host_real_tensor(&tensor)?;
     permutation_to_value(&ordering)
 }
@@ -489,6 +489,7 @@ fn permutation_to_value(ordering: &[usize]) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::LogicalArray;
 
     fn tensor_from_entries(rows: usize, cols: usize, entries: &[(usize, usize, f64)]) -> Tensor {
@@ -747,5 +748,9 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn symrcm_builtin(matrix: Value) -> BuiltinResult<Value> {
+        block_on(super::symrcm_builtin(matrix))
     }
 }

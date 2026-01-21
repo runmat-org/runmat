@@ -226,7 +226,7 @@ fn ifftshift_error(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     builtin_path = "crate::builtins::math::fft::ifftshift"
 )]
-fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(ifftshift_error("ifftshift: too many input arguments"));
     }
@@ -266,7 +266,7 @@ fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
         }
         Value::GpuTensor(handle) => {
             let dims = compute_shift_dims(&handle.shape, dims_arg, BUILTIN_NAME)?;
-            Ok(ifftshift_gpu(handle, &dims)?)
+            Ok(ifftshift_gpu(handle, &dims).await?)
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => Err(
             ifftshift_error("ifftshift: expected numeric or logical input"),
@@ -314,7 +314,7 @@ fn ifftshift_logical(array: LogicalArray, dims: &[usize]) -> BuiltinResult<Logic
     LogicalArray::new(rotated, shape).map_err(|e| ifftshift_error(format!("ifftshift: {e}")))
 }
 
-fn ifftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<Value> {
+async fn ifftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<Value> {
     let plan = build_shift_plan(&handle.shape, dims, ShiftKind::Ifft);
     if plan.is_noop() {
         return Ok(Value::GpuTensor(handle));
@@ -325,7 +325,7 @@ fn ifftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<Value
         if plan.ext_shape != working.shape {
             match provider.reshape(&working, &plan.ext_shape) {
                 Ok(reshaped) => working = reshaped,
-                Err(_) => return ifftshift_gpu_fallback(handle, dims),
+                Err(_) => return ifftshift_gpu_fallback(handle, dims).await,
             }
         }
         if let Ok(mut out) = provider.circshift(&working, &plan.provider) {
@@ -343,11 +343,11 @@ fn ifftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<Value
         }
     }
 
-    ifftshift_gpu_fallback(handle, dims)
+    ifftshift_gpu_fallback(handle, dims).await
 }
 
-fn ifftshift_gpu_fallback(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<Value> {
-    let host_tensor = gpu_helpers::gather_tensor(&handle)?;
+async fn ifftshift_gpu_fallback(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<Value> {
+    let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let shifted = ifftshift_tensor(host_tensor, dims)?;
     if let Some(provider) = runmat_accelerate_api::provider() {
         let view = HostTensorView {
@@ -367,6 +367,7 @@ pub(crate) mod tests {
     use super::super::common::{apply_shift, build_shift_plan, ShiftKind};
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, Tensor};
 
     fn error_message(error: crate::RuntimeError) -> String {
@@ -609,5 +610,9 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor cpu result, got {other:?}"),
         }
+    }
+
+    fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::ifftshift_builtin(value, rest))
     }
 }

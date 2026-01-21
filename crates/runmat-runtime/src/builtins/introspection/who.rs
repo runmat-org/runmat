@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::io::mat::load::read_mat_file_for_builtin;
-use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -190,7 +190,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::introspection::who"
 )]
-fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         // Only install the WGPU provider if none is currently registered to avoid clobbering
@@ -203,9 +203,9 @@ fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
     let mut gathered = Vec::with_capacity(args.len());
     for arg in args {
-        gathered.push(gather_if_needed(&arg).map_err(who_flow)?);
+        gathered.push(gather_if_needed_async(&arg).await.map_err(who_flow)?);
     }
-    let request = parse_request(&gathered)?;
+    let request = parse_request(&gathered).await?;
 
     let mut entries = match &request.source {
         WhoSource::Workspace => crate::workspace::snapshot().unwrap_or_default(),
@@ -274,7 +274,7 @@ fn who_flow(mut err: RuntimeError) -> RuntimeError {
     err
 }
 
-fn parse_request(values: &[Value]) -> BuiltinResult<WhoRequest> {
+async fn parse_request(values: &[Value]) -> BuiltinResult<WhoRequest> {
     let mut idx = 0usize;
     let mut path_value: Option<Value> = None;
     let mut names: Vec<String> = Vec::new();
@@ -305,7 +305,7 @@ fn parse_request(values: &[Value]) -> BuiltinResult<WhoRequest> {
                         if option_token(&values[idx])?.is_some() {
                             break;
                         }
-                        let candidates = extract_name_list(&values[idx])?;
+                        let candidates = extract_name_list(&values[idx]).await?;
                         if candidates.is_empty() {
                             return Err(who_error(
                                 "who: '-regexp' requires non-empty pattern strings",
@@ -332,7 +332,7 @@ fn parse_request(values: &[Value]) -> BuiltinResult<WhoRequest> {
             }
         }
 
-        let extracted = extract_name_list(&values[idx])?;
+        let extracted = extract_name_list(&values[idx]).await?;
         if extracted.is_empty() {
             idx += 1;
             continue;
@@ -421,7 +421,8 @@ fn option_token(value: &Value) -> BuiltinResult<Option<String>> {
     Ok(None)
 }
 
-fn extract_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
+#[async_recursion::async_recursion(?Send)]
+async fn extract_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(s) => Ok(vec![s.clone()]),
         Value::CharArray(ca) => Ok(char_array_rows_as_strings(ca)),
@@ -434,7 +435,7 @@ fn extract_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
                     names.push(text);
                     continue;
                 }
-                let gathered = gather_if_needed(inner).map_err(who_flow)?;
+                let gathered = gather_if_needed_async(inner).await.map_err(who_flow)?;
                 if let Some(text) = value_to_string_scalar(&gathered) {
                     names.push(text);
                 } else {
@@ -446,8 +447,8 @@ fn extract_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
             Ok(names)
         }
         Value::GpuTensor(_) => {
-            let gathered = gather_if_needed(value).map_err(who_flow)?;
-            extract_name_list(&gathered)
+            let gathered = gather_if_needed_async(value).await.map_err(who_flow)?;
+            extract_name_list(&gathered).await
         }
         _ => Err(who_error(
             "who: selections must be character vectors, string scalars, string arrays, or cell arrays of those types",
@@ -485,9 +486,14 @@ pub(crate) mod tests {
     };
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::call_builtin;
+    use crate::call_builtin_async;
+    use futures::executor::block_on;
     use runmat_builtins::{CellArray, CharArray, StringArray, Tensor};
     use tempfile::tempdir;
+
+    fn who_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::who_builtin(args))
+    }
 
     fn names_from_value(value: Value) -> Vec<String> {
         match value {
@@ -772,14 +778,14 @@ pub(crate) mod tests {
         let dir = tempdir().expect("tempdir");
         let file_path = dir.path().join("snapshot.mat");
         let path_str = file_path.to_string_lossy().to_string();
-        call_builtin(
+        block_on(call_builtin_async(
             "save",
             &[
                 Value::from(path_str.clone()),
                 Value::from("alpha"),
                 Value::from("beta"),
             ],
-        )
+        ))
         .expect("save");
 
         shared_set_workspace(&[], &[]);
@@ -805,7 +811,7 @@ pub(crate) mod tests {
         let dir = tempdir().expect("tempdir");
         let stem_path = dir.path().join("snapshot_combo");
         let stem_str = stem_path.to_string_lossy().to_string();
-        call_builtin(
+        block_on(call_builtin_async(
             "save",
             &[
                 Value::from(stem_str.clone()),
@@ -813,7 +819,7 @@ pub(crate) mod tests {
                 Value::from("beta"),
                 Value::from("gamma"),
             ],
-        )
+        ))
         .expect("save");
 
         shared_set_workspace(&[], &[]);
@@ -838,7 +844,11 @@ pub(crate) mod tests {
         let dir = tempdir().expect("tempdir");
         let stem_path = dir.path().join("snapshot_no_ext");
         let stem_str = stem_path.to_string_lossy().to_string();
-        call_builtin("save", &[Value::from(stem_str.clone()), Value::from("v")]).expect("save");
+        block_on(call_builtin_async(
+            "save",
+            &[Value::from(stem_str.clone()), Value::from("v")],
+        ))
+        .expect("save");
 
         shared_set_workspace(&[], &[]);
         let value = who_builtin(vec![Value::from("-file"), Value::from(stem_str)]).expect("who");
@@ -852,7 +862,11 @@ pub(crate) mod tests {
         ensure_shared_resolver();
         test_support::with_test_provider(|_| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-            let gpu_value = crate::call_builtin("gpuArray", &[Value::Tensor(tensor)]).expect("gpu");
+            let gpu_value = block_on(crate::call_builtin_async(
+                "gpuArray",
+                &[Value::Tensor(tensor)],
+            ))
+            .expect("gpu");
             shared_set_workspace(
                 &[("gpuVar", gpu_value.clone()), ("hostVar", Value::Num(5.0))],
                 &[],
@@ -871,7 +885,11 @@ pub(crate) mod tests {
         ensure_shared_resolver();
         test_support::with_test_provider(|_| {
             shared_set_workspace(&[], &[]);
-            let gpu_scalar = crate::call_builtin("gpuArray", &[Value::Num(3.0)]).expect("gpu");
+            let gpu_scalar = block_on(crate::call_builtin_async(
+                "gpuArray",
+                &[Value::Num(3.0)],
+            ))
+            .expect("gpu");
             shared_set_workspace(&[("shared_gpu", gpu_scalar)], &["shared_gpu"]);
 
             let value = who_builtin(vec![Value::from("global")]).expect("who");
@@ -891,8 +909,11 @@ pub(crate) mod tests {
         )
         .expect("wgpu provider");
         let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
-        let gpu_value =
-            crate::call_builtin("gpuArray", &[Value::Tensor(tensor)]).expect("gpuArray");
+        let gpu_value = block_on(crate::call_builtin_async(
+            "gpuArray",
+            &[Value::Tensor(tensor)],
+        ))
+        .expect("gpuArray");
         shared_set_workspace(&[("wgpuVar", gpu_value)], &[]);
 
         let value = who_builtin(Vec::new()).expect("who");

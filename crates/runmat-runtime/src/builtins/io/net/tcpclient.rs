@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use std::io::{self, ErrorKind};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -204,13 +204,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "tcpclient,tcp,network,client",
     builtin_path = "crate::builtins::io::net::tcpclient"
 )]
-pub(crate) fn tcpclient_builtin(
+pub(crate) async fn tcpclient_builtin(
     host: Value,
     port: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let host = gather_if_needed(&host)?;
-    let port = gather_if_needed(&port)?;
+    let host = gather_if_needed_async(&host).await?;
+    let port = gather_if_needed_async(&port).await?;
 
     let host_text = string_scalar(&host, "tcpclient host").map_err(|err| {
         tcpclient_flow(
@@ -225,7 +225,7 @@ pub(crate) fn tcpclient_builtin(
         )
     })?;
 
-    let options = parse_name_value_pairs(rest)?;
+    let options = parse_name_value_pairs(rest).await?;
 
     let (stream, resolved_addr) =
         connect_with_timeout(&host_text, port_num, options.connect_timeout).map_err(|err| {
@@ -290,7 +290,7 @@ impl Default for TcpClientOptions {
     }
 }
 
-fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOptions> {
+async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOptions> {
     if rest.is_empty() {
         return Ok(TcpClientOptions::default());
     }
@@ -307,7 +307,7 @@ fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOptions> {
         let value_raw = iter
             .next()
             .expect("even-length vec ensures paired name/value");
-        let name_value = gather_if_needed(&name_raw)?;
+        let name_value = gather_if_needed_async(&name_raw).await?;
         let option_name = string_scalar(&name_value, "OptionName").map_err(|err| {
             tcpclient_flow(
                 MESSAGE_ID_INVALID_NAME_VALUE,
@@ -317,7 +317,7 @@ fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOptions> {
         let lower = option_name.to_ascii_lowercase();
         match lower.as_str() {
             "timeout" => {
-                let timeout_value = gather_if_needed(&value_raw)?;
+                let timeout_value = gather_if_needed_async(&value_raw).await?;
                 options.timeout = parse_timeout_value(&timeout_value).map_err(|err| {
                     tcpclient_flow(
                         MESSAGE_ID_INVALID_NAME_VALUE,
@@ -326,7 +326,7 @@ fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOptions> {
                 })?;
             }
             "connecttimeout" => {
-                let connect_value = gather_if_needed(&value_raw)?;
+                let connect_value = gather_if_needed_async(&value_raw).await?;
                 options.connect_timeout = parse_timeout_value(&connect_value).map_err(|err| {
                     tcpclient_flow(
                         MESSAGE_ID_INVALID_NAME_VALUE,
@@ -335,7 +335,7 @@ fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOptions> {
                 })?;
             }
             "byteorder" => {
-                let order_value = gather_if_needed(&value_raw)?;
+                let order_value = gather_if_needed_async(&value_raw).await?;
                 let raw_order = string_scalar(&order_value, "ByteOrder").map_err(|err| {
                     tcpclient_flow(
                         MESSAGE_ID_INVALID_NAME_VALUE,
@@ -352,7 +352,7 @@ fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOptions> {
             }
             "userdata" => options.user_data = value_raw,
             "name" => {
-                let name_value = gather_if_needed(&value_raw)?;
+                let name_value = gather_if_needed_async(&value_raw).await?;
                 let text = string_scalar(&name_value, "Name").map_err(|err| {
                     tcpclient_flow(
                         MESSAGE_ID_INVALID_NAME_VALUE,
@@ -362,11 +362,11 @@ fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOptions> {
                 options.name = Some(text);
             }
             "inputbuffersize" => {
-                let gathered = gather_if_needed(&value_raw)?;
+                let gathered = gather_if_needed_async(&value_raw).await?;
                 options.input_buffer_size = parse_buffer_size(&gathered, "InputBufferSize")?;
             }
             "outputbuffersize" => {
-                let gathered = gather_if_needed(&value_raw)?;
+                let gathered = gather_if_needed_async(&value_raw).await?;
                 options.output_buffer_size = parse_buffer_size(&gathered, "OutputBufferSize")?;
             }
             _ => {
@@ -570,6 +570,10 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), Some(expected));
     }
 
+    fn run_tcpclient(host: Value, port: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(tcpclient_builtin(host, port, rest))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpclient_connects_to_loopback_server() {
@@ -581,7 +585,7 @@ pub(crate) mod tests {
             thread::sleep(Duration::from_millis(20));
         });
 
-        let client = tcpclient_builtin(
+        let client = run_tcpclient(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(port as i32)),
             Vec::new(),
@@ -629,7 +633,7 @@ pub(crate) mod tests {
             Value::from("CustomClient"),
         ];
 
-        let client = tcpclient_builtin(
+        let client = run_tcpclient(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(port as i32)),
             args,
@@ -666,7 +670,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpclient_rejects_invalid_port() {
-        let err = tcpclient_builtin(
+        let err = run_tcpclient(
             Value::from("localhost"),
             Value::Int(IntValue::I32(70000)),
             Vec::new(),
@@ -679,7 +683,7 @@ pub(crate) mod tests {
     #[test]
     fn tcpclient_reports_connection_failure() {
         // Assume nothing listens on port 65000.
-        let err = tcpclient_builtin(
+        let err = run_tcpclient(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(65000)),
             vec![Value::from("ConnectTimeout"), Value::Num(0.05)],

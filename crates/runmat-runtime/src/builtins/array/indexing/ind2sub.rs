@@ -222,8 +222,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::array::indexing::ind2sub"
 )]
-fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinResult<Value> {
-    let (dims_value, dims_was_gpu) = materialize_value(dims_val, "ind2sub")?;
+async fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinResult<Value> {
+    let (dims_value, dims_was_gpu) = materialize_value(dims_val, "ind2sub").await?;
     let dims = parse_dims(&dims_value, "ind2sub")?;
     if dims.is_empty() {
         return Err(ind2sub_error("Size vector must have at least one element."));
@@ -236,7 +236,7 @@ fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinResult<
         return Ok(result);
     }
 
-    let (indices_value, indices_was_gpu) = materialize_value(indices_val, "ind2sub")?;
+    let (indices_value, indices_was_gpu) = materialize_value(indices_val, "ind2sub").await?;
     let indices_tensor = tensor::value_into_tensor_for("ind2sub", indices_value)
         .map_err(|message| ind2sub_error(message))?;
 
@@ -413,8 +413,13 @@ fn ind2sub_error(message: impl Into<String>) -> RuntimeError {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{Tensor, Value};
+
+    fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinResult<Value> {
+        block_on(super::ind2sub_builtin(dims_val, indices_val))
+    }
 
     fn cell_to_vec(cell: &runmat_builtins::CellArray) -> Vec<Value> {
         cell.data.iter().map(|ptr| (**ptr).clone()).collect()

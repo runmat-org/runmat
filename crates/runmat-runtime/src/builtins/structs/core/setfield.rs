@@ -9,7 +9,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, call_builtin, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, call_builtin_async, gather_if_needed_async, BuiltinResult, RuntimeError,
+};
 use runmat_builtins::{
     Access, CellArray, CharArray, ComplexTensor, HandleRef, LogicalArray, ObjectInstance,
     StructValue, Tensor, Value,
@@ -248,14 +250,14 @@ fn is_undefined_function(err: &RuntimeError) -> bool {
     keywords = "setfield,struct,assignment,object property",
     builtin_path = "crate::builtins::structs::core::setfield"
 )]
-fn setfield_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn setfield_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let parsed = parse_arguments(rest)?;
     let ParsedArguments {
         leading_index,
         steps,
         value,
     } = parsed;
-    assign_value(base, leading_index, steps, value)
+    assign_value(base, leading_index, steps, value).await
 }
 
 struct ParsedArguments {
@@ -328,7 +330,7 @@ fn parse_arguments(mut rest: Vec<Value>) -> BuiltinResult<ParsedArguments> {
     Ok(parsed)
 }
 
-fn assign_value(
+async fn assign_value(
     base: Value,
     leading_index: Option<IndexSelector>,
     steps: Vec<FieldStep>,
@@ -338,34 +340,34 @@ fn assign_value(
         return Err(setfield_flow("setfield: expected field name arguments"));
     }
     if let Some(selector) = leading_index {
-        assign_with_leading_index(base, &selector, &steps, rhs)
+        assign_with_leading_index(base, &selector, &steps, rhs).await
     } else {
-        assign_without_leading_index(base, &steps, rhs)
+        assign_without_leading_index(base, &steps, rhs).await
     }
 }
 
-fn assign_with_leading_index(
+async fn assign_with_leading_index(
     base: Value,
     selector: &IndexSelector,
     steps: &[FieldStep],
     rhs: Value,
 ) -> BuiltinResult<Value> {
     match base {
-        Value::Cell(cell) => assign_into_struct_array(cell, selector, steps, rhs),
+        Value::Cell(cell) => assign_into_struct_array(cell, selector, steps, rhs).await,
         other => Err(setfield_flow(format!(
             "setfield: leading indices require a struct array, got {other:?}"
         ))),
     }
 }
 
-fn assign_without_leading_index(
+async fn assign_without_leading_index(
     base: Value,
     steps: &[FieldStep],
     rhs: Value,
 ) -> BuiltinResult<Value> {
     match base {
-        Value::Struct(struct_value) => assign_into_struct(struct_value, steps, rhs),
-        Value::Object(object) => assign_into_object(object, steps, rhs),
+        Value::Struct(struct_value) => assign_into_struct(struct_value, steps, rhs).await,
+        Value::Object(object) => assign_into_object(object, steps, rhs).await,
         Value::Cell(cell) if is_struct_array(&cell) => {
             if cell.data.is_empty() {
                 Err(setfield_flow(
@@ -375,10 +377,10 @@ fn assign_without_leading_index(
                 let selector = IndexSelector {
                     components: vec![IndexComponent::Scalar(1)],
                 };
-                assign_into_struct_array(cell, &selector, steps, rhs)
+                assign_into_struct_array(cell, &selector, steps, rhs).await
             }
         }
-        Value::HandleObject(handle) => assign_into_handle(handle, steps, rhs),
+        Value::HandleObject(handle) => assign_into_handle(handle, steps, rhs).await,
         Value::Listener(_) => Err(setfield_flow(
             "setfield: listeners do not support direct field assignment",
         )),
@@ -389,7 +391,7 @@ fn assign_without_leading_index(
     }
 }
 
-fn assign_into_struct_array(
+async fn assign_into_struct_array(
     mut cell: CellArray,
     selector: &IndexSelector,
     steps: &[FieldStep],
@@ -433,20 +435,21 @@ fn assign_into_struct_array(
         .clone();
 
     let current = unsafe { &*handle.as_raw() }.clone();
-    let updated = assign_into_value(current, steps, rhs)?;
+    let updated = assign_into_value(current, steps, rhs).await?;
     cell.data[position] = allocate_cell_handle(updated)?;
     Ok(Value::Cell(cell))
 }
 
-fn assign_into_value(value: Value, steps: &[FieldStep], rhs: Value) -> BuiltinResult<Value> {
+#[async_recursion::async_recursion(?Send)]
+async fn assign_into_value(value: Value, steps: &[FieldStep], rhs: Value) -> BuiltinResult<Value> {
     if steps.is_empty() {
         return Ok(rhs);
     }
     match value {
-        Value::Struct(struct_value) => assign_into_struct(struct_value, steps, rhs),
-        Value::Object(object) => assign_into_object(object, steps, rhs),
-        Value::Cell(cell) => assign_into_cell(cell, steps, rhs),
-        Value::HandleObject(handle) => assign_into_handle(handle, steps, rhs),
+        Value::Struct(struct_value) => assign_into_struct(struct_value, steps, rhs).await,
+        Value::Object(object) => assign_into_object(object, steps, rhs).await,
+        Value::Cell(cell) => assign_into_cell(cell, steps, rhs).await,
+        Value::HandleObject(handle) => assign_into_handle(handle, steps, rhs).await,
         Value::Listener(_) => Err(setfield_flow(
             "setfield: listeners do not support nested field assignment",
         )),
@@ -456,7 +459,8 @@ fn assign_into_value(value: Value, steps: &[FieldStep], rhs: Value) -> BuiltinRe
     }
 }
 
-fn assign_into_struct(
+#[async_recursion::async_recursion(?Send)]
+async fn assign_into_struct(
     mut struct_value: StructValue,
     steps: &[FieldStep],
     rhs: Value,
@@ -472,7 +476,7 @@ fn assign_into_struct(
                 .get(&first.name)
                 .cloned()
                 .ok_or_else(|| format!("Reference to non-existent field '{}'.", first.name))?;
-            let updated = assign_with_selector(current, selector, &[], rhs)?;
+            let updated = assign_with_selector(current, selector, &[], rhs).await?;
             struct_value.fields.insert(first.name.clone(), updated);
         } else {
             struct_value.fields.insert(first.name.clone(), rhs);
@@ -486,7 +490,7 @@ fn assign_into_struct(
             .get(&first.name)
             .cloned()
             .ok_or_else(|| format!("Reference to non-existent field '{}'.", first.name))?;
-        let updated = assign_with_selector(current, selector, rest, rhs)?;
+        let updated = assign_with_selector(current, selector, rest, rhs).await?;
         struct_value.fields.insert(first.name.clone(), updated);
         return Ok(Value::Struct(struct_value));
     }
@@ -496,12 +500,12 @@ fn assign_into_struct(
         .get(&first.name)
         .cloned()
         .unwrap_or_else(|| Value::Struct(StructValue::new()));
-    let updated = assign_into_value(current, rest, rhs)?;
+    let updated = assign_into_value(current, rest, rhs).await?;
     struct_value.fields.insert(first.name.clone(), updated);
     Ok(Value::Struct(struct_value))
 }
 
-fn assign_into_object(
+async fn assign_into_object(
     mut object: ObjectInstance,
     steps: &[FieldStep],
     rhs: Value,
@@ -517,17 +521,17 @@ fn assign_into_object(
     }
 
     if rest.is_empty() {
-        write_object_property(&mut object, &first.name, rhs)?;
+        write_object_property(&mut object, &first.name, rhs).await?;
         return Ok(Value::Object(object));
     }
 
-    let current = read_object_property(&object, &first.name)?;
-    let updated = assign_into_value(current, rest, rhs)?;
-    write_object_property(&mut object, &first.name, updated)?;
+    let current = read_object_property(&object, &first.name).await?;
+    let updated = assign_into_value(current, rest, rhs).await?;
+    write_object_property(&mut object, &first.name, updated).await?;
     Ok(Value::Object(object))
 }
 
-fn assign_into_cell(cell: CellArray, steps: &[FieldStep], rhs: Value) -> BuiltinResult<Value> {
+async fn assign_into_cell(cell: CellArray, steps: &[FieldStep], rhs: Value) -> BuiltinResult<Value> {
     let (first, rest) = steps
         .split_first()
         .expect("steps is non-empty when assign_into_cell is called");
@@ -536,20 +540,22 @@ fn assign_into_cell(cell: CellArray, steps: &[FieldStep], rhs: Value) -> Builtin
         setfield_flow("setfield: cell array assignments require indices in a cell array")
     })?;
     if rest.is_empty() {
-        assign_with_selector(Value::Cell(cell), selector, &[], rhs)
+        assign_with_selector(Value::Cell(cell), selector, &[], rhs).await
     } else {
-        assign_with_selector(Value::Cell(cell), selector, rest, rhs)
+        assign_with_selector(Value::Cell(cell), selector, rest, rhs).await
     }
 }
 
-fn assign_with_selector(
+#[async_recursion::async_recursion(?Send)]
+async fn assign_with_selector(
     value: Value,
     selector: &IndexSelector,
     rest: &[FieldStep],
     rhs: Value,
 ) -> BuiltinResult<Value> {
-    let host_value =
-        gather_if_needed(&value).map_err(|flow| remap_setfield_flow(flow, Some("setfield: ")))?;
+    let host_value = gather_if_needed_async(&value)
+        .await
+        .map_err(|flow| remap_setfield_flow(flow, Some("setfield: ")))?;
     match host_value {
         Value::Cell(mut cell) => {
             let resolved = resolve_indices(&Value::Cell(cell.clone()), selector)?;
@@ -585,7 +591,7 @@ fn assign_with_selector(
             let new_value = if rest.is_empty() {
                 rhs
             } else {
-                assign_into_value(existing, rest, rhs)?
+                assign_into_value(existing, rest, rhs).await?
             };
             cell.data[position] = allocate_cell_handle(new_value)?;
             Ok(Value::Cell(cell))
@@ -839,7 +845,7 @@ fn assign_complex_tensor_element(
     }
 }
 
-fn read_object_property(obj: &ObjectInstance, name: &str) -> BuiltinResult<Value> {
+async fn read_object_property(obj: &ObjectInstance, name: &str) -> BuiltinResult<Value> {
     if let Some((prop, _owner)) = runmat_builtins::lookup_property(&obj.class_name, name) {
         if prop.is_static {
             return Err(setfield_flow(format!(
@@ -855,7 +861,7 @@ fn read_object_property(obj: &ObjectInstance, name: &str) -> BuiltinResult<Value
         }
         if prop.is_dependent {
             let getter = format!("get.{name}");
-            match call_builtin(&getter, &[Value::Object(obj.clone())]) {
+            match call_builtin_async(&getter, &[Value::Object(obj.clone())]).await {
                 Ok(value) => return Ok(value),
                 Err(err) => {
                     if !is_undefined_function(&err) {
@@ -892,7 +898,11 @@ fn read_object_property(obj: &ObjectInstance, name: &str) -> BuiltinResult<Value
     )))
 }
 
-fn write_object_property(obj: &mut ObjectInstance, name: &str, rhs: Value) -> BuiltinResult<()> {
+async fn write_object_property(
+    obj: &mut ObjectInstance,
+    name: &str,
+    rhs: Value,
+) -> BuiltinResult<()> {
     if let Some((prop, _owner)) = runmat_builtins::lookup_property(&obj.class_name, name) {
         if prop.is_static {
             return Err(setfield_flow(format!(
@@ -905,7 +915,7 @@ fn write_object_property(obj: &mut ObjectInstance, name: &str, rhs: Value) -> Bu
         }
         if prop.is_dependent {
             let setter = format!("set.{name}");
-            match call_builtin(&setter, &[Value::Object(obj.clone()), rhs.clone()]) {
+            match call_builtin_async(&setter, &[Value::Object(obj.clone()), rhs.clone()]).await {
                 Ok(value) => {
                     if let Value::Object(updated) = value {
                         *obj = updated;
@@ -931,7 +941,11 @@ fn write_object_property(obj: &mut ObjectInstance, name: &str, rhs: Value) -> Bu
     Ok(())
 }
 
-fn assign_into_handle(handle: HandleRef, steps: &[FieldStep], rhs: Value) -> BuiltinResult<Value> {
+async fn assign_into_handle(
+    handle: HandleRef,
+    steps: &[FieldStep],
+    rhs: Value,
+) -> BuiltinResult<Value> {
     if steps.is_empty() {
         return Err(setfield_flow(
             "setfield: expected at least one field name when assigning into a handle",
@@ -944,7 +958,7 @@ fn assign_into_handle(handle: HandleRef, steps: &[FieldStep], rhs: Value) -> Bui
         )));
     }
     let current = unsafe { &*handle.target.as_raw() }.clone();
-    let updated = assign_into_value(current, steps, rhs)?;
+    let updated = assign_into_value(current, steps, rhs).await?;
     let raw = unsafe { handle.target.as_raw_mut() };
     if raw.is_null() {
         return Err(setfield_flow("setfield: handle target is null"));
@@ -1333,11 +1347,15 @@ pub(crate) mod tests {
         err.message().to_string()
     }
 
+    fn run_setfield(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(setfield_builtin(base, rest))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_creates_scalar_field() {
         let struct_value = StructValue::new();
-        let updated = setfield_builtin(
+        let updated = run_setfield(
             Value::Struct(struct_value),
             vec![Value::from("answer"), Value::Num(42.0)],
         )
@@ -1358,7 +1376,7 @@ pub(crate) mod tests {
     #[test]
     fn setfield_creates_nested_structs() {
         let struct_value = StructValue::new();
-        let updated = setfield_builtin(
+        let updated = run_setfield(
             Value::Struct(struct_value),
             vec![
                 Value::from("solver"),
@@ -1398,7 +1416,7 @@ pub(crate) mod tests {
             .unwrap();
         let indices =
             CellArray::new_with_shape(vec![Value::Int(IntValue::I32(2))], vec![1, 1]).unwrap();
-        let updated = setfield_builtin(
+        let updated = run_setfield(
             Value::Cell(array),
             vec![
                 Value::Cell(indices),
@@ -1438,7 +1456,7 @@ pub(crate) mod tests {
 
         let index_cell =
             CellArray::new_with_shape(vec![Value::Int(IntValue::I32(2))], vec![1, 1]).unwrap();
-        let updated = setfield_builtin(
+        let updated = run_setfield(
             Value::Struct(root),
             vec![
                 Value::from("samples"),
@@ -1486,7 +1504,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let index_cell = CellArray::new_with_shape(vec![Value::from("end")], vec![1, 1]).unwrap();
-        let updated = setfield_builtin(
+        let updated = run_setfield(
             Value::Cell(array),
             vec![
                 Value::Cell(index_cell),
@@ -1534,7 +1552,7 @@ pub(crate) mod tests {
         let mut obj = ObjectInstance::new("Simple".to_string());
         obj.properties.insert("x".to_string(), Value::Num(0.0));
 
-        let updated = setfield_builtin(Value::Object(obj), vec![Value::from("x"), Value::Num(5.0)])
+        let updated = run_setfield(Value::Object(obj), vec![Value::from("x"), Value::Num(5.0)])
             .expect("setfield");
 
         match updated {
@@ -1552,7 +1570,7 @@ pub(crate) mod tests {
         let index_cell =
             CellArray::new_with_shape(vec![Value::Int(IntValue::I32(1))], vec![1, 1]).unwrap();
         let err = error_message(
-            setfield_builtin(
+            run_setfield(
                 Value::Struct(struct_value),
                 vec![
                     Value::from("missing"),
@@ -1592,7 +1610,7 @@ pub(crate) mod tests {
 
         let obj = ObjectInstance::new("StaticSetfield".to_string());
         let err = error_message(
-            setfield_builtin(
+            run_setfield(
                 Value::Object(obj),
                 vec![Value::from("version"), Value::Num(2.0)],
             )
@@ -1617,7 +1635,7 @@ pub(crate) mod tests {
             valid: true,
         };
 
-        let updated = setfield_builtin(
+        let updated = run_setfield(
             Value::HandleObject(handle.clone()),
             vec![Value::from("x"), Value::Num(7.0)],
         )
@@ -1671,7 +1689,7 @@ pub(crate) mod tests {
         )
         .unwrap();
 
-        let updated = setfield_builtin(
+        let updated = run_setfield(
             Value::Struct(root),
             vec![
                 Value::from("values"),

@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::strings::core::string::{
     extract_format_spec, format_from_spec, FormatSpecData,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -218,8 +218,16 @@ fn compose_flow(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("compose").build()
 }
 
-fn remap_compose_flow(err: RuntimeError) -> RuntimeError {
-    map_control_flow_with_builtin(err, "compose")
+fn remap_compose_flow(mut err: RuntimeError) -> RuntimeError {
+    err = map_control_flow_with_builtin(err, "compose");
+    if let Some(message) = err.message.strip_prefix("string: ") {
+        err.message = format!("compose: {message}");
+        return err;
+    }
+    if !err.message.starts_with("compose: ") {
+        err.message = format!("compose: {}", err.message);
+    }
+    err
 }
 
 #[runtime_builtin(
@@ -230,21 +238,29 @@ fn remap_compose_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     builtin_path = "crate::builtins::strings::core::compose"
 )]
-fn compose_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let format_value = gather_if_needed(&format_spec).map_err(remap_compose_flow)?;
+async fn compose_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let format_value = gather_if_needed_async(&format_spec)
+        .await
+        .map_err(remap_compose_flow)?;
     let mut gathered_args = Vec::with_capacity(rest.len());
     for arg in rest {
-        let gathered = gather_if_needed(&arg).map_err(remap_compose_flow)?;
+        let gathered = gather_if_needed_async(&arg)
+            .await
+            .map_err(remap_compose_flow)?;
         gathered_args.push(gathered);
     }
 
     if gathered_args.is_empty() {
-        let spec = extract_format_spec(format_value).map_err(remap_compose_flow)?;
+        let spec = extract_format_spec(format_value)
+            .await
+            .map_err(remap_compose_flow)?;
         let array = format_spec_data_to_string_array(spec)?;
         return Ok(Value::StringArray(array));
     }
 
-    let formatted = format_from_spec(format_value, gathered_args).map_err(remap_compose_flow)?;
+    let formatted = format_from_spec(format_value, gathered_args)
+        .await
+        .map_err(remap_compose_flow)?;
     Ok(Value::StringArray(formatted))
 }
 
@@ -266,6 +282,10 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
+
+    fn compose_builtin(format_spec: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::compose_builtin(format_spec, rest))
+    }
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()

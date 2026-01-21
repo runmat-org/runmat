@@ -383,17 +383,17 @@ enum NormParse {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::std"
 )]
-fn std_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn std_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let input_meta = InputMeta::from_value(&value);
     let parsed = parse_arguments(&rest)?;
     let raw = match value {
-        Value::GpuTensor(handle) => std_gpu(handle, &parsed)?,
+        Value::GpuTensor(handle) => std_gpu(handle, &parsed).await?,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             return Err(std_error("std: complex inputs are not supported yet"));
         }
         other => std_host(other, &parsed)?,
     };
-    apply_output_template(raw, &parsed.output, &input_meta)
+    apply_output_template(raw, &parsed.output, &input_meta).await
 }
 
 fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
@@ -854,7 +854,7 @@ fn multi_to_linear(coords: &[usize], shape: &[usize]) -> usize {
     index
 }
 
-fn std_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
+async fn std_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -868,7 +868,7 @@ fn std_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Val
             return Ok(Value::GpuTensor(device_value));
         }
     }
-    std_gpu_fallback(&handle, args)
+    std_gpu_fallback(&handle, args).await
 }
 
 fn std_gpu_reduce(
@@ -933,8 +933,11 @@ fn reduce_std_dim_gpu(
         .ok()
 }
 
-fn std_gpu_fallback(handle: &GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor(handle)?;
+async fn std_gpu_fallback(
+    handle: &GpuTensorHandle,
+    args: &ParsedArguments,
+) -> BuiltinResult<Value> {
+    let tensor = gpu_helpers::gather_tensor_async(handle).await?;
     let reduced = std_tensor(tensor, &args.axes, args.normalization, args.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
@@ -950,7 +953,7 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
         .unwrap_or(1)
 }
 
-fn apply_output_template(
+async fn apply_output_template(
     value: Value,
     template: &OutputTemplate,
     meta: &InputMeta,
@@ -958,14 +961,14 @@ fn apply_output_template(
     match template {
         OutputTemplate::Double => Ok(value),
         OutputTemplate::Native => {
-            let value = apply_native_template(value, meta)?;
-            ensure_device(value, meta.device)
+            let value = apply_native_template(value, meta).await?;
+            ensure_device(value, meta.device).await
         }
-        OutputTemplate::Like(proto) => apply_like_template(value, proto),
+        OutputTemplate::Like(proto) => apply_like_template(value, proto).await,
     }
 }
 
-fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
+async fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
     match meta.class {
         InputClass::Integer(class) => match value {
             Value::Num(n) => class.to_value(n),
@@ -974,7 +977,7 @@ fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value>
         },
         _ => {
             if let Some(dtype) = meta.numeric_dtype {
-                coerce_value_to_dtype(value, dtype)
+                coerce_value_to_dtype(value, dtype).await
             } else {
                 Ok(value)
             }
@@ -982,7 +985,7 @@ fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value>
     }
 }
 
-fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Value> {
+async fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Value> {
     match dtype {
         NumericDType::F64 => Ok(value),
         NumericDType::F32 => match value {
@@ -1002,7 +1005,7 @@ fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Val
                 Ok(Value::Tensor(tensor))
             }
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                 let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
                 Ok(Value::Tensor(tensor))
             }
@@ -1026,11 +1029,11 @@ fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
     tensor
 }
 
-fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value> {
+async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value> {
     match device {
         DevicePreference::Host => match value {
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                 Ok(tensor::tensor_into_value(tensor))
             }
             _ => Ok(value),
@@ -1070,15 +1073,15 @@ fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     Ok(Value::GpuTensor(handle))
 }
 
-fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
-    let analysed = analyse_like_prototype(prototype)?;
+async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
+    let analysed = analyse_like_prototype(prototype).await?;
     match analysed.class {
         PrototypeClass::Real => match analysed.device {
-            DevicePreference::Host => ensure_device(value, DevicePreference::Host),
-            DevicePreference::Gpu => ensure_device(value, DevicePreference::Gpu),
+            DevicePreference::Host => ensure_device(value, DevicePreference::Host).await,
+            DevicePreference::Gpu => ensure_device(value, DevicePreference::Gpu).await,
         },
         PrototypeClass::Complex => {
-            let host_value = ensure_device(value, DevicePreference::Host)?;
+            let host_value = ensure_device(value, DevicePreference::Host).await?;
             real_to_complex(host_value)
         }
     }
@@ -1114,7 +1117,8 @@ enum PrototypeClass {
     Complex,
 }
 
-fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
+#[async_recursion::async_recursion(?Send)]
+async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
     match proto {
         Value::GpuTensor(_) => Ok(LikeAnalysis {
             device: DevicePreference::Gpu,
@@ -1133,9 +1137,10 @@ fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
             class: PrototypeClass::Complex,
         }),
         other => {
-            let gathered =
-                dispatcher::gather_if_needed(other).map_err(|e| std_error(format!("std: {e}")))?;
-            analyse_like_prototype(&gathered)
+            let gathered = dispatcher::gather_if_needed_async(other)
+                .await
+                .map_err(|e| std_error(format!("std: {e}")))?;
+            analyse_like_prototype(&gathered).await
         }
     }
 }
@@ -1144,9 +1149,14 @@ fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};
     use std::f64::consts::{FRAC_1_SQRT_2, SQRT_2};
+
+    fn std_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::std_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1413,7 +1423,7 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let gpu_value = std_gpu(handle.clone(), &args).expect("gpu std");
+        let gpu_value = block_on(std_gpu(handle.clone(), &args)).expect("gpu std");
         let gpu_tensor = test_support::gather(gpu_value).expect("gather gpu");
         provider.free(&handle).ok();
 

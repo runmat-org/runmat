@@ -223,10 +223,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::cos"
 )]
-fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
     let base = match value {
-        Value::GpuTensor(handle) => cos_gpu(handle)?,
+        Value::GpuTensor(handle) => cos_gpu(handle).await?,
         Value::Complex(re, im) => Value::Complex(cos_complex_re(re, im), cos_complex_im(re, im)),
         Value::ComplexTensor(ct) => cos_complex_tensor(ct)?,
         Value::CharArray(ca) => cos_char_array(ca)?,
@@ -235,16 +235,16 @@ fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         }
         other => cos_real(other)?,
     };
-    apply_output_template(base, &template)
+    apply_output_template(base, &template).await
 }
 
-fn cos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn cos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_cos(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     cos_tensor(tensor).map(tensor::tensor_into_value)
 }
 
@@ -319,7 +319,7 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     }
 }
 
-fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
+async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
     match template {
         OutputTemplate::Default => Ok(value),
         OutputTemplate::Like(proto) => match proto {
@@ -328,7 +328,7 @@ fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResu
             | Value::Num(_)
             | Value::Int(_)
             | Value::Bool(_)
-            | Value::LogicalArray(_) => convert_to_host_like(value),
+            | Value::LogicalArray(_) => convert_to_host_like(value).await,
             Value::Complex(_, _) | Value::ComplexTensor(_) => Err(runtime_error_for(
                 "cos: complex prototypes for 'like' are not supported yet",
             )),
@@ -377,11 +377,11 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
+async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             let proxy = Value::GpuTensor(handle);
-            gpu_helpers::gather_value(&proxy)
+            gpu_helpers::gather_value_async(&proxy).await
         }
         other => Ok(other),
     }
@@ -390,10 +390,15 @@ fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, StringArray, Tensor};
 
     use crate::builtins::common::test_support;
+
+    fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::cos_builtin(value, rest))
+    }
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
@@ -653,7 +658,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = cos_gpu(h).unwrap();
+        let gpu = block_on(cos_gpu(h)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {

@@ -243,22 +243,22 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     accel = "binary",
     builtin_path = "crate::builtins::math::rounding::rem"
 )]
-fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+async fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     match (lhs, rhs) {
-        (Value::GpuTensor(a), Value::GpuTensor(b)) => rem_gpu_pair(a, b),
+        (Value::GpuTensor(a), Value::GpuTensor(b)) => rem_gpu_pair(a, b).await,
         (Value::GpuTensor(a), other) => {
-            let gathered = gpu_helpers::gather_tensor(&a)?;
+            let gathered = gpu_helpers::gather_tensor_async(&a).await?;
             rem_host(Value::Tensor(gathered), other)
         }
         (other, Value::GpuTensor(b)) => {
-            let gathered = gpu_helpers::gather_tensor(&b)?;
+            let gathered = gpu_helpers::gather_tensor_async(&b).await?;
             rem_host(other, Value::Tensor(gathered))
         }
         (left, right) => rem_host(left, right),
     }
 }
 
-fn rem_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn rem_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<Value> {
     if a.device_id == b.device_id {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&a) {
             if a.shape == b.shape {
@@ -291,8 +291,8 @@ fn rem_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<Value> 
             }
         }
     }
-    let left = gpu_helpers::gather_tensor(&a)?;
-    let right = gpu_helpers::gather_tensor(&b)?;
+    let left = gpu_helpers::gather_tensor_async(&a).await?;
+    let right = gpu_helpers::gather_tensor_async(&b).await?;
     rem_host(Value::Tensor(left), Value::Tensor(right))
 }
 
@@ -476,7 +476,12 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::RuntimeError;
+    use futures::executor::block_on;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor};
+
+    fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+        block_on(super::rem_builtin(lhs, rhs))
+    }
 
     fn assert_error_contains(error: RuntimeError, needle: &str) {
         assert!(
@@ -701,7 +706,7 @@ pub(crate) mod tests {
             })
             .expect("upload denom");
 
-        let gpu_value = rem_gpu_pair(numer_handle, denom_handle).expect("gpu rem");
+        let gpu_value = block_on(rem_gpu_pair(numer_handle, denom_handle)).expect("gpu rem");
         let gpu_tensor = test_support::gather(gpu_value).expect("gather gpu result");
 
         let cpu_tensor = match cpu_value {

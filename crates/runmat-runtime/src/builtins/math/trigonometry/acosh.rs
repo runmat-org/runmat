@@ -261,9 +261,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::acosh"
 )]
-fn acosh_builtin(value: Value) -> BuiltinResult<Value> {
+async fn acosh_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => acosh_gpu(handle),
+        Value::GpuTensor(handle) => acosh_gpu(handle).await,
         Value::Complex(re, im) => Ok(acosh_complex_scalar(re, im)),
         Value::ComplexTensor(ct) => acosh_complex_tensor(ct),
         Value::CharArray(ca) => acosh_char_array(ca),
@@ -274,7 +274,7 @@ fn acosh_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn acosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn acosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match detect_gpu_requires_complex(provider, &handle) {
             Ok(false) => {
@@ -283,7 +283,7 @@ fn acosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 }
             }
             Ok(true) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                 return acosh_tensor_real(tensor);
             }
             Err(_) => {
@@ -291,7 +291,7 @@ fn acosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     acosh_tensor_real(tensor)
 }
 
@@ -425,8 +425,13 @@ fn zero_small(value: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use num_complex::Complex64;
     use runmat_builtins::{IntValue, LogicalArray};
+
+    fn acosh_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::acosh_builtin(value))
+    }
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
@@ -708,7 +713,7 @@ pub(crate) mod tests {
             .expect("provider")
             .upload(&view)
             .expect("upload");
-        let gpu = acosh_gpu(handle).unwrap();
+        let gpu = block_on(acosh_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
             Value::Tensor(ct) => {

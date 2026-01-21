@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::{
-    build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeError,
+    build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
 
 #[cfg_attr(
@@ -232,9 +232,9 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::erase"
 )]
-fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
-    let text = gather_if_needed(&text).map_err(map_flow)?;
-    let pattern = gather_if_needed(&pattern).map_err(map_flow)?;
+async fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
+    let text = gather_if_needed_async(&text).await.map_err(map_flow)?;
+    let pattern = gather_if_needed_async(&pattern).await.map_err(map_flow)?;
 
     let patterns = PatternList::from_value(&pattern)?;
 
@@ -395,6 +395,10 @@ fn erase_cell_element(value: &Value, patterns: &PatternList) -> BuiltinResult<Va
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+
+    fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::erase_builtin(text, pattern))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

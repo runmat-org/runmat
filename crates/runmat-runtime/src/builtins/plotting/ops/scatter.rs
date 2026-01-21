@@ -1,5 +1,6 @@
 //! MATLAB-compatible `scatter` builtin.
 
+use futures::executor::block_on;
 use glam::{Vec3, Vec4};
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
@@ -20,7 +21,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::gather_if_needed_async;
 use std::convert::TryFrom;
 
 use super::common::numeric_pair;
@@ -133,7 +134,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::scatter"
 )]
-pub fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
+pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter())?;
     let mut x_input = Some(ScatterInput::from_value(x)?);
     let mut y_input = Some(ScatterInput::from_value(y)?);
@@ -437,11 +438,19 @@ impl ScatterInput {
     }
 }
 
-fn gather_tensor_from_gpu(handle: GpuTensorHandle, name: &'static str) -> BuiltinResult<Tensor> {
+async fn gather_tensor_from_gpu_async(
+    handle: GpuTensorHandle,
+    name: &'static str,
+) -> BuiltinResult<Tensor> {
     let value = Value::GpuTensor(handle);
-    let gathered =
-        gather_if_needed(&value).map_err(|flow| map_control_flow_with_builtin(flow, name))?;
+    let gathered = gather_if_needed_async(&value)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, name))?;
     Tensor::try_from(&gathered).map_err(|e| scatter_err(format!("{name}: {e}")))
+}
+
+fn gather_tensor_from_gpu(handle: GpuTensorHandle, name: &'static str) -> BuiltinResult<Tensor> {
+    block_on(gather_tensor_from_gpu_async(handle, name))
 }
 
 fn build_scatter_gpu_plot(
@@ -649,10 +658,15 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
     use crate::RuntimeError;
+    use futures::executor::block_on;
     use runmat_builtins::Value;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
+    }
+
+    fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<String> {
+        block_on(super::scatter_builtin(x, y, rest))
     }
 
     fn test_style() -> ScatterResolvedStyle {

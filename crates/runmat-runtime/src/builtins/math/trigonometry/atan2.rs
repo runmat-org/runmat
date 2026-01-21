@@ -233,22 +233,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "binary",
     builtin_path = "crate::builtins::math::trigonometry::atan2"
 )]
-fn atan2_builtin(y: Value, x: Value) -> BuiltinResult<Value> {
+async fn atan2_builtin(y: Value, x: Value) -> BuiltinResult<Value> {
     match (y, x) {
-        (Value::GpuTensor(yh), Value::GpuTensor(xh)) => atan2_gpu_pair(yh, xh),
+        (Value::GpuTensor(yh), Value::GpuTensor(xh)) => atan2_gpu_pair(yh, xh).await,
         (Value::GpuTensor(yh), other) => {
-            let gathered = gpu_helpers::gather_tensor(&yh)?;
+            let gathered = gpu_helpers::gather_tensor_async(&yh).await?;
             atan2_host(Value::Tensor(gathered), other)
         }
         (other, Value::GpuTensor(xh)) => {
-            let gathered = gpu_helpers::gather_tensor(&xh)?;
+            let gathered = gpu_helpers::gather_tensor_async(&xh).await?;
             atan2_host(other, Value::Tensor(gathered))
         }
         (lhs, rhs) => atan2_host(lhs, rhs),
     }
 }
 
-fn atan2_gpu_pair(y: GpuTensorHandle, x: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn atan2_gpu_pair(y: GpuTensorHandle, x: GpuTensorHandle) -> BuiltinResult<Value> {
     if y.device_id == x.device_id {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&y) {
             if y.shape == x.shape {
@@ -258,8 +258,8 @@ fn atan2_gpu_pair(y: GpuTensorHandle, x: GpuTensorHandle) -> BuiltinResult<Value
             }
         }
     }
-    let host_y = gpu_helpers::gather_tensor(&y)?;
-    let host_x = gpu_helpers::gather_tensor(&x)?;
+    let host_y = gpu_helpers::gather_tensor_async(&y).await?;
+    let host_x = gpu_helpers::gather_tensor_async(&x).await?;
     atan2_host(Value::Tensor(host_y), Value::Tensor(host_x))
 }
 
@@ -306,10 +306,15 @@ fn value_into_atan2_tensor(value: Value) -> BuiltinResult<Tensor> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
     use std::f64::consts::PI;
 
     const EPS: f64 = 1e-12;
+
+    fn atan2_builtin(y: Value, x: Value) -> BuiltinResult<Value> {
+        block_on(super::atan2_builtin(y, x))
+    }
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
@@ -576,7 +581,7 @@ pub(crate) mod tests {
                 shape: &x.shape,
             })
             .unwrap();
-        let gpu = atan2_gpu_pair(hy, hx).unwrap();
+        let gpu = block_on(atan2_gpu_pair(hy, hx)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
             Value::Tensor(ct) => {

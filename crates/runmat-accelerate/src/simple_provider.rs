@@ -62,6 +62,16 @@ fn runtime_flow_to_anyhow(_context: &str, err: RuntimeError) -> anyhow::Error {
     anyhow::Error::new(err)
 }
 
+#[cfg(feature = "wgpu")]
+fn block_on_runtime<F: std::future::Future>(future: F) -> F::Output {
+    pollster::block_on(future)
+}
+
+#[cfg(not(feature = "wgpu"))]
+fn block_on_runtime<F: std::future::Future>(future: F) -> F::Output {
+    futures::executor::block_on(future)
+}
+
 #[derive(Clone, Copy)]
 enum PolyOrientation {
     Scalar,
@@ -4501,9 +4511,11 @@ impl AccelProvider for InProcessProvider {
         if lower {
             args.push(Value::from("lower"));
         }
-        let eval = runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
-            Value::Tensor(tensor),
-            &args,
+        let eval = block_on_runtime(
+            runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
+                Value::Tensor(tensor),
+                &args,
+            ),
         )
         .map_err(|err| runtime_flow_to_anyhow("chol", err))?;
         let factor_tensor = tensor_from_value("chol", eval.factor())?;
@@ -4530,9 +4542,8 @@ impl AccelProvider for InProcessProvider {
         if matches!(options.pivot, ProviderQrPivot::Vector) {
             args.push(Value::from("vector"));
         }
-        let eval = runmat_runtime::builtins::math::linalg::factor::qr::evaluate(
-            Value::Tensor(tensor),
-            &args,
+        let eval = block_on_runtime(
+            runmat_runtime::builtins::math::linalg::factor::qr::evaluate(Value::Tensor(tensor), &args),
         )
         .map_err(|err| runtime_flow_to_anyhow("qr", err))?;
 

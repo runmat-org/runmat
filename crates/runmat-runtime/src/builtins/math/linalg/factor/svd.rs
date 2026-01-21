@@ -234,8 +234,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::math::linalg::factor::svd"
 )]
-fn svd_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(value, &rest)?;
+async fn svd_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(value, &rest).await?;
     Ok(eval.singular_values())
 }
 
@@ -291,23 +291,25 @@ enum SigmaFormat {
     Vector,
 }
 
-pub fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<SvdEval> {
+pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<SvdEval> {
     let options = parse_options(args)?;
-    evaluate_value(value, options)
+    evaluate_value(value, options).await
 }
 
-fn evaluate_value(value: Value, options: SvdOptions) -> BuiltinResult<SvdEval> {
+async fn evaluate_value(value: Value, options: SvdOptions) -> BuiltinResult<SvdEval> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle).map_err(with_svd_context)?;
-            evaluate_tensor(Value::Tensor(tensor), options)
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(with_svd_context)?;
+            evaluate_tensor(Value::Tensor(tensor), options).await
         }
-        other => evaluate_tensor(other, options),
+        other => evaluate_tensor(other, options).await,
     }
 }
 
-fn evaluate_tensor(value: Value, options: SvdOptions) -> BuiltinResult<SvdEval> {
-    match value_to_numeric_matrix(value)? {
+async fn evaluate_tensor(value: Value, options: SvdOptions) -> BuiltinResult<SvdEval> {
+    match value_to_numeric_matrix(value).await? {
         NumericMatrix::Real(matrix) => compute_svd_real(matrix, &options),
         NumericMatrix::Complex(matrix) => compute_svd_complex(matrix, &options),
     }
@@ -318,7 +320,7 @@ enum NumericMatrix {
     Complex(DMatrix<Complex64>),
 }
 
-fn value_to_numeric_matrix(value: Value) -> BuiltinResult<NumericMatrix> {
+async fn value_to_numeric_matrix(value: Value) -> BuiltinResult<NumericMatrix> {
     match value {
         Value::Tensor(tensor) => tensor_to_matrix(&tensor).map(NumericMatrix::Real),
         Value::ComplexTensor(ct) => complex_tensor_to_matrix(&ct).map(NumericMatrix::Complex),
@@ -340,7 +342,9 @@ fn value_to_numeric_matrix(value: Value) -> BuiltinResult<NumericMatrix> {
             Complex64::new(re, im),
         ))),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle).map_err(with_svd_context)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(with_svd_context)?;
             tensor_to_matrix(&tensor).map(NumericMatrix::Real)
         }
         other => Err(svd_error(format!(
@@ -777,6 +781,7 @@ fn extend_orthonormal_complex(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::LogicalArray;
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
@@ -1133,5 +1138,13 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn svd_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::svd_builtin(value, rest))
+    }
+
+    fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<SvdEval> {
+        block_on(super::evaluate(value, args))
     }
 }

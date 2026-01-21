@@ -240,16 +240,18 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     accel = "binary",
     builtin_path = "crate::builtins::math::elementwise::hypot"
 )]
-fn hypot_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+async fn hypot_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     match (lhs, rhs) {
-        (Value::GpuTensor(a), Value::GpuTensor(b)) => hypot_gpu_pair(a, b),
+        (Value::GpuTensor(a), Value::GpuTensor(b)) => hypot_gpu_pair(a, b).await,
         (Value::GpuTensor(a), other) => {
-            let gathered = gpu_helpers::gather_tensor(&a)
+            let gathered = gpu_helpers::gather_tensor_async(&a)
+                .await
                 .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
             Ok(hypot_host(Value::Tensor(gathered), other)?)
         }
         (other, Value::GpuTensor(b)) => {
-            let gathered = gpu_helpers::gather_tensor(&b)
+            let gathered = gpu_helpers::gather_tensor_async(&b)
+                .await
                 .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
             Ok(hypot_host(other, Value::Tensor(gathered))?)
         }
@@ -257,7 +259,7 @@ fn hypot_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn hypot_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn hypot_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if a.shape == b.shape {
             if let Ok(handle) = provider.elem_hypot(&a, &b) {
@@ -265,9 +267,11 @@ fn hypot_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<Value
             }
         }
     }
-    let left = gpu_helpers::gather_tensor(&a)
+    let left = gpu_helpers::gather_tensor_async(&a)
+        .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    let right = gpu_helpers::gather_tensor(&b)
+    let right = gpu_helpers::gather_tensor_async(&b)
+        .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     hypot_host(Value::Tensor(left), Value::Tensor(right))
 }
@@ -326,7 +330,12 @@ fn complex_magnitude(re: f64, im: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor, Value};
+
+    fn hypot_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+        block_on(super::hypot_builtin(lhs, rhs))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

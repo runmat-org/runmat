@@ -234,7 +234,7 @@ fn flipud_error(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::flipud"
 )]
-fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
+async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => {
             Ok(flip_tensor_with("flipud", tensor, &UD_DIM).map(tensor::tensor_into_value)?)
@@ -274,7 +274,7 @@ fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
                 .map_err(|e| flipud_error(e))?;
             Ok(flip_tensor_with("flipud", tensor, &UD_DIM).map(tensor::tensor_into_value)?)
         }
-        Value::GpuTensor(handle) => Ok(flip_gpu_with("flipud", handle, &UD_DIM)?),
+        Value::GpuTensor(handle) => Ok(flip_gpu_with("flipud", handle, &UD_DIM).await?),
         Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::Struct(_)
@@ -308,6 +308,11 @@ fn flip_cell_array_rows(cell: CellArray) -> crate::BuiltinResult<Value> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
+        block_on(super::flipud_builtin(value))
+    }
     use crate::builtins::array::shape::flip::{
         flip_complex_tensor, flip_logical_array, flip_tensor,
     };

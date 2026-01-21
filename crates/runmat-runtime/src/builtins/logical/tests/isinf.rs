@@ -216,7 +216,7 @@ const IDENTIFIER_INTERNAL: &str = "RunMat:isinf:InternalError";
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::tests::isinf"
 )]
-fn isinf_builtin(value: Value) -> BuiltinResult<Value> {
+async fn isinf_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             if let Some(provider) = runmat_accelerate_api::provider() {
@@ -224,7 +224,8 @@ fn isinf_builtin(value: Value) -> BuiltinResult<Value> {
                     return Ok(gpu_helpers::logical_gpu_value(mask));
                 }
             }
-            let tensor = gpu_helpers::gather_tensor(&handle)
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
                 .map_err(|err| internal_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {err}")))?;
             isinf_tensor(BUILTIN_NAME, tensor)
         }
@@ -333,59 +334,64 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::IntValue;
+    use futures::executor::block_on;
+
+    fn run_isinf(value: Value) -> BuiltinResult<Value> {
+        block_on(super::isinf_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_scalar_positive() {
-        let result = isinf_builtin(Value::Num(f64::INFINITY)).expect("isinf");
+        let result = run_isinf(Value::Num(f64::INFINITY)).expect("isinf");
         assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_scalar_negative() {
-        let result = isinf_builtin(Value::Num(f64::NEG_INFINITY)).expect("isinf");
+        let result = run_isinf(Value::Num(f64::NEG_INFINITY)).expect("isinf");
         assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_scalar_finite() {
-        let result = isinf_builtin(Value::Num(42.0)).expect("isinf");
+        let result = run_isinf(Value::Num(42.0)).expect("isinf");
         assert_eq!(result, Value::Bool(false));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_scalar_nan_false() {
-        let result = isinf_builtin(Value::Num(f64::NAN)).expect("isinf");
+        let result = run_isinf(Value::Num(f64::NAN)).expect("isinf");
         assert_eq!(result, Value::Bool(false));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_scalar_bool_false() {
-        let result = isinf_builtin(Value::Bool(true)).expect("isinf");
+        let result = run_isinf(Value::Bool(true)).expect("isinf");
         assert_eq!(result, Value::Bool(false));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_scalar_int_false() {
-        let result = isinf_builtin(Value::Int(IntValue::I32(7))).expect("isinf");
+        let result = run_isinf(Value::Int(IntValue::I32(7))).expect("isinf");
         assert_eq!(result, Value::Bool(false));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_complex_scalar_detects_infinite_components() {
-        let finite = isinf_builtin(Value::Complex(1.0, 2.0)).expect("isinf");
+        let finite = run_isinf(Value::Complex(1.0, 2.0)).expect("isinf");
         assert_eq!(finite, Value::Bool(false));
 
-        let inf_real = isinf_builtin(Value::Complex(f64::INFINITY, 0.0)).expect("isinf");
+        let inf_real = run_isinf(Value::Complex(f64::INFINITY, 0.0)).expect("isinf");
         assert_eq!(inf_real, Value::Bool(true));
 
-        let inf_imag = isinf_builtin(Value::Complex(0.0, f64::NEG_INFINITY)).expect("isinf");
+        let inf_imag = run_isinf(Value::Complex(0.0, f64::NEG_INFINITY)).expect("isinf");
         assert_eq!(inf_imag, Value::Bool(true));
     }
 
@@ -394,7 +400,7 @@ pub(crate) mod tests {
     fn isinf_tensor_mask() {
         let tensor =
             Tensor::new(vec![1.0, f64::INFINITY, -f64::INFINITY, 0.0], vec![2, 2]).unwrap();
-        let result = isinf_builtin(Value::Tensor(tensor)).expect("isinf");
+        let result = run_isinf(Value::Tensor(tensor)).expect("isinf");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![2, 2]);
@@ -408,7 +414,7 @@ pub(crate) mod tests {
     #[test]
     fn isinf_logical_array_returns_zeros() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
-        let result = isinf_builtin(Value::LogicalArray(logical)).expect("isinf");
+        let result = run_isinf(Value::LogicalArray(logical)).expect("isinf");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![3, 1]);
@@ -426,7 +432,7 @@ pub(crate) mod tests {
             vec![3, 1],
         )
         .unwrap();
-        let result = isinf_builtin(Value::ComplexTensor(tensor)).expect("isinf");
+        let result = run_isinf(Value::ComplexTensor(tensor)).expect("isinf");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![3, 1]);
@@ -439,7 +445,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_string_scalar_false() {
-        let result = isinf_builtin(Value::String("Inf".to_string())).expect("isinf");
+        let result = run_isinf(Value::String("Inf".to_string())).expect("isinf");
         assert_eq!(result, Value::Bool(false));
     }
 
@@ -447,7 +453,7 @@ pub(crate) mod tests {
     #[test]
     fn isinf_string_array_returns_all_false() {
         let strings = StringArray::new(vec!["foo".into(), "bar".into()], vec![1, 2]).unwrap();
-        let result = isinf_builtin(Value::StringArray(strings)).expect("isinf");
+        let result = run_isinf(Value::StringArray(strings)).expect("isinf");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![1, 2]);
@@ -461,7 +467,7 @@ pub(crate) mod tests {
     #[test]
     fn isinf_empty_tensor_preserves_shape() {
         let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
-        let result = isinf_builtin(Value::Tensor(tensor)).expect("isinf");
+        let result = run_isinf(Value::Tensor(tensor)).expect("isinf");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![0, 3]);
@@ -475,18 +481,18 @@ pub(crate) mod tests {
     #[test]
     fn isinf_singleton_tensor_returns_scalar_bool() {
         let tensor = Tensor::new(vec![f64::INFINITY], vec![1, 1]).unwrap();
-        let result = isinf_builtin(Value::Tensor(tensor)).expect("isinf");
+        let result = run_isinf(Value::Tensor(tensor)).expect("isinf");
         assert_eq!(result, Value::Bool(true));
 
         let finite = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
-        let result = isinf_builtin(Value::Tensor(finite)).expect("isinf");
+        let result = run_isinf(Value::Tensor(finite)).expect("isinf");
         assert_eq!(result, Value::Bool(false));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_rejects_unsupported_types() {
-        let err = isinf_builtin(Value::FunctionHandle("foo".to_string()))
+        let err = run_isinf(Value::FunctionHandle("foo".to_string()))
             .expect_err("isinf should reject function handles");
         assert!(
             err.message()
@@ -499,7 +505,7 @@ pub(crate) mod tests {
     #[test]
     fn isinf_char_array_returns_zeros() {
         let array = CharArray::new("Inf".chars().collect(), 1, 3).unwrap();
-        let result = isinf_builtin(Value::CharArray(array)).expect("isinf");
+        let result = run_isinf(Value::CharArray(array)).expect("isinf");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![1, 3]);
@@ -519,7 +525,7 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = isinf_builtin(Value::GpuTensor(handle)).expect("isinf");
+            let result = run_isinf(Value::GpuTensor(handle)).expect("isinf");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
             assert_eq!(gathered.data, vec![0.0, 1.0, 1.0]);
@@ -551,7 +557,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .expect("upload");
-        let gpu = isinf_builtin(Value::GpuTensor(handle)).expect("gpu path");
+        let gpu = run_isinf(Value::GpuTensor(handle)).expect("gpu path");
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::LogicalArray(expected), Tensor { data, shape, .. }) => {

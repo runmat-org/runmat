@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -206,9 +206,9 @@ fn remap_strcmpi_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     builtin_path = "crate::builtins::strings::core::strcmpi"
 )]
-fn strcmpi_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
-    let a = gather_if_needed(&a).map_err(remap_strcmpi_flow)?;
-    let b = gather_if_needed(&b).map_err(remap_strcmpi_flow)?;
+async fn strcmpi_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
+    let a = gather_if_needed_async(&a).await.map_err(remap_strcmpi_flow)?;
+    let b = gather_if_needed_async(&b).await.map_err(remap_strcmpi_flow)?;
     let left = TextCollection::from_argument("strcmpi", a, "first argument")?;
     let right = TextCollection::from_argument("strcmpi", b, "second argument")?;
     evaluate_strcmpi(&left, &right)
@@ -249,6 +249,10 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::RuntimeError;
     use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray};
+
+    fn strcmpi_builtin(a: Value, b: Value) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::strcmpi_builtin(a, b))
+    }
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()

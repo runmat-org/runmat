@@ -253,9 +253,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::asinh"
 )]
-fn asinh_builtin(value: Value) -> BuiltinResult<Value> {
+async fn asinh_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => asinh_gpu(handle),
+        Value::GpuTensor(handle) => asinh_gpu(handle).await,
         Value::Complex(re, im) => Ok(complex_asinh_scalar(re, im)),
         Value::ComplexTensor(ct) => asinh_complex_tensor(ct),
         Value::CharArray(ca) => asinh_char_array(ca),
@@ -266,13 +266,13 @@ fn asinh_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn asinh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn asinh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_asinh(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     asinh_tensor(tensor).map(tensor::tensor_into_value)
 }
 
@@ -320,8 +320,13 @@ fn complex_asinh_scalar(re: f64, im: f64) -> Value {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use num_complex::Complex64;
     use runmat_builtins::LogicalArray;
+
+    fn asinh_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::asinh_builtin(value))
+    }
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
@@ -477,7 +482,7 @@ pub(crate) mod tests {
             .expect("provider")
             .upload(&view)
             .expect("upload");
-        let gpu = asinh_gpu(handle).unwrap();
+        let gpu = block_on(asinh_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
             Value::Tensor(ct) => {

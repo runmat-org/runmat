@@ -6,7 +6,7 @@ use std::str::Chars;
 
 use runmat_builtins::{IntValue, LogicalArray, StringArray, Value};
 
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 /// Stateful cursor over formatting arguments.
 #[derive(Debug)]
@@ -953,17 +953,19 @@ pub fn decode_escape_sequences(context: &str, input: &str) -> BuiltinResult<Stri
 /// Flatten MATLAB argument values into a linear vector suitable for repeated
 /// printf-style formatting. Arrays are traversed in column-major order and GPU
 /// tensors are gathered back to the host.
-pub fn flatten_arguments(args: &[Value], context: &str) -> BuiltinResult<Vec<Value>> {
+pub async fn flatten_arguments(args: &[Value], context: &str) -> BuiltinResult<Vec<Value>> {
     let mut flattened = Vec::new();
     for value in args {
-        let gathered =
-            gather_if_needed(value).map_err(|flow| map_control_flow_with_context(flow, context))?;
-        flatten_value(gathered, &mut flattened, context)?;
+        let gathered = gather_if_needed_async(value)
+            .await
+            .map_err(|flow| map_control_flow_with_context(flow, context))?;
+        flatten_value(gathered, &mut flattened, context).await?;
     }
     Ok(flattened)
 }
 
-fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> BuiltinResult<()> {
+#[async_recursion::async_recursion(?Send)]
+async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> BuiltinResult<()> {
     match value {
         Value::Num(_)
         | Value::Int(_)
@@ -1010,16 +1012,18 @@ fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> Builti
                 for row in 0..cell.rows {
                     let idx = row * cell.cols + col;
                     let inner = (*cell.data[idx]).clone();
-                    let gathered = gather_if_needed(&inner)
+                    let gathered = gather_if_needed_async(&inner)
+                        .await
                         .map_err(|flow| map_control_flow_with_context(flow, context))?;
-                    flatten_value(gathered, output, context)?;
+                    flatten_value(gathered, output, context).await?;
                 }
             }
         }
         Value::GpuTensor(handle) => {
-            let gathered = gather_if_needed(&Value::GpuTensor(handle))
+            let gathered = gather_if_needed_async(&Value::GpuTensor(handle))
+                .await
                 .map_err(|flow| map_control_flow_with_context(flow, context))?;
-            flatten_value(gathered, output, context)?;
+            flatten_value(gathered, output, context).await?;
         }
         Value::MException(_)
         | Value::HandleObject(_)

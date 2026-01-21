@@ -252,10 +252,10 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     accel = "unary",
     builtin_path = "crate::builtins::math::rounding::floor"
 )]
-fn floor_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn floor_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let args = parse_arguments(&rest)?;
     let base = match value {
-        Value::GpuTensor(handle) => floor_gpu(handle, &args)?,
+        Value::GpuTensor(handle) => floor_gpu(handle, &args).await?,
         Value::Complex(re, im) => Value::Complex(
             apply_floor_scalar(re, args.strategy),
             apply_floor_scalar(im, args.strategy),
@@ -272,7 +272,7 @@ fn floor_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         }
         other => floor_numeric(other, args.strategy)?,
     };
-    apply_output_template(base, &args.output)
+    apply_output_template(base, &args.output).await
 }
 
 fn floor_numeric(value: Value, strategy: FloorStrategy) -> BuiltinResult<Value> {
@@ -314,7 +314,7 @@ fn floor_char_array(ca: CharArray, strategy: FloorStrategy) -> BuiltinResult<Val
     Ok(Value::Tensor(tensor))
 }
 
-fn floor_gpu(handle: GpuTensorHandle, args: &FloorArgs) -> BuiltinResult<Value> {
+async fn floor_gpu(handle: GpuTensorHandle, args: &FloorArgs) -> BuiltinResult<Value> {
     if matches!(args.strategy, FloorStrategy::Integer) {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
             if let Ok(out) = provider.unary_floor(&handle) {
@@ -322,7 +322,7 @@ fn floor_gpu(handle: GpuTensorHandle, args: &FloorArgs) -> BuiltinResult<Value> 
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let floored = floor_tensor(tensor, args.strategy)?;
     Ok(tensor::tensor_into_value(floored))
 }
@@ -486,7 +486,7 @@ fn floor_with_significant(value: f64, digits: i32) -> f64 {
     (value * scale).floor() / scale
 }
 
-fn apply_output_template(value: Value, output: &OutputTemplate) -> BuiltinResult<Value> {
+async fn apply_output_template(value: Value, output: &OutputTemplate) -> BuiltinResult<Value> {
     match output {
         OutputTemplate::Default => Ok(value),
         OutputTemplate::Like(proto) => match proto {
@@ -497,7 +497,7 @@ fn apply_output_template(value: Value, output: &OutputTemplate) -> BuiltinResult
             | Value::Bool(_)
             | Value::LogicalArray(_)
             | Value::Complex(_, _)
-            | Value::ComplexTensor(_) => convert_to_host_like(value),
+            | Value::ComplexTensor(_) => convert_to_host_like(value).await,
             _ => Err(builtin_error(
                 "floor: unsupported prototype for 'like'; provide a numeric or gpuArray prototype",
             )),
@@ -538,11 +538,11 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
+async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             let proxy = Value::GpuTensor(handle);
-            gpu_helpers::gather_value(&proxy)
+            gpu_helpers::gather_value_async(&proxy).await
         }
         other => Ok(other),
     }
@@ -553,8 +553,13 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::RuntimeError;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, LogicalArray, Tensor, Value};
+
+    fn floor_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::floor_builtin(value, rest))
+    }
 
     fn assert_error_contains(error: RuntimeError, needle: &str) {
         assert!(
@@ -776,13 +781,13 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = floor_gpu(
+        let gpu = block_on(floor_gpu(
             h,
             &FloorArgs {
                 strategy: FloorStrategy::Integer,
                 output: OutputTemplate::Default,
             },
-        )
+        ))
         .unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {

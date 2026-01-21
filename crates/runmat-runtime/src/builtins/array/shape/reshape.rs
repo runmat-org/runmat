@@ -207,7 +207,7 @@ fn reshape_error(message: impl Into<String>) -> RuntimeError {
     accel = "shape",
     builtin_path = "crate::builtins::array::shape::reshape"
 )]
-fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
         return Err(reshape_error("reshape: size information missing"));
     }
@@ -564,6 +564,11 @@ fn is_vector(t: &Tensor) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::reshape_builtin(value, rest))
+    }
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
 

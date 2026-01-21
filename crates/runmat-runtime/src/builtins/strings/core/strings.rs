@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const FN_NAME: &str = "strings";
 const SIZE_INTEGER_ERR: &str = "size inputs must be integers";
@@ -266,8 +266,8 @@ enum FillKind {
     accel = "array_construct",
     builtin_path = "crate::builtins::strings::core::strings"
 )]
-fn strings_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let ParsedStrings { shape, fill } = parse_arguments(rest)?;
+async fn strings_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let ParsedStrings { shape, fill } = parse_arguments(rest).await?;
     let total = shape.iter().try_fold(1usize, |acc, &dim| {
         acc.checked_mul(dim).ok_or_else(|| {
             strings_flow(format!("{FN_NAME}: requested size exceeds platform limits"))
@@ -289,14 +289,14 @@ fn strings_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     Ok(Value::StringArray(array))
 }
 
-fn parse_arguments(args: Vec<Value>) -> BuiltinResult<ParsedStrings> {
+async fn parse_arguments(args: Vec<Value>) -> BuiltinResult<ParsedStrings> {
     let mut size_values: Vec<Value> = Vec::new();
     let mut like_proto: Option<Value> = None;
     let mut fill = FillKind::Empty;
 
     let mut idx = 0;
     while idx < args.len() {
-        let host = gather_if_needed(&args[idx]).map_err(remap_strings_flow)?;
+        let host = gather_if_needed_async(&args[idx]).await.map_err(remap_strings_flow)?;
         if let Some(keyword) = keyword_of(&host) {
             match keyword.as_str() {
                 "like" => {
@@ -310,7 +310,7 @@ fn parse_arguments(args: Vec<Value>) -> BuiltinResult<ParsedStrings> {
                             "{FN_NAME}: expected prototype after 'like'"
                         )));
                     };
-                    let proto = gather_if_needed(proto_raw).map_err(remap_strings_flow)?;
+                    let proto = gather_if_needed_async(proto_raw).await.map_err(remap_strings_flow)?;
                     like_proto = Some(proto);
                     idx += 2;
                     continue;
@@ -508,6 +508,10 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
+
+    fn strings_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::strings_builtin(rest))
+    }
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()

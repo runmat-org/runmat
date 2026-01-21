@@ -252,10 +252,10 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     accel = "unary",
     builtin_path = "crate::builtins::math::rounding::ceil"
 )]
-fn ceil_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let args = parse_arguments(&rest)?;
+async fn ceil_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let args = parse_arguments(&rest).await?;
     let base = match value {
-        Value::GpuTensor(handle) => ceil_gpu(handle, &args)?,
+        Value::GpuTensor(handle) => ceil_gpu(handle, &args).await?,
         Value::Complex(re, im) => Value::Complex(
             apply_ceil_scalar(re, args.strategy),
             apply_ceil_scalar(im, args.strategy),
@@ -272,7 +272,7 @@ fn ceil_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         }
         other => ceil_numeric(other, args.strategy)?,
     };
-    apply_output_template(base, &args.output)
+    apply_output_template(base, &args.output).await
 }
 
 fn ceil_numeric(value: Value, strategy: CeilStrategy) -> BuiltinResult<Value> {
@@ -314,7 +314,7 @@ fn ceil_char_array(ca: CharArray, strategy: CeilStrategy) -> BuiltinResult<Value
     Ok(Value::Tensor(tensor))
 }
 
-fn ceil_gpu(handle: GpuTensorHandle, args: &CeilArgs) -> BuiltinResult<Value> {
+async fn ceil_gpu(handle: GpuTensorHandle, args: &CeilArgs) -> BuiltinResult<Value> {
     if matches!(args.strategy, CeilStrategy::Integer) {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
             if let Ok(out) = provider.unary_ceil(&handle) {
@@ -322,7 +322,7 @@ fn ceil_gpu(handle: GpuTensorHandle, args: &CeilArgs) -> BuiltinResult<Value> {
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let ceiled = ceil_tensor(tensor, args.strategy)?;
     Ok(tensor::tensor_into_value(ceiled))
 }
@@ -346,13 +346,13 @@ enum OutputTemplate {
     Like(Value),
 }
 
-fn parse_arguments(args: &[Value]) -> BuiltinResult<CeilArgs> {
+async fn parse_arguments(args: &[Value]) -> BuiltinResult<CeilArgs> {
     let (strategy_len, output) = parse_output_template(args)?;
     let strategy = match strategy_len {
         0 => CeilStrategy::Integer,
-        1 => CeilStrategy::Decimals(parse_digits(&args[0])?),
+        1 => CeilStrategy::Decimals(parse_digits(&args[0]).await?),
         2 => {
-            let digits = parse_digits(&args[0])?;
+            let digits = parse_digits(&args[0]).await?;
             let mode = parse_mode(&args[1])?;
             match mode {
                 CeilMode::Decimals => CeilStrategy::Decimals(digits),
@@ -388,11 +388,11 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<(usize, OutputTemplate
     Ok((args.len(), OutputTemplate::Default))
 }
 
-fn parse_digits(value: &Value) -> BuiltinResult<i32> {
+async fn parse_digits(value: &Value) -> BuiltinResult<i32> {
     match value {
         Value::GpuTensor(handle) => {
             let proxy = Value::GpuTensor(handle.clone());
-            let gathered = gpu_helpers::gather_value(&proxy)?;
+            let gathered = gpu_helpers::gather_value_async(&proxy).await?;
             parse_digits_inner(&gathered)
         }
         other => parse_digits_inner(other),
@@ -522,7 +522,7 @@ fn ceil_with_significant(value: f64, digits: i32) -> f64 {
     (value * scale).ceil() / scale
 }
 
-fn apply_output_template(value: Value, output: &OutputTemplate) -> BuiltinResult<Value> {
+async fn apply_output_template(value: Value, output: &OutputTemplate) -> BuiltinResult<Value> {
     match output {
         OutputTemplate::Default => Ok(value),
         OutputTemplate::Like(proto) => match proto {
@@ -533,7 +533,7 @@ fn apply_output_template(value: Value, output: &OutputTemplate) -> BuiltinResult
             | Value::Bool(_)
             | Value::LogicalArray(_)
             | Value::Complex(_, _)
-            | Value::ComplexTensor(_) => convert_to_host_like(value),
+            | Value::ComplexTensor(_) => convert_to_host_like(value).await,
             _ => Err(builtin_error(
                 "ceil: unsupported prototype for 'like'; provide a numeric or gpuArray prototype",
             )),
@@ -574,11 +574,11 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
+async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             let proxy = Value::GpuTensor(handle);
-            gpu_helpers::gather_value(&proxy)
+            gpu_helpers::gather_value_async(&proxy).await
         }
         other => Ok(other),
     }
@@ -589,8 +589,13 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::RuntimeError;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, Tensor, Value};
+
+    fn ceil_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::ceil_builtin(value, rest))
+    }
 
     fn assert_error_contains(error: RuntimeError, needle: &str) {
         assert!(
@@ -935,13 +940,13 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = ceil_gpu(
+        let gpu = block_on(ceil_gpu(
             h,
             &CeilArgs {
                 strategy: CeilStrategy::Integer,
                 output: OutputTemplate::Default,
             },
-        )
+        ))
         .unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {

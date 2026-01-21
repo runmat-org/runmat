@@ -253,7 +253,7 @@ fn ge_error(message: impl Into<String>, identifier: &'static str) -> RuntimeErro
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::rel::ge"
 )]
-fn ge_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+async fn ge_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     // Prefer device paths when any operand is a GPU tensor
     match (&lhs, &rhs) {
         (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) => {
@@ -277,7 +277,7 @@ fn ge_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         }
         _ => {}
     }
-    ge_host(lhs, rhs)
+    ge_host(lhs, rhs).await
 }
 
 fn try_ge_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<crate::BuiltinResult<Value>> {
@@ -304,11 +304,11 @@ fn try_fill_like(proto: &GpuTensorHandle, other: &Value) -> Option<GpuTensorHand
     provider.fill_like(proto, scalar).ok()
 }
 
-fn ge_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+async fn ge_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let (lhs, rhs) = normalize_char_string(lhs, rhs);
 
-    let left = GeOperand::from_value(lhs)?;
-    let right = GeOperand::from_value(rhs)?;
+    let left = GeOperand::from_value(lhs).await?;
+    let right = GeOperand::from_value(rhs).await?;
 
     match (left, right) {
         (GeOperand::Numeric(a), GeOperand::Numeric(b)) => {
@@ -365,7 +365,7 @@ enum GeOperand {
 }
 
 impl GeOperand {
-    fn from_value(value: Value) -> crate::BuiltinResult<Self> {
+    async fn from_value(value: Value) -> crate::BuiltinResult<Self> {
         match value {
             Value::Num(n) => Ok(GeOperand::Numeric(NumericBuffer::scalar(n))),
             Value::Bool(flag) => Ok(GeOperand::Numeric(NumericBuffer::scalar(if flag {
@@ -384,9 +384,11 @@ impl GeOperand {
             Value::String(s) => Ok(GeOperand::String(StringBuffer::scalar(s))),
             Value::StringArray(sa) => Ok(GeOperand::String(StringBuffer::from_array(sa))),
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle).map_err(|err| {
-                    ge_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT)
-                })?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle)
+                    .await
+                    .map_err(|err| {
+                        ge_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT)
+                    })?;
                 Ok(GeOperand::Numeric(NumericBuffer::from_tensor(tensor)))
             }
             Value::Complex(_, _) | Value::ComplexTensor(_) => Err(ge_error(
@@ -544,19 +546,24 @@ impl StringBuffer {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
+
+    fn run_ge(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+        block_on(super::ge_builtin(lhs, rhs))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ge_scalar_true_for_equal_values() {
-        let result = ge_builtin(Value::Num(5.0), Value::Num(5.0)).expect("ge");
+        let result = run_ge(Value::Num(5.0), Value::Num(5.0)).expect("ge");
         assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ge_scalar_false() {
-        let result = ge_builtin(Value::Num(2.0), Value::Num(3.0)).expect("ge");
+        let result = run_ge(Value::Num(2.0), Value::Num(3.0)).expect("ge");
         assert_eq!(result, Value::Bool(false));
     }
 
@@ -564,7 +571,7 @@ pub(crate) mod tests {
     #[test]
     fn ge_vector_broadcast() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![1, 4]).unwrap();
-        let result = ge_builtin(Value::Tensor(tensor), Value::Num(4.0)).expect("ge");
+        let result = run_ge(Value::Tensor(tensor), Value::Num(4.0)).expect("ge");
         match result {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![1, 4]);
@@ -578,7 +585,7 @@ pub(crate) mod tests {
     #[test]
     fn ge_vector_including_equal_values() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
-        let result = ge_builtin(Value::Tensor(tensor), Value::Num(2.0)).expect("ge");
+        let result = run_ge(Value::Tensor(tensor), Value::Num(2.0)).expect("ge");
         match result {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![1, 3]);
@@ -593,7 +600,7 @@ pub(crate) mod tests {
     fn ge_char_array_against_numeric() {
         let chars = CharArray::new(vec!['A', 'B', 'C'], 1, 3).unwrap();
         let tensor = Tensor::new(vec![65.0, 66.0, 66.0], vec![1, 3]).unwrap();
-        let result = ge_builtin(Value::CharArray(chars), Value::Tensor(tensor)).expect("ge");
+        let result = run_ge(Value::CharArray(chars), Value::Tensor(tensor)).expect("ge");
         match result {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![1, 3]);
@@ -608,7 +615,7 @@ pub(crate) mod tests {
     fn ge_string_array_against_scalar() {
         let array = StringArray::new(vec!["apple".into(), "banana".into()], vec![1, 2]).unwrap();
         let result =
-            ge_builtin(Value::StringArray(array), Value::String("banana".into())).expect("ge");
+            run_ge(Value::StringArray(array), Value::String("banana".into())).expect("ge");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![1, 2]);
@@ -622,7 +629,7 @@ pub(crate) mod tests {
     #[test]
     fn ge_string_numeric_error() {
         let err =
-            ge_builtin(Value::String("apple".into()), Value::Num(3.0)).expect_err("expected error");
+            run_ge(Value::String("apple".into()), Value::Num(3.0)).expect_err("expected error");
         assert!(err.message().contains("mixing numeric and string"));
         assert_eq!(err.identifier(), Some(IDENT_INVALID_INPUT));
     }
@@ -630,7 +637,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ge_complex_error() {
-        let err = ge_builtin(Value::Complex(1.0, 1.0), Value::Num(0.0)).expect_err("ge");
+        let err = run_ge(Value::Complex(1.0, 1.0), Value::Num(0.0)).expect_err("ge");
         assert!(err.message().contains("complex"));
         assert_eq!(err.identifier(), Some(IDENT_COMPLEX_UNSUPPORTED));
     }
@@ -652,7 +659,7 @@ pub(crate) mod tests {
             let handle_l = provider.upload(&view_l).expect("upload lhs");
             let handle_r = provider.upload(&view_r).expect("upload rhs");
             let result =
-                ge_builtin(Value::GpuTensor(handle_l), Value::GpuTensor(handle_r)).expect("ge");
+                run_ge(Value::GpuTensor(handle_l), Value::GpuTensor(handle_r)).expect("ge");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
             assert_eq!(gathered.data, vec![1.0, 0.0, 1.0]);
@@ -675,7 +682,7 @@ pub(crate) mod tests {
         );
         let lhs = Tensor::new(vec![0.0, 2.0, 5.0, 8.0], vec![4, 1]).unwrap();
         let rhs = Tensor::new(vec![0.0, 2.5, 5.0, 9.0], vec![4, 1]).unwrap();
-        let cpu = ge_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).unwrap();
+        let cpu = run_ge_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).unwrap();
 
         let view_l = HostTensorView {
             data: &lhs.data,
@@ -688,7 +695,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("provider");
         let handle_l = provider.upload(&view_l).expect("upload lhs");
         let handle_r = provider.upload(&view_r).expect("upload rhs");
-        let gpu = ge_builtin(Value::GpuTensor(handle_l), Value::GpuTensor(handle_r)).unwrap();
+        let gpu = run_ge(Value::GpuTensor(handle_l), Value::GpuTensor(handle_r)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
 
         match (cpu, gathered) {

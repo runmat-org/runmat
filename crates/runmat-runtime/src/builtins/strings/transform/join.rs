@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -248,11 +248,11 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     accel = "none",
     builtin_path = "crate::builtins::strings::transform::join"
 )]
-fn join_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let text = gather_if_needed(&text).map_err(map_flow)?;
+async fn join_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let text = gather_if_needed_async(&text).await.map_err(map_flow)?;
     let mut args = Vec::with_capacity(rest.len());
     for arg in rest {
-        args.push(gather_if_needed(&arg).map_err(map_flow)?);
+        args.push(gather_if_needed_async(&arg).await.map_err(map_flow)?);
     }
 
     let mut input = JoinInput::from_value(text)?;
@@ -724,6 +724,10 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
     use runmat_builtins::IntValue;
+
+    fn join_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::join_builtin(text, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

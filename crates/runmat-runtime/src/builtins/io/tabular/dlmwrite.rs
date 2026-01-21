@@ -21,7 +21,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "dlmwrite";
 
@@ -276,17 +276,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::tabular::dlmwrite"
 )]
-fn dlmwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let gathered_path = gather_if_needed(&filename).map_err(map_control_flow)?;
+async fn dlmwrite_builtin(
+    filename: Value,
+    data: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let gathered_path = gather_if_needed_async(&filename).await.map_err(map_control_flow)?;
     let path = resolve_path(&gathered_path)?;
 
     let mut gathered_args = Vec::with_capacity(rest.len());
     for value in &rest {
-        gathered_args.push(gather_if_needed(value).map_err(map_control_flow)?);
+        gathered_args.push(gather_if_needed_async(value).await.map_err(map_control_flow)?);
     }
     let options = parse_arguments(&gathered_args)?;
 
-    let gathered_data = gather_if_needed(&data).map_err(map_control_flow)?;
+    let gathered_data = gather_if_needed_async(&data).await.map_err(map_control_flow)?;
     let tensor =
         tensor::value_into_tensor_for("dlmwrite", gathered_data).map_err(dlmwrite_error)?;
     ensure_matrix_shape(&tensor)?;
@@ -1353,6 +1357,10 @@ pub(crate) mod tests {
 
     use crate::builtins::common::fs as fs_helpers;
     use crate::builtins::common::test_support;
+
+    fn dlmwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::dlmwrite_builtin(filename, data, rest))
+    }
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 

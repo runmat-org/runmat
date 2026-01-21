@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -224,7 +224,7 @@ fn remap_char_flow(err: RuntimeError) -> RuntimeError {
     accel = "conversion",
     builtin_path = "crate::builtins::strings::core::char"
 )]
-fn char_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn char_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
         let empty =
             CharArray::new(Vec::new(), 0, 0).map_err(|e| char_flow(format!("char: {e}")))?;
@@ -235,7 +235,9 @@ fn char_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut max_width = 0usize;
 
     for arg in rest {
-        let gathered = gather_if_needed(&arg).map_err(remap_char_flow)?;
+        let gathered = gather_if_needed_async(&arg)
+            .await
+            .map_err(remap_char_flow)?;
         let mut produced = value_to_char_rows(&gathered)?;
         for row in &produced {
             if row.len() > max_width {
@@ -454,6 +456,10 @@ fn infer_rows_cols(shape: &[usize], len: usize) -> (usize, usize) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+
+    fn char_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::char_builtin(rest))
+    }
     use runmat_builtins::StringArray;
 
     fn error_message(err: crate::RuntimeError) -> String {

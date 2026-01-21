@@ -248,9 +248,9 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::sqrt"
 )]
-fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
+async fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => sqrt_gpu(handle),
+        Value::GpuTensor(handle) => sqrt_gpu(handle).await,
         Value::Complex(re, im) => Ok(sqrt_complex_value(re, im)),
         Value::ComplexTensor(ct) => sqrt_complex_tensor(ct),
         Value::CharArray(ca) => sqrt_char_array(ca),
@@ -261,7 +261,7 @@ fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn sqrt_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn sqrt_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match detect_gpu_requires_complex(provider, &handle) {
             Ok(false) => {
@@ -270,7 +270,8 @@ fn sqrt_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 }
             }
             Ok(true) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)
+                let tensor = gpu_helpers::gather_tensor_async(&handle)
+                    .await
                     .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
                 return sqrt_tensor_real(tensor);
             }
@@ -282,7 +283,8 @@ fn sqrt_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     sqrt_tensor_real(tensor)
 }
@@ -428,7 +430,12 @@ fn zero_small(value: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, Tensor};
+
+    fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::sqrt_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

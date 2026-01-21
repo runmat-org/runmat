@@ -248,8 +248,8 @@ fn issorted_error(message: impl Into<String>) -> crate::RuntimeError {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::issorted"
 )]
-fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let input = normalize_input(value)?;
+async fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let input = normalize_input(value).await?;
     let shape = input.shape();
     let args = IssortedArgs::parse(&rest, &shape)?;
 
@@ -500,7 +500,7 @@ fn ensure_unique_direction(direction: &Option<Direction>) -> crate::BuiltinResul
     }
 }
 
-fn normalize_input(value: Value) -> crate::BuiltinResult<InputArray> {
+async fn normalize_input(value: Value) -> crate::BuiltinResult<InputArray> {
     match value {
         Value::Tensor(tensor) => Ok(InputArray::Real(tensor)),
         Value::LogicalArray(logical) => {
@@ -530,7 +530,7 @@ fn normalize_input(value: Value) -> crate::BuiltinResult<InputArray> {
             Ok(InputArray::String(array))
         }
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             Ok(InputArray::Real(tensor))
         }
         other => Err(issorted_error(format!(
@@ -1238,7 +1238,12 @@ fn char_array_to_tensor(array: &CharArray) -> crate::BuiltinResult<Tensor> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray, Value};
+
+    fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::issorted_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

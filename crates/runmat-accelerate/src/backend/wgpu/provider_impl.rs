@@ -96,6 +96,16 @@ fn runtime_flow_to_anyhow(_context: &str, err: RuntimeError) -> anyhow::Error {
     anyhow::Error::new(err)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn block_on_runtime<F: std::future::Future>(future: F) -> F::Output {
+    block_on(future)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn block_on_runtime<F: std::future::Future>(future: F) -> F::Output {
+    futures::executor::block_on(future)
+}
+
 #[derive(Clone, Debug)]
 pub struct WgpuProviderOptions {
     pub power_preference: wgpu::PowerPreference,
@@ -3145,9 +3155,8 @@ impl WgpuProvider {
         if matches!(options.pivot, ProviderQrPivot::Vector) {
             args.push(Value::from("vector"));
         }
-        let eval = runmat_runtime::builtins::math::linalg::factor::qr::evaluate(
-            Value::Tensor(tensor),
-            &args,
+        let eval = block_on_runtime(
+            runmat_runtime::builtins::math::linalg::factor::qr::evaluate(Value::Tensor(tensor), &args),
         )
         .map_err(|err| runtime_flow_to_anyhow("qr", err))?;
 
@@ -14285,9 +14294,11 @@ impl AccelProvider for WgpuProvider {
         if lower {
             args.push(Value::from("lower"));
         }
-        let eval = runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
-            Value::Tensor(tensor),
-            &args,
+        let eval = block_on_runtime(
+            runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
+                Value::Tensor(tensor),
+                &args,
+            ),
         )
         .map_err(|err| runtime_flow_to_anyhow("chol", err))?;
         let factor_tensor = host_tensor_from_value("chol", eval.factor())?;
@@ -15499,10 +15510,12 @@ impl AccelProvider for WgpuProvider {
         let host = self.download(handle)?;
         let tensor =
             Tensor::new(host.data.clone(), host.shape.clone()).map_err(|e| anyhow!("eig: {e}"))?;
-        let eval = runmat_runtime::builtins::math::linalg::factor::eig::evaluate(
-            Value::Tensor(tensor),
-            &[],
-            compute_left,
+        let eval = block_on_runtime(
+            runmat_runtime::builtins::math::linalg::factor::eig::evaluate(
+                Value::Tensor(tensor),
+                &[],
+                compute_left,
+            ),
         )
         .map_err(|err| runtime_flow_to_anyhow("eig", err))?;
 

@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 
@@ -244,13 +244,13 @@ const BUILTIN_NAME: &str = "startsWith";
     accel = "sink",
     builtin_path = "crate::builtins::strings::search::startswith"
 )]
-fn startswith_builtin(
+async fn startswith_builtin(
     text: Value,
     pattern: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let text = gather_if_needed(&text)?;
-    let pattern = gather_if_needed(&pattern)?;
+    let text = gather_if_needed_async(&text).await?;
+    let pattern = gather_if_needed_async(&pattern).await?;
     let ignore_case = parse_ignore_case(BUILTIN_NAME, &rest)?;
     let subject = TextCollection::from_subject(BUILTIN_NAME, text)?;
     let patterns = TextCollection::from_pattern(BUILTIN_NAME, pattern)?;
@@ -321,10 +321,14 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, IntValue, LogicalArray, StringArray, Tensor};
 
+    fn run_startswith(text: Value, pattern: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(startswith_builtin(text, pattern, rest))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_string_scalar_true() {
-        let result = startswith_builtin(
+        let result = run_startswith(
             Value::String("RunMat".into()),
             Value::String("Run".into()),
             Vec::new(),
@@ -336,7 +340,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_string_scalar_false() {
-        let result = startswith_builtin(
+        let result = run_startswith(
             Value::String("RunMat".into()),
             Value::String("Mat".into()),
             Vec::new(),
@@ -348,7 +352,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_ignore_case_option() {
-        let result = startswith_builtin(
+        let result = run_startswith(
             Value::String("RunMat".into()),
             Value::String("run".into()),
             vec![Value::String("IgnoreCase".into()), Value::Bool(true)],
@@ -365,7 +369,7 @@ pub(crate) mod tests {
             vec![3, 1],
         )
         .unwrap();
-        let result = startswith_builtin(
+        let result = run_startswith(
             Value::StringArray(array),
             Value::String("a".into()),
             Vec::new(),
@@ -385,7 +389,7 @@ pub(crate) mod tests {
         .unwrap();
         let patterns =
             StringArray::new(vec!["hyd".into(), "hel".into(), "lit".into()], vec![3, 1]).unwrap();
-        let result = startswith_builtin(
+        let result = run_startswith(
             Value::StringArray(subjects),
             Value::StringArray(patterns),
             Vec::new(),
@@ -399,7 +403,7 @@ pub(crate) mod tests {
     #[test]
     fn startswith_broadcast_pattern_column_vector() {
         let patterns = CharArray::new(vec!['s', 'n', 'x'], 3, 1).unwrap();
-        let result = startswith_builtin(
+        let result = run_startswith(
             Value::String("saturn".into()),
             Value::CharArray(patterns),
             Vec::new(),
@@ -422,7 +426,7 @@ pub(crate) mod tests {
             3,
         )
         .unwrap();
-        let result = startswith_builtin(Value::Cell(cell), Value::String("M".into()), Vec::new())
+        let result = run_startswith(Value::Cell(cell), Value::String("M".into()), Vec::new())
             .expect("startsWith");
         let expected = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap();
         assert_eq!(result, Value::LogicalArray(expected));
@@ -432,7 +436,7 @@ pub(crate) mod tests {
     #[test]
     fn startswith_missing_strings_false() {
         let array = StringArray::new(vec!["<missing>".into()], vec![1, 1]).unwrap();
-        let result = startswith_builtin(
+        let result = run_startswith(
             Value::StringArray(array),
             Value::String("a".into()),
             Vec::new(),
@@ -444,7 +448,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_empty_pattern_true() {
-        let result = startswith_builtin(
+        let result = run_startswith(
             Value::String("foo".into()),
             Value::String("".into()),
             Vec::new(),
@@ -456,7 +460,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_invalid_option_name() {
-        let err = startswith_builtin(
+        let err = run_startswith(
             Value::String("foo".into()),
             Value::String("f".into()),
             vec![Value::String("IgnoreCases".into()), Value::Bool(true)],
@@ -468,7 +472,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_ignore_case_string_flag() {
-        let result = startswith_builtin(
+        let result = run_startswith(
             Value::String("RunMat".into()),
             Value::String("run".into()),
             vec![
@@ -483,7 +487,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_ignore_case_numeric_flag() {
-        let result = startswith_builtin(
+        let result = run_startswith(
             Value::String("RunMat".into()),
             Value::String("run".into()),
             vec![
@@ -498,7 +502,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_ignore_case_positional_value() {
-        let result = startswith_builtin(
+        let result = run_startswith(
             Value::String("RunMat".into()),
             Value::String("run".into()),
             vec![Value::Bool(true)],
@@ -511,7 +515,7 @@ pub(crate) mod tests {
     #[test]
     fn startswith_ignore_case_logical_array_value() {
         let logical = LogicalArray::new(vec![1], vec![1, 1]).unwrap();
-        let result = startswith_builtin(
+        let result = run_startswith(
             Value::String("RunMat".into()),
             Value::String("run".into()),
             vec![
@@ -527,7 +531,7 @@ pub(crate) mod tests {
     #[test]
     fn startswith_ignore_case_tensor_value() {
         let tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
-        let result = startswith_builtin(
+        let result = run_startswith(
             Value::String("RunMat".into()),
             Value::String("run".into()),
             vec![Value::String("IgnoreCase".into()), Value::Tensor(tensor)],
@@ -539,7 +543,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_ignore_case_invalid_value() {
-        let err = startswith_builtin(
+        let err = run_startswith(
             Value::String("RunMat".into()),
             Value::String("run".into()),
             vec![
@@ -555,7 +559,7 @@ pub(crate) mod tests {
     #[test]
     fn startswith_ignore_case_logical_array_invalid_size() {
         let logical = LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
-        let err = startswith_builtin(
+        let err = run_startswith(
             Value::String("RunMat".into()),
             Value::String("run".into()),
             vec![
@@ -570,7 +574,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_ignore_case_numeric_nan_invalid() {
-        let err = startswith_builtin(
+        let err = run_startswith(
             Value::String("RunMat".into()),
             Value::String("run".into()),
             vec![Value::Num(f64::NAN)],
@@ -582,7 +586,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_ignore_case_missing_value() {
-        let err = startswith_builtin(
+        let err = run_startswith(
             Value::String("RunMat".into()),
             Value::String("run".into()),
             vec![Value::String("IgnoreCase".into())],
@@ -599,7 +603,7 @@ pub(crate) mod tests {
         let text = StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap();
         let pattern =
             StringArray::new(vec!["a".into(), "b".into(), "c".into()], vec![3, 1]).unwrap();
-        let err = startswith_builtin(
+        let err = run_startswith(
             Value::StringArray(text),
             Value::StringArray(pattern),
             Vec::new(),
@@ -612,14 +616,14 @@ pub(crate) mod tests {
     #[test]
     fn startswith_invalid_subject_type() {
         let err =
-            startswith_builtin(Value::Num(1.0), Value::String("a".into()), Vec::new()).unwrap_err();
+            run_startswith(Value::Num(1.0), Value::String("a".into()), Vec::new()).unwrap_err();
         assert!(err.to_string().contains("first argument must be text"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_invalid_pattern_type() {
-        let err = startswith_builtin(Value::String("foo".into()), Value::Num(1.0), Vec::new())
+        let err = run_startswith(Value::String("foo".into()), Value::Num(1.0), Vec::new())
             .unwrap_err();
         assert!(
             err.to_string().contains("pattern must be text"),
@@ -631,7 +635,7 @@ pub(crate) mod tests {
     #[test]
     fn startswith_cell_invalid_element_error() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
-        let err = startswith_builtin(Value::Cell(cell), Value::String("a".into()), Vec::new())
+        let err = run_startswith(Value::Cell(cell), Value::String("a".into()), Vec::new())
             .unwrap_err();
         assert!(err.to_string().contains("cell array elements"));
     }
@@ -640,7 +644,7 @@ pub(crate) mod tests {
     #[test]
     fn startswith_zero_sized_inputs() {
         let subjects = StringArray::new(Vec::<String>::new(), vec![0, 1]).unwrap();
-        let result = startswith_builtin(
+        let result = run_startswith(
             Value::StringArray(subjects),
             Value::String("a".into()),
             Vec::new(),
@@ -658,7 +662,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_missing_pattern_false() {
-        let result = startswith_builtin(
+        let result = run_startswith(
             Value::String("alpha".into()),
             Value::String("<missing>".into()),
             Vec::new(),

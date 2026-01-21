@@ -6,7 +6,7 @@ use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, comp
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::{
-    build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeError,
+    build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
 use runmat_builtins::{CharArray, IntValue, StringArray, Value};
 use runmat_macros::runtime_builtin;
@@ -267,17 +267,17 @@ enum BoundariesMode {
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::erasebetween"
 )]
-fn erase_between_builtin(
+async fn erase_between_builtin(
     text: Value,
     start: Value,
     stop: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let text = gather_if_needed(&text).map_err(map_flow)?;
-    let start = gather_if_needed(&start).map_err(map_flow)?;
-    let stop = gather_if_needed(&stop).map_err(map_flow)?;
+    let text = gather_if_needed_async(&text).await.map_err(map_flow)?;
+    let start = gather_if_needed_async(&start).await.map_err(map_flow)?;
+    let stop = gather_if_needed_async(&stop).await.map_err(map_flow)?;
 
-    let mode_override = parse_boundaries_option(&rest)?;
+    let mode_override = parse_boundaries_option(&rest).await?;
 
     let normalized_text = NormalizedText::from_value(text)?;
     let start_boundary = BoundaryArg::from_value(start)?;
@@ -339,7 +339,7 @@ fn erase_between_builtin(
     normalized_text.into_value(results, output_shape)
 }
 
-fn parse_boundaries_option(args: &[Value]) -> BuiltinResult<Option<BoundariesMode>> {
+async fn parse_boundaries_option(args: &[Value]) -> BuiltinResult<Option<BoundariesMode>> {
     if args.is_empty() {
         return Ok(None);
     }
@@ -350,13 +350,13 @@ fn parse_boundaries_option(args: &[Value]) -> BuiltinResult<Option<BoundariesMod
     let mut mode: Option<BoundariesMode> = None;
     let mut idx = 0;
     while idx < args.len() {
-        let name_value = gather_if_needed(&args[idx]).map_err(map_flow)?;
+        let name_value = gather_if_needed_async(&args[idx]).await.map_err(map_flow)?;
         let name =
             value_to_string(&name_value).ok_or_else(|| runtime_error_for(OPTION_NAME_ERROR))?;
         if !name.eq_ignore_ascii_case("boundaries") {
             return Err(runtime_error_for(OPTION_NAME_ERROR));
         }
-        let value = gather_if_needed(&args[idx + 1]).map_err(map_flow)?;
+        let value = gather_if_needed_async(&args[idx + 1]).await.map_err(map_flow)?;
         let value_str =
             value_to_string(&value).ok_or_else(|| runtime_error_for(OPTION_VALUE_ERROR))?;
         let parsed_mode = if value_str.eq_ignore_ascii_case("inclusive") {
@@ -882,6 +882,15 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, StringArray, Tensor};
+
+    fn erase_between_builtin(
+        text: Value,
+        start: Value,
+        stop: Value,
+        rest: Vec<Value>,
+    ) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::erase_between_builtin(text, start, stop, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

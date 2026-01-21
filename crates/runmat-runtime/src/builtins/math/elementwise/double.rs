@@ -259,7 +259,7 @@ fn conversion_error(type_name: &str) -> RuntimeError {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::double"
 )]
-fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
     let converted = match value {
         Value::Num(n) => Ok(Value::Num(n)),
@@ -270,7 +270,7 @@ fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::ComplexTensor(tensor) => Ok(Value::ComplexTensor(tensor)),
         Value::LogicalArray(array) => double_from_logical(array),
         Value::CharArray(chars) => double_from_char_array(chars),
-        Value::GpuTensor(handle) => double_from_gpu(handle),
+        Value::GpuTensor(handle) => double_from_gpu(handle).await,
         Value::String(_) | Value::StringArray(_) => Err(conversion_error("string")),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
@@ -281,7 +281,7 @@ fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::ClassRef(_) => Err(conversion_error("meta.class")),
         Value::MException(_) => Err(conversion_error("MException")),
     }?;
-    apply_output_template(converted, &template)
+    apply_output_template(converted, &template).await
 }
 
 fn double_from_logical(array: LogicalArray) -> BuiltinResult<Value> {
@@ -297,7 +297,7 @@ fn double_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn double_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn double_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider_for_handle(&handle);
 
     if let Some(provider) = provider {
@@ -318,7 +318,7 @@ fn double_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     if let Some(provider) = provider {
         if provider.precision() == ProviderPrecision::F64 {
             let view = HostTensorView {
@@ -370,7 +370,7 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     }
 }
 
-fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
+async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
     match template {
         OutputTemplate::Default => Ok(value),
         OutputTemplate::Like(proto) => match proto {
@@ -379,7 +379,7 @@ fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResu
             | Value::Num(_)
             | Value::Int(_)
             | Value::Bool(_)
-            | Value::LogicalArray(_) => convert_to_host_like(value),
+            | Value::LogicalArray(_) => convert_to_host_like(value).await,
             Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
                 "double: complex prototypes for 'like' are not supported yet",
             )),
@@ -433,11 +433,13 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
+async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             let proxy = Value::GpuTensor(handle);
-            gpu_helpers::gather_value(&proxy).map_err(|e| builtin_error(format!("double: {e}")))
+            gpu_helpers::gather_value_async(&proxy)
+                .await
+                .map_err(|e| builtin_error(format!("double: {e}")))
         }
         other => Ok(other),
     }
@@ -447,10 +449,15 @@ fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::IntValue;
+
+    fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::double_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

@@ -226,12 +226,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::stats::summary::corrcoef"
 )]
-fn corrcoef_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn corrcoef_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let args = CorrcoefArgs::parse(value, rest)?;
     if let Some(result) = corrcoef_try_gpu(&args)? {
         return Ok(result);
     }
-    corrcoef_host(args)
+    corrcoef_host(args).await
 }
 
 /// Exposed for acceleration providers that need the host reference implementation.
@@ -381,25 +381,25 @@ fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Option<Value>> {
     }
 }
 
-fn corrcoef_host(args: CorrcoefArgs) -> BuiltinResult<Value> {
+async fn corrcoef_host(args: CorrcoefArgs) -> BuiltinResult<Value> {
     let CorrcoefArgs {
         first,
         second,
         normalization,
         rows,
     } = args;
-    let left = value_to_tensor_gather(first)?;
+    let left = value_to_tensor_gather(first).await?;
     let right = match second {
-        Some(value) => Some(value_to_tensor_gather(value)?),
+        Some(value) => Some(value_to_tensor_gather(value).await?),
         None => None,
     };
     let tensor = corrcoef_from_tensors(left, right, normalization, rows)?;
     Ok(Value::Tensor(tensor))
 }
 
-fn value_to_tensor_gather(value: Value) -> BuiltinResult<Tensor> {
+async fn value_to_tensor_gather(value: Value) -> BuiltinResult<Tensor> {
     match value {
-        Value::GpuTensor(handle) => gpu_helpers::gather_tensor(&handle),
+        Value::GpuTensor(handle) => gpu_helpers::gather_tensor_async(&handle).await,
         other => tensor::value_into_tensor_for("corrcoef", other).map_err(builtin_error),
     }
 }
@@ -785,6 +785,7 @@ fn set_entry(buffer: &mut [f64], dim: usize, row: usize, col: usize, value: f64)
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor, Value};
 
     fn assert_tensor_close(actual: &Tensor, expected: &[f64], tol: f64) {
@@ -825,7 +826,8 @@ pub(crate) mod tests {
             vec![4, 3],
         )
         .unwrap();
-        let result = corrcoef_builtin(Value::Tensor(tensor), Vec::new()).expect("corrcoef");
+        let result =
+            block_on(corrcoef_builtin(Value::Tensor(tensor), Vec::new())).expect("corrcoef");
         match result {
             Value::Tensor(out) => {
                 let expected = [
@@ -867,13 +869,13 @@ pub(crate) mod tests {
         )
         .unwrap();
 
-        let via_two = corrcoef_builtin(
+        let via_two = block_on(corrcoef_builtin(
             Value::Tensor(left.clone()),
             vec![Value::Tensor(right.clone())],
-        )
+        ))
         .expect("corrcoef");
         let via_combined =
-            corrcoef_builtin(Value::Tensor(combined), Vec::new()).expect("corrcoef combined");
+            block_on(corrcoef_builtin(Value::Tensor(combined), Vec::new())).expect("corrcoef combined");
 
         let expected_tensor = match via_combined {
             Value::Tensor(t) => t,
@@ -903,10 +905,10 @@ pub(crate) mod tests {
             vec![4, 2],
         )
         .unwrap();
-        let result = corrcoef_builtin(
+        let result = block_on(corrcoef_builtin(
             Value::Tensor(tensor),
             vec![Value::from("rows"), Value::from("complete")],
-        )
+        ))
         .expect("corrcoef");
         match result {
             Value::Tensor(out) => {
@@ -941,10 +943,10 @@ pub(crate) mod tests {
             vec![4, 3],
         )
         .unwrap();
-        let result = corrcoef_builtin(
+        let result = block_on(corrcoef_builtin(
             Value::Tensor(tensor),
             vec![Value::from("rows"), Value::from("pairwise")],
-        )
+        ))
         .expect("corrcoef");
         match result {
             Value::Tensor(out) => {
@@ -971,9 +973,12 @@ pub(crate) mod tests {
         )
         .unwrap();
         let unbiased =
-            corrcoef_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("unbiased");
-        let biased = corrcoef_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(1))])
-            .expect("biased");
+            block_on(corrcoef_builtin(Value::Tensor(tensor.clone()), Vec::new())).expect("unbiased");
+        let biased = block_on(corrcoef_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Int(IntValue::I32(1))],
+        ))
+        .expect("biased");
 
         let a = match biased {
             Value::Tensor(t) => t,
@@ -1004,7 +1009,8 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = corrcoef_builtin(Value::GpuTensor(handle), Vec::new()).expect("corrcoef");
+            let result =
+                block_on(corrcoef_builtin(Value::GpuTensor(handle), Vec::new())).expect("corrcoef");
             let gathered = test_support::gather(result).expect("gather");
             let expected = [
                 1.0,
@@ -1026,7 +1032,7 @@ pub(crate) mod tests {
     fn corrcoef_mismatched_rows_errors() {
         let left = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
         let right = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = corrcoef_builtin(Value::Tensor(left), vec![Value::Tensor(right)])
+        let err = block_on(corrcoef_builtin(Value::Tensor(left), vec![Value::Tensor(right)]))
             .expect_err("expected mismatch error");
         assert_flow_message(err, "same number of rows");
     }
@@ -1035,7 +1041,7 @@ pub(crate) mod tests {
     #[test]
     fn corrcoef_invalid_flag_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = corrcoef_builtin(Value::Tensor(tensor), vec![Value::Num(2.5)])
+        let err = block_on(corrcoef_builtin(Value::Tensor(tensor), vec![Value::Num(2.5)]))
             .expect_err("expected invalid flag error");
         assert_flow_message(err, "normalization flag");
     }

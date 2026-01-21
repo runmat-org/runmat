@@ -201,10 +201,10 @@ enum CumprodNanMode {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::cumprod"
 )]
-fn cumprod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn cumprod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let (dim, direction, nan_mode) = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => cumprod_gpu(handle, dim, direction, nan_mode),
+        Value::GpuTensor(handle) => cumprod_gpu(handle, dim, direction, nan_mode).await,
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| cumprod_error(format!("cumprod: {e}")))?;
@@ -326,7 +326,7 @@ fn cumprod_host(
     Ok(tensor::tensor_into_value(result))
 }
 
-fn cumprod_gpu(
+async fn cumprod_gpu(
     handle: GpuTensorHandle,
     dim: Option<usize>,
     direction: CumprodDirection,
@@ -341,7 +341,7 @@ fn cumprod_gpu(
         }
     }
     if matches!(direction, CumprodDirection::Reverse) && matches!(nan_mode, CumprodNanMode::Omit) {
-        let tensor = gpu_helpers::gather_tensor(&handle)?;
+        let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&tensor.shape));
         let result = cumprod_tensor(&tensor, fallback_dim, direction, nan_mode)?;
         return Ok(tensor::tensor_into_value(result));
@@ -383,7 +383,7 @@ fn cumprod_gpu(
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let result = cumprod_tensor(&tensor, fallback_dim, direction, nan_mode)?;
     Ok(tensor::tensor_into_value(result))
 }
@@ -615,12 +615,17 @@ fn dim_product(dims: &[usize]) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor as BuiltinsTensor};
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
+
+    fn cumprod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::cumprod_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

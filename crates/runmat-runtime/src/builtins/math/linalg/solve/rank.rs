@@ -262,10 +262,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "rank",
     builtin_path = "crate::builtins::math::linalg::solve::rank"
 )]
-fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let tol = parse_tolerance_arg(NAME, &rest).map_err(builtin_error)?;
     match value {
-        Value::GpuTensor(handle) => rank_gpu(handle, tol),
+        Value::GpuTensor(handle) => rank_gpu(handle, tol).await,
         Value::ComplexTensor(tensor) => rank_complex_tensor_value(tensor, tol),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(builtin_error)?;
@@ -278,7 +278,7 @@ fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
-fn rank_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Value> {
+async fn rank_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         match provider.rank(&handle, tol) {
             Ok(device_scalar) => return Ok(Value::GpuTensor(device_scalar)),
@@ -288,8 +288,9 @@ fn rank_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Value> {
         }
     }
 
-    let gathered =
-        gpu_helpers::gather_value(&Value::GpuTensor(handle.clone())).map_err(map_control_flow)?;
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
+        .await
+        .map_err(map_control_flow)?;
     let rank = rank_scalar_from_value(gathered, tol)?;
 
     if let Some(provider) = runmat_accelerate_api::provider() {
@@ -404,6 +405,7 @@ pub fn rank_host_real_for_provider(matrix: &Tensor, tol: Option<f64>) -> Builtin
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::IntValue;
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -594,5 +596,9 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::rank_builtin(value, rest))
     }
 }

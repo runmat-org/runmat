@@ -236,17 +236,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "polyint,polynomial,integral,antiderivative",
     builtin_path = "crate::builtins::math::poly::polyint"
 )]
-fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(polyint_error("polyint: too many input arguments"));
     }
 
-    let constant = rest
-        .into_iter()
-        .next()
-        .map(parse_constant)
-        .transpose()?
-        .unwrap_or_else(|| Complex64::new(0.0, 0.0));
+    let constant = match rest.into_iter().next() {
+        Some(value) => parse_constant(value).await?,
+        None => Complex64::new(0.0, 0.0),
+    };
 
     if let Value::GpuTensor(handle) = &coeffs {
         if let Some(device_result) = try_polyint_gpu(handle, constant)? {
@@ -255,11 +253,15 @@ fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> crate::BuiltinResult<Valu
     }
 
     let was_gpu = matches!(coeffs, Value::GpuTensor(_));
-    polyint_host_value(coeffs, constant, was_gpu)
+    polyint_host_value(coeffs, constant, was_gpu).await
 }
 
-fn polyint_host_value(coeffs: Value, constant: Complex64, was_gpu: bool) -> BuiltinResult<Value> {
-    let polynomial = parse_polynomial(coeffs)?;
+async fn polyint_host_value(
+    coeffs: Value,
+    constant: Complex64,
+    was_gpu: bool,
+) -> BuiltinResult<Value> {
+    let polynomial = parse_polynomial(coeffs).await?;
     let mut integrated = integrate_coeffs(&polynomial.coeffs);
     if integrated.is_empty() {
         integrated.push(constant);
@@ -349,8 +351,8 @@ fn coeffs_to_value(coeffs: &[Complex64], orientation: Orientation) -> BuiltinRes
     }
 }
 
-fn parse_polynomial(value: Value) -> BuiltinResult<Polynomial> {
-    let gathered = dispatcher::gather_if_needed(&value)?;
+async fn parse_polynomial(value: Value) -> BuiltinResult<Polynomial> {
+    let gathered = dispatcher::gather_if_needed_async(&value).await?;
     match gathered {
         Value::Tensor(tensor) => parse_tensor_coeffs(&tensor),
         Value::ComplexTensor(tensor) => parse_complex_tensor_coeffs(&tensor),
@@ -407,8 +409,8 @@ fn parse_complex_tensor_coeffs(tensor: &ComplexTensor) -> BuiltinResult<Polynomi
     })
 }
 
-fn parse_constant(value: Value) -> BuiltinResult<Complex64> {
-    let gathered = dispatcher::gather_if_needed(&value)?;
+async fn parse_constant(value: Value) -> BuiltinResult<Complex64> {
+    let gathered = dispatcher::gather_if_needed_async(&value).await?;
     match gathered {
         Value::Tensor(tensor) => {
             if tensor.data.len() != 1 {
@@ -498,6 +500,7 @@ impl Orientation {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::LogicalArray;
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
@@ -821,5 +824,9 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::polyint_builtin(coeffs, rest))
     }
 }

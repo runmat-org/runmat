@@ -259,21 +259,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::any"
 )]
-fn any_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn any_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let (spec, nan_mode) = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => any_gpu(handle, spec, nan_mode),
-        other => any_host(other, spec, nan_mode),
+        Value::GpuTensor(handle) => any_gpu(handle, spec, nan_mode).await,
+        other => any_host(other, spec, nan_mode).await,
     }
 }
 
-fn any_host(value: Value, spec: ReductionSpec, nan_mode: ReductionNaN) -> BuiltinResult<Value> {
-    let truth = TruthTensor::from_value(value)?;
+async fn any_host(
+    value: Value,
+    spec: ReductionSpec,
+    nan_mode: ReductionNaN,
+) -> BuiltinResult<Value> {
+    let truth = TruthTensor::from_value(value).await?;
     let reduced = apply_reduction(truth, spec, nan_mode)?;
     reduced.into_value()
 }
 
-fn any_gpu(
+async fn any_gpu(
     handle: GpuTensorHandle,
     spec: ReductionSpec,
     nan_mode: ReductionNaN,
@@ -288,25 +292,25 @@ fn any_gpu(
     }
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
-        None => return gpu_fallback(handle, spec, nan_mode),
+        None => return gpu_fallback(handle, spec, nan_mode).await,
     };
     if matches!(nan_mode, ReductionNaN::Omit) {
         // Logical reductions return host results; gather to ensure exact omitnan semantics
-        return gpu_fallback(handle, spec, nan_mode);
+        return gpu_fallback(handle, spec, nan_mode).await;
     }
     match try_any_gpu(provider, &handle, &spec, nan_mode)? {
         Some(host) => logical_from_host(host),
-        None => gpu_fallback(handle, spec, nan_mode),
+        None => gpu_fallback(handle, spec, nan_mode).await,
     }
 }
 
-fn gpu_fallback(
+async fn gpu_fallback(
     handle: GpuTensorHandle,
     spec: ReductionSpec,
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
-    any_host(Value::Tensor(tensor), spec, nan_mode)
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+    any_host(Value::Tensor(tensor), spec, nan_mode).await
 }
 
 fn try_any_gpu(
@@ -529,7 +533,7 @@ impl TruthValue {
 }
 
 impl TruthTensor {
-    fn from_value(value: Value) -> BuiltinResult<Self> {
+    async fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::Tensor(t) => Ok(Self::from_tensor(t)),
             Value::LogicalArray(logical) => Ok(Self::from_logical(logical)),
@@ -562,7 +566,7 @@ impl TruthTensor {
             Value::ComplexTensor(ct) => Ok(Self::from_complex_tensor(ct)),
             Value::CharArray(ca) => Ok(Self::from_char_array(ca)),
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                 Ok(Self::from_tensor(tensor))
             }
             other => Err(any_error(format!(
@@ -879,8 +883,13 @@ fn product(dims: &[usize]) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue};
+
+    fn any_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::any_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

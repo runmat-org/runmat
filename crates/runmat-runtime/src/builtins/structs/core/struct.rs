@@ -202,7 +202,7 @@ fn struct_flow(message: impl Into<String>) -> RuntimeError {
     keywords = "struct,structure,name-value,record",
     builtin_path = "crate::builtins::structs::core::r#struct"
 )]
-fn struct_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn struct_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     match rest.len() {
         0 => Ok(Value::Struct(StructValue::new())),
         1 => match rest.into_iter().next().unwrap() {
@@ -419,10 +419,14 @@ pub(crate) mod tests {
         err.message().to_string()
     }
 
+    fn run_struct(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(struct_builtin(args))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_empty() {
-        let Value::Struct(s) = struct_builtin(Vec::new()).expect("struct") else {
+        let Value::Struct(s) = run_struct(Vec::new()).expect("struct") else {
             panic!("expected struct value");
         };
         assert!(s.fields.is_empty());
@@ -432,7 +436,7 @@ pub(crate) mod tests {
     #[test]
     fn struct_empty_from_empty_matrix() {
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
-        let value = struct_builtin(vec![Value::Tensor(tensor)]).expect("struct([])");
+        let value = run_struct(vec![Value::Tensor(tensor)]).expect("struct([])");
         match value {
             Value::Cell(cell) => {
                 assert_eq!(cell.rows, 0);
@@ -452,7 +456,7 @@ pub(crate) mod tests {
             Value::from("score"),
             Value::Int(IntValue::I32(42)),
         ];
-        let Value::Struct(s) = struct_builtin(args).expect("struct") else {
+        let Value::Struct(s) = run_struct(args).expect("struct") else {
             panic!("expected struct value");
         };
         assert_eq!(s.fields.len(), 2);
@@ -473,7 +477,7 @@ pub(crate) mod tests {
             2,
         )
         .unwrap();
-        let result = struct_builtin(vec![
+        let result = run_struct(vec![
             Value::from("name"),
             Value::Cell(names),
             Value::from("age"),
@@ -496,7 +500,7 @@ pub(crate) mod tests {
     #[test]
     fn struct_struct_array_replicates_scalars() {
         let names = CellArray::new(vec![Value::from("Ada"), Value::from("Grace")], 1, 2).unwrap();
-        let result = struct_builtin(vec![
+        let result = run_struct(vec![
             Value::from("name"),
             Value::Cell(names),
             Value::from("department"),
@@ -519,7 +523,7 @@ pub(crate) mod tests {
         let names = CellArray::new(vec![Value::from("Ada"), Value::from("Grace")], 1, 2).unwrap();
         let scores = CellArray::new(vec![Value::Int(IntValue::I32(1))], 1, 1).unwrap();
         let err = error_message(
-            struct_builtin(vec![
+            run_struct(vec![
                 Value::from("name"),
                 Value::Cell(names),
                 Value::from("score"),
@@ -539,7 +543,7 @@ pub(crate) mod tests {
             Value::from("version"),
             Value::Int(IntValue::I32(2)),
         ];
-        let Value::Struct(s) = struct_builtin(args).expect("struct") else {
+        let Value::Struct(s) = run_struct(args).expect("struct") else {
             panic!("expected struct value");
         };
         assert_eq!(s.fields.len(), 1);
@@ -552,7 +556,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_rejects_odd_arguments() {
-        let err = error_message(struct_builtin(vec![Value::from("name")]).unwrap_err());
+        let err = error_message(run_struct(vec![Value::from("name")]).unwrap_err());
         assert!(err.contains("name/value pairs"));
     }
 
@@ -560,7 +564,7 @@ pub(crate) mod tests {
     #[test]
     fn struct_rejects_invalid_field_name() {
         let err = error_message(
-            struct_builtin(vec![Value::from("1bad"), Value::Int(IntValue::I32(1))]).unwrap_err(),
+            run_struct(vec![Value::from("1bad"), Value::Int(IntValue::I32(1))]).unwrap_err(),
         );
         assert!(err.contains("begin with a letter or underscore"));
     }
@@ -569,7 +573,7 @@ pub(crate) mod tests {
     #[test]
     fn struct_rejects_non_text_field_name() {
         let err = error_message(
-            struct_builtin(vec![Value::Num(1.0), Value::Int(IntValue::I32(1))]).unwrap_err(),
+            run_struct(vec![Value::Num(1.0), Value::Int(IntValue::I32(1))]).unwrap_err(),
         );
         assert!(err.contains("strings or character vectors"));
     }
@@ -579,7 +583,7 @@ pub(crate) mod tests {
     fn struct_accepts_char_vector_name() {
         let chars = CharArray::new("field".chars().collect(), 1, 5).unwrap();
         let args = vec![Value::CharArray(chars), Value::Num(1.0)];
-        let Value::Struct(s) = struct_builtin(args).expect("struct") else {
+        let Value::Struct(s) = run_struct(args).expect("struct") else {
             panic!("expected struct value");
         };
         assert!(s.fields.contains_key("field"));
@@ -590,7 +594,7 @@ pub(crate) mod tests {
     fn struct_accepts_string_scalar_name() {
         let sa = StringArray::new(vec!["field".to_string()], vec![1]).unwrap();
         let args = vec![Value::StringArray(sa), Value::Num(1.0)];
-        let Value::Struct(s) = struct_builtin(args).expect("struct") else {
+        let Value::Struct(s) = run_struct(args).expect("struct") else {
             panic!("expected struct value");
         };
         assert!(s.fields.contains_key("field"));
@@ -602,7 +606,7 @@ pub(crate) mod tests {
         let mut base = StructValue::new();
         base.fields
             .insert("id".to_string(), Value::Int(IntValue::I32(7)));
-        let copy = struct_builtin(vec![Value::Struct(base.clone())]).expect("struct");
+        let copy = run_struct(vec![Value::Struct(base.clone())]).expect("struct");
         assert_eq!(copy, Value::Struct(base));
     }
 
@@ -624,7 +628,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let original = struct_array.clone();
-        let result = struct_builtin(vec![Value::Cell(struct_array)]).expect("struct array clone");
+        let result = run_struct(vec![Value::Cell(struct_array)]).expect("struct array clone");
         let cloned = expect_struct_array(result);
         let baseline = expect_struct_array(Value::Cell(original));
         assert_eq!(cloned, baseline);
@@ -634,7 +638,7 @@ pub(crate) mod tests {
     #[test]
     fn struct_rejects_cell_argument_without_structs() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
-        let err = error_message(struct_builtin(vec![Value::Cell(cell)]).unwrap_err());
+        let err = error_message(run_struct(vec![Value::Cell(cell)]).unwrap_err());
         assert!(err.contains("must contain structs"));
     }
 
@@ -647,7 +651,7 @@ pub(crate) mod tests {
             buffer_id: 99,
         };
         let args = vec![Value::from("data"), Value::GpuTensor(handle.clone())];
-        let Value::Struct(s) = struct_builtin(args).expect("struct") else {
+        let Value::Struct(s) = run_struct(args).expect("struct") else {
             panic!("expected struct value");
         };
         assert!(matches!(s.fields.get("data"), Some(Value::GpuTensor(h)) if h == &handle));
@@ -675,7 +679,7 @@ pub(crate) mod tests {
             2,
         )
         .unwrap();
-        let result = struct_builtin(vec![Value::from("payload"), Value::Cell(cell)])
+        let result = run_struct(vec![Value::from("payload"), Value::Cell(cell)])
             .expect("struct array gpu handles");
         let structs = expect_struct_array(result);
         assert!(matches!(
@@ -702,7 +706,7 @@ pub(crate) mod tests {
         };
         let handle = provider.upload(&host).expect("upload");
         let args = vec![Value::from("gpu"), Value::GpuTensor(handle.clone())];
-        let Value::Struct(s) = struct_builtin(args).expect("struct") else {
+        let Value::Struct(s) = run_struct(args).expect("struct") else {
             panic!("expected struct value");
         };
         assert!(matches!(s.fields.get("gpu"), Some(Value::GpuTensor(h)) if h == &handle));

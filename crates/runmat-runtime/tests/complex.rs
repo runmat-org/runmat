@@ -85,10 +85,10 @@ fn complex_matmul_and_transpose() {
         ComplexTensor::new_2d(vec![(1.0, 1.0), (0.0, -1.0), (2.0, 0.0), (1.0, 0.5)], 2, 2).unwrap();
     let b = ComplexTensor::new_2d(vec![(-1.0, 0.0), (3.0, 0.5), (0.0, 2.0), (1.0, -1.0)], 2, 2)
         .unwrap();
-    let v = runmat_runtime::matrix::value_matmul(
+    let v = futures::executor::block_on(runmat_runtime::matrix::value_matmul(
         &Value::ComplexTensor(a.clone()),
         &Value::ComplexTensor(b.clone()),
-    )
+    ))
     .unwrap();
     if let Value::ComplexTensor(m) = v {
         assert_eq!(m.rows, 2);
@@ -96,9 +96,11 @@ fn complex_matmul_and_transpose() {
     }
     // real * complex
     let r = Tensor::new_2d(vec![1.0, 2.0, 0.0, 1.0], 2, 2).unwrap();
-    let v2 =
-        runmat_runtime::matrix::value_matmul(&Value::Tensor(r), &Value::ComplexTensor(b.clone()))
-            .unwrap();
+    let v2 = futures::executor::block_on(runmat_runtime::matrix::value_matmul(
+        &Value::Tensor(r),
+        &Value::ComplexTensor(b.clone()),
+    ))
+    .unwrap();
     if let Value::ComplexTensor(m) = v2 {
         assert_eq!(m.rows, 2);
         assert_eq!(m.cols, 2);

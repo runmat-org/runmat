@@ -249,19 +249,27 @@ fn ismember_error(message: impl Into<String>) -> crate::RuntimeError {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::ismember"
 )]
-fn ismember_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    Ok(evaluate(a, b, &rest)?.into_mask_value())
+async fn ismember_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    Ok(evaluate(a, b, &rest).await?.into_mask_value())
 }
 
 /// Evaluate the `ismember` builtin once and expose all outputs.
-pub fn evaluate(a: Value, b: Value, rest: &[Value]) -> crate::BuiltinResult<IsMemberEvaluation> {
+pub async fn evaluate(
+    a: Value,
+    b: Value,
+    rest: &[Value],
+) -> crate::BuiltinResult<IsMemberEvaluation> {
     let opts = parse_options(rest)?;
     match (a, b) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
-            ismember_gpu_pair(handle_a, handle_b, &opts)
+            ismember_gpu_pair(handle_a, handle_b, &opts).await
         }
-        (Value::GpuTensor(handle_a), other) => ismember_gpu_mixed(handle_a, other, &opts, true),
-        (other, Value::GpuTensor(handle_b)) => ismember_gpu_mixed(handle_b, other, &opts, false),
+        (Value::GpuTensor(handle_a), other) => {
+            ismember_gpu_mixed(handle_a, other, &opts, true).await
+        }
+        (other, Value::GpuTensor(handle_b)) => {
+            ismember_gpu_mixed(handle_b, other, &opts, false).await
+        }
         (left, right) => ismember_host(left, right, &opts),
     }
 }
@@ -300,7 +308,7 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<IsMemberOptions> {
     Ok(opts)
 }
 
-fn ismember_gpu_pair(
+async fn ismember_gpu_pair(
     handle_a: GpuTensorHandle,
     handle_b: GpuTensorHandle,
     opts: &IsMemberOptions,
@@ -314,18 +322,18 @@ fn ismember_gpu_pair(
             }
         }
     }
-    let tensor_a = gpu_helpers::gather_tensor(&handle_a)?;
-    let tensor_b = gpu_helpers::gather_tensor(&handle_b)?;
+    let tensor_a = gpu_helpers::gather_tensor_async(&handle_a).await?;
+    let tensor_b = gpu_helpers::gather_tensor_async(&handle_b).await?;
     ismember_numeric_tensors(tensor_a, tensor_b, opts)
 }
 
-fn ismember_gpu_mixed(
+async fn ismember_gpu_mixed(
     handle_gpu: GpuTensorHandle,
     other: Value,
     opts: &IsMemberOptions,
     gpu_is_a: bool,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
-    let tensor_gpu = gpu_helpers::gather_tensor(&handle_gpu)?;
+    let tensor_gpu = gpu_helpers::gather_tensor_async(&handle_gpu).await?;
     if gpu_is_a {
         ismember_host(Value::Tensor(tensor_gpu), other, opts)
     } else {
@@ -901,11 +909,20 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::Tensor;
 
+
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    fn evaluate_sync(
+        a: Value,
+        b: Value,
+        rest: &[Value],
+    ) -> crate::BuiltinResult<IsMemberEvaluation> {
+        futures::executor::block_on(evaluate(a, b, rest))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1061,7 +1078,8 @@ pub(crate) mod tests {
     #[test]
     fn rejects_unknown_option() {
         let err = error_message(
-            evaluate(Value::Num(1.0), Value::Num(1.0), &[Value::from("stable")]).unwrap_err(),
+            evaluate_sync(Value::Num(1.0), Value::Num(1.0), &[Value::from("stable")])
+                .unwrap_err(),
         );
         assert!(err.contains("unrecognised option"));
     }
@@ -1071,7 +1089,7 @@ pub(crate) mod tests {
     fn ismember_runtime_numeric() {
         let a = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
         let b = Value::Tensor(Tensor::new(vec![3.0, 1.0], vec![2, 1]).unwrap());
-        let (mask, loc) = evaluate(a, b, &[]).unwrap().into_pair();
+        let (mask, loc) = evaluate_sync(a, b, &[]).unwrap().into_pair();
         match mask {
             Value::LogicalArray(arr) => assert_eq!(arr.data, vec![1, 0, 1]),
             other => panic!("expected logical array, got {other:?}"),
@@ -1088,7 +1106,8 @@ pub(crate) mod tests {
         let a = Value::Bool(true);
         let logical_b =
             LogicalArray::new(vec![1, 0], vec![2, 1]).expect("logical array construction");
-        let eval = evaluate(a, Value::LogicalArray(logical_b), &[]).expect("ismember");
+        let eval =
+            evaluate_sync(a, Value::LogicalArray(logical_b), &[]).expect("ismember");
         assert_eq!(eval.mask_value(), Value::Bool(true));
         assert_eq!(eval.loc_value(), Value::Num(1.0));
     }
@@ -1120,7 +1139,7 @@ pub(crate) mod tests {
             };
             let handle_a = provider.upload(&view_a).expect("upload a");
             let handle_b = provider.upload(&view_b).expect("upload b");
-            let eval = evaluate(Value::GpuTensor(handle_a), Value::GpuTensor(handle_b), &[])
+            let eval = evaluate_sync(Value::GpuTensor(handle_a), Value::GpuTensor(handle_b), &[])
                 .expect("ismember");
             assert_eq!(eval.mask.data, vec![0, 1, 0, 1]);
             assert_eq!(eval.loc.data, vec![0.0, 1.0, 0.0, 1.0]);
@@ -1143,7 +1162,7 @@ pub(crate) mod tests {
             };
             let handle_a = provider.upload(&view_a).expect("upload a");
             let handle_b = provider.upload(&view_b).expect("upload b");
-            let eval = evaluate(
+            let eval = evaluate_sync(
                 Value::GpuTensor(handle_a.clone()),
                 Value::GpuTensor(handle_b.clone()),
                 &[Value::from("rows")],
@@ -1181,7 +1200,7 @@ pub(crate) mod tests {
         let handle_a = provider.upload(&view_a).expect("upload a");
         let handle_b = provider.upload(&view_b).expect("upload b");
 
-        let eval = evaluate(
+        let eval = evaluate_sync(
             Value::GpuTensor(handle_a.clone()),
             Value::GpuTensor(handle_b.clone()),
             &[],
@@ -1207,7 +1226,7 @@ pub(crate) mod tests {
         };
         let handle_matrix = provider.upload(&view_matrix).expect("upload matrix");
         let handle_bank = provider.upload(&view_bank).expect("upload bank");
-        let eval_rows = evaluate(
+        let eval_rows = evaluate_sync(
             Value::GpuTensor(handle_matrix.clone()),
             Value::GpuTensor(handle_bank.clone()),
             &[Value::from("rows")],
@@ -1224,7 +1243,7 @@ pub(crate) mod tests {
     fn scalar_return_is_bool() {
         let a = Value::Tensor(Tensor::new(vec![7.0], vec![1, 1]).unwrap());
         let b = Value::Tensor(Tensor::new(vec![7.0], vec![1, 1]).unwrap());
-        let mask = evaluate(a, b, &[]).unwrap().into_mask_value();
+        let mask = evaluate_sync(a, b, &[]).unwrap().into_mask_value();
         assert_eq!(mask, Value::Bool(true));
     }
 

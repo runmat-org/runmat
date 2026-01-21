@@ -270,8 +270,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::math::linalg::factor::chol"
 )]
-fn chol_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(value, &rest)?;
+async fn chol_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(value, &rest).await?;
     if !eval.is_positive_definite() {
         return Err(chol_error("Matrix must be positive definite."));
     }
@@ -342,22 +342,24 @@ pub enum CholTriangle {
 }
 
 /// Compute the Cholesky factorization for the given value and option list.
-pub fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<CholEval> {
+pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<CholEval> {
     let triangle = parse_triangle(args)?;
     match value {
         Value::GpuTensor(handle) => {
             if let Some(eval) = evaluate_gpu(&handle, triangle)? {
                 return Ok(eval);
             }
-            let tensor = gpu_helpers::gather_tensor(&handle).map_err(with_chol_context)?;
-            evaluate_host_value(Value::Tensor(tensor), triangle)
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(with_chol_context)?;
+            evaluate_host_value(Value::Tensor(tensor), triangle).await
         }
-        other => evaluate_host_value(other, triangle),
+        other => evaluate_host_value(other, triangle).await,
     }
 }
 
-fn evaluate_host_value(value: Value, triangle: CholTriangle) -> BuiltinResult<CholEval> {
-    let matrix = extract_matrix(value)?;
+async fn evaluate_host_value(value: Value, triangle: CholTriangle) -> BuiltinResult<CholEval> {
+    let matrix = extract_matrix(value).await?;
     if matrix.rows != matrix.cols {
         return Err(chol_error("chol: input matrix must be square"));
     }
@@ -467,7 +469,7 @@ fn chol_factor(matrix: RowMajorMatrix) -> BuiltinResult<CholComponents> {
     Ok(CholComponents { upper, info })
 }
 
-fn extract_matrix(value: Value) -> BuiltinResult<RowMajorMatrix> {
+async fn extract_matrix(value: Value) -> BuiltinResult<RowMajorMatrix> {
     match value {
         Value::Tensor(tensor) => RowMajorMatrix::from_tensor(&tensor, "chol"),
         Value::ComplexTensor(ct) => RowMajorMatrix::from_complex_tensor(&ct, "chol"),
@@ -484,7 +486,9 @@ fn extract_matrix(value: Value) -> BuiltinResult<RowMajorMatrix> {
         ))),
         Value::Complex(re, im) => Ok(RowMajorMatrix::from_scalar(Complex64::new(re, im))),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle).map_err(with_chol_context)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(with_chol_context)?;
             RowMajorMatrix::from_tensor(&tensor, "chol")
         }
         other => Err(chol_error(format!(
@@ -616,6 +620,7 @@ impl RowMajorMatrix {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{LogicalArray, Tensor as Matrix};
 
     fn error_message(err: RuntimeError) -> String {
@@ -1075,5 +1080,13 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn chol_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::chol_builtin(value, rest))
+    }
+
+    fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<CholEval> {
+        block_on(super::evaluate(value, args))
     }
 }

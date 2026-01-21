@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::{
-    build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeError,
+    build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
 
 #[cfg_attr(
@@ -241,7 +241,7 @@ fn mat2cell_error_with_identifier(message: impl Into<String>, identifier: &str) 
     keywords = "mat2cell,cell array,partition,block",
     builtin_path = "crate::builtins::cells::core::mat2cell"
 )]
-fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
         return Err(mat2cell_error_with_identifier(
             "mat2cell: expected at least one size vector",
@@ -249,10 +249,10 @@ fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Valu
         ));
     }
 
-    let host_value = gather_if_needed(&value)?;
+    let host_value = gather_if_needed_async(&value).await?;
     let mut size_args = Vec::with_capacity(rest.len());
     for arg in rest {
-        let gathered = gather_if_needed(&arg)?;
+        let gathered = gather_if_needed_async(&arg).await?;
         size_args.push(gathered);
     }
 
@@ -781,7 +781,12 @@ fn normalize_cell_shape(shape: Vec<usize>) -> Vec<usize> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::LogicalArray;
+
+    fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::mat2cell_builtin(value, rest))
+    }
 
     fn row_vector(values: &[f64]) -> Value {
         Value::Tensor(

@@ -7,7 +7,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::dispatcher::gather_if_needed;
+use crate::dispatcher::gather_if_needed_async;
 use crate::{build_runtime_error, make_cell, make_cell_with_shape, BuiltinResult, RuntimeError};
 
 const ERR_INPUT_NOT_TEXT: &str =
@@ -255,13 +255,13 @@ fn cellstr_error_with_identifier(message: impl Into<String>, identifier: &str) -
     accel = "gather",
     builtin_path = "crate::builtins::cells::core::cellstr"
 )]
-fn cellstr_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    let host = gather_if_needed(&value)?;
+async fn cellstr_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    let host = gather_if_needed_async(&value).await?;
     match host {
         Value::CharArray(ca) => cellstr_from_char_array(ca),
         Value::StringArray(sa) => cellstr_from_string_array(sa),
         Value::String(text) => cellstr_from_string(text),
-        Value::Cell(cell) => cellstr_from_cell(cell),
+        Value::Cell(cell) => cellstr_from_cell(cell).await,
         Value::LogicalArray(_)
         | Value::Bool(_)
         | Value::Int(_)
@@ -336,11 +336,11 @@ fn cellstr_from_string_array(sa: StringArray) -> BuiltinResult<Value> {
     make_cell_with_shape(values, shape).map_err(|e| cellstr_error(format!("cellstr: {e}")))
 }
 
-fn cellstr_from_cell(cell: CellArray) -> BuiltinResult<Value> {
+async fn cellstr_from_cell(cell: CellArray) -> BuiltinResult<Value> {
     let mut values = Vec::with_capacity(cell.data.len());
     for ptr in &cell.data {
         let element = unsafe { &*ptr.as_raw() };
-        let gathered = gather_if_needed(element)?;
+        let gathered = gather_if_needed_async(element).await?;
         values.push(coerce_to_char_vector(gathered)?);
     }
     make_cell_with_shape(values, cell.shape.clone())
@@ -433,6 +433,11 @@ fn multi_to_linear_column_major(coords: &[usize], shape: &[usize]) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+
+    fn cellstr_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::cellstr_builtin(value))
+    }
 
     fn cell_to_strings(cell: &CellArray) -> Vec<String> {
         cell.data

@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const LABEL: &str = "string.empty";
 
@@ -243,8 +243,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "none",
     builtin_path = "crate::builtins::strings::core::string_empty"
 )]
-fn string_empty_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let shape = parse_shape(&rest)?;
+async fn string_empty_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let shape = parse_shape(&rest).await?;
     let total: usize = shape.iter().product();
     debug_assert_eq!(total, 0, "string.empty must produce an empty array");
     let data = Vec::<String>::new();
@@ -253,7 +253,7 @@ fn string_empty_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     Ok(Value::StringArray(array))
 }
 
-fn parse_shape(args: &[Value]) -> BuiltinResult<Vec<usize>> {
+async fn parse_shape(args: &[Value]) -> BuiltinResult<Vec<usize>> {
     if args.is_empty() {
         return Ok(vec![0, 0]);
     }
@@ -263,7 +263,9 @@ fn parse_shape(args: &[Value]) -> BuiltinResult<Vec<usize>> {
     let mut idx = 0;
 
     while idx < args.len() {
-        let arg_host = gather_if_needed(&args[idx]).map_err(remap_string_empty_flow)?;
+        let arg_host = gather_if_needed_async(&args[idx])
+            .await
+            .map_err(remap_string_empty_flow)?;
 
         if let Some(keyword) = keyword_of(&arg_host) {
             if keyword.as_str() == "like" {
@@ -277,7 +279,9 @@ fn parse_shape(args: &[Value]) -> BuiltinResult<Vec<usize>> {
                         "{LABEL}: expected prototype after 'like'"
                     )));
                 };
-                let proto = gather_if_needed(proto_raw).map_err(remap_string_empty_flow)?;
+                let proto = gather_if_needed_async(proto_raw)
+                    .await
+                    .map_err(remap_string_empty_flow)?;
                 like_shape = Some(prototype_dims(&proto));
                 idx += 2;
                 continue;
@@ -368,6 +372,10 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{StringArray, Tensor, Value};
+
+    fn string_empty_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::string_empty_builtin(rest))
+    }
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()

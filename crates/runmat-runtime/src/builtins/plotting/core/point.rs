@@ -1,3 +1,4 @@
+use futures::executor::block_on;
 use glam::Vec4;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
@@ -5,7 +6,7 @@ use runmat_plot::plots::surface::ColorMap;
 use std::collections::VecDeque;
 
 use crate::builtins::common::map_control_flow_with_builtin;
-use crate::{gather_if_needed, BuiltinResult};
+use crate::{gather_if_needed_async, BuiltinResult};
 
 use super::plotting_error;
 
@@ -231,12 +232,16 @@ fn total_len(shape: &[usize]) -> usize {
     }
 }
 
-pub(crate) fn tensor_from_value(value: &Value, context: &'static str) -> BuiltinResult<Tensor> {
+pub(crate) async fn tensor_from_value_async(
+    value: &Value,
+    context: &'static str,
+) -> BuiltinResult<Tensor> {
     match value {
         Value::Tensor(tensor) => Ok(tensor.clone()),
         Value::GpuTensor(handle) => {
             let tmp = Value::GpuTensor(handle.clone());
-            let gathered = gather_if_needed(&tmp)
+            let gathered = gather_if_needed_async(&tmp)
+                .await
                 .map_err(|flow| map_control_flow_with_builtin(flow, context))?;
             Tensor::try_from(&gathered)
                 .map_err(|e| plotting_error(context, format!("{context}: {e}")))
@@ -245,6 +250,10 @@ pub(crate) fn tensor_from_value(value: &Value, context: &'static str) -> Builtin
             Tensor::try_from(value).map_err(|e| plotting_error(context, format!("{context}: {e}")))
         }
     }
+}
+
+pub(crate) fn tensor_from_value(value: &Value, context: &'static str) -> BuiltinResult<Tensor> {
+    block_on(tensor_from_value_async(value, context))
 }
 
 pub(crate) fn convert_size_vector(

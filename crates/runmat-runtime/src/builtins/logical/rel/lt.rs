@@ -254,13 +254,13 @@ fn lt_error(message: impl Into<String>, identifier: &'static str) -> RuntimeErro
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::rel::lt"
 )]
-fn lt_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+async fn lt_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
         if let Some(result) = try_lt_gpu(a, b) {
             return result;
         }
     }
-    lt_host(lhs, rhs)
+    lt_host(lhs, rhs).await
 }
 
 fn try_lt_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<crate::BuiltinResult<Value>> {
@@ -274,11 +274,11 @@ fn try_lt_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<crate::Builtin
     }
 }
 
-fn lt_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+async fn lt_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let (lhs, rhs) = normalize_char_string(lhs, rhs);
 
-    let left = LtOperand::from_value(lhs)?;
-    let right = LtOperand::from_value(rhs)?;
+    let left = LtOperand::from_value(lhs).await?;
+    let right = LtOperand::from_value(rhs).await?;
 
     match (left, right) {
         (LtOperand::Numeric(a), LtOperand::Numeric(b)) => {
@@ -335,7 +335,7 @@ enum LtOperand {
 }
 
 impl LtOperand {
-    fn from_value(value: Value) -> crate::BuiltinResult<Self> {
+    async fn from_value(value: Value) -> crate::BuiltinResult<Self> {
         match value {
             Value::Num(n) => Ok(LtOperand::Numeric(NumericBuffer::scalar(n))),
             Value::Bool(flag) => Ok(LtOperand::Numeric(NumericBuffer::scalar(if flag {
@@ -354,9 +354,11 @@ impl LtOperand {
             Value::String(s) => Ok(LtOperand::String(StringBuffer::scalar(s))),
             Value::StringArray(sa) => Ok(LtOperand::String(StringBuffer::from_array(sa))),
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle).map_err(|err| {
-                    lt_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT)
-                })?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle)
+                    .await
+                    .map_err(|err| {
+                        lt_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT)
+                    })?;
                 Ok(LtOperand::Numeric(NumericBuffer::from_tensor(tensor)))
             }
             Value::Complex(_, _) | Value::ComplexTensor(_) => Err(lt_error(
@@ -514,19 +516,24 @@ impl StringBuffer {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
+
+    fn run_lt(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+        block_on(super::lt_builtin(lhs, rhs))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lt_scalar_true() {
-        let result = lt_builtin(Value::Num(3.0), Value::Num(4.0)).expect("lt");
+        let result = run_lt(Value::Num(3.0), Value::Num(4.0)).expect("lt");
         assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lt_scalar_false() {
-        let result = lt_builtin(Value::Num(4.0), Value::Num(3.0)).expect("lt");
+        let result = run_lt(Value::Num(4.0), Value::Num(3.0)).expect("lt");
         assert_eq!(result, Value::Bool(false));
     }
 
@@ -534,7 +541,7 @@ pub(crate) mod tests {
     #[test]
     fn lt_vector_broadcast() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![1, 4]).unwrap();
-        let result = lt_builtin(Value::Tensor(tensor), Value::Num(3.0)).expect("lt");
+        let result = run_lt(Value::Tensor(tensor), Value::Num(3.0)).expect("lt");
         match result {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![1, 4]);
@@ -549,7 +556,7 @@ pub(crate) mod tests {
     fn lt_char_array_against_numeric() {
         let chars = CharArray::new(vec!['A', 'B', 'C'], 1, 3).unwrap();
         let tensor = Tensor::new(vec![66.0, 66.0, 66.0], vec![1, 3]).unwrap();
-        let result = lt_builtin(Value::CharArray(chars), Value::Tensor(tensor)).expect("lt");
+        let result = run_lt(Value::CharArray(chars), Value::Tensor(tensor)).expect("lt");
         match result {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![1, 3]);
@@ -564,7 +571,7 @@ pub(crate) mod tests {
     fn lt_string_array_against_scalar() {
         let array = StringArray::new(vec!["apple".into(), "carrot".into()], vec![1, 2]).unwrap();
         let result =
-            lt_builtin(Value::StringArray(array), Value::String("banana".into())).expect("lt");
+            run_lt(Value::StringArray(array), Value::String("banana".into())).expect("lt");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![1, 2]);
@@ -578,7 +585,7 @@ pub(crate) mod tests {
     #[test]
     fn lt_string_numeric_error() {
         let err =
-            lt_builtin(Value::String("apple".into()), Value::Num(3.0)).expect_err("expected error");
+            run_lt(Value::String("apple".into()), Value::Num(3.0)).expect_err("expected error");
         assert!(err.message().contains("mixing numeric and string"));
         assert_eq!(err.identifier(), Some(IDENT_INVALID_INPUT));
     }
@@ -586,7 +593,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lt_complex_error() {
-        let err = lt_builtin(Value::Complex(1.0, 1.0), Value::Num(0.0)).expect_err("lt");
+        let err = run_lt(Value::Complex(1.0, 1.0), Value::Num(0.0)).expect_err("lt");
         assert!(err.message().contains("complex"));
         assert_eq!(err.identifier(), Some(IDENT_COMPLEX_UNSUPPORTED));
     }
@@ -608,7 +615,7 @@ pub(crate) mod tests {
             let handle_l = provider.upload(&view_l).expect("upload lhs");
             let handle_r = provider.upload(&view_r).expect("upload rhs");
             let result =
-                lt_builtin(Value::GpuTensor(handle_l), Value::GpuTensor(handle_r)).expect("lt");
+                run_lt(Value::GpuTensor(handle_l), Value::GpuTensor(handle_r)).expect("lt");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
             assert_eq!(gathered.data, vec![1.0, 0.0, 1.0]);
@@ -631,7 +638,7 @@ pub(crate) mod tests {
         );
         let lhs = Tensor::new(vec![0.0, 2.0, 5.0, 7.0], vec![4, 1]).unwrap();
         let rhs = Tensor::new(vec![1.0, 2.5, 4.0, 8.0], vec![4, 1]).unwrap();
-        let cpu = lt_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).unwrap();
+        let cpu = run_lt_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).unwrap();
 
         let view_l = HostTensorView {
             data: &lhs.data,
@@ -644,7 +651,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("provider");
         let handle_l = provider.upload(&view_l).expect("upload lhs");
         let handle_r = provider.upload(&view_r).expect("upload rhs");
-        let gpu = lt_builtin(Value::GpuTensor(handle_l), Value::GpuTensor(handle_r)).unwrap();
+        let gpu = run_lt(Value::GpuTensor(handle_l), Value::GpuTensor(handle_r)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
 
         match (cpu, gathered) {

@@ -263,9 +263,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::atanh"
 )]
-fn atanh_builtin(value: Value) -> BuiltinResult<Value> {
+async fn atanh_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => atanh_gpu(handle),
+        Value::GpuTensor(handle) => atanh_gpu(handle).await,
         Value::Complex(re, im) => Ok(atanh_complex_scalar(re, im)),
         Value::ComplexTensor(ct) => atanh_complex_tensor(ct),
         Value::CharArray(ca) => atanh_char_array(ca),
@@ -276,7 +276,7 @@ fn atanh_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn atanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn atanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match gpu_domain_is_real(provider, &handle) {
             Ok(true) => {
@@ -292,7 +292,7 @@ fn atanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     atanh_tensor_real(tensor)
 }
 
@@ -451,8 +451,13 @@ fn zero_small(value: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use num_complex::Complex64;
     use runmat_builtins::{CharArray, IntValue, LogicalArray};
+
+    fn atanh_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::atanh_builtin(value))
+    }
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()

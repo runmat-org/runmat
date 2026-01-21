@@ -227,7 +227,7 @@ fn ipermute_error(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::ipermute"
 )]
-fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
+async fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
     let order_vec = parse_order_argument("ipermute", order)?;
     let inverse = inverse_permutation(&order_vec);
 
@@ -259,7 +259,7 @@ fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
         }
         Value::GpuTensor(handle) => {
             validate_rank("ipermute", &order_vec, handle.shape.len())?;
-            Ok(ipermute_gpu(handle, &inverse)?)
+            Ok(ipermute_gpu(handle, &inverse).await?)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             let tensor = tensor::value_into_tensor_for("ipermute", value)
@@ -275,8 +275,11 @@ fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
     }
 }
 
-fn ipermute_gpu(handle: GpuTensorHandle, inverse_order: &[usize]) -> crate::BuiltinResult<Value> {
-    permute_gpu("ipermute", handle, inverse_order)
+async fn ipermute_gpu(
+    handle: GpuTensorHandle,
+    inverse_order: &[usize],
+) -> crate::BuiltinResult<Value> {
+    permute_gpu("ipermute", handle, inverse_order).await
 }
 
 fn inverse_permutation(order: &[usize]) -> Vec<usize> {
@@ -293,6 +296,11 @@ fn inverse_permutation(order: &[usize]) -> Vec<usize> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
+        block_on(super::ipermute_builtin(value, order))
+    }
     use crate::builtins::array::shape::permute::{
         parse_order_argument, permute_char_array, permute_gpu, permute_logical_array,
         permute_string_array, permute_tensor,
@@ -389,7 +397,12 @@ pub(crate) mod tests {
             let handle = provider.upload(&view).expect("upload");
             let order_vec = parse_order_argument("ipermute", Value::Tensor(order.clone()))
                 .expect("parse order");
-            let permuted = permute_gpu("ipermute", handle, &order_vec).expect("permute gpu");
+            let permuted = futures::executor::block_on(permute_gpu(
+                "ipermute",
+                handle,
+                &order_vec,
+            ))
+            .expect("permute gpu");
             let restored = ipermute_builtin(permuted, Value::Tensor(order)).expect("ipermute gpu");
             let gathered = test_support::gather(restored).expect("gather");
             assert_eq!(gathered.shape, host.shape);

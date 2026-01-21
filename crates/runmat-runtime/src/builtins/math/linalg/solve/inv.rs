@@ -238,9 +238,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "inv",
     builtin_path = "crate::builtins::math::linalg::solve::inv"
 )]
-fn inv_builtin(value: Value) -> BuiltinResult<Value> {
+async fn inv_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => inv_gpu(handle),
+        Value::GpuTensor(handle) => inv_gpu(handle).await,
         Value::ComplexTensor(tensor) => inv_complex_value(tensor),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(builtin_error)?;
@@ -253,7 +253,7 @@ fn inv_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let options = ProviderInvOptions::default();
         match provider.inv(&handle, options) {
@@ -262,7 +262,9 @@ fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 // Fall back to host implementation and attempt to re-upload.
             }
         }
-        let gathered = gpu_helpers::gather_tensor(&handle).map_err(map_control_flow)?;
+        let gathered = gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(map_control_flow)?;
         let inv = inv_real_tensor(&gathered)?;
         if let Ok(uploaded) = provider.upload(&runmat_accelerate_api::HostTensorView {
             data: &inv.data,
@@ -273,7 +275,9 @@ fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         return Ok(tensor::tensor_into_value(inv));
     }
 
-    let gathered = gpu_helpers::gather_tensor(&handle).map_err(map_control_flow)?;
+    let gathered = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(map_control_flow)?;
     let inv = inv_real_tensor(&gathered)?;
     Ok(tensor::tensor_into_value(inv))
 }
@@ -403,6 +407,7 @@ pub fn inv_host_real_for_provider(matrix: &Tensor) -> BuiltinResult<Tensor> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::IntValue;
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -611,5 +616,9 @@ pub(crate) mod tests {
         for (a, b) in gathered.data.iter().zip(cpu.data.iter()) {
             assert!((*a - *b).abs() < tol, "expected {b}, got {a}");
         }
+    }
+
+    fn inv_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::inv_builtin(value))
     }
 }

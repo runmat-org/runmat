@@ -226,9 +226,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::eye"
 )]
-fn eye_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn eye_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = ParsedEye::parse(rest)?;
-    build_output(parsed).map_err(Into::into)
+    build_output(parsed).await.map_err(Into::into)
 }
 
 struct ParsedEye {
@@ -352,12 +352,12 @@ impl ParsedEye {
     }
 }
 
-fn build_output(parsed: ParsedEye) -> Result<Value, String> {
+async fn build_output(parsed: ParsedEye) -> Result<Value, String> {
     let shape = normalize_shape(&parsed.shape);
     match parsed.template {
         EyeTemplate::Double => eye_double(&shape),
         EyeTemplate::Logical => eye_logical(&shape),
-        EyeTemplate::Like(proto) => eye_like(&proto, &shape),
+        EyeTemplate::Like(proto) => eye_like(&proto, &shape).await,
     }
 }
 
@@ -380,22 +380,25 @@ fn eye_complex(shape: &[usize]) -> Result<Value, String> {
     Ok(Value::ComplexTensor(tensor))
 }
 
-fn eye_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
+#[async_recursion::async_recursion(?Send)]
+async fn eye_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
     match proto {
         Value::LogicalArray(_) | Value::Bool(_) => eye_logical(shape),
         Value::ComplexTensor(_) | Value::Complex(_, _) => eye_complex(shape),
-        Value::GpuTensor(handle) => eye_like_gpu(handle, shape),
+        Value::GpuTensor(handle) => eye_like_gpu(handle, shape).await,
         Value::Tensor(_) | Value::Num(_) | Value::Int(_) => eye_double(shape),
         Value::CharArray(_) | Value::Cell(_) => eye_double(shape),
         other => {
-            let gathered =
-                crate::dispatcher::gather_if_needed(other).map_err(|e| format!("eye: {e}"))?;
-            eye_like(&gathered, shape)
+            let gathered = crate::dispatcher::gather_if_needed_async(other)
+                .await
+                .map_err(|e| format!("eye: {e}"))?;
+            eye_like(&gathered, shape).await
         }
     }
 }
 
-fn eye_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, String> {
+#[async_recursion::async_recursion(?Send)]
+async fn eye_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, String> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -426,9 +429,10 @@ fn eye_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, Stri
         }
     }
 
-    let gathered = crate::dispatcher::gather_if_needed(&Value::GpuTensor(handle.clone()))
+    let gathered = crate::dispatcher::gather_if_needed_async(&Value::GpuTensor(handle.clone()))
+        .await
         .map_err(|e| format!("eye: {e}"))?;
-    eye_like(&gathered, shape)
+    eye_like(&gathered, shape).await
 }
 
 fn identity_tensor(shape: &[usize]) -> Result<Tensor, String> {
@@ -584,6 +588,7 @@ fn visit_identity_positions(shape: &[usize], mut f: impl FnMut(usize)) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_accelerate_api::HostTensorView;
@@ -591,7 +596,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_default_scalar() {
-        let result = eye_builtin(Vec::new()).expect("eye");
+        let result = block_on(eye_builtin(Vec::new())).expect("eye");
         assert_eq!(result, Value::Num(1.0));
     }
 
@@ -599,7 +604,7 @@ pub(crate) mod tests {
     #[test]
     fn eye_square_from_scalar_dimension() {
         let args = vec![Value::Num(3.0)];
-        let result = eye_builtin(args).expect("eye");
+        let result = block_on(eye_builtin(args)).expect("eye");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
@@ -622,7 +627,7 @@ pub(crate) mod tests {
     #[test]
     fn eye_rectangular_from_two_dims() {
         let args = vec![Value::Num(2.0), Value::Num(4.0)];
-        let result = eye_builtin(args).expect("eye");
+        let result = block_on(eye_builtin(args)).expect("eye");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 4]);
@@ -646,7 +651,7 @@ pub(crate) mod tests {
     #[test]
     fn eye_accepts_size_vector_argument() {
         let size_vec = Tensor::new(vec![2.0, 4.0], vec![1, 2]).unwrap();
-        let result = eye_builtin(vec![Value::Tensor(size_vec)]).expect("eye");
+        let result = block_on(eye_builtin(vec![Value::Tensor(size_vec)])).expect("eye");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 4]);
@@ -663,7 +668,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_zero_dimension_matrix() {
-        let result = eye_builtin(vec![Value::Num(0.0)]).expect("eye");
+        let result = block_on(eye_builtin(vec![Value::Num(0.0)])).expect("eye");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
@@ -678,7 +683,7 @@ pub(crate) mod tests {
     fn eye_uses_tensor_argument_shape_and_type() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor.clone())];
-        let result = eye_builtin(args).expect("eye");
+        let result = block_on(eye_builtin(args)).expect("eye");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, tensor.shape);
@@ -692,7 +697,7 @@ pub(crate) mod tests {
     #[test]
     fn eye_logical_output() {
         let args = vec![Value::Num(4.0), Value::from("logical")];
-        let result = eye_builtin(args).expect("eye");
+        let result = block_on(eye_builtin(args)).expect("eye");
         match result {
             Value::LogicalArray(logical) => {
                 assert_eq!(logical.shape, vec![4, 4]);
@@ -715,7 +720,7 @@ pub(crate) mod tests {
     #[test]
     fn eye_like_bool_produces_logical() {
         let args = vec![Value::Num(3.0), Value::from("like"), Value::Bool(true)];
-        let result = eye_builtin(args).expect("eye");
+        let result = block_on(eye_builtin(args)).expect("eye");
         match result {
             Value::LogicalArray(logical) => {
                 assert_eq!(logical.shape, vec![3, 3]);
@@ -739,7 +744,7 @@ pub(crate) mod tests {
     fn eye_prototype_with_logical_override() {
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
         let args = vec![Value::Tensor(proto), Value::from("logical")];
-        let result = eye_builtin(args).expect("eye");
+        let result = block_on(eye_builtin(args)).expect("eye");
         match result {
             Value::LogicalArray(logical) => {
                 assert_eq!(logical.shape, vec![2, 3]);
@@ -758,7 +763,7 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::Complex(1.0, 2.0),
         ];
-        let result = eye_builtin(args).expect("eye");
+        let result = block_on(eye_builtin(args)).expect("eye");
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -775,7 +780,7 @@ pub(crate) mod tests {
     #[test]
     fn eye_extra_dimensions_replicate_identity() {
         let args = vec![Value::Num(2.0), Value::Num(3.0), Value::Num(2.0)];
-        let result = eye_builtin(args).expect("eye");
+        let result = block_on(eye_builtin(args)).expect("eye");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3, 2]);
@@ -797,7 +802,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_like_requires_prototype() {
-        assert!(eye_builtin(vec![Value::from("like")]).is_err());
+        assert!(block_on(eye_builtin(vec![Value::from("like")])).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -816,7 +821,7 @@ pub(crate) mod tests {
                 Value::from("like"),
                 Value::GpuTensor(handle),
             ];
-            let result = eye_builtin(args).expect("eye");
+            let result = block_on(eye_builtin(args)).expect("eye");
             match result {
                 Value::GpuTensor(gpu) => {
                     assert_eq!(gpu.shape, vec![2, 3]);
@@ -842,7 +847,7 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let prototype = provider.upload(&view).expect("upload proto");
-            let result = eye_builtin(vec![Value::GpuTensor(prototype)]).expect("eye");
+            let result = block_on(eye_builtin(vec![Value::GpuTensor(prototype)])).expect("eye");
             let gathered = test_support::gather(result).expect("gather gpu identity");
             assert_eq!(gathered.shape, vec![2, 2]);
             assert_eq!(gathered.data, vec![1.0, 0.0, 0.0, 1.0]);
@@ -854,7 +859,7 @@ pub(crate) mod tests {
     fn eye_like_string_first_argument() {
         let proto = Tensor::new(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
         let args = vec![Value::from("like"), Value::Tensor(proto)];
-        let result = eye_builtin(args).expect("eye");
+        let result = block_on(eye_builtin(args)).expect("eye");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -873,21 +878,21 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::Num(1.0),
         ];
-        assert!(eye_builtin(args).is_err());
+        assert!(block_on(eye_builtin(args)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_rejects_negative_dimension() {
         let args = vec![Value::Num(-1.0)];
-        assert!(eye_builtin(args).is_err());
+        assert!(block_on(eye_builtin(args)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_rejects_non_integer_dimension() {
         let args = vec![Value::Num(2.5)];
-        assert!(eye_builtin(args).is_err());
+        assert!(block_on(eye_builtin(args)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -898,7 +903,7 @@ pub(crate) mod tests {
             wgpu_provider::register_wgpu_provider(wgpu_provider::WgpuProviderOptions::default());
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
 
-        let cpu_value = eye_builtin(vec![Value::Num(3.0)]).expect("cpu eye");
+        let cpu_value = block_on(eye_builtin(vec![Value::Num(3.0)])).expect("cpu eye");
         let host_proto = Tensor::zeros(vec![3, 3]);
         let view = HostTensorView {
             data: &host_proto.data,
@@ -906,11 +911,11 @@ pub(crate) mod tests {
         };
         let gpu_proto = provider.upload(&view).expect("upload proto");
 
-        let gpu_value = eye_builtin(vec![
+        let gpu_value = block_on(eye_builtin(vec![
             Value::Num(3.0),
             Value::from("like"),
             Value::GpuTensor(gpu_proto),
-        ])
+        ]))
         .expect("gpu eye");
 
         let gathered = test_support::gather(gpu_value).expect("gather gpu eye");

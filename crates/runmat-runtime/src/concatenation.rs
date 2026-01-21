@@ -490,7 +490,7 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
 
 /// Create a matrix from a 2D array of Values with proper concatenation semantics
 /// This handles the case where matrix elements can be variables, not just literals
-pub fn create_matrix_from_values(rows: &[Vec<Value>]) -> BuiltinResult<Value> {
+pub async fn create_matrix_from_values(rows: &[Vec<Value>]) -> BuiltinResult<Value> {
     if rows.is_empty() {
         return Ok(Value::Tensor(
             Tensor::new(vec![], vec![0, 0]).map_err(concat_error)?,
@@ -503,7 +503,7 @@ pub fn create_matrix_from_values(rows: &[Vec<Value>]) -> BuiltinResult<Value> {
         let row_value = if row.is_empty() {
             Value::Tensor(Tensor::new(vec![], vec![0, 0]).map_err(concat_error)?)
         } else {
-            crate::call_builtin("horzcat", row)?
+            crate::call_builtin_async("horzcat", row).await?
         };
         row_matrices.push(row_value);
     }
@@ -516,7 +516,7 @@ pub fn create_matrix_from_values(rows: &[Vec<Value>]) -> BuiltinResult<Value> {
     } else if row_matrices.len() == 1 {
         Ok(row_matrices.into_iter().next().unwrap())
     } else {
-        Ok(crate::call_builtin("vertcat", &row_matrices)?)
+        Ok(crate::call_builtin_async("vertcat", &row_matrices).await?)
     }
 }
 

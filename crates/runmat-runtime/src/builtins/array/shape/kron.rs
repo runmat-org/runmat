@@ -234,28 +234,33 @@ enum KronInput {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::kron"
 )]
-fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(kron_error("kron: too many input arguments"));
     }
 
     match (a, b) {
-        (Value::GpuTensor(left), Value::GpuTensor(right)) => Ok(kron_gpu_gpu(left, right)?),
-        (Value::GpuTensor(left), right) => Ok(kron_gpu_mixed_left(left, right)?),
-        (left, Value::GpuTensor(right)) => Ok(kron_gpu_mixed_right(left, right)?),
+        (Value::GpuTensor(left), Value::GpuTensor(right)) => {
+            Ok(kron_gpu_gpu(left, right).await?)
+        }
+        (Value::GpuTensor(left), right) => Ok(kron_gpu_mixed_left(left, right).await?),
+        (left, Value::GpuTensor(right)) => Ok(kron_gpu_mixed_right(left, right).await?),
         (left, right) => Ok(kron_host(left, right)?),
     }
 }
 
-fn kron_gpu_gpu(left: GpuTensorHandle, right: GpuTensorHandle) -> crate::BuiltinResult<Value> {
+async fn kron_gpu_gpu(
+    left: GpuTensorHandle,
+    right: GpuTensorHandle,
+) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(handle) = provider.kron(&left, &right) {
             return Ok(Value::GpuTensor(handle));
         }
     }
 
-    let left_tensor = gpu_helpers::gather_tensor(&left)?;
-    let right_tensor = gpu_helpers::gather_tensor(&right)?;
+    let left_tensor = gpu_helpers::gather_tensor_async(&left).await?;
+    let right_tensor = gpu_helpers::gather_tensor_async(&right).await?;
     if let Some(provider) = runmat_accelerate_api::provider() {
         let _ = provider.free(&left);
         let _ = provider.free(&right);
@@ -266,7 +271,7 @@ fn kron_gpu_gpu(left: GpuTensorHandle, right: GpuTensorHandle) -> crate::Builtin
     finalize_numeric(numeric, true)
 }
 
-fn kron_gpu_mixed_left(left: GpuTensorHandle, right: Value) -> crate::BuiltinResult<Value> {
+async fn kron_gpu_mixed_left(left: GpuTensorHandle, right: Value) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(tensor_right) = tensor::value_into_tensor_for("kron", right.clone()) {
             let view = HostTensorView {
@@ -287,7 +292,7 @@ fn kron_gpu_mixed_left(left: GpuTensorHandle, right: Value) -> crate::BuiltinRes
         }
     }
 
-    let left_tensor = gpu_helpers::gather_tensor(&left)?;
+    let left_tensor = gpu_helpers::gather_tensor_async(&left).await?;
     if let Some(provider) = runmat_accelerate_api::provider() {
         let _ = provider.free(&left);
     }
@@ -296,7 +301,7 @@ fn kron_gpu_mixed_left(left: GpuTensorHandle, right: Value) -> crate::BuiltinRes
     finalize_numeric(numeric, true)
 }
 
-fn kron_gpu_mixed_right(left: Value, right: GpuTensorHandle) -> crate::BuiltinResult<Value> {
+async fn kron_gpu_mixed_right(left: Value, right: GpuTensorHandle) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(tensor_left) = tensor::value_into_tensor_for("kron", left.clone()) {
             let view = HostTensorView {
@@ -317,7 +322,7 @@ fn kron_gpu_mixed_right(left: Value, right: GpuTensorHandle) -> crate::BuiltinRe
         }
     }
 
-    let right_tensor = gpu_helpers::gather_tensor(&right)?;
+    let right_tensor = gpu_helpers::gather_tensor_async(&right).await?;
     if let Some(provider) = runmat_accelerate_api::provider() {
         let _ = provider.free(&right);
     }
@@ -559,6 +564,11 @@ fn checked_total(shape: &[usize], context: &str) -> crate::BuiltinResult<usize> 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::kron_builtin(a, b, rest))
+    }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{LogicalArray, Tensor};

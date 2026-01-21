@@ -251,17 +251,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "mldivide",
     builtin_path = "crate::builtins::math::linalg::ops::mldivide"
 )]
-fn mldivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    mldivide_eval(&lhs, &rhs)
+async fn mldivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    mldivide_eval(&lhs, &rhs).await
 }
 
-pub(crate) fn mldivide_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
+pub(crate) async fn mldivide_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
     if let Some(result) = try_gpu_mldivide(lhs, rhs)? {
         return Ok(result);
     }
 
-    let lhs_host = crate::dispatcher::gather_if_needed(lhs).map_err(map_control_flow)?;
-    let rhs_host = crate::dispatcher::gather_if_needed(rhs).map_err(map_control_flow)?;
+    let lhs_host = crate::dispatcher::gather_if_needed_async(lhs)
+        .await
+        .map_err(map_control_flow)?;
+    let rhs_host = crate::dispatcher::gather_if_needed_async(rhs)
+        .await
+        .map_err(map_control_flow)?;
     mldivide_cpu(lhs_host, rhs_host)
 }
 
@@ -584,6 +588,7 @@ fn release_operand(provider: &'static dyn AccelProvider, operand: &mut PreparedO
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -779,5 +784,13 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn mldivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+        block_on(super::mldivide_builtin(lhs, rhs))
+    }
+
+    fn mldivide_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
+        block_on(super::mldivide_eval(lhs, rhs))
     }
 }

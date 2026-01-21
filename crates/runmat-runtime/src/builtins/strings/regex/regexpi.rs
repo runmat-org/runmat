@@ -222,9 +222,13 @@ fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
 }
 
 /// Evaluate `regexpi` with MATLAB-compatible defaults and return the shared regex evaluation handle.
-pub fn evaluate(subject: Value, pattern: Value, rest: &[Value]) -> BuiltinResult<RegexpEvaluation> {
+pub async fn evaluate(
+    subject: Value,
+    pattern: Value,
+    rest: &[Value],
+) -> BuiltinResult<RegexpEvaluation> {
     let options = build_options(rest);
-    regexp::evaluate_with(BUILTIN_NAME, subject, pattern, &options)
+    regexp::evaluate_with(BUILTIN_NAME, subject, pattern, &options).await
 }
 
 #[runtime_builtin(
@@ -235,12 +239,12 @@ pub fn evaluate(subject: Value, pattern: Value, rest: &[Value]) -> BuiltinResult
     accel = "sink",
     builtin_path = "crate::builtins::strings::regex::regexpi"
 )]
-fn regexpi_builtin(
+async fn regexpi_builtin(
     subject: Value,
     pattern: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let evaluation = evaluate(subject, pattern, &rest)?;
+    let evaluation = evaluate(subject, pattern, &rest).await?;
     let mut outputs = evaluation.outputs_for_single()?;
     if outputs.is_empty() {
         return Ok(Value::Num(0.0));
@@ -288,6 +292,18 @@ pub(crate) mod tests {
     use runmat_builtins::{CellArray, StringArray};
 
     use crate::builtins::common::test_support;
+
+    fn evaluate(subject: Value, pattern: Value, rest: &[Value]) -> BuiltinResult<RegexpEvaluation> {
+        futures::executor::block_on(super::evaluate(subject, pattern, rest))
+    }
+
+    fn run_regexpi_builtin(
+        subject: Value,
+        pattern: Value,
+        rest: Vec<Value>,
+    ) -> BuiltinResult<Value> {
+        futures::executor::block_on(regexpi_builtin(subject, pattern, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -350,7 +366,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexpi_builtin_match_output() {
-        let result = regexpi_builtin(
+        let result = run_regexpi_builtin(
             Value::String("FooBarBaz".into()),
             Value::String("bar".into()),
             vec![Value::String("match".into())],

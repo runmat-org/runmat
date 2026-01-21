@@ -263,7 +263,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::acceleration::gpu::gpuarray"
 )]
-fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let options = parse_options(&rest)?;
     let incoming_precision = match &value {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_precision(handle),
@@ -273,7 +273,7 @@ fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
     let dims = options.dims.clone();
 
     let prepared = match value {
-        Value::GpuTensor(handle) => convert_device_value(handle, dtype)?,
+        Value::GpuTensor(handle) => convert_device_value(handle, dtype).await?,
         other => upload_host_value(other, dtype)?,
     };
 
@@ -572,7 +572,7 @@ fn upload_host_value(value: Value, dtype: DataClass) -> BuiltinResult<PreparedHa
     })
 }
 
-fn convert_device_value(
+async fn convert_device_value(
     handle: GpuTensorHandle,
     dtype: DataClass,
 ) -> BuiltinResult<PreparedHandle> {
@@ -597,8 +597,9 @@ fn convert_device_value(
 
     let provider =
         runmat_accelerate_api::provider().ok_or_else(|| gpu_array_error(ERR_NO_PROVIDER))?;
-    let tensor =
-        gpu_helpers::gather_tensor(&handle).map_err(|err| gpu_array_error(err.to_string()))?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|err| gpu_array_error(err.to_string()))?;
     let (mut tensor, logical) = cast_tensor(tensor, dtype)?;
 
     let view = HostTensorView {
@@ -765,11 +766,12 @@ fn char_array_to_tensor(ca: &CharArray) -> BuiltinResult<Tensor> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, LogicalArray};
 
     fn call(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        gpu_array_builtin(value, rest)
+        block_on(gpu_array_builtin(value, rest))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

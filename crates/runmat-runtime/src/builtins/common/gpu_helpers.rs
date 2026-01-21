@@ -7,7 +7,7 @@ use crate::build_runtime_error;
 ///
 /// This helper routes through the dispatcher so residency hooks and provider
 /// semantics stay consistent with the rest of the runtime.
-pub fn gather_tensor(
+pub async fn gather_tensor_async(
     handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> crate::BuiltinResult<Tensor> {
     // Ensure the correct provider is active for WGPU-backed handles when tests run in parallel.
@@ -21,7 +21,7 @@ pub fn gather_tensor(
         }
     }
     let value = Value::GpuTensor(handle.clone());
-    let gathered = crate::dispatcher::gather_if_needed(&value)?;
+    let gathered = crate::dispatcher::gather_if_needed_async(&value).await?;
     match gathered {
         Value::Tensor(t) => Ok(t),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
@@ -44,8 +44,8 @@ pub fn gather_tensor(
 }
 
 /// Gather an arbitrary value, returning a host-side `Value`.
-pub fn gather_value(value: &Value) -> crate::BuiltinResult<Value> {
-    crate::dispatcher::gather_if_needed(value)
+pub async fn gather_value_async(value: &Value) -> crate::BuiltinResult<Value> {
+    crate::dispatcher::gather_if_needed_async(value).await
 }
 
 /// Wrap a GPU tensor handle as a logical gpuArray value, recording metadata so that

@@ -250,19 +250,19 @@ fn sortrows_error(message: impl Into<String>) -> crate::RuntimeError {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::sortrows"
 )]
-fn sortrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    Ok(evaluate(value, &rest)?.into_sorted_value())
+async fn sortrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    Ok(evaluate(value, &rest).await?.into_sorted_value())
 }
 
 /// Evaluate the `sortrows` builtin once and expose both outputs.
-pub fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortRowsEvaluation> {
+pub async fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortRowsEvaluation> {
     match value {
-        Value::GpuTensor(handle) => sortrows_gpu(handle, rest),
+        Value::GpuTensor(handle) => sortrows_gpu(handle, rest).await,
         other => sortrows_host(other, rest),
     }
 }
 
-fn sortrows_gpu(
+async fn sortrows_gpu(
     handle: GpuTensorHandle,
     rest: &[Value],
 ) -> crate::BuiltinResult<SortRowsEvaluation> {
@@ -283,7 +283,7 @@ fn sortrows_gpu(
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     sortrows_real_tensor_with_args(tensor, &args)
 }
 
@@ -1048,8 +1048,13 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Value};
 
+
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortRowsEvaluation> {
+        futures::executor::block_on(super::evaluate(value, rest))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

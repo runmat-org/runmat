@@ -216,17 +216,17 @@ fn squeeze_error(message: impl Into<String>) -> RuntimeError {
     accel = "shape",
     builtin_path = "crate::builtins::array::shape::squeeze"
 )]
-fn squeeze_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    squeeze_value(value)
+async fn squeeze_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    squeeze_value(value).await
 }
 
-fn squeeze_value(value: Value) -> crate::BuiltinResult<Value> {
+async fn squeeze_value(value: Value) -> crate::BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => squeeze_numeric_tensor(tensor).map(Value::Tensor),
         Value::ComplexTensor(ct) => squeeze_complex_tensor(ct).map(Value::ComplexTensor),
         Value::LogicalArray(logical) => squeeze_logical_array(logical).map(Value::LogicalArray),
         Value::StringArray(strings) => squeeze_string_array(strings).map(Value::StringArray),
-        Value::GpuTensor(handle) => squeeze_gpu(handle),
+        Value::GpuTensor(handle) => squeeze_gpu(handle).await,
         Value::String(_) | Value::CharArray(_) | Value::Cell(_) | Value::Struct(_) => Ok(value),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(value),
         other => Err(squeeze_error(format!(
@@ -292,9 +292,9 @@ fn squeeze_string_array(strings: StringArray) -> crate::BuiltinResult<StringArra
     StringArray::new(strings.data, shape).map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 
-fn squeeze_gpu(handle: GpuTensorHandle) -> crate::BuiltinResult<Value> {
+async fn squeeze_gpu(handle: GpuTensorHandle) -> crate::BuiltinResult<Value> {
     let shape_source = if handle.shape.is_empty() {
-        let gathered = gpu_helpers::gather_tensor(&handle)?;
+        let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
         gathered.shape
     } else {
         handle.shape.clone()
@@ -334,6 +334,11 @@ fn squeeze_shape(shape: &[usize]) -> Vec<usize> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn squeeze_builtin(value: Value) -> crate::BuiltinResult<Value> {
+        block_on(super::squeeze_builtin(value))
+    }
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 

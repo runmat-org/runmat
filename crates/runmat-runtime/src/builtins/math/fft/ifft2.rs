@@ -204,10 +204,10 @@ fn ifft2_error(message: impl Into<String>) -> RuntimeError {
     keywords = "ifft2,inverse fft,image reconstruction,gpu",
     builtin_path = "crate::builtins::math::fft::ifft2"
 )]
-fn ifft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn ifft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let ((len_rows, len_cols), symmetric) = parse_ifft2_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => ifft2_gpu(handle, (len_rows, len_cols), symmetric),
+        Value::GpuTensor(handle) => ifft2_gpu(handle, (len_rows, len_cols), symmetric).await,
         other => ifft2_host(other, (len_rows, len_cols), symmetric),
     }
 }
@@ -222,13 +222,13 @@ fn ifft2_host(
     finalize_ifft2_output(transformed, symmetric)
 }
 
-fn ifft2_gpu(
+async fn ifft2_gpu(
     handle: GpuTensorHandle,
     lengths: (Option<usize>, Option<usize>),
     symmetric: bool,
 ) -> BuiltinResult<Value> {
     if matches!(lengths.0, Some(0)) || matches!(lengths.1, Some(0)) {
-        return ifft2_gpu_fallback(handle, lengths, symmetric);
+        return ifft2_gpu_fallback(handle, lengths, symmetric).await;
     }
 
     if let Some(provider) = runmat_accelerate_api::provider() {
@@ -251,7 +251,7 @@ fn ifft2_gpu(
         }
     }
 
-    ifft2_gpu_fallback(handle, lengths, symmetric)
+    ifft2_gpu_fallback(handle, lengths, symmetric).await
 }
 
 fn ifft2_download_gpu_result(
@@ -266,12 +266,12 @@ fn ifft2_download_gpu_result(
     host_to_complex_tensor(host, BUILTIN_NAME)
 }
 
-fn ifft2_gpu_fallback(
+async fn ifft2_gpu_fallback(
     handle: GpuTensorHandle,
     lengths: (Option<usize>, Option<usize>),
     symmetric: bool,
 ) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let complex = if tensor.shape.last() == Some(&2) {
         let host = HostTensorOwned {
             data: tensor.data,
@@ -462,6 +462,7 @@ fn parse_symflag(value: &Value) -> BuiltinResult<Option<bool>> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor as HostTensor};
 
@@ -758,5 +759,9 @@ pub(crate) mod tests {
         for (lhs, rhs) in gpu_ct.data.iter().zip(cpu_ct.data.iter()) {
             assert!(approx_eq(*lhs, *rhs, tol), "{lhs:?} vs {rhs:?}");
         }
+    }
+
+    fn ifft2_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::ifft2_builtin(value, rest))
     }
 }

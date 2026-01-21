@@ -241,14 +241,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "transpose",
     builtin_path = "crate::builtins::math::linalg::ops::transpose"
 )]
-fn transpose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
+async fn transpose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
     let value = match args.len() {
         0 => return Err(builtin_error("transpose: missing input argument")),
         1 => args.remove(0),
         _ => return Err(builtin_error("transpose: too many input arguments")),
     };
     match value {
-        Value::GpuTensor(handle) => transpose_gpu(handle),
+        Value::GpuTensor(handle) => transpose_gpu(handle).await,
         Value::Tensor(t) => Ok(tensor::tensor_into_value(transpose_tensor(t)?)),
         Value::ComplexTensor(ct) => Ok(Value::ComplexTensor(transpose_complex_tensor(ct)?)),
         Value::LogicalArray(la) => Ok(Value::LogicalArray(transpose_logical_array(la)?)),
@@ -389,7 +389,7 @@ fn transpose_cell_array(ca: CellArray) -> BuiltinResult<CellArray> {
     CellArray::new_handles(out, cols, rows).map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
-fn transpose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn transpose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let rank = handle.shape.len();
     if rank == 0 {
         return Ok(Value::GpuTensor(handle));
@@ -409,7 +409,9 @@ fn transpose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             }
         }
     }
-    let host = gpu_helpers::gather_tensor(&handle).map_err(map_control_flow)?;
+    let host = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(map_control_flow)?;
     let transposed = transpose_tensor(host)?;
     if let Some(provider) = runmat_accelerate_api::provider() {
         let view = HostTensorView {
@@ -480,13 +482,14 @@ fn transpose_complex_matrix(ct: &ComplexTensor) -> Vec<(f64, f64)> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
 
     fn call_transpose(value: Value) -> BuiltinResult<Value> {
-        transpose_builtin(vec![value])
+        block_on(super::transpose_builtin(vec![value]))
     }
 
     fn tensor(data: &[f64], shape: &[usize]) -> Tensor {

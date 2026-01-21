@@ -204,7 +204,7 @@ fn size_error(message: impl Into<String>) -> RuntimeError {
     keywords = "size,dimensions,shape,gpu,introspection",
     builtin_path = "crate::builtins::array::introspection::size"
 )]
-fn size_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn size_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let dims = value_dimensions(&value);
     match rest.len() {
         0 => dimensions_to_value(&dims),
@@ -295,6 +295,11 @@ fn dimension_extent(dimensions: &[usize], dim: usize) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+
+    fn size_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::size_builtin(value, rest))
+    }
     use runmat_builtins::Tensor;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

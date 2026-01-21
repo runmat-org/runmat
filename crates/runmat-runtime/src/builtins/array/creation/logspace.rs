@@ -235,19 +235,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::logspace"
 )]
-fn logspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn logspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(builtin_error(
             "logspace: expected two or three input arguments",
         ));
     }
 
-    let (start_scalar, start_gpu) = parse_scalar("logspace", start)?;
-    let (stop_scalar, stop_gpu) = parse_scalar("logspace", stop)?;
+    let (start_scalar, start_gpu) = parse_scalar("logspace", start).await?;
+    let (stop_scalar, stop_gpu) = parse_scalar("logspace", stop).await?;
     let count = if rest.is_empty() {
         50usize
     } else {
-        parse_count(&rest[0])?
+        parse_count(&rest[0]).await?
     };
 
     let prefer_gpu =
@@ -270,7 +270,7 @@ impl Scalar {
     }
 }
 
-fn parse_scalar(name: &str, value: Value) -> crate::BuiltinResult<(Scalar, bool)> {
+async fn parse_scalar(name: &str, value: Value) -> crate::BuiltinResult<(Scalar, bool)> {
     match value {
         Value::Num(n) => Ok((Scalar::Real(n), false)),
         Value::Int(i) => Ok((Scalar::Real(i.to_f64()), false)),
@@ -279,7 +279,7 @@ fn parse_scalar(name: &str, value: Value) -> crate::BuiltinResult<(Scalar, bool)
         Value::Tensor(t) => tensor_scalar(name, &t).map(|scalar| (scalar, false)),
         Value::ComplexTensor(t) => complex_tensor_scalar(name, &t).map(|scalar| (scalar, false)),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             tensor_scalar(name, &tensor).map(|scalar| (scalar, true))
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(builtin_error(
@@ -306,7 +306,7 @@ fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinRe
     Ok(Scalar::Complex { re, im })
 }
 
-fn parse_count(value: &Value) -> crate::BuiltinResult<usize> {
+async fn parse_count(value: &Value) -> crate::BuiltinResult<usize> {
     match value {
         Value::Int(i) => {
             let raw = i.to_i64();
@@ -326,7 +326,7 @@ fn parse_count(value: &Value) -> crate::BuiltinResult<usize> {
             parse_numeric_count(t.data[0])
         }
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(handle).await?;
             if !tensor::is_scalar_tensor(&tensor) {
                 return Err(builtin_error("logspace: number of points must be a scalar"));
             }
@@ -525,7 +525,12 @@ fn complex_pow10(re: f64, im: f64) -> (f64, f64) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::IntValue;
+
+    fn logspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::logspace_builtin(start, stop, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

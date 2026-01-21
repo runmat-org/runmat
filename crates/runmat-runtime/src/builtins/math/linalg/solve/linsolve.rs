@@ -249,20 +249,24 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "linsolve",
     builtin_path = "crate::builtins::math::linalg::solve::linsolve"
 )]
-fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let eval = evaluate_args(lhs, rhs, &rest)?;
+async fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let eval = evaluate_args(lhs, rhs, &rest).await?;
     Ok(eval.solution())
 }
 
 /// Evaluate `linsolve`, returning both the solution and the estimated reciprocal condition number.
-pub fn evaluate(lhs: Value, rhs: Value, options: SolveOptions) -> BuiltinResult<LinsolveEval> {
+pub async fn evaluate(lhs: Value, rhs: Value, options: SolveOptions) -> BuiltinResult<LinsolveEval> {
     if let Some(eval) = try_gpu_linsolve(&lhs, &rhs, &options)? {
         return Ok(eval);
     }
 
-    let lhs_host = crate::dispatcher::gather_if_needed(&lhs).map_err(map_control_flow)?;
-    let rhs_host = crate::dispatcher::gather_if_needed(&rhs).map_err(map_control_flow)?;
-    let pair = coerce_numeric_pair(lhs_host, rhs_host)?;
+    let lhs_host = crate::dispatcher::gather_if_needed_async(&lhs)
+        .await
+        .map_err(map_control_flow)?;
+    let rhs_host = crate::dispatcher::gather_if_needed_async(&rhs)
+        .await
+        .map_err(map_control_flow)?;
+    let pair = coerce_numeric_pair(lhs_host, rhs_host).await?;
     match pair {
         NumericPair::Real(lhs_r, rhs_r) => {
             let (solution, rcond) = solve_real(lhs_r, rhs_r, &options)?;
@@ -368,9 +372,9 @@ fn options_from_rest(rest: &[Value]) -> BuiltinResult<SolveOptions> {
 }
 
 /// Public helper for the VM multi-output surface.
-pub fn evaluate_args(lhs: Value, rhs: Value, rest: &[Value]) -> BuiltinResult<LinsolveEval> {
+pub async fn evaluate_args(lhs: Value, rhs: Value, rest: &[Value]) -> BuiltinResult<LinsolveEval> {
     let options = options_from_rest(rest)?;
-    evaluate(lhs, rhs, options)
+    evaluate(lhs, rhs, options).await
 }
 
 fn try_gpu_linsolve(
@@ -522,9 +526,9 @@ enum NumericPair {
     Complex(ComplexTensor, ComplexTensor),
 }
 
-fn coerce_numeric_pair(lhs: Value, rhs: Value) -> BuiltinResult<NumericPair> {
-    let lhs_num = coerce_numeric(lhs)?;
-    let rhs_num = coerce_numeric(rhs)?;
+async fn coerce_numeric_pair(lhs: Value, rhs: Value) -> BuiltinResult<NumericPair> {
+    let lhs_num = coerce_numeric(lhs).await?;
+    let rhs_num = coerce_numeric(rhs).await?;
     match (lhs_num, rhs_num) {
         (NumericInput::Real(lhs_r), NumericInput::Real(rhs_r)) => {
             Ok(NumericPair::Real(lhs_r, rhs_r))
@@ -543,7 +547,7 @@ fn coerce_numeric_pair(lhs: Value, rhs: Value) -> BuiltinResult<NumericPair> {
     }
 }
 
-fn coerce_numeric(value: Value) -> BuiltinResult<NumericInput> {
+async fn coerce_numeric(value: Value) -> BuiltinResult<NumericInput> {
     match value {
         Value::Tensor(tensor) => {
             ensure_matrix_shape(NAME, &tensor.shape)?;
@@ -576,7 +580,9 @@ fn coerce_numeric(value: Value) -> BuiltinResult<NumericInput> {
             Ok(NumericInput::Complex(ct))
         }
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle).map_err(map_control_flow)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(map_control_flow)?;
             ensure_matrix_shape(NAME, &tensor.shape)?;
             Ok(NumericInput::Real(tensor))
         }
@@ -1086,6 +1092,7 @@ fn conjugate_complex_in_place(tensor: &mut ComplexTensor) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, StructValue};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
@@ -1096,7 +1103,23 @@ pub(crate) mod tests {
         assert!((actual - expected).abs() < 1e-12);
     }
 
+    fn evaluate_args(
+        a: Value,
+        b: Value,
+        rest: &[Value],
+    ) -> Result<LinsolveEval, RuntimeError> {
+        block_on(super::evaluate_args(a, b, rest))
+    }
+
     use crate::builtins::common::test_support;
+
+    fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::linsolve_builtin(lhs, rhs, rest))
+    }
+
+    fn evaluate(lhs: Value, rhs: Value, options: SolveOptions) -> BuiltinResult<LinsolveEval> {
+        block_on(super::evaluate(lhs, rhs, options))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1161,7 +1184,7 @@ pub(crate) mod tests {
         assert_eq!(tensor.shape, vec![3, 1]);
 
         let a_transposed = transpose_tensor(&a);
-        let reference = super::evaluate(
+        let reference = evaluate(
             Value::Tensor(a_transposed.clone()),
             Value::Tensor(b.clone()),
             SolveOptions::default(),
@@ -1200,7 +1223,7 @@ pub(crate) mod tests {
     fn linsolve_recovers_rcond_output() {
         let a = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let eval = super::evaluate_args(Value::Tensor(a.clone()), Value::Tensor(b.clone()), &[])
+        let eval = evaluate_args(Value::Tensor(a.clone()), Value::Tensor(b.clone()), &[])
             .expect("evaluate");
         let solution_tensor = match eval.solution() {
             Value::Tensor(sol) => sol.clone(),

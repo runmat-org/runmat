@@ -201,7 +201,7 @@ fn pwd_error(message: impl Into<String>) -> RuntimeError {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::pwd"
 )]
-fn pwd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn pwd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !args.is_empty() {
         return Err(pwd_error("pwd: too many input arguments"));
     }
@@ -227,10 +227,15 @@ fn emit_path_stdout(path: &Path) {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
+    use crate::BuiltinResult;
     use runmat_builtins::CharArray;
     use std::convert::TryFrom;
     use std::path::PathBuf;
     use tempfile::tempdir;
+
+    fn pwd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::pwd_builtin(args))
+    }
 
     struct DirGuard {
         original: PathBuf,

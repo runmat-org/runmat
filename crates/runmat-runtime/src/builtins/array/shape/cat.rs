@@ -367,7 +367,7 @@ fn extract_like(mut inputs: Vec<Value>) -> BuiltinResult<(Vec<Value>, LikeSpec)>
     accel = "array_construct",
     builtin_path = "crate::builtins::array::shape::cat"
 )]
-fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() < 2 {
         return Err(cat_err("cat: at least two input arrays are required"));
     }
@@ -385,7 +385,7 @@ fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
                 "cat: cannot mix gpuArray inputs with host arrays; convert them first",
             ));
         }
-        return cat_gpu_tensors(dim_zero, inputs, &like);
+        return cat_gpu_tensors(dim_zero, inputs, &like).await;
     }
 
     let category = determine_category(&inputs, &like)?;
@@ -789,7 +789,11 @@ fn concat_cell_cols(arrays: Vec<CellArray>) -> BuiltinResult<Value> {
     Ok(Value::Cell(cell))
 }
 
-fn cat_gpu_tensors(dim_zero: usize, values: Vec<Value>, like: &LikeSpec) -> BuiltinResult<Value> {
+async fn cat_gpu_tensors(
+    dim_zero: usize,
+    values: Vec<Value>,
+    like: &LikeSpec,
+) -> BuiltinResult<Value> {
     if let Some(hint) = like.category_hint {
         if !matches!(hint, CatCategory::Numeric) {
             return Err(cat_err(
@@ -811,12 +815,12 @@ fn cat_gpu_tensors(dim_zero: usize, values: Vec<Value>, like: &LikeSpec) -> Buil
 
     // Native provider hook
     if let Ok(result) = provider.cat(dim_zero + 1, &handles) {
-        return finalize_gpu_value(result, like);
+        return finalize_gpu_value(result, like).await;
     }
 
     let mut tensors = Vec::with_capacity(handles.len());
     for handle in &handles {
-        let tensor = gpu_helpers::gather_tensor(handle)?;
+        let tensor = gpu_helpers::gather_tensor_async(handle).await?;
         tensors.push(tensor);
     }
 
@@ -987,12 +991,12 @@ fn tensor_to_complex(tensor: Tensor) -> BuiltinResult<ComplexTensor> {
     ComplexTensor::new(data, tensor.shape).map_err(|e| cat_err(format!("cat: {e}")))
 }
 
-fn finalize_gpu_value(
+async fn finalize_gpu_value(
     handle: runmat_accelerate_api::GpuTensorHandle,
     like: &LikeSpec,
 ) -> BuiltinResult<Value> {
     if matches!(like.device, LikeDevice::Host) {
-        let tensor = gpu_helpers::gather_tensor(&handle)?;
+        let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     Ok(Value::GpuTensor(handle))
@@ -1001,6 +1005,11 @@ fn finalize_gpu_value(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::cat_builtin(dim, rest))
+    }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};

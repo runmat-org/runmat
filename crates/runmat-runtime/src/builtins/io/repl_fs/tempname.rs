@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const ERR_TOO_MANY_INPUTS: &str = "tempname: too many input arguments";
 const ERR_FOLDER_TYPE: &str = "tempname: folder name must be a character vector or string scalar";
@@ -232,14 +232,14 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "cpu",
     builtin_path = "crate::builtins::io::repl_fs::tempname"
 )]
-fn tempname_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn tempname_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     match args.len() {
         0 => {
             let base = default_temp_directory()?;
             Ok(path_to_value(&generate_unique_path(&base)?))
         }
         1 => {
-            let gathered = gather_argument(&args[0])?;
+            let gathered = gather_argument(&args[0]).await?;
             let folder = parse_folder_argument(&gathered)?;
             Ok(path_to_value(&generate_unique_path(&folder)?))
         }
@@ -256,8 +256,8 @@ fn default_temp_directory() -> BuiltinResult<PathBuf> {
     }
 }
 
-fn gather_argument(value: &Value) -> BuiltinResult<Value> {
-    gather_if_needed(value).map_err(map_control_flow)
+async fn gather_argument(value: &Value) -> BuiltinResult<Value> {
+    gather_if_needed_async(value).await.map_err(map_control_flow)
 }
 
 fn parse_folder_argument(value: &Value) -> BuiltinResult<PathBuf> {
@@ -343,6 +343,10 @@ pub(crate) mod tests {
     use std::convert::TryFrom;
     use std::path::{Path, PathBuf};
     use tempfile::tempdir;
+
+    fn tempname_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::tempname_builtin(args))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

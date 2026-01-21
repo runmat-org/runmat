@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -221,20 +221,26 @@ fn with_builtin_context(mut err: RuntimeError) -> RuntimeError {
     accel = "sink",
     builtin_path = "crate::builtins::strings::regex::regexprep"
 )]
-fn regexprep_builtin(
+async fn regexprep_builtin(
     subject: Value,
     pattern: Value,
     replacement: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let subject = gather_if_needed(&subject).map_err(with_builtin_context)?;
-    let pattern = gather_if_needed(&pattern).map_err(with_builtin_context)?;
-    let replacement = gather_if_needed(&replacement).map_err(with_builtin_context)?;
+    let subject = gather_if_needed_async(&subject)
+        .await
+        .map_err(with_builtin_context)?;
+    let pattern = gather_if_needed_async(&pattern)
+        .await
+        .map_err(with_builtin_context)?;
+    let replacement = gather_if_needed_async(&replacement)
+        .await
+        .map_err(with_builtin_context)?;
     let options = RegexprepOptions::parse(BUILTIN_NAME, &rest)?;
 
-    let subjects = SubjectCollection::collect(BUILTIN_NAME, subject)?;
-    let patterns = PatternCollection::collect(BUILTIN_NAME, pattern, &subjects)?;
-    let replacements = ReplacementCollection::collect(BUILTIN_NAME, replacement, &subjects)?;
+    let subjects = SubjectCollection::collect(BUILTIN_NAME, subject).await?;
+    let patterns = PatternCollection::collect(BUILTIN_NAME, pattern, &subjects).await?;
+    let replacements = ReplacementCollection::collect(BUILTIN_NAME, replacement, &subjects).await?;
     let plan = build_plan(BUILTIN_NAME, &patterns, &replacements, &options, &subjects)?;
 
     let mut results = Vec::with_capacity(subjects.entries.len());
@@ -396,7 +402,7 @@ struct SubjectCollection {
 }
 
 impl SubjectCollection {
-    fn collect(builtin: &'static str, value: Value) -> BuiltinResult<Self> {
+    async fn collect(builtin: &'static str, value: Value) -> BuiltinResult<Self> {
         match value {
             Value::String(s) => Ok(Self {
                 entries: vec![s],
@@ -406,7 +412,7 @@ impl SubjectCollection {
             }),
             Value::CharArray(array) => collect_char_array(array),
             Value::StringArray(array) => collect_string_array(array),
-            Value::Cell(cell) => collect_cell_array(builtin, cell),
+            Value::Cell(cell) => collect_cell_array(builtin, cell).await,
             other => Err(runtime_error_for(format!(
                 "{builtin}: expected char vector, string, string array, or cell array of text, got {other:?}"
             ))),
@@ -466,13 +472,15 @@ fn collect_string_array(array: StringArray) -> BuiltinResult<SubjectCollection> 
     })
 }
 
-fn collect_cell_array(
+async fn collect_cell_array(
     builtin: &'static str,
     cell: runmat_builtins::CellArray,
 ) -> BuiltinResult<SubjectCollection> {
     let mut entries = Vec::with_capacity(cell.data.len());
     for ptr in &cell.data {
-        let value = gather_if_needed(ptr).map_err(with_builtin_context)?;
+        let value = gather_if_needed_async(ptr)
+            .await
+            .map_err(with_builtin_context)?;
         let text = extract_string(&value).ok_or_else(|| {
             runtime_error_for(format!(
                 "{builtin}: cell array elements must be character vectors or string scalars, got {value:?}"
@@ -499,7 +507,7 @@ enum PatternCollection {
 }
 
 impl PatternCollection {
-    fn collect(
+    async fn collect(
         builtin: &'static str,
         value: Value,
         subjects: &SubjectCollection,
@@ -508,7 +516,7 @@ impl PatternCollection {
             Value::String(s) => Ok(Self::Scalar(s)),
             Value::CharArray(array) => collect_pattern_char_array(array),
             Value::StringArray(array) => collect_pattern_string_array(array, subjects),
-            Value::Cell(cell) => collect_pattern_cell(builtin, cell, subjects),
+            Value::Cell(cell) => collect_pattern_cell(builtin, cell, subjects).await,
             other => Err(runtime_error_for(format!(
                 "{builtin}: expected char vector, string array, or cell array for pattern, got {other:?}"
             ))),
@@ -547,14 +555,16 @@ fn collect_pattern_string_array(
     Ok(PatternCollection::Sequence(array.data.clone()))
 }
 
-fn collect_pattern_cell(
+async fn collect_pattern_cell(
     builtin: &'static str,
     cell: runmat_builtins::CellArray,
     subjects: &SubjectCollection,
 ) -> BuiltinResult<PatternCollection> {
     let mut entries = Vec::with_capacity(cell.data.len());
     for ptr in &cell.data {
-        let value = gather_if_needed(ptr).map_err(with_builtin_context)?;
+        let value = gather_if_needed_async(ptr)
+            .await
+            .map_err(with_builtin_context)?;
         let text = extract_string(&value).ok_or_else(|| {
             runtime_error_for(format!(
                 "{builtin}: pattern cell elements must be character vectors or string scalars, got {value:?}"
@@ -576,7 +586,7 @@ enum ReplacementCollection {
 }
 
 impl ReplacementCollection {
-    fn collect(
+    async fn collect(
         builtin: &'static str,
         value: Value,
         subjects: &SubjectCollection,
@@ -585,7 +595,7 @@ impl ReplacementCollection {
             Value::String(s) => Ok(Self::Scalar(s)),
             Value::CharArray(array) => collect_replacement_char_array(array),
             Value::StringArray(array) => collect_replacement_string_array(array, subjects),
-            Value::Cell(cell) => collect_replacement_cell(builtin, cell, subjects),
+            Value::Cell(cell) => collect_replacement_cell(builtin, cell, subjects).await,
             other => Err(runtime_error_for(format!(
                 "{builtin}: expected char vector, string array, or cell array for replacement, got {other:?}"
             ))),
@@ -624,14 +634,16 @@ fn collect_replacement_string_array(
     Ok(ReplacementCollection::Sequence(array.data.clone()))
 }
 
-fn collect_replacement_cell(
+async fn collect_replacement_cell(
     builtin: &'static str,
     cell: runmat_builtins::CellArray,
     subjects: &SubjectCollection,
 ) -> BuiltinResult<ReplacementCollection> {
     let mut entries = Vec::with_capacity(cell.data.len());
     for ptr in &cell.data {
-        let value = gather_if_needed(ptr).map_err(with_builtin_context)?;
+        let value = gather_if_needed_async(ptr)
+            .await
+            .map_err(with_builtin_context)?;
         let text = extract_string(&value).ok_or_else(|| {
             runtime_error_for(format!(
                 "{builtin}: replacement cell elements must be character vectors or string scalars, got {value:?}"
@@ -1079,10 +1091,19 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    fn run_regexprep(
+        subject: Value,
+        pattern: Value,
+        replacement: Value,
+        rest: Vec<Value>,
+    ) -> BuiltinResult<Value> {
+        futures::executor::block_on(regexprep_builtin(subject, pattern, replacement, rest))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_basic_replacement() {
-        let result = regexprep_builtin(
+        let result = run_regexprep(
             Value::String("abracadabra".into()),
             Value::String("[aeiou]".into()),
             Value::String("X".into()),
@@ -1117,7 +1138,7 @@ pub(crate) mod tests {
             .unwrap(),
         );
         let result =
-            regexprep_builtin(subject, patterns, replacements, Vec::new()).expect("regexprep");
+            run_regexprep(subject, patterns, replacements, Vec::new()).expect("regexprep");
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.data.len(), 1);
@@ -1130,7 +1151,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_ignore_case() {
-        let result = regexprep_builtin(
+        let result = run_regexprep(
             Value::StringArray(
                 StringArray::new(vec!["Alpha".into(), "beta".into()], vec![2, 1]).unwrap(),
             ),
@@ -1150,7 +1171,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_preserve_case() {
-        let result = regexprep_builtin(
+        let result = run_regexprep(
             Value::String("MATLAB and matlab".into()),
             Value::String("matlab".into()),
             Value::String("runmat".into()),
@@ -1166,7 +1187,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_once_option() {
-        let result = regexprep_builtin(
+        let result = run_regexprep(
             Value::StringArray(StringArray::new(vec!["abababa".into()], vec![1, 1]).unwrap()),
             Value::String("ba".into()),
             Value::String("XY".into()),
@@ -1190,7 +1211,7 @@ pub(crate) mod tests {
         let replacements =
             Value::StringArray(StringArray::new(vec!["A".into(), "O".into()], vec![2, 1]).unwrap());
         let result =
-            regexprep_builtin(subject, patterns, replacements, Vec::new()).expect("regexprep");
+            run_regexprep(subject, patterns, replacements, Vec::new()).expect("regexprep");
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.data, vec!["cAt".to_string(), "dOg".to_string()]);
@@ -1206,7 +1227,7 @@ pub(crate) mod tests {
         let pattern = Value::String("^".into());
         let replacement = Value::String("X".into());
 
-        let unchanged = regexprep_builtin(
+        let unchanged = run_regexprep(
             subject.clone(),
             pattern.clone(),
             replacement.clone(),
@@ -1215,7 +1236,7 @@ pub(crate) mod tests {
         .expect("regexprep");
         assert_eq!(unchanged, Value::String("abc".into()));
 
-        let allowed = regexprep_builtin(
+        let allowed = run_regexprep(
             subject,
             pattern,
             replacement,
@@ -1232,7 +1253,7 @@ pub(crate) mod tests {
     #[test]
     fn regexprep_char_array_result() {
         let chars = CharArray::new(vec!['c', 'a', 't', 'd', 'o', 'g'], 2, 3).unwrap();
-        let result = regexprep_builtin(
+        let result = run_regexprep(
             Value::CharArray(chars),
             Value::String("[ao]".into()),
             Value::String("X".into()),
@@ -1252,7 +1273,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_invalid_option_errors() {
-        let err = regexprep_builtin(
+        let err = run_regexprep(
             Value::String("test".into()),
             Value::String("t".into()),
             Value::String("x".into()),
@@ -1272,7 +1293,7 @@ pub(crate) mod tests {
         let subject = Value::String("foo\nbar".into());
         let pattern = Value::String("^bar".into());
         let replacement = Value::String("BAR".into());
-        let anchored = regexprep_builtin(
+        let anchored = run_regexprep(
             subject.clone(),
             pattern.clone(),
             replacement.clone(),
@@ -1281,7 +1302,7 @@ pub(crate) mod tests {
         .expect("regexprep");
         assert_eq!(anchored, Value::String("foo\nBAR".into()));
 
-        let dotall = regexprep_builtin(
+        let dotall = run_regexprep(
             Value::String("foo\nbar".into()),
             Value::String("foo.bar".into()),
             Value::String("HIT".into()),
@@ -1290,7 +1311,7 @@ pub(crate) mod tests {
         .expect("regexprep");
         assert_eq!(dotall, Value::String("HIT".into()));
 
-        let preserve = regexprep_builtin(
+        let preserve = run_regexprep(
             Value::String("Matlab".into()),
             Value::String("matlab".into()),
             Value::String("runmat".into()),
@@ -1309,7 +1330,7 @@ pub(crate) mod tests {
             1,
         )
         .unwrap();
-        let result = regexprep_builtin(
+        let result = run_regexprep(
             Value::Cell(cell),
             Value::String("[ao]".into()),
             Value::String("_".into()),
@@ -1340,7 +1361,7 @@ pub(crate) mod tests {
         let replacements = Value::StringArray(
             StringArray::new(vec!["A".into(), "O".into(), "U".into()], vec![3, 1]).unwrap(),
         );
-        let err = regexprep_builtin(subject, patterns, replacements, Vec::new())
+        let err = run_regexprep(subject, patterns, replacements, Vec::new())
             .expect_err("expected error");
         let message = err.message().to_string();
         assert!(

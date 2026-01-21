@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_filesystem::OpenOptions;
 
 #[cfg_attr(
@@ -272,10 +272,18 @@ impl Default for FilewriteOptions {
     accel = "cpu",
     builtin_path = "crate::builtins::io::filetext::filewrite"
 )]
-fn filewrite_builtin(path: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let path = gather_if_needed(&path).map_err(map_control_flow)?;
-    let data = gather_if_needed(&data).map_err(map_control_flow)?;
-    let rest = gather_values(&rest)?;
+async fn filewrite_builtin(
+    path: Value,
+    data: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let path = gather_if_needed_async(&path)
+        .await
+        .map_err(map_control_flow)?;
+    let data = gather_if_needed_async(&data)
+        .await
+        .map_err(map_control_flow)?;
+    let rest = gather_values(&rest).await?;
     let options = parse_options(&rest)?;
     let resolved = resolve_path(&path)?;
     let payload = prepare_payload(&data, options.encoding)?;
@@ -283,10 +291,14 @@ fn filewrite_builtin(path: Value, data: Value, rest: Vec<Value>) -> crate::Built
     Ok(Value::Num(written as f64))
 }
 
-fn gather_values(values: &[Value]) -> BuiltinResult<Vec<Value>> {
+async fn gather_values(values: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(values.len());
     for value in values {
-        out.push(gather_if_needed(value).map_err(map_control_flow)?);
+        out.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     Ok(out)
 }
@@ -697,6 +709,10 @@ pub(crate) mod tests {
         err.message().to_string()
     }
 
+    fn run_filewrite(path: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(filewrite_builtin(path, data, rest))
+    }
+
     fn unique_path(prefix: &str) -> PathBuf {
         let millis = unix_timestamp_ms();
         let mut path = std::env::temp_dir();
@@ -710,7 +726,7 @@ pub(crate) mod tests {
         let path = unique_path("filewrite_text");
         let contents = "RunMat filewrite\nLine two\n";
 
-        let result = filewrite_builtin(
+        let result = run_filewrite(
             Value::from(path.to_string_lossy().to_string()),
             Value::from(contents),
             Vec::new(),
@@ -734,7 +750,7 @@ pub(crate) mod tests {
         let path = unique_path("filewrite_append");
         fs::write(&path, "first\n").expect("write baseline");
 
-        filewrite_builtin(
+        run_filewrite(
             Value::from(path.to_string_lossy().to_string()),
             Value::from("second\n"),
             vec![Value::from("WriteMode"), Value::from("append")],
@@ -752,7 +768,7 @@ pub(crate) mod tests {
     fn filewrite_errors_on_invalid_ascii() {
         let path = unique_path("filewrite_ascii_error");
         let err = unwrap_error_message(
-            filewrite_builtin(
+            run_filewrite(
                 Value::from(path.to_string_lossy().to_string()),
                 Value::from("café"),
                 vec![Value::from("Encoding"), Value::from("ascii")],
@@ -771,7 +787,7 @@ pub(crate) mod tests {
     fn filewrite_writes_raw_bytes_from_tensor() {
         let path = unique_path("filewrite_raw_bytes");
         let tensor = Tensor::new(vec![0.0, 127.0, 255.0], vec![3, 1]).expect("tensor");
-        filewrite_builtin(
+        run_filewrite(
             Value::from(path.to_string_lossy().to_string()),
             Value::Tensor(tensor),
             vec![Value::from("Encoding"), Value::from("raw")],
@@ -792,7 +808,7 @@ pub(crate) mod tests {
     #[test]
     fn filewrite_numeric_scalar_writes_byte() {
         let path = unique_path("filewrite_numeric_scalar");
-        filewrite_builtin(
+        run_filewrite(
             Value::from(path.to_string_lossy().to_string()),
             Value::Num(65.0),
             Vec::new(),
@@ -809,7 +825,7 @@ pub(crate) mod tests {
     #[test]
     fn filewrite_bool_scalar_writes_byte() {
         let path = unique_path("filewrite_bool_scalar");
-        filewrite_builtin(
+        run_filewrite(
             Value::from(path.to_string_lossy().to_string()),
             Value::Bool(true),
             Vec::new(),
@@ -827,7 +843,7 @@ pub(crate) mod tests {
     fn filewrite_writes_logical_array_bytes() {
         let path = unique_path("filewrite_logical_array");
         let logical = LogicalArray::new(vec![0, 1, 2], vec![3]).expect("logical array");
-        filewrite_builtin(
+        run_filewrite(
             Value::from(path.to_string_lossy().to_string()),
             Value::LogicalArray(logical),
             Vec::new(),
@@ -845,7 +861,7 @@ pub(crate) mod tests {
     fn filewrite_errors_on_numeric_out_of_range() {
         let path = unique_path("filewrite_out_of_range");
         let err = unwrap_error_message(
-            filewrite_builtin(
+            run_filewrite(
                 Value::from(path.to_string_lossy().to_string()),
                 Value::Num(300.0),
                 Vec::new(),
@@ -864,7 +880,7 @@ pub(crate) mod tests {
     fn filewrite_errors_on_non_integer_numeric() {
         let path = unique_path("filewrite_non_integer");
         let err = unwrap_error_message(
-            filewrite_builtin(
+            run_filewrite(
                 Value::from(path.to_string_lossy().to_string()),
                 Value::Num(std::f64::consts::PI),
                 Vec::new(),
@@ -884,7 +900,7 @@ pub(crate) mod tests {
         let path = unique_path("filewrite_ascii_bytes");
         let tensor = Tensor::new(vec![255.0], vec![1, 1]).expect("tensor");
         let err = unwrap_error_message(
-            filewrite_builtin(
+            run_filewrite(
                 Value::from(path.to_string_lossy().to_string()),
                 Value::Tensor(tensor),
                 vec![Value::from("Encoding"), Value::from("ascii")],
@@ -902,7 +918,7 @@ pub(crate) mod tests {
     #[test]
     fn filewrite_positional_encoding_argument() {
         let path = unique_path("filewrite_positional_encoding");
-        filewrite_builtin(
+        run_filewrite(
             Value::from(path.to_string_lossy().to_string()),
             Value::from("Espa\u{00F1}a"),
             vec![Value::from("latin1")],
@@ -920,7 +936,7 @@ pub(crate) mod tests {
     fn filewrite_utf8_encoding_allows_arbitrary_bytes() {
         let path = unique_path("filewrite_utf8_numeric");
         let tensor = Tensor::new(vec![0.0, 255.0], vec![2, 1]).expect("tensor");
-        filewrite_builtin(
+        run_filewrite(
             Value::from(path.to_string_lossy().to_string()),
             Value::Tensor(tensor),
             vec![Value::from("Encoding"), Value::from("utf-8")],
@@ -938,7 +954,7 @@ pub(crate) mod tests {
     fn filewrite_rejects_unknown_option() {
         let path = unique_path("filewrite_unknown_option");
         let err = unwrap_error_message(
-            filewrite_builtin(
+            run_filewrite(
                 Value::from(path.to_string_lossy().to_string()),
                 Value::from("data"),
                 vec![Value::from("Mode"), Value::from("append")],
@@ -957,7 +973,7 @@ pub(crate) mod tests {
     fn filewrite_rejects_duplicate_encoding() {
         let path = unique_path("filewrite_duplicate_encoding");
         let err = unwrap_error_message(
-            filewrite_builtin(
+            run_filewrite(
                 Value::from(path.to_string_lossy().to_string()),
                 Value::from("data"),
                 vec![
@@ -980,7 +996,7 @@ pub(crate) mod tests {
     fn filewrite_rejects_duplicate_writemode() {
         let path = unique_path("filewrite_duplicate_writemode");
         let err = unwrap_error_message(
-            filewrite_builtin(
+            run_filewrite(
                 Value::from(path.to_string_lossy().to_string()),
                 Value::from("data"),
                 vec![
@@ -1004,7 +1020,7 @@ pub(crate) mod tests {
     fn filewrite_rejects_invalid_writemode_value() {
         let path = unique_path("filewrite_invalid_writemode");
         let err = unwrap_error_message(
-            filewrite_builtin(
+            run_filewrite(
                 Value::from(path.to_string_lossy().to_string()),
                 Value::from("data"),
                 vec![Value::from("WriteMode"), Value::from("invalid")],
@@ -1023,7 +1039,7 @@ pub(crate) mod tests {
     fn filewrite_rejects_invalid_encoding_value() {
         let path = unique_path("filewrite_invalid_encoding");
         let err = unwrap_error_message(
-            filewrite_builtin(
+            run_filewrite(
                 Value::from(path.to_string_lossy().to_string()),
                 Value::from("data"),
                 vec![Value::from("Encoding"), Value::from("utf-32")],
@@ -1045,7 +1061,7 @@ pub(crate) mod tests {
         let chars: Vec<char> = path_str.chars().collect();
         let char_array = CharArray::new(chars, 1, path_str.len()).expect("char array path");
 
-        filewrite_builtin(
+        run_filewrite(
             Value::CharArray(char_array),
             Value::from("hello"),
             Vec::new(),
@@ -1064,7 +1080,7 @@ pub(crate) mod tests {
         let path = unique_path("filewrite_string_array");
         let array = StringArray::new(vec!["a".into(), "b".into(), "c".into()], vec![3, 1])
             .expect("string array");
-        filewrite_builtin(
+        run_filewrite(
             Value::from(path.to_string_lossy().to_string()),
             Value::StringArray(array),
             Vec::new(),

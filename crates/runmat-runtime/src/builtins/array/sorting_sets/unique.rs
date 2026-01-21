@@ -326,15 +326,15 @@ fn unique_error(message: impl Into<String>) -> crate::RuntimeError {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::unique"
 )]
-fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    Ok(evaluate(value, &rest)?.into_values_value())
+async fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    Ok(evaluate(value, &rest).await?.into_values_value())
 }
 
 /// Evaluate `unique` once and expose all outputs to the caller.
-pub fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<UniqueEvaluation> {
+pub async fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<UniqueEvaluation> {
     let opts = parse_options(rest)?;
     match value {
-        Value::GpuTensor(handle) => unique_gpu(handle, &opts),
+        Value::GpuTensor(handle) => unique_gpu(handle, &opts).await,
         other => unique_host(other, &opts),
     }
 }
@@ -412,7 +412,7 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<UniqueOptions> {
     Ok(opts)
 }
 
-fn unique_gpu(
+async fn unique_gpu(
     handle: GpuTensorHandle,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
@@ -421,7 +421,7 @@ fn unique_gpu(
             return UniqueEvaluation::from_unique_result(result);
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     unique_numeric_from_tensor(tensor, opts)
 }
 
@@ -1515,15 +1515,20 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor, Value};
 
+
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    fn evaluate_sync(value: Value, rest: &[Value]) -> crate::BuiltinResult<UniqueEvaluation> {
+        futures::executor::block_on(evaluate(value, rest))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_sorted_default() {
         let tensor = Tensor::new(vec![3.0, 1.0, 3.0, 2.0], vec![4, 1]).unwrap();
-        let eval = evaluate(Value::Tensor(tensor), &[]).expect("unique");
+        let eval = evaluate_sync(Value::Tensor(tensor), &[]).expect("unique");
         let (values, ia, ic) = eval.into_triple();
         match values {
             Value::Tensor(t) => {
@@ -1547,7 +1552,7 @@ pub(crate) mod tests {
     #[test]
     fn unique_sorted_handles_nan() {
         let tensor = Tensor::new(vec![f64::NAN, 2.0, f64::NAN, 1.0], vec![4, 1]).unwrap();
-        let eval = evaluate(Value::Tensor(tensor), &[]).expect("unique");
+        let eval = evaluate_sync(Value::Tensor(tensor), &[]).expect("unique");
         let (values, ..) = eval.into_triple();
         match values {
             Value::Tensor(t) => {
@@ -1564,7 +1569,7 @@ pub(crate) mod tests {
     #[test]
     fn unique_stable_with_nan() {
         let tensor = Tensor::new(vec![f64::NAN, 2.0, f64::NAN, 1.0], vec![4, 1]).unwrap();
-        let eval = evaluate(Value::Tensor(tensor), &[Value::from("stable")]).expect("unique");
+        let eval = evaluate_sync(Value::Tensor(tensor), &[Value::from("stable")]).expect("unique");
         let (values, ..) = eval.into_triple();
         match values {
             Value::Tensor(t) => {
@@ -1580,7 +1585,7 @@ pub(crate) mod tests {
     #[test]
     fn unique_stable_preserves_order() {
         let tensor = Tensor::new(vec![4.0, 2.0, 4.0, 1.0, 2.0], vec![5, 1]).unwrap();
-        let eval = evaluate(Value::Tensor(tensor), &[Value::from("stable")]).expect("unique");
+        let eval = evaluate_sync(Value::Tensor(tensor), &[Value::from("stable")]).expect("unique");
         let (values, ia) = eval.into_pair();
         match values {
             Value::Tensor(t) => assert_eq!(t.data, vec![4.0, 2.0, 1.0]),
@@ -1596,7 +1601,7 @@ pub(crate) mod tests {
     #[test]
     fn unique_last_occurrence() {
         let tensor = Tensor::new(vec![9.0, 8.0, 9.0, 7.0, 8.0], vec![5, 1]).unwrap();
-        let eval = evaluate(Value::Tensor(tensor), &[Value::from("last")]).expect("unique");
+        let eval = evaluate_sync(Value::Tensor(tensor), &[Value::from("last")]).expect("unique");
         let (values, ia, ic) = eval.into_triple();
         match values {
             Value::Tensor(t) => assert_eq!(t.data, vec![7.0, 8.0, 9.0]),
@@ -1616,7 +1621,7 @@ pub(crate) mod tests {
     #[test]
     fn unique_rows_sorted_default() {
         let tensor = Tensor::new(vec![1.0, 1.0, 2.0, 1.0, 3.0, 3.0, 4.0, 2.0], vec![4, 2]).unwrap();
-        let eval = evaluate(Value::Tensor(tensor), &[Value::from("rows")]).expect("unique");
+        let eval = evaluate_sync(Value::Tensor(tensor), &[Value::from("rows")]).expect("unique");
         let (values, ia, ic) = eval.into_triple();
         match values {
             Value::Tensor(t) => {
@@ -1639,7 +1644,7 @@ pub(crate) mod tests {
     #[test]
     fn unique_rows_stable_last() {
         let tensor = Tensor::new(vec![1.0, 1.0, 2.0, 1.0, 1.0, 2.0], vec![3, 2]).unwrap();
-        let eval = evaluate(
+        let eval = evaluate_sync(
             Value::Tensor(tensor),
             &[
                 Value::from("rows"),
@@ -1670,7 +1675,7 @@ pub(crate) mod tests {
     #[test]
     fn unique_char_elements_sorted() {
         let chars = CharArray::new(vec!['m', 'z', 'm', 'a'], 2, 2).unwrap();
-        let eval = evaluate(Value::CharArray(chars), &[]).expect("unique");
+        let eval = evaluate_sync(Value::CharArray(chars), &[]).expect("unique");
         let (values, ia, ic) = eval.into_triple();
         match values {
             Value::CharArray(arr) => {
@@ -1694,7 +1699,7 @@ pub(crate) mod tests {
     #[test]
     fn unique_char_rows_last() {
         let chars = CharArray::new(vec!['a', 'b', 'a', 'b', 'a', 'c'], 3, 2).unwrap();
-        let eval = evaluate(
+        let eval = evaluate_sync(
             Value::CharArray(chars),
             &[Value::from("rows"), Value::from("last")],
         )
@@ -1726,7 +1731,8 @@ pub(crate) mod tests {
             vec![3, 1],
         )
         .unwrap();
-        let eval = evaluate(Value::StringArray(array), &[Value::from("stable")]).expect("unique");
+        let eval =
+            evaluate_sync(Value::StringArray(array), &[Value::from("stable")]).expect("unique");
         let (values, ia, ic) = eval.into_triple();
         match values {
             Value::StringArray(sa) => {
@@ -1760,7 +1766,7 @@ pub(crate) mod tests {
             vec![3, 2],
         )
         .unwrap();
-        let eval = evaluate(
+        let eval = evaluate_sync(
             Value::StringArray(array),
             &[Value::from("rows"), Value::from("stable")],
         )
@@ -1791,7 +1797,7 @@ pub(crate) mod tests {
             vec![4, 1],
         )
         .unwrap();
-        let eval = evaluate(Value::ComplexTensor(tensor), &[]).expect("unique");
+        let eval = evaluate_sync(Value::ComplexTensor(tensor), &[]).expect("unique");
         let (values, ..) = eval.into_triple();
         match values {
             Value::ComplexTensor(t) => {
@@ -1808,7 +1814,7 @@ pub(crate) mod tests {
     #[test]
     fn unique_handles_logical_arrays() {
         let logical = LogicalArray::new(vec![1, 0, 1, 1], vec![4, 1]).unwrap();
-        let eval = evaluate(Value::LogicalArray(logical), &[]).expect("unique");
+        let eval = evaluate_sync(Value::LogicalArray(logical), &[]).expect("unique");
         let values = eval.into_values_value();
         match values {
             Value::Tensor(t) => assert_eq!(t.data, vec![0.0, 1.0]),
@@ -1826,8 +1832,8 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let eval =
-                evaluate(Value::GpuTensor(handle), &[Value::from("stable")]).expect("unique");
+            let eval = evaluate_sync(Value::GpuTensor(handle), &[Value::from("stable")])
+                .expect("unique");
             let values = eval.into_values_value();
             match values {
                 Value::Tensor(t) => assert_eq!(t.data, vec![5.0, 3.0, 1.0]),
@@ -1844,7 +1850,8 @@ pub(crate) mod tests {
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
         let tensor = Tensor::new(vec![5.0, 3.0, 5.0, 1.0, 2.0], vec![5, 1]).unwrap();
-        let host_eval = evaluate(Value::Tensor(tensor.clone()), &[]).expect("host unique");
+        let host_eval =
+            evaluate_sync(Value::Tensor(tensor.clone()), &[]).expect("host unique");
         let (host_values, host_ia, host_ic) = host_eval.into_triple();
 
         let provider = runmat_accelerate_api::provider().expect("provider registered");
@@ -1853,7 +1860,8 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let gpu_eval = evaluate(Value::GpuTensor(handle.clone()), &[]).expect("gpu unique");
+        let gpu_eval =
+            evaluate_sync(Value::GpuTensor(handle.clone()), &[]).expect("gpu unique");
         let (gpu_values, gpu_ia, gpu_ic) = gpu_eval.into_triple();
         let _ = provider.free(&handle);
 
@@ -1874,8 +1882,9 @@ pub(crate) mod tests {
     #[test]
     fn unique_rejects_legacy_option() {
         let tensor = Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap();
-        let err =
-            error_message(evaluate(Value::Tensor(tensor), &[Value::from("legacy")]).unwrap_err());
+        let err = error_message(
+            evaluate_sync(Value::Tensor(tensor), &[Value::from("legacy")]).unwrap_err(),
+        );
         assert!(err.contains("legacy"));
     }
 
@@ -1884,7 +1893,7 @@ pub(crate) mod tests {
     fn unique_conflicting_order_flags() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = error_message(
-            evaluate(
+            evaluate_sync(
                 Value::Tensor(tensor),
                 &[Value::from("stable"), Value::from("sorted")],
             )
@@ -1898,7 +1907,7 @@ pub(crate) mod tests {
     fn unique_conflicting_occurrence_flags() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = error_message(
-            evaluate(
+            evaluate_sync(
                 Value::Tensor(tensor),
                 &[Value::from("first"), Value::from("last")],
             )
@@ -1911,8 +1920,9 @@ pub(crate) mod tests {
     #[test]
     fn unique_rows_requires_two_dimensional_input() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1, 1]).unwrap();
-        let err =
-            error_message(evaluate(Value::Tensor(tensor), &[Value::from("rows")]).unwrap_err());
+        let err = error_message(
+            evaluate_sync(Value::Tensor(tensor), &[Value::from("rows")]).unwrap_err(),
+        );
         assert!(err.contains("2-D matrix"));
     }
 
@@ -1927,7 +1937,8 @@ pub(crate) mod tests {
     #[test]
     fn unique_handles_empty_rows() {
         let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
-        let eval = evaluate(Value::Tensor(tensor), &[Value::from("rows")]).expect("unique");
+        let eval =
+            evaluate_sync(Value::Tensor(tensor), &[Value::from("rows")]).expect("unique");
         let (values, ia, ic) = eval.into_triple();
         match values {
             Value::Tensor(t) => {
@@ -1949,7 +1960,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_accepts_integer_scalars() {
-        let eval = evaluate(Value::Int(IntValue::I32(42)), &[]).expect("unique");
+        let eval = evaluate_sync(Value::Int(IntValue::I32(42)), &[]).expect("unique");
         let values = eval.into_values_value();
         match values {
             Value::Num(n) => assert_eq!(n, 42.0),

@@ -238,16 +238,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::sum"
 )]
-fn sum_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn sum_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let input_meta = InputMeta::from_value(&value);
     let parsed = parse_arguments(&rest)?;
     let raw_result = match value {
-        Value::GpuTensor(handle) => sum_gpu(handle, &parsed)?,
+        Value::GpuTensor(handle) => sum_gpu(handle, &parsed).await?,
         Value::ComplexTensor(ct) => sum_host_complex_tensor(ct, &parsed)?,
         Value::Complex(re, im) => sum_host_complex_scalar(re, im, &parsed)?,
         other => sum_host(other, &parsed)?,
     };
-    apply_output_template(raw_result, &parsed.output, &input_meta)
+    apply_output_template(raw_result, &parsed.output, &input_meta).await
 }
 
 fn numeric_dtype_from_value(value: &Value) -> Option<NumericDType> {
@@ -577,7 +577,7 @@ fn sum_host_complex_scalar(re: f64, im: f64, parsed: &ParsedArguments) -> Builti
     sum_host_complex_tensor(tensor, parsed)
 }
 
-fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinResult<Value> {
+async fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -587,11 +587,11 @@ fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinResult<V
         }
     }
     if matches!(parsed.nan_mode, ReductionNaN::Omit) {
-        return sum_gpu_with_omitnan(handle, parsed);
+        return sum_gpu_with_omitnan(handle, parsed).await;
     }
 
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return sum_gpu_fallback(&handle, parsed);
+        return sum_gpu_fallback(&handle, parsed).await;
     };
 
     let resolved = resolve_dims(&handle.shape, &parsed.selection)?;
@@ -611,13 +611,16 @@ fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinResult<V
             Ok(next) => {
                 current = next;
             }
-            Err(_) => return sum_gpu_fallback(&handle, parsed),
+            Err(_) => return sum_gpu_fallback(&handle, parsed).await,
         }
     }
     Ok(Value::GpuTensor(current))
 }
 
-fn sum_gpu_with_omitnan(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinResult<Value> {
+async fn sum_gpu_with_omitnan(
+    handle: GpuTensorHandle,
+    parsed: &ParsedArguments,
+) -> BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -627,7 +630,7 @@ fn sum_gpu_with_omitnan(handle: GpuTensorHandle, parsed: &ParsedArguments) -> Bu
         }
     }
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return sum_gpu_fallback(&handle, parsed);
+        return sum_gpu_fallback(&handle, parsed).await;
     };
     let resolved = resolve_dims(&handle.shape, &parsed.selection)?;
     if resolved.dims_in_bounds.is_empty() {
@@ -656,7 +659,7 @@ fn sum_gpu_with_omitnan(handle: GpuTensorHandle, parsed: &ParsedArguments) -> Bu
                 if !std::ptr::eq(&current, &cleaned) {
                     let _ = provider.free(&current);
                 }
-                return sum_gpu_fallback(&handle, parsed);
+                return sum_gpu_fallback(&handle, parsed).await;
             }
         }
     }
@@ -768,8 +771,11 @@ fn reduced_shape(shape: &[usize], dims: &[usize]) -> Vec<usize> {
     out
 }
 
-fn sum_gpu_fallback(handle: &GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor(handle)?;
+async fn sum_gpu_fallback(
+    handle: &GpuTensorHandle,
+    parsed: &ParsedArguments,
+) -> BuiltinResult<Value> {
+    let tensor = gpu_helpers::gather_tensor_async(handle).await?;
     let resolved = resolve_dims(&tensor.shape, &parsed.selection)?;
     let reduced = sum_tensor(&tensor, &resolved, parsed.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
@@ -1022,7 +1028,7 @@ fn multi_to_linear(coords: &[usize], shape: &[usize]) -> usize {
     index
 }
 
-fn apply_output_template(
+async fn apply_output_template(
     value: Value,
     template: &OutputTemplate,
     meta: &InputMeta,
@@ -1030,14 +1036,14 @@ fn apply_output_template(
     match template {
         OutputTemplate::Double => Ok(value),
         OutputTemplate::Native => {
-            let value = apply_native_template(value, meta)?;
-            ensure_device(value, meta.device)
+            let value = apply_native_template(value, meta).await?;
+            ensure_device(value, meta.device).await
         }
-        OutputTemplate::Like(proto) => apply_like_template(value, proto),
+        OutputTemplate::Like(proto) => apply_like_template(value, proto).await,
     }
 }
 
-fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
+async fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
     match meta.class {
         InputClass::Integer(class) => match value {
             Value::Num(n) => class.to_value(n),
@@ -1046,7 +1052,7 @@ fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value>
         },
         _ => {
             if let Some(dtype) = meta.numeric_dtype {
-                coerce_value_to_dtype(value, dtype)
+                coerce_value_to_dtype(value, dtype).await
             } else {
                 Ok(value)
             }
@@ -1054,7 +1060,7 @@ fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value>
     }
 }
 
-fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Value> {
+async fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Value> {
     match dtype {
         NumericDType::F64 => Ok(value),
         NumericDType::F32 => match value {
@@ -1074,7 +1080,7 @@ fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Val
                 Ok(Value::Tensor(tensor))
             }
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                 let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
                 Ok(Value::Tensor(tensor))
             }
@@ -1098,11 +1104,11 @@ fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
     tensor
 }
 
-fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value> {
+async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value> {
     match device {
         DevicePreference::Host => match value {
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                 Ok(tensor::tensor_into_value(tensor))
             }
             _ => Ok(value),
@@ -1142,15 +1148,15 @@ fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     Ok(Value::GpuTensor(handle))
 }
 
-fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
-    let analysed = analyse_like_prototype(prototype)?;
+async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
+    let analysed = analyse_like_prototype(prototype).await?;
     match analysed.class {
         PrototypeClass::Real => match analysed.device {
-            DevicePreference::Host => ensure_device(value, DevicePreference::Host),
-            DevicePreference::Gpu => ensure_device(value, DevicePreference::Gpu),
+            DevicePreference::Host => ensure_device(value, DevicePreference::Host).await,
+            DevicePreference::Gpu => ensure_device(value, DevicePreference::Gpu).await,
         },
         PrototypeClass::Complex => {
-            let host_value = ensure_device(value, DevicePreference::Host)?;
+            let host_value = ensure_device(value, DevicePreference::Host).await?;
             real_to_complex(host_value)
         }
     }
@@ -1186,7 +1192,8 @@ enum PrototypeClass {
     Complex,
 }
 
-fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
+#[async_recursion::async_recursion(?Send)]
+async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
     match proto {
         Value::GpuTensor(_) => Ok(LikeAnalysis {
             device: DevicePreference::Gpu,
@@ -1205,9 +1212,10 @@ fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
             class: PrototypeClass::Complex,
         }),
         other => {
-            let gathered = crate::dispatcher::gather_if_needed(other)
+            let gathered = crate::dispatcher::gather_if_needed_async(other)
+                .await
                 .map_err(|e| sum_error(format!("sum: {e}")))?;
-            analyse_like_prototype(&gathered)
+            analyse_like_prototype(&gathered).await
         }
     }
 }
@@ -1216,8 +1224,13 @@ fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::IntValue;
+
+    fn sum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::sum_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

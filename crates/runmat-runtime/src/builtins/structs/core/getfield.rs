@@ -7,7 +7,9 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::indexing::perform_indexing;
 use crate::make_cell_with_shape;
-use crate::{build_runtime_error, call_builtin, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, call_builtin_async, gather_if_needed_async, BuiltinResult, RuntimeError,
+};
 use runmat_builtins::{
     Access, CellArray, CharArray, ComplexTensor, HandleRef, Listener, LogicalArray, MException,
     ObjectInstance, StructValue, Tensor, Value,
@@ -251,18 +253,18 @@ fn is_undefined_function(err: &RuntimeError) -> bool {
     keywords = "getfield,struct,object,field access",
     builtin_path = "crate::builtins::structs::core::getfield"
 )]
-fn getfield_builtin(base: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn getfield_builtin(base: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = parse_arguments(rest)?;
 
     let mut current = base;
     if let Some(index) = parsed.leading_index {
-        current = apply_indices(current, &index)?;
+        current = apply_indices(current, &index).await?;
     }
 
     for step in parsed.fields {
-        current = get_field_value(current, &step.name)?;
+        current = get_field_value(current, &step.name).await?;
         if let Some(index) = step.index {
-            current = apply_indices(current, &index)?;
+            current = apply_indices(current, &index).await?;
         }
     }
 
@@ -450,7 +452,7 @@ fn parse_field_name(value: Value) -> BuiltinResult<String> {
     }
 }
 
-fn apply_indices(value: Value, selector: &IndexSelector) -> BuiltinResult<Value> {
+async fn apply_indices(value: Value, selector: &IndexSelector) -> BuiltinResult<Value> {
     if selector.components.is_empty() {
         return Err(getfield_flow(
             "getfield: index cell must contain at least one element",
@@ -458,7 +460,8 @@ fn apply_indices(value: Value, selector: &IndexSelector) -> BuiltinResult<Value>
     }
 
     let value = match value {
-        Value::GpuTensor(handle) => gather_if_needed(&Value::GpuTensor(handle))
+        Value::GpuTensor(handle) => gather_if_needed_async(&Value::GpuTensor(handle))
+            .await
             .map_err(|flow| remap_getfield_flow(flow, Some("getfield: ")))?,
         other => other,
     };
@@ -802,11 +805,12 @@ fn index_complex_tensor(tensor: &ComplexTensor, indices: &[usize]) -> BuiltinRes
     ))
 }
 
-fn get_field_value(value: Value, name: &str) -> BuiltinResult<Value> {
+#[async_recursion::async_recursion(?Send)]
+async fn get_field_value(value: Value, name: &str) -> BuiltinResult<Value> {
     match value {
         Value::Struct(st) => get_struct_field(&st, name),
-        Value::Object(obj) => get_object_field(&obj, name),
-        Value::HandleObject(handle) => get_handle_field(&handle, name),
+        Value::Object(obj) => get_object_field(&obj, name).await,
+        Value::HandleObject(handle) => get_handle_field(&handle, name).await,
         Value::Listener(listener) => get_listener_field(&listener, name),
         Value::MException(ex) => get_exception_field(&ex, name),
         Value::Cell(cell) if is_struct_array(&cell) => {
@@ -815,7 +819,7 @@ fn get_field_value(value: Value, name: &str) -> BuiltinResult<Value> {
                     "Struct contents reference from an empty struct array.",
                 ));
             };
-            get_field_value(first, name)
+            get_field_value(first, name).await
         }
         _ => Err(getfield_flow(
             "Struct contents reference from a non-struct array object.",
@@ -831,7 +835,7 @@ fn get_struct_field(struct_value: &StructValue, name: &str) -> BuiltinResult<Val
         .ok_or_else(|| getfield_flow(format!("Reference to non-existent field '{}'.", name)))
 }
 
-fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Value> {
+async fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Value> {
     if let Some((prop, _owner)) = runmat_builtins::lookup_property(&obj.class_name, name) {
         if prop.is_static {
             return Err(getfield_flow(format!(
@@ -847,7 +851,7 @@ fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Value> {
         }
         if prop.is_dependent {
             let getter = format!("get.{name}");
-            match call_builtin(&getter, &[Value::Object(obj.clone())]) {
+            match call_builtin_async(&getter, &[Value::Object(obj.clone())]).await {
                 Ok(value) => return Ok(value),
                 Err(err) => {
                     if !is_undefined_function(&err) {
@@ -884,7 +888,8 @@ fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Value> {
     )))
 }
 
-fn get_handle_field(handle: &HandleRef, name: &str) -> BuiltinResult<Value> {
+#[async_recursion::async_recursion(?Send)]
+async fn get_handle_field(handle: &HandleRef, name: &str) -> BuiltinResult<Value> {
     if !handle.valid {
         return Err(getfield_flow(format!(
             "Invalid or deleted handle object '{}'.",
@@ -892,7 +897,7 @@ fn get_handle_field(handle: &HandleRef, name: &str) -> BuiltinResult<Value> {
         )));
     }
     let target = unsafe { &*handle.target.as_raw() }.clone();
-    get_field_value(target, name)
+    get_field_value(target, name).await
 }
 
 fn get_listener_field(listener: &Listener, name: &str) -> BuiltinResult<Value> {
@@ -981,13 +986,17 @@ pub(crate) mod tests {
         err.message().to_string()
     }
 
+    fn run_getfield(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(getfield_builtin(base, rest))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_scalar_struct() {
         let mut st = StructValue::new();
         st.fields.insert("answer".to_string(), Value::Num(42.0));
         let value =
-            getfield_builtin(Value::Struct(st), vec![Value::from("answer")]).expect("getfield");
+            run_getfield(Value::Struct(st), vec![Value::from("answer")]).expect("getfield");
         assert_eq!(value, Value::Num(42.0));
     }
 
@@ -1000,7 +1009,7 @@ pub(crate) mod tests {
         outer
             .fields
             .insert("inner".to_string(), Value::Struct(inner));
-        let result = getfield_builtin(
+        let result = run_getfield(
             Value::Struct(outer),
             vec![Value::from("inner"), Value::from("depth")],
         )
@@ -1024,7 +1033,7 @@ pub(crate) mod tests {
         .unwrap();
         let index =
             CellArray::new_with_shape(vec![Value::Int(IntValue::I32(2))], vec![1, 1]).unwrap();
-        let result = getfield_builtin(
+        let result = run_getfield(
             Value::Cell(array),
             vec![Value::Cell(index), Value::from("name")],
         )
@@ -1038,7 +1047,7 @@ pub(crate) mod tests {
         let mut obj = ObjectInstance::new("TestClass".to_string());
         obj.properties.insert("value".to_string(), Value::Num(7.0));
         let result =
-            getfield_builtin(Value::Object(obj), vec![Value::from("value")]).expect("object");
+            run_getfield(Value::Object(obj), vec![Value::from("value")]).expect("object");
         assert_eq!(result, Value::Num(7.0));
     }
 
@@ -1047,7 +1056,7 @@ pub(crate) mod tests {
     fn getfield_missing_field_errors() {
         let st = StructValue::new();
         let err = error_message(
-            getfield_builtin(Value::Struct(st), vec![Value::from("missing")]).unwrap_err(),
+            run_getfield(Value::Struct(st), vec![Value::from("missing")]).unwrap_err(),
         );
         assert!(err.contains("Reference to non-existent field 'missing'"));
     }
@@ -1056,10 +1065,10 @@ pub(crate) mod tests {
     #[test]
     fn getfield_exception_fields() {
         let ex = MException::new("MATLAB:Test".to_string(), "failure".to_string());
-        let msg = getfield_builtin(Value::MException(ex.clone()), vec![Value::from("message")])
+        let msg = run_getfield(Value::MException(ex.clone()), vec![Value::from("message")])
             .expect("message");
         assert_eq!(msg, Value::String("failure".to_string()));
-        let ident = getfield_builtin(Value::MException(ex), vec![Value::from("identifier")])
+        let ident = run_getfield(Value::MException(ex), vec![Value::from("identifier")])
             .expect("identifier");
         assert_eq!(ident, Value::String("MATLAB:Test".to_string()));
     }
@@ -1071,7 +1080,7 @@ pub(crate) mod tests {
         ex.stack.push("demo.m:5".to_string());
         ex.stack.push("main.m:1".to_string());
         let stack =
-            getfield_builtin(Value::MException(ex), vec![Value::from("stack")]).expect("stack");
+            run_getfield(Value::MException(ex), vec![Value::from("stack")]).expect("stack");
         let Value::Cell(cell) = stack else {
             panic!("expected cell array");
         };
@@ -1096,7 +1105,7 @@ pub(crate) mod tests {
         let index =
             CellArray::new_with_shape(vec![Value::Int(IntValue::I32(1))], vec![1, 1]).unwrap();
         let err = error_message(
-            getfield_builtin(Value::Struct(outer), vec![Value::Cell(index)]).unwrap_err(),
+            run_getfield(Value::Struct(outer), vec![Value::Cell(index)]).unwrap_err(),
         );
         assert!(err.contains("expected field name"));
     }
@@ -1110,7 +1119,7 @@ pub(crate) mod tests {
             .insert("values".to_string(), Value::Tensor(tensor));
         let idx_cell =
             CellArray::new(vec![Value::CharArray(CharArray::new_row("end"))], 1, 1).unwrap();
-        let result = getfield_builtin(
+        let result = run_getfield(
             Value::Struct(st),
             vec![Value::from("values"), Value::Cell(idx_cell)],
         )
@@ -1133,7 +1142,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let result =
-            getfield_builtin(Value::Cell(array), vec![Value::from("name")]).expect("default index");
+            run_getfield(Value::Cell(array), vec![Value::from("name")]).expect("default index");
         assert_eq!(result, Value::from("Ada"));
     }
 
@@ -1146,7 +1155,7 @@ pub(crate) mod tests {
             .insert("name".to_string(), Value::CharArray(chars));
         let index =
             CellArray::new_with_shape(vec![Value::Int(IntValue::I32(2))], vec![1, 1]).unwrap();
-        let result = getfield_builtin(
+        let result = run_getfield(
             Value::Struct(st),
             vec![Value::from("name"), Value::Cell(index)],
         )
@@ -1171,7 +1180,7 @@ pub(crate) mod tests {
             .insert("vals".to_string(), Value::ComplexTensor(tensor));
         let index =
             CellArray::new_with_shape(vec![Value::Int(IntValue::I32(2))], vec![1, 1]).unwrap();
-        let result = getfield_builtin(
+        let result = run_getfield(
             Value::Struct(st),
             vec![Value::from("vals"), Value::Cell(index)],
         )
@@ -1207,7 +1216,7 @@ pub(crate) mod tests {
             .insert("p_backing".to_string(), Value::Num(42.0));
 
         let result =
-            getfield_builtin(Value::Object(obj), vec![Value::from("p")]).expect("dependent");
+            run_getfield(Value::Object(obj), vec![Value::from("p")]).expect("dependent");
         assert_eq!(result, Value::Num(42.0));
     }
 
@@ -1221,7 +1230,7 @@ pub(crate) mod tests {
             valid: false,
         };
         let err = error_message(
-            getfield_builtin(Value::HandleObject(handle), vec![Value::from("x")]).unwrap_err(),
+            run_getfield(Value::HandleObject(handle), vec![Value::from("x")]).unwrap_err(),
         );
         assert!(err.contains("Invalid or deleted handle object 'Demo'"));
     }
@@ -1243,19 +1252,19 @@ pub(crate) mod tests {
             enabled: true,
             valid: true,
         };
-        let enabled = getfield_builtin(
+        let enabled = run_getfield(
             Value::Listener(listener.clone()),
             vec![Value::from("Enabled")],
         )
         .expect("enabled");
         assert_eq!(enabled, Value::Bool(true));
-        let event_name = getfield_builtin(
+        let event_name = run_getfield(
             Value::Listener(listener.clone()),
             vec![Value::from("EventName")],
         )
         .expect("event name");
         assert_eq!(event_name, Value::String("tick".to_string()));
-        let callback = getfield_builtin(Value::Listener(listener), vec![Value::from("Callback")])
+        let callback = run_getfield(Value::Listener(listener), vec![Value::from("Callback")])
             .expect("callback");
         assert!(matches!(callback, Value::FunctionHandle(_)));
     }
@@ -1278,7 +1287,7 @@ pub(crate) mod tests {
         st.fields
             .insert("values".to_string(), Value::GpuTensor(handle.clone()));
 
-        let direct = getfield_builtin(Value::Struct(st.clone()), vec![Value::from("values")])
+        let direct = run_getfield(Value::Struct(st.clone()), vec![Value::from("values")])
             .expect("direct gpu field");
         match direct {
             Value::GpuTensor(out) => assert_eq!(out.buffer_id, handle.buffer_id),
@@ -1287,7 +1296,7 @@ pub(crate) mod tests {
 
         let idx_cell =
             CellArray::new(vec![Value::CharArray(CharArray::new_row("end"))], 1, 1).unwrap();
-        let indexed = getfield_builtin(
+        let indexed = run_getfield(
             Value::Struct(st),
             vec![Value::from("values"), Value::Cell(idx_cell)],
         )

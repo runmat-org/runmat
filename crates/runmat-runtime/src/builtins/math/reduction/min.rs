@@ -252,15 +252,15 @@ impl MinEvaluation {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::min"
 )]
-fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    evaluate(value, &rest).map(|eval| eval.into_value())
+async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    evaluate(value, &rest).await.map(|eval| eval.into_value())
 }
 
 /// Evaluate the builtin once and expose both outputs (value + indices).
-pub fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluation> {
+pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluation> {
     match parse_call(rest)? {
-        ParsedCall::Elementwise(args) => elementwise_min(value, args),
-        ParsedCall::Reduction(args) => reduction_min(value, args),
+        ParsedCall::Elementwise(args) => elementwise_min(value, args).await,
+        ParsedCall::Reduction(args) => reduction_min(value, args).await,
     }
 }
 
@@ -538,14 +538,14 @@ fn parse_dimension_tensor(tensor: &Tensor) -> BuiltinResult<Option<DimSelection>
     }
 }
 
-fn reduction_min(value: Value, args: ReductionArgs) -> BuiltinResult<MinEvaluation> {
+async fn reduction_min(value: Value, args: ReductionArgs) -> BuiltinResult<MinEvaluation> {
     match value {
         Value::GpuTensor(handle) => {
             if let Some(eval) = reduction_min_gpu(handle.clone(), &args)? {
                 return Ok(eval);
             }
             // Fall back to host if GPU path is unavailable.
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             reduction_min_host(Value::Tensor(tensor), &args)
         }
         other => reduction_min_host(other, &args),
@@ -1288,40 +1288,48 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
     1
 }
 
-fn elementwise_min(value: Value, args: ElementwiseArgs) -> BuiltinResult<MinEvaluation> {
+async fn elementwise_min(value: Value, args: ElementwiseArgs) -> BuiltinResult<MinEvaluation> {
     let ElementwiseArgs { other, comparison } = args;
     match (value, other) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
-            elementwise_min_gpu_pair(&handle_a, &handle_b, comparison)
-                .or_else(|| {
-                    let ta = gpu_helpers::gather_tensor(&handle_a).ok()?;
-                    let tb = gpu_helpers::gather_tensor(&handle_b).ok()?;
+            if let Some(eval) = elementwise_min_gpu_pair(&handle_a, &handle_b, comparison).await {
+                return Ok(eval);
+            }
+            if let (Ok(ta), Ok(tb)) = (
+                gpu_helpers::gather_tensor_async(&handle_a).await,
+                gpu_helpers::gather_tensor_async(&handle_b).await,
+            ) {
+                if let Ok(eval) =
                     elementwise_real_or_complex(Value::Tensor(ta), Value::Tensor(tb), comparison)
-                        .ok()
-                })
-                .ok_or_else(|| min_error("min: elementwise GPU path failed"))
+                {
+                    return Ok(eval);
+                }
+            }
+            Err(min_error("min: elementwise GPU path failed"))
         }
         (Value::GpuTensor(handle), other) => {
-            elementwise_min_gpu_scalar_left(&handle, &other, comparison)
-                .or_else(|| {
-                    let t = gpu_helpers::gather_tensor(&handle).ok()?;
-                    elementwise_real_or_complex(Value::Tensor(t), other, comparison).ok()
-                })
-                .ok_or_else(|| min_error("min: elementwise GPU scalar path failed"))
+            if let Some(eval) = elementwise_min_gpu_scalar_left(&handle, &other, comparison).await {
+                return Ok(eval);
+            }
+            let t = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(|_| min_error("min: elementwise GPU scalar path failed"))?;
+            elementwise_real_or_complex(Value::Tensor(t), other, comparison)
         }
         (other, Value::GpuTensor(handle)) => {
-            elementwise_min_gpu_scalar_right(&other, &handle, comparison)
-                .or_else(|| {
-                    let t = gpu_helpers::gather_tensor(&handle).ok()?;
-                    elementwise_real_or_complex(other, Value::Tensor(t), comparison).ok()
-                })
-                .ok_or_else(|| min_error("min: elementwise GPU scalar path failed"))
+            if let Some(eval) = elementwise_min_gpu_scalar_right(&other, &handle, comparison).await {
+                return Ok(eval);
+            }
+            let t = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(|_| min_error("min: elementwise GPU scalar path failed"))?;
+            elementwise_real_or_complex(other, Value::Tensor(t), comparison)
         }
         (lhs, rhs) => elementwise_real_or_complex(lhs, rhs, comparison),
     }
 }
 
-fn elementwise_min_gpu_pair(
+async fn elementwise_min_gpu_pair(
     a: &GpuTensorHandle,
     b: &GpuTensorHandle,
     comparison: ComparisonMethod,
@@ -1335,7 +1343,7 @@ fn elementwise_min_gpu_pair(
         let values = provider.elem_min(a, b).ok()?;
         // Try device mask first; if unavailable, compute indices on host while keeping values on device
         if let Ok(mask) = provider.elem_le(a, b) {
-            let mask_host = gpu_helpers::gather_tensor(&mask).ok()?;
+            let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
             let _ = provider.free(&mask);
             let mut indices = Vec::with_capacity(mask_host.data.len());
             for &m in &mask_host.data {
@@ -1348,8 +1356,8 @@ fn elementwise_min_gpu_pair(
             });
         } else {
             // Host indices only
-            let ta = gpu_helpers::gather_tensor(a).ok()?;
-            let tb = gpu_helpers::gather_tensor(b).ok()?;
+            let ta = gpu_helpers::gather_tensor_async(a).await.ok()?;
+            let tb = gpu_helpers::gather_tensor_async(b).await.ok()?;
             let mut indices = Vec::with_capacity(ta.data.len());
             for i in 0..ta.data.len() {
                 indices.push(if ta.data[i] <= tb.data[i] { 1.0 } else { 2.0 });
@@ -1387,7 +1395,7 @@ fn elementwise_min_gpu_pair(
         return None;
     }
     let index_tensor = if let Some(mask) = mask {
-        let mask_host = gpu_helpers::gather_tensor(&mask).ok()?;
+        let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
         let _ = provider.free(&mask);
         let mut indices = Vec::with_capacity(mask_host.data.len());
         for &m in &mask_host.data {
@@ -1396,8 +1404,8 @@ fn elementwise_min_gpu_pair(
         Tensor::new(indices, out_shape).ok()?
     } else {
         // Host indices fallback
-        let ta = gpu_helpers::gather_tensor(&a_exp).ok()?;
-        let tb = gpu_helpers::gather_tensor(&b_exp).ok()?;
+        let ta = gpu_helpers::gather_tensor_async(&a_exp).await.ok()?;
+        let tb = gpu_helpers::gather_tensor_async(&b_exp).await.ok()?;
         let mut indices = Vec::with_capacity(ta.data.len());
         for i in 0..ta.data.len() {
             indices.push(if ta.data[i] <= tb.data[i] { 1.0 } else { 2.0 });
@@ -1440,7 +1448,7 @@ fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, V
     Some((out, reps_a, reps_b))
 }
 
-fn elementwise_min_gpu_scalar_left(
+async fn elementwise_min_gpu_scalar_left(
     a: &GpuTensorHandle,
     other: &Value,
     comparison: ComparisonMethod,
@@ -1455,7 +1463,7 @@ fn elementwise_min_gpu_scalar_left(
     let index_tensor = if let Ok(fill) = provider.fill_like(a, scalar) {
         if let Ok(mask) = provider.elem_le(a, &fill) {
             let _ = provider.free(&fill);
-            let mask_host = gpu_helpers::gather_tensor(&mask).ok()?;
+            let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
             let _ = provider.free(&mask);
             let mut indices = Vec::with_capacity(mask_host.data.len());
             for &m in &mask_host.data {
@@ -1464,7 +1472,7 @@ fn elementwise_min_gpu_scalar_left(
             Tensor::new(indices, mask_host.shape.clone()).ok()?
         } else {
             let _ = provider.free(&fill);
-            let ta = gpu_helpers::gather_tensor(a).ok()?;
+            let ta = gpu_helpers::gather_tensor_async(a).await.ok()?;
             let mut indices = Vec::with_capacity(ta.data.len());
             for &v in &ta.data {
                 indices.push(if v <= scalar { 1.0 } else { 2.0 });
@@ -1472,7 +1480,7 @@ fn elementwise_min_gpu_scalar_left(
             Tensor::new(indices, ta.shape.clone()).ok()?
         }
     } else {
-        let ta = gpu_helpers::gather_tensor(a).ok()?;
+        let ta = gpu_helpers::gather_tensor_async(a).await.ok()?;
         let mut indices = Vec::with_capacity(ta.data.len());
         for &v in &ta.data {
             indices.push(if v <= scalar { 1.0 } else { 2.0 });
@@ -1485,7 +1493,7 @@ fn elementwise_min_gpu_scalar_left(
     })
 }
 
-fn elementwise_min_gpu_scalar_right(
+async fn elementwise_min_gpu_scalar_right(
     other: &Value,
     b: &GpuTensorHandle,
     comparison: ComparisonMethod,
@@ -1500,7 +1508,7 @@ fn elementwise_min_gpu_scalar_right(
     let index_tensor = if let Ok(fill) = provider.fill_like(b, scalar) {
         if let Ok(mask) = provider.elem_le(&fill, b) {
             let _ = provider.free(&fill);
-            let mask_host = gpu_helpers::gather_tensor(&mask).ok()?;
+            let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
             let _ = provider.free(&mask);
             let mut indices = Vec::with_capacity(mask_host.data.len());
             for &m in &mask_host.data {
@@ -1509,7 +1517,7 @@ fn elementwise_min_gpu_scalar_right(
             Tensor::new(indices, mask_host.shape.clone()).ok()?
         } else {
             let _ = provider.free(&fill);
-            let tb = gpu_helpers::gather_tensor(b).ok()?;
+            let tb = gpu_helpers::gather_tensor_async(b).await.ok()?;
             let mut indices = Vec::with_capacity(tb.data.len());
             for &v in &tb.data {
                 indices.push(if scalar <= v { 1.0 } else { 2.0 });
@@ -1517,7 +1525,7 @@ fn elementwise_min_gpu_scalar_right(
             Tensor::new(indices, tb.shape.clone()).ok()?
         }
     } else {
-        let tb = gpu_helpers::gather_tensor(b).ok()?;
+        let tb = gpu_helpers::gather_tensor_async(b).await.ok()?;
         let mut indices = Vec::with_capacity(tb.data.len());
         for &v in &tb.data {
             indices.push(if scalar <= v { 1.0 } else { 2.0 });
@@ -1682,9 +1690,18 @@ fn choose_complex_elementwise(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor, Value};
+
+    fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::min_builtin(value, rest))
+    }
+
+    fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluation> {
+        block_on(super::evaluate(value, rest))
+    }
 
     fn placeholder() -> Value {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap();

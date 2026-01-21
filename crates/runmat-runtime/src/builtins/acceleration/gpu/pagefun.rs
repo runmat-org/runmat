@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, PagefunOp, PagefunRequest};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -200,7 +200,11 @@ fn pagefun_error(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     builtin_path = "crate::builtins::acceleration::gpu::pagefun"
 )]
-fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn pagefun_builtin(
+    func: Value,
+    first: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     let operation = PageOperation::from_callable(func)?;
     let mut operands = Vec::with_capacity(rest.len() + 1);
     operands.push(first);
@@ -218,7 +222,7 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> crate::Builti
     let all_gpu = operands.iter().all(|v| matches!(v, Value::GpuTensor(_)));
     let mut host_values = Vec::with_capacity(operands.len());
     for value in operands {
-        host_values.push(gather_if_needed(&value)?);
+        host_values.push(gather_if_needed_async(&value).await?);
     }
 
     let mut page_inputs = Vec::with_capacity(host_values.len());
@@ -301,8 +305,8 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> crate::Builti
             page_args.push(input.page_value(&multi_index)?);
         }
 
-        let mut evaluated = operation.evaluate(&page_args)?;
-        evaluated = gather_if_needed(&evaluated)?;
+        let mut evaluated = operation.evaluate(&page_args).await?;
+        evaluated = gather_if_needed_async(&evaluated).await?;
         match output_kind {
             OutputKind::Real => {
                 let (data, rows, cols) = tensor_matrix_data(evaluated)?;
@@ -929,9 +933,9 @@ impl PageOperation {
         }
     }
 
-    fn evaluate(&self, args: &[Value]) -> crate::BuiltinResult<Value> {
+    async fn evaluate(&self, args: &[Value]) -> crate::BuiltinResult<Value> {
         match self {
-            Self::Mtimes => crate::call_builtin("mtimes", args),
+            Self::Mtimes => crate::call_builtin_async("mtimes", args).await,
         }
     }
 
@@ -1001,6 +1005,7 @@ impl TypeName for Value {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{CharArray, StringArray};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1013,7 +1018,8 @@ pub(crate) mod tests {
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
         )
-        .expect("pagefun");
+        ;
+        let result = block_on(result).expect("pagefun");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -1033,7 +1039,8 @@ pub(crate) mod tests {
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
         )
-        .expect("pagefun");
+        ;
+        let result = block_on(result).expect("pagefun");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2, 2]);
@@ -1053,7 +1060,8 @@ pub(crate) mod tests {
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
         )
-        .expect("pagefun");
+        ;
+        let result = block_on(result).expect("pagefun");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2, 2]);
@@ -1077,7 +1085,8 @@ pub(crate) mod tests {
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
         )
-        .expect("pagefun");
+        ;
+        let result = block_on(result).expect("pagefun");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2, 0]);
@@ -1098,7 +1107,8 @@ pub(crate) mod tests {
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
         )
-        .expect("pagefun char array");
+        ;
+        let result = block_on(result).expect("pagefun char array");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -1119,7 +1129,8 @@ pub(crate) mod tests {
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
         )
-        .expect("pagefun string array");
+        ;
+        let result = block_on(result).expect("pagefun string array");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -1140,7 +1151,8 @@ pub(crate) mod tests {
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
         )
-        .expect_err("expected multi-row char array error");
+        ;
+        let err = block_on(err).expect_err("expected multi-row char array error");
         assert!(
             err.contains("char array"),
             "unexpected error for multi-row char array: {err}"
@@ -1159,7 +1171,8 @@ pub(crate) mod tests {
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
         )
-        .expect_err("expected multi-element string array error");
+        ;
+        let err = block_on(err).expect_err("expected multi-element string array error");
         assert!(
             err.contains("string array"),
             "unexpected error for string array: {err}"
@@ -1182,7 +1195,8 @@ pub(crate) mod tests {
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
         )
-        .expect_err("expected page dimension mismatch");
+        ;
+        let err = block_on(err).expect_err("expected page dimension mismatch");
         assert!(
             err.contains("page dimension"),
             "unexpected mismatch error message: {err}"
@@ -1199,7 +1213,8 @@ pub(crate) mod tests {
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
         )
-        .expect_err("expected dimension mismatch");
+        ;
+        let err = block_on(err).expect_err("expected dimension mismatch");
         assert!(
             err.contains("inner matrix dimensions"),
             "unexpected error message {err}"
@@ -1230,7 +1245,8 @@ pub(crate) mod tests {
                 Value::GpuTensor(lhs),
                 vec![Value::GpuTensor(rhs)],
             )
-            .expect("pagefun");
+            ;
+            let result = block_on(result).expect("pagefun");
 
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2, 2]);
@@ -1297,7 +1313,8 @@ pub(crate) mod tests {
             Value::GpuTensor(lhs_handle.clone()),
             vec![Value::GpuTensor(rhs_handle.clone())],
         )
-        .expect("pagefun builtin on GPU");
+        ;
+        let builtin_value = block_on(builtin_value).expect("pagefun builtin on GPU");
         let builtin_tensor = test_support::gather(builtin_value).expect("gather builtin");
 
         let expected_value = pagefun_builtin(
@@ -1305,7 +1322,8 @@ pub(crate) mod tests {
             Value::Tensor(lhs.clone()),
             vec![Value::Tensor(rhs.clone())],
         )
-        .expect("pagefun host baseline");
+        ;
+        let expected_value = block_on(expected_value).expect("pagefun host baseline");
         let expected_tensor = match expected_value {
             Value::Tensor(t) => t,
             other => panic!("expected tensor result, got {other:?}"),

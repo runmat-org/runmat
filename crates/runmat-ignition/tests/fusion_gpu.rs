@@ -19,7 +19,7 @@ use runmat_ignition::{compile, interpret as interpret_async, Instr};
 use runmat_parser::parse;
 use runmat_runtime::builtins::image::filters::fspecial::spec_from_request as test_fspecial_spec_from_request;
 use runmat_runtime::builtins::math::linalg::ops::mrdivide_host_real_for_provider;
-use runmat_runtime::{gather_if_needed, RuntimeError};
+use runmat_runtime::{gather_if_needed, gather_if_needed_async, RuntimeError};
 use std::collections::HashMap;
 
 fn interpret(bytecode: &runmat_ignition::Bytecode) -> Result<Vec<Value>, RuntimeError> {
@@ -2642,7 +2642,9 @@ fn explained_variance_matches_cpu() {
 
         if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
             for (idx, value) in vars_cpu.iter().enumerate() {
-                if let Ok(Value::Tensor(t)) = gather_if_needed(value) {
+                if let Ok(Value::Tensor(t)) =
+                    futures::executor::block_on(gather_if_needed_async(value))
+                {
                     if t.shape == vec![2, 2] {
                         println!("tensor idx {idx} shape {:?} data {:?}", t.shape, t.data);
                     }
@@ -2659,7 +2661,11 @@ fn explained_variance_matches_cpu() {
             if let Value::Tensor(ref q_t_tensor) = q_t_value {
                 println!("q_t tensor data {:?}", q_t_tensor.data);
             }
-            let tmp_via_runtime = runmat_runtime::matrix::value_matmul(&q_t_value, &g_tensor_value)
+            let tmp_via_runtime =
+                futures::executor::block_on(runmat_runtime::matrix::value_matmul(
+                    &q_t_value,
+                    &g_tensor_value,
+                ))
                 .expect("q' * g via runtime");
             if let Value::Tensor(ref tmp_tensor) = tmp_via_runtime {
                 println!("tmp via runtime {:?}", tmp_tensor.data);

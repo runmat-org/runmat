@@ -256,7 +256,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "rng,seed,twister,shuffle,state",
     builtin_path = "crate::builtins::stats::random::rng"
 )]
-fn rng_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn rng_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.is_empty() {
         let current = random::snapshot()?;
         return snapshot_to_value(current);
@@ -537,6 +537,7 @@ fn sync_provider_state(state: u64) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
+    use futures::executor::block_on;
     use runmat_builtins::IntValue;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -546,7 +547,7 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
-        let value = rng_builtin(Vec::new()).expect("rng");
+        let value = block_on(rng_builtin(Vec::new())).expect("rng");
         let snapshot = snapshot_from_value(&value).expect("snapshot");
         assert_eq!(snapshot.state, random::default_snapshot().state);
         assert_eq!(snapshot.seed, Some(DEFAULT_USER_SEED));
@@ -560,9 +561,9 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
-        rng_builtin(vec![Value::Int(IntValue::U32(42))]).expect("rng");
+        block_on(rng_builtin(vec![Value::Int(IntValue::U32(42))])).expect("rng");
         let seq1 = random::generate_uniform(5, "rng test").expect("uniform");
-        rng_builtin(vec![Value::Int(IntValue::U32(42))]).expect("rng");
+        block_on(rng_builtin(vec![Value::Int(IntValue::U32(42))])).expect("rng");
         let seq2 = random::generate_uniform(5, "rng test").expect("uniform");
         assert_eq!(seq1, seq2);
     }
@@ -574,9 +575,9 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
-        let saved = rng_builtin(Vec::new()).expect("rng");
-        rng_builtin(vec![Value::Int(IntValue::U32(7))]).expect("rng");
-        rng_builtin(vec![saved.clone()]).expect("rng restore");
+        let saved = block_on(rng_builtin(Vec::new())).expect("rng");
+        block_on(rng_builtin(vec![Value::Int(IntValue::U32(7))])).expect("rng");
+        block_on(rng_builtin(vec![saved.clone()])).expect("rng restore");
         let current = random::snapshot().expect("snapshot");
         assert_eq!(current.state, random::default_snapshot().state);
         assert_eq!(current.seed, Some(DEFAULT_USER_SEED));
@@ -589,8 +590,8 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
-        rng_builtin(vec![Value::Int(IntValue::U32(99))]).expect("seed rng");
-        let previous = rng_builtin(vec![Value::from("default")]).expect("rng default");
+        block_on(rng_builtin(vec![Value::Int(IntValue::U32(99))])).expect("seed rng");
+        let previous = block_on(rng_builtin(vec![Value::from("default")])).expect("rng default");
         let restored = random::snapshot().expect("snapshot");
         assert_eq!(restored.state, random::default_snapshot().state);
         assert_eq!(restored.seed, Some(DEFAULT_USER_SEED));
@@ -606,11 +607,14 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
-        rng_builtin(vec![Value::Int(IntValue::U32(123))]).expect("rng seed first");
+        block_on(rng_builtin(vec![Value::Int(IntValue::U32(123))])).expect("rng seed first");
         let host_seq = random::generate_uniform(4, "twister alias host").expect("uniform");
         random::reset_rng();
-        rng_builtin(vec![Value::Int(IntValue::U32(123)), Value::from("twister")])
-            .expect("rng seed twister");
+        block_on(rng_builtin(vec![
+            Value::Int(IntValue::U32(123)),
+            Value::from("twister"),
+        ]))
+        .expect("rng seed twister");
         let alias_seq = random::generate_uniform(4, "twister alias verify").expect("uniform");
         assert_eq!(host_seq, alias_seq);
     }
@@ -622,7 +626,7 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
-        let err = rng_builtin(vec![Value::Int(IntValue::I32(-5))]).unwrap_err();
+        let err = block_on(rng_builtin(vec![Value::Int(IntValue::I32(-5))])).unwrap_err();
         let message = err.to_string();
         assert!(
             message.contains("seed must be non-negative"),
@@ -637,7 +641,8 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
-        let err = rng_builtin(vec![Value::from("default"), Value::from("philox")]).unwrap_err();
+        let err = block_on(rng_builtin(vec![Value::from("default"), Value::from("philox")]))
+            .unwrap_err();
         let message = err.to_string();
         assert!(
             message.contains("generator 'philox' is not supported")
@@ -657,7 +662,7 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.fields.insert("Seed".to_string(), Value::Num(0.0));
         st.fields.insert("State".to_string(), Value::Tensor(tensor));
-        let err = rng_builtin(vec![Value::Struct(st)]).unwrap_err();
+        let err = block_on(rng_builtin(vec![Value::Struct(st)])).unwrap_err();
         let message = err.to_string();
         assert!(
             message.contains("Type"),
@@ -673,7 +678,7 @@ pub(crate) mod tests {
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
         test_support::with_test_provider(|provider| {
-            rng_builtin(vec![Value::Int(IntValue::U32(9))]).expect("rng");
+            block_on(rng_builtin(vec![Value::Int(IntValue::U32(9))])).expect("rng");
             let handle = provider.random_uniform(&[4, 1]).expect("gpu uniform");
             let host_after_gpu = random::generate_uniform(4, "rng provider sync").expect("uniform");
             let gpu = provider.download(&handle).expect("download");
@@ -692,7 +697,7 @@ pub(crate) mod tests {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
-        rng_builtin(vec![Value::Int(IntValue::U32(2024))]).expect("rng wgpu seed");
+        block_on(rng_builtin(vec![Value::Int(IntValue::U32(2024))])).expect("rng wgpu seed");
         let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
         let handle = provider
             .random_uniform(&[1, 6])
@@ -725,7 +730,7 @@ pub(crate) mod tests {
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
         unsafe { std::env::set_var("RUNMAT_RNG_SHUFFLE_SEED", "12345") };
-        rng_builtin(vec![Value::from("shuffle")]).expect("rng shuffle");
+        block_on(rng_builtin(vec![Value::from("shuffle")])).expect("rng shuffle");
         unsafe { std::env::remove_var("RUNMAT_RNG_SHUFFLE_SEED") };
         let current = random::snapshot().expect("snapshot");
         assert_eq!(current.seed, Some(12345));

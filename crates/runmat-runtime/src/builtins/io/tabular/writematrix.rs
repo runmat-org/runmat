@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "writematrix";
 
@@ -257,17 +257,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::tabular::writematrix"
 )]
-fn writematrix_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn writematrix_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
         return Err(writematrix_error("writematrix: filename is required"));
     }
 
-    let filename_value = gather_if_needed(&rest[0]).map_err(map_control_flow)?;
+    let filename_value = gather_if_needed_async(&rest[0])
+        .await
+        .map_err(map_control_flow)?;
     let path = resolve_path(&filename_value)?;
 
-    let options = parse_options(&rest[1..])?;
+    let options = parse_options(&rest[1..]).await?;
 
-    let gathered = gather_if_needed(&data).map_err(map_control_flow)?;
+    let gathered = gather_if_needed_async(&data)
+        .await
+        .map_err(map_control_flow)?;
     let matrix = MatrixData::from_value(gathered)?;
 
     let bytes_written = write_matrix(&path, &matrix, &options)?;
@@ -328,7 +332,7 @@ enum FileType {
     Text,
 }
 
-fn parse_options(args: &[Value]) -> BuiltinResult<WriteMatrixOptions> {
+async fn parse_options(args: &[Value]) -> BuiltinResult<WriteMatrixOptions> {
     if args.is_empty() {
         return Ok(WriteMatrixOptions::default());
     }
@@ -341,9 +345,13 @@ fn parse_options(args: &[Value]) -> BuiltinResult<WriteMatrixOptions> {
     let mut options = WriteMatrixOptions::default();
     let mut index = 0usize;
     while index < args.len() {
-        let name_value = gather_if_needed(&args[index]).map_err(map_control_flow)?;
+        let name_value = gather_if_needed_async(&args[index])
+            .await
+            .map_err(map_control_flow)?;
         let name = option_name_from_value(&name_value)?;
-        let value = gather_if_needed(&args[index + 1]).map_err(map_control_flow)?;
+        let value = gather_if_needed_async(&args[index + 1])
+            .await
+            .map_err(map_control_flow)?;
         apply_option(&mut options, &name, &value)?;
         index += 2;
     }
@@ -826,6 +834,7 @@ fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
     use runmat_time::unix_timestamp_ms;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -858,8 +867,11 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
         let filename = path.to_string_lossy().into_owned();
 
-        writematrix_builtin(Value::Tensor(tensor), vec![Value::from(filename)])
-            .expect("writematrix");
+        block_on(writematrix_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from(filename)],
+        ))
+        .expect("writematrix");
 
         let contents = fs::read_to_string(&path).expect("read contents");
         assert_eq!(contents, "1 2 3\n4 5 6\n");
@@ -873,8 +885,11 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
         let filename = path.to_string_lossy().into_owned();
 
-        writematrix_builtin(Value::Tensor(tensor), vec![Value::from(filename)])
-            .expect("writematrix");
+        block_on(writematrix_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from(filename)],
+        ))
+        .expect("writematrix");
 
         let contents = fs::read_to_string(&path).expect("read contents");
         assert_eq!(contents, "1,2,3\n");
@@ -889,17 +904,20 @@ pub(crate) mod tests {
         let second = Tensor::new(vec![4.0, 5.0, 6.0], vec![1, 3]).unwrap();
         let filename = path.to_string_lossy().into_owned();
 
-        writematrix_builtin(Value::Tensor(first), vec![Value::from(filename.clone())])
-            .expect("initial write");
+        block_on(writematrix_builtin(
+            Value::Tensor(first),
+            vec![Value::from(filename.clone())],
+        ))
+        .expect("initial write");
 
-        writematrix_builtin(
+        block_on(writematrix_builtin(
             Value::Tensor(second),
             vec![
                 Value::from(filename.clone()),
                 Value::from("WriteMode"),
                 Value::from("append"),
             ],
-        )
+        ))
         .expect("append write");
 
         let contents = fs::read_to_string(&path).expect("read contents");
@@ -915,8 +933,11 @@ pub(crate) mod tests {
             .expect("string array");
         let filename = path.to_string_lossy().into_owned();
 
-        writematrix_builtin(Value::StringArray(strings), vec![Value::from(filename)])
-            .expect("writematrix");
+        block_on(writematrix_builtin(
+            Value::StringArray(strings),
+            vec![Value::from(filename)],
+        ))
+        .expect("writematrix");
 
         let contents = fs::read_to_string(&path).expect("read contents");
         assert_eq!(contents, "\"Alice\",\"Bob\"\n");
@@ -936,8 +957,11 @@ pub(crate) mod tests {
             let handle = provider.upload(&view).expect("upload");
             let filename = path.to_string_lossy().into_owned();
 
-            writematrix_builtin(Value::GpuTensor(handle), vec![Value::from(filename)])
-                .expect("writematrix");
+            block_on(writematrix_builtin(
+                Value::GpuTensor(handle),
+                vec![Value::from(filename)],
+            ))
+            .expect("writematrix");
 
             let contents = fs::read_to_string(&path).expect("read contents");
             assert_eq!(contents, "1,2\n");

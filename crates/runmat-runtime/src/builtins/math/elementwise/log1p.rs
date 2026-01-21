@@ -246,9 +246,9 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::log1p"
 )]
-fn log1p_builtin(value: Value) -> BuiltinResult<Value> {
+async fn log1p_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => log1p_gpu(handle),
+        Value::GpuTensor(handle) => log1p_gpu(handle).await,
         Value::Complex(re, im) => {
             let (real, imag) = log1p_complex_parts(re, im);
             Ok(Value::Complex(real, imag))
@@ -262,7 +262,7 @@ fn log1p_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn log1p_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn log1p_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         // Fast path: try device op first; if unsupported, fall back to complex-domain check
         if let Ok(out) = provider.unary_log1p(&handle) {
@@ -270,7 +270,8 @@ fn log1p_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
         match detect_gpu_requires_complex(provider, &handle) {
             Ok(true) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)
+                let tensor = gpu_helpers::gather_tensor_async(&handle)
+                    .await
                     .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
                 return log1p_tensor(tensor);
             }
@@ -282,7 +283,8 @@ fn log1p_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     log1p_tensor(tensor)
 }
@@ -400,8 +402,13 @@ fn log1p_complex_parts(re: f64, im: f64) -> (f64, f64) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{LogicalArray, Tensor};
     use std::f64::consts::PI;
+
+    fn log1p_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::log1p_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

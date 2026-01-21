@@ -246,7 +246,7 @@ fn rot90_error(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::rot90"
 )]
-fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(rot90_error("rot90: too many input arguments"));
     }
@@ -269,7 +269,7 @@ fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> 
             let tensor = tensor::value_into_tensor_for("rot90", v).map_err(|e| rot90_error(e))?;
             Ok(rot90_tensor(tensor, steps).map(tensor::tensor_into_value)?)
         }
-        Value::GpuTensor(handle) => Ok(rot90_gpu(handle, steps)?),
+        Value::GpuTensor(handle) => Ok(rot90_gpu(handle, steps).await?),
         Value::Cell(_) => Err(rot90_error("rot90: cell arrays are not yet supported")),
         Value::FunctionHandle(_)
         | Value::Closure(_)
@@ -434,7 +434,7 @@ fn rot90_char_array(array: CharArray, steps: usize) -> crate::BuiltinResult<Char
     CharArray::new(out, out_rows, out_cols).map_err(|e| rot90_error(format!("rot90: {e}")))
 }
 
-fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResult<Value> {
+async fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResult<Value> {
     if steps == 0 {
         return Ok(Value::GpuTensor(handle));
     }
@@ -451,7 +451,7 @@ fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResult<Valu
             return Ok(Value::GpuTensor(out));
         }
     }
-    let host_tensor = gpu_helpers::gather_tensor(&handle)?;
+    let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let rotated = rot90_tensor(host_tensor, steps)?;
     if let Some(provider) = runmat_accelerate_api::provider() {
         let view = HostTensorView {
@@ -616,6 +616,11 @@ fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::rot90_builtin(value, rest))
+    }
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 

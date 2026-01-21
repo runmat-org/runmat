@@ -223,10 +223,11 @@ const IDENTIFIER_INTERNAL: &str = "RunMat:isnan:InternalError";
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::tests::isnan"
 )]
-fn isnan_builtin(value: Value) -> BuiltinResult<Value> {
+async fn isnan_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
                 .map_err(|err| internal_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {err}")))?;
             isnan_tensor(BUILTIN_NAME, tensor)
         }
@@ -328,25 +329,30 @@ fn internal_error(name: &str, message: impl Into<String>) -> RuntimeError {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+
+    fn run_isnan(value: Value) -> BuiltinResult<Value> {
+        block_on(super::isnan_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_scalar_nan() {
-        let result = isnan_builtin(Value::Num(f64::NAN)).expect("isnan");
+        let result = run_isnan(Value::Num(f64::NAN)).expect("isnan");
         assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_scalar_finite() {
-        let result = isnan_builtin(Value::Num(5.0)).expect("isnan");
+        let result = run_isnan(Value::Num(5.0)).expect("isnan");
         assert_eq!(result, Value::Bool(false));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_scalar_bool_false() {
-        let result = isnan_builtin(Value::Bool(true)).expect("isnan");
+        let result = run_isnan(Value::Bool(true)).expect("isnan");
         assert_eq!(result, Value::Bool(false));
     }
 
@@ -354,7 +360,7 @@ pub(crate) mod tests {
     #[test]
     fn isnan_tensor_mask() {
         let tensor = Tensor::new(vec![1.0, f64::NAN, 3.0, f64::NAN], vec![2, 2]).unwrap();
-        let result = isnan_builtin(Value::Tensor(tensor)).expect("isnan");
+        let result = run_isnan(Value::Tensor(tensor)).expect("isnan");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![2, 2]);
@@ -368,7 +374,7 @@ pub(crate) mod tests {
     #[test]
     fn isnan_logical_array_returns_zeros() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
-        let result = isnan_builtin(Value::LogicalArray(logical)).expect("isnan");
+        let result = run_isnan(Value::LogicalArray(logical)).expect("isnan");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![3, 1]);
@@ -386,7 +392,7 @@ pub(crate) mod tests {
             vec![3, 1],
         )
         .unwrap();
-        let result = isnan_builtin(Value::ComplexTensor(tensor)).expect("isnan");
+        let result = run_isnan(Value::ComplexTensor(tensor)).expect("isnan");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![3, 1]);
@@ -399,7 +405,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_string_scalar_false() {
-        let result = isnan_builtin(Value::String("NaN".to_string())).expect("isnan");
+        let result = run_isnan(Value::String("NaN".to_string())).expect("isnan");
         assert_eq!(result, Value::Bool(false));
     }
 
@@ -407,7 +413,7 @@ pub(crate) mod tests {
     #[test]
     fn isnan_string_array_returns_all_false() {
         let strings = StringArray::new(vec!["foo".into(), "bar".into()], vec![1, 2]).unwrap();
-        let result = isnan_builtin(Value::StringArray(strings)).expect("isnan");
+        let result = run_isnan(Value::StringArray(strings)).expect("isnan");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![1, 2]);
@@ -421,7 +427,7 @@ pub(crate) mod tests {
     #[test]
     fn isnan_empty_tensor_preserves_shape() {
         let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
-        let result = isnan_builtin(Value::Tensor(tensor)).expect("isnan");
+        let result = run_isnan(Value::Tensor(tensor)).expect("isnan");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![0, 3]);
@@ -434,7 +440,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_rejects_unsupported_types() {
-        let err = isnan_builtin(Value::FunctionHandle("foo".to_string()))
+        let err = run_isnan(Value::FunctionHandle("foo".to_string()))
             .expect_err("isnan should reject function handles");
         assert!(
             err.message()
@@ -447,7 +453,7 @@ pub(crate) mod tests {
     #[test]
     fn isnan_char_array_returns_zeros() {
         let array = CharArray::new("NaN".chars().collect(), 1, 3).unwrap();
-        let result = isnan_builtin(Value::CharArray(array)).expect("isnan");
+        let result = run_isnan(Value::CharArray(array)).expect("isnan");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![1, 3]);
@@ -467,7 +473,7 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = isnan_builtin(Value::GpuTensor(handle)).expect("isnan");
+            let result = run_isnan(Value::GpuTensor(handle)).expect("isnan");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
             assert_eq!(gathered.data, vec![0.0, 1.0, 0.0]);
@@ -498,7 +504,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .expect("upload");
-        let gpu = isnan_builtin(Value::GpuTensor(handle)).expect("gpu path");
+        let gpu = run_isnan(Value::GpuTensor(handle)).expect("gpu path");
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::LogicalArray(expected), Tensor { data, shape, .. }) => {

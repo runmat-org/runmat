@@ -20,7 +20,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::console::{record_console_output, ConsoleStream};
-use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError,
+};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -241,8 +243,8 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::dir"
 )]
-fn dir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let gathered = gather_arguments(&args)?;
+async fn dir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let gathered = gather_arguments(&args).await?;
     let records = match gathered.len() {
         0 => list_current_directory()?,
         1 => list_from_single_value(&gathered[0])?,
@@ -263,10 +265,10 @@ struct DirRecord {
     datenum: f64,
 }
 
-fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
+async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(map_control_flow)?);
+        out.push(gather_if_needed_async(value).await.map_err(map_control_flow)?);
     }
     Ok(out)
 }
@@ -609,6 +611,10 @@ pub(crate) mod tests {
     use runmat_builtins::{CharArray, StringArray, StructValue as TestStruct};
     use runmat_filesystem::{self as fs, File};
     use tempfile::tempdir;
+
+    fn dir_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::dir_builtin(args))
+    }
 
     struct DirGuard {
         original: PathBuf,

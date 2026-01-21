@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use thiserror::Error;
 
 use std::collections::HashMap;
@@ -325,20 +325,20 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "tcpserver,tcp,network,server",
     builtin_path = "crate::builtins::io::net::tcpserver"
 )]
-pub(crate) fn tcpserver_builtin(
+pub(crate) async fn tcpserver_builtin(
     address: Value,
     port: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let address = gather_if_needed(&address)?;
-    let port = gather_if_needed(&port)?;
+    let address = gather_if_needed_async(&address).await?;
+    let port = gather_if_needed_async(&port).await?;
 
     let host = string_scalar(&address, "tcpserver address")
         .map_err(|err| tcpserver_flow(MESSAGE_ID_INVALID_ADDRESS, err.to_string()))?;
     let port = parse_port(&port)
         .map_err(|err| tcpserver_flow(MESSAGE_ID_INVALID_PORT, err.to_string()))?;
 
-    let options = parse_name_value_pairs(rest)?;
+    let options = parse_name_value_pairs(rest).await?;
 
     let listener = TcpListener::bind((host.as_str(), port)).map_err(|err| {
         tcpserver_flow(
@@ -373,7 +373,7 @@ impl Default for ParsedOptions {
     }
 }
 
-fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions> {
+async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions> {
     if rest.is_empty() {
         return Ok(ParsedOptions::default());
     }
@@ -390,7 +390,7 @@ fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions> {
         let value_raw = iter
             .next()
             .expect("even-length vector ensures paired name/value");
-        let name_value = gather_if_needed(&name_raw)?;
+        let name_value = gather_if_needed_async(&name_raw).await?;
 
         let name = string_scalar(&name_value, "OptionName").map_err(|err| {
             tcpserver_flow(
@@ -401,7 +401,7 @@ fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions> {
         let lower = name.to_ascii_lowercase();
         match lower.as_str() {
             "timeout" => {
-                let timeout_value = gather_if_needed(&value_raw)?;
+                let timeout_value = gather_if_needed_async(&value_raw).await?;
                 options.timeout = parse_timeout(&timeout_value).map_err(|err| {
                     tcpserver_flow(
                         MESSAGE_ID_INVALID_NAME_VALUE,
@@ -411,7 +411,7 @@ fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions> {
             }
             "userdata" => options.user_data = value_raw,
             "name" => {
-                let name_value = gather_if_needed(&value_raw)?;
+                let name_value = gather_if_needed_async(&value_raw).await?;
                 let text = string_scalar(&name_value, "Name").map_err(|err| {
                     tcpserver_flow(
                         MESSAGE_ID_INVALID_NAME_VALUE,
@@ -421,7 +421,7 @@ fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions> {
                 options.name = Some(text);
             }
             "byteorder" => {
-                let order_value = gather_if_needed(&value_raw)?;
+                let order_value = gather_if_needed_async(&value_raw).await?;
                 let raw_order = string_scalar(&order_value, "ByteOrder").map_err(|err| {
                     tcpserver_flow(
                         MESSAGE_ID_INVALID_NAME_VALUE,
@@ -676,6 +676,10 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), Some(expected));
     }
 
+    fn run_tcpserver(address: Value, port: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(tcpserver_builtin(address, port, rest))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_accepts_loopback_connection() {
@@ -683,7 +687,7 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
 
-        let result = tcpserver_builtin(
+        let result = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
             Vec::new(),
@@ -710,7 +714,7 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
 
-        let result = tcpserver_builtin(
+        let result = run_tcpserver(
             Value::from("localhost"),
             Value::Int(IntValue::I32(0)),
             vec![Value::from("Timeout"), Value::Num(5.0)],
@@ -734,7 +738,7 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
 
-        let result = tcpserver_builtin(
+        let result = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
             vec![Value::from("Name"), Value::from("CustomListener")],
@@ -758,7 +762,7 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
 
-        let result = tcpserver_builtin(
+        let result = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
             vec![Value::from("ByteOrder"), Value::from("big-endian")],
@@ -778,7 +782,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_rejects_invalid_byte_order() {
-        let err = tcpserver_builtin(
+        let err = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(8000)),
             vec![Value::from("ByteOrder"), Value::from("middle-endian")],
@@ -795,7 +799,7 @@ pub(crate) mod tests {
             .unwrap_or_else(|poison| poison.into_inner());
 
         let tensor_port = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
-        let result = tcpserver_builtin(
+        let result = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Tensor(tensor_port),
             Vec::new(),
@@ -815,7 +819,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_rejects_invalid_port() {
-        let err = tcpserver_builtin(
+        let err = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(-1)),
             Vec::new(),
@@ -827,7 +831,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_requires_name_value_pairs() {
-        let err = tcpserver_builtin(
+        let err = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(9000)),
             vec![Value::from("Timeout")],
@@ -849,7 +853,7 @@ pub(crate) mod tests {
             .insert("tag".to_string(), Value::from("demo"));
         let user_struct = Value::Struct(user_struct_value);
 
-        let result = tcpserver_builtin(
+        let result = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
             vec![Value::from("UserData"), user_struct.clone()],
@@ -877,7 +881,7 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
 
-        let result = tcpserver_builtin(
+        let result = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
             vec![Value::from("Timeout"), Value::Num(1.5)],

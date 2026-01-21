@@ -240,9 +240,9 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::angle"
 )]
-fn angle_builtin(value: Value) -> BuiltinResult<Value> {
+async fn angle_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => angle_gpu(handle),
+        Value::GpuTensor(handle) => angle_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Num(angle_scalar(re, im))),
         Value::ComplexTensor(ct) => angle_complex_tensor(ct),
         Value::CharArray(ca) => angle_char_array(ca),
@@ -253,13 +253,14 @@ fn angle_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn angle_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn angle_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(device_result) = provider.unary_angle(&handle) {
             return Ok(Value::GpuTensor(device_result));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     Ok(tensor::tensor_into_value(angle_tensor(tensor)?))
 }
@@ -306,8 +307,13 @@ fn angle_scalar(re: f64, im: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray, StringArray};
     use std::f64::consts::PI;
+
+    fn angle_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::angle_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

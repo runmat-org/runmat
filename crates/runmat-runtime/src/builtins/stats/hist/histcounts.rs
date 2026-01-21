@@ -230,24 +230,24 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::stats::hist::histcounts"
 )]
-fn histcounts_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    evaluate(data, &rest).map(|eval| eval.into_counts_value())
+async fn histcounts_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    evaluate(data, &rest).await.map(|eval| eval.into_counts_value())
 }
 
 /// Evaluate `histcounts` once and surface both primary outputs.
-pub fn evaluate(data: Value, rest: &[Value]) -> BuiltinResult<HistcountsEvaluation> {
+pub async fn evaluate(data: Value, rest: &[Value]) -> BuiltinResult<HistcountsEvaluation> {
     let options = parse_options(rest)?;
     match data {
-        Value::GpuTensor(handle) => histcounts_gpu(handle, &options),
+        Value::GpuTensor(handle) => histcounts_gpu(handle, &options).await,
         other => histcounts_host(other, &options),
     }
 }
 
-fn histcounts_gpu(
+async fn histcounts_gpu(
     handle: GpuTensorHandle,
     options: &HistcountsOptions,
 ) -> BuiltinResult<HistcountsEvaluation> {
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     histcounts_from_tensor(tensor, options)
 }
 
@@ -1115,6 +1115,7 @@ fn parse_normalization(text: &str) -> BuiltinResult<HistogramNormalization> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor, Value};
 
     fn values_from_tensor(value: Value) -> Vec<f64> {
@@ -1129,8 +1130,8 @@ pub(crate) mod tests {
     #[test]
     fn histcounts_basic_numbins() {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0, 5.0, 7.0], vec![6, 1]).unwrap();
-        let eval =
-            evaluate(Value::Tensor(tensor), &[Value::Int(IntValue::I32(3))]).expect("histcounts");
+        let eval = block_on(evaluate(Value::Tensor(tensor), &[Value::Int(IntValue::I32(3))]))
+            .expect("histcounts");
         let (counts_val, edges_val) = eval.into_pair();
         assert_eq!(values_from_tensor(counts_val), vec![3.0, 1.0, 2.0]);
         assert_eq!(values_from_tensor(edges_val), vec![1.0, 3.0, 5.0, 7.0]);
@@ -1140,7 +1141,7 @@ pub(crate) mod tests {
     #[test]
     fn histcounts_binwidth_and_limits() {
         let tensor = Tensor::new(vec![5.0, 7.0, 8.0, 10.0, 12.0], vec![5, 1]).unwrap();
-        let eval = evaluate(
+        let eval = block_on(evaluate(
             Value::Tensor(tensor),
             &[
                 Value::from("BinWidth"),
@@ -1148,7 +1149,7 @@ pub(crate) mod tests {
                 Value::from("BinLimits"),
                 Value::Tensor(Tensor::new(vec![4.0, 12.0], vec![2, 1]).unwrap()),
             ],
-        )
+        ))
         .expect("histcounts");
         let (counts_val, edges_val) = eval.into_pair();
         assert_eq!(values_from_tensor(counts_val), vec![1.0, 1.0, 1.0, 2.0]);
@@ -1162,14 +1163,14 @@ pub(crate) mod tests {
     #[test]
     fn histcounts_probability_normalization() {
         let data = Tensor::new(vec![0.2, 0.4, 1.1, 1.4, 1.8, 2.5], vec![6, 1]).unwrap();
-        let eval = evaluate(
+        let eval = block_on(evaluate(
             Value::Tensor(data),
             &[
                 Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap()),
                 Value::from("Normalization"),
                 Value::from("probability"),
             ],
-        )
+        ))
         .expect("histcounts");
         let (counts_val, _) = eval.into_pair();
         let counts = values_from_tensor(counts_val);
@@ -1182,14 +1183,14 @@ pub(crate) mod tests {
     #[test]
     fn histcounts_cdf_normalization() {
         let data = Tensor::new(vec![1.0, 2.0, 2.0, 3.0], vec![4, 1]).unwrap();
-        let eval = evaluate(
+        let eval = block_on(evaluate(
             Value::Tensor(data),
             &[
                 Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap()),
                 Value::from("Normalization"),
                 Value::from("cdf"),
             ],
-        )
+        ))
         .expect("histcounts");
         let (counts_val, _) = eval.into_pair();
         let counts = values_from_tensor(counts_val);
@@ -1200,8 +1201,8 @@ pub(crate) mod tests {
     #[test]
     fn histcounts_handles_nan() {
         let data = Tensor::new(vec![1.0, f64::NAN, 2.0, f64::NAN, 3.0], vec![5, 1]).unwrap();
-        let eval =
-            evaluate(Value::Tensor(data), &[Value::Int(IntValue::I32(3))]).expect("histcounts");
+        let eval = block_on(evaluate(Value::Tensor(data), &[Value::Int(IntValue::I32(3))]))
+            .expect("histcounts");
         let (counts_val, _) = eval.into_pair();
         assert_eq!(values_from_tensor(counts_val), vec![1.0, 1.0, 1.0]);
     }
@@ -1210,7 +1211,7 @@ pub(crate) mod tests {
     #[test]
     fn histcounts_constant_data_single_bin() {
         let data = Tensor::new(vec![4.0, 4.0, 4.0], vec![3, 1]).unwrap();
-        let eval = evaluate(Value::Tensor(data), &[]).expect("histcounts");
+        let eval = block_on(evaluate(Value::Tensor(data), &[])).expect("histcounts");
         let (counts_val, edges_val) = eval.into_pair();
         assert_eq!(values_from_tensor(counts_val), vec![3.0]);
         assert_eq!(values_from_tensor(edges_val), vec![3.5, 4.5]);
@@ -1221,10 +1222,10 @@ pub(crate) mod tests {
     fn histcounts_binmethod_sqrt() {
         let data: Vec<f64> = (1..=16).map(|v| v as f64).collect();
         let tensor = Tensor::new(data, vec![16, 1]).unwrap();
-        let eval = evaluate(
+        let eval = block_on(evaluate(
             Value::Tensor(tensor),
             &[Value::from("BinMethod"), Value::from("sqrt")],
-        )
+        ))
         .expect("histcounts");
         let (counts_val, edges_val) = eval.into_pair();
         assert_eq!(values_from_tensor(counts_val).len(), 4);
@@ -1235,7 +1236,7 @@ pub(crate) mod tests {
     #[test]
     fn histcounts_binmethod_integers_with_limits() {
         let tensor = Tensor::new(vec![2.2, 2.8, 3.4, 3.9], vec![4, 1]).unwrap();
-        let eval = evaluate(
+        let eval = block_on(evaluate(
             Value::Tensor(tensor),
             &[
                 Value::from("BinMethod"),
@@ -1243,7 +1244,7 @@ pub(crate) mod tests {
                 Value::from("BinLimits"),
                 Value::Tensor(Tensor::new(vec![2.0, 4.0], vec![2, 1]).unwrap()),
             ],
-        )
+        ))
         .expect("histcounts");
         let (counts_val, edges_val) = eval.into_pair();
         let counts = values_from_tensor(counts_val);
@@ -1256,7 +1257,7 @@ pub(crate) mod tests {
     #[test]
     fn histcounts_binmethod_conflict_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let result = evaluate(
+        let result = block_on(evaluate(
             Value::Tensor(tensor),
             &[
                 Value::from("BinMethod"),
@@ -1264,7 +1265,7 @@ pub(crate) mod tests {
                 Value::from("NumBins"),
                 Value::Num(5.0),
             ],
-        );
+        ));
         assert!(result.is_err());
     }
 
@@ -1272,10 +1273,10 @@ pub(crate) mod tests {
     #[test]
     fn histcounts_invalid_binwidth_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let result = evaluate(
+        let result = block_on(evaluate(
             Value::Tensor(tensor),
             &[Value::from("BinWidth"), Value::Num(0.0)],
-        );
+        ));
         assert!(result.is_err());
     }
 
@@ -1289,12 +1290,12 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let eval = evaluate(
+            let eval = block_on(evaluate(
                 Value::GpuTensor(handle),
                 &[Value::Tensor(
                     Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap(),
                 )],
-            )
+            ))
             .expect("histcounts");
             let (counts_val, edges_val) = eval.into_pair();
             assert_eq!(values_from_tensor(counts_val), vec![1.0, 1.0, 1.0]);
@@ -1316,12 +1317,12 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let eval = evaluate(
+        let eval = block_on(evaluate(
             Value::GpuTensor(handle),
             &[Value::Tensor(
                 Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap(),
             )],
-        )
+        ))
         .expect("histcounts");
         let (counts_val, edges_val) = eval.into_pair();
         assert_eq!(values_from_tensor(counts_val), vec![1.0, 1.0, 1.0]);

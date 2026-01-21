@@ -245,7 +245,7 @@ fn repmat_error(message: impl Into<String>) -> RuntimeError {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::shape::repmat"
 )]
-fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
         return Err(repmat_error(
             "repmat: replication factors must be specified",
@@ -301,7 +301,7 @@ fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value>
             let tiled = repmat_cell_array(&ca, &raw_reps)?;
             Ok(Value::Cell(tiled))
         }
-        Value::GpuTensor(handle) => Ok(repmat_gpu_tensor(handle, &raw_reps)?),
+        Value::GpuTensor(handle) => Ok(repmat_gpu_tensor(handle, &raw_reps).await?),
         other => Err(repmat_error(format!(
             "repmat: unsupported input type {:?}",
             other
@@ -453,12 +453,15 @@ fn repmat_cell_array(cell: &CellArray, reps: &[usize]) -> crate::BuiltinResult<C
     CellArray::new(values, rows, cols).map_err(|e| repmat_error(format!("repmat: {e}")))
 }
 
-fn repmat_gpu_tensor(handle: GpuTensorHandle, reps: &[usize]) -> crate::BuiltinResult<Value> {
+async fn repmat_gpu_tensor(
+    handle: GpuTensorHandle,
+    reps: &[usize],
+) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(tiled) = provider.repmat(&handle, reps) {
             return Ok(Value::GpuTensor(tiled));
         }
-        let gathered = gpu_helpers::gather_tensor(&handle)?;
+        let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
         let tiled = repmat_tensor(&gathered, reps)?;
         let view = HostTensorView {
             data: &tiled.data,
@@ -619,6 +622,11 @@ fn checked_total(shape: &[usize], context: &str) -> crate::BuiltinResult<usize> 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::repmat_builtin(value, rest))
+    }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};

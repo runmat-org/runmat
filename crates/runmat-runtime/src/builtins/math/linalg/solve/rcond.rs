@@ -230,9 +230,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "rcond",
     builtin_path = "crate::builtins::math::linalg::solve::rcond"
 )]
-fn rcond_builtin(value: Value) -> BuiltinResult<Value> {
+async fn rcond_builtin(value: Value) -> BuiltinResult<Value> {
     let estimate = match value {
-        Value::GpuTensor(handle) => return rcond_gpu(handle),
+        Value::GpuTensor(handle) => return rcond_gpu(handle).await,
         Value::ComplexTensor(matrix) => rcond_complex_tensor(&matrix)?,
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(builtin_error)?;
@@ -246,7 +246,7 @@ fn rcond_builtin(value: Value) -> BuiltinResult<Value> {
     Ok(Value::Num(estimate))
 }
 
-fn rcond_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn rcond_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let (rows, cols) = matrix_dimensions_for(NAME, &handle.shape).map_err(builtin_error)?;
     if rows != cols {
         return Err(builtin_error(format!(
@@ -288,8 +288,9 @@ fn rcond_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
     }
 
-    let gathered =
-        gpu_helpers::gather_value(&Value::GpuTensor(handle.clone())).map_err(map_control_flow)?;
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
+        .await
+        .map_err(map_control_flow)?;
     let estimate = match gathered {
         Value::Tensor(tensor) => rcond_real_tensor(&tensor)?,
         Value::ComplexTensor(tensor) => rcond_complex_tensor(&tensor)?,
@@ -477,6 +478,7 @@ pub fn rcond_host_real_for_provider(matrix: &Tensor) -> BuiltinResult<f64> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::IntValue;
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -627,5 +629,9 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let snippets = test_support::doc_examples(DOC_MD);
         assert!(!snippets.is_empty());
+    }
+
+    fn rcond_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::rcond_builtin(value))
     }
 }

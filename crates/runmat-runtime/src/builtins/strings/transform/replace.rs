@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -268,10 +268,10 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::replace"
 )]
-fn replace_builtin(text: Value, old: Value, new: Value) -> BuiltinResult<Value> {
-    let text = gather_if_needed(&text).map_err(map_flow)?;
-    let old = gather_if_needed(&old).map_err(map_flow)?;
-    let new = gather_if_needed(&new).map_err(map_flow)?;
+async fn replace_builtin(text: Value, old: Value, new: Value) -> BuiltinResult<Value> {
+    let text = gather_if_needed_async(&text).await.map_err(map_flow)?;
+    let old = gather_if_needed_async(&old).await.map_err(map_flow)?;
+    let new = gather_if_needed_async(&new).await.map_err(map_flow)?;
 
     let spec = ReplacementSpec::from_values(&old, &new)?;
 
@@ -465,6 +465,10 @@ impl ReplacementSpec {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+
+    fn replace_builtin(text: Value, old: Value, new: Value) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::replace_builtin(text, old, new))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

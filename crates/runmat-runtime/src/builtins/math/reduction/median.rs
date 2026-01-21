@@ -254,10 +254,10 @@ struct ParsedArguments {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::median"
 )]
-fn median_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn median_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => median_gpu(handle, &parsed),
+        Value::GpuTensor(handle) => median_gpu(handle, &parsed).await,
         other => median_host(other, &parsed),
     }
 }
@@ -349,7 +349,7 @@ fn median_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {
     Ok(tensor::tensor_into_value(reduced))
 }
 
-fn median_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
+async fn median_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
     if args.nan_mode == ReductionNaN::Include {
         if let Some(provider) = runmat_accelerate_api::provider() {
             if let Some(device_result) = median_gpu_try(provider, &handle, &args.axes) {
@@ -358,7 +358,7 @@ fn median_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<
         }
     }
 
-    let gathered = gpu_helpers::gather_tensor(&handle)?;
+    let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
     let reduced = median_tensor(gathered, args.axes.clone(), args.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
@@ -695,7 +695,12 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::IntValue;
+
+    fn median_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::median_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

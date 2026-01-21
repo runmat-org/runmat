@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const INPUT_TYPE_ERROR: &str = "jsondecode: JSON text must be a character vector or string scalar";
 const PARSE_ERROR_PREFIX: &str = "jsondecode: invalid JSON text";
@@ -242,8 +242,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::io::json::jsondecode"
 )]
-fn jsondecode_builtin(text: Value) -> crate::BuiltinResult<Value> {
-    let gathered = gather_if_needed(&text).map_err(jsondecode_flow_with_context)?;
+async fn jsondecode_builtin(text: Value) -> crate::BuiltinResult<Value> {
+    let gathered = gather_if_needed_async(&text)
+        .await
+        .map_err(jsondecode_flow_with_context)?;
     let source = extract_text(gathered)?;
     let parsed: JsonValue = serde_json::from_str(&source).map_err(|err| {
         build_runtime_error(format!("{PARSE_ERROR_PREFIX} ({err})"))
@@ -619,6 +621,7 @@ fn parse_rectangular_cell_array(values: &[JsonValue]) -> BuiltinResult<Option<Va
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor};
 
     use crate::builtins::common::test_support;
@@ -635,14 +638,15 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_scalar_number() {
-        let result = jsondecode_builtin(char_row("42")).expect("jsondecode");
+        let result = block_on(jsondecode_builtin(char_row("42"))).expect("jsondecode");
         assert_eq!(result, Value::Num(42.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_boolean_array() {
-        let result = jsondecode_builtin(char_row("[true,false,true]")).expect("jsondecode");
+        let result =
+            block_on(jsondecode_builtin(char_row("[true,false,true]"))).expect("jsondecode");
         match result {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![3]);
@@ -655,7 +659,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_matrix_to_tensor() {
-        let result = jsondecode_builtin(char_row("[[1,2,3],[4,5,6]]")).expect("jsondecode matrix");
+        let result = block_on(jsondecode_builtin(char_row("[[1,2,3],[4,5,6]]")))
+            .expect("jsondecode matrix");
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 3]);
@@ -669,7 +674,8 @@ pub(crate) mod tests {
     #[test]
     fn jsondecode_numeric_tensor_3d() {
         let json = "[[[1,2],[3,4]],[[5,6],[7,8]]]";
-        let result = jsondecode_builtin(char_row(json)).expect("jsondecode 3d tensor");
+        let result = block_on(jsondecode_builtin(char_row(json)))
+            .expect("jsondecode 3d tensor");
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 2, 2]);
@@ -683,7 +689,8 @@ pub(crate) mod tests {
     #[test]
     fn jsondecode_numeric_singleton_array_retains_tensor() {
         let result =
-            jsondecode_builtin(char_row("[42]")).expect("jsondecode singleton numeric array");
+            block_on(jsondecode_builtin(char_row("[42]")))
+                .expect("jsondecode singleton numeric array");
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1]);
@@ -698,8 +705,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_object_to_struct() {
-        let result = jsondecode_builtin(char_row("{\"name\":\"RunMat\",\"year\":2025}"))
-            .expect("jsondecode struct");
+        let result = block_on(jsondecode_builtin(char_row(
+            "{\"name\":\"RunMat\",\"year\":2025}",
+        )))
+        .expect("jsondecode struct");
         match result {
             Value::Struct(struct_value) => {
                 assert_eq!(
@@ -719,8 +728,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_string_array() {
-        let result = jsondecode_builtin(char_row("[\"alpha\",\"beta\",\"gamma\"]"))
-            .expect("jsondecode string array");
+        let result =
+            block_on(jsondecode_builtin(char_row("[\"alpha\",\"beta\",\"gamma\"]")))
+                .expect("jsondecode string array");
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![3]);
@@ -743,7 +753,8 @@ pub(crate) mod tests {
     #[test]
     fn jsondecode_mixed_array_returns_cell() {
         let result =
-            jsondecode_builtin(char_row("[\"RunMat\",42,true]")).expect("jsondecode mixed");
+            block_on(jsondecode_builtin(char_row("[\"RunMat\",42,true]")))
+                .expect("jsondecode mixed");
         match result {
             Value::Cell(cell) => {
                 assert_eq!(cell.rows, 1);
@@ -763,8 +774,8 @@ pub(crate) mod tests {
     #[test]
     fn jsondecode_rectangular_cell_array_preserves_layout() {
         let text = "[[1,true],[false,null]]";
-        let result =
-            jsondecode_builtin(char_row(text)).expect("jsondecode rectangular heterogeneous array");
+        let result = block_on(jsondecode_builtin(char_row(text)))
+            .expect("jsondecode rectangular heterogeneous array");
         match result {
             Value::Cell(cell) => {
                 assert_eq!(cell.rows, 2);
@@ -788,7 +799,7 @@ pub(crate) mod tests {
     #[test]
     fn jsondecode_array_of_objects_returns_cell() {
         let text = "[{\"id\":1,\"name\":\"Ada\"},{\"id\":2,\"name\":\"Charles\"}]";
-        let result = jsondecode_builtin(char_row(text)).expect("jsondecode object array");
+        let result = block_on(jsondecode_builtin(char_row(text))).expect("jsondecode object array");
         match result {
             Value::Cell(cell) => {
                 assert_eq!(cell.rows, 1);
@@ -825,7 +836,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_null_returns_empty_double() {
-        let result = jsondecode_builtin(char_row("null")).expect("jsondecode null");
+        let result = block_on(jsondecode_builtin(char_row("null"))).expect("jsondecode null");
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![0, 0]);
@@ -838,7 +849,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_invalid_text_reports_error() {
-        let err = jsondecode_builtin(char_row("{not json}")).expect_err("expected failure");
+        let err =
+            block_on(jsondecode_builtin(char_row("{not json}"))).expect_err("expected failure");
         let err = error_message(err);
         assert!(
             err.starts_with(PARSE_ERROR_PREFIX),
@@ -850,14 +862,16 @@ pub(crate) mod tests {
     #[test]
     fn jsondecode_rejects_multirow_char_input() {
         let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("char array");
-        let err = jsondecode_builtin(Value::CharArray(chars)).expect_err("expected type error");
+        let err =
+            block_on(jsondecode_builtin(Value::CharArray(chars))).expect_err("expected type error");
         assert_eq!(error_message(err), INPUT_TYPE_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_accepts_string_input() {
-        let result = jsondecode_builtin(Value::String("[1,2]".to_string())).expect("jsondecode");
+        let result = block_on(jsondecode_builtin(Value::String("[1,2]".to_string())))
+            .expect("jsondecode");
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2]);
@@ -871,7 +885,7 @@ pub(crate) mod tests {
     #[test]
     fn jsondecode_accepts_string_array_scalar_input() {
         let array = StringArray::new(vec!["[1,2]".to_string()], vec![1, 1]).expect("string scalar");
-        let result = jsondecode_builtin(Value::StringArray(array)).expect("jsondecode");
+        let result = block_on(jsondecode_builtin(Value::StringArray(array))).expect("jsondecode");
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2]);
@@ -892,9 +906,12 @@ pub(crate) mod tests {
     #[test]
     fn jsondecode_round_trip_with_jsonencode() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("tensor");
-        let encoded =
-            crate::call_builtin("jsonencode", &[Value::Tensor(tensor.clone())]).expect("encode");
-        let decoded = jsondecode_builtin(encoded).expect("decode");
+        let encoded = block_on(crate::call_builtin_async(
+            "jsonencode",
+            &[Value::Tensor(tensor.clone())],
+        ))
+        .expect("encode");
+        let decoded = block_on(jsondecode_builtin(encoded)).expect("decode");
         match decoded {
             Value::Tensor(result) => {
                 assert_eq!(result.data.len(), tensor.data.len());

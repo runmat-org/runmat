@@ -354,7 +354,7 @@ pub fn spec_from_request(filter: &FspecialFilter) -> BuiltinResult<FspecialFilte
     accel = "array_construct",
     builtin_path = "crate::builtins::image::filters::fspecial"
 )]
-fn fspecial_builtin(kind: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn fspecial_builtin(kind: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let spec = build_filter_spec(&kind, &rest)?;
     let tensor = spec.generate_tensor()?;
     finalize_output(&spec, tensor)
@@ -1080,6 +1080,7 @@ fn clamp_asin(value: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
 
     fn assert_close(actual: f64, expected: f64, epsilon: f64) {
         if (actual - expected).abs() > epsilon {
@@ -1096,7 +1097,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_average_default() {
-        let result = fspecial_builtin(Value::from("average"), Vec::new()).unwrap();
+        let result = block_on(fspecial_builtin(Value::from("average"), Vec::new())).unwrap();
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
@@ -1112,7 +1113,7 @@ pub(crate) mod tests {
     #[test]
     fn fspecial_average_scalar_size() {
         let args = vec![Value::from(5)];
-        let result = fspecial_builtin(Value::from("average"), args).unwrap();
+        let result = block_on(fspecial_builtin(Value::from("average"), args)).unwrap();
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![5, 5]);
@@ -1129,7 +1130,7 @@ pub(crate) mod tests {
         let args = vec![Value::from(
             Tensor::new(vec![4.0, 6.0], vec![1, 2]).unwrap(),
         )];
-        let result = fspecial_builtin(Value::from("average"), args).unwrap();
+        let result = block_on(fspecial_builtin(Value::from("average"), args)).unwrap();
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![4, 6]);
@@ -1146,15 +1147,15 @@ pub(crate) mod tests {
     #[test]
     fn fspecial_average_rejects_zero_size() {
         let args = vec![Value::from(0)];
-        let err =
-            fspecial_builtin(Value::from("average"), args).expect_err("fspecial should error");
+        let err = block_on(fspecial_builtin(Value::from("average"), args))
+            .expect_err("fspecial should error");
         assert!(error_message(err).contains("positive"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_gaussian_default_matches_reference() {
-        let result = fspecial_builtin(Value::from("gaussian"), Vec::new()).unwrap();
+        let result = block_on(fspecial_builtin(Value::from("gaussian"), Vec::new())).unwrap();
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
@@ -1181,7 +1182,7 @@ pub(crate) mod tests {
     #[test]
     fn fspecial_gaussian_size_sigma() {
         let args = vec![Value::from(7), Value::from(2.0)];
-        let result = fspecial_builtin(Value::from("gaussian"), args).unwrap();
+        let result = block_on(fspecial_builtin(Value::from("gaussian"), args)).unwrap();
         let tensor = match result {
             Value::Tensor(t) => t,
             Value::GpuTensor(h) => {
@@ -1202,7 +1203,7 @@ pub(crate) mod tests {
     #[test]
     fn fspecial_laplacian_alpha() {
         let args = vec![Value::from(0.2)];
-        let result = fspecial_builtin(Value::from("laplacian"), args).unwrap();
+        let result = block_on(fspecial_builtin(Value::from("laplacian"), args)).unwrap();
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
@@ -1228,7 +1229,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_unsharp_default() {
-        let result = fspecial_builtin(Value::from("unsharp"), Vec::new()).unwrap();
+        let result = block_on(fspecial_builtin(Value::from("unsharp"), Vec::new())).unwrap();
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
@@ -1242,8 +1243,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_log_basic_properties() {
-        let result =
-            fspecial_builtin(Value::from("log"), vec![Value::from(5), Value::from(0.5)]).unwrap();
+        let result = block_on(fspecial_builtin(
+            Value::from("log"),
+            vec![Value::from(5), Value::from(0.5)],
+        ))
+        .unwrap();
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![5, 5]);
@@ -1260,7 +1264,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_disk_sum_is_one() {
-        let result = fspecial_builtin(Value::from("disk"), vec![Value::from(5)]).unwrap();
+        let result = block_on(fspecial_builtin(Value::from("disk"), vec![Value::from(5)])).unwrap();
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![11, 11]);
@@ -1276,7 +1280,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_disk_negative_radius_errors() {
-        let err = fspecial_builtin(Value::from("disk"), vec![Value::from(-1.0)])
+        let err = block_on(fspecial_builtin(Value::from("disk"), vec![Value::from(-1.0)]))
             .expect_err("fspecial should error");
         assert!(error_message(err).contains("non-negative"));
     }
@@ -1284,10 +1288,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_motion_sum_is_one() {
-        let result = fspecial_builtin(
+        let result = block_on(fspecial_builtin(
             Value::from("motion"),
             vec![Value::from(15), Value::from(45.0)],
-        )
+        ))
         .unwrap();
         match result {
             Value::Tensor(t) => {
@@ -1302,7 +1306,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_invalid_filter_name() {
-        let err = fspecial_builtin(Value::from("notafilter"), Vec::new())
+        let err = block_on(fspecial_builtin(Value::from("notafilter"), Vec::new()))
             .expect_err("fspecial should error");
         assert!(error_message(err).contains("not supported"));
     }
@@ -1322,7 +1326,7 @@ pub(crate) mod tests {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
-        let gpu_tensor = match fspecial_builtin(Value::from("gaussian"), Vec::new()).unwrap() {
+        let gpu_tensor = match block_on(fspecial_builtin(Value::from("gaussian"), Vec::new())).unwrap() {
             Value::GpuTensor(handle) => {
                 test_support::gather(Value::GpuTensor(handle)).expect("gather gpu result")
             }
@@ -1330,7 +1334,7 @@ pub(crate) mod tests {
             other => panic!("unexpected result {other:?}"),
         };
         std::env::remove_var("RUNMAT_ACCEL_FSPECIAL_DEVICE");
-        let host_tensor = match fspecial_builtin(Value::from("gaussian"), Vec::new()).unwrap() {
+        let host_tensor = match block_on(fspecial_builtin(Value::from("gaussian"), Vec::new())).unwrap() {
             Value::Tensor(t) => t,
             Value::GpuTensor(handle) => {
                 test_support::gather(Value::GpuTensor(handle)).expect("gather fallback")

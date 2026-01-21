@@ -1667,7 +1667,7 @@ fn compare_matmul(
     };
     let a = Value::Tensor(ta.clone());
     let b = Value::Tensor(tb.clone());
-    let cpu_time = time(|| runmat_runtime::matrix::value_matmul(&a, &b))?;
+    let cpu_time = time(|| futures::executor::block_on(runmat_runtime::matrix::value_matmul(&a, &b)))?;
     let flops = (n * n * n) as f64;
     update_cpu_cost(cpu_cost_slot, cpu_time.as_secs_f64() / flops);
     if let Some(model) = profile_cost_model() {

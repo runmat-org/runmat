@@ -280,8 +280,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::math::linalg::factor::eig"
 )]
-fn eig_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(value, &rest, false)?;
+async fn eig_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(value, &rest, false).await?;
     Ok(eval.eigenvalues())
 }
 
@@ -351,17 +351,19 @@ impl Default for EigOptions {
     }
 }
 
-pub fn evaluate(value: Value, args: &[Value], require_left: bool) -> BuiltinResult<EigEval> {
+pub async fn evaluate(value: Value, args: &[Value], require_left: bool) -> BuiltinResult<EigEval> {
     let options = parse_options(args)?;
     match value {
         Value::GpuTensor(handle) => {
             if let Some(eval) = evaluate_gpu(&handle, options, require_left)? {
                 return Ok(eval);
             }
-            let tensor = gpu_helpers::gather_tensor(&handle).map_err(with_eig_context)?;
-            evaluate_host(Value::Tensor(tensor), options, require_left)
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(with_eig_context)?;
+            evaluate_host(Value::Tensor(tensor), options, require_left).await
         }
-        other => evaluate_host(other, options, require_left),
+        other => evaluate_host(other, options, require_left).await,
     }
 }
 
@@ -392,8 +394,12 @@ fn evaluate_gpu(
     }
 }
 
-fn evaluate_host(value: Value, options: EigOptions, require_left: bool) -> BuiltinResult<EigEval> {
-    let matrix = value_to_complex_matrix(value)?;
+async fn evaluate_host(
+    value: Value,
+    options: EigOptions,
+    require_left: bool,
+) -> BuiltinResult<EigEval> {
+    let matrix = value_to_complex_matrix(value).await?;
     compute_eigen(matrix, options, require_left)
 }
 
@@ -609,7 +615,7 @@ fn normalize_left(left: &mut DMatrix<Complex64>, right: &DMatrix<Complex64>) {
     }
 }
 
-fn value_to_complex_matrix(value: Value) -> BuiltinResult<DMatrix<Complex64>> {
+async fn value_to_complex_matrix(value: Value) -> BuiltinResult<DMatrix<Complex64>> {
     match value {
         Value::Tensor(tensor) => tensor_to_matrix(&tensor),
         Value::ComplexTensor(ct) => complex_tensor_to_matrix(&ct),
@@ -627,7 +633,9 @@ fn value_to_complex_matrix(value: Value) -> BuiltinResult<DMatrix<Complex64>> {
         )),
         Value::Complex(re, im) => Ok(DMatrix::from_element(1, 1, Complex64::new(re, im))),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle).map_err(with_eig_context)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(with_eig_context)?;
             tensor_to_matrix(&tensor)
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(eig_error(
@@ -748,6 +756,7 @@ where
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::IntValue;
 
     fn error_message(err: RuntimeError) -> String {
@@ -1070,5 +1079,13 @@ pub(crate) mod tests {
         if let Value::GpuTensor(_) = eval.eigenvalues() {
             panic!("expected host fallback for 'nobalance' option");
         }
+    }
+
+    fn eig_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::eig_builtin(value, rest))
+    }
+
+    fn evaluate(value: Value, args: &[Value], require_left: bool) -> BuiltinResult<EigEval> {
+        block_on(super::evaluate(value, args, require_left))
     }
 }

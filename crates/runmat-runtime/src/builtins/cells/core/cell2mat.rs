@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ReductionNaN, ResidencyPolicy, ScalarType,
     ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -283,9 +283,9 @@ fn cell2mat_error_with_identifier(message: impl Into<String>, identifier: &str) 
     accel = "gather",
     builtin_path = "crate::builtins::cells::core::cell2mat"
 )]
-fn cell2mat_builtin(value: Value) -> crate::BuiltinResult<Value> {
+async fn cell2mat_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::Cell(ca) => cell_array_to_matrix(&ca),
+        Value::Cell(ca) => cell_array_to_matrix(&ca).await,
         other => Err(cell2mat_error_with_identifier(
             format!("cell2mat: expected a cell array input, got {other:?}"),
             IDENT_INVALID_INPUT,
@@ -333,7 +333,7 @@ impl CellEntry {
     }
 }
 
-fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<Value> {
+async fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<Value> {
     if ca.data.is_empty() {
         // Mirror MATLAB's behaviour: empty cell array -> 0x0 double matrix.
         let tensor = Tensor::new(Vec::new(), vec![0, 0])
@@ -348,7 +348,7 @@ fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<Value>
     let mut detected_kind: Option<ElementKind> = None;
 
     for ptr in &ca.data {
-        let gathered = gather_if_needed(ptr)?;
+        let gathered = gather_if_needed_async(ptr).await?;
         let entry = parse_cell_entry(gathered)?;
         if let Some(kind) = detected_kind {
             if kind != entry.kind {
@@ -832,6 +832,11 @@ fn accumulate_linear(base_offsets: &[usize], local_index: &[usize], strides: &[u
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+
+    fn cell2mat_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::cell2mat_builtin(value))
+    }
 
     fn scalar_cell(values: &[f64], rows: usize, cols: usize) -> Value {
         let cells: Vec<Value> = values.iter().map(|&v| Value::Num(v)).collect();

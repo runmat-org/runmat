@@ -273,14 +273,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::meshgrid"
 )]
-fn meshgrid_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(&rest)?;
-    eval.first()
+async fn meshgrid_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(&rest).await?;
+    eval.first().await
 }
 
 /// Evaluate the `meshgrid` builtin once and reuse the result for multiple outputs.
-pub fn evaluate(args: &[Value]) -> crate::BuiltinResult<MeshgridEval> {
-    let parsed = ParsedMeshgrid::parse(args)?;
+pub async fn evaluate(args: &[Value]) -> crate::BuiltinResult<MeshgridEval> {
+    let parsed = ParsedMeshgrid::parse(args).await?;
     let (x_axis, y_axis, z_axis) = normalise_axes(&parsed.axes);
 
     let require_complex = parsed.axes.iter().any(|axis| axis.is_complex);
@@ -378,7 +378,7 @@ struct ParsedMeshgrid {
 }
 
 impl ParsedMeshgrid {
-    fn parse(args: &[Value]) -> crate::BuiltinResult<Self> {
+    async fn parse(args: &[Value]) -> crate::BuiltinResult<Self> {
         if args.is_empty() {
             return Err(builtin_error(
                 "meshgrid: at least one input vector is required",
@@ -444,7 +444,7 @@ impl ParsedMeshgrid {
         let mut axes = Vec::with_capacity(max(axis_values.len(), 2));
         for (i, value) in axis_values.into_iter().enumerate() {
             let mut consumed_gpu = false;
-            let data = axis_from_value(value, i, &mut consumed_gpu)?;
+            let data = axis_from_value(value, i, &mut consumed_gpu).await?;
             if consumed_gpu {
                 prefer_gpu = true;
             }
@@ -539,7 +539,7 @@ struct AxisData {
     is_complex: bool,
 }
 
-fn axis_from_value(
+async fn axis_from_value(
     value: Value,
     index: usize,
     prefer_gpu: &mut bool,
@@ -576,7 +576,7 @@ fn axis_from_value(
         Value::ComplexTensor(tensor) => axis_from_complex_tensor(tensor),
         Value::GpuTensor(handle) => {
             *prefer_gpu = true;
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             axis_from_tensor(tensor)
         }
         other => Err(builtin_error(format!(
@@ -785,7 +785,7 @@ enum MeshgridOutput {
 }
 
 impl MeshgridOutput {
-    fn to_value(
+    async fn to_value(
         &self,
         class: PrototypeClass,
         residency: DevicePreference,
@@ -797,16 +797,16 @@ impl MeshgridOutput {
                     Ok(Value::GpuTensor(handle.clone()))
                 }
                 (PrototypeClass::Real, DevicePreference::Host) => {
-                    let tensor = gpu_helpers::gather_tensor(handle)?;
+                    let tensor = gpu_helpers::gather_tensor_async(handle).await?;
                     Ok(tensor::tensor_into_value(tensor))
                 }
                 (PrototypeClass::Complex, DevicePreference::Host) => {
-                    let tensor = gpu_helpers::gather_tensor(handle)?;
+                    let tensor = gpu_helpers::gather_tensor_async(handle).await?;
                     tensor_to_complex_value(tensor)
                 }
                 (PrototypeClass::Complex, DevicePreference::Gpu) => {
                     warn!("meshgrid: complex GPU outputs are not implemented; returning host complex array");
-                    let tensor = gpu_helpers::gather_tensor(handle)?;
+                    let tensor = gpu_helpers::gather_tensor_async(handle).await?;
                     tensor_to_complex_value(tensor)
                 }
             },
@@ -827,25 +827,31 @@ impl MeshgridEval {
         self.outputs.len()
     }
 
-    pub fn first(&self) -> crate::BuiltinResult<Value> {
-        self.outputs[0].to_value(self.target_class, self.target_residency)
+    pub async fn first(&self) -> crate::BuiltinResult<Value> {
+        self.outputs[0]
+            .to_value(self.target_class, self.target_residency)
+            .await
     }
 
-    pub fn second(&self) -> crate::BuiltinResult<Value> {
+    pub async fn second(&self) -> crate::BuiltinResult<Value> {
         if self.outputs.len() < 2 {
             Err(builtin_error("meshgrid: second output unavailable"))
         } else {
-            self.outputs[1].to_value(self.target_class, self.target_residency)
+            self.outputs[1]
+                .to_value(self.target_class, self.target_residency)
+                .await
         }
     }
 
-    pub fn third(&self) -> crate::BuiltinResult<Value> {
+    pub async fn third(&self) -> crate::BuiltinResult<Value> {
         if self.outputs.len() < 3 {
             Err(builtin_error(
                 "meshgrid: third output requested but no Z vector was supplied",
             ))
         } else {
-            self.outputs[2].to_value(self.target_class, self.target_residency)
+            self.outputs[2]
+                .to_value(self.target_class, self.target_residency)
+                .await
         }
     }
 }
@@ -854,9 +860,27 @@ impl MeshgridEval {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
+
     use runmat_accelerate_api::HostTensorView;
+
+    fn evaluate(args: &[Value]) -> crate::BuiltinResult<MeshgridEval> {
+        block_on(super::evaluate(args))
+    }
+
+    fn eval_first(eval: &MeshgridEval) -> crate::BuiltinResult<Value> {
+        block_on(eval.first())
+    }
+
+    fn eval_second(eval: &MeshgridEval) -> crate::BuiltinResult<Value> {
+        block_on(eval.second())
+    }
+
+    fn eval_third(eval: &MeshgridEval) -> crate::BuiltinResult<Value> {
+        block_on(eval.third())
+    }
 
     fn tensor_from_vec(data: Vec<f64>, rows: usize, cols: usize) -> Tensor {
         Tensor::new(data, vec![rows, cols]).unwrap()
@@ -868,13 +892,13 @@ pub(crate) mod tests {
         let x = tensor_from_vec(vec![-1.0, 0.0, 1.0], 1, 3);
         let eval = evaluate(&[Value::Tensor(x)]).expect("meshgrid");
         assert_eq!(eval.output_count(), 2);
-        let x_out = test_support::gather(eval.first().expect("X")).expect("host");
+        let x_out = test_support::gather(eval_first(&eval).expect("X")).expect("host");
         assert_eq!(x_out.shape, vec![3, 3]);
         assert_eq!(
             x_out.data,
             vec![-1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
         );
-        let y_out = test_support::gather(eval.second().expect("Y")).expect("host");
+        let y_out = test_support::gather(eval_second(&eval).expect("Y")).expect("host");
         assert_eq!(y_out.shape, vec![3, 3]);
         assert_eq!(
             y_out.data,
@@ -889,10 +913,10 @@ pub(crate) mod tests {
         let y = tensor_from_vec(vec![10.0, 20.0], 2, 1);
         let eval = evaluate(&[Value::Tensor(x), Value::Tensor(y)]).expect("meshgrid");
         assert_eq!(eval.output_count(), 2);
-        let x_out = test_support::gather(eval.first().expect("X")).expect("host");
+        let x_out = test_support::gather(eval_first(&eval).expect("X")).expect("host");
         assert_eq!(x_out.shape, vec![2, 3]);
         assert_eq!(x_out.data, vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0]);
-        let y_out = test_support::gather(eval.second().expect("Y")).expect("host");
+        let y_out = test_support::gather(eval_second(&eval).expect("Y")).expect("host");
         assert_eq!(y_out.shape, vec![2, 3]);
         assert_eq!(y_out.data, vec![10.0, 20.0, 10.0, 20.0, 10.0, 20.0]);
     }
@@ -906,13 +930,13 @@ pub(crate) mod tests {
         let eval =
             evaluate(&[Value::Tensor(x), Value::Tensor(y), Value::Tensor(z)]).expect("meshgrid");
         assert_eq!(eval.output_count(), 3);
-        let x_out = test_support::gather(eval.first().expect("X")).expect("host");
+        let x_out = test_support::gather(eval_first(&eval).expect("X")).expect("host");
         assert_eq!(x_out.shape, vec![3, 2, 2]);
         assert_eq!(
             x_out.data,
             vec![1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0]
         );
-        let z_out = test_support::gather(eval.third().expect("Z")).expect("host");
+        let z_out = test_support::gather(eval_third(&eval).expect("Z")).expect("host");
         assert_eq!(z_out.shape, vec![3, 2, 2]);
         assert_eq!(
             z_out.data,
@@ -939,7 +963,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(proto_handle),
             ])
             .expect("meshgrid");
-            let x_value = eval.first().expect("X");
+            let x_value = eval_first(&eval).expect("X");
             assert!(matches!(x_value, Value::GpuTensor(_)));
             let gathered = test_support::gather(x_value).expect("gather");
             assert_eq!(gathered.shape, vec![2, 3]);
@@ -964,8 +988,8 @@ pub(crate) mod tests {
             let y_handle = provider.upload(&y_view).expect("upload");
             let eval = evaluate(&[Value::GpuTensor(x_handle), Value::GpuTensor(y_handle)])
                 .expect("meshgrid");
-            assert!(matches!(eval.first().expect("X"), Value::GpuTensor(_)));
-            assert!(matches!(eval.second().expect("Y"), Value::GpuTensor(_)));
+            assert!(matches!(eval_first(&eval).expect("X"), Value::GpuTensor(_)));
+            assert!(matches!(eval_second(&eval).expect("Y"), Value::GpuTensor(_)));
         });
     }
 
@@ -983,8 +1007,10 @@ pub(crate) mod tests {
 
         let cpu_eval =
             evaluate(&[Value::Tensor(x.clone()), Value::Tensor(y.clone())]).expect("meshgrid cpu");
-        let cpu_x = test_support::gather(cpu_eval.first().expect("X cpu")).expect("gather X cpu");
-        let cpu_y = test_support::gather(cpu_eval.second().expect("Y cpu")).expect("gather Y cpu");
+        let cpu_x =
+            test_support::gather(eval_first(&cpu_eval).expect("X cpu")).expect("gather X cpu");
+        let cpu_y =
+            test_support::gather(eval_second(&cpu_eval).expect("Y cpu")).expect("gather Y cpu");
 
         let x_view = HostTensorView {
             data: &x.data,
@@ -999,8 +1025,8 @@ pub(crate) mod tests {
 
         let gpu_eval =
             evaluate(&[Value::GpuTensor(x_gpu), Value::GpuTensor(y_gpu)]).expect("meshgrid gpu");
-        let gpu_x_value = gpu_eval.first().expect("X gpu");
-        let gpu_y_value = gpu_eval.second().expect("Y gpu");
+        let gpu_x_value = eval_first(&gpu_eval).expect("X gpu");
+        let gpu_y_value = eval_second(&gpu_eval).expect("Y gpu");
 
         assert!(matches!(gpu_x_value, Value::GpuTensor(_)));
         assert!(matches!(gpu_y_value, Value::GpuTensor(_)));
@@ -1019,7 +1045,7 @@ pub(crate) mod tests {
     fn meshgrid_complex_inputs_produce_complex_outputs() {
         let complex = ComplexTensor::new(vec![(1.0, 1.0), (2.0, -1.0)], vec![1, 2]).unwrap();
         let eval = evaluate(&[Value::ComplexTensor(complex)]).expect("meshgrid");
-        let x_value = eval.first().expect("X");
+        let x_value = eval_first(&eval).expect("X");
         match x_value {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2, 2]);
@@ -1035,7 +1061,7 @@ pub(crate) mod tests {
         let x = tensor_from_vec(vec![1.0, 2.0], 1, 2);
         let eval =
             evaluate(&[Value::Tensor(x), Value::from("like"), Value::Num(0.0)]).expect("meshgrid");
-        let x_out = eval.first().expect("X");
+        let x_out = eval_first(&eval).expect("X");
         assert!(matches!(x_out, Value::Tensor(_) | Value::Num(_)));
     }
 

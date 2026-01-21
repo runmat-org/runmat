@@ -250,19 +250,23 @@ fn runtime_error(name: &str, message: impl Into<String>) -> RuntimeError {
     accel = "metadata",
     builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
 )]
-fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (mode, tol) = parse_optional_args(&rest)?;
     match value {
-        Value::GpuTensor(handle) => issymmetric_gpu(handle, mode, tol),
+        Value::GpuTensor(handle) => issymmetric_gpu(handle, mode, tol).await,
         other => {
-            let matrix = MatrixInput::from_value(other)?;
+            let matrix = MatrixInput::from_value(other).await?;
             let result = evaluate_matrix(matrix, mode, tol);
             Ok(Value::Bool(result))
         }
     }
 }
 
-fn issymmetric_gpu(handle: GpuTensorHandle, mode: SymmetryMode, tol: f64) -> BuiltinResult<Value> {
+async fn issymmetric_gpu(
+    handle: GpuTensorHandle,
+    mode: SymmetryMode,
+    tol: f64,
+) -> BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -286,8 +290,8 @@ fn issymmetric_gpu(handle: GpuTensorHandle, mode: SymmetryMode, tol: f64) -> Bui
         log::debug!("issymmetric: provider path failed or panicked; falling back to host");
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
-    let matrix = MatrixInput::from_value(Value::Tensor(tensor))?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+    let matrix = MatrixInput::from_value(Value::Tensor(tensor)).await?;
     let result = evaluate_matrix(matrix, mode, tol);
     Ok(Value::Bool(result))
 }
@@ -319,7 +323,7 @@ impl MatrixData {
 }
 
 impl MatrixInput {
-    fn from_value(value: Value) -> BuiltinResult<Self> {
+    async fn from_value(value: Value) -> BuiltinResult<Self> {
         let data = match value {
             Value::Tensor(tensor) => MatrixData::Real(tensor),
             Value::LogicalArray(logical) => {
@@ -327,7 +331,7 @@ impl MatrixInput {
                 MatrixData::Real(tensor)
             }
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                 MatrixData::Real(tensor)
             }
             Value::ComplexTensor(tensor) => MatrixData::Complex(tensor),
@@ -669,6 +673,7 @@ pub fn issymmetric_host_complex_data(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_builtins::{IntValue, LogicalArray};
@@ -891,5 +896,9 @@ pub(crate) mod tests {
 
         let _ = provider.free(&handle);
         let _ = provider.free(&handle_skew);
+    }
+
+    fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::issymmetric_builtin(value, rest))
     }
 }

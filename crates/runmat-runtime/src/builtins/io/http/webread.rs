@@ -17,7 +17,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::json::jsondecode::decode_json_text;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 const DEFAULT_USER_AGENT: &str = "RunMat webread/0.0";
@@ -234,9 +234,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::io::http::webread"
 )]
-fn webread_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let gathered_url = gather_if_needed(&url).map_err(webread_flow_with_context)?;
-    let gathered_args = gather_arguments(rest)?;
+async fn webread_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let gathered_url = gather_if_needed_async(&url)
+        .await
+        .map_err(webread_flow_with_context)?;
+    let gathered_args = gather_arguments(rest).await?;
     let url_text = expect_string_scalar(
         &gathered_url,
         "webread: URL must be a character vector or string scalar",
@@ -248,10 +250,14 @@ fn webread_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> 
     execute_request(&url_text, options, &query_params)
 }
 
-fn gather_arguments(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
+async fn gather_arguments(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(values.len());
     for value in values {
-        out.push(gather_if_needed(&value).map_err(webread_flow_with_context)?);
+        out.push(
+            gather_if_needed_async(&value)
+                .await
+                .map_err(webread_flow_with_context)?,
+        );
     }
     Ok(out)
 }
@@ -754,6 +760,10 @@ pub(crate) mod tests {
         err.message().to_string()
     }
 
+    fn run_webread(url: Value, args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(webread_builtin(url, args))
+    }
+
     fn spawn_server<F>(handler: F) -> String
     where
         F: FnOnce(TcpStream) + Send + 'static,
@@ -809,7 +819,7 @@ pub(crate) mod tests {
             );
         });
 
-        let result = webread_builtin(Value::from(url), vec![]).expect("webread JSON response");
+        let result = run_webread(Value::from(url), vec![]).expect("webread JSON response");
 
         match result {
             Value::Struct(struct_value) => {
@@ -840,7 +850,7 @@ pub(crate) mod tests {
             respond_with(stream, "text/plain; charset=utf-8", b"RunMat webread test");
         });
 
-        let result = webread_builtin(Value::from(url), vec![]).expect("webread text response");
+        let result = run_webread(Value::from(url), vec![]).expect("webread text response");
 
         match result {
             Value::CharArray(ca) => {
@@ -862,7 +872,7 @@ pub(crate) mod tests {
         });
 
         let args = vec![Value::from("ContentType"), Value::from("binary")];
-        let result = webread_builtin(Value::from(url), args).expect("webread binary response");
+        let result = run_webread(Value::from(url), args).expect("webread binary response");
 
         match result {
             Value::Tensor(tensor) => {
@@ -890,7 +900,7 @@ pub(crate) mod tests {
             Value::from("ContentType"),
             Value::from("json"),
         ];
-        let result = webread_builtin(Value::from(url.clone()), args).expect("webread query");
+        let result = run_webread(Value::from(url.clone()), args).expect("webread query");
         match result {
             Value::Struct(struct_value) => {
                 assert!(struct_value.fields.contains_key("ok"));
@@ -924,7 +934,7 @@ pub(crate) mod tests {
             .insert("ContentType".to_string(), Value::from("json"));
         fields.fields.insert("limit".to_string(), Value::Num(5.0));
 
-        let result = webread_builtin(Value::from(url.clone()), vec![Value::Struct(fields)])
+        let result = run_webread(Value::from(url.clone()), vec![Value::Struct(fields)])
             .expect("webread struct arg");
 
         let request = rx.recv().expect("request log");
@@ -964,7 +974,7 @@ pub(crate) mod tests {
             Value::from("json"),
         ];
 
-        let result = webread_builtin(Value::from(url), args).expect("webread header fields");
+        let result = run_webread(Value::from(url), args).expect("webread header fields");
         assert!(matches!(result, Value::Struct(_)));
 
         let request = rx.recv().expect("request log");
@@ -995,7 +1005,7 @@ pub(crate) mod tests {
         ];
 
         let result =
-            webread_builtin(Value::from(url.clone()), args).expect("webread query parameters");
+            run_webread(Value::from(url.clone()), args).expect("webread query parameters");
         assert!(matches!(result, Value::Struct(_)));
 
         let request = rx.recv().expect("request log");
@@ -1008,7 +1018,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webread_errors_on_missing_name_value_pair() {
-        let err = webread_builtin(
+        let err = run_webread(
             Value::from("https://example.com"),
             vec![Value::from("Timeout")],
         )
@@ -1025,7 +1035,7 @@ pub(crate) mod tests {
     fn webread_rejects_non_positive_timeout() {
         let args = vec![Value::from("Timeout"), Value::Num(0.0)];
         let err =
-            webread_builtin(Value::from("https://example.com"), args).expect_err("timeout error");
+            run_webread(Value::from("https://example.com"), args).expect_err("timeout error");
         let err = error_message(err);
         assert!(
             err.contains("Timeout must be a finite, positive scalar"),
@@ -1038,7 +1048,7 @@ pub(crate) mod tests {
     fn webread_rejects_password_without_username() {
         let args = vec![Value::from("Password"), Value::from("secret")];
         let err =
-            webread_builtin(Value::from("https://example.com"), args).expect_err("auth error");
+            run_webread(Value::from("https://example.com"), args).expect_err("auth error");
         let err = error_message(err);
         assert!(
             err.contains("Password requires a Username"),
@@ -1051,7 +1061,7 @@ pub(crate) mod tests {
     fn webread_rejects_unsupported_content_type() {
         let args = vec![Value::from("ContentType"), Value::from("table")];
         let err =
-            webread_builtin(Value::from("https://example.com"), args).expect_err("format error");
+            run_webread(Value::from("https://example.com"), args).expect_err("format error");
         let err = error_message(err);
         assert!(
             err.contains("unsupported ContentType"),
@@ -1071,7 +1081,7 @@ pub(crate) mod tests {
 
         let args = vec![Value::from("HeaderFields"), cell];
         let err =
-            webread_builtin(Value::from("https://example.com"), args).expect_err("header error");
+            run_webread(Value::from("https://example.com"), args).expect_err("header error");
         let err = error_message(err);
         assert!(
             err.contains("HeaderFields cell array must have exactly two columns"),

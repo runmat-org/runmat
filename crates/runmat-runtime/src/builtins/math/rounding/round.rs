@@ -222,10 +222,10 @@ impl RoundStrategy {
     accel = "unary",
     builtin_path = "crate::builtins::math::rounding::round"
 )]
-fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let strategy = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => round_gpu(handle, strategy),
+        Value::GpuTensor(handle) => round_gpu(handle, strategy).await,
         Value::Complex(re, im) => Ok(Value::Complex(
             round_scalar(re, strategy),
             round_scalar(im, strategy),
@@ -243,7 +243,7 @@ fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
-fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> BuiltinResult<Value> {
+async fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> BuiltinResult<Value> {
     if !strategy.requires_host() {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
             if let Ok(out) = provider.unary_round(&handle) {
@@ -251,7 +251,7 @@ fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> BuiltinResult<
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     round_tensor(tensor, strategy).map(tensor::tensor_into_value)
 }
 
@@ -423,7 +423,12 @@ fn parse_mode(value: &Value) -> BuiltinResult<RoundMode> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor};
+
+    fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::round_builtin(value, rest))
+    }
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
         assert!(

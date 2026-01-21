@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::{
-    build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeError,
+    build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
 
 #[cfg_attr(
@@ -253,10 +253,14 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::strrep"
 )]
-fn strrep_builtin(str_value: Value, old_value: Value, new_value: Value) -> BuiltinResult<Value> {
-    let gathered_str = gather_if_needed(&str_value).map_err(map_flow)?;
-    let gathered_old = gather_if_needed(&old_value).map_err(map_flow)?;
-    let gathered_new = gather_if_needed(&new_value).map_err(map_flow)?;
+async fn strrep_builtin(
+    str_value: Value,
+    old_value: Value,
+    new_value: Value,
+) -> BuiltinResult<Value> {
+    let gathered_str = gather_if_needed_async(&str_value).await.map_err(map_flow)?;
+    let gathered_old = gather_if_needed_async(&old_value).await.map_err(map_flow)?;
+    let gathered_new = gather_if_needed_async(&new_value).await.map_err(map_flow)?;
 
     let (old_text, old_kind) = parse_pattern(gathered_old)?;
     let (new_text, new_kind) = parse_pattern(gathered_new)?;
@@ -373,10 +377,14 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    fn run_strrep(str_value: Value, old_value: Value, new_value: Value) -> BuiltinResult<Value> {
+        futures::executor::block_on(strrep_builtin(str_value, old_value, new_value))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_string_scalar_basic() {
-        let result = strrep_builtin(
+        let result = run_strrep(
             Value::String("RunMat Ignite".into()),
             Value::String("Ignite".into()),
             Value::String("Interpreter".into()),
@@ -397,7 +405,7 @@ pub(crate) mod tests {
             vec![3, 1],
         )
         .unwrap();
-        let result = strrep_builtin(
+        let result = run_strrep(
             Value::StringArray(array),
             Value::String("gpu".into()),
             Value::String("GPU".into()),
@@ -427,7 +435,7 @@ pub(crate) mod tests {
             vec![2, 1],
         )
         .unwrap();
-        let result = strrep_builtin(
+        let result = run_strrep(
             Value::StringArray(array),
             Value::CharArray(CharArray::new_row("a")),
             Value::CharArray(CharArray::new_row("A")),
@@ -446,7 +454,7 @@ pub(crate) mod tests {
     #[test]
     fn strrep_char_array_padding() {
         let chars = CharArray::new(vec!['R', 'u', 'n', ' ', 'M', 'a', 't'], 1, 7).unwrap();
-        let result = strrep_builtin(
+        let result = run_strrep(
             Value::CharArray(chars),
             Value::String(" ".into()),
             Value::String("_".into()),
@@ -469,7 +477,7 @@ pub(crate) mod tests {
         let mut data: Vec<char> = "alpha".chars().collect();
         data.extend("beta ".chars());
         let array = CharArray::new(data, 2, 5).unwrap();
-        let result = strrep_builtin(
+        let result = run_strrep(
             Value::CharArray(array),
             Value::String("a".into()),
             Value::String("".into()),
@@ -498,7 +506,7 @@ pub(crate) mod tests {
             2,
         )
         .unwrap();
-        let result = strrep_builtin(
+        let result = run_strrep(
             Value::Cell(cell),
             Value::String(" ".into()),
             Value::String("_".into()),
@@ -533,7 +541,7 @@ pub(crate) mod tests {
             2,
         )
         .unwrap();
-        let result = strrep_builtin(
+        let result = run_strrep(
             Value::Cell(cell),
             Value::String("er".into()),
             Value::String("ER".into()),
@@ -554,7 +562,7 @@ pub(crate) mod tests {
     #[test]
     fn strrep_cell_array_invalid_element_error() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
-        let err = strrep_builtin(
+        let err = run_strrep(
             Value::Cell(cell),
             Value::String("1".into()),
             Value::String("one".into()),
@@ -570,7 +578,7 @@ pub(crate) mod tests {
         chars.extend("beta ".chars());
         let element = CharArray::new(chars, 2, 5).unwrap();
         let cell = CellArray::new(vec![Value::CharArray(element)], 1, 1).unwrap();
-        let result = strrep_builtin(
+        let result = run_strrep(
             Value::Cell(cell),
             Value::String("a".into()),
             Value::String("A".into()),
@@ -599,7 +607,7 @@ pub(crate) mod tests {
     fn strrep_cell_array_string_arrays() {
         let element = StringArray::new(vec!["alpha".into(), "beta".into()], vec![1, 2]).unwrap();
         let cell = CellArray::new(vec![Value::StringArray(element)], 1, 1).unwrap();
-        let result = strrep_builtin(
+        let result = run_strrep(
             Value::Cell(cell),
             Value::String("a".into()),
             Value::String("A".into()),
@@ -623,7 +631,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_empty_pattern_inserts_replacement() {
-        let result = strrep_builtin(
+        let result = run_strrep(
             Value::String("abc".into()),
             Value::String("".into()),
             Value::String("-".into()),
@@ -635,7 +643,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_type_mismatch_errors() {
-        let err = strrep_builtin(
+        let err = run_strrep(
             Value::String("abc".into()),
             Value::String("a".into()),
             Value::CharArray(CharArray::new_row("x")),
@@ -647,7 +655,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_invalid_pattern_type_errors() {
-        let err = strrep_builtin(
+        let err = run_strrep(
             Value::String("abc".into()),
             Value::Num(1.0),
             Value::String("x".into()),
@@ -661,7 +669,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_first_argument_type_error() {
-        let err = strrep_builtin(
+        let err = run_strrep(
             Value::Num(42.0),
             Value::String("a".into()),
             Value::String("b".into()),
@@ -682,7 +690,7 @@ pub(crate) mod tests {
             // Unable to initialize the provider in this environment; skip.
             return;
         }
-        let result = strrep_builtin(
+        let result = run_strrep(
             Value::String("Turbine Engine".into()),
             Value::String("Engine".into()),
             Value::String("JIT".into()),

@@ -230,20 +230,23 @@ fn sort_error(message: impl Into<String>) -> crate::RuntimeError {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::sort"
 )]
-fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    Ok(evaluate(value, &rest)?.into_sorted_value())
+async fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    Ok(evaluate(value, &rest).await?.into_sorted_value())
 }
 
 /// Evaluate the `sort` builtin once and expose both outputs.
-pub fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortEvaluation> {
+pub async fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortEvaluation> {
     let args = SortArgs::parse(rest)?;
     match value {
-        Value::GpuTensor(handle) => sort_gpu(handle, &args),
+        Value::GpuTensor(handle) => sort_gpu(handle, &args).await,
         other => sort_host(other, &args),
     }
 }
 
-fn sort_gpu(handle: GpuTensorHandle, args: &SortArgs) -> crate::BuiltinResult<SortEvaluation> {
+async fn sort_gpu(
+    handle: GpuTensorHandle,
+    args: &SortArgs,
+) -> crate::BuiltinResult<SortEvaluation> {
     let shape = handle.shape.clone();
     let dim = args.dimension.unwrap_or_else(|| default_dimension(&shape));
     if dim == 0 {
@@ -268,7 +271,7 @@ fn sort_gpu(handle: GpuTensorHandle, args: &SortArgs) -> crate::BuiltinResult<So
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     sort_real_tensor(tensor, args)
 }
 
@@ -696,10 +699,19 @@ impl SortEvaluation {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{ComplexTensor, IntValue, Tensor, Value};
+
+    fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::sort_builtin(value, rest))
+    }
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortEvaluation> {
+        block_on(super::evaluate(value, rest))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

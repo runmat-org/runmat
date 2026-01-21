@@ -1,5 +1,6 @@
 //! MATLAB-compatible `bar` builtin.
 
+use futures::executor::block_on;
 use glam::{Vec3, Vec4};
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
@@ -16,7 +17,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::gather_if_needed_async;
 use crate::{BuiltinResult, RuntimeError};
 
 use super::common::numeric_vector;
@@ -119,7 +120,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::bar"
 )]
-pub fn bar_builtin(values: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
+pub async fn bar_builtin(values: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
     let style = parse_bar_style_args("bar", &rest, defaults)?;
     let mut input = Some(BarInput::from_value(values)?);
@@ -434,11 +435,19 @@ impl BarInput {
     }
 }
 
-fn gather_tensor_from_gpu(handle: GpuTensorHandle, context: &'static str) -> BuiltinResult<Tensor> {
+async fn gather_tensor_from_gpu_async(
+    handle: GpuTensorHandle,
+    context: &'static str,
+) -> BuiltinResult<Tensor> {
     let value = Value::GpuTensor(handle);
-    let gathered =
-        gather_if_needed(&value).map_err(|flow| map_control_flow_with_builtin(flow, context))?;
+    let gathered = gather_if_needed_async(&value)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, context))?;
     Tensor::try_from(&gathered).map_err(|e| bar_err(format!("{context}: {e}")))
+}
+
+fn gather_tensor_from_gpu(handle: GpuTensorHandle, context: &'static str) -> BuiltinResult<Tensor> {
+    block_on(gather_tensor_from_gpu_async(handle, context))
 }
 
 pub(crate) fn apply_bar_style(bar: &mut BarChart, style: &BarStyle, default_label: &str) {
@@ -589,10 +598,15 @@ fn compute_stack_offsets(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use futures::executor::block_on;
     use runmat_builtins::Value;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
+    }
+
+    fn bar_builtin(values: Value, rest: Vec<Value>) -> BuiltinResult<String> {
+        block_on(super::bar_builtin(values, rest))
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {

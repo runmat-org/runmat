@@ -262,10 +262,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::tan"
 )]
-fn tan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn tan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
     let base = match value {
-        Value::GpuTensor(handle) => tan_gpu(handle)?,
+        Value::GpuTensor(handle) => tan_gpu(handle).await?,
         Value::Complex(re, im) => {
             let (out_re, out_im) = tan_complex_components(re, im);
             Value::Complex(out_re, out_im)
@@ -277,16 +277,16 @@ fn tan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         }
         other => tan_real(other)?,
     };
-    apply_output_template(base, &template)
+    apply_output_template(base, &template).await
 }
 
-fn tan_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn tan_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_tan(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     tan_tensor(tensor).map(tensor::tensor_into_value)
 }
 
@@ -361,7 +361,7 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     }
 }
 
-fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
+async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
     match template {
         OutputTemplate::Default => Ok(value),
         OutputTemplate::Like(proto) => match proto {
@@ -370,7 +370,7 @@ fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResu
             | Value::Num(_)
             | Value::Int(_)
             | Value::Bool(_)
-            | Value::LogicalArray(_) => convert_to_host_like(value),
+            | Value::LogicalArray(_) => convert_to_host_like(value).await,
             Value::Complex(_, _) | Value::ComplexTensor(_) => Err(runtime_error_for(
                 "tan: complex prototypes for 'like' are not supported yet",
             )),
@@ -419,11 +419,11 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
+async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             let proxy = Value::GpuTensor(handle);
-            gpu_helpers::gather_value(&proxy)
+            gpu_helpers::gather_value_async(&proxy).await
         }
         other => Ok(other),
     }
@@ -433,11 +433,16 @@ fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, IntValue, StringArray, Tensor};
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    fn tan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::tan_builtin(value, rest))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -718,7 +723,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = tan_gpu(handle).unwrap();
+        let gpu = block_on(tan_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {

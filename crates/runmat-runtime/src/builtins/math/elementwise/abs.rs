@@ -242,9 +242,9 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::abs"
 )]
-fn abs_builtin(value: Value) -> BuiltinResult<Value> {
+async fn abs_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => abs_gpu(handle),
+        Value::GpuTensor(handle) => abs_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Num(complex_magnitude(re, im))),
         Value::ComplexTensor(ct) => abs_complex_tensor(ct),
         Value::CharArray(ca) => abs_char_array(ca),
@@ -255,13 +255,13 @@ fn abs_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn abs_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn abs_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_abs(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     Ok(tensor::tensor_into_value(abs_tensor(tensor)?))
 }
 
@@ -306,7 +306,12 @@ fn complex_magnitude(re: f64, im: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor};
+
+    fn abs_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::abs_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

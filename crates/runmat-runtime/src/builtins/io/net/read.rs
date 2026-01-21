@@ -4,12 +4,13 @@ use runmat_builtins::{CharArray, IntValue, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 use std::io::{self, Read};
 use std::net::TcpStream;
+use std::time::{Duration, Instant};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
 
@@ -223,9 +224,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "read,tcpclient,networking",
     builtin_path = "crate::builtins::io::net::read"
 )]
-fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let client = gather_if_needed(&client)?;
-    let options = parse_arguments(rest)?;
+async fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let client = gather_if_needed_async(&client).await?;
+    let options = parse_arguments(rest).await?;
 
     let client_struct = match &client {
         Value::Struct(st) => st,
@@ -403,7 +404,10 @@ fn read_all_available(stream: &mut TcpStream) -> Result<ReadOutcome, ReadError> 
         match stream.read(&mut buffer) {
             Ok(0) => {
                 connection_closed = true;
-                break;
+                return Ok(ReadOutcome {
+                    bytes: Vec::new(),
+                    connection_closed,
+                });
             }
             Ok(n) => {
                 data.extend_from_slice(&buffer[..n]);
@@ -415,26 +419,24 @@ fn read_all_available(stream: &mut TcpStream) -> Result<ReadOutcome, ReadError> 
         }
     }
 
-    if !data.is_empty() {
-        let guard = NonBlockingGuard::enter(stream).map_err(ReadError::Io)?;
-        let mut guard = Some(guard);
-        loop {
-            match stream.read(&mut buffer) {
-                Ok(0) => {
-                    connection_closed = true;
-                    break;
-                }
-                Ok(n) => {
-                    data.extend_from_slice(&buffer[..n]);
-                }
-                Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
-                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-                Err(err) if is_timeout(&err) => break,
-                Err(err) => return Err(ReadError::Io(err)),
+    let guard = NonBlockingGuard::enter(stream).map_err(ReadError::Io)?;
+    let mut guard = Some(guard);
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => {
+                connection_closed = true;
+                break;
             }
+            Ok(n) => {
+                data.extend_from_slice(&buffer[..n]);
+            }
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+            Err(err) if is_timeout(&err) => break,
+            Err(err) => return Err(ReadError::Io(err)),
         }
-        drop(guard.take());
     }
+    drop(guard.take());
 
     Ok(ReadOutcome {
         bytes: data,
@@ -452,6 +454,13 @@ fn read_exact_bytes(stream: &mut TcpStream, total: usize) -> Result<ReadOutcome,
 
     let mut buf = vec![0u8; total];
     let mut offset = 0;
+    let timeout = stream.read_timeout().ok().flatten();
+    let start = Instant::now();
+    let _guard = if timeout.is_some() {
+        Some(NonBlockingGuard::enter(stream).map_err(ReadError::Io)?)
+    } else {
+        None
+    };
     while offset < total {
         match stream.read(&mut buf[offset..]) {
             Ok(0) => return Err(ReadError::ConnectionClosed),
@@ -459,7 +468,15 @@ fn read_exact_bytes(stream: &mut TcpStream, total: usize) -> Result<ReadOutcome,
                 offset += n;
             }
             Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-            Err(err) if is_timeout(&err) => return Err(ReadError::Timeout),
+            Err(err) if is_timeout(&err) => {
+                if let Some(timeout) = timeout {
+                    if start.elapsed() < timeout {
+                        std::thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                }
+                return Err(ReadError::Timeout);
+            }
             Err(err) => return Err(ReadError::Io(err)),
         }
     }
@@ -597,14 +614,14 @@ fn f64_from(bytes: &[u8], order: ByteOrder) -> f64 {
     }
 }
 
-fn parse_arguments(rest: Vec<Value>) -> BuiltinResult<ReadOptions> {
+async fn parse_arguments(rest: Vec<Value>) -> BuiltinResult<ReadOptions> {
     match rest.len() {
         0 => Ok(ReadOptions {
             mode: ReadMode::Available,
             datatype: DataType::UInt8,
         }),
         1 => {
-            let count_value = gather_if_needed(&rest[0])?;
+            let count_value = gather_if_needed_async(&rest[0]).await?;
             let count = parse_count(&count_value)?;
             Ok(ReadOptions {
                 mode: ReadMode::Count(count),
@@ -612,8 +629,8 @@ fn parse_arguments(rest: Vec<Value>) -> BuiltinResult<ReadOptions> {
             })
         }
         2 => {
-            let count_value = gather_if_needed(&rest[0])?;
-            let dtype_value = gather_if_needed(&rest[1])?;
+            let count_value = gather_if_needed_async(&rest[0]).await?;
+            let dtype_value = gather_if_needed_async(&rest[1]).await?;
             let count = parse_count(&count_value)?;
             let datatype = parse_datatype(&dtype_value)?;
             Ok(ReadOptions {
@@ -789,6 +806,10 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), Some(expected));
     }
 
+    fn run_read(client: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(read_builtin(client, rest))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn read_reads_requested_uint8_values() {
@@ -803,7 +824,7 @@ pub(crate) mod tests {
         let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
         let client = make_client(stream, 1.0);
 
-        let data = read_builtin(client.clone(), vec![Value::Num(6.0)]).expect("read");
+        let data = run_read(client.clone(), vec![Value::Num(6.0)]).expect("read");
         let tensor = match data {
             Value::Tensor(t) => t,
             other => panic!("expected tensor result, got {other:?}"),
@@ -830,7 +851,7 @@ pub(crate) mod tests {
         let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
         let client = make_client(stream, 1.0);
 
-        let data = read_builtin(client.clone(), Vec::new()).expect("read");
+        let data = run_read(client.clone(), Vec::new()).expect("read");
         let tensor = match data {
             Value::Tensor(t) => t,
             other => panic!("expected tensor result, got {other:?}"),
@@ -858,7 +879,7 @@ pub(crate) mod tests {
         let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
         let client = make_client(stream, 0.1);
 
-        let err = read_builtin(client.clone(), vec![Value::Num(4.0)]).unwrap_err();
+        let err = run_read(client.clone(), vec![Value::Num(4.0)]).unwrap_err();
         assert_error_identifier(err, MESSAGE_ID_TIMEOUT);
 
         remove_client_for_test(client_id(&client));

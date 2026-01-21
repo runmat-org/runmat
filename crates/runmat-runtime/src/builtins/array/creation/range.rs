@@ -247,10 +247,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::array::creation::range"
 )]
-fn range_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn range_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (dim_selection, nan_mode) = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => range_gpu(handle, dim_selection, nan_mode),
+        Value::GpuTensor(handle) => range_gpu(handle, dim_selection, nan_mode).await,
         other => range_host(other, dim_selection, nan_mode),
     }
 }
@@ -424,13 +424,13 @@ fn range_host(
     Ok(tensor::tensor_into_value(result))
 }
 
-fn range_gpu(
+async fn range_gpu(
     handle: GpuTensorHandle,
     selection: DimSelection,
     nan_mode: NanMode,
 ) -> crate::BuiltinResult<Value> {
     if matches!(nan_mode, NanMode::Omit) {
-        return range_gpu_fallback(&handle, selection, nan_mode);
+        return range_gpu_fallback(&handle, selection, nan_mode).await;
     }
 
     #[cfg(all(test, feature = "wgpu"))]
@@ -442,7 +442,7 @@ fn range_gpu(
         }
     }
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return range_gpu_fallback(&handle, selection, nan_mode);
+            return range_gpu_fallback(&handle, selection, nan_mode).await;
     };
 
     let resolved = resolve_dims(&handle.shape, &selection)?;
@@ -451,25 +451,25 @@ fn range_gpu(
         if let Some(diff) = range_gpu_all(provider, &handle) {
             return Ok(Value::GpuTensor(diff));
         }
-        return range_gpu_fallback(&handle, selection, nan_mode);
+        return range_gpu_fallback(&handle, selection, nan_mode).await;
     }
 
     if resolved.dims_in_bounds.len() != 1 {
-        return range_gpu_fallback(&handle, selection, nan_mode);
+        return range_gpu_fallback(&handle, selection, nan_mode).await;
     }
 
     let dim = resolved.dims_in_bounds[0];
     let expected_shape = reduced_shape(&handle.shape, &[dim]);
 
     if expected_shape.is_empty() {
-        return range_gpu_fallback(&handle, selection, nan_mode);
+        return range_gpu_fallback(&handle, selection, nan_mode).await;
     }
 
     if let Some(diff) = range_gpu_single_dim(provider, &handle, dim, &expected_shape) {
         return Ok(Value::GpuTensor(diff));
     }
 
-    range_gpu_fallback(&handle, selection, nan_mode)
+    range_gpu_fallback(&handle, selection, nan_mode).await
 }
 
 fn reduced_shape(shape: &[usize], dims: &[usize]) -> Vec<usize> {
@@ -582,12 +582,12 @@ fn range_gpu_single_dim(
     None
 }
 
-fn range_gpu_fallback(
+async fn range_gpu_fallback(
     handle: &GpuTensorHandle,
     selection: DimSelection,
     nan_mode: NanMode,
 ) -> crate::BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor(handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(handle).await?;
     range_host(Value::Tensor(tensor), selection, nan_mode)
 }
 
@@ -767,6 +767,11 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+
+    fn range_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::range_builtin(value, rest))
+    }
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::IntValue;
 

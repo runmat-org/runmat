@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use runmat_filesystem as vfs;
 use std::collections::HashSet;
@@ -242,34 +242,34 @@ struct AddPathSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::addpath"
 )]
-fn addpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn addpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         return Err(addpath_error(ERROR_TOO_FEW_ARGS));
     }
 
-    let gathered = gather_arguments(&args)?;
+    let gathered = gather_arguments(&args).await?;
     let previous = current_path_string();
-    let spec = parse_arguments(&gathered)?;
+    let spec = parse_arguments(&gathered).await?;
     apply_addpath(spec)?;
     Ok(char_array_value(&previous))
 }
 
-fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
+async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(map_control_flow)?);
+        out.push(gather_if_needed_async(value).await.map_err(map_control_flow)?);
     }
     Ok(out)
 }
 
-fn parse_arguments(args: &[Value]) -> BuiltinResult<AddPathSpec> {
+async fn parse_arguments(args: &[Value]) -> BuiltinResult<AddPathSpec> {
     let mut position = InsertPosition::Begin;
     let mut position_set = false;
     let mut frozen = false;
     let mut directories = Vec::new();
 
     for value in args {
-        collect_strings(value, &mut directories)?;
+        collect_strings(value, &mut directories).await?;
     }
 
     if directories.is_empty() {
@@ -377,7 +377,8 @@ fn apply_addpath(spec: AddPathSpec) -> BuiltinResult<()> {
     Ok(())
 }
 
-fn collect_strings(value: &Value, output: &mut Vec<String>) -> BuiltinResult<()> {
+#[async_recursion::async_recursion(?Send)]
+async fn collect_strings(value: &Value, output: &mut Vec<String>) -> BuiltinResult<()> {
     match value {
         Value::String(text) => {
             output.push(text.clone());
@@ -410,8 +411,8 @@ fn collect_strings(value: &Value, output: &mut Vec<String>) -> BuiltinResult<()>
         Value::Cell(cell) => {
             for ptr in &cell.data {
                 let inner = (*ptr).clone();
-                let gathered = gather_if_needed(&inner).map_err(map_control_flow)?;
-                collect_strings(&gathered, output)?;
+                let gathered = gather_if_needed_async(&inner).await.map_err(map_control_flow)?;
+                collect_strings(&gathered, output).await?;
             }
             Ok(())
         }
@@ -551,6 +552,10 @@ pub(crate) mod tests {
     use std::env;
     use std::fs;
     use tempfile::tempdir;
+
+    fn addpath_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::addpath_builtin(args))
+    }
 
     struct PathGuard {
         previous: String,

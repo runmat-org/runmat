@@ -6043,6 +6043,7 @@ dependencies = [
  "bytemuck",
  "dirs 5.0.1",
  "env_logger 0.11.8",
+ "futures",
  "futures-channel",
  "log",
  "num-complex",
@@ -6374,6 +6375,7 @@ name = "runmat-runtime"
 version = "0.2.8"
 dependencies = [
  "accelerate-src",
+ "async-recursion",
  "axum 0.7.9",
  "base64 0.22.1",
  "blas",
@@ -6381,6 +6383,7 @@ dependencies = [
  "clap",
  "ctor 0.2.9",
  "encoding_rs",
+ "futures",
  "getrandom 0.2.16",
  "glam",
  "glob",

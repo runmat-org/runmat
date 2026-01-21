@@ -28,15 +28,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Type alias for builtin function dispatch table to reduce complexity
-type BuiltinDispatchTable = Arc<
-    RwLock<
-        Vec<
-            fn(
-                &[runmat_builtins::Value],
-            ) -> Result<runmat_builtins::Value, runmat_builtins::BuiltinControlFlow>,
-        >,
-    >,
->;
+type BuiltinDispatchTable =
+    Arc<RwLock<Vec<fn(&[runmat_builtins::Value]) -> runmat_builtins::BuiltinFuture>>>;
 use std::time::Duration;
 
 use parking_lot::RwLock;

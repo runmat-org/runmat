@@ -213,9 +213,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::sinh"
 )]
-fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
+async fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => sinh_gpu(handle),
+        Value::GpuTensor(handle) => sinh_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Complex(
             sinh_complex_re(re, im),
             sinh_complex_im(re, im),
@@ -229,13 +229,13 @@ fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn sinh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn sinh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_sinh(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     sinh_tensor(tensor).map(tensor::tensor_into_value)
 }
 
@@ -284,9 +284,14 @@ fn sinh_complex_im(re: f64, im: f64) -> f64 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor};
 
     use crate::builtins::common::test_support;
+
+    fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::sinh_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -399,7 +404,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = sinh_gpu(h).unwrap();
+        let gpu = block_on(sinh_gpu(h)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {

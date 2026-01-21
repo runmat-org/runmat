@@ -268,9 +268,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::asin"
 )]
-fn asin_builtin(value: Value) -> BuiltinResult<Value> {
+async fn asin_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => asin_gpu(handle),
+        Value::GpuTensor(handle) => asin_gpu(handle).await,
         Value::Complex(re, im) => Ok(asin_complex_value(re, im)),
         Value::ComplexTensor(ct) => asin_complex_tensor(ct),
         Value::CharArray(ca) => asin_char_array(ca),
@@ -281,7 +281,7 @@ fn asin_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn asin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn asin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match detect_gpu_requires_complex(provider, &handle) {
             Ok(false) => {
@@ -290,7 +290,7 @@ fn asin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 }
             }
             Ok(true) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                 return asin_tensor_real(tensor);
             }
             Err(_) => {
@@ -298,7 +298,7 @@ fn asin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     asin_tensor_real(tensor)
 }
 
@@ -438,7 +438,12 @@ fn zero_small(value: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray};
+
+    fn asin_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::asin_builtin(value))
+    }
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
@@ -612,7 +617,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = asin_gpu(h).expect("asin gpu");
+        let gpu = block_on(asin_gpu(h)).expect("asin gpu");
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {

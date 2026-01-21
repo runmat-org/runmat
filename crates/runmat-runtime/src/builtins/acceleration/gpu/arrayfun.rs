@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::{
-    build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeError,
+    build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
 use runmat_accelerate_api::{set_handle_logical, GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, Closure, ComplexTensor, LogicalArray, Tensor, Value};
@@ -248,10 +248,14 @@ fn arrayfun_error(message: impl Into<String>) -> RuntimeError {
 }
 
 fn arrayfun_error_with_source(message: impl Into<String>, source: RuntimeError) -> RuntimeError {
-    build_runtime_error(message)
+    let identifier = source.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(message)
         .with_builtin("arrayfun")
-        .with_source(source)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn arrayfun_flow(message: impl Into<String>) -> RuntimeError {
@@ -283,7 +287,7 @@ fn format_handler_error(err: &RuntimeError) -> String {
     accel = "host",
     builtin_path = "crate::builtins::acceleration::gpu::arrayfun"
 )]
-fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let callable = Callable::from_function(func)?;
 
     let mut uniform_output = true;
@@ -345,7 +349,7 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<V
             return Err(arrayfun_flow("arrayfun: struct inputs are not supported"));
         }
 
-        let host_value = gather_if_needed(&raw)?;
+        let host_value = gather_if_needed_async(&raw).await?;
         let data = ArrayData::from_value(host_value)?;
         let len = data.len();
         let is_scalar = len == 1;
@@ -436,7 +440,7 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<V
             args.push(input.value_at(idx)?);
         }
 
-        let result = match callable.call(&args) {
+        let result = match callable.call(&args).await {
             Ok(value) => value,
             Err(err) => {
                 let handler = match error_handler.as_ref() {
@@ -453,11 +457,11 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<V
                 let mut handler_args = Vec::with_capacity(1 + args.len());
                 handler_args.push(err_value);
                 handler_args.extend(args.clone());
-                handler.call(&handler_args)?
+                handler.call(&handler_args).await?
             }
         };
 
-        let host_result = gather_if_needed(&result)?;
+        let host_result = gather_if_needed_async(&result).await?;
 
         if let Some(collector) = collector.as_mut() {
             collector.push(&host_result)?;
@@ -768,13 +772,13 @@ impl Callable {
         }
     }
 
-    fn call(&self, args: &[Value]) -> crate::BuiltinResult<Value> {
+    async fn call(&self, args: &[Value]) -> crate::BuiltinResult<Value> {
         match self {
-            Callable::Builtin { name } => crate::call_builtin(name, args),
+            Callable::Builtin { name } => crate::call_builtin_async(name, args).await,
             Callable::Closure(c) => {
                 let mut merged = c.captures.clone();
                 merged.extend_from_slice(args);
-                crate::call_builtin(&c.function_name, &merged)
+                crate::call_builtin_async(&c.function_name, &merged).await
             }
         }
     }
@@ -1151,15 +1155,20 @@ fn dims_to_row_tensor(dims: &[usize]) -> BuiltinResult<Tensor> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::Tensor;
+
+    fn call(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(arrayfun_builtin(func, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_basic_sin() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
         let expected: Vec<f64> = tensor.data.iter().map(|&x| x.sin()).collect();
-        let result = arrayfun_builtin(
+        let result = call(
             Value::FunctionHandle("sin".to_string()),
             vec![Value::Tensor(tensor.clone())],
         )
@@ -1178,7 +1187,7 @@ pub(crate) mod tests {
     fn arrayfun_additional_scalar_argument() {
         let tensor = Tensor::new(vec![0.5, 1.0, -1.0], vec![3, 1]).unwrap();
         let expected: Vec<f64> = tensor.data.iter().map(|&y| y.atan2(1.0)).collect();
-        let result = arrayfun_builtin(
+        let result = call(
             Value::FunctionHandle("atan2".to_string()),
             vec![Value::Tensor(tensor), Value::Num(1.0)],
         )
@@ -1196,7 +1205,7 @@ pub(crate) mod tests {
     fn arrayfun_uniform_false_returns_cell() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let expected: Vec<Value> = tensor.data.iter().map(|&x| Value::Num(x.sin())).collect();
-        let result = arrayfun_builtin(
+        let result = call(
             Value::FunctionHandle("sin".to_string()),
             vec![
                 Value::Tensor(tensor),
@@ -1220,7 +1229,7 @@ pub(crate) mod tests {
     fn arrayfun_size_mismatch_errors() {
         let taller = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let shorter = Tensor::new(vec![4.0, 5.0], vec![2, 1]).unwrap();
-        let err = arrayfun_builtin(
+        let err = call(
             Value::FunctionHandle("sin".to_string()),
             vec![Value::Tensor(taller), Value::Tensor(shorter)],
         )
@@ -1240,7 +1249,7 @@ pub(crate) mod tests {
             function_name: "__arrayfun_test_handler".into(),
             captures: vec![Value::Num(42.0)],
         });
-        let result = arrayfun_builtin(
+        let result = call(
             Value::String("@nonexistent_builtin".into()),
             vec![
                 Value::Tensor(tensor),
@@ -1262,14 +1271,16 @@ pub(crate) mod tests {
     #[test]
     fn arrayfun_error_without_handler_propagates_identifier() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let err = arrayfun_builtin(
+        let err = call(
             Value::String("@nonexistent_builtin".into()),
             vec![Value::Tensor(tensor)],
         )
         .expect_err("expected unresolved function error");
-        assert!(
-            err.contains("MATLAB:UndefinedFunction"),
-            "unexpected error: {err}"
+        assert_eq!(
+            err.identifier(),
+            Some("MATLAB:UndefinedFunction"),
+            "unexpected error: {}",
+            err.message()
         );
     }
 
@@ -1277,7 +1288,7 @@ pub(crate) mod tests {
     #[test]
     fn arrayfun_uniform_logical_result() {
         let tensor = Tensor::new(vec![1.0, f64::NAN, 0.0, f64::INFINITY], vec![4, 1]).unwrap();
-        let result = arrayfun_builtin(
+        let result = call(
             Value::FunctionHandle("isfinite".to_string()),
             vec![Value::Tensor(tensor)],
         )
@@ -1295,7 +1306,7 @@ pub(crate) mod tests {
     #[test]
     fn arrayfun_uniform_character_result() {
         let tensor = Tensor::new(vec![65.0, 66.0, 67.0], vec![1, 3]).unwrap();
-        let result = arrayfun_builtin(
+        let result = call(
             Value::FunctionHandle("char".to_string()),
             vec![Value::Tensor(tensor)],
         )
@@ -1320,7 +1331,7 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = arrayfun_builtin(
+            let result = call(
                 Value::FunctionHandle("sin".to_string()),
                 vec![
                     Value::GpuTensor(handle),
@@ -1358,7 +1369,7 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = arrayfun_builtin(
+            let result = call(
                 Value::FunctionHandle("sin".to_string()),
                 vec![Value::GpuTensor(handle)],
             )
@@ -1390,7 +1401,7 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let result = arrayfun_builtin(
+        let result = call(
             Value::FunctionHandle("sin".into()),
             vec![Value::GpuTensor(handle.clone())],
         )
@@ -1436,7 +1447,7 @@ pub(crate) mod tests {
         };
         let handle_a = provider.upload(&view_a).expect("upload a");
         let handle_b = provider.upload(&view_b).expect("upload b");
-        let result = arrayfun_builtin(
+        let result = call(
             Value::FunctionHandle("plus".into()),
             vec![
                 Value::GpuTensor(handle_a.clone()),
@@ -1475,7 +1486,7 @@ pub(crate) mod tests {
         name = "__arrayfun_test_handler",
         builtin_path = "crate::builtins::acceleration::gpu::arrayfun::tests"
     )]
-    fn arrayfun_test_handler(
+    async fn arrayfun_test_handler(
         seed: Value,
         _err: Value,
         rest: Vec<Value>,

@@ -216,7 +216,7 @@ fn permute_error(builtin: &'static str, message: impl Into<String>) -> RuntimeEr
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::permute"
 )]
-fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
+async fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
     let order_vec = parse_order_argument("permute", order)?;
     match value {
         Value::Tensor(t) => {
@@ -242,7 +242,7 @@ fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
         }
         Value::GpuTensor(handle) => {
             validate_rank("permute", &order_vec, handle.shape.len())?;
-            Ok(permute_gpu("permute", handle, &order_vec)?)
+            Ok(permute_gpu("permute", handle, &order_vec).await?)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             let tensor = tensor::value_into_tensor_for("permute", value)
@@ -480,7 +480,7 @@ pub(crate) fn permute_char_array(
     }
 }
 
-pub(crate) fn permute_gpu(
+pub(crate) async fn permute_gpu(
     builtin: &'static str,
     handle: GpuTensorHandle,
     order: &[usize],
@@ -498,7 +498,7 @@ pub(crate) fn permute_gpu(
         if let Ok(out) = provider.permute(&handle, &zero_based) {
             return Ok(Value::GpuTensor(out));
         }
-        let host_tensor = gpu_helpers::gather_tensor(&handle)?;
+        let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         let permuted = permute_tensor(builtin, host_tensor, order)?;
         let view = HostTensorView {
             data: &permuted.data,
@@ -509,7 +509,7 @@ pub(crate) fn permute_gpu(
             .map(Value::GpuTensor)
             .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
     } else {
-        let host_tensor = gpu_helpers::gather_tensor(&handle)?;
+        let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         permute_tensor(builtin, host_tensor, order).map(tensor::tensor_into_value)
     }
 }
@@ -604,6 +604,11 @@ fn is_vector(tensor: &Tensor) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
+        block_on(super::permute_builtin(value, order))
+    }
     use crate::builtins::common::test_support;
 
     fn tensor(data: &[f64], shape: &[usize]) -> Tensor {
@@ -791,7 +796,8 @@ pub(crate) mod tests {
                 .expect("permute");
             match value {
                 Value::GpuTensor(result) => {
-                    let gathered = gpu_helpers::gather_tensor(&result).expect("gather");
+                    let gathered =
+                        block_on(gpu_helpers::gather_tensor_async(&result)).expect("gather");
                     assert_eq!(gathered.shape, vec![3, 2, 2]);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),

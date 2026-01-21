@@ -17,8 +17,8 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::json::jsondecode::decode_json_text;
-use crate::call_builtin;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::call_builtin_async;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 const DEFAULT_USER_AGENT: &str = "RunMat webwrite/0.0";
@@ -240,8 +240,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::io::http::webwrite"
 )]
-fn webwrite_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let gathered_url = gather_if_needed(&url).map_err(webwrite_flow_with_context)?;
+async fn webwrite_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let gathered_url = gather_if_needed_async(&url)
+        .await
+        .map_err(webwrite_flow_with_context)?;
     let url_text = expect_string_scalar(
         &gathered_url,
         "webwrite: URL must be a character vector or string scalar",
@@ -255,7 +257,11 @@ fn webwrite_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value>
 
     let mut gathered = Vec::with_capacity(rest.len());
     for value in rest {
-        gathered.push(gather_if_needed(&value).map_err(webwrite_flow_with_context)?);
+        gathered.push(
+            gather_if_needed_async(&value)
+                .await
+                .map_err(webwrite_flow_with_context)?,
+        );
     }
     let mut queue: VecDeque<Value> = VecDeque::from(gathered);
     let data_value = queue
@@ -263,7 +269,7 @@ fn webwrite_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value>
         .ok_or_else(|| webwrite_error("webwrite: missing data argument"))?;
 
     let (options, query_params) = parse_arguments(queue)?;
-    let body = prepare_request_body(data_value, &options)?;
+    let body = prepare_request_body(data_value, &options).await?;
     execute_request(&url_text, options, &query_params, body)
 }
 
@@ -485,7 +491,10 @@ fn execute_request(
     }
 }
 
-fn prepare_request_body(data: Value, options: &WebWriteOptions) -> BuiltinResult<PreparedBody> {
+async fn prepare_request_body(
+    data: Value,
+    options: &WebWriteOptions,
+) -> BuiltinResult<PreparedBody> {
     let format = match options.request_format {
         RequestFormat::Auto => guess_request_format(&data),
         set => set,
@@ -496,10 +505,10 @@ fn prepare_request_body(data: Value, options: &WebWriteOptions) -> BuiltinResult
         .or_else(|| default_content_type_for(format));
     let bytes = match format {
         RequestFormat::Form => encode_form_payload(&data)?,
-        RequestFormat::Json => encode_json_payload(&data)?,
+        RequestFormat::Json => encode_json_payload(&data).await?,
         RequestFormat::Text => encode_text_payload(&data)?,
         RequestFormat::Binary => encode_binary_payload(&data)?,
-        RequestFormat::Auto => encode_json_payload(&data)?,
+        RequestFormat::Auto => encode_json_payload(&data).await?,
     };
     Ok(PreparedBody {
         bytes,
@@ -578,8 +587,9 @@ fn hex_digit(nibble: u8) -> char {
     }
 }
 
-fn encode_json_payload(value: &Value) -> BuiltinResult<Vec<u8>> {
-    let encoded = call_builtin("jsonencode", std::slice::from_ref(value))
+async fn encode_json_payload(value: &Value) -> BuiltinResult<Vec<u8>> {
+    let encoded = call_builtin_async("jsonencode", std::slice::from_ref(value))
+        .await
         .map_err(|flow| remap_webwrite_flow(flow, |err| format!("webwrite: {}", err.message())))?;
     let text = expect_string_scalar(
         &encoded,
@@ -1134,6 +1144,10 @@ pub(crate) mod tests {
         let _ = stream.write_all(body);
     }
 
+    fn run_webwrite(url: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(webwrite_builtin(url, rest))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webwrite_posts_form_data_by_default() {
@@ -1161,7 +1175,7 @@ pub(crate) mod tests {
             );
         });
 
-        let result = webwrite_builtin(
+        let result = run_webwrite(
             Value::from(url),
             vec![Value::Struct(payload), Value::Struct(opts)],
         )
@@ -1213,7 +1227,7 @@ pub(crate) mod tests {
             respond_with(stream, "application/json", br#"{"ok":true}"#);
         });
 
-        let result = webwrite_builtin(
+        let result = run_webwrite(
             Value::from(url),
             vec![Value::Struct(payload), Value::Struct(opts)],
         )
@@ -1269,7 +1283,7 @@ pub(crate) mod tests {
             respond_with(stream, "text/plain", b"OK");
         });
 
-        let result = webwrite_builtin(Value::from(url), vec![payload, Value::Struct(opts_struct)])
+        let result = run_webwrite(Value::from(url), vec![payload, Value::Struct(opts_struct)])
             .expect("webwrite");
 
         let headers = rx.recv().expect("headers");
@@ -1308,7 +1322,7 @@ pub(crate) mod tests {
             respond_with(stream, "application/json", br#"{"ok":true}"#);
         });
 
-        let _ = webwrite_builtin(
+        let _ = run_webwrite(
             Value::from(url.clone()),
             vec![payload, Value::Struct(opts_struct)],
         )
@@ -1342,7 +1356,7 @@ pub(crate) mod tests {
             respond_with(stream, "text/plain", b"OK");
         });
 
-        let _ = webwrite_builtin(Value::from(url), vec![payload, Value::Struct(opts_struct)])
+        let _ = run_webwrite(Value::from(url), vec![payload, Value::Struct(opts_struct)])
             .expect("webwrite");
 
         let (headers, body) = rx.recv().expect("request");

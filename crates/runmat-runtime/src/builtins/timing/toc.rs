@@ -197,7 +197,7 @@ fn toc_error_with_identifier(message: impl Into<String>, identifier: &str) -> cr
     keywords = "toc,timing,profiling,benchmark",
     builtin_path = "crate::builtins::timing::toc"
 )]
-pub fn toc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn toc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     match args.len() {
         0 => latest_elapsed(),
         1 => elapsed_from_value(&args[0]),
@@ -229,6 +229,7 @@ fn elapsed_from_value(value: &Value) -> Result<f64, crate::RuntimeError> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::timing::tic::{encode_instant, record_tic, take_latest_start, TEST_GUARD};
+    use futures::executor::block_on;
     use std::time::Duration;
 
     use crate::builtins::common::test_support;
@@ -251,7 +252,7 @@ pub(crate) mod tests {
     fn toc_requires_matching_tic() {
         let _guard = TEST_GUARD.lock().unwrap();
         clear_tic_stack();
-        let err = toc_builtin(Vec::new()).unwrap_err();
+        let err = block_on(toc_builtin(Vec::new())).unwrap_err();
         assert_toc_error_identifier(err, ERR_NO_MATCHING_TIC);
     }
 
@@ -262,7 +263,7 @@ pub(crate) mod tests {
         clear_tic_stack();
         record_tic("tic").expect("tic");
         std::thread::sleep(Duration::from_millis(5));
-        let elapsed = toc_builtin(Vec::new()).expect("toc");
+        let elapsed = block_on(toc_builtin(Vec::new())).expect("toc");
         assert!(elapsed >= 0.0);
         assert!(take_latest_start(BUILTIN_NAME).unwrap().is_none());
     }
@@ -274,10 +275,10 @@ pub(crate) mod tests {
         clear_tic_stack();
         let handle = record_tic("tic").expect("tic");
         std::thread::sleep(Duration::from_millis(5));
-        let elapsed = toc_builtin(vec![Value::Num(handle)]).expect("toc(handle)");
+        let elapsed = block_on(toc_builtin(vec![Value::Num(handle)])).expect("toc(handle)");
         assert!(elapsed >= 0.0);
         // Stack still contains the entry so a subsequent toc pops it.
-        let later = toc_builtin(Vec::new()).expect("second toc");
+        let later = block_on(toc_builtin(Vec::new())).expect("second toc");
         assert!(later >= elapsed);
     }
 
@@ -286,7 +287,7 @@ pub(crate) mod tests {
     fn toc_rejects_invalid_handle() {
         let _guard = TEST_GUARD.lock().unwrap();
         clear_tic_stack();
-        let err = toc_builtin(vec![Value::Num(f64::NAN)]).unwrap_err();
+        let err = block_on(toc_builtin(vec![Value::Num(f64::NAN)])).unwrap_err();
         assert_toc_error_identifier(err, ERR_INVALID_HANDLE);
     }
 
@@ -296,7 +297,7 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap();
         clear_tic_stack();
         let future_handle = encode_instant(Instant::now()) + 10_000.0;
-        let err = toc_builtin(vec![Value::Num(future_handle)]).unwrap_err();
+        let err = block_on(toc_builtin(vec![Value::Num(future_handle)])).unwrap_err();
         assert_toc_error_identifier(err, ERR_INVALID_HANDLE);
     }
 
@@ -305,7 +306,7 @@ pub(crate) mod tests {
     fn toc_rejects_string_handle() {
         let _guard = TEST_GUARD.lock().unwrap();
         clear_tic_stack();
-        let err = toc_builtin(vec![Value::from("not a timer")]).unwrap_err();
+        let err = block_on(toc_builtin(vec![Value::from("not a timer")])).unwrap_err();
         assert_toc_error_identifier(err, ERR_INVALID_HANDLE);
     }
 
@@ -314,7 +315,7 @@ pub(crate) mod tests {
     fn toc_rejects_extra_arguments() {
         let _guard = TEST_GUARD.lock().unwrap();
         clear_tic_stack();
-        let err = toc_builtin(vec![Value::Num(0.0), Value::Num(0.0)]).unwrap_err();
+        let err = block_on(toc_builtin(vec![Value::Num(0.0), Value::Num(0.0)])).unwrap_err();
         assert_toc_error_identifier(err, ERR_TOO_MANY_INPUTS);
     }
 
@@ -327,10 +328,10 @@ pub(crate) mod tests {
         std::thread::sleep(Duration::from_millis(2));
         record_tic("tic").expect("inner");
         std::thread::sleep(Duration::from_millis(4));
-        let inner = toc_builtin(Vec::new()).expect("inner toc");
+        let inner = block_on(toc_builtin(Vec::new())).expect("inner toc");
         assert!(inner >= 0.0);
         std::thread::sleep(Duration::from_millis(2));
-        let outer = toc_builtin(Vec::new()).expect("outer toc");
+        let outer = block_on(toc_builtin(Vec::new())).expect("outer toc");
         assert!(outer >= inner);
     }
 
@@ -353,7 +354,7 @@ pub(crate) mod tests {
         clear_tic_stack();
         record_tic("tic").expect("tic");
         std::thread::sleep(Duration::from_millis(1));
-        let elapsed = toc_builtin(Vec::new()).expect("toc");
+        let elapsed = block_on(toc_builtin(Vec::new())).expect("toc");
         assert!(elapsed >= 0.0);
     }
 }

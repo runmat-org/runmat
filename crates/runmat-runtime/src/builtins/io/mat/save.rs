@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+use futures::future::LocalBoxFuture;
 use regex::Regex;
 use runmat_builtins::{CharArray, StructValue, Tensor, Value};
 use runmat_filesystem::File;
@@ -19,7 +20,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::workspace;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -199,10 +200,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::io::mat::save"
 )]
-fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut host_args = Vec::with_capacity(args.len());
     for value in &args {
-        host_args.push(gather_if_needed(value)?);
+        host_args.push(gather_if_needed_async(value).await?);
     }
 
     let default_path = Value::from("matlab.mat");
@@ -218,7 +219,7 @@ fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         }
     }
 
-    let request = parse_arguments(&host_args[option_start..])?;
+    let request = parse_arguments(&host_args[option_start..]).await?;
     if request.append {
         return Err(save_error("save: -append is not supported yet"));
     }
@@ -230,7 +231,7 @@ fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         && request.structs.is_empty()
         && request.regex_patterns.is_empty()
     {
-        let snapshot = ensure_workspace_entries(&mut workspace_entries)?;
+        let snapshot = ensure_workspace_entries(&mut workspace_entries).await?;
         entries.extend(snapshot.iter().cloned());
     } else {
         for name in &request.variables {
@@ -240,7 +241,7 @@ fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
                     continue;
                 }
             }
-            let value = lookup_workspace(name)?;
+            let value = lookup_workspace(name).await?;
             entries.push((name.clone(), value));
         }
 
@@ -252,7 +253,7 @@ fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             };
             let value = match value {
                 Some(val) => val,
-                None => lookup_workspace(&struct_req.source)?,
+                None => lookup_workspace(&struct_req.source).await?,
             };
 
             let struct_value = match value {
@@ -269,11 +270,12 @@ fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
                 &struct_value,
                 &struct_req.fields,
                 &mut entries,
-            )?;
+            )
+            .await?;
         }
 
         if !request.regex_patterns.is_empty() {
-            let snapshot = ensure_workspace_entries(&mut workspace_entries)?;
+            let snapshot = ensure_workspace_entries(&mut workspace_entries).await?;
             let mut patterns = Vec::with_capacity(request.regex_patterns.len());
             for pattern in &request.regex_patterns {
                 let regex = Regex::new(pattern).map_err(|err| {
@@ -315,7 +317,7 @@ fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     for (name, value) in unique_entries {
         mat_vars.push(MatVar {
             name,
-            array: convert_value(&value)?,
+            array: convert_value(value).await?,
         });
     }
 
@@ -356,7 +358,7 @@ fn save_error_with_source(
         .build()
 }
 
-fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
+async fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
     let mut variables = Vec::new();
     let mut structs = Vec::new();
     let mut regex_patterns = Vec::new();
@@ -374,7 +376,7 @@ fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
                             "save: '-struct' requires a struct variable name",
                         ));
                     }
-                    let struct_names = extract_names(&values[idx])?;
+                    let struct_names = extract_names(&values[idx]).await?;
                     if struct_names.len() != 1 {
                         return Err(save_error(
                             "save: '-struct' requires a single struct variable name",
@@ -387,7 +389,7 @@ fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
                         if option_token(&values[idx])?.is_some() {
                             break;
                         }
-                        let names = extract_names(&values[idx])?;
+                        let names = extract_names(&values[idx]).await?;
                         if names.is_empty() {
                             break;
                         }
@@ -412,7 +414,7 @@ fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
                         if option_token(&values[idx])?.is_some() {
                             break;
                         }
-                        let names = extract_names(&values[idx])?;
+                        let names = extract_names(&values[idx]).await?;
                         if names.is_empty() {
                             return Err(save_error(
                                 "save: '-regexp' requires pattern strings or character rows",
@@ -432,7 +434,7 @@ fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
                 }
             }
         } else {
-            let names = extract_names(&values[idx])?;
+            let names = extract_names(&values[idx]).await?;
             variables.extend(names);
         }
         idx += 1;
@@ -446,22 +448,22 @@ fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
     })
 }
 
-fn ensure_workspace_entries(
+async fn ensure_workspace_entries(
     cache: &mut Option<Vec<(String, Value)>>,
 ) -> BuiltinResult<&Vec<(String, Value)>> {
     if cache.is_none() {
-        let entries = collect_workspace_entries()?;
+        let entries = collect_workspace_entries().await?;
         *cache = Some(entries);
     }
     Ok(cache.as_ref().unwrap())
 }
 
-fn collect_workspace_entries() -> BuiltinResult<Vec<(String, Value)>> {
+async fn collect_workspace_entries() -> BuiltinResult<Vec<(String, Value)>> {
     let snapshot =
         workspace::snapshot().ok_or_else(|| save_error("save: workspace state unavailable"))?;
     let mut entries = Vec::with_capacity(snapshot.len());
     for (name, value) in snapshot {
-        let gathered = gather_if_needed(&value)?;
+        let gathered = gather_if_needed_async(&value).await?;
         entries.push((name, gathered));
     }
     Ok(entries)
@@ -483,7 +485,7 @@ fn option_token(value: &Value) -> BuiltinResult<Option<String>> {
     Ok(None)
 }
 
-fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
+async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(s) => Ok(vec![s.clone()]),
         Value::CharArray(ca) => {
@@ -517,7 +519,7 @@ fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
         }
         other => {
             // Gather once, then require a string-like scalar to avoid infinite recursion.
-            let gathered = gather_if_needed(other)?;
+            let gathered = gather_if_needed_async(other).await?;
             if let Some(text) = value_to_string_scalar(&gathered) {
                 return Ok(vec![text]);
             }
@@ -537,7 +539,7 @@ fn value_to_string_scalar(value: &Value) -> Option<String> {
     }
 }
 
-fn append_struct_fields(
+async fn append_struct_fields(
     struct_name: &str,
     value: &StructValue,
     fields: &Option<Vec<String>>,
@@ -547,7 +549,7 @@ fn append_struct_fields(
         for field in names {
             match value.fields.get(field) {
                 Some(val) => {
-                    let gathered = gather_if_needed(val)?;
+                    let gathered = gather_if_needed_async(val).await?;
                     out.push((field.clone(), gathered));
                 }
                 None => {
@@ -560,7 +562,7 @@ fn append_struct_fields(
         }
     } else {
         for (field, val) in &value.fields {
-            let gathered = gather_if_needed(val)?;
+            let gathered = gather_if_needed_async(val).await?;
             out.push((field.clone(), gathered));
         }
     }
@@ -583,14 +585,14 @@ fn char_array_rows_as_strings(ca: &CharArray) -> Vec<String> {
     rows
 }
 
-fn lookup_workspace(name: &str) -> BuiltinResult<Value> {
+async fn lookup_workspace(name: &str) -> BuiltinResult<Value> {
     let value = workspace::lookup(name).ok_or_else(|| {
         save_error(format!(
             "save: variable '{}' was not found in the workspace",
             name
         ))
     })?;
-    gather_if_needed(&value)
+    gather_if_needed_async(&value).await
 }
 
 fn normalise_path(path: &Value) -> BuiltinResult<PathBuf> {
@@ -616,159 +618,159 @@ fn canonical_dims(shape: &[usize]) -> Vec<usize> {
     }
 }
 
-fn convert_value(value: &Value) -> BuiltinResult<MatArray> {
-    match value {
-        Value::Num(n) => Ok(MatArray {
-            class: MatClass::Double,
-            dims: vec![1, 1],
-            data: MatData::Double {
-                real: vec![*n],
-                imag: None,
-            },
-        }),
-        Value::Int(i) => Ok(MatArray {
-            class: MatClass::Double,
-            dims: vec![1, 1],
-            data: MatData::Double {
-                real: vec![i.to_f64()],
-                imag: None,
-            },
-        }),
-        Value::Bool(b) => Ok(MatArray {
-            class: MatClass::Logical,
-            dims: vec![1, 1],
-            data: MatData::Logical {
-                data: vec![if *b { 1 } else { 0 }],
-            },
-        }),
-        Value::Tensor(t) => Ok(MatArray {
-            class: MatClass::Double,
-            dims: canonical_dims(&t.shape),
-            data: MatData::Double {
-                real: t.data.clone(),
-                imag: None,
-            },
-        }),
-        Value::Complex(re, im) => Ok(MatArray {
-            class: MatClass::Double,
-            dims: vec![1, 1],
-            data: MatData::Double {
-                real: vec![*re],
-                imag: Some(vec![*im]),
-            },
-        }),
-        Value::ComplexTensor(t) => {
-            let mut real = Vec::with_capacity(t.data.len());
-            let mut imag = Vec::with_capacity(t.data.len());
-            for (re, im) in &t.data {
-                real.push(*re);
-                imag.push(*im);
-            }
-            Ok(MatArray {
+fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray>> {
+    Box::pin(async move {
+        match value {
+            Value::Num(n) => Ok(MatArray {
+                class: MatClass::Double,
+                dims: vec![1, 1],
+                data: MatData::Double {
+                    real: vec![n],
+                    imag: None,
+                },
+            }),
+            Value::Int(i) => Ok(MatArray {
+                class: MatClass::Double,
+                dims: vec![1, 1],
+                data: MatData::Double {
+                    real: vec![i.to_f64()],
+                    imag: None,
+                },
+            }),
+            Value::Bool(b) => Ok(MatArray {
+                class: MatClass::Logical,
+                dims: vec![1, 1],
+                data: MatData::Logical {
+                    data: vec![if b { 1 } else { 0 }],
+                },
+            }),
+            Value::Tensor(t) => Ok(MatArray {
                 class: MatClass::Double,
                 dims: canonical_dims(&t.shape),
                 data: MatData::Double {
-                    real,
-                    imag: Some(imag),
+                    real: t.data,
+                    imag: None,
                 },
-            })
-        }
-        Value::LogicalArray(la) => Ok(MatArray {
-            class: MatClass::Logical,
-            dims: canonical_dims(&la.shape),
-            data: MatData::Logical {
-                data: la.data.clone(),
-            },
-        }),
-        Value::CharArray(ca) => Ok(MatArray {
-            class: MatClass::Char,
-            dims: vec![ca.rows, ca.cols],
-            data: MatData::Char {
-                data: char_array_to_utf16(ca),
-            },
-        }),
-        Value::String(s) => Ok(MatArray {
-            class: MatClass::Char,
-            dims: vec![1, s.chars().count()],
-            data: MatData::Char {
-                data: s.encode_utf16().collect(),
-            },
-        }),
-        Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                return convert_value(&Value::String(sa.data[0].clone()));
-            }
-            let mut elements = Vec::with_capacity(sa.data.len());
-            for text in &sa.data {
-                elements.push(MatArray {
-                    class: MatClass::Char,
-                    dims: vec![1, text.chars().count()],
-                    data: MatData::Char {
-                        data: text.encode_utf16().collect(),
-                    },
-                });
-            }
-            Ok(MatArray {
-                class: MatClass::Cell,
-                dims: canonical_dims(&sa.shape),
-                data: MatData::Cell { elements },
-            })
-        }
-        Value::Cell(cell) => {
-            let mut elements = Vec::with_capacity(cell.data.len());
-            for col in 0..cell.cols {
-                for row in 0..cell.rows {
-                    let idx = row * cell.cols + col;
-                    let element = unsafe { &*cell.data[idx].as_raw() };
-                    let gathered = gather_if_needed(element)?;
-                    elements.push(convert_value(&gathered)?);
-                }
-            }
-            Ok(MatArray {
-                class: MatClass::Cell,
-                dims: vec![cell.rows, cell.cols],
-                data: MatData::Cell { elements },
-            })
-        }
-        Value::Struct(struct_value) => {
-            let mut field_names: Vec<String> = struct_value.fields.keys().cloned().collect();
-            field_names.sort();
-            let mut field_values = Vec::with_capacity(field_names.len());
-            for field in &field_names {
-                let val = struct_value
-                    .fields
-                    .get(field)
-                    .ok_or_else(|| save_error(format!("save: missing struct field '{field}'")))?;
-                let gathered = gather_if_needed(val)?;
-                field_values.push(convert_value(&gathered)?);
-            }
-            Ok(MatArray {
-                class: MatClass::Struct,
+            }),
+            Value::Complex(re, im) => Ok(MatArray {
+                class: MatClass::Double,
                 dims: vec![1, 1],
-                data: MatData::Struct {
-                    field_names,
-                    field_values,
+                data: MatData::Double {
+                    real: vec![re],
+                    imag: Some(vec![im]),
                 },
-            })
-        }
-        Value::GpuTensor(handle) => {
-            let provider = runmat_accelerate_api::provider()
-                .ok_or_else(|| save_error("save: no acceleration provider registered"))?;
-            let host = match provider.download(handle) {
-                Ok(host) => host,
-                Err(err) => {
-                    return Err(save_error_with_source(format!("save: {err}"), err));
+            }),
+            Value::ComplexTensor(t) => {
+                let mut real = Vec::with_capacity(t.data.len());
+                let mut imag = Vec::with_capacity(t.data.len());
+                for (re, im) in &t.data {
+                    real.push(*re);
+                    imag.push(*im);
                 }
-            };
-            let tensor =
-                Tensor::new(host.data, host.shape).map_err(|e| save_error(format!("save: {e}")))?;
-            convert_value(&Value::Tensor(tensor))
+                Ok(MatArray {
+                    class: MatClass::Double,
+                    dims: canonical_dims(&t.shape),
+                    data: MatData::Double {
+                        real,
+                        imag: Some(imag),
+                    },
+                })
+            }
+            Value::LogicalArray(la) => Ok(MatArray {
+                class: MatClass::Logical,
+                dims: canonical_dims(&la.shape),
+                data: MatData::Logical { data: la.data },
+            }),
+            Value::CharArray(ca) => Ok(MatArray {
+                class: MatClass::Char,
+                dims: vec![ca.rows, ca.cols],
+                data: MatData::Char {
+                    data: char_array_to_utf16(&ca),
+                },
+            }),
+            Value::String(s) => Ok(MatArray {
+                class: MatClass::Char,
+                dims: vec![1, s.chars().count()],
+                data: MatData::Char {
+                    data: s.encode_utf16().collect(),
+                },
+            }),
+            Value::StringArray(sa) => {
+                if sa.data.len() == 1 {
+                    return convert_value(Value::String(sa.data[0].clone())).await;
+                }
+                let mut elements = Vec::with_capacity(sa.data.len());
+                for text in &sa.data {
+                    elements.push(MatArray {
+                        class: MatClass::Char,
+                        dims: vec![1, text.chars().count()],
+                        data: MatData::Char {
+                            data: text.encode_utf16().collect(),
+                        },
+                    });
+                }
+                Ok(MatArray {
+                    class: MatClass::Cell,
+                    dims: canonical_dims(&sa.shape),
+                    data: MatData::Cell { elements },
+                })
+            }
+            Value::Cell(cell) => {
+                let mut elements = Vec::with_capacity(cell.data.len());
+                for col in 0..cell.cols {
+                    for row in 0..cell.rows {
+                        let idx = row * cell.cols + col;
+                        let element = unsafe { &*cell.data[idx].as_raw() };
+                        let gathered = gather_if_needed_async(element).await?;
+                        elements.push(convert_value(gathered).await?);
+                    }
+                }
+                Ok(MatArray {
+                    class: MatClass::Cell,
+                    dims: vec![cell.rows, cell.cols],
+                    data: MatData::Cell { elements },
+                })
+            }
+            Value::Struct(struct_value) => {
+                let mut field_names: Vec<String> = struct_value.fields.keys().cloned().collect();
+                field_names.sort();
+                let mut field_values = Vec::with_capacity(field_names.len());
+                for field in &field_names {
+                    let val = struct_value
+                        .fields
+                        .get(field)
+                        .ok_or_else(|| save_error(format!("save: missing struct field '{field}'")))?;
+                    let gathered = gather_if_needed_async(val).await?;
+                    field_values.push(convert_value(gathered).await?);
+                }
+                Ok(MatArray {
+                    class: MatClass::Struct,
+                    dims: vec![1, 1],
+                    data: MatData::Struct {
+                        field_names,
+                        field_values,
+                    },
+                })
+            }
+            Value::GpuTensor(handle) => {
+                let provider = runmat_accelerate_api::provider()
+                    .ok_or_else(|| save_error("save: no acceleration provider registered"))?;
+                let host = match provider.download(&handle) {
+                    Ok(host) => host,
+                    Err(err) => {
+                        return Err(save_error_with_source(format!("save: {err}"), err));
+                    }
+                };
+                let tensor = Tensor::new(host.data, host.shape)
+                    .map_err(|e| save_error(format!("save: {e}")))?;
+                convert_value(Value::Tensor(tensor)).await
+            }
+            unsupported => Err(save_error(format!(
+                "save: value of type '{:?}' is not supported",
+                unsupported
+            ))),
         }
-        unsupported => Err(save_error(format!(
-            "save: value of type '{:?}' is not supported",
-            unsupported
-        ))),
-    }
+    })
 }
 
 fn char_array_to_utf16(ca: &CharArray) -> Vec<u16> {
@@ -943,6 +945,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::workspace::WorkspaceResolver;
+    use futures::executor::block_on;
     use once_cell::sync::OnceCell;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::StringArray;
@@ -957,18 +960,15 @@ pub(crate) mod tests {
     }
 
     fn ensure_test_resolver() {
-        static INIT: OnceCell<()> = OnceCell::new();
-        INIT.get_or_init(|| {
-            workspace::register_workspace_resolver(WorkspaceResolver {
-                lookup: |name| TEST_WORKSPACE.with(|slot| slot.borrow().get(name).cloned()),
-                snapshot: || {
-                    let mut entries: Vec<(String, Value)> =
-                        TEST_WORKSPACE.with(|slot| slot.borrow().clone().into_iter().collect());
-                    entries.sort_by(|a, b| a.0.cmp(&b.0));
-                    entries
-                },
-                globals: || Vec::new(),
-            });
+        workspace::register_workspace_resolver(WorkspaceResolver {
+            lookup: |name| TEST_WORKSPACE.with(|slot| slot.borrow().get(name).cloned()),
+            snapshot: || {
+                let mut entries: Vec<(String, Value)> =
+                    TEST_WORKSPACE.with(|slot| slot.borrow().clone().into_iter().collect());
+                entries.sort_by(|a, b| a.0.cmp(&b.0));
+                entries
+            },
+            globals: || Vec::new(),
         });
     }
 
@@ -1028,7 +1028,7 @@ pub(crate) mod tests {
             Value::from(path.to_string_lossy().to_string()),
             Value::from("A"),
         ];
-        save_builtin(args).unwrap();
+        block_on(save_builtin(args)).unwrap();
 
         let file = File::open(&path).unwrap();
         let mat = matfile::MatFile::parse(file).unwrap();
@@ -1057,7 +1057,7 @@ pub(crate) mod tests {
             Value::from(path.to_string_lossy().to_string()),
             Value::StringArray(names),
         ];
-        save_builtin(args).unwrap();
+        block_on(save_builtin(args)).unwrap();
 
         let file = File::open(&path).unwrap();
         let mat = matfile::MatFile::parse(file).unwrap();
@@ -1082,7 +1082,7 @@ pub(crate) mod tests {
             Value::from(path.to_string_lossy().to_string()),
             Value::CharArray(chars),
         ];
-        save_builtin(args).unwrap();
+        block_on(save_builtin(args)).unwrap();
 
         let file = File::open(&path).unwrap();
         let mat = matfile::MatFile::parse(file).unwrap();
@@ -1110,7 +1110,7 @@ pub(crate) mod tests {
             Value::from("-struct"),
             Value::from("opts"),
         ];
-        save_builtin(args).unwrap();
+        block_on(save_builtin(args)).unwrap();
 
         let file = File::open(&path).unwrap();
         let mat = matfile::MatFile::parse(file).unwrap();
@@ -1141,7 +1141,7 @@ pub(crate) mod tests {
             Value::from("opts"),
             Value::from("bar"),
         ];
-        save_builtin(args).unwrap();
+        block_on(save_builtin(args)).unwrap();
 
         let file = File::open(&path).unwrap();
         let mat = matfile::MatFile::parse(file).unwrap();
@@ -1158,7 +1158,10 @@ pub(crate) mod tests {
     fn save_missing_variable_errors() {
         ensure_test_resolver();
         set_workspace(&[]);
-        let result = save_builtin(vec![Value::from("missing.mat"), Value::from("x")]);
+        let result = block_on(save_builtin(vec![
+            Value::from("missing.mat"),
+            Value::from("x"),
+        ]));
         assert_error_contains(result, "variable 'x'");
     }
 
@@ -1179,7 +1182,7 @@ pub(crate) mod tests {
             Value::from("^a"),
             Value::from("ma$"),
         ];
-        save_builtin(args).unwrap();
+        block_on(save_builtin(args)).unwrap();
 
         let file = File::open(&path).unwrap();
         let mat = matfile::MatFile::parse(file).unwrap();
@@ -1193,7 +1196,7 @@ pub(crate) mod tests {
     fn save_regex_requires_pattern() {
         ensure_test_resolver();
         set_workspace(&[("foo", Value::Num(1.0))]);
-        let result = save_builtin(vec![Value::from("-regexp")]);
+        let result = block_on(save_builtin(vec![Value::from("-regexp")]));
         assert_error_contains(result, "'-regexp' requires at least one pattern");
     }
 
@@ -1202,11 +1205,11 @@ pub(crate) mod tests {
     fn save_unsupported_option_errors() {
         ensure_test_resolver();
         set_workspace(&[("foo", Value::Num(1.0))]);
-        let result = save_builtin(vec![
+        let result = block_on(save_builtin(vec![
             Value::from("text.mat"),
             Value::from("-ascii"),
             Value::from("foo"),
-        ]);
+        ]));
         assert_error_contains(result, "unsupported option '-ascii'");
     }
 
@@ -1220,7 +1223,7 @@ pub(crate) mod tests {
         let target = dir.path().join("matlab_default.mat");
         let target_str = target.to_string_lossy().to_string();
         let _env = EnvOverride::set("RUNMAT_SAVE_DEFAULT_PATH", &target_str);
-        save_builtin(Vec::new()).unwrap();
+        block_on(save_builtin(Vec::new())).unwrap();
 
         assert!(
             target.exists(),
@@ -1250,7 +1253,7 @@ pub(crate) mod tests {
         let target = dir.path().join("matlab_struct.mat");
         let target_str = target.to_string_lossy().to_string();
         let _env = EnvOverride::set("RUNMAT_SAVE_DEFAULT_PATH", &target_str);
-        save_builtin(vec![Value::from("-struct"), Value::from("payload")]).unwrap();
+        block_on(save_builtin(vec![Value::from("-struct"), Value::from("payload")])).unwrap();
 
         assert!(
             target.exists(),
@@ -1281,10 +1284,10 @@ pub(crate) mod tests {
 
             let dir = tempdir().unwrap();
             let path = dir.path().join("gpu_roundtrip.mat");
-            save_builtin(vec![
+            block_on(save_builtin(vec![
                 Value::from(path.to_string_lossy().to_string()),
                 Value::from("gpu_data"),
-            ])
+            ]))
             .unwrap();
 
             let file = File::open(&path).unwrap();
@@ -1326,10 +1329,10 @@ pub(crate) mod tests {
 
         let dir = tempdir().unwrap();
         let path = dir.path().join("wgpu_roundtrip.mat");
-        save_builtin(vec![
+        block_on(save_builtin(vec![
             Value::from(path.to_string_lossy().to_string()),
             Value::from("wgpu_tensor"),
-        ])
+        ]))
         .unwrap();
 
         let file = File::open(&path).unwrap();

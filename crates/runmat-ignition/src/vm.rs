@@ -1,6 +1,7 @@
 use crate::functions::{Bytecode, ExecutionContext, UserFunction};
 use crate::gc_roots::InterpretContext;
 use crate::instr::{EmitLabel, Instr};
+use futures::executor::block_on;
 use miette::{SourceOffset, SourceSpan};
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::fusion_exec::{
@@ -2156,7 +2157,7 @@ async fn run_interpreter(
                         match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = runmat_runtime::matrix::value_matmul(&a, &b)?;
+                                let v = runmat_runtime::matrix::value_matmul(&a, &b).await?;
                                 stack.push(v)
                             }
                         }
@@ -2170,14 +2171,14 @@ async fn run_interpreter(
                         match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = runmat_runtime::matrix::value_matmul(&a, &b)?;
+                                let v = runmat_runtime::matrix::value_matmul(&a, &b).await?;
                                 stack.push(v)
                             }
                         }
                     }
                     _ => {
                         let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::MatMul, &a, &b)?;
-                        let v = runmat_runtime::matrix::value_matmul(&a_acc, &b_acc)?;
+                        let v = runmat_runtime::matrix::value_matmul(&a_acc, &b_acc).await?;
                         stack.push(v)
                     }
                 }
@@ -4436,7 +4437,9 @@ async fn run_interpreter(
                 if name == "gather" {
                     let eval = match runmat_runtime::builtins::acceleration::gpu::gather::evaluate(
                         &args,
-                    ) {
+                    )
+                    .await
+                    {
                         Ok(eval) => eval,
                         Err(err) => vm_bail!(err),
                     };
@@ -4503,7 +4506,8 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "load" {
-                    let eval = match runmat_runtime::builtins::io::mat::load::evaluate(&args) {
+                    let eval = match runmat_runtime::builtins::io::mat::load::evaluate(&args).await
+                    {
                         Ok(eval) => eval,
                         Err(err) => vm_bail!(err),
                     };
@@ -4527,6 +4531,7 @@ async fn run_interpreter(
                 }
                 if name == "fopen" {
                     let eval = match runmat_runtime::builtins::io::filetext::fopen::evaluate(&args)
+                        .await
                     {
                         Ok(eval) => eval,
                         Err(err) => vm_bail!(err),
@@ -4554,7 +4559,9 @@ async fn run_interpreter(
                     let eval = match runmat_runtime::builtins::io::filetext::fgets::evaluate(
                         &args[0],
                         &args[1..],
-                    ) {
+                    )
+                    .await
+                    {
                         Ok(eval) => eval,
                         Err(err) => vm_bail!(err),
                     };
@@ -4573,6 +4580,7 @@ async fn run_interpreter(
                 }
                 if name == "fclose" {
                     let eval = match runmat_runtime::builtins::io::filetext::fclose::evaluate(&args)
+                        .await
                     {
                         Ok(eval) => eval,
                         Err(err) => vm_bail!(err),
@@ -4591,7 +4599,9 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "mkdir" {
-                    let eval = match runmat_runtime::builtins::io::repl_fs::mkdir::evaluate(&args) {
+                    let eval = match runmat_runtime::builtins::io::repl_fs::mkdir::evaluate(&args)
+                        .await
+                    {
                         Ok(eval) => eval,
                         Err(err) => vm_bail!(err),
                     };
@@ -4610,6 +4620,7 @@ async fn run_interpreter(
                 }
                 if name == "setenv" {
                     let eval = match runmat_runtime::builtins::io::repl_fs::setenv::evaluate(&args)
+                        .await
                     {
                         Ok(eval) => eval,
                         Err(err) => vm_bail!(err),
@@ -4629,7 +4640,9 @@ async fn run_interpreter(
                 }
                 if name == "savepath" {
                     let eval =
-                        match runmat_runtime::builtins::io::repl_fs::savepath::evaluate(&args) {
+                        match runmat_runtime::builtins::io::repl_fs::savepath::evaluate(&args)
+                            .await
+                        {
                             Ok(eval) => eval,
                             Err(err) => vm_bail!(err),
                         };
@@ -4648,7 +4661,9 @@ async fn run_interpreter(
                 }
                 if name == "copyfile" {
                     let eval =
-                        match runmat_runtime::builtins::io::repl_fs::copyfile::evaluate(&args) {
+                        match runmat_runtime::builtins::io::repl_fs::copyfile::evaluate(&args)
+                            .await
+                        {
                             Ok(eval) => eval,
                             Err(err) => vm_bail!(err),
                         };
@@ -4667,7 +4682,9 @@ async fn run_interpreter(
                 }
                 if name == "movefile" {
                     let eval =
-                        match runmat_runtime::builtins::io::repl_fs::movefile::evaluate(&args) {
+                        match runmat_runtime::builtins::io::repl_fs::movefile::evaluate(&args)
+                            .await
+                        {
                             Ok(eval) => eval,
                             Err(err) => vm_bail!(err),
                         };
@@ -4685,7 +4702,9 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "rmdir" {
-                    let eval = match runmat_runtime::builtins::io::repl_fs::rmdir::evaluate(&args) {
+                    let eval = match runmat_runtime::builtins::io::repl_fs::rmdir::evaluate(&args)
+                        .await
+                    {
                         Ok(eval) => eval,
                         Err(err) => vm_bail!(err),
                     };
@@ -4806,7 +4825,9 @@ async fn run_interpreter(
                             args[0].clone(),
                             args[1].clone(),
                             &args[2..],
-                        ) {
+                        )
+                        .await
+                        {
                             Ok(v) => v,
                             Err(err) => vm_bail!(err),
                         };
@@ -4944,9 +4965,11 @@ async fn run_interpreter(
                 }
                 // Special-case for 'find' to support [i,j,v] = find(A)
                 if name == "find" && !args.is_empty() {
-                    let eval = match runmat_runtime::builtins::array::indexing::find::evaluate(
-                        args[0].clone(),
-                        &args[1..],
+                    let eval = match block_on(
+                        runmat_runtime::builtins::array::indexing::find::evaluate(
+                            args[0].clone(),
+                            &args[1..],
+                        ),
                     ) {
                         Ok(eval) => eval,
                         Err(err) => vm_bail!(err),
@@ -4994,7 +5017,9 @@ async fn run_interpreter(
                         args[0].clone(),
                         args[1].clone(),
                         &args[2..],
-                    ) {
+                    )
+                    .await
+                    {
                         Ok(eval) => eval,
                         Err(err) => vm_bail!(err),
                     };
@@ -5047,11 +5072,13 @@ async fn run_interpreter(
                         let result = match args.len() {
                             1 => runmat_runtime::builtins::math::poly::polyder::derivative_single(
                                 args[0].clone(),
-                            ),
+                            )
+                            .await,
                             2 => runmat_runtime::builtins::math::poly::polyder::derivative_product(
                                 args[0].clone(),
                                 args[1].clone(),
-                            ),
+                            )
+                            .await,
                             _ => vm_bail!("polyder: too many input arguments.".to_string()),
                         };
                         match result {
@@ -5080,7 +5107,9 @@ async fn run_interpreter(
                         match runmat_runtime::builtins::math::poly::polyder::evaluate_quotient(
                             args[0].clone(),
                             args[1].clone(),
-                        ) {
+                        )
+                        .await
+                        {
                             Ok(eval) => eval,
                             Err(err) => vm_bail!(err),
                         };
@@ -5133,7 +5162,9 @@ async fn run_interpreter(
                         args[1].clone(),
                         args[2].clone(),
                         &args[3..],
-                    ) {
+                    )
+                    .await
+                    {
                         Ok(eval) => eval,
                         Err(err) => vm_bail!(err),
                     };
@@ -5185,9 +5216,11 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "sort" && !args.is_empty() {
-                    let eval = match runmat_runtime::builtins::array::sorting_sets::sort::evaluate(
-                        args[0].clone(),
-                        &args[1..],
+                    let eval = match block_on(
+                        runmat_runtime::builtins::array::sorting_sets::sort::evaluate(
+                            args[0].clone(),
+                            &args[1..],
+                        ),
                     ) {
                         Ok(eval) => eval,
                         Err(err) => vm_bail!(err),
@@ -5254,11 +5287,12 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "sortrows" && !args.is_empty() {
-                    let eval =
-                        match runmat_runtime::builtins::array::sorting_sets::sortrows::evaluate(
+                    let eval = match block_on(
+                        runmat_runtime::builtins::array::sorting_sets::sortrows::evaluate(
                             args[0].clone(),
                             &args[1..],
-                        ) {
+                        ),
+                    ) {
                             Ok(eval) => eval,
                             Err(err) => vm_bail!(err),
                         };
@@ -5278,12 +5312,13 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "ismember" && args.len() >= 2 {
-                    let eval =
-                        match runmat_runtime::builtins::array::sorting_sets::ismember::evaluate(
+                    let eval = match block_on(
+                        runmat_runtime::builtins::array::sorting_sets::ismember::evaluate(
                             args[0].clone(),
                             args[1].clone(),
                             &args[2..],
-                        ) {
+                        ),
+                    ) {
                             Ok(eval) => eval,
                             Err(err) => vm_bail!(err),
                         };
@@ -5305,12 +5340,13 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "intersect" && args.len() >= 2 {
-                    let eval =
-                        match runmat_runtime::builtins::array::sorting_sets::intersect::evaluate(
+                    let eval = match block_on(
+                        runmat_runtime::builtins::array::sorting_sets::intersect::evaluate(
                             args[0].clone(),
                             args[1].clone(),
                             &args[2..],
-                        ) {
+                        ),
+                    ) {
                             Ok(eval) => eval,
                             Err(err) => vm_bail!(err),
                         };
@@ -5339,10 +5375,12 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "union" && args.len() >= 2 {
-                    let eval = match runmat_runtime::builtins::array::sorting_sets::union::evaluate(
-                        args[0].clone(),
-                        args[1].clone(),
-                        &args[2..],
+                    let eval = match block_on(
+                        runmat_runtime::builtins::array::sorting_sets::union::evaluate(
+                            args[0].clone(),
+                            args[1].clone(),
+                            &args[2..],
+                        ),
                     ) {
                         Ok(eval) => eval,
                         Err(err) => vm_bail!(err),
@@ -5466,9 +5504,11 @@ async fn run_interpreter(
                     continue;
                 }
                 if name == "unique" && !args.is_empty() {
-                    let eval = match runmat_runtime::builtins::array::sorting_sets::unique::evaluate(
-                        args[0].clone(),
-                        &args[1..],
+                    let eval = match block_on(
+                        runmat_runtime::builtins::array::sorting_sets::unique::evaluate(
+                            args[0].clone(),
+                            &args[1..],
+                        ),
                     ) {
                         Ok(eval) => eval,
                         Err(err) => vm_bail!(err),
@@ -5646,7 +5686,7 @@ async fn run_interpreter(
                     rows_data.push(row_values);
                 }
                 rows_data.reverse();
-                let result = runmat_runtime::create_matrix_from_values(&rows_data)?;
+                let result = runmat_runtime::create_matrix_from_values(&rows_data).await?;
                 stack.push(result);
             }
             Instr::CreateRange(has_step) => {
@@ -5663,7 +5703,8 @@ async fn run_interpreter(
                         .pop()
                         .ok_or(mex("StackUnderflow", "stack underflow"))?)
                         .try_into()?;
-                    let range_result = runmat_runtime::create_range(start, Some(step), end)?;
+                    let range_result =
+                        runmat_runtime::create_range(start, Some(step), end).await?;
                     stack.push(range_result);
                 } else {
                     let end: f64 = (&stack
@@ -5674,7 +5715,7 @@ async fn run_interpreter(
                         .pop()
                         .ok_or(mex("StackUnderflow", "stack underflow"))?)
                         .try_into()?;
-                    let range_result = runmat_runtime::create_range(start, None, end)?;
+                    let range_result = runmat_runtime::create_range(start, None, end).await?;
                     stack.push(range_result);
                 }
             }

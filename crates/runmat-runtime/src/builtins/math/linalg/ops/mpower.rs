@@ -227,17 +227,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "matmul",
     builtin_path = "crate::builtins::math::linalg::ops::mpower"
 )]
-fn mpower_builtin(base: Value, exponent: Value) -> BuiltinResult<Value> {
-    mpower_eval(&base, &exponent)
+async fn mpower_builtin(base: Value, exponent: Value) -> BuiltinResult<Value> {
+    mpower_eval(&base, &exponent).await
 }
 
-pub(crate) fn mpower_eval(base: &Value, exponent: &Value) -> BuiltinResult<Value> {
+pub(crate) async fn mpower_eval(base: &Value, exponent: &Value) -> BuiltinResult<Value> {
     if let Some(result) = try_gpu_mpower(base, exponent)? {
         return Ok(result);
     }
 
-    let base_host = crate::dispatcher::gather_if_needed(base).map_err(map_control_flow)?;
-    let exponent_host = crate::dispatcher::gather_if_needed(exponent).map_err(map_control_flow)?;
+    let base_host = crate::dispatcher::gather_if_needed_async(base)
+        .await
+        .map_err(map_control_flow)?;
+    let exponent_host = crate::dispatcher::gather_if_needed_async(exponent)
+        .await
+        .map_err(map_control_flow)?;
     let result = crate::elementwise::power(&base_host, &exponent_host).map_err(builtin_error)?;
 
     if matches!(base, Value::GpuTensor(_)) {
@@ -456,6 +460,7 @@ impl HandleState {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -578,4 +583,9 @@ pub(crate) mod tests {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
+
+    fn mpower_builtin(base: Value, exponent: Value) -> BuiltinResult<Value> {
+        block_on(super::mpower_builtin(base, exponent))
+    }
+
 }

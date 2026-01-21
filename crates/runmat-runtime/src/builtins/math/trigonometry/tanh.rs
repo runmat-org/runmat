@@ -242,9 +242,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::tanh"
 )]
-fn tanh_builtin(value: Value) -> BuiltinResult<Value> {
+async fn tanh_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => tanh_gpu(handle),
+        Value::GpuTensor(handle) => tanh_gpu(handle).await,
         Value::Complex(re, im) => {
             let (real, imag) = tanh_complex_parts(re, im);
             Ok(Value::Complex(real, imag))
@@ -258,13 +258,13 @@ fn tanh_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn tanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn tanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_tanh(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     tanh_tensor(tensor).map(tensor::tensor_into_value)
 }
 
@@ -317,8 +317,13 @@ fn tanh_complex_parts(re: f64, im: f64) -> (f64, f64) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use num_complex::Complex64;
     use runmat_builtins::{CharArray, Tensor};
+
+    fn tanh_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::tanh_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -420,7 +425,7 @@ pub(crate) mod tests {
             .expect("wgpu provider")
             .upload(&view)
             .expect("upload");
-        let gpu_value = tanh_gpu(handle).expect("gpu tanh");
+        let gpu_value = block_on(tanh_gpu(handle)).expect("gpu tanh");
         let gpu_tensor = test_support::gather(gpu_value).expect("gather gpu");
 
         assert_eq!(gpu_tensor.shape, cpu_tensor.shape);

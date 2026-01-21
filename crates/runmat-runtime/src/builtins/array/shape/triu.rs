@@ -230,11 +230,11 @@ fn triu_error(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::triu"
 )]
-fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(triu_error("triu: too many input arguments"));
     }
-    let offset = parse_diagonal_offset(&rest)?;
+    let offset = parse_diagonal_offset(&rest).await?;
     match value {
         Value::Tensor(tensor) => Ok(triu_tensor(tensor, offset).map(tensor::tensor_into_value)?),
         Value::LogicalArray(array) => {
@@ -269,7 +269,7 @@ fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
                 .map_err(|e| triu_error(format!("triu: {e}")))?;
             Ok(triu_tensor(tensor, offset).map(tensor::tensor_into_value)?)
         }
-        Value::GpuTensor(handle) => Ok(triu_gpu(handle, offset)?),
+        Value::GpuTensor(handle) => Ok(triu_gpu(handle, offset).await?),
         Value::String(_) | Value::StringArray(_) => {
             Err(triu_error("triu: string arrays are not supported"))
         }
@@ -285,11 +285,12 @@ fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 }
 
-fn parse_diagonal_offset(args: &[Value]) -> crate::BuiltinResult<isize> {
+async fn parse_diagonal_offset(args: &[Value]) -> crate::BuiltinResult<isize> {
     if args.is_empty() {
         return Ok(0);
     }
-    let gathered = crate::dispatcher::gather_if_needed(&args[0])
+    let gathered = crate::dispatcher::gather_if_needed_async(&args[0])
+        .await
         .map_err(|e| triu_error(format!("triu: {e}")))?;
     scalar_to_isize(&gathered, "triu")
 }
@@ -342,7 +343,7 @@ fn triu_complex_tensor(
     Ok(tensor)
 }
 
-fn triu_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResult<Value> {
+async fn triu_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -358,7 +359,7 @@ fn triu_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResult<Valu
                 // Fall through to the gather path.
             }
         }
-        let tensor = gpu_helpers::gather_tensor(&handle)?;
+        let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         let result = triu_tensor(tensor, offset)?;
         let view = HostTensorView {
             data: &result.data,
@@ -369,7 +370,7 @@ fn triu_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResult<Valu
             .map_err(|e| triu_error(format!("triu: failed to upload fallback result: {e}")))?;
         Ok(Value::GpuTensor(uploaded))
     } else {
-        let tensor = gpu_helpers::gather_tensor(&handle)?;
+        let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         Ok(triu_tensor(tensor, offset).map(tensor::tensor_into_value)?)
     }
 }
@@ -425,6 +426,11 @@ where
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::triu_builtin(value, rest))
+    }
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
 
@@ -586,7 +592,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .expect("upload");
-        let gpu = triu_gpu(handle, 1).expect("gpu triu");
+        let gpu = block_on(super::triu_gpu(handle, 1)).expect("gpu triu");
         let gathered = test_support::gather(gpu).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
         assert_eq!(gathered.data, cpu.data);

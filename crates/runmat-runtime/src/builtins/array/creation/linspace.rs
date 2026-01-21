@@ -223,20 +223,20 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::linspace"
 )]
-fn linspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn linspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(builtin_error(
             "linspace: expected at most three input arguments",
         ));
     }
 
-    let (start_scalar, start_gpu) = parse_scalar("linspace", start)?;
-    let (stop_scalar, stop_gpu) = parse_scalar("linspace", stop)?;
+    let (start_scalar, start_gpu) = parse_scalar("linspace", start).await?;
+    let (stop_scalar, stop_gpu) = parse_scalar("linspace", stop).await?;
 
     let count = if rest.is_empty() {
         100usize
     } else {
-        parse_count(&rest[0])?
+        parse_count(&rest[0]).await?
     };
 
     let residency = sequence_gpu_preference(count, SequenceIntent::Linspace, start_gpu || stop_gpu);
@@ -267,10 +267,10 @@ impl Scalar {
     }
 }
 
-fn parse_scalar(name: &str, value: Value) -> crate::BuiltinResult<(Scalar, bool)> {
+async fn parse_scalar(name: &str, value: Value) -> crate::BuiltinResult<(Scalar, bool)> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             let scalar = tensor_scalar(name, &tensor)?;
             Ok((scalar, true))
         }
@@ -311,10 +311,10 @@ fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinRe
     Ok(Scalar::Complex { re, im })
 }
 
-fn parse_count(value: &Value) -> crate::BuiltinResult<usize> {
+async fn parse_count(value: &Value) -> crate::BuiltinResult<usize> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(handle).await?;
             if !tensor::is_scalar_tensor(&tensor) {
                 return Err(builtin_error("linspace: number of points must be a scalar"));
             }
@@ -496,7 +496,12 @@ fn generate_complex_sequence(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor};
+
+    fn linspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::linspace_builtin(start, stop, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

@@ -235,11 +235,11 @@ fn tril_error(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::tril"
 )]
-fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(tril_error("tril: too many input arguments"));
     }
-    let offset = parse_diagonal_offset(&rest)?;
+    let offset = parse_diagonal_offset(&rest).await?;
     match value {
         Value::Tensor(tensor) => Ok(tril_tensor(tensor, offset).map(tensor::tensor_into_value)?),
         Value::LogicalArray(array) => {
@@ -274,7 +274,7 @@ fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
                 .map_err(|e| tril_error(format!("tril: {e}")))?;
             Ok(tril_tensor(tensor, offset).map(tensor::tensor_into_value)?)
         }
-        Value::GpuTensor(handle) => Ok(tril_gpu(handle, offset)?),
+        Value::GpuTensor(handle) => Ok(tril_gpu(handle, offset).await?),
         Value::String(_) | Value::StringArray(_) => {
             Err(tril_error("tril: string arrays are not supported"))
         }
@@ -290,11 +290,12 @@ fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 }
 
-fn parse_diagonal_offset(args: &[Value]) -> crate::BuiltinResult<isize> {
+async fn parse_diagonal_offset(args: &[Value]) -> crate::BuiltinResult<isize> {
     if args.is_empty() {
         return Ok(0);
     }
-    let gathered = crate::dispatcher::gather_if_needed(&args[0])
+    let gathered = crate::dispatcher::gather_if_needed_async(&args[0])
+        .await
         .map_err(|e| tril_error(format!("tril: {e}")))?;
     scalar_to_isize(&gathered, "tril")
 }
@@ -348,7 +349,7 @@ fn tril_complex_tensor(
     Ok(tensor)
 }
 
-fn tril_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResult<Value> {
+async fn tril_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -364,7 +365,7 @@ fn tril_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResult<Valu
                 // Fall through to gather path.
             }
         }
-        let tensor = gpu_helpers::gather_tensor(&handle)?;
+        let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         let result = tril_tensor(tensor, offset)?;
         let view = HostTensorView {
             data: &result.data,
@@ -375,7 +376,7 @@ fn tril_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResult<Valu
             .map_err(|e| tril_error(format!("tril: failed to upload fallback result: {e}")))?;
         Ok(Value::GpuTensor(uploaded))
     } else {
-        let tensor = gpu_helpers::gather_tensor(&handle)?;
+        let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         Ok(tril_tensor(tensor, offset).map(tensor::tensor_into_value)?)
     }
 }
@@ -429,6 +430,11 @@ where
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::tril_builtin(value, rest))
+    }
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
 
@@ -563,7 +569,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .expect("upload");
-        let gpu = tril_gpu(handle, -1).expect("gpu tril");
+        let gpu = block_on(super::tril_gpu(handle, -1)).expect("gpu tril");
         let gathered = test_support::gather(gpu).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
         assert_eq!(gathered.data, cpu.data);

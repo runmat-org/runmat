@@ -211,9 +211,9 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     accel = "unary",
     builtin_path = "crate::builtins::math::rounding::fix"
 )]
-fn fix_builtin(value: Value) -> BuiltinResult<Value> {
+async fn fix_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => fix_gpu(handle),
+        Value::GpuTensor(handle) => fix_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Complex(fix_scalar(re), fix_scalar(im))),
         Value::ComplexTensor(ct) => fix_complex_tensor(ct),
         Value::CharArray(ca) => fix_char_array(ca),
@@ -228,13 +228,13 @@ fn fix_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn fix_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn fix_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_fix(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     fix_tensor(tensor).map(tensor::tensor_into_value)
 }
 
@@ -298,7 +298,12 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::RuntimeError;
+    use futures::executor::block_on;
     use runmat_builtins::{ComplexTensor, IntValue, LogicalArray};
+
+    fn fix_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::fix_builtin(value))
+    }
 
     fn assert_error_contains(error: RuntimeError, needle: &str) {
         assert!(
@@ -477,7 +482,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = fix_gpu(handle).unwrap();
+        let gpu = block_on(fix_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
         assert_eq!(gathered.data, cpu.data);

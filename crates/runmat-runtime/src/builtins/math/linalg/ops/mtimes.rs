@@ -276,15 +276,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "matmul",
     builtin_path = "crate::builtins::math::linalg::ops::mtimes"
 )]
-fn mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    mtimes_eval(&lhs, &rhs)
+async fn mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    mtimes_eval(&lhs, &rhs).await
 }
 
-pub(crate) fn mtimes_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
+pub(crate) async fn mtimes_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
     if let Some(result) = try_gpu_matmul(lhs, rhs)? {
         return Ok(result);
     }
-    mtimes_cpu(lhs.clone(), rhs.clone())
+    mtimes_cpu(lhs.clone(), rhs.clone()).await
 }
 
 fn try_gpu_matmul(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
@@ -388,28 +388,33 @@ fn is_scalar_handle(handle: &GpuTensorHandle) -> bool {
     elements == 1
 }
 
-fn mtimes_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+#[async_recursion::async_recursion(?Send)]
+async fn mtimes_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     use Value::*;
 
-    let lhs = crate::dispatcher::gather_if_needed(&lhs).map_err(map_control_flow)?;
-    let rhs = crate::dispatcher::gather_if_needed(&rhs).map_err(map_control_flow)?;
+    let lhs = crate::dispatcher::gather_if_needed_async(&lhs)
+        .await
+        .map_err(map_control_flow)?;
+    let rhs = crate::dispatcher::gather_if_needed_async(&rhs)
+        .await
+        .map_err(map_control_flow)?;
 
     match (lhs, rhs) {
         (LogicalArray(la), other) => {
             let tensor = tensor::logical_to_tensor(&la).map_err(builtin_error)?;
-            mtimes_cpu(Value::Tensor(tensor), other)
+            mtimes_cpu(Value::Tensor(tensor), other).await
         }
         (other, LogicalArray(lb)) => {
             let tensor = tensor::logical_to_tensor(&lb).map_err(builtin_error)?;
-            mtimes_cpu(other, Value::Tensor(tensor))
+            mtimes_cpu(other, Value::Tensor(tensor)).await
         }
         (Bool(b), other) => {
             let scalar = if b { 1.0 } else { 0.0 };
-            mtimes_cpu(Value::Num(scalar), other)
+            mtimes_cpu(Value::Num(scalar), other).await
         }
         (other, Bool(b)) => {
             let scalar = if b { 1.0 } else { 0.0 };
-            mtimes_cpu(other, Value::Num(scalar))
+            mtimes_cpu(other, Value::Num(scalar)).await
         }
         (Complex(ar, ai), Complex(br, bi)) => Ok(Complex(ar * br - ai * bi, ar * bi + ai * br)),
         (Complex(ar, ai), Num(s)) => Ok(Complex(ar * s, ai * s)),
@@ -559,6 +564,7 @@ impl PreparedOperand {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
@@ -766,5 +772,9 @@ pub(crate) mod tests {
 
         assert_eq!(gathered.shape, expected.shape);
         assert_eq!(gathered.data, expected.data);
+    }
+
+    fn mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+        block_on(super::mtimes_builtin(lhs, rhs))
     }
 }

@@ -208,10 +208,10 @@ fn builtin_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
     keywords = "fft,fourier transform,complex,gpu",
     builtin_path = "crate::builtins::math::fft::forward"
 )]
-fn fft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn fft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (length, dimension) = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => fft_gpu(handle, length, dimension),
+        Value::GpuTensor(handle) => fft_gpu(handle, length, dimension).await,
         other => fft_host(other, length, dimension),
     }
 }
@@ -222,7 +222,7 @@ fn fft_host(value: Value, length: Option<usize>, dimension: Option<usize>) -> Bu
     Ok(complex_tensor_into_value(transformed))
 }
 
-fn fft_gpu(
+async fn fft_gpu(
     handle: GpuTensorHandle,
     length: Option<usize>,
     dimension: Option<usize>,
@@ -247,7 +247,7 @@ fn fft_gpu(
     let target_len = length.unwrap_or(current_len);
 
     if target_len == 0 {
-        let tensor = gpu_helpers::gather_tensor(&handle)?;
+        let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         let complex = tensor_to_complex_tensor(tensor, BUILTIN_NAME)?;
         let transformed = fft_complex_tensor(complex, length, dimension)?;
         return Ok(complex_tensor_into_value(transformed));
@@ -260,7 +260,7 @@ fn fft_gpu(
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let complex = tensor_to_complex_tensor(tensor, BUILTIN_NAME)?;
     let transformed = fft_complex_tensor(complex, length, dimension)?;
     Ok(complex_tensor_into_value(transformed))
@@ -406,6 +406,7 @@ pub(super) fn fft_complex_tensor(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use num_complex::Complex;
     use runmat_builtins::{ComplexTensor as HostComplexTensor, IntValue, Tensor};
     use rustfft::FftPlanner;
@@ -722,5 +723,9 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn fft_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::fft_builtin(value, rest))
     }
 }

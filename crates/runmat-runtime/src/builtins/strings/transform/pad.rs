@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -287,14 +287,14 @@ impl PadOptions {
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::pad"
 )]
-fn pad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn pad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let options = parse_arguments(&rest)?;
-    let gathered = gather_if_needed(&value).map_err(map_flow)?;
+    let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
     match gathered {
         Value::String(text) => pad_string(text, options),
         Value::StringArray(array) => pad_string_array(array, options),
         Value::CharArray(array) => pad_char_array(array, options),
-        Value::Cell(cell) => pad_cell_array(cell, options),
+        Value::Cell(cell) => pad_cell_array(cell, options).await,
         _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
     }
 }
@@ -376,7 +376,7 @@ fn pad_char_array(array: CharArray, options: PadOptions) -> BuiltinResult<Value>
         .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<Value> {
+async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<Value> {
     let rows = cell.rows;
     let cols = cell.cols;
     let total = rows * cols;
@@ -385,7 +385,7 @@ fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<Value> 
 
     for idx in 0..total {
         let value = &cell.data[idx];
-        let gathered = gather_if_needed(value).map_err(map_flow)?;
+        let gathered = gather_if_needed_async(value).await.map_err(map_flow)?;
         let item = match gathered {
             Value::String(text) => {
                 let is_missing = is_missing_string(&text);
@@ -655,6 +655,10 @@ fn apply_padding_owned(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+
+    fn pad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::pad_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

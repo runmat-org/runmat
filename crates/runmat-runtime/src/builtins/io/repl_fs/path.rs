@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const ERROR_ARG_TYPE: &str = "path: arguments must be character vectors or string scalars";
 
@@ -191,8 +191,8 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::path"
 )]
-fn path_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let gathered = gather_arguments(&args)?;
+async fn path_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let gathered = gather_arguments(&args).await?;
     match gathered.len() {
         0 => Ok(path_value()),
         1 => set_single_argument(&gathered[0]),
@@ -288,10 +288,10 @@ fn tensor_to_string(tensor: &Tensor) -> BuiltinResult<String> {
     Ok(text)
 }
 
-fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
+async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(map_control_flow)?);
+        out.push(gather_if_needed_async(value).await.map_err(map_control_flow)?);
     }
     Ok(out)
 }
@@ -308,6 +308,10 @@ pub(crate) mod tests {
     use crate::builtins::common::path_state::set_path_string;
     use std::convert::TryFrom;
     use tempfile::tempdir;
+
+    fn path_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::path_builtin(args))
+    }
 
     struct PathGuard {
         previous: String,

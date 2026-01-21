@@ -246,7 +246,7 @@ fn flip_error_for(builtin: &'static str, message: impl Into<String>) -> RuntimeE
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::flip"
 )]
-fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(flip_error_for("flip", "flip: too many input arguments"));
     }
@@ -299,7 +299,7 @@ fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         }
         Value::GpuTensor(handle) => {
             let dims = resolve_dims(&spec, &handle.shape);
-            Ok(flip_gpu(handle, &dims)?)
+            Ok(flip_gpu(handle, &dims).await?)
         }
         Value::Cell(_) => Err(flip_error_for(
             "flip",
@@ -589,11 +589,14 @@ pub(crate) fn flip_char_array_with(
     CharArray::new(out, rows, cols).map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
 }
 
-pub(crate) fn flip_gpu(handle: GpuTensorHandle, dims: &[usize]) -> crate::BuiltinResult<Value> {
-    flip_gpu_with("flip", handle, dims)
+pub(crate) async fn flip_gpu(
+    handle: GpuTensorHandle,
+    dims: &[usize],
+) -> crate::BuiltinResult<Value> {
+    flip_gpu_with("flip", handle, dims).await
 }
 
-pub(crate) fn flip_gpu_with(
+pub(crate) async fn flip_gpu_with(
     builtin: &'static str,
     handle: GpuTensorHandle,
     dims: &[usize],
@@ -612,7 +615,7 @@ pub(crate) fn flip_gpu_with(
         if let Ok(out) = provider.flip(&handle, &zero_based) {
             return Ok(Value::GpuTensor(out));
         }
-        let host_tensor = gpu_helpers::gather_tensor(&handle)?;
+        let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         let flipped = flip_tensor_with(builtin, host_tensor, dims)?;
         let view = HostTensorView {
             data: &flipped.data,
@@ -623,7 +626,7 @@ pub(crate) fn flip_gpu_with(
             .map(Value::GpuTensor)
             .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
     } else {
-        let host_tensor = gpu_helpers::gather_tensor(&handle)?;
+        let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         flip_tensor_with(builtin, host_tensor, dims).map(tensor::tensor_into_value)
     }
 }
@@ -717,6 +720,11 @@ pub(crate) fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::flip_builtin(value, rest))
+    }
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, Tensor};
 

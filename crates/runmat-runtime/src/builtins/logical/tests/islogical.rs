@@ -232,14 +232,14 @@ const IDENTIFIER_INTERNAL: &str = "RunMat:islogical:InternalError";
     accel = "metadata",
     builtin_path = "crate::builtins::logical::tests::islogical"
 )]
-fn islogical_builtin(value: Value) -> BuiltinResult<Value> {
+async fn islogical_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => islogical_gpu(handle),
+        Value::GpuTensor(handle) => islogical_gpu(handle).await,
         other => islogical_host(other),
     }
 }
 
-fn islogical_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn islogical_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(flag) = provider.logical_islogical(&handle) {
             return Ok(Value::Bool(flag));
@@ -251,7 +251,8 @@ fn islogical_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     }
 
     let gpu_value = Value::GpuTensor(handle.clone());
-    let gathered = gpu_helpers::gather_value(&gpu_value)
+    let gathered = gpu_helpers::gather_value_async(&gpu_value)
+        .await
         .map_err(|err| internal_error(format!("islogical: {err}")))?;
     islogical_host(gathered)
 }
@@ -277,22 +278,21 @@ fn internal_error(message: impl Into<String>) -> RuntimeError {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
 
+    fn run_islogical(value: Value) -> BuiltinResult<Value> {
+        block_on(super::islogical_builtin(value))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_scalars_report_true() {
-        assert_eq!(
-            islogical_builtin(Value::Bool(true)).unwrap(),
-            Value::Bool(true)
-        );
-        assert_eq!(
-            islogical_builtin(Value::Bool(false)).unwrap(),
-            Value::Bool(true)
-        );
+        assert_eq!(run_islogical(Value::Bool(true)).unwrap(), Value::Bool(true));
+        assert_eq!(run_islogical(Value::Bool(false)).unwrap(), Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -300,7 +300,7 @@ pub(crate) mod tests {
     fn logical_arrays_report_true() {
         let array = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
         assert_eq!(
-            islogical_builtin(Value::LogicalArray(array)).unwrap(),
+            run_islogical(Value::LogicalArray(array)).unwrap(),
             Value::Bool(true)
         );
     }
@@ -309,17 +309,14 @@ pub(crate) mod tests {
     #[test]
     fn numeric_values_report_false() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        assert_eq!(
-            islogical_builtin(Value::Tensor(tensor)).unwrap(),
-            Value::Bool(false)
-        );
+        assert_eq!(run_islogical(Value::Tensor(tensor)).unwrap(), Value::Bool(false));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_values_report_false() {
         assert_eq!(
-            islogical_builtin(Value::String("runmat".to_string())).unwrap(),
+            run_islogical(Value::String("runmat".to_string())).unwrap(),
             Value::Bool(false)
         );
     }
@@ -328,10 +325,7 @@ pub(crate) mod tests {
     #[test]
     fn char_arrays_report_false() {
         let chars = CharArray::new("rm".chars().collect(), 1, 2).unwrap();
-        assert_eq!(
-            islogical_builtin(Value::CharArray(chars)).unwrap(),
-            Value::Bool(false)
-        );
+        assert_eq!(run_islogical(Value::CharArray(chars)).unwrap(), Value::Bool(false));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -340,11 +334,11 @@ pub(crate) mod tests {
         let struct_value = runmat_builtins::StructValue::new();
         let cell = runmat_builtins::CellArray::new(vec![Value::Bool(true)], 1, 1).unwrap();
         assert_eq!(
-            islogical_builtin(Value::Struct(struct_value)).unwrap(),
+            run_islogical(Value::Struct(struct_value)).unwrap(),
             Value::Bool(false)
         );
         assert_eq!(
-            islogical_builtin(Value::Cell(cell)).unwrap(),
+            run_islogical(Value::Cell(cell)).unwrap(),
             Value::Bool(false)
         );
     }
@@ -360,7 +354,7 @@ pub(crate) mod tests {
             };
             let handle = provider.upload(&view).expect("upload");
             let logical_value = gpu_helpers::logical_gpu_value(handle.clone());
-            let result = islogical_builtin(logical_value).expect("islogical");
+            let result = run_islogical(logical_value).expect("islogical");
             assert_eq!(result, Value::Bool(true));
             provider.free(&handle).ok();
         });
@@ -376,7 +370,7 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = islogical_builtin(Value::GpuTensor(handle.clone())).expect("islogical");
+            let result = run_islogical(Value::GpuTensor(handle.clone())).expect("islogical");
             assert_eq!(result, Value::Bool(false));
             provider.free(&handle).ok();
         });
@@ -404,7 +398,7 @@ pub(crate) mod tests {
         let rhs_handle = provider.upload(&rhs_view).expect("upload rhs");
         let mask_handle = provider.elem_eq(&lhs_handle, &rhs_handle).expect("elem_eq");
 
-        let result = islogical_builtin(Value::GpuTensor(mask_handle.clone())).expect("islogical");
+        let result = run_islogical(Value::GpuTensor(mask_handle.clone())).expect("islogical");
         assert_eq!(result, Value::Bool(true));
 
         provider.free(&mask_handle).ok();
@@ -426,7 +420,7 @@ pub(crate) mod tests {
             shape: &shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let result = islogical_builtin(Value::GpuTensor(handle.clone())).expect("islogical");
+        let result = run_islogical(Value::GpuTensor(handle.clone())).expect("islogical");
         assert_eq!(result, Value::Bool(false));
         provider.free(&handle).ok();
     }

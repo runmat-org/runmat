@@ -235,10 +235,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cond",
     builtin_path = "crate::builtins::math::linalg::solve::cond"
 )]
-fn cond_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn cond_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let norm = parse_norm_argument(&rest)?;
     let result = match value {
-        Value::GpuTensor(handle) => return cond_gpu(handle, norm),
+        Value::GpuTensor(handle) => return cond_gpu(handle, norm).await,
         Value::ComplexTensor(matrix) => cond_complex_tensor_builtin(&matrix, norm)?,
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(builtin_error)?;
@@ -252,7 +252,7 @@ fn cond_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     Ok(Value::Num(result))
 }
 
-fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> BuiltinResult<Value> {
+async fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> BuiltinResult<Value> {
     let maybe_provider = runmat_accelerate_api::provider();
 
     if let Some(provider) = maybe_provider {
@@ -261,8 +261,9 @@ fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> BuiltinResult<Value> {
         }
     }
 
-    let gathered =
-        gpu_helpers::gather_value(&Value::GpuTensor(handle.clone())).map_err(map_control_flow)?;
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
+        .await
+        .map_err(map_control_flow)?;
 
     let cond_value = match gathered {
         Value::Tensor(tensor) => cond_real_tensor_builtin(&tensor, norm)?,
@@ -635,6 +636,7 @@ impl From<ProviderCondNorm> for CondNorm {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::IntValue;
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -795,5 +797,9 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn cond_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::cond_builtin(value, rest))
     }
 }

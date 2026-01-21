@@ -15,7 +15,7 @@ use crate::builtins::io::filetext::{
     helpers::{char_array_value, extract_scalar_string},
     registry,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "Invalid file identifier. Use fopen to generate a valid file ID.";
@@ -252,8 +252,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::filetext::fclose"
 )]
-fn fclose_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(&args)?;
+async fn fclose_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(&args).await?;
     Ok(eval.first_output())
 }
 
@@ -297,8 +297,8 @@ impl FcloseEval {
     }
 }
 
-pub fn evaluate(args: &[Value]) -> BuiltinResult<FcloseEval> {
-    let gathered = gather_args(args)?;
+pub async fn evaluate(args: &[Value]) -> BuiltinResult<FcloseEval> {
+    let gathered = gather_args(args).await?;
     match gathered.len() {
         0 => Ok(close_all()),
         1 => handle_single_argument(&gathered[0]),
@@ -417,10 +417,14 @@ fn parse_fid_from_f64(value: f64) -> BuiltinResult<i32> {
     Ok(rounded as i32)
 }
 
-fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
+async fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut gathered = Vec::with_capacity(args.len());
     for value in args {
-        gathered.push(gather_if_needed(value).map_err(map_control_flow)?);
+        gathered.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     Ok(gathered)
 }
@@ -435,23 +439,28 @@ fn matches_keyword(value: &Value, keyword: &str) -> bool {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::filetext::{fopen, registry};
-    use once_cell::sync::Lazy;
     use runmat_builtins::{CellArray, LogicalArray, StringArray, Tensor};
     use runmat_filesystem as fs;
     use runmat_time::system_time_now;
     use std::io::Write;
     use std::path::PathBuf;
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
     use std::time::UNIX_EPOCH;
-
-    static REGISTRY_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     fn unwrap_error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
     }
 
+    fn run_evaluate(args: &[Value]) -> BuiltinResult<FcloseEval> {
+        futures::executor::block_on(evaluate(args))
+    }
+
+    fn run_fopen(args: &[Value]) -> BuiltinResult<fopen::FopenEval> {
+        futures::executor::block_on(fopen::evaluate(args))
+    }
+
     fn registry_guard() -> MutexGuard<'static, ()> {
-        REGISTRY_LOCK.lock().unwrap()
+        registry::test_guard()
     }
 
     fn unique_path(prefix: &str) -> PathBuf {
@@ -469,7 +478,7 @@ pub(crate) mod tests {
             writeln!(&mut file, "data").unwrap();
         }
         let eval =
-            fopen::evaluate(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
+            run_fopen(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
         let fid = eval.as_open().unwrap().fid;
         assert!(fid >= 3.0, "expected valid file identifier");
         (fid, path)
@@ -481,7 +490,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let (fid, path) = open_temp_file("fclose_single");
-        let eval = evaluate(&[Value::Num(fid)]).expect("fclose");
+        let eval = run_evaluate(&[Value::Num(fid)]).expect("fclose");
         assert_eq!(eval.status(), 0.0);
         assert!(eval.message().is_empty());
         assert!(registry::info_for(fid as i32).is_none());
@@ -493,7 +502,7 @@ pub(crate) mod tests {
     fn fclose_invalid_identifier_returns_error() {
         let _guard = registry_guard();
         registry::reset_for_tests();
-        let eval = evaluate(&[Value::Num(9999.0)]).expect("fclose");
+        let eval = run_evaluate(&[Value::Num(9999.0)]).expect("fclose");
         assert_eq!(eval.status(), -1.0);
         assert_eq!(eval.message(), INVALID_IDENTIFIER_MESSAGE);
     }
@@ -504,7 +513,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let (fid, path) = open_temp_file("fclose_all");
-        let eval = evaluate(&[Value::from("all")]).expect("fclose all");
+        let eval = run_evaluate(&[Value::from("all")]).expect("fclose all");
         assert_eq!(eval.status(), 0.0);
         assert!(registry::info_for(fid as i32).is_none());
         let infos = registry::list_infos();
@@ -518,7 +527,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let (fid, path) = open_temp_file("fclose_no_args");
-        let eval = evaluate(&[]).expect("fclose");
+        let eval = run_evaluate(&[]).expect("fclose");
         assert_eq!(eval.status(), 0.0);
         assert!(registry::info_for(fid as i32).is_none());
         fs::remove_file(path).unwrap();
@@ -531,20 +540,20 @@ pub(crate) mod tests {
         registry::reset_for_tests();
         let path1 = unique_path("fclose_vec1");
         fs::write(&path1, "a").unwrap();
-        let fid1 = fopen::evaluate(&[Value::from(path1.to_string_lossy().to_string())])
+        let fid1 = run_fopen(&[Value::from(path1.to_string_lossy().to_string())])
             .expect("open 1")
             .as_open()
             .unwrap()
             .fid;
         let path2 = unique_path("fclose_vec2");
         fs::write(&path2, "b").unwrap();
-        let fid2 = fopen::evaluate(&[Value::from(path2.to_string_lossy().to_string())])
+        let fid2 = run_fopen(&[Value::from(path2.to_string_lossy().to_string())])
             .expect("open 2")
             .as_open()
             .unwrap()
             .fid;
         let tensor = Tensor::new(vec![fid1, fid2], vec![2, 1]).expect("tensor construction");
-        let eval = evaluate(&[Value::Tensor(tensor)]).expect("fclose");
+        let eval = run_evaluate(&[Value::Tensor(tensor)]).expect("fclose");
         assert_eq!(eval.status(), 0.0);
         assert!(registry::info_for(fid1 as i32).is_none());
         assert!(registry::info_for(fid2 as i32).is_none());
@@ -558,9 +567,9 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let (fid, path) = open_temp_file("fclose_repeat");
-        let first = evaluate(&[Value::Num(fid)]).expect("fclose");
+        let first = run_evaluate(&[Value::Num(fid)]).expect("fclose");
         assert_eq!(first.status(), 0.0);
-        let second = evaluate(&[Value::Num(fid)]).expect("fclose second");
+        let second = run_evaluate(&[Value::Num(fid)]).expect("fclose second");
         assert_eq!(second.status(), -1.0);
         assert_eq!(second.message(), INVALID_IDENTIFIER_MESSAGE);
         fs::remove_file(path).unwrap();
@@ -571,7 +580,7 @@ pub(crate) mod tests {
     fn fclose_standard_stream_bool_argument() {
         let _guard = registry_guard();
         registry::reset_for_tests();
-        let eval = evaluate(&[Value::Bool(true)]).expect("fclose stdout");
+        let eval = run_evaluate(&[Value::Bool(true)]).expect("fclose stdout");
         assert_eq!(eval.status(), 0.0);
         assert!(eval.message().is_empty());
         let outputs = eval.outputs();
@@ -585,7 +594,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let logical = LogicalArray::new(vec![1u8, 0u8, 1u8], vec![3]).expect("logical array");
-        let eval = evaluate(&[Value::LogicalArray(logical)]).expect("fclose logical");
+        let eval = run_evaluate(&[Value::LogicalArray(logical)]).expect("fclose logical");
         assert_eq!(eval.status(), 0.0);
         assert!(eval.message().is_empty());
     }
@@ -598,7 +607,7 @@ pub(crate) mod tests {
         let (fid1, path1) = open_temp_file("fclose_cell1");
         let (fid2, path2) = open_temp_file("fclose_cell2");
         let cell = CellArray::new(vec![Value::Num(fid1), Value::Num(fid2)], 1, 2).expect("cell");
-        let eval = evaluate(&[Value::Cell(cell)]).expect("fclose cell");
+        let eval = run_evaluate(&[Value::Cell(cell)]).expect("fclose cell");
         assert_eq!(eval.status(), 0.0);
         assert!(registry::info_for(fid1 as i32).is_none());
         assert!(registry::info_for(fid2 as i32).is_none());
@@ -612,7 +621,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let tensor = Tensor::new(vec![1.5], vec![1, 1]).expect("tensor");
-        let err = unwrap_error_message(evaluate(&[Value::Tensor(tensor)]).unwrap_err());
+        let err = unwrap_error_message(run_evaluate(&[Value::Tensor(tensor)]).unwrap_err());
         assert_eq!(err, "fclose: file identifier must be an integer");
     }
 
@@ -622,7 +631,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let strings = StringArray::new(vec!["all".to_string()], vec![1]).expect("string array");
-        let eval = evaluate(&[Value::StringArray(strings)]).expect("fclose all");
+        let eval = run_evaluate(&[Value::StringArray(strings)]).expect("fclose all");
         assert_eq!(eval.status(), 0.0);
         assert!(eval.message().is_empty());
     }
@@ -633,7 +642,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).expect("tensor");
-        let eval = evaluate(&[Value::Tensor(tensor)]).expect("fclose");
+        let eval = run_evaluate(&[Value::Tensor(tensor)]).expect("fclose");
         assert_eq!(eval.status(), 0.0);
         assert!(eval.message().is_empty());
     }
@@ -643,7 +652,7 @@ pub(crate) mod tests {
     fn fclose_errors_on_non_numeric_input() {
         let _guard = registry_guard();
         registry::reset_for_tests();
-        let err = unwrap_error_message(evaluate(&[Value::from("not-a-fid")]).unwrap_err());
+        let err = unwrap_error_message(run_evaluate(&[Value::from("not-a-fid")]).unwrap_err());
         assert_eq!(err, "fclose: file identifier must be numeric or 'all'");
     }
 

@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_filesystem as fs;
 
 #[cfg_attr(
@@ -233,9 +233,11 @@ impl FileEncoding {
     accel = "cpu",
     builtin_path = "crate::builtins::io::filetext::fileread"
 )]
-fn fileread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let gathered_path = gather_if_needed(&path).map_err(map_control_flow)?;
-    let gathered_rest = gather_values(&rest)?;
+async fn fileread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let gathered_path = gather_if_needed_async(&path)
+        .await
+        .map_err(map_control_flow)?;
+    let gathered_rest = gather_values(&rest).await?;
     let encoding = parse_encoding_args(&gathered_rest)?;
     let resolved = resolve_path(&gathered_path)?;
     let bytes = read_all(&resolved)?;
@@ -246,10 +248,14 @@ fn fileread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
     Ok(Value::CharArray(char_array))
 }
 
-fn gather_values(values: &[Value]) -> BuiltinResult<Vec<Value>> {
+async fn gather_values(values: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(values.len());
     for value in values {
-        out.push(gather_if_needed(value).map_err(map_control_flow)?);
+        out.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     Ok(out)
 }
@@ -428,6 +434,10 @@ pub(crate) mod tests {
         err.message().to_string()
     }
 
+    fn run_fileread(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(fileread_builtin(path, rest))
+    }
+
     fn unique_path(prefix: &str) -> PathBuf {
         let millis = unix_timestamp_ms();
         let mut path = std::env::temp_dir();
@@ -443,7 +453,7 @@ pub(crate) mod tests {
         fs::write(&path, contents).expect("write sample file");
 
         let value = Value::from(path.to_string_lossy().to_string());
-        let result = fileread_builtin(value, Vec::new()).expect("fileread result");
+        let result = run_fileread(value, Vec::new()).expect("fileread result");
 
         match result {
             Value::CharArray(ca) => {
@@ -470,7 +480,7 @@ pub(crate) mod tests {
         let char_array = CharArray::new(chars, 1, len).expect("char array from path string");
         let value = Value::CharArray(char_array);
 
-        let result = fileread_builtin(value, Vec::new()).expect("fileread");
+        let result = run_fileread(value, Vec::new()).expect("fileread");
         match result {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
@@ -493,7 +503,7 @@ pub(crate) mod tests {
             .expect("string array scalar");
         let value = Value::StringArray(string_array);
 
-        let result = fileread_builtin(value, Vec::new()).expect("fileread");
+        let result = run_fileread(value, Vec::new()).expect("fileread");
         match result {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
@@ -511,7 +521,8 @@ pub(crate) mod tests {
         let path = unique_path("fileread_empty");
         fs::File::create(&path).expect("create empty file");
 
-        let result = fileread_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new())
+        let result =
+            run_fileread(Value::from(path.to_string_lossy().to_string()), Vec::new())
             .expect("fileread");
         match result {
             Value::CharArray(ca) => {
@@ -530,7 +541,7 @@ pub(crate) mod tests {
     fn fileread_errors_when_file_missing() {
         let path = unique_path("fileread_missing");
         let err = unwrap_error_message(
-            fileread_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new())
+            run_fileread(Value::from(path.to_string_lossy().to_string()), Vec::new())
                 .unwrap_err(),
         );
         assert!(
@@ -547,7 +558,8 @@ pub(crate) mod tests {
         file.write_all(&[0xFF, 0x61, 0x00]).expect("write bytes");
         drop(file);
 
-        let result = fileread_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new())
+        let result =
+            run_fileread(Value::from(path.to_string_lossy().to_string()), Vec::new())
             .expect("fileread");
         match result {
             Value::CharArray(ca) => {
@@ -567,7 +579,7 @@ pub(crate) mod tests {
         let contents = "UTF-8 ✓";
         fs::write(&path, contents).expect("write sample file");
 
-        let result = fileread_builtin(
+        let result = run_fileread(
             Value::from(path.to_string_lossy().to_string()),
             vec![Value::from("Encoding"), Value::from("utf-8")],
         )
@@ -590,7 +602,7 @@ pub(crate) mod tests {
         let bytes = [0xC0u8, 0x20, 0x41];
         fs::write(&path, bytes).expect("write latin1 data");
 
-        let result = fileread_builtin(
+        let result = run_fileread(
             Value::from(path.to_string_lossy().to_string()),
             vec![Value::from("latin1")],
         )
@@ -613,7 +625,7 @@ pub(crate) mod tests {
         let bytes = [0x01u8, 0xFF, 0x7F];
         fs::write(&path, bytes).expect("write raw bytes");
 
-        let result = fileread_builtin(
+        let result = run_fileread(
             Value::from(path.to_string_lossy().to_string()),
             vec![Value::from("raw")],
         )
@@ -636,7 +648,7 @@ pub(crate) mod tests {
         fs::write(&path, [0x41, 0x80]).expect("write bytes");
 
         let err = unwrap_error_message(
-            fileread_builtin(
+            run_fileread(
                 Value::from(path.to_string_lossy().to_string()),
                 vec![Value::from("Encoding"), Value::from("ascii")],
             )
@@ -657,7 +669,7 @@ pub(crate) mod tests {
         fs::write(&path, "abc").expect("write file");
 
         let err = unwrap_error_message(
-            fileread_builtin(
+            run_fileread(
                 Value::from(path.to_string_lossy().to_string()),
                 vec![Value::from("Encoding")],
             )
@@ -678,7 +690,7 @@ pub(crate) mod tests {
         fs::write(&path, "abc").expect("write file");
 
         let err = unwrap_error_message(
-            fileread_builtin(
+            run_fileread(
                 Value::from(path.to_string_lossy().to_string()),
                 vec![
                     Value::from("Encoding"),

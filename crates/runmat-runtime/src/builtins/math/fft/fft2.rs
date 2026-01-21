@@ -196,10 +196,10 @@ fn fft2_error(message: impl Into<String>) -> RuntimeError {
     keywords = "fft2,2d fft,two-dimensional fourier transform,gpu",
     builtin_path = "crate::builtins::math::fft::fft2"
 )]
-fn fft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn fft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let lengths = parse_fft2_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => fft2_gpu(handle, lengths),
+        Value::GpuTensor(handle) => fft2_gpu(handle, lengths).await,
         other => fft2_host(other, lengths),
     }
 }
@@ -210,12 +210,12 @@ fn fft2_host(value: Value, lengths: (Option<usize>, Option<usize>)) -> BuiltinRe
     Ok(complex_tensor_into_value(transformed))
 }
 
-fn fft2_gpu(
+async fn fft2_gpu(
     handle: GpuTensorHandle,
     lengths: (Option<usize>, Option<usize>),
 ) -> BuiltinResult<Value> {
     if matches!(lengths.0, Some(0)) || matches!(lengths.1, Some(0)) {
-        return fft2_gpu_fallback(handle, lengths);
+        return fft2_gpu_fallback(handle, lengths).await;
     }
 
     if let Some(provider) = runmat_accelerate_api::provider() {
@@ -238,7 +238,7 @@ fn fft2_gpu(
         }
     }
 
-    fft2_gpu_fallback(handle, lengths)
+    fft2_gpu_fallback(handle, lengths).await
 }
 
 fn fft2_download_gpu_result(
@@ -248,11 +248,11 @@ fn fft2_download_gpu_result(
     fft_download_gpu_result(provider, handle, BUILTIN_NAME)
 }
 
-fn fft2_gpu_fallback(
+async fn fft2_gpu_fallback(
     handle: GpuTensorHandle,
     lengths: (Option<usize>, Option<usize>),
 ) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let complex = tensor_to_complex_tensor(tensor, BUILTIN_NAME)?;
     let transformed = fft2_complex_tensor(complex, lengths)?;
     Ok(complex_tensor_into_value(transformed))
@@ -347,6 +347,7 @@ fn parse_length_pair(data: &[f64], builtin: &str) -> BuiltinResult<(Option<usize
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};
 
@@ -562,5 +563,9 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn fft2_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::fft2_builtin(value, rest))
     }
 }

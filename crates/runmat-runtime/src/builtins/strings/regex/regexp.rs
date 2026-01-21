@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -246,21 +246,29 @@ fn with_builtin_context(builtin: &'static str, mut err: RuntimeError) -> Runtime
 }
 
 /// Evaluate a regular expression and return an evaluation handle that can produce MATLAB-compatible outputs.
-pub fn evaluate(subject: Value, pattern: Value, rest: &[Value]) -> BuiltinResult<RegexpEvaluation> {
-    evaluate_with(BUILTIN_NAME, subject, pattern, rest)
+pub async fn evaluate(
+    subject: Value,
+    pattern: Value,
+    rest: &[Value],
+) -> BuiltinResult<RegexpEvaluation> {
+    evaluate_with(BUILTIN_NAME, subject, pattern, rest).await
 }
 
 /// Evaluate a regular expression using the specified builtin name for error context.
-pub fn evaluate_with(
+pub async fn evaluate_with(
     builtin: &'static str,
     subject: Value,
     pattern: Value,
     rest: &[Value],
 ) -> BuiltinResult<RegexpEvaluation> {
-    let subject = gather_if_needed(&subject).map_err(|err| with_builtin_context(builtin, err))?;
-    let pattern = gather_if_needed(&pattern).map_err(|err| with_builtin_context(builtin, err))?;
+    let subject = gather_if_needed_async(&subject)
+        .await
+        .map_err(|err| with_builtin_context(builtin, err))?;
+    let pattern = gather_if_needed_async(&pattern)
+        .await
+        .map_err(|err| with_builtin_context(builtin, err))?;
     let options = RegexpOptions::parse(builtin, rest)?;
-    RegexpEvaluation::new(builtin, subject, pattern, options)
+    RegexpEvaluation::new(builtin, subject, pattern, options).await
 }
 
 #[runtime_builtin(
@@ -271,8 +279,12 @@ pub fn evaluate_with(
     accel = "sink",
     builtin_path = "crate::builtins::strings::regex::regexp"
 )]
-fn regexp_builtin(subject: Value, pattern: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let evaluation = evaluate(subject, pattern, &rest)?;
+async fn regexp_builtin(
+    subject: Value,
+    pattern: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let evaluation = evaluate(subject, pattern, &rest).await?;
     let mut outputs = evaluation.outputs_for_single()?;
     if outputs.is_empty() {
         return Ok(Value::Num(0.0));
@@ -454,7 +466,7 @@ impl SubjectCollection {
     }
 }
 
-fn collect_subjects(
+async fn collect_subjects(
     builtin: &'static str,
     value: Value,
     force_cell_output: bool,
@@ -469,7 +481,7 @@ fn collect_subjects(
         }),
         Value::CharArray(array) => collect_char_array(array, force_cell_output),
         Value::StringArray(array) => collect_string_array(array, force_cell_output),
-        Value::Cell(cell) => collect_cell_array(builtin, cell, force_cell_output),
+        Value::Cell(cell) => collect_cell_array(builtin, cell, force_cell_output).await,
         other => Err(runtime_error_for(
             builtin,
             format!(
@@ -557,14 +569,16 @@ fn collect_string_array(
     })
 }
 
-fn collect_cell_array(
+async fn collect_cell_array(
     builtin: &'static str,
     cell: runmat_builtins::CellArray,
     _force_cell_output: bool,
 ) -> BuiltinResult<SubjectCollection> {
     let mut entries = Vec::with_capacity(cell.data.len());
     for ptr in &cell.data {
-        let value = gather_if_needed(ptr).map_err(|err| with_builtin_context(builtin, err))?;
+        let value = gather_if_needed_async(ptr)
+            .await
+            .map_err(|err| with_builtin_context(builtin, err))?;
         let text = extract_string(&value).ok_or_else(|| {
             runtime_error_for(
                 builtin,
@@ -649,13 +663,13 @@ pub struct RegexpEvaluation {
 }
 
 impl RegexpEvaluation {
-    fn new(
+    async fn new(
         builtin: &'static str,
         subject: Value,
         pattern: Value,
         options: RegexpOptions,
     ) -> BuiltinResult<Self> {
-        let subjects = collect_subjects(builtin, subject, options.force_cell_output)?;
+        let subjects = collect_subjects(builtin, subject, options.force_cell_output).await?;
         let pattern_str = extract_string(&pattern).ok_or_else(|| {
             runtime_error_for(
                 builtin,
@@ -1125,6 +1139,10 @@ fn names_struct(names: &[String], match_data: Option<&MatchComponents>) -> Value
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+
+    fn evaluate(subject: Value, pattern: Value, rest: &[Value]) -> BuiltinResult<RegexpEvaluation> {
+        futures::executor::block_on(super::evaluate(subject, pattern, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

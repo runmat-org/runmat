@@ -244,14 +244,24 @@ fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     builtin_path = "crate::builtins::math::signal::filter"
 )]
-fn filter_builtin(b: Value, a: Value, x: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(b, a, x, &rest)?;
+async fn filter_builtin(
+    b: Value,
+    a: Value,
+    x: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(b, a, x, &rest).await?;
     Ok(eval.into_value())
 }
 
 /// Evaluate the builtin once and expose both filter output and final state.
-pub fn evaluate(b: Value, a: Value, x: Value, rest: &[Value]) -> BuiltinResult<FilterEvaluation> {
-    let args = FilterArgs::parse(b, a, x, rest)?;
+pub async fn evaluate(
+    b: Value,
+    a: Value,
+    x: Value,
+    rest: &[Value],
+) -> BuiltinResult<FilterEvaluation> {
+    let args = FilterArgs::parse(b, a, x, rest).await?;
     if let Some(eval) = try_filter_gpu(&args)? {
         return Ok(eval);
     }
@@ -295,7 +305,7 @@ struct FilterArgs {
 }
 
 impl FilterArgs {
-    fn parse(b: Value, a: Value, x: Value, rest: &[Value]) -> BuiltinResult<Self> {
+    async fn parse(b: Value, a: Value, x: Value, rest: &[Value]) -> BuiltinResult<Self> {
         let (zi_raw, dim_raw) = parse_optional_arguments(rest)?;
         let zi_value = match zi_raw {
             Some(val) if is_empty_placeholder(&val) => None,
@@ -306,8 +316,8 @@ impl FilterArgs {
             other => other,
         };
 
-        let coeffs_b = CoeffInput::from_value("filter", "numerator", b)?;
-        let coeffs_a = CoeffInput::from_value("filter", "denominator", a)?;
+        let coeffs_b = CoeffInput::from_value("filter", "numerator", b).await?;
+        let coeffs_a = CoeffInput::from_value("filter", "denominator", a).await?;
 
         if coeffs_a.len == 0 {
             return Err(runtime_error_for(
@@ -320,7 +330,7 @@ impl FilterArgs {
             ));
         }
 
-        let signal = SignalInput::from_value(x)?;
+        let signal = SignalInput::from_value(x).await?;
 
         let dim = if let Some(dim_val) = dim_value {
             tensor::parse_dimension(&dim_val, "filter").map_err(|err| runtime_error_for(err))?
@@ -354,7 +364,8 @@ impl FilterArgs {
         let expected_states = state_len.saturating_mul(channel_count);
 
         let initial = if let Some(zi_val) = zi_value {
-            InitialState::from_value(zi_val, state_len, &state_shape, expected_states, "filter")?
+            InitialState::from_value(zi_val, state_len, &state_shape, expected_states, "filter")
+                .await?
         } else {
             InitialState::empty(state_shape.clone())
         };
@@ -387,10 +398,11 @@ struct CoeffInput {
 }
 
 impl CoeffInput {
-    fn from_value(name: &str, label: &str, value: Value) -> BuiltinResult<Self> {
+    async fn from_value(name: &str, label: &str, value: Value) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)
+                let tensor = gpu_helpers::gather_tensor_async(&handle)
+                    .await
                     .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
                 Self::from_tensor(name, label, tensor)
             }
@@ -478,10 +490,11 @@ struct SignalInput {
 }
 
 impl SignalInput {
-    fn from_value(value: Value) -> BuiltinResult<Self> {
+    async fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)
+                let tensor = gpu_helpers::gather_tensor_async(&handle)
+                    .await
                     .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
                 let shape = tensor.shape.clone();
                 let data = tensor
@@ -591,7 +604,7 @@ impl InitialState {
         }
     }
 
-    fn from_value(
+    async fn from_value(
         value: Value,
         state_len: usize,
         expected_shape: &[usize],
@@ -604,7 +617,8 @@ impl InitialState {
                     return Ok(Self::empty(expected_shape.to_vec()))
                 }
                 Value::GpuTensor(handle) => {
-                    let tensor = gpu_helpers::gather_tensor(&handle)
+                    let tensor = gpu_helpers::gather_tensor_async(&handle)
+                        .await
                         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
                     if !tensor.data.is_empty() {
                         return Err(runtime_error_for(format!(
@@ -656,7 +670,8 @@ impl InitialState {
 
         let (column_major, shape, is_complex, gpu_handle) = match value {
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)
+                let tensor = gpu_helpers::gather_tensor_async(&handle)
+                    .await
                     .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
                 (
                     tensor
@@ -1257,10 +1272,15 @@ fn to_real_vec(data: &[Complex<f64>]) -> Option<Vec<f64>> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::IntValue;
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
+    }
+
+    fn evaluate(b: Value, a: Value, x: Value, rest: &[Value]) -> BuiltinResult<FilterEvaluation> {
+        block_on(super::evaluate(b, a, x, rest))
     }
 
     fn approx_eq_slice(lhs: &[f64], rhs: &[f64]) {
@@ -1632,4 +1652,5 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         assert!(!test_support::doc_examples(DOC_MD).is_empty());
     }
+
 }

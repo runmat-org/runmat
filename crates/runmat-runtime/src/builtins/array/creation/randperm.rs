@@ -249,7 +249,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::randperm"
 )]
-fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = ParsedRandPerm::parse(args)?;
     build_output(parsed)
 }
@@ -518,6 +518,11 @@ fn parse_numeric(value: f64, allow_zero: bool, message: &str) -> crate::BuiltinR
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
+    use futures::executor::block_on;
+
+    fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::randperm_builtin(args))
+    }
 
     fn reset_rng_clean() {
         runmat_accelerate_api::clear_provider();

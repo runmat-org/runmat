@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const MESSAGE_ID_OS_ERROR: &str = "MATLAB:RMDIR:OSError";
 const MESSAGE_ID_DIRECTORY_NOT_FOUND: &str = "MATLAB:RMDIR:DirectoryNotFound";
@@ -233,14 +233,14 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::rmdir"
 )]
-fn rmdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(&args)?;
+async fn rmdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(&args).await?;
     Ok(eval.first_output())
 }
 
 /// Evaluate `rmdir` once and expose all outputs.
-pub fn evaluate(args: &[Value]) -> BuiltinResult<RmdirResult> {
-    let gathered = gather_arguments(args)?;
+pub async fn evaluate(args: &[Value]) -> BuiltinResult<RmdirResult> {
+    let gathered = gather_arguments(args).await?;
     match gathered.len() {
         0 => Err(rmdir_error("rmdir: not enough input arguments")),
         1 => remove_folder(&gathered[0], RemoveMode::NonRecursive),
@@ -450,10 +450,10 @@ fn extract_folder_name(value: &Value) -> BuiltinResult<String> {
     }
 }
 
-fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
+async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(map_control_flow)?);
+        out.push(gather_if_needed_async(value).await.map_err(map_control_flow)?);
     }
     Ok(out)
 }
@@ -470,6 +470,10 @@ pub(crate) mod tests {
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
+
+    fn evaluate(args: &[Value]) -> BuiltinResult<RmdirResult> {
+        futures::executor::block_on(super::evaluate(args))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

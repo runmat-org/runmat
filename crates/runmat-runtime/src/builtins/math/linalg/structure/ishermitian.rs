@@ -237,10 +237,10 @@ fn runtime_error(name: &str, message: impl Into<String>) -> RuntimeError {
     accel = "metadata",
     builtin_path = "crate::builtins::math::linalg::structure::ishermitian"
 )]
-fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (mode, tol) = parse_optional_args(&rest)?;
     match value {
-        Value::GpuTensor(handle) => ishermitian_gpu(handle, mode, tol),
+        Value::GpuTensor(handle) => ishermitian_gpu(handle, mode, tol).await,
         other => {
             let matrix = MatrixInput::from_value(other)?;
             let result = evaluate_matrix(&matrix, mode, tol);
@@ -249,7 +249,11 @@ fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
     }
 }
 
-fn ishermitian_gpu(handle: GpuTensorHandle, mode: HermitianMode, tol: f64) -> BuiltinResult<Value> {
+async fn ishermitian_gpu(
+    handle: GpuTensorHandle,
+    mode: HermitianMode,
+    tol: f64,
+) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let provider_mode = match mode {
             HermitianMode::Hermitian => ProviderHermitianKind::Hermitian,
@@ -262,7 +266,7 @@ fn ishermitian_gpu(handle: GpuTensorHandle, mode: HermitianMode, tol: f64) -> Bu
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let matrix = MatrixInput::from_value(Value::Tensor(tensor))?;
     let result = evaluate_matrix(&matrix, mode, tol);
     Ok(Value::Bool(result))
@@ -651,6 +655,7 @@ pub fn ishermitian_host_complex_data(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -900,5 +905,9 @@ pub(crate) mod tests {
             .unwrap();
         let gpu = ishermitian_builtin(Value::GpuTensor(handle), Vec::new()).unwrap();
         assert_eq!(cpu, gpu);
+    }
+
+    fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::ishermitian_builtin(value, rest))
     }
 }

@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::char_row_to_string;
 use crate::console::{record_console_output, ConsoleStream};
-use crate::gather_if_needed;
+use crate::gather_if_needed_async;
 
 #[cfg_attr(
     feature = "doc_export",
@@ -235,12 +235,14 @@ enum Align {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::disp"
 )]
-fn disp_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn disp_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(("disp: too many input arguments".to_string()).into());
     }
 
-    let host_value = gather_if_needed(&value).map_err(|e| format!("disp: {e}"))?;
+    let host_value = gather_if_needed_async(&value)
+        .await
+        .map_err(|e| format!("disp: {e}"))?;
     let lines = format_for_disp(&host_value);
 
     if lines.is_empty() {
@@ -974,8 +976,11 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result =
-                disp_builtin(Value::GpuTensor(handle), Vec::new()).expect("disp should succeed");
+            let result = futures::executor::block_on(disp_builtin(
+                Value::GpuTensor(handle),
+                Vec::new(),
+            ))
+            .expect("disp should succeed");
             assert_eq!(result, Value::Tensor(Tensor::zeros(vec![0, 0])));
         });
     }
@@ -995,14 +1000,18 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        disp_builtin(Value::GpuTensor(handle), Vec::new()).expect("disp");
+        futures::executor::block_on(disp_builtin(Value::GpuTensor(handle), Vec::new()))
+            .expect("disp");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn disp_rejects_extra_arguments() {
-        let err = disp_builtin(Value::Num(1.0), vec![Value::Int(IntValue::I32(2))])
-            .expect_err("expected error");
+        let err = futures::executor::block_on(disp_builtin(
+            Value::Num(1.0),
+            vec![Value::Int(IntValue::I32(2))],
+        ))
+        .expect_err("expected error");
         assert!(err.contains("too many input arguments"));
     }
 

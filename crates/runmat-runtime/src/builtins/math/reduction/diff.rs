@@ -215,7 +215,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "diff",
     builtin_path = "crate::builtins::math::reduction::diff"
 )]
-fn diff_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn diff_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (order, dim) = parse_arguments(&rest)?;
     if order == 0 {
         return Ok(value);
@@ -246,7 +246,7 @@ fn diff_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
             diff_complex_tensor(tensor, order, dim).map(complex_tensor_into_value)
         }
         Value::CharArray(chars) => diff_char_array(chars, order, dim),
-        Value::GpuTensor(handle) => diff_gpu(handle, order, dim),
+        Value::GpuTensor(handle) => diff_gpu(handle, order, dim).await,
         other => Err(diff_error(format!(
             "diff: unsupported input type {:?}; expected numeric, logical, or character data",
             other
@@ -336,7 +336,11 @@ fn is_empty_array(value: &Value) -> bool {
     matches!(value, Value::Tensor(t) if t.data.is_empty())
 }
 
-fn diff_gpu(handle: GpuTensorHandle, order: usize, dim: Option<usize>) -> BuiltinResult<Value> {
+async fn diff_gpu(
+    handle: GpuTensorHandle,
+    order: usize,
+    dim: Option<usize>,
+) -> BuiltinResult<Value> {
     let working_dim = dim.unwrap_or_else(|| default_dimension(&handle.shape));
     if working_dim == 0 {
         return Err(diff_error("diff: dimension must be >= 1"));
@@ -349,7 +353,7 @@ fn diff_gpu(handle: GpuTensorHandle, order: usize, dim: Option<usize>) -> Builti
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     diff_tensor_host(tensor, order, Some(working_dim)).map(tensor::tensor_into_value)
 }
 
@@ -495,7 +499,12 @@ fn product(dims: &[usize]) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor};
+
+    fn diff_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::diff_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

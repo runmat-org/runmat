@@ -1,3 +1,4 @@
+use futures::executor::block_on;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 use runmat_plot::plots::Figure;
@@ -137,14 +138,19 @@ impl SurfaceDataInput {
     }
 }
 
-pub fn gather_tensor_from_gpu(
+pub async fn gather_tensor_from_gpu_async(
     handle: GpuTensorHandle,
     context: &'static str,
 ) -> BuiltinResult<Tensor> {
     let value = Value::GpuTensor(handle);
-    let gathered = crate::gather_if_needed(&value)
+    let gathered = crate::gather_if_needed_async(&value)
+        .await
         .map_err(|flow| map_control_flow_with_builtin(flow, context))?;
     Tensor::try_from(&gathered).map_err(|e| plotting_error(context, format!("{context}: {e}")))
+}
+
+pub fn gather_tensor_from_gpu(handle: GpuTensorHandle, context: &'static str) -> BuiltinResult<Tensor> {
+    block_on(gather_tensor_from_gpu_async(handle, context))
 }
 
 pub fn tensor_to_surface_grid(

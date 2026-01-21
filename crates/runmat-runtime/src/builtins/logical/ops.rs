@@ -236,14 +236,14 @@ fn logical_error(message: impl Into<String>) -> RuntimeError {
     accel = "unary",
     builtin_path = "crate::builtins::logical::ops"
 )]
-fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(logical_error("logical: too many input arguments"));
     }
-    convert_value_to_logical(value)
+    convert_value_to_logical(value).await
 }
 
-fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
+async fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Bool(_) | Value::LogicalArray(_) => Ok(value),
         Value::Num(n) => Ok(Value::Bool(n != 0.0)),
@@ -253,7 +253,7 @@ fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
         Value::ComplexTensor(tensor) => logical_from_complex_tensor(tensor),
         Value::CharArray(chars) => logical_from_char_array(chars),
         Value::StringArray(strings) => logical_from_string_array(strings),
-        Value::GpuTensor(handle) => logical_from_gpu(handle),
+        Value::GpuTensor(handle) => logical_from_gpu(handle).await,
         Value::String(_) => Err(conversion_error("string")),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
@@ -291,7 +291,7 @@ fn logical_from_string_array(strings: StringArray) -> BuiltinResult<Value> {
     logical_buffer_to_host(LogicalBuffer { bits, shape })
 }
 
-fn logical_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn logical_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if runmat_accelerate_api::handle_is_logical(&handle) {
         return Ok(Value::GpuTensor(handle));
     }
@@ -319,7 +319,8 @@ fn logical_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
         .map_err(|err| logical_error(format!("{BUILTIN_NAME}: {err}")))?;
     let buffer = LogicalBuffer::from_real_tensor(&tensor);
     logical_buffer_to_gpu(buffer, provider)
@@ -443,8 +444,13 @@ fn canonical_shape(shape: &[usize], len: usize) -> Vec<usize> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CellArray, IntValue, MException, ObjectInstance, StructValue};
+
+    fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::logical_builtin(value, rest))
+    }
 
     fn assert_error_message(err: crate::RuntimeError, expected: &str) {
         assert_eq!(err.message(), expected);

@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -307,31 +307,31 @@ impl PatternSpec {
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::strip"
 )]
-fn strip_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let gathered = gather_if_needed(&value).map_err(map_flow)?;
+async fn strip_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
     match gathered {
-        Value::String(text) => strip_string(text, &rest),
-        Value::StringArray(array) => strip_string_array(array, &rest),
-        Value::CharArray(array) => strip_char_array(array, &rest),
-        Value::Cell(cell) => strip_cell_array(cell, &rest),
+        Value::String(text) => strip_string(text, &rest).await,
+        Value::StringArray(array) => strip_string_array(array, &rest).await,
+        Value::CharArray(array) => strip_char_array(array, &rest).await,
+        Value::Cell(cell) => strip_cell_array(cell, &rest).await,
         _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
     }
 }
 
-fn strip_string(text: String, args: &[Value]) -> BuiltinResult<Value> {
+async fn strip_string(text: String, args: &[Value]) -> BuiltinResult<Value> {
     if is_missing_string(&text) {
         return Ok(Value::String(text));
     }
     let expectation = PatternExpectation::scalar();
-    let (direction, pattern_spec) = parse_arguments(args, &expectation)?;
+    let (direction, pattern_spec) = parse_arguments(args, &expectation).await?;
     let stripped = strip_text(&text, direction, pattern_spec.pattern_for_index(0));
     Ok(Value::String(stripped))
 }
 
-fn strip_string_array(array: StringArray, args: &[Value]) -> BuiltinResult<Value> {
+async fn strip_string_array(array: StringArray, args: &[Value]) -> BuiltinResult<Value> {
     let expected_len = array.data.len();
     let expectation = PatternExpectation::with_shape(expected_len, &array.shape);
-    let (direction, pattern_spec) = parse_arguments(args, &expectation)?;
+    let (direction, pattern_spec) = parse_arguments(args, &expectation).await?;
     let StringArray { data, shape, .. } = array;
     let mut stripped: Vec<String> = Vec::with_capacity(expected_len);
     for (idx, text) in data.into_iter().enumerate() {
@@ -347,10 +347,10 @@ fn strip_string_array(array: StringArray, args: &[Value]) -> BuiltinResult<Value
     Ok(Value::StringArray(result))
 }
 
-fn strip_char_array(array: CharArray, args: &[Value]) -> BuiltinResult<Value> {
+async fn strip_char_array(array: CharArray, args: &[Value]) -> BuiltinResult<Value> {
     let CharArray { data, rows, cols } = array;
     let expectation = PatternExpectation::with_len(rows);
-    let (direction, pattern_spec) = parse_arguments(args, &expectation)?;
+    let (direction, pattern_spec) = parse_arguments(args, &expectation).await?;
 
     if rows == 0 {
         return Ok(Value::CharArray(CharArray { data, rows, cols }));
@@ -381,30 +381,30 @@ fn strip_char_array(array: CharArray, args: &[Value]) -> BuiltinResult<Value> {
         .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn strip_cell_array(cell: CellArray, args: &[Value]) -> BuiltinResult<Value> {
+async fn strip_cell_array(cell: CellArray, args: &[Value]) -> BuiltinResult<Value> {
     let rows = cell.rows;
     let cols = cell.cols;
     let dims = [rows, cols];
     let expectation = PatternExpectation::with_shape(rows * cols, &dims);
-    let (direction, pattern_spec) = parse_arguments(args, &expectation)?;
+    let (direction, pattern_spec) = parse_arguments(args, &expectation).await?;
     let total = rows * cols;
     let mut stripped_values: Vec<Value> = Vec::with_capacity(total);
     for idx in 0..total {
         let value = &cell.data[idx];
         let pattern = pattern_spec.pattern_for_index(idx);
-        let stripped = strip_cell_element(value, direction, pattern)?;
+        let stripped = strip_cell_element(value, direction, pattern).await?;
         stripped_values.push(stripped);
     }
     make_cell(stripped_values, rows, cols)
         .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn strip_cell_element(
+async fn strip_cell_element(
     value: &Value,
     direction: StripDirection,
     pattern: PatternRef<'_>,
 ) -> BuiltinResult<Value> {
-    let gathered = gather_if_needed(value).map_err(map_flow)?;
+    let gathered = gather_if_needed_async(value).await.map_err(map_flow)?;
     match gathered {
         Value::String(text) => {
             if is_missing_string(&text) {
@@ -443,7 +443,7 @@ fn strip_cell_element(
     }
 }
 
-fn parse_arguments(
+async fn parse_arguments(
     args: &[Value],
     expectation: &PatternExpectation,
 ) -> BuiltinResult<(StripDirection, PatternSpec)> {
@@ -453,7 +453,7 @@ fn parse_arguments(
             if let Some(direction) = try_parse_direction(&args[0], false)? {
                 Ok((direction, PatternSpec::Default))
             } else {
-                let pattern = parse_pattern(&args[0], expectation)?;
+                let pattern = parse_pattern(&args[0], expectation).await?;
                 Ok((StripDirection::Both, pattern))
             }
         }
@@ -462,7 +462,7 @@ fn parse_arguments(
                 Some(dir) => dir,
                 None => return Err(runtime_error_for(DIRECTION_ERROR)),
             };
-            let pattern = parse_pattern(&args[1], expectation)?;
+            let pattern = parse_pattern(&args[1], expectation).await?;
             Ok((direction, pattern))
         }
         _ => Err(runtime_error_for("strip: too many input arguments")),
@@ -517,7 +517,7 @@ fn value_to_single_string(value: &Value) -> Option<String> {
     }
 }
 
-fn parse_pattern(value: &Value, expectation: &PatternExpectation) -> BuiltinResult<PatternSpec> {
+async fn parse_pattern(value: &Value, expectation: &PatternExpectation) -> BuiltinResult<PatternSpec> {
     let expected_len = expectation.len();
     match value {
         Value::String(text) => Ok(PatternSpec::Scalar(text.chars().collect())),
@@ -562,12 +562,12 @@ fn parse_pattern(value: &Value, expectation: &PatternExpectation) -> BuiltinResu
                 Err(runtime_error_for(SIZE_MISMATCH_ERROR))
             }
         }
-        Value::Cell(cell) => parse_pattern_cell(cell, expectation),
+        Value::Cell(cell) => parse_pattern_cell(cell, expectation).await,
         _ => Err(runtime_error_for(CHARACTERS_ERROR)),
     }
 }
 
-fn parse_pattern_cell(
+async fn parse_pattern_cell(
     cell: &CellArray,
     expectation: &PatternExpectation,
 ) -> BuiltinResult<PatternSpec> {
@@ -576,7 +576,7 @@ fn parse_pattern_cell(
         return Ok(PatternSpec::Scalar(Vec::new()));
     }
     if len == 1 {
-        let chars = pattern_chars_from_value(&cell.data[0])?;
+        let chars = pattern_chars_from_value(&cell.data[0]).await?;
         return Ok(PatternSpec::Scalar(chars));
     }
     if len != expectation.len() {
@@ -599,13 +599,13 @@ fn parse_pattern_cell(
     }
     let mut patterns = Vec::with_capacity(len);
     for value in &cell.data {
-        patterns.push(pattern_chars_from_value(value)?);
+        patterns.push(pattern_chars_from_value(value).await?);
     }
     Ok(PatternSpec::PerElement(patterns))
 }
 
-fn pattern_chars_from_value(value: &Value) -> BuiltinResult<Vec<char>> {
-    let gathered = gather_if_needed(value).map_err(map_flow)?;
+async fn pattern_chars_from_value(value: &Value) -> BuiltinResult<Vec<char>> {
+    let gathered = gather_if_needed_async(value).await.map_err(map_flow)?;
     match gathered {
         Value::String(text) => Ok(text.chars().collect()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].chars().collect()),
@@ -663,17 +663,21 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    fn run_strip(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(strip_builtin(value, rest))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_string_scalar_default() {
-        let result = strip_builtin(Value::String("  RunMat  ".into()), Vec::new()).expect("strip");
+        let result = run_strip(Value::String("  RunMat  ".into()), Vec::new()).expect("strip");
         assert_eq!(result, Value::String("RunMat".into()));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_string_scalar_direction() {
-        let result = strip_builtin(
+        let result = run_strip(
             Value::String("...data".into()),
             vec![Value::String("left".into()), Value::String(".".into())],
         )
@@ -684,7 +688,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_string_scalar_custom_characters() {
-        let result = strip_builtin(
+        let result = run_strip(
             Value::String("00052".into()),
             vec![Value::String("left".into()), Value::String("0".into())],
         )
@@ -695,7 +699,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_string_scalar_pattern_only() {
-        let result = strip_builtin(
+        let result = run_strip(
             Value::String("xxaccelerationxx".into()),
             vec![Value::String("x".into())],
         )
@@ -706,7 +710,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_empty_pattern_returns_original() {
-        let result = strip_builtin(
+        let result = run_strip(
             Value::String("abc".into()),
             vec![Value::String(String::new())],
         )
@@ -717,7 +721,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_supports_leading_synonym() {
-        let result = strip_builtin(
+        let result = run_strip(
             Value::String("   data".into()),
             vec![Value::String("leading".into())],
         )
@@ -728,7 +732,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_supports_trailing_synonym() {
-        let result = strip_builtin(
+        let result = run_strip(
             Value::String("data   ".into()),
             vec![Value::String("trailing".into())],
         )
@@ -745,7 +749,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let chars = CharArray::new(vec!['#', '#', '-', '-', '*', '*'], 3, 2).unwrap();
-        let result = strip_builtin(
+        let result = run_strip(
             Value::StringArray(strings),
             vec![Value::String("both".into()), Value::CharArray(chars)],
         )
@@ -777,7 +781,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let result =
-            strip_builtin(Value::StringArray(strings), vec![Value::Cell(patterns)]).expect("strip");
+            run_strip(Value::StringArray(strings), vec![Value::Cell(patterns)]).expect("strip");
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.data, vec![String::from("pass"), String::from("warn")]);
@@ -791,7 +795,7 @@ pub(crate) mod tests {
     fn strip_string_array_preserves_missing() {
         let strings =
             StringArray::new(vec!["   data   ".into(), "<missing>".into()], vec![2, 1]).unwrap();
-        let result = strip_builtin(Value::StringArray(strings), Vec::new()).expect("strip");
+        let result = run_strip(Value::StringArray(strings), Vec::new()).expect("strip");
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.data[0], "data");
@@ -807,7 +811,7 @@ pub(crate) mod tests {
         let source = "  cat  dog  ";
         let chars: Vec<char> = source.chars().collect();
         let array = CharArray::new(chars, 1, source.chars().count()).unwrap();
-        let result = strip_builtin(Value::CharArray(array), Vec::new()).expect("strip");
+        let result = run_strip(Value::CharArray(array), Vec::new()).expect("strip");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
@@ -823,7 +827,7 @@ pub(crate) mod tests {
     #[test]
     fn strip_char_array_supports_trailing_direction() {
         let array = CharArray::new_row("gpu   ");
-        let result = strip_builtin(
+        let result = run_strip(
             Value::CharArray(array),
             vec![Value::String("trailing".into())],
         )
@@ -852,7 +856,7 @@ pub(crate) mod tests {
             3,
         )
         .unwrap();
-        let result = strip_builtin(Value::Cell(cell), Vec::new()).expect("strip");
+        let result = run_strip(Value::Cell(cell), Vec::new()).expect("strip");
         match result {
             Value::Cell(out) => {
                 assert_eq!(out.rows, 1);
@@ -871,28 +875,28 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_preserves_missing_string() {
-        let result = strip_builtin(Value::String("<missing>".into()), Vec::new()).expect("strip");
+        let result = run_strip(Value::String("<missing>".into()), Vec::new()).expect("strip");
         assert_eq!(result, Value::String("<missing>".into()));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_errors_on_invalid_input() {
-        let err = strip_builtin(Value::Num(1.0), Vec::new()).unwrap_err();
+        let err = run_strip(Value::Num(1.0), Vec::new()).unwrap_err();
         assert_eq!(err.to_string(), ARG_TYPE_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_errors_on_invalid_pattern_type() {
-        let err = strip_builtin(Value::String("abc".into()), vec![Value::Num(1.0)]).unwrap_err();
+        let err = run_strip(Value::String("abc".into()), vec![Value::Num(1.0)]).unwrap_err();
         assert_eq!(err.to_string(), CHARACTERS_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_errors_on_invalid_direction() {
-        let err = strip_builtin(
+        let err = run_strip(
             Value::String("abc".into()),
             vec![Value::String("sideways".into()), Value::String("a".into())],
         )
@@ -906,7 +910,7 @@ pub(crate) mod tests {
         let strings = StringArray::new(vec!["one".into(), "two".into()], vec![2, 1]).unwrap();
         let pattern =
             StringArray::new(vec!["x".into(), "y".into(), "z".into()], vec![3, 1]).unwrap();
-        let err = strip_builtin(
+        let err = run_strip(
             Value::StringArray(strings),
             vec![Value::StringArray(pattern)],
         )
@@ -919,7 +923,7 @@ pub(crate) mod tests {
     fn strip_errors_on_pattern_shape_mismatch() {
         let strings = StringArray::new(vec!["one".into(), "two".into()], vec![1, 2]).unwrap();
         let pattern = StringArray::new(vec!["x".into(), "y".into()], vec![2, 1]).unwrap();
-        let err = strip_builtin(
+        let err = run_strip(
             Value::StringArray(strings),
             vec![Value::StringArray(pattern)],
         )
@@ -937,7 +941,7 @@ pub(crate) mod tests {
             1,
         )
         .unwrap();
-        let err = strip_builtin(Value::StringArray(strings), vec![Value::Cell(cell_pattern)])
+        let err = run_strip(Value::StringArray(strings), vec![Value::Cell(cell_pattern)])
             .unwrap_err();
         assert_eq!(err.to_string(), SIZE_MISMATCH_ERROR);
     }
@@ -945,7 +949,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_errors_on_too_many_arguments() {
-        let err = strip_builtin(
+        let err = run_strip(
             Value::String("abc".into()),
             vec![
                 Value::String("both".into()),
@@ -973,7 +977,7 @@ pub(crate) mod tests {
                 shape: &host_shape,
             })
             .expect("upload");
-        let err = strip_builtin(Value::GpuTensor(handle.clone()), Vec::new()).unwrap_err();
+        let err = run_strip(Value::GpuTensor(handle.clone()), Vec::new()).unwrap_err();
         assert_eq!(err.to_string(), ARG_TYPE_ERROR);
         provider.free(&handle).ok();
     }

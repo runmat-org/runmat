@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const ERR_TOO_FEW_INPUTS: &str = "setenv: not enough input arguments";
 const ERR_TOO_MANY_INPUTS: &str = "setenv: too many input arguments";
@@ -241,14 +241,14 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::setenv"
 )]
-fn setenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(&args)?;
+async fn setenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(&args).await?;
     Ok(eval.first_output())
 }
 
 /// Evaluate `setenv` once and expose both outputs.
-pub fn evaluate(args: &[Value]) -> BuiltinResult<SetenvResult> {
-    let gathered = gather_arguments(args)?;
+pub async fn evaluate(args: &[Value]) -> BuiltinResult<SetenvResult> {
+    let gathered = gather_arguments(args).await?;
     match gathered.len() {
         0 | 1 => Err(setenv_error(ERR_TOO_FEW_INPUTS)),
         2 => apply(&gathered[0], &gathered[1]),
@@ -338,10 +338,10 @@ fn update_environment(name: &str, value: &str) -> SetenvResult {
     }
 }
 
-fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
+async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(map_control_flow)?);
+        out.push(gather_if_needed_async(value).await.map_err(map_control_flow)?);
     }
     Ok(out)
 }
@@ -399,6 +399,14 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
     use runmat_builtins::{CharArray, StringArray, Value};
+
+    fn setenv_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::setenv_builtin(args))
+    }
+
+    fn evaluate(args: &[Value]) -> BuiltinResult<SetenvResult> {
+        futures::executor::block_on(super::evaluate(args))
+    }
 
     fn unique_name(suffix: &str) -> String {
         format!("RUNMAT_TEST_SETENV_{}", suffix)

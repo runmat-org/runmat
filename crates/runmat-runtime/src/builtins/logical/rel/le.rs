@@ -253,13 +253,13 @@ fn le_error(message: impl Into<String>, identifier: &'static str) -> RuntimeErro
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::rel::le"
 )]
-fn le_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+async fn le_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
         if let Some(result) = try_le_gpu(a, b) {
             return result;
         }
     }
-    le_host(lhs, rhs)
+    le_host(lhs, rhs).await
 }
 
 fn try_le_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<crate::BuiltinResult<Value>> {
@@ -273,11 +273,11 @@ fn try_le_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<crate::Builtin
     }
 }
 
-fn le_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+async fn le_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let (lhs, rhs) = normalize_char_string(lhs, rhs);
 
-    let left = LeOperand::from_value(lhs)?;
-    let right = LeOperand::from_value(rhs)?;
+    let left = LeOperand::from_value(lhs).await?;
+    let right = LeOperand::from_value(rhs).await?;
 
     match (left, right) {
         (LeOperand::Numeric(a), LeOperand::Numeric(b)) => {
@@ -334,7 +334,7 @@ enum LeOperand {
 }
 
 impl LeOperand {
-    fn from_value(value: Value) -> crate::BuiltinResult<Self> {
+    async fn from_value(value: Value) -> crate::BuiltinResult<Self> {
         match value {
             Value::Num(n) => Ok(LeOperand::Numeric(NumericBuffer::scalar(n))),
             Value::Bool(flag) => Ok(LeOperand::Numeric(NumericBuffer::scalar(if flag {
@@ -353,9 +353,11 @@ impl LeOperand {
             Value::String(s) => Ok(LeOperand::String(StringBuffer::scalar(s))),
             Value::StringArray(sa) => Ok(LeOperand::String(StringBuffer::from_array(sa))),
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle).map_err(|err| {
-                    le_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT)
-                })?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle)
+                    .await
+                    .map_err(|err| {
+                        le_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT)
+                    })?;
                 Ok(LeOperand::Numeric(NumericBuffer::from_tensor(tensor)))
             }
             Value::Complex(_, _) | Value::ComplexTensor(_) => Err(le_error(
@@ -513,19 +515,24 @@ impl StringBuffer {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
+
+    fn run_le(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+        block_on(super::le_builtin(lhs, rhs))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn le_scalar_true_for_equal_values() {
-        let result = le_builtin(Value::Num(4.0), Value::Num(4.0)).expect("le");
+        let result = run_le(Value::Num(4.0), Value::Num(4.0)).expect("le");
         assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn le_scalar_false() {
-        let result = le_builtin(Value::Num(5.0), Value::Num(3.0)).expect("le");
+        let result = run_le(Value::Num(5.0), Value::Num(3.0)).expect("le");
         assert_eq!(result, Value::Bool(false));
     }
 
@@ -533,7 +540,7 @@ pub(crate) mod tests {
     #[test]
     fn le_vector_broadcast() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![1, 4]).unwrap();
-        let result = le_builtin(Value::Tensor(tensor), Value::Num(3.0)).expect("le");
+        let result = run_le(Value::Tensor(tensor), Value::Num(3.0)).expect("le");
         match result {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![1, 4]);
@@ -548,7 +555,7 @@ pub(crate) mod tests {
     fn le_char_array_against_numeric() {
         let chars = CharArray::new(vec!['A', 'B', 'C'], 1, 3).unwrap();
         let tensor = Tensor::new(vec![65.0, 66.0, 67.0], vec![1, 3]).unwrap();
-        let result = le_builtin(Value::CharArray(chars), Value::Tensor(tensor)).expect("le");
+        let result = run_le(Value::CharArray(chars), Value::Tensor(tensor)).expect("le");
         match result {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![1, 3]);
@@ -563,7 +570,7 @@ pub(crate) mod tests {
     fn le_string_array_against_scalar() {
         let array = StringArray::new(vec!["apple".into(), "carrot".into()], vec![1, 2]).unwrap();
         let result =
-            le_builtin(Value::StringArray(array), Value::String("banana".into())).expect("le");
+            run_le(Value::StringArray(array), Value::String("banana".into())).expect("le");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![1, 2]);
@@ -577,7 +584,7 @@ pub(crate) mod tests {
     #[test]
     fn le_string_numeric_error() {
         let err =
-            le_builtin(Value::String("apple".into()), Value::Num(3.0)).expect_err("expected error");
+            run_le(Value::String("apple".into()), Value::Num(3.0)).expect_err("expected error");
         assert!(err.message().contains("mixing numeric and string"));
         assert_eq!(err.identifier(), Some(IDENT_INVALID_INPUT));
     }
@@ -585,7 +592,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn le_complex_error() {
-        let err = le_builtin(Value::Complex(1.0, 1.0), Value::Num(0.0)).expect_err("le");
+        let err = run_le(Value::Complex(1.0, 1.0), Value::Num(0.0)).expect_err("le");
         assert!(err.message().contains("complex"));
         assert_eq!(err.identifier(), Some(IDENT_COMPLEX_UNSUPPORTED));
     }
@@ -607,7 +614,7 @@ pub(crate) mod tests {
             let handle_l = provider.upload(&view_l).expect("upload lhs");
             let handle_r = provider.upload(&view_r).expect("upload rhs");
             let result =
-                le_builtin(Value::GpuTensor(handle_l), Value::GpuTensor(handle_r)).expect("le");
+                run_le(Value::GpuTensor(handle_l), Value::GpuTensor(handle_r)).expect("le");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
             assert_eq!(gathered.data, vec![1.0, 1.0, 1.0]);
@@ -630,7 +637,7 @@ pub(crate) mod tests {
         );
         let lhs = Tensor::new(vec![0.0, 2.0, 5.0, 7.0], vec![4, 1]).unwrap();
         let rhs = Tensor::new(vec![1.0, 2.0, 4.0, 8.0], vec![4, 1]).unwrap();
-        let cpu = le_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).unwrap();
+        let cpu = run_le_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).unwrap();
 
         let view_l = HostTensorView {
             data: &lhs.data,
@@ -643,7 +650,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("provider");
         let handle_l = provider.upload(&view_l).expect("upload lhs");
         let handle_r = provider.upload(&view_r).expect("upload rhs");
-        let gpu = le_builtin(Value::GpuTensor(handle_l), Value::GpuTensor(handle_r)).unwrap();
+        let gpu = run_le(Value::GpuTensor(handle_l), Value::GpuTensor(handle_r)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
 
         match (cpu, gathered) {

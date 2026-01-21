@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use runmat_filesystem as vfs;
 use std::env;
@@ -259,14 +259,14 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::savepath"
 )]
-fn savepath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(&args)?;
+async fn savepath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(&args).await?;
     Ok(eval.first_output())
 }
 
 /// Evaluate `savepath` and expose all MATLAB-style outputs.
-pub fn evaluate(args: &[Value]) -> BuiltinResult<SavepathResult> {
-    let gathered = gather_arguments(args)?;
+pub async fn evaluate(args: &[Value]) -> BuiltinResult<SavepathResult> {
+    let gathered = gather_arguments(args).await?;
     let target = match gathered.len() {
         0 => match default_target_path() {
             Ok(path) => path,
@@ -500,10 +500,10 @@ fn tensor_to_string(tensor: &Tensor) -> BuiltinResult<String> {
     Ok(text)
 }
 
-fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
+async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut gathered = Vec::with_capacity(args.len());
     for value in args {
-        gathered.push(gather_if_needed(value).map_err(map_control_flow)?);
+        gathered.push(gather_if_needed_async(value).await.map_err(map_control_flow)?);
     }
     Ok(gathered)
 }
@@ -523,6 +523,14 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use std::fs;
     use tempfile::tempdir;
+
+    fn savepath_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::savepath_builtin(args))
+    }
+
+    fn evaluate(args: &[Value]) -> BuiltinResult<SavepathResult> {
+        futures::executor::block_on(super::evaluate(args))
+    }
 
     struct PathGuard {
         previous: String,

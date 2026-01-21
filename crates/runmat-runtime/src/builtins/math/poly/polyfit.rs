@@ -249,29 +249,34 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::math::poly::polyfit"
 )]
-fn polyfit_builtin(
+async fn polyfit_builtin(
     x: Value,
     y: Value,
     degree: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(x, y, degree, &rest)?;
+    let eval = evaluate(x, y, degree, &rest).await?;
     Ok(eval.coefficients())
 }
 
 /// Evaluate `polyfit`, returning the multi-output envelope used by the VM.
-pub fn evaluate(x: Value, y: Value, degree: Value, rest: &[Value]) -> BuiltinResult<PolyfitEval> {
+pub async fn evaluate(
+    x: Value,
+    y: Value,
+    degree: Value,
+    rest: &[Value],
+) -> BuiltinResult<PolyfitEval> {
     let deg = parse_degree(&degree)?;
 
     if let Some(eval) = try_gpu_polyfit(&x, &y, deg, rest)? {
         return Ok(eval);
     }
 
-    let x_host = dispatcher::gather_if_needed(&x)?;
-    let y_host = dispatcher::gather_if_needed(&y)?;
+    let x_host = dispatcher::gather_if_needed_async(&x).await?;
+    let y_host = dispatcher::gather_if_needed_async(&y).await?;
 
-    let x_data = real_vector("polyfit", "X", x_host)?;
-    let (y_data, is_complex_input) = complex_vector("polyfit", "Y", y_host)?;
+    let x_data = real_vector("polyfit", "X", x_host).await?;
+    let (y_data, is_complex_input) = complex_vector("polyfit", "Y", y_host).await?;
 
     if x_data.len() != y_data.len() {
         return Err(polyfit_error(
@@ -291,7 +296,7 @@ pub fn evaluate(x: Value, y: Value, degree: Value, rest: &[Value]) -> BuiltinRes
         );
     }
 
-    let weights = parse_weights(rest, x_data.len())?;
+    let weights = parse_weights(rest, x_data.len()).await?;
     let mut solution = solve_polyfit(&x_data, &y_data, deg, weights.as_deref())?;
     if is_complex_input {
         solution.is_complex = true;
@@ -469,7 +474,8 @@ fn parse_degree(value: &Value) -> BuiltinResult<usize> {
     }
 }
 
-fn real_vector(context: &str, label: &str, value: Value) -> BuiltinResult<Vec<f64>> {
+#[async_recursion::async_recursion(?Send)]
+async fn real_vector(context: &str, label: &str, value: Value) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(mut tensor) => {
             ensure_vector_shape(context, label, &tensor.shape)?;
@@ -484,8 +490,9 @@ fn real_vector(context: &str, label: &str, value: Value) -> BuiltinResult<Vec<f6
         Value::Int(i) => Ok(vec![i.to_f64()]),
         Value::Bool(b) => Ok(vec![if b { 1.0 } else { 0.0 }]),
         Value::GpuTensor(handle) => {
-            let gathered = crate::builtins::common::gpu_helpers::gather_tensor(&handle)?;
-            real_vector(context, label, Value::Tensor(gathered))
+            let gathered =
+                crate::builtins::common::gpu_helpers::gather_tensor_async(&handle).await?;
+            real_vector(context, label, Value::Tensor(gathered)).await
         }
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(polyfit_error(format!(
             "{context}: {label} must be real-valued; complex inputs are not supported"
@@ -496,7 +503,8 @@ fn real_vector(context: &str, label: &str, value: Value) -> BuiltinResult<Vec<f6
     }
 }
 
-fn complex_vector(
+#[async_recursion::async_recursion(?Send)]
+async fn complex_vector(
     context: &str,
     label: &str,
     value: Value,
@@ -538,25 +546,23 @@ fn complex_vector(
         Value::Int(i) => Ok((vec![Complex64::new(i.to_f64(), 0.0)], false)),
         Value::Bool(b) => Ok((vec![Complex64::new(if b { 1.0 } else { 0.0 }, 0.0)], false)),
         Value::Complex(re, im) => Ok((vec![Complex64::new(re, im)], im.abs() > EPS)),
-        Value::GpuTensor(handle) => complex_vector(
-            context,
-            label,
-            Value::Tensor(crate::builtins::common::gpu_helpers::gather_tensor(
-                &handle,
-            )?),
-        ),
+        Value::GpuTensor(handle) => {
+            let gathered =
+                crate::builtins::common::gpu_helpers::gather_tensor_async(&handle).await?;
+            complex_vector(context, label, Value::Tensor(gathered)).await
+        }
         other => Err(polyfit_error(format!(
             "{context}: expected {label} to be a numeric vector, got {other:?}"
         ))),
     }
 }
 
-fn parse_weights(rest: &[Value], len: usize) -> BuiltinResult<Option<Vec<f64>>> {
+async fn parse_weights(rest: &[Value], len: usize) -> BuiltinResult<Option<Vec<f64>>> {
     match rest.len() {
         0 => Ok(None),
         1 => {
-            let gathered = dispatcher::gather_if_needed(&rest[0])?;
-            let data = real_vector("polyfit", "weights", gathered)?;
+            let gathered = dispatcher::gather_if_needed_async(&rest[0]).await?;
+            let data = real_vector("polyfit", "weights", gathered).await?;
             if data.len() != len {
                 return Err(polyfit_error(
                     "polyfit: weight vector must match the size of X",
@@ -984,6 +990,7 @@ pub fn polyfit_host_real_for_provider(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
         assert!(
@@ -991,6 +998,15 @@ pub(crate) mod tests {
             "expected error containing '{needle}', got '{}'",
             err.message()
         );
+    }
+
+    fn evaluate(
+        x: Value,
+        y: Value,
+        degree: Value,
+        rest: &[Value],
+    ) -> Result<PolyfitEval, RuntimeError> {
+        block_on(super::evaluate(x, y, degree, rest))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1395,4 +1411,5 @@ pub(crate) mod tests {
             assert!(!blocks.is_empty());
         }
     }
+
 }

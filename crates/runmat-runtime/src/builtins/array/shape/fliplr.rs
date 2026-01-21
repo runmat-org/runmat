@@ -245,7 +245,7 @@ fn fliplr_error(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::fliplr"
 )]
-fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
+async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => {
             Ok(flip_tensor_with("fliplr", tensor, &LR_DIM).map(tensor::tensor_into_value)?)
@@ -284,7 +284,7 @@ fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
                 .map_err(|e| fliplr_error(e))?;
             Ok(flip_tensor_with("fliplr", tensor, &LR_DIM).map(tensor::tensor_into_value)?)
         }
-        Value::GpuTensor(handle) => Ok(flip_gpu_with("fliplr", handle, &LR_DIM)?),
+        Value::GpuTensor(handle) => Ok(flip_gpu_with("fliplr", handle, &LR_DIM).await?),
         Value::Cell(_) => Err(fliplr_error("fliplr: cell arrays are not yet supported")),
         Value::FunctionHandle(_)
         | Value::Closure(_)
@@ -300,6 +300,11 @@ fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
+        block_on(super::fliplr_builtin(value))
+    }
     use crate::builtins::array::shape::flip::{flip_logical_array, flip_tensor};
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

@@ -236,7 +236,7 @@ fn orderfields_flow(message: impl Into<String>) -> RuntimeError {
     keywords = "orderfields,struct,reorder fields,alphabetical,struct array",
     builtin_path = "crate::builtins::structs::core::orderfields"
 )]
-fn orderfields_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn orderfields_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     Ok(evaluate(value, &rest)?.into_ordered_value())
 }
 
@@ -606,6 +606,10 @@ pub(crate) mod tests {
         err.message().to_string()
     }
 
+    fn run_orderfields(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(orderfields_builtin(value, rest))
+    }
+
     fn field_order(struct_value: &StructValue) -> Vec<String> {
         struct_value.field_names().cloned().collect()
     }
@@ -618,7 +622,7 @@ pub(crate) mod tests {
         st.fields.insert("alpha".to_string(), Value::Num(1.0));
         st.fields.insert("gamma".to_string(), Value::Num(3.0));
 
-        let result = orderfields_builtin(Value::Struct(st), Vec::new()).expect("orderfields");
+        let result = run_orderfields(Value::Struct(st), Vec::new()).expect("orderfields");
         let Value::Struct(sorted) = result else {
             panic!("expected struct result");
         };
@@ -643,7 +647,7 @@ pub(crate) mod tests {
         .expect("cell");
 
         let reordered =
-            orderfields_builtin(Value::Struct(st), vec![Value::Cell(names)]).expect("orderfields");
+            run_orderfields(Value::Struct(st), vec![Value::Cell(names)]).expect("orderfields");
         let Value::Struct(result) = reordered else {
             panic!("expected struct result");
         };
@@ -667,7 +671,7 @@ pub(crate) mod tests {
         )
         .expect("string array");
 
-        let result = orderfields_builtin(Value::Struct(st), vec![Value::StringArray(strings)])
+        let result = run_orderfields(Value::Struct(st), vec![Value::StringArray(strings)])
             .expect("orderfields");
         let Value::Struct(sorted) = result else {
             panic!("expected struct result");
@@ -689,7 +693,7 @@ pub(crate) mod tests {
         let data = vec!['b', 'a', 't', 'c', 'a', 't', 'a', 'n', 't'];
         let char_array = CharArray::new(data, 3, 3).expect("char array");
 
-        let result = orderfields_builtin(Value::Struct(st), vec![Value::CharArray(char_array)])
+        let result = run_orderfields(Value::Struct(st), vec![Value::CharArray(char_array)])
             .expect("order");
         let Value::Struct(sorted) = result else {
             panic!("expected struct result");
@@ -711,7 +715,7 @@ pub(crate) mod tests {
         reference.fields.insert("x".to_string(), Value::Num(0.0));
         reference.fields.insert("y".to_string(), Value::Num(0.0));
 
-        let result = orderfields_builtin(
+        let result = run_orderfields(
             Value::Struct(source),
             vec![Value::Struct(reference.clone())],
         )
@@ -734,7 +738,7 @@ pub(crate) mod tests {
         st.fields.insert("third".to_string(), Value::Num(3.0));
 
         let permutation = Tensor::new(vec![3.0, 1.0, 2.0], vec![1, 3]).expect("tensor permutation");
-        let result = orderfields_builtin(Value::Struct(st), vec![Value::Tensor(permutation)])
+        let result = run_orderfields(Value::Struct(st), vec![Value::Tensor(permutation)])
             .expect("orderfields");
         let Value::Struct(reordered) = result else {
             panic!("expected struct result");
@@ -758,7 +762,7 @@ pub(crate) mod tests {
 
         let permutation = Tensor::new(vec![1.0, 1.5], vec![1, 2]).expect("tensor");
         let err = error_message(
-            orderfields_builtin(Value::Struct(st), vec![Value::Tensor(permutation)]).unwrap_err(),
+            run_orderfields(Value::Struct(st), vec![Value::Tensor(permutation)]).unwrap_err(),
         );
         assert!(
             err.contains("index vector must contain integers"),
@@ -807,7 +811,7 @@ pub(crate) mod tests {
             CellArray::new(vec![Value::from("a"), Value::from("b")], 1, 2).expect("cell names");
 
         let result =
-            orderfields_builtin(Value::Cell(array), vec![Value::Cell(names)]).expect("orderfields");
+            run_orderfields(Value::Cell(array), vec![Value::Cell(names)]).expect("orderfields");
         let Value::Cell(reordered) = result else {
             panic!("expected cell array");
         };
@@ -853,7 +857,7 @@ pub(crate) mod tests {
         st.fields.insert("alpha".to_string(), Value::Num(1.0));
         st.fields.insert("beta".to_string(), Value::Num(2.0));
         let err = error_message(
-            orderfields_builtin(
+            run_orderfields(
                 Value::Struct(st),
                 vec![Value::Cell(
                     CellArray::new(vec![Value::from("beta"), Value::from("gamma")], 1, 2)
@@ -878,7 +882,7 @@ pub(crate) mod tests {
         let names =
             CellArray::new(vec![Value::from("alpha"), Value::from("alpha")], 1, 2).expect("cell");
         let err = error_message(
-            orderfields_builtin(Value::Struct(st), vec![Value::Cell(names)]).unwrap_err(),
+            run_orderfields(Value::Struct(st), vec![Value::Cell(names)]).unwrap_err(),
         );
         assert!(
             err.contains("duplicate field 'alpha'"),
@@ -897,7 +901,7 @@ pub(crate) mod tests {
         reference.fields.insert("x".to_string(), Value::Num(0.0));
 
         let err = error_message(
-            orderfields_builtin(Value::Struct(source), vec![Value::Struct(reference)]).unwrap_err(),
+            run_orderfields(Value::Struct(source), vec![Value::Struct(reference)]).unwrap_err(),
         );
         assert!(
             err.contains("field names must match the struct exactly"),
@@ -912,7 +916,7 @@ pub(crate) mod tests {
         st.fields.insert("x".to_string(), Value::Num(1.0));
 
         let err = error_message(
-            orderfields_builtin(Value::Struct(st), vec![Value::Num(1.0)]).unwrap_err(),
+            run_orderfields(Value::Struct(st), vec![Value::Num(1.0)]).unwrap_err(),
         );
         assert!(
             err.contains("unrecognised ordering argument"),
@@ -930,7 +934,7 @@ pub(crate) mod tests {
             .insert("field".to_string(), Value::Num(1.0));
 
         let err = error_message(
-            orderfields_builtin(Value::Cell(empty), vec![Value::Struct(reference)]).unwrap_err(),
+            run_orderfields(Value::Cell(empty), vec![Value::Struct(reference)]).unwrap_err(),
         );
         assert!(
             err.contains("empty struct arrays cannot adopt a non-empty reference order"),

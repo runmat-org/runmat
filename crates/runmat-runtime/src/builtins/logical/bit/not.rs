@@ -211,7 +211,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::bit::not"
 )]
-fn not_builtin(value: Value) -> BuiltinResult<Value> {
+async fn not_builtin(value: Value) -> BuiltinResult<Value> {
     if let Value::GpuTensor(ref handle) = value {
         if let Some(provider) = runmat_accelerate_api::provider() {
             if let Ok(device_out) = provider.logical_not(handle) {
@@ -219,11 +219,11 @@ fn not_builtin(value: Value) -> BuiltinResult<Value> {
             }
         }
     }
-    not_host(value)
+    not_host(value).await
 }
 
-fn not_host(value: Value) -> BuiltinResult<Value> {
-    let buffer = logical_buffer_from("not", value)?;
+async fn not_host(value: Value) -> BuiltinResult<Value> {
+    let buffer = logical_buffer_from("not", value).await?;
     let LogicalBuffer { data, shape } = buffer;
     let total = tensor::element_count(&shape);
     if total == 0 {
@@ -255,7 +255,7 @@ struct LogicalBuffer {
     shape: Vec<usize>,
 }
 
-fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalBuffer> {
+async fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalBuffer> {
     match value {
         Value::LogicalArray(array) => {
             let LogicalArray { data, shape } = array;
@@ -281,7 +281,8 @@ fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalBuffer>
         Value::ComplexTensor(tensor) => complex_tensor_to_logical_buffer(tensor),
         Value::CharArray(array) => char_array_to_logical_buffer(array),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
                 .map_err(|err| builtin_error(name, format!("{name}: {err}")))?;
             tensor_to_logical_buffer(tensor)
         }
@@ -356,6 +357,7 @@ pub(crate) mod tests {
     use crate::builtins::common::tensor;
     use crate::builtins::common::test_support;
     use crate::RuntimeError;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
 
     fn assert_error_contains(err: RuntimeError, expected: &str) {
@@ -365,6 +367,10 @@ pub(crate) mod tests {
             err.message()
         );
     }
+
+    fn run_not(value: Value) -> BuiltinResult<Value> {
+        block_on(super::not_builtin(value))
+    }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor};
@@ -372,15 +378,15 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_of_booleans() {
-        assert_eq!(not_builtin(Value::Bool(true)).unwrap(), Value::Bool(false));
-        assert_eq!(not_builtin(Value::Bool(false)).unwrap(), Value::Bool(true));
+        assert_eq!(run_not(Value::Bool(true)).unwrap(), Value::Bool(false));
+        assert_eq!(run_not(Value::Bool(false)).unwrap(), Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_numeric_array() {
         let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 0.0], vec![2, 2]).unwrap();
-        let result = not_builtin(Value::Tensor(tensor)).unwrap();
+        let result = run_not(Value::Tensor(tensor)).unwrap();
         match result {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![2, 2]);
@@ -394,18 +400,18 @@ pub(crate) mod tests {
     #[test]
     fn not_complex_scalar() {
         let result =
-            not_builtin(Value::Complex(0.0, 0.0)).expect("not complex zero should succeed");
+            run_not(Value::Complex(0.0, 0.0)).expect("not complex zero should succeed");
         assert_eq!(result, Value::Bool(true));
 
         let result =
-            not_builtin(Value::Complex(1.0, 0.0)).expect("not complex nonzero should succeed");
+            run_not(Value::Complex(1.0, 0.0)).expect("not complex nonzero should succeed");
         assert_eq!(result, Value::Bool(false));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_nan_yields_false() {
-        let result = not_builtin(Value::Num(f64::NAN)).unwrap();
+        let result = run_not(Value::Num(f64::NAN)).unwrap();
         assert_eq!(result, Value::Bool(false));
     }
 
@@ -413,7 +419,7 @@ pub(crate) mod tests {
     #[test]
     fn not_char_array() {
         let chars = CharArray::new_row("A\0C");
-        let result = not_builtin(Value::CharArray(chars)).unwrap();
+        let result = run_not(Value::CharArray(chars)).unwrap();
         match result {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![1, 3]);
@@ -433,7 +439,7 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = not_builtin(Value::GpuTensor(handle)).expect("not on gpu");
+            let result = run_not(Value::GpuTensor(handle)).expect("not on gpu");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
             assert_eq!(gathered.data, vec![1.0, 0.0, 1.0, 0.0]);
@@ -444,7 +450,7 @@ pub(crate) mod tests {
     #[test]
     fn not_accepts_int_inputs() {
         let value = Value::Int(IntValue::I32(0));
-        assert_eq!(not_builtin(value).unwrap(), Value::Bool(true));
+        assert_eq!(run_not(value).unwrap(), Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -452,13 +458,13 @@ pub(crate) mod tests {
     fn not_tensor_scalar_returns_bool() {
         let tensor = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
         assert_eq!(
-            not_builtin(Value::Tensor(tensor)).unwrap(),
+            run_not(Value::Tensor(tensor)).unwrap(),
             Value::Bool(false)
         );
 
         let tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
         assert_eq!(
-            not_builtin(Value::Tensor(tensor)).unwrap(),
+            run_not(Value::Tensor(tensor)).unwrap(),
             Value::Bool(true)
         );
     }
@@ -467,7 +473,7 @@ pub(crate) mod tests {
     #[test]
     fn not_empty_tensor_preserves_shape() {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![0, 3]).unwrap();
-        let result = not_builtin(Value::Tensor(tensor)).unwrap();
+        let result = run_not(Value::Tensor(tensor)).unwrap();
         match result {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![0, 3]);
@@ -482,7 +488,7 @@ pub(crate) mod tests {
     fn not_complex_tensor() {
         let tensor =
             ComplexTensor::new(vec![(0.0, 0.0), (1.0, 0.0), (0.0, -2.0)], vec![3, 1]).unwrap();
-        let result = not_builtin(Value::ComplexTensor(tensor)).unwrap();
+        let result = run_not(Value::ComplexTensor(tensor)).unwrap();
         match result {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![3, 1]);
@@ -496,7 +502,7 @@ pub(crate) mod tests {
     #[test]
     fn not_logical_array_flips_bits() {
         let array = LogicalArray::new(vec![1, 0, 1, 1], vec![2, 2]).unwrap();
-        let result = not_builtin(Value::LogicalArray(array)).unwrap();
+        let result = run_not(Value::LogicalArray(array)).unwrap();
         match result {
             Value::LogicalArray(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
@@ -509,7 +515,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_rejects_string_input() {
-        let err = not_builtin(Value::String("abc".into())).unwrap_err();
+        let err = run_not(Value::String("abc".into())).unwrap_err();
         assert_error_contains(err, "unsupported input type");
     }
 
@@ -521,7 +527,7 @@ pub(crate) mod tests {
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
         let tensor = Tensor::new(vec![0.0, 3.0, 0.0, -1.0], vec![2, 2]).unwrap();
-        let cpu = not_host(Value::Tensor(tensor.clone())).unwrap();
+        let cpu = run_not_host(Value::Tensor(tensor.clone())).unwrap();
         let view = HostTensorView {
             data: &tensor.data,
             shape: &tensor.shape,
@@ -530,7 +536,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = not_builtin(Value::GpuTensor(handle)).unwrap();
+        let gpu = run_not(Value::GpuTensor(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         let cpu_tensor = tensor::value_to_tensor(&cpu).expect("cpu tensor");
         assert_eq!(gathered.shape, cpu_tensor.shape);

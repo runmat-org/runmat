@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const CLASS_NAME: &str = "containers.Map";
 const MISSING_KEY_ERR: &str = "containers.Map: The specified key is not present in this container.";
@@ -577,8 +577,8 @@ struct KeyCandidate {
     sink = true,
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
-fn containers_map_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let parsed = parse_constructor_args(args, BUILTIN_CONSTRUCTOR)?;
+async fn containers_map_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let parsed = parse_constructor_args(args, BUILTIN_CONSTRUCTOR).await?;
     let store = build_store(parsed, BUILTIN_CONSTRUCTOR)?;
     allocate_handle(store, BUILTIN_CONSTRUCTOR)
 }
@@ -587,7 +587,7 @@ fn containers_map_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     name = "containers.Map.keys",
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
-fn containers_map_keys(map: Value) -> crate::BuiltinResult<Value> {
+async fn containers_map_keys(map: Value) -> crate::BuiltinResult<Value> {
     with_store(&map, BUILTIN_KEYS, |store| {
         let values = store.keys();
         make_row_cell(values, BUILTIN_KEYS)
@@ -598,7 +598,7 @@ fn containers_map_keys(map: Value) -> crate::BuiltinResult<Value> {
     name = "containers.Map.values",
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
-fn containers_map_values(map: Value) -> crate::BuiltinResult<Value> {
+async fn containers_map_values(map: Value) -> crate::BuiltinResult<Value> {
     with_store(&map, BUILTIN_VALUES, |store| {
         let values = store.values();
         make_row_cell(values, BUILTIN_VALUES)
@@ -609,9 +609,10 @@ fn containers_map_values(map: Value) -> crate::BuiltinResult<Value> {
     name = "containers.Map.isKey",
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
-fn containers_map_is_key(map: Value, key_spec: Value) -> crate::BuiltinResult<Value> {
+async fn containers_map_is_key(map: Value, key_spec: Value) -> crate::BuiltinResult<Value> {
+    let key_type = with_store(&map, BUILTIN_IS_KEY, |store| Ok(store.key_type))?;
+    let collection = collect_key_spec(&key_spec, key_type, BUILTIN_IS_KEY).await?;
     with_store(&map, BUILTIN_IS_KEY, |store| {
-        let collection = collect_key_spec(&key_spec, store.key_type, BUILTIN_IS_KEY)?;
         let mut flags = Vec::with_capacity(collection.values.len());
         for value in &collection.values {
             let normalized = normalize_key(value, store.key_type, BUILTIN_IS_KEY)?;
@@ -632,9 +633,10 @@ fn containers_map_is_key(map: Value, key_spec: Value) -> crate::BuiltinResult<Va
     name = "containers.Map.remove",
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
-fn containers_map_remove(map: Value, key_spec: Value) -> crate::BuiltinResult<Value> {
+async fn containers_map_remove(map: Value, key_spec: Value) -> crate::BuiltinResult<Value> {
+    let key_type = with_store(&map, BUILTIN_REMOVE, |store| Ok(store.key_type))?;
+    let collection = collect_key_spec(&key_spec, key_type, BUILTIN_REMOVE).await?;
     with_store_mut(&map, BUILTIN_REMOVE, |store| {
-        let collection = collect_key_spec(&key_spec, store.key_type, BUILTIN_REMOVE)?;
         for value in &collection.values {
             let normalized = normalize_key(value, store.key_type, BUILTIN_REMOVE)?;
             store.remove(&normalized, BUILTIN_REMOVE)?;
@@ -648,7 +650,11 @@ fn containers_map_remove(map: Value, key_spec: Value) -> crate::BuiltinResult<Va
     name = "containers.Map.subsref",
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
-fn containers_map_subsref(map: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
+async fn containers_map_subsref(
+    map: Value,
+    kind: String,
+    payload: Value,
+) -> crate::BuiltinResult<Value> {
     if !matches!(map, Value::HandleObject(_)) {
         return Err(map_error(
             format!("containers.Map: subsref expects a containers.Map handle, got {map:?}"),
@@ -671,8 +677,9 @@ fn containers_map_subsref(map: Value, kind: String, payload: Value) -> crate::Bu
                 ));
             }
             let key_arg = args.remove(0);
+            let key_type = with_store(&map, BUILTIN_SUBSREF, |store| Ok(store.key_type))?;
+            let collection = collect_key_spec(&key_arg, key_type, BUILTIN_SUBSREF).await?;
             with_store(&map, BUILTIN_SUBSREF, |store| {
-                let collection = collect_key_spec(&key_arg, store.key_type, BUILTIN_SUBSREF)?;
                 if collection.values.is_empty() {
                     return crate::make_cell_with_shape(Vec::new(), collection.shape.clone())
                         .map_err(|e| map_error(format!("containers.Map: {e}"), BUILTIN_SUBSREF));
@@ -732,7 +739,7 @@ fn containers_map_subsref(map: Value, kind: String, payload: Value) -> crate::Bu
     name = "containers.Map.subsasgn",
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
-fn containers_map_subsasgn(
+async fn containers_map_subsasgn(
     map: Value,
     kind: String,
     payload: Value,
@@ -760,12 +767,13 @@ fn containers_map_subsasgn(
                 ));
             }
             let key_arg = args.remove(0);
+            let key_type = with_store(&map, BUILTIN_SUBSASGN, |store| Ok(store.key_type))?;
+            let KeyCollection {
+                values: key_values, ..
+            } = collect_key_spec(&key_arg, key_type, BUILTIN_SUBSASGN).await?;
+            let values =
+                expand_assignment_values(rhs.clone(), key_values.len(), BUILTIN_SUBSASGN).await?;
             with_store_mut(&map, BUILTIN_SUBSASGN, move |store| {
-                let KeyCollection {
-                    values: key_values, ..
-                } = collect_key_spec(&key_arg, store.key_type, BUILTIN_SUBSASGN)?;
-                let values =
-                    expand_assignment_values(rhs.clone(), key_values.len(), BUILTIN_SUBSASGN)?;
                 for (key_raw, value) in key_values.into_iter().zip(values.into_iter()) {
                     let (normalized, canonical) =
                         canonicalize_key(key_raw, store.key_type, BUILTIN_SUBSASGN)?;
@@ -795,7 +803,7 @@ fn containers_map_subsasgn(
     }
 }
 
-fn parse_constructor_args(
+async fn parse_constructor_args(
     args: Vec<Value>,
     builtin: &'static str,
 ) -> BuiltinResult<ConstructorArgs> {
@@ -867,12 +875,12 @@ fn parse_constructor_args(
     }
 
     let keys = match keys_input {
-        Some(value) => prepare_keys(value, key_type, builtin)?,
+        Some(value) => prepare_keys(value, key_type, builtin).await?,
         None => Vec::new(),
     };
 
     let values = match values_input {
-        Some(value) => prepare_values(value, builtin)?,
+        Some(value) => prepare_values(value, builtin).await?,
         None => Vec::new(),
     };
 
@@ -1018,13 +1026,15 @@ fn map_id(handle: &HandleRef, builtin: &'static str) -> BuiltinResult<u64> {
     }
 }
 
-fn prepare_keys(
+async fn prepare_keys(
     value: Value,
     key_type: KeyType,
     builtin: &'static str,
 ) -> BuiltinResult<Vec<KeyCandidate>> {
-    let host = gather_if_needed(&value).map_err(|err| attach_builtin_context(err, builtin))?;
-    let flattened = flatten_keys(&host, key_type, builtin)?;
+    let host = gather_if_needed_async(&value)
+        .await
+        .map_err(|err| attach_builtin_context(err, builtin))?;
+    let flattened = flatten_keys(&host, key_type, builtin).await?;
     let mut out = Vec::with_capacity(flattened.len());
     for raw_key in flattened {
         let (normalized, canonical) = canonicalize_key(raw_key, key_type, builtin)?;
@@ -1036,12 +1046,14 @@ fn prepare_keys(
     Ok(out)
 }
 
-fn prepare_values(value: Value, builtin: &'static str) -> BuiltinResult<Vec<Value>> {
-    let host = gather_if_needed(&value).map_err(|err| attach_builtin_context(err, builtin))?;
-    flatten_values(&host, builtin)
+async fn prepare_values(value: Value, builtin: &'static str) -> BuiltinResult<Vec<Value>> {
+    let host = gather_if_needed_async(&value)
+        .await
+        .map_err(|err| attach_builtin_context(err, builtin))?;
+    flatten_values(&host, builtin).await
 }
 
-fn flatten_keys(
+async fn flatten_keys(
     value: &Value,
     key_type: KeyType,
     builtin: &'static str,
@@ -1058,7 +1070,8 @@ fn flatten_keys(
                     ));
                 }
                 out.push(
-                    gather_if_needed(element)
+                    gather_if_needed_async(element)
+                        .await
                         .map_err(|err| attach_builtin_context(err, builtin))?,
                 );
             }
@@ -1102,13 +1115,14 @@ fn flatten_keys(
     }
 }
 
-fn flatten_values(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<Value>> {
+async fn flatten_values(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<Value>> {
     match value {
         Value::Cell(cell) => {
             let mut out = Vec::with_capacity(cell.data.len());
             for ptr in &cell.data {
                 out.push(
-                    gather_if_needed(unsafe { &*ptr.as_raw() })
+                    gather_if_needed_async(unsafe { &*ptr.as_raw() })
+                        .await
                         .map_err(|err| attach_builtin_context(err, builtin))?,
                 );
             }
@@ -1504,13 +1518,15 @@ fn extract_key_arguments(payload: &Value, builtin: &'static str) -> BuiltinResul
     }
 }
 
-fn expand_assignment_values(
+async fn expand_assignment_values(
     value: Value,
     expected: usize,
     builtin: &'static str,
 ) -> BuiltinResult<Vec<Value>> {
-    let host = gather_if_needed(&value).map_err(|err| attach_builtin_context(err, builtin))?;
-    let values = flatten_values(&host, builtin)?;
+    let host = gather_if_needed_async(&value)
+        .await
+        .map_err(|err| attach_builtin_context(err, builtin))?;
+    let values = flatten_values(&host, builtin).await?;
     if expected == 1 {
         if values.is_empty() {
             return Err(map_error(
@@ -1540,18 +1556,21 @@ struct KeyCollection {
     shape: Vec<usize>,
 }
 
-fn collect_key_spec(
+async fn collect_key_spec(
     value: &Value,
     key_type: KeyType,
     builtin: &'static str,
 ) -> BuiltinResult<KeyCollection> {
-    let host = gather_if_needed(value).map_err(|err| attach_builtin_context(err, builtin))?;
+    let host = gather_if_needed_async(value)
+        .await
+        .map_err(|err| attach_builtin_context(err, builtin))?;
     match &host {
         Value::Cell(cell) => {
             let mut values = Vec::with_capacity(cell.data.len());
             for ptr in &cell.data {
                 values.push(
-                    gather_if_needed(unsafe { &*ptr.as_raw() })
+                    gather_if_needed_async(unsafe { &*ptr.as_raw() })
+                        .await
                         .map_err(|err| attach_builtin_context(err, builtin))?,
                 );
             }
@@ -1605,9 +1624,40 @@ pub fn map_length(value: &Value) -> Option<usize> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message.clone()
+    }
+
+    fn containers_map_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::containers_map_builtin(args))
+    }
+
+    fn containers_map_keys(map: Value) -> BuiltinResult<Value> {
+        block_on(super::containers_map_keys(map))
+    }
+
+
+    fn containers_map_is_key(map: Value, key_spec: Value) -> BuiltinResult<Value> {
+        block_on(super::containers_map_is_key(map, key_spec))
+    }
+
+    fn containers_map_remove(map: Value, key_spec: Value) -> BuiltinResult<Value> {
+        block_on(super::containers_map_remove(map, key_spec))
+    }
+
+    fn containers_map_subsref(map: Value, kind: String, payload: Value) -> BuiltinResult<Value> {
+        block_on(super::containers_map_subsref(map, kind, payload))
+    }
+
+    fn containers_map_subsasgn(
+        map: Value,
+        kind: String,
+        payload: Value,
+        rhs: Value,
+    ) -> BuiltinResult<Value> {
+        block_on(super::containers_map_subsasgn(map, kind, payload, rhs))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const DOT_NAME: &str = "dot";
 
@@ -239,7 +239,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::linalg::ops::dot"
 )]
-fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(builtin_error("dot: too many input arguments"));
     }
@@ -263,8 +263,12 @@ fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value>
     let lhs_gpu = matches!(lhs, Value::GpuTensor(_));
     let rhs_gpu = matches!(rhs, Value::GpuTensor(_));
 
-    let lhs_host = gather_if_needed(&lhs).map_err(map_control_flow)?;
-    let rhs_host = gather_if_needed(&rhs).map_err(map_control_flow)?;
+    let lhs_host = gather_if_needed_async(&lhs)
+        .await
+        .map_err(map_control_flow)?;
+    let rhs_host = gather_if_needed_async(&rhs)
+        .await
+        .map_err(map_control_flow)?;
 
     let has_complex = value_is_complex(&lhs_host) || value_is_complex(&rhs_host);
 
@@ -542,6 +546,7 @@ fn promote_result_to_gpu(value: Value) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -879,5 +884,9 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::dot_builtin(lhs, rhs, rest))
     }
 }

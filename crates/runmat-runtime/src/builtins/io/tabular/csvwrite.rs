@@ -19,7 +19,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "csvwrite";
 
@@ -259,13 +259,21 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "cpu",
     builtin_path = "crate::builtins::io::tabular::csvwrite"
 )]
-fn csvwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let filename_value = gather_if_needed(&filename).map_err(map_control_flow)?;
+async fn csvwrite_builtin(
+    filename: Value,
+    data: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let filename_value = gather_if_needed_async(&filename).await.map_err(map_control_flow)?;
     let path = resolve_path(&filename_value)?;
 
-    let (row_offset, col_offset) = parse_offsets(&rest)?;
+    let mut gathered_offsets = Vec::with_capacity(rest.len());
+    for value in &rest {
+        gathered_offsets.push(gather_if_needed_async(value).await.map_err(map_control_flow)?);
+    }
+    let (row_offset, col_offset) = parse_offsets(&gathered_offsets)?;
 
-    let gathered_data = gather_if_needed(&data).map_err(map_control_flow)?;
+    let gathered_data = gather_if_needed_async(&data).await.map_err(map_control_flow)?;
     let tensor =
         tensor::value_into_tensor_for("csvwrite", gathered_data).map_err(csvwrite_error)?;
     ensure_matrix_shape(&tensor)?;
@@ -544,6 +552,10 @@ pub(crate) mod tests {
 
     use crate::builtins::common::fs as fs_helpers;
     use crate::builtins::common::test_support;
+
+    fn csvwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::csvwrite_builtin(filename, data, rest))
+    }
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 

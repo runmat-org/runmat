@@ -19,9 +19,16 @@ pub fn value_contains_gpu(value: &Value) -> bool {
 
 /// Convert GPU-resident values to host tensors when an acceleration provider exists.
 /// Non-GPU inputs are passed through unchanged.
-pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeError> {
-    match value {
-        Value::GpuTensor(handle) => {
+pub async fn gather_if_needed_async(value: &Value) -> Result<Value, RuntimeError> {
+    gather_if_needed_async_impl(value).await
+}
+
+fn gather_if_needed_async_impl<'a>(
+    value: &'a Value,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + 'a>> {
+    Box::pin(async move {
+        match value {
+            Value::GpuTensor(handle) => {
             // In parallel test runs, ensure the WGPU provider is reasserted for WGPU handles.
             #[cfg(all(test, feature = "wgpu"))]
             {
@@ -66,45 +73,53 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeError> {
                 Ok(Value::Tensor(tensor))
             }
         }
-        Value::Cell(ca) => {
-            let mut gathered = Vec::with_capacity(ca.data.len());
-            for ptr in &ca.data {
-                gathered.push(gather_if_needed(ptr)?);
+            Value::Cell(ca) => {
+                let mut gathered = Vec::with_capacity(ca.data.len());
+                for ptr in &ca.data {
+                    gathered.push(gather_if_needed_async_impl(ptr).await?);
+                }
+                make_cell_with_shape(gathered, ca.shape.clone())
+                    .map_err(|err| build_runtime_error(format!("gather: {err}")).build())
             }
-            make_cell_with_shape(gathered, ca.shape.clone())
-                .map_err(|err| build_runtime_error(format!("gather: {err}")).build())
-        }
-        Value::Struct(sv) => {
-            let mut gathered = sv.clone();
-            for value in gathered.fields.values_mut() {
-                let updated = gather_if_needed(value)?;
-                *value = updated;
+            Value::Struct(sv) => {
+                let mut gathered = sv.clone();
+                for value in gathered.fields.values_mut() {
+                    let updated = gather_if_needed_async_impl(value).await?;
+                    *value = updated;
+                }
+                Ok(Value::Struct(gathered))
             }
-            Ok(Value::Struct(gathered))
-        }
-        Value::Object(obj) => {
-            let mut cloned = obj.clone();
-            for value in cloned.properties.values_mut() {
-                *value = gather_if_needed(value)?;
+            Value::Object(obj) => {
+                let mut cloned = obj.clone();
+                for value in cloned.properties.values_mut() {
+                    *value = gather_if_needed_async_impl(value).await?;
+                }
+                Ok(Value::Object(cloned))
             }
-            Ok(Value::Object(cloned))
+            other => Ok(other.clone()),
         }
-        other => Ok(other.clone()),
-    }
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeError> {
+    futures::executor::block_on(gather_if_needed_async(value))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn gather_if_needed(_value: &Value) -> Result<Value, RuntimeError> {
+    Err(build_runtime_error("gather: synchronous gather is unavailable on wasm").build())
 }
 
 /// Call a registered language builtin by name.
 /// Supports function overloading by trying different argument patterns.
 /// Returns an error if no builtin with that name and compatible arguments is found.
 pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
-    call_builtin_sync(name, args)
+    futures::executor::block_on(call_builtin_async(name, args))
 }
 
+#[async_recursion::async_recursion(?Send)]
 pub async fn call_builtin_async(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
-    call_builtin_sync(name, args)
-}
-
-fn call_builtin_sync(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
     let mut matching_builtins = Vec::new();
 
     // Collect all builtins with the matching name
@@ -120,10 +135,10 @@ fn call_builtin_sync(name: &str, args: &[Value]) -> Result<Value, RuntimeError> 
             // Prefer explicit constructor method with the same name as class (static)
             if let Some(ctor) = cls.methods.get(name) {
                 // Dispatch to constructor builtin; pass args through
-                return call_builtin(&ctor.function_name, args);
+                return call_builtin_async(&ctor.function_name, args).await;
             }
             // Otherwise default-construct object
-            return new_object_builtin(name.to_string());
+            return new_object_builtin(name.to_string()).await;
         }
         return Err(build_runtime_error(format!("Undefined function: {name}"))
             .with_identifier("MATLAB:UndefinedFunction")
@@ -150,7 +165,7 @@ fn call_builtin_sync(name: &str, args: &[Value]) -> Result<Value, RuntimeError> 
         .chain(categorized.into_iter().rev())
     {
         let f = builtin.implementation;
-        match (f)(args) {
+        match (f)(args).await {
             Ok(mut result) => {
                 // Normalize certain logical scalar results to numeric 0/1 for
                 // compatibility with legacy expectations in dispatcher tests
@@ -164,8 +179,8 @@ fn call_builtin_sync(name: &str, args: &[Value]) -> Result<Value, RuntimeError> 
             }
             Err(err) => {
                 if should_retry_with_gpu_gather(&err, args) {
-                    match gather_args_for_retry(args) {
-                        Ok(Some(gathered_args)) => match (f)(&gathered_args) {
+                    match gather_args_for_retry_async(args).await {
+                        Ok(Some(gathered_args)) => match (f)(&gathered_args).await {
                             Ok(result) => return Ok(result),
                             Err(retry_err) => last_error = retry_err,
                         },
@@ -197,12 +212,12 @@ fn should_retry_with_gpu_gather(err: &RuntimeError, args: &[Value]) -> bool {
     lowered.contains("gpu")
 }
 
-fn gather_args_for_retry(args: &[Value]) -> Result<Option<Vec<Value>>, RuntimeError> {
+async fn gather_args_for_retry_async(args: &[Value]) -> Result<Option<Vec<Value>>, RuntimeError> {
     let mut gathered_any = false;
     let mut gathered_args = Vec::with_capacity(args.len());
     for arg in args {
         if value_contains_gpu(arg) {
-            gathered_args.push(gather_if_needed(arg)?);
+            gathered_args.push(gather_if_needed_async(arg).await?);
             gathered_any = true;
         } else {
             gathered_args.push(arg.clone());

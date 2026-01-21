@@ -220,9 +220,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::cosh"
 )]
-fn cosh_builtin(value: Value) -> BuiltinResult<Value> {
+async fn cosh_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => cosh_gpu(handle),
+        Value::GpuTensor(handle) => cosh_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Complex(
             cosh_complex_re(re, im),
             cosh_complex_im(re, im),
@@ -236,13 +236,13 @@ fn cosh_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn cosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn cosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_cosh(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     cosh_tensor(tensor).map(tensor::tensor_into_value)
 }
 
@@ -291,12 +291,17 @@ fn cosh_complex_im(re: f64, im: f64) -> f64 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
 
     use crate::builtins::common::test_support;
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    fn cosh_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::cosh_builtin(value))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -435,7 +440,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = cosh_gpu(h).unwrap();
+        let gpu = block_on(cosh_gpu(h)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {

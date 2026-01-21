@@ -256,10 +256,10 @@ enum NormParse {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::var"
 )]
-fn var_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn var_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => var_gpu(handle, &parsed),
+        Value::GpuTensor(handle) => var_gpu(handle, &parsed).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err(var_error("var: complex inputs are not supported yet"))
         }
@@ -642,7 +642,7 @@ fn multi_to_linear(coords: &[usize], shape: &[usize]) -> usize {
     idx
 }
 
-fn var_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
+async fn var_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -656,7 +656,7 @@ fn var_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Val
             return Ok(Value::GpuTensor(device_value));
         }
     }
-    var_gpu_fallback(&handle, args)
+    var_gpu_fallback(&handle, args).await
 }
 
 fn var_gpu_reduce(
@@ -731,8 +731,11 @@ fn reduce_std_dim_gpu(
         .ok()
 }
 
-fn var_gpu_fallback(handle: &GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor(handle)?;
+async fn var_gpu_fallback(
+    handle: &GpuTensorHandle,
+    args: &ParsedArguments,
+) -> BuiltinResult<Value> {
+    let tensor = gpu_helpers::gather_tensor_async(handle).await?;
     let reduced = var_tensor(tensor, &args.axes, args.normalization, args.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
@@ -752,8 +755,13 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor, Value};
+
+    fn var_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::var_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -997,14 +1005,14 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = var_gpu(
+        let gpu = block_on(var_gpu(
             handle,
             &ParsedArguments {
                 axes: VarAxes::Dim(1),
                 normalization: VarNormalization::Sample,
                 nan_mode: ReductionNaN::Include,
             },
-        )
+        ))
         .unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {

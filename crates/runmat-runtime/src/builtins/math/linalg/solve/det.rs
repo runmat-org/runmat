@@ -245,9 +245,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "det",
     builtin_path = "crate::builtins::math::linalg::solve::det"
 )]
-fn det_builtin(value: Value) -> BuiltinResult<Value> {
+async fn det_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => det_gpu(handle),
+        Value::GpuTensor(handle) => det_gpu(handle).await,
         Value::ComplexTensor(tensor) => det_complex_value(tensor),
         Value::Complex(re, im) => Ok(Value::Complex(re, im)),
         other => {
@@ -257,9 +257,9 @@ fn det_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn det_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn det_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
-        match det_gpu_via_provider(provider, &handle) {
+        match det_gpu_via_provider(provider, &handle).await {
             Ok(Some(value)) => return Ok(value),
             Ok(None) => {}
             Err(err) => {
@@ -273,7 +273,7 @@ fn det_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 
     let gathered_value = {
         let proxy = Value::GpuTensor(handle.clone());
-        gpu_helpers::gather_value(&proxy)?
+        gpu_helpers::gather_value_async(&proxy).await?
     };
 
     let det_result = determinant_from_value(gathered_value)?;
@@ -399,7 +399,7 @@ fn upload_scalar(
         .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
-fn det_gpu_via_provider(
+async fn det_gpu_via_provider(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<Option<Value>> {
@@ -427,20 +427,21 @@ fn det_gpu_via_provider(
         lu_result.perm_vector.clone(),
     ];
 
-    let outcome = (|| -> BuiltinResult<Option<Value>> {
+    let outcome = {
+        async {
         enum UpperFactor {
             Real(Tensor),
             Complex(ComplexTensor),
         }
 
-        let upper_factor = match gpu_helpers::gather_tensor(&lu_result.upper) {
+        let upper_factor = match gpu_helpers::gather_tensor_async(&lu_result.upper).await {
             Ok(tensor) => UpperFactor::Real(tensor),
             Err(err) => {
                 if err.message() == "interaction pending..." {
                     return Err(interaction_pending_error());
                 }
                 let value = Value::GpuTensor(lu_result.upper.clone());
-                match gpu_helpers::gather_value(&value) {
+                match gpu_helpers::gather_value_async(&value).await {
                     Ok(Value::Tensor(tensor)) => UpperFactor::Real(tensor),
                     Ok(Value::ComplexTensor(tensor)) => UpperFactor::Complex(tensor),
                     Ok(Value::Num(n)) => {
@@ -458,7 +459,7 @@ fn det_gpu_via_provider(
             }
         };
 
-        let pivot_tensor = match gpu_helpers::gather_tensor(&lu_result.perm_vector) {
+        let pivot_tensor = match gpu_helpers::gather_tensor_async(&lu_result.perm_vector).await {
             Ok(tensor) => tensor,
             Err(err) => {
                 if err.message() == "interaction pending..." {
@@ -514,7 +515,9 @@ fn det_gpu_via_provider(
             },
             Determinant::Complex(re, im) => Ok(Some(Value::Complex(re, im))),
         }
-    })();
+        }
+        .await
+    };
 
     for handle_to_free in &handles_to_free {
         let _ = provider.free(handle_to_free);
@@ -704,4 +707,5 @@ pub(crate) mod tests {
             "gpu det {det_gpu} differs from cpu det {cpu_det}"
         );
     }
+
 }

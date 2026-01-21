@@ -240,14 +240,14 @@ const IDENTIFIER_INTERNAL: &str = "RunMat:isnumeric:InternalError";
     accel = "metadata",
     builtin_path = "crate::builtins::logical::tests::isnumeric"
 )]
-fn isnumeric_builtin(value: Value) -> BuiltinResult<Value> {
+async fn isnumeric_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => isnumeric_gpu(handle),
+        Value::GpuTensor(handle) => isnumeric_gpu(handle).await,
         other => Ok(Value::Bool(isnumeric_value(&other))),
     }
 }
 
-fn isnumeric_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn isnumeric_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(flag) = provider.logical_islogical(&handle) {
             return Ok(Value::Bool(!flag));
@@ -260,7 +260,8 @@ fn isnumeric_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 
     // Fall back to gathering only when metadata is unavailable.
     let gpu_value = Value::GpuTensor(handle.clone());
-    let gathered = gpu_helpers::gather_value(&gpu_value)
+    let gathered = gpu_helpers::gather_value_async(&gpu_value)
+        .await
         .map_err(|err| internal_error(format!("isnumeric: {err}")))?;
     isnumeric_host(gathered)
 }
@@ -296,6 +297,7 @@ fn internal_error(message: impl Into<String>) -> RuntimeError {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
         CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntValue, Listener, LogicalArray,
@@ -303,19 +305,20 @@ pub(crate) mod tests {
     };
     use runmat_gc_api::GcPtr;
 
+    fn run_isnumeric(value: Value) -> BuiltinResult<Value> {
+        block_on(super::isnumeric_builtin(value))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_scalars_return_true() {
+        assert_eq!(run_isnumeric(Value::Num(3.5)).unwrap(), Value::Bool(true));
         assert_eq!(
-            isnumeric_builtin(Value::Num(3.5)).unwrap(),
+            run_isnumeric(Value::Int(IntValue::I16(7))).unwrap(),
             Value::Bool(true)
         );
         assert_eq!(
-            isnumeric_builtin(Value::Int(IntValue::I16(7))).unwrap(),
-            Value::Bool(true)
-        );
-        assert_eq!(
-            isnumeric_builtin(Value::Complex(1.0, -2.0)).unwrap(),
+            run_isnumeric(Value::Complex(1.0, -2.0)).unwrap(),
             Value::Bool(true)
         );
     }
@@ -324,14 +327,11 @@ pub(crate) mod tests {
     #[test]
     fn numeric_tensors_return_true() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        assert_eq!(
-            isnumeric_builtin(Value::Tensor(tensor)).unwrap(),
-            Value::Bool(true)
-        );
+        assert_eq!(run_isnumeric(Value::Tensor(tensor)).unwrap(), Value::Bool(true));
 
         let complex = ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![2, 1]).unwrap();
         assert_eq!(
-            isnumeric_builtin(Value::ComplexTensor(complex)).unwrap(),
+            run_isnumeric(Value::ComplexTensor(complex)).unwrap(),
             Value::Bool(true)
         );
     }
@@ -339,69 +339,48 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn non_numeric_types_return_false() {
-        assert_eq!(
-            isnumeric_builtin(Value::Bool(true)).unwrap(),
-            Value::Bool(false)
-        );
+        assert_eq!(run_isnumeric(Value::Bool(true)).unwrap(), Value::Bool(false));
 
         let logical = LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
         assert_eq!(
-            isnumeric_builtin(Value::LogicalArray(logical)).unwrap(),
+            run_isnumeric(Value::LogicalArray(logical)).unwrap(),
             Value::Bool(false)
         );
 
         let chars = CharArray::new("rm".chars().collect(), 1, 2).unwrap();
-        assert_eq!(
-            isnumeric_builtin(Value::CharArray(chars)).unwrap(),
-            Value::Bool(false)
-        );
+        assert_eq!(run_isnumeric(Value::CharArray(chars)).unwrap(), Value::Bool(false));
 
+        assert_eq!(run_isnumeric(Value::String("runmat".into())).unwrap(), Value::Bool(false));
         assert_eq!(
-            isnumeric_builtin(Value::String("runmat".into())).unwrap(),
-            Value::Bool(false)
-        );
-        assert_eq!(
-            isnumeric_builtin(Value::Struct(StructValue::new())).unwrap(),
+            run_isnumeric(Value::Struct(StructValue::new())).unwrap(),
             Value::Bool(false)
         );
         let string_array =
             StringArray::new(vec!["foo".into(), "bar".into()], vec![1, 2]).expect("string array");
         assert_eq!(
-            isnumeric_builtin(Value::StringArray(string_array)).unwrap(),
+            run_isnumeric(Value::StringArray(string_array)).unwrap(),
             Value::Bool(false)
         );
         let cell =
             CellArray::new(vec![Value::Num(1.0), Value::Bool(false)], 1, 2).expect("cell array");
-        assert_eq!(
-            isnumeric_builtin(Value::Cell(cell)).unwrap(),
-            Value::Bool(false)
-        );
+        assert_eq!(run_isnumeric(Value::Cell(cell)).unwrap(), Value::Bool(false));
         let object = ObjectInstance::new("runmat.MockObject".into());
+        assert_eq!(run_isnumeric(Value::Object(object)).unwrap(), Value::Bool(false));
         assert_eq!(
-            isnumeric_builtin(Value::Object(object)).unwrap(),
-            Value::Bool(false)
-        );
-        assert_eq!(
-            isnumeric_builtin(Value::FunctionHandle("runmat_fun".into())).unwrap(),
+            run_isnumeric(Value::FunctionHandle("runmat_fun".into())).unwrap(),
             Value::Bool(false)
         );
         let closure = Closure {
             function_name: "anon".into(),
             captures: vec![Value::Num(1.0)],
         };
-        assert_eq!(
-            isnumeric_builtin(Value::Closure(closure)).unwrap(),
-            Value::Bool(false)
-        );
+        assert_eq!(run_isnumeric(Value::Closure(closure)).unwrap(), Value::Bool(false));
         let handle = HandleRef {
             class_name: "runmat.Handle".into(),
             target: GcPtr::null(),
             valid: true,
         };
-        assert_eq!(
-            isnumeric_builtin(Value::HandleObject(handle)).unwrap(),
-            Value::Bool(false)
-        );
+        assert_eq!(run_isnumeric(Value::HandleObject(handle)).unwrap(), Value::Bool(false));
         let listener = Listener {
             id: 1,
             target: GcPtr::null(),
@@ -410,19 +389,13 @@ pub(crate) mod tests {
             enabled: true,
             valid: true,
         };
+        assert_eq!(run_isnumeric(Value::Listener(listener)).unwrap(), Value::Bool(false));
         assert_eq!(
-            isnumeric_builtin(Value::Listener(listener)).unwrap(),
-            Value::Bool(false)
-        );
-        assert_eq!(
-            isnumeric_builtin(Value::ClassRef("pkg.Class".into())).unwrap(),
+            run_isnumeric(Value::ClassRef("pkg.Class".into())).unwrap(),
             Value::Bool(false)
         );
         let mex = MException::new("MATLAB:mock".into(), "message".into());
-        assert_eq!(
-            isnumeric_builtin(Value::MException(mex)).unwrap(),
-            Value::Bool(false)
-        );
+        assert_eq!(run_isnumeric(Value::MException(mex)).unwrap(), Value::Bool(false));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -435,11 +408,11 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let numeric_handle = provider.upload(&view).expect("upload");
-            let numeric = isnumeric_builtin(Value::GpuTensor(numeric_handle.clone())).unwrap();
+            let numeric = run_isnumeric(Value::GpuTensor(numeric_handle.clone())).unwrap();
             assert_eq!(numeric, Value::Bool(true));
 
             let logical_value = gpu_helpers::logical_gpu_value(numeric_handle.clone());
-            let logical = isnumeric_builtin(logical_value).unwrap();
+            let logical = run_isnumeric(logical_value).unwrap();
             assert_eq!(logical, Value::Bool(false));
 
             runmat_accelerate_api::clear_handle_logical(&numeric_handle);
@@ -463,11 +436,11 @@ pub(crate) mod tests {
             shape: &shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let numeric = isnumeric_builtin(Value::GpuTensor(handle.clone())).unwrap();
+        let numeric = run_isnumeric(Value::GpuTensor(handle.clone())).unwrap();
         assert_eq!(numeric, Value::Bool(true));
 
         let logical_value = gpu_helpers::logical_gpu_value(handle.clone());
-        let logical = isnumeric_builtin(logical_value).unwrap();
+        let logical = run_isnumeric(logical_value).unwrap();
         assert_eq!(logical, Value::Bool(false));
 
         runmat_accelerate_api::clear_handle_logical(&handle);

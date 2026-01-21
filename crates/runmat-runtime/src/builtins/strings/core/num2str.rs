@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const DEFAULT_PRECISION: usize = 15;
 const MAX_PRECISION: usize = 52;
@@ -234,11 +234,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         builtin_path = "crate::builtins::strings::core::num2str"
     )
 )]
-fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let gathered = gather_if_needed(&value).map_err(remap_num2str_flow)?;
-    let data = extract_numeric_data(gathered)?;
+async fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let gathered = gather_if_needed_async(&value)
+        .await
+        .map_err(remap_num2str_flow)?;
+    let data = extract_numeric_data(gathered).await?;
 
-    let options = parse_options(rest)?;
+    let options = parse_options(rest).await?;
     let char_array = format_numeric_data(data, &options)?;
     Ok(Value::CharArray(char_array))
 }
@@ -285,7 +287,7 @@ enum NumericData {
     },
 }
 
-fn parse_options(args: Vec<Value>) -> BuiltinResult<FormatOptions> {
+async fn parse_options(args: Vec<Value>) -> BuiltinResult<FormatOptions> {
     if args.is_empty() {
         return Ok(FormatOptions {
             spec: FormatSpec::General {
@@ -297,7 +299,11 @@ fn parse_options(args: Vec<Value>) -> BuiltinResult<FormatOptions> {
 
     let mut gathered = Vec::with_capacity(args.len());
     for arg in args {
-        gathered.push(gather_if_needed(&arg).map_err(remap_num2str_flow)?);
+        gathered.push(
+            gather_if_needed_async(&arg)
+                .await
+                .map_err(remap_num2str_flow)?,
+        );
     }
 
     let mut iter = gathered.into_iter();
@@ -527,7 +533,7 @@ fn parse_custom_format(text: &str) -> BuiltinResult<CustomFormat> {
     })
 }
 
-fn extract_numeric_data(value: Value) -> BuiltinResult<NumericData> {
+async fn extract_numeric_data(value: Value) -> BuiltinResult<NumericData> {
     match value {
         Value::Num(n) => Ok(NumericData::Real {
             data: vec![n],
@@ -556,7 +562,9 @@ fn extract_numeric_data(value: Value) -> BuiltinResult<NumericData> {
         }),
         Value::ComplexTensor(t) => complex_tensor_to_data(t),
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_tensor(&handle).map_err(remap_num2str_flow)?;
+            let gathered = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(remap_num2str_flow)?;
             tensor_to_numeric_data(gathered)
         }
         other => Err(num2str_flow(format!(
@@ -978,6 +986,10 @@ fn apply_format_flags(mut text: String, fmt: &CustomFormat) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+
+    fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::num2str_builtin(value, rest))
+    }
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
 
     fn error_message(err: crate::RuntimeError) -> String {

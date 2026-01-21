@@ -199,7 +199,7 @@ where
     accel = "metadata",
     builtin_path = "crate::builtins::diagnostics::assert"
 )]
-fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         return Err(assert_flow(MIN_INPUT_IDENTIFIER, MIN_INPUT_MESSAGE));
     }
@@ -208,7 +208,7 @@ fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let condition_raw = iter.next().expect("checked length above");
     let rest: Vec<Value> = iter.collect();
 
-    let condition = normalize_condition_value(condition_raw)?;
+    let condition = normalize_condition_value(condition_raw).await?;
     match evaluate_condition(condition)? {
         ConditionOutcome::Pass => Ok(Value::Num(0.0)),
         ConditionOutcome::Fail => {
@@ -218,11 +218,13 @@ fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 }
 
-fn normalize_condition_value(condition: Value) -> crate::BuiltinResult<Value> {
+async fn normalize_condition_value(condition: Value) -> crate::BuiltinResult<Value> {
     match condition {
         Value::GpuTensor(handle) => {
             let gpu_value = Value::GpuTensor(handle);
-            gpu_helpers::gather_value(&gpu_value).map_err(|flow| {
+            gpu_helpers::gather_value_async(&gpu_value)
+                .await
+                .map_err(|flow| {
                 remap_assert_flow(flow, INVALID_INPUT_IDENTIFIER, |err| {
                     format!("assert: {}", err.message())
                 })
@@ -452,7 +454,12 @@ fn string_scalar_opt(value: &Value) -> Option<String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, Tensor};
+
+    fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::assert_builtin(args))
+    }
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err

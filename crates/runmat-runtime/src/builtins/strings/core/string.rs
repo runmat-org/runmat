@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -226,32 +226,42 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::strings::core::string"
 )]
-fn string_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn string_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        let gathered = gather_if_needed(&value).map_err(|flow| remap_string_flow(flow))?;
-        let array = convert_to_string_array(gathered, StringEncoding::Utf8)?;
+        let gathered = gather_if_needed_async(&value)
+            .await
+            .map_err(|flow| remap_string_flow(flow))?;
+        let array = convert_to_string_array(gathered, StringEncoding::Utf8).await?;
         return Ok(Value::StringArray(array));
     }
 
     let mut args = rest;
-    let format_value = gather_if_needed(&value).map_err(|flow| remap_string_flow(flow))?;
+    let format_value = gather_if_needed_async(&value)
+        .await
+        .map_err(|flow| remap_string_flow(flow))?;
 
     if args.len() == 1 {
         let arg = args.pop().unwrap();
-        let gathered_arg = gather_if_needed(&arg).map_err(|flow| remap_string_flow(flow))?;
+        let gathered_arg = gather_if_needed_async(&arg)
+            .await
+            .map_err(|flow| remap_string_flow(flow))?;
         if let Some(encoding) = try_encoding_argument(&format_value, &gathered_arg)? {
-            let array = convert_to_string_array(format_value, encoding)?;
+            let array = convert_to_string_array(format_value, encoding).await?;
             return Ok(Value::StringArray(array));
         }
-        let formatted = format_from_spec(format_value, vec![gathered_arg])?;
+        let formatted = format_from_spec(format_value, vec![gathered_arg]).await?;
         return Ok(Value::StringArray(formatted));
     }
 
-    let gathered_args = args
-        .into_iter()
-        .map(|arg| gather_if_needed(&arg).map_err(|flow| remap_string_flow(flow)))
-        .collect::<Result<Vec<_>, _>>()?;
-    let formatted = format_from_spec(format_value, gathered_args)?;
+    let mut gathered_args = Vec::with_capacity(args.len());
+    for arg in args {
+        gathered_args.push(
+            gather_if_needed_async(&arg)
+                .await
+                .map_err(|flow| remap_string_flow(flow))?,
+        );
+    }
+    let formatted = format_from_spec(format_value, gathered_args).await?;
     Ok(Value::StringArray(formatted))
 }
 
@@ -382,14 +392,14 @@ fn remap_string_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, "string")
 }
 
-pub(crate) fn format_from_spec(
+pub(crate) async fn format_from_spec(
     format_value: Value,
     args: Vec<Value>,
 ) -> crate::BuiltinResult<StringArray> {
-    let spec = extract_format_spec(format_value)?;
+    let spec = extract_format_spec(format_value).await?;
     let mut arguments = Vec::with_capacity(args.len());
     for arg in args {
-        arguments.push(extract_argument_data(arg)?);
+        arguments.push(extract_argument_data(arg).await?);
     }
 
     let (target_len, mut target_shape) = resolve_target_shape(&spec, &arguments)?;
@@ -526,7 +536,7 @@ fn resolve_target_shape(
     Ok((target_len, target_shape))
 }
 
-pub(crate) fn extract_format_spec(value: Value) -> BuiltinResult<FormatSpecData> {
+pub(crate) async fn extract_format_spec(value: Value) -> BuiltinResult<FormatSpecData> {
     match value {
         Value::String(s) => Ok(FormatSpecData {
             specs: vec![s],
@@ -550,8 +560,9 @@ pub(crate) fn extract_format_spec(value: Value) -> BuiltinResult<FormatSpecData>
                     let idx = row * cell.cols + col;
                     let element = &cell.data[idx];
                     let value = (**element).clone();
-                    let gathered =
-                        gather_if_needed(&value).map_err(|flow| remap_string_flow(flow))?;
+                    let gathered = gather_if_needed_async(&value)
+                        .await
+                        .map_err(|flow| remap_string_flow(flow))?;
                     let text = value_to_scalar_text(&gathered).ok_or_else(|| {
                         string_flow("string: formatSpec cell elements must be text scalars")
                     })?;
@@ -569,7 +580,8 @@ pub(crate) fn extract_format_spec(value: Value) -> BuiltinResult<FormatSpecData>
     }
 }
 
-fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
+#[async_recursion::async_recursion(?Send)]
+async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
     match value {
         Value::String(s) => Ok(ArgumentData {
             values: vec![Value::String(s)],
@@ -629,8 +641,9 @@ fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                     let idx = row * cell.cols + col;
                     let element = &cell.data[idx];
                     let value = (**element).clone();
-                    let gathered =
-                        gather_if_needed(&value).map_err(|flow| remap_string_flow(flow))?;
+                    let gathered = gather_if_needed_async(&value)
+                        .await
+                        .map_err(|flow| remap_string_flow(flow))?;
                     let value = match gathered {
                         Value::String(s) => Value::String(s),
                         Value::StringArray(sa) if sa.data.len() == 1 => {
@@ -694,9 +707,10 @@ fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
             })
         }
         Value::GpuTensor(handle) => {
-            let gathered = gather_if_needed(&Value::GpuTensor(handle))
+            let gathered = gather_if_needed_async(&Value::GpuTensor(handle))
+                .await
                 .map_err(|flow| remap_string_flow(flow))?;
-            extract_argument_data(gathered)
+            extract_argument_data(gathered).await
         }
         Value::MException(_)
         | Value::HandleObject(_)
@@ -709,7 +723,11 @@ fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
     }
 }
 
-fn convert_to_string_array(value: Value, encoding: StringEncoding) -> BuiltinResult<StringArray> {
+#[async_recursion::async_recursion(?Send)]
+async fn convert_to_string_array(
+    value: Value,
+    encoding: StringEncoding,
+) -> BuiltinResult<StringArray> {
     match value {
         Value::String(s) => string_scalar(s),
         Value::StringArray(sa) => Ok(sa),
@@ -717,17 +735,17 @@ fn convert_to_string_array(value: Value, encoding: StringEncoding) -> BuiltinRes
         Value::Tensor(tensor) => tensor_to_string_array(tensor),
         Value::ComplexTensor(tensor) => complex_tensor_to_string_array(tensor),
         Value::LogicalArray(logical) => logical_array_to_string_array(logical),
-        Value::Cell(cell) => cell_array_to_string_array(cell, encoding),
+        Value::Cell(cell) => cell_array_to_string_array(cell, encoding).await,
         Value::Num(n) => string_scalar(Value::Num(n).to_string()),
         Value::Int(i) => string_scalar(int_value_to_string(&i)),
         Value::Bool(b) => string_scalar(bool_to_string(b).to_string()),
         Value::Complex(re, im) => string_scalar(Value::Complex(re, im).to_string()),
         Value::GpuTensor(handle) => {
             // Defensive fallback: gather and retry.
-            let gathered = gather_if_needed(&Value::GpuTensor(handle)).map_err(|flow| {
-                remap_string_flow(flow)
-            })?;
-            convert_to_string_array(gathered, encoding)
+            let gathered = gather_if_needed_async(&Value::GpuTensor(handle))
+                .await
+                .map_err(|flow| remap_string_flow(flow))?;
+            convert_to_string_array(gathered, encoding).await
         }
         Value::Object(_) | Value::HandleObject(_) | Value::Listener(_) => Err(string_flow(
             "string: unsupported conversion from handle-based objects. Use class-specific formatters.",
@@ -798,7 +816,7 @@ fn logical_array_to_string_array(logical: LogicalArray) -> BuiltinResult<StringA
     StringArray::new(strings, logical.shape).map_err(|e| string_flow(format!("string: {e}")))
 }
 
-fn cell_array_to_string_array(
+async fn cell_array_to_string_array(
     cell: runmat_builtins::CellArray,
     _encoding: StringEncoding,
 ) -> BuiltinResult<StringArray> {
@@ -808,7 +826,9 @@ fn cell_array_to_string_array(
             let idx = row * cell.cols + col;
             let element = &cell.data[idx];
             let value = (**element).clone();
-            let gathered = gather_if_needed(&value).map_err(|flow| remap_string_flow(flow))?;
+            let gathered = gather_if_needed_async(&value)
+                .await
+                .map_err(|flow| remap_string_flow(flow))?;
             strings.push(cell_element_to_string(&gathered)?);
         }
     }
@@ -896,6 +916,10 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, IntValue, StringArray, StructValue};
+
+    fn string_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::string_builtin(value, rest))
+    }
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()

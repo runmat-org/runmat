@@ -270,7 +270,7 @@ fn conversion_error(type_name: &str) -> RuntimeError {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::single"
 )]
-fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
     let converted = match value {
         Value::Num(n) => Ok(Value::Num(cast_f64_to_single(n))),
@@ -284,7 +284,7 @@ fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::ComplexTensor(tensor) => single_from_complex_tensor(tensor),
         Value::LogicalArray(array) => single_from_logical_array(array),
         Value::CharArray(chars) => single_from_char_array(chars),
-        Value::GpuTensor(handle) => single_from_gpu(handle),
+        Value::GpuTensor(handle) => single_from_gpu(handle).await,
         Value::String(_) | Value::StringArray(_) => Err(conversion_error("string")),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
@@ -295,7 +295,7 @@ fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::ClassRef(_) => Err(conversion_error("meta.class")),
         Value::MException(_) => Err(conversion_error("MException")),
     }?;
-    apply_output_template(converted, &template)
+    apply_output_template(converted, &template).await
 }
 
 fn single_from_tensor(tensor: Tensor) -> BuiltinResult<Value> {
@@ -317,7 +317,7 @@ fn single_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
     single_tensor_to_host(tensor).map(Value::Tensor)
 }
 
-fn single_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn single_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match provider.unary_single(&handle) {
             Ok(result) => {
@@ -330,7 +330,7 @@ fn single_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let converted = single_tensor_to_host(tensor)?;
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         let _ = provider.free(&handle);
@@ -413,7 +413,7 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     }
 }
 
-fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
+async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
     match template {
         OutputTemplate::Default => Ok(value),
         OutputTemplate::Like(proto) => match proto {
@@ -422,7 +422,7 @@ fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResu
             | Value::Num(_)
             | Value::Int(_)
             | Value::Bool(_)
-            | Value::LogicalArray(_) => convert_to_host_like(value),
+            | Value::LogicalArray(_) => convert_to_host_like(value).await,
             Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
                 "single: complex prototypes for 'like' are not supported yet",
             )),
@@ -471,11 +471,13 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
+async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             let proxy = Value::GpuTensor(handle);
-            gpu_helpers::gather_value(&proxy).map_err(|e| builtin_error(format!("single: {e}")))
+            gpu_helpers::gather_value_async(&proxy)
+                .await
+                .map_err(|e| builtin_error(format!("single: {e}")))
         }
         other => Ok(other),
     }
@@ -485,7 +487,12 @@ fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
+
+    fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::single_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

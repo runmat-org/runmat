@@ -1,3 +1,4 @@
+use futures::executor::block_on;
 use runmat_builtins::{LogicalArray, Tensor, Value};
 
 use crate::build_runtime_error;
@@ -58,7 +59,24 @@ pub fn gather(value: Value) -> Result<Tensor, crate::RuntimeError> {
             }
         }
     }
-    match crate::dispatcher::gather_if_needed(&value)? {
+    #[cfg(not(target_arch = "wasm32"))]
+    let provider = match &value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::provider_for_handle(handle),
+        _ => runmat_accelerate_api::provider(),
+    };
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let gathered = std::thread::spawn(move || {
+        let _guard = runmat_accelerate_api::ThreadProviderGuard::set(provider);
+        block_on(crate::dispatcher::gather_if_needed_async(&value))
+    })
+    .join()
+    .map_err(|_| build_runtime_error("gather: join error").build())??;
+
+    #[cfg(target_arch = "wasm32")]
+    let gathered = block_on(crate::dispatcher::gather_if_needed_async(&value))?;
+
+    match gathered {
         Value::Tensor(t) => Ok(t),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
             .map_err(|e| build_runtime_error(format!("gather: {e}")).build()),

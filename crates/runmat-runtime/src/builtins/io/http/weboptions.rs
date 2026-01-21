@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 
@@ -183,12 +183,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::http::weboptions"
 )]
-fn weboptions_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn weboptions_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut gathered = Vec::with_capacity(rest.len());
     for value in rest {
-        gathered.push(gather_if_needed(&value).map_err(|flow| {
-            remap_weboptions_flow(flow, |err| format!("weboptions: {}", err.message()))
-        })?);
+        gathered.push(
+            gather_if_needed_async(&value)
+                .await
+                .map_err(|flow| {
+                    remap_weboptions_flow(flow, |err| format!("weboptions: {}", err.message()))
+                })?,
+        );
     }
     let mut queue: VecDeque<Value> = gathered.into();
     let mut options = default_options_struct();
@@ -538,7 +542,7 @@ pub(crate) mod tests {
     use std::sync::mpsc;
     use std::thread;
 
-    use crate::call_builtin;
+    use crate::call_builtin_async;
     use runmat_builtins::CellArray;
 
     use crate::builtins::common::test_support;
@@ -559,6 +563,14 @@ pub(crate) mod tests {
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    fn run_weboptions(rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(weboptions_builtin(rest))
+    }
+
+    fn run_call_builtin(name: &str, args: &[Value]) -> BuiltinResult<Value> {
+        futures::executor::block_on(call_builtin_async(name, args))
     }
 
     fn read_request(stream: &mut TcpStream) -> (String, Vec<u8>) {
@@ -599,7 +611,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weboptions_default_struct_matches_expected_fields() {
-        let result = weboptions_builtin(Vec::new()).expect("weboptions");
+        let result = run_weboptions(Vec::new()).expect("weboptions");
         let Value::Struct(options) = result else {
             panic!("expected struct result");
         };
@@ -653,7 +665,7 @@ pub(crate) mod tests {
             Value::from("HeaderFields"),
             Value::Struct(headers),
         ];
-        let result = weboptions_builtin(args).expect("weboptions overrides");
+        let result = run_weboptions(args).expect("weboptions overrides");
         let Value::Struct(opts) = result else {
             panic!("expected struct");
         };
@@ -679,10 +691,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weboptions_updates_existing_struct() {
-        let base = weboptions_builtin(vec![Value::from("ContentType"), Value::from("json")])
+        let base = run_weboptions(vec![Value::from("ContentType"), Value::from("json")])
             .expect("base weboptions");
         let args = vec![base, Value::from("Timeout"), Value::Num(15.0)];
-        let updated = weboptions_builtin(args).expect("weboptions update");
+        let updated = run_weboptions(args).expect("weboptions update");
         let Value::Struct(opts) = updated else {
             panic!("expected struct");
         };
@@ -706,7 +718,7 @@ pub(crate) mod tests {
     #[test]
     fn weboptions_rejects_unknown_option() {
         let err = error_message(
-            weboptions_builtin(vec![Value::from("BogusOption"), Value::Num(1.0)])
+            run_weboptions(vec![Value::from("BogusOption"), Value::Num(1.0)])
                 .expect_err("unknown option should fail"),
         );
         assert!(err.contains("unknown option"), "unexpected error: {err}");
@@ -716,7 +728,7 @@ pub(crate) mod tests {
     #[test]
     fn weboptions_requires_username_when_password_provided() {
         let err = error_message(
-            weboptions_builtin(vec![Value::from("Password"), Value::from("secret")])
+            run_weboptions(vec![Value::from("Password"), Value::from("secret")])
                 .expect_err("password without username"),
         );
         assert!(
@@ -729,7 +741,7 @@ pub(crate) mod tests {
     #[test]
     fn weboptions_rejects_timeout_nonpositive() {
         let err = error_message(
-            weboptions_builtin(vec![Value::from("Timeout"), Value::Num(0.0)])
+            run_weboptions(vec![Value::from("Timeout"), Value::Num(0.0)])
                 .expect_err("timeout should reject nonpositive values"),
         );
         assert!(
@@ -743,7 +755,7 @@ pub(crate) mod tests {
     fn weboptions_rejects_headerfields_bad_cell_shape() {
         let cell = CellArray::new(vec![Value::from("Accept")], 1, 1).expect("cell");
         let err = error_message(
-            weboptions_builtin(vec![Value::from("HeaderFields"), Value::Cell(cell)])
+            run_weboptions(vec![Value::from("HeaderFields"), Value::Cell(cell)])
                 .expect_err("headerfields cell shape"),
         );
         assert!(
@@ -755,7 +767,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webread_uses_weboptions_without_polluting_query() {
-        let options = weboptions_builtin(Vec::new()).expect("weboptions");
+        let options = run_weboptions(Vec::new()).expect("weboptions");
         let (tx, rx) = mpsc::channel();
         let url = spawn_server(move |mut stream| {
             let (headers, _) = read_request(&mut stream);
@@ -764,7 +776,7 @@ pub(crate) mod tests {
         });
 
         let args = vec![Value::from(url.clone()), options];
-        let result = call_builtin("webread", &args).expect("webread with options");
+        let result = run_call_builtin("webread", &args).expect("webread with options");
         match result {
             Value::Struct(reply) => {
                 assert!(matches!(reply.fields.get("ok"), Some(Value::Bool(true))));
@@ -782,7 +794,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webwrite_uses_weboptions_auto_request_method() {
-        let options = weboptions_builtin(Vec::new()).expect("weboptions default");
+        let options = run_weboptions(Vec::new()).expect("weboptions default");
         let payload = Value::from("Hello from RunMat");
         let (tx, rx) = mpsc::channel();
         let url = spawn_server(move |mut stream| {
@@ -792,7 +804,7 @@ pub(crate) mod tests {
         });
 
         let args = vec![Value::from(url), payload, options];
-        let result = call_builtin("webwrite", &args).expect("webwrite with weboptions");
+        let result = run_call_builtin("webwrite", &args).expect("webwrite with weboptions");
         match result {
             Value::Struct(reply) => {
                 assert!(matches!(reply.fields.get("ack"), Some(Value::Bool(true))));

@@ -251,14 +251,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "transpose",
     builtin_path = "crate::builtins::math::linalg::ops::ctranspose"
 )]
-fn ctranspose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
+async fn ctranspose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
     let value = match args.len() {
         0 => return Err(builtin_error("ctranspose: missing input argument")),
         1 => args.remove(0),
         _ => return Err(builtin_error("ctranspose: too many input arguments")),
     };
     match value {
-        Value::GpuTensor(handle) => ctranspose_gpu(handle),
+        Value::GpuTensor(handle) => ctranspose_gpu(handle).await,
         Value::Complex(re, im) => ctranspose_complex_scalar(re, im),
         Value::ComplexTensor(ct) => ctranspose_complex_tensor(ct),
         Value::Tensor(t) => Ok(tensor::tensor_into_value(ctranspose_tensor(t)?)),
@@ -433,7 +433,7 @@ fn ctranspose_cell_array(ca: CellArray) -> BuiltinResult<CellArray> {
     CellArray::new_handles(out, cols, rows).map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
-fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let rank = handle.shape.len();
     if rank == 0 {
         return Ok(Value::GpuTensor(handle));
@@ -495,7 +495,9 @@ fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
     }
 
-    let host = gpu_helpers::gather_tensor(&handle).map_err(map_control_flow)?;
+    let host = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(map_control_flow)?;
     let transposed = ctranspose_tensor(host)?;
     if let Some(provider) = runmat_accelerate_api::provider() {
         let view = HostTensorView {
@@ -567,6 +569,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::array::shape::permute::permute_tensor;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -576,7 +579,7 @@ pub(crate) mod tests {
     use runmat_builtins::{IntValue, LogicalArray, StringArray, StructValue, Tensor};
 
     fn call_ctranspose(value: Value) -> BuiltinResult<Value> {
-        ctranspose_builtin(vec![value])
+        block_on(super::ctranspose_builtin(vec![value]))
     }
 
     fn tensor(data: &[f64], shape: &[usize]) -> Tensor {

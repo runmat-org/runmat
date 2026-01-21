@@ -14,7 +14,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError,
+};
 
 const ERR_TOO_MANY_INPUTS: &str = "getenv: too many input arguments";
 const ERR_INVALID_TYPE: &str = "getenv: NAME must be a character vector, string scalar, string array, or cell array of character vectors";
@@ -262,12 +264,12 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "cpu",
     builtin_path = "crate::builtins::io::repl_fs::getenv"
 )]
-fn getenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn getenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     match args.len() {
         0 => Ok(getenv_all()),
         1 => {
-            let gathered = gather_if_needed(&args[0]).map_err(map_control_flow)?;
-            getenv_one(gathered)
+            let gathered = gather_if_needed_async(&args[0]).await.map_err(map_control_flow)?;
+            getenv_one(gathered).await
         }
         _ => Err(getenv_error(ERR_TOO_MANY_INPUTS)),
     }
@@ -282,12 +284,12 @@ fn getenv_all() -> Value {
     Value::Struct(st)
 }
 
-fn getenv_one(value: Value) -> BuiltinResult<Value> {
+async fn getenv_one(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::CharArray(array) => getenv_from_char_array(array),
         Value::String(s) => Ok(Value::String(read_env_string(&s))),
         Value::StringArray(sa) => getenv_from_string_array(sa),
-        Value::Cell(ca) => getenv_from_cell_array(ca),
+        Value::Cell(ca) => getenv_from_cell_array(ca).await,
         _ => Err(getenv_error(ERR_INVALID_TYPE)),
     }
 }
@@ -328,10 +330,10 @@ fn getenv_from_string_array(array: StringArray) -> BuiltinResult<Value> {
     Ok(Value::StringArray(result))
 }
 
-fn getenv_from_cell_array(array: runmat_builtins::CellArray) -> BuiltinResult<Value> {
+async fn getenv_from_cell_array(array: runmat_builtins::CellArray) -> BuiltinResult<Value> {
     let mut values: Vec<Value> = Vec::with_capacity(array.data.len());
     for cell in &array.data {
-        let gathered = gather_if_needed(cell).map_err(map_control_flow)?;
+        let gathered = gather_if_needed_async(cell).await.map_err(map_control_flow)?;
         let resolved = match gathered {
             Value::CharArray(ca) => {
                 if ca.rows != 1 {
@@ -397,6 +399,10 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
     use runmat_builtins::{CharArray, StringArray, Value};
+
+    fn getenv_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::getenv_builtin(args))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

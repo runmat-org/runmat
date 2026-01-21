@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
@@ -315,8 +315,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::filetext::fgets"
 )]
-fn fgets_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(&fid, &rest)?;
+async fn fgets_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(&fid, &rest).await?;
     Ok(eval.first_output())
 }
 
@@ -347,12 +347,12 @@ impl FgetsEval {
     }
 }
 
-pub fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsEval> {
+pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsEval> {
     if rest.len() > 1 {
         return Err(fgets_error("fgets: too many input arguments"));
     }
 
-    let fid_host = gather_value(fid_value)?;
+    let fid_host = gather_value(fid_value).await?;
     let fid = parse_fid(&fid_host)?;
     if fid < 0 {
         return Err(fgets_error("fgets: file identifier must be non-negative"));
@@ -376,7 +376,7 @@ pub fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsEval> {
         .lock()
         .map_err(|_| fgets_error("fgets: failed to lock file handle (poisoned mutex)"))?;
 
-    let limit = parse_nchar(rest)?;
+    let limit = parse_nchar(rest).await?;
     let read = read_line(&mut file, limit)?;
     if read.eof_before_any {
         return Ok(FgetsEval::end_of_file());
@@ -398,8 +398,10 @@ pub fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsEval> {
     Ok(FgetsEval::new(line_value, terminators_value))
 }
 
-fn gather_value(value: &Value) -> BuiltinResult<Value> {
-    gather_if_needed(value).map_err(map_control_flow)
+async fn gather_value(value: &Value) -> BuiltinResult<Value> {
+    gather_if_needed_async(value)
+        .await
+        .map_err(map_control_flow)
 }
 
 fn parse_fid(value: &Value) -> BuiltinResult<i32> {
@@ -434,11 +436,11 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
     }
 }
 
-fn parse_nchar(args: &[Value]) -> BuiltinResult<Option<usize>> {
+async fn parse_nchar(args: &[Value]) -> BuiltinResult<Option<usize>> {
     if args.is_empty() {
         return Ok(None);
     }
-    let value = gather_value(&args[0])?;
+    let value = gather_value(&args[0]).await?;
     match value {
         Value::Num(n) => {
             if !n.is_finite() {
@@ -739,6 +741,18 @@ pub(crate) mod tests {
         err.message().to_string()
     }
 
+    fn run_evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsEval> {
+        futures::executor::block_on(evaluate(fid_value, rest))
+    }
+
+    fn run_fopen(args: &[Value]) -> BuiltinResult<fopen::FopenEval> {
+        futures::executor::block_on(fopen::evaluate(args))
+    }
+
+    fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
+        registry::test_guard()
+    }
+
     fn unique_path(prefix: &str) -> PathBuf {
         let now = system_time_now()
             .duration_since(UNIX_EPOCH)
@@ -749,7 +763,7 @@ pub(crate) mod tests {
 
     fn fopen_path(path: &Path) -> FopenHandle {
         let eval =
-            fopen::evaluate(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
+            run_fopen(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
         let open = eval.as_open().expect("open outputs");
         assert!(open.fid >= 3.0);
         FopenHandle {
@@ -770,12 +784,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_reads_line_with_newline() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_line");
         fs::write(&path, "Hello world\nSecond line\n").unwrap();
 
         let handle = fopen_path(&path);
-        let eval = evaluate(&Value::Num(handle.fid as f64), &[]).expect("fgets");
+        let eval = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("fgets");
         let line = eval.first_output();
         match line {
             Value::CharArray(ca) => {
@@ -799,13 +814,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_returns_minus_one_at_eof() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_eof");
         fs::write(&path, "line\n").unwrap();
         let handle = fopen_path(&path);
 
-        let _ = evaluate(&Value::Num(handle.fid as f64), &[]).expect("first read");
-        let eval = evaluate(&Value::Num(handle.fid as f64), &[]).expect("second read");
+        let _ = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("first read");
+        let eval = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("second read");
         assert_eq!(eval.first_output(), Value::Num(-1.0));
         assert_eq!(eval.outputs()[1], Value::Num(-1.0));
 
@@ -815,13 +831,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_honours_nchar_limit() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_limit");
         fs::write(&path, "abcdefghij\nrest\n").unwrap();
         let handle = fopen_path(&path);
 
         let eval =
-            evaluate(&Value::Num(handle.fid as f64), &[Value::Num(5.0)]).expect("limited read");
+            run_evaluate(&Value::Num(handle.fid as f64), &[Value::Num(5.0)]).expect("limited read");
         match eval.first_output() {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
@@ -842,17 +859,18 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_errors_for_write_only_identifier() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_write_only");
         fs::write(&path, "payload").unwrap();
-        let eval = fopen::evaluate(&[
+        let eval = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("w"),
         ])
         .expect("fopen");
         let open = eval.as_open().expect("open outputs");
         assert!(open.fid >= 3.0);
-        let err = unwrap_error_message(evaluate(&Value::Num(open.fid), &[]).unwrap_err());
+        let err = unwrap_error_message(run_evaluate(&Value::Num(open.fid), &[]).unwrap_err());
         assert_eq!(err, "fgets: file identifier is not open for reading");
         fs::remove_file(&path).unwrap();
     }
@@ -860,12 +878,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_respects_limit_before_crlf_sequence() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_limit_crlf");
         fs::write(&path, b"ABCDE\r\nnext\n").unwrap();
         let handle = fopen_path(&path);
 
-        let first = evaluate(&Value::Num(handle.fid as f64), &[Value::Num(3.0)]).expect("first");
+        let first =
+            run_evaluate(&Value::Num(handle.fid as f64), &[Value::Num(3.0)]).expect("first");
         match first.first_output() {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
@@ -878,7 +898,7 @@ pub(crate) mod tests {
             other => panic!("expected empty numeric tensor, got {other:?}"),
         }
 
-        let second = evaluate(&Value::Num(handle.fid as f64), &[]).expect("second");
+        let second = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("second");
         match second.first_output() {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
@@ -891,7 +911,7 @@ pub(crate) mod tests {
             other => panic!("expected CRLF terminators, got {other:?}"),
         }
 
-        let third = evaluate(&Value::Num(handle.fid as f64), &[]).expect("third");
+        let third = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("third");
         match third.first_output() {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
@@ -906,12 +926,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_handles_crlf_newlines() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_crlf");
         fs::write(&path, b"first line\r\nsecond\r\n").unwrap();
         let handle = fopen_path(&path);
 
-        let eval = evaluate(&Value::Num(handle.fid as f64), &[]).expect("fgets");
+        let eval = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("fgets");
         let outputs = eval.outputs();
         match &outputs[0] {
             Value::CharArray(ca) => {
@@ -933,10 +954,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_decodes_latin1() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_latin1");
         fs::write(&path, [0x48u8, 0x6f, 0x6c, 0x61, 0x20, 0xf1, b'\n']).unwrap();
-        let eval = fopen::evaluate(&[
+        let eval = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("r"),
             Value::from("native"),
@@ -946,7 +968,7 @@ pub(crate) mod tests {
         let open = eval.as_open().expect("open outputs");
         let fid = open.fid as i32;
 
-        let read = evaluate(&Value::Num(fid as f64), &[]).expect("fgets");
+        let read = run_evaluate(&Value::Num(fid as f64), &[]).expect("fgets");
         match read.first_output() {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
@@ -962,12 +984,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_nchar_zero_returns_empty_char() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_zero");
         fs::write(&path, "hello\n").unwrap();
         let handle = fopen_path(&path);
 
-        let eval = evaluate(
+        let eval = run_evaluate(
             &Value::Num(handle.fid as f64),
             &[Value::Int(IntValue::I32(0))],
         )
@@ -987,6 +1010,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_gathers_gpu_scalar_arguments() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_gpu_args");
         fs::write(&path, b"abcdef\nextra").unwrap();
@@ -1007,7 +1031,7 @@ pub(crate) mod tests {
             };
             let limit_gpu = Value::GpuTensor(provider.upload(&limit_view).expect("upload limit"));
 
-            let eval = evaluate(&fid_gpu, &[limit_gpu]).expect("fgets");
+            let eval = run_evaluate(&fid_gpu, &[limit_gpu]).expect("fgets");
             match eval.first_output() {
                 Value::CharArray(ca) => {
                     let text: String = ca.data.iter().collect();

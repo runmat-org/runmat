@@ -200,13 +200,13 @@ enum PauseWait {
     sink = true,
     builtin_path = "crate::builtins::timing::pause"
 )]
-fn pause_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn pause_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     match args.len() {
         0 => {
             perform_wait(PauseWait::Default)?;
             Ok(empty_return_value())
         }
-        1 => match classify_argument(&args[0])? {
+        1 => match classify_argument(&args[0]).await? {
             PauseArgument::Wait(wait) => {
                 perform_wait(wait)?;
                 Ok(empty_return_value())
@@ -257,9 +257,10 @@ fn wait_for_key_press() -> Result<(), RuntimeError> {
     }
 }
 
-fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
-    let host_value =
-        gpu_helpers::gather_value(arg).map_err(|e| pause_error(format!("pause: {e}")))?;
+async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
+    let host_value = gpu_helpers::gather_value_async(arg)
+        .await
+        .map_err(|e| pause_error(format!("pause: {e}")))?;
     match host_value {
         Value::String(text) => parse_command(&text),
         Value::CharArray(ca) => {
@@ -293,7 +294,7 @@ fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
         Value::Tensor(tensor) => parse_tensor(tensor),
         Value::LogicalArray(logical) => parse_logical(logical),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             parse_tensor(tensor)
         }
         Value::Complex(_, _)
@@ -405,6 +406,7 @@ fn set_pause_enabled(next: bool) -> Result<bool, RuntimeError> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
 
@@ -437,7 +439,7 @@ pub(crate) mod tests {
     fn query_returns_on_by_default() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
-        let result = pause_builtin(vec![Value::from("query")]).expect("pause query");
+        let result = block_on(pause_builtin(vec![Value::from("query")])).expect("pause query");
         assert_eq!(char_array_to_string(result), "on");
     }
 
@@ -446,7 +448,7 @@ pub(crate) mod tests {
     fn pause_off_returns_previous_state() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
-        let previous = pause_builtin(vec![Value::from("off")]).expect("pause off");
+        let previous = block_on(pause_builtin(vec![Value::from("off")])).expect("pause off");
         assert_eq!(char_array_to_string(previous), "on");
         assert!(!pause_enabled().unwrap());
     }
@@ -456,7 +458,7 @@ pub(crate) mod tests {
     fn pause_on_restores_state() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(false);
-        let previous = pause_builtin(vec![Value::from("on")]).expect("pause on");
+        let previous = block_on(pause_builtin(vec![Value::from("on")])).expect("pause on");
         assert_eq!(char_array_to_string(previous), "off");
         assert!(pause_enabled().unwrap());
     }
@@ -466,7 +468,7 @@ pub(crate) mod tests {
     fn pause_default_returns_empty_tensor() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
-        let result = pause_builtin(Vec::new()).expect("pause()");
+        let result = block_on(pause_builtin(Vec::new())).expect("pause()");
         match result {
             Value::Tensor(t) => assert_eq!(t.data.len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
@@ -478,7 +480,7 @@ pub(crate) mod tests {
     fn numeric_zero_is_accepted() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
-        let result = pause_builtin(vec![Value::Num(0.0)]).expect("pause(0)");
+        let result = block_on(pause_builtin(vec![Value::Num(0.0)])).expect("pause(0)");
         match result {
             Value::Tensor(t) => assert_eq!(t.data.len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
@@ -490,7 +492,7 @@ pub(crate) mod tests {
     fn integer_scalar_is_accepted() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
-        let result = pause_builtin(vec![Value::Int(IntValue::I32(0))]).expect("pause(int)");
+        let result = block_on(pause_builtin(vec![Value::Int(IntValue::I32(0))])).expect("pause(int)");
         match result {
             Value::Tensor(t) => assert_eq!(t.data.len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
@@ -502,7 +504,7 @@ pub(crate) mod tests {
     fn numeric_negative_zero_is_treated_as_zero() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
-        let result = pause_builtin(vec![Value::Num(-0.0)]).expect("pause(-0)");
+        let result = block_on(pause_builtin(vec![Value::Num(-0.0)])).expect("pause(-0)");
         match result {
             Value::Tensor(t) => assert_eq!(t.data.len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
@@ -514,7 +516,7 @@ pub(crate) mod tests {
     fn negative_duration_raises_error() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
-        let err = pause_builtin(vec![Value::Num(-0.1)]).unwrap_err();
+        let err = block_on(pause_builtin(vec![Value::Num(-0.1)])).unwrap_err();
         assert_pause_error_identifier(err, ERR_INVALID_ARG);
     }
 
@@ -524,7 +526,7 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = pause_builtin(vec![Value::Tensor(tensor)]).unwrap_err();
+        let err = block_on(pause_builtin(vec![Value::Tensor(tensor)])).unwrap_err();
         assert_pause_error_identifier(err, ERR_INVALID_ARG);
     }
 
@@ -534,7 +536,7 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap();
         reset_state(true);
         let empty = Tensor::zeros(vec![0, 0]);
-        let result = pause_builtin(vec![Value::Tensor(empty)]).expect("pause([])");
+        let result = block_on(pause_builtin(vec![Value::Tensor(empty)])).expect("pause([])");
         match result {
             Value::Tensor(t) => assert_eq!(t.data.len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
@@ -547,7 +549,7 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap();
         reset_state(true);
         let logical = LogicalArray::new(vec![1u8], vec![1, 1]).unwrap();
-        let result = pause_builtin(vec![Value::LogicalArray(logical)]).expect("pause(true)");
+        let result = block_on(pause_builtin(vec![Value::LogicalArray(logical)])).expect("pause(true)");
         match result {
             Value::Tensor(t) => assert_eq!(t.data.len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
@@ -559,7 +561,7 @@ pub(crate) mod tests {
     fn infinite_duration_behaves_like_default() {
         let _guard = TEST_GUARD.lock().unwrap();
         reset_state(true);
-        let result = pause_builtin(vec![Value::Num(f64::INFINITY)]).expect("pause(Inf)");
+        let result = block_on(pause_builtin(vec![Value::Num(f64::INFINITY)])).expect("pause(Inf)");
         match result {
             Value::Tensor(t) => assert_eq!(t.data.len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
@@ -578,7 +580,8 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = pause_builtin(vec![Value::GpuTensor(handle)]).expect("pause(gpuScalar)");
+            let result =
+                block_on(pause_builtin(vec![Value::GpuTensor(handle)])).expect("pause(gpuScalar)");
             match result {
                 Value::Tensor(t) => assert_eq!(t.data.len(), 0),
                 other => panic!("expected empty tensor, got {other:?}"),
@@ -604,7 +607,8 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let result = pause_builtin(vec![Value::GpuTensor(handle)]).expect("pause(gpuScalar)");
+        let result =
+            block_on(pause_builtin(vec![Value::GpuTensor(handle)])).expect("pause(gpuScalar)");
         match result {
             Value::Tensor(t) => assert_eq!(t.data.len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
@@ -616,7 +620,7 @@ pub(crate) mod tests {
     fn invalid_command_raises_error() {
         let _guard = TEST_GUARD.lock().unwrap();
         reset_state(true);
-        let err = pause_builtin(vec![Value::from("invalid")]).unwrap_err();
+        let err = block_on(pause_builtin(vec![Value::from("invalid")])).unwrap_err();
         assert_pause_error_identifier(err, ERR_INVALID_ARG);
     }
 

@@ -266,10 +266,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "polyder,polynomial,derivative,product,quotient",
     builtin_path = "crate::builtins::math::poly::polyder"
 )]
-fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     match rest.len() {
-        0 => derivative_single(first),
-        1 => derivative_product(first, rest.into_iter().next().unwrap()),
+        0 => derivative_single(first).await,
+        1 => derivative_product(first, rest.into_iter().next().unwrap()).await,
         _ => Err(polyder_error("polyder: too many input arguments")),
     }
 }
@@ -330,12 +330,12 @@ fn try_gpu_quotient(u: &Value, v: &Value) -> BuiltinResult<Option<PolyderEval>> 
 }
 
 /// Evaluate the quotient rule derivative `[num, den] = polyder(u, v)`.
-pub fn evaluate_quotient(u: Value, v: Value) -> BuiltinResult<PolyderEval> {
+pub async fn evaluate_quotient(u: Value, v: Value) -> BuiltinResult<PolyderEval> {
     if let Some(eval) = try_gpu_quotient(&u, &v)? {
         return Ok(eval);
     }
-    let u_poly = parse_polynomial("polyder", "U", u)?;
-    let v_poly = parse_polynomial("polyder", "V", v)?;
+    let u_poly = parse_polynomial("polyder", "U", u).await?;
+    let v_poly = parse_polynomial("polyder", "V", v).await?;
     let numerator = quotient_numerator(&u_poly, &v_poly)?;
     let denominator = quotient_denominator(&v_poly)?;
     Ok(PolyderEval {
@@ -363,20 +363,20 @@ impl PolyderEval {
     }
 }
 
-pub fn derivative_single(value: Value) -> BuiltinResult<Value> {
+pub async fn derivative_single(value: Value) -> BuiltinResult<Value> {
     if let Some(out) = try_gpu_derivative_single(&value)? {
         return Ok(out);
     }
-    let poly = parse_polynomial("polyder", "P", value)?;
+    let poly = parse_polynomial("polyder", "P", value).await?;
     differentiate_polynomial(&poly)
 }
 
-pub fn derivative_product(first: Value, second: Value) -> BuiltinResult<Value> {
+pub async fn derivative_product(first: Value, second: Value) -> BuiltinResult<Value> {
     if let Some(out) = try_gpu_derivative_product(&first, &second)? {
         return Ok(out);
     }
-    let p = parse_polynomial("polyder", "P", first)?;
-    let q = parse_polynomial("polyder", "A", second)?;
+    let p = parse_polynomial("polyder", "P", first).await?;
+    let q = parse_polynomial("polyder", "A", second).await?;
     product_derivative(&p, &q)
 }
 
@@ -492,8 +492,8 @@ fn coeffs_to_value(coeffs: &[Complex64], orientation: Orientation) -> BuiltinRes
     }
 }
 
-fn parse_polynomial(context: &str, label: &str, value: Value) -> BuiltinResult<Polynomial> {
-    let gathered = dispatcher::gather_if_needed(&value)?;
+async fn parse_polynomial(context: &str, label: &str, value: Value) -> BuiltinResult<Polynomial> {
+    let gathered = dispatcher::gather_if_needed_async(&value).await?;
     let (coeffs, orientation) = match gathered {
         Value::Tensor(tensor) => {
             ensure_vector_shape(context, label, &tensor.shape)?;
@@ -618,6 +618,7 @@ struct Polynomial {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor};
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
@@ -794,8 +795,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn builtin_rejects_too_many_inputs() {
-        let err = super::polyder_builtin(Value::Num(1.0), vec![Value::Num(2.0), Value::Num(3.0)])
-            .unwrap_err();
+        let err = futures::executor::block_on(super::polyder_builtin(
+            Value::Num(1.0),
+            vec![Value::Num(2.0), Value::Num(3.0)],
+        ))
+        .unwrap_err();
         assert_error_contains(err, "too many input arguments");
     }
 
@@ -1031,5 +1035,17 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn derivative_single(value: Value) -> BuiltinResult<Value> {
+        block_on(super::derivative_single(value))
+    }
+
+    fn derivative_product(first: Value, second: Value) -> BuiltinResult<Value> {
+        block_on(super::derivative_product(first, second))
+    }
+
+    fn evaluate_quotient(u: Value, v: Value) -> BuiltinResult<PolyderEval> {
+        block_on(super::evaluate_quotient(u, v))
     }
 }

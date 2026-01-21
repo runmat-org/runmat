@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::is_missing_string;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -207,8 +207,8 @@ fn remap_strlength_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     builtin_path = "crate::builtins::strings::core::strlength"
 )]
-fn strlength_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    let gathered = gather_if_needed(&value).map_err(remap_strlength_flow)?;
+async fn strlength_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    let gathered = gather_if_needed_async(&value).await.map_err(remap_strlength_flow)?;
     match gathered {
         Value::StringArray(array) => strlength_string_array(array),
         Value::String(text) => Ok(Value::Num(string_scalar_length(&text))),
@@ -295,6 +295,10 @@ fn trimmed_row_length(array: &CharArray, row: usize) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+
+    fn strlength_builtin(value: Value) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::strlength_builtin(value))
+    }
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()

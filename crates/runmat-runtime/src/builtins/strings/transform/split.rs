@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -253,11 +253,11 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::split"
 )]
-fn split_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let text = gather_if_needed(&text).map_err(map_flow)?;
+async fn split_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let text = gather_if_needed_async(&text).await.map_err(map_flow)?;
     let mut args: Vec<Value> = Vec::with_capacity(rest.len());
     for arg in rest {
-        args.push(gather_if_needed(&arg).map_err(map_flow)?);
+        args.push(gather_if_needed_async(&arg).await.map_err(map_flow)?);
     }
 
     let options = SplitOptions::parse(&args)?;
@@ -733,6 +733,10 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, LogicalArray, Tensor};
+
+    fn split_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::split_builtin(text, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

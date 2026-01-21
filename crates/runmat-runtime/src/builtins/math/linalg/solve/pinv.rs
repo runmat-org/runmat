@@ -236,10 +236,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "pinv",
     builtin_path = "crate::builtins::math::linalg::solve::pinv"
 )]
-fn pinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn pinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let tol = parse_tolerance_arg(NAME, &rest).map_err(builtin_error)?;
     match value {
-        Value::GpuTensor(handle) => pinv_gpu(handle, tol),
+        Value::GpuTensor(handle) => pinv_gpu(handle, tol).await,
         Value::ComplexTensor(t) => pinv_complex_value(t, tol),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(builtin_error)?;
@@ -252,7 +252,7 @@ fn pinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
-fn pinv_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Value> {
+async fn pinv_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let options = ProviderPinvOptions { tolerance: tol };
         match provider.pinv(&handle, options) {
@@ -261,7 +261,9 @@ fn pinv_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Value> {
                 // Fall through to host implementation and attempt to re-upload
             }
         }
-        let gathered = gpu_helpers::gather_tensor(&handle).map_err(map_control_flow)?;
+        let gathered = gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(map_control_flow)?;
         let pinv = pinv_real_tensor(&gathered, tol)?;
         if let Ok(uploaded) = provider.upload(&HostTensorView {
             data: &pinv.data,
@@ -271,7 +273,9 @@ fn pinv_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Value> {
         }
         return Ok(tensor::tensor_into_value(pinv));
     }
-    let gathered = gpu_helpers::gather_tensor(&handle).map_err(map_control_flow)?;
+    let gathered = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(map_control_flow)?;
     let pinv = pinv_real_tensor(&gathered, tol)?;
     Ok(tensor::tensor_into_value(pinv))
 }
@@ -392,6 +396,7 @@ pub fn pinv_host_real_for_provider(matrix: &Tensor, tol: Option<f64>) -> Builtin
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{CharArray, IntValue};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -584,5 +589,9 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn pinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::pinv_builtin(value, rest))
     }
 }

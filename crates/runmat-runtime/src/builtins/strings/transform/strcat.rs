@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::{
-    build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeError,
+    build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
 
 #[cfg_attr(
@@ -437,7 +437,7 @@ fn cell_element_to_text(value: &Value) -> BuiltinResult<TextElement> {
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::strcat"
 )]
-fn strcat_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn strcat_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     if rest.is_empty() {
         return Err(runtime_error_for(ERROR_NOT_ENOUGH_INPUTS));
     }
@@ -446,7 +446,7 @@ fn strcat_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     let mut output_kind = OutputKind::Char;
 
     for value in rest {
-        let gathered = gather_if_needed(&value).map_err(map_flow)?;
+        let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
         let operand = TextOperand::from_value(gathered)?;
         output_kind = output_kind.update(operand.kind);
         operands.push(operand);
@@ -561,10 +561,14 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
 
+    fn run_strcat(rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(strcat_builtin(rest))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_string_scalar_concatenation() {
-        let result = strcat_builtin(vec![
+        let result = run_strcat(vec![
             Value::String("Run".into()),
             Value::String("Mat".into()),
         ])
@@ -576,7 +580,7 @@ pub(crate) mod tests {
     #[test]
     fn strcat_string_array_broadcasts_scalar() {
         let array = StringArray::new(vec!["core".into(), "runtime".into()], vec![1, 2]).unwrap();
-        let result = strcat_builtin(vec![
+        let result = run_strcat(vec![
             Value::String("runmat-".into()),
             Value::StringArray(array),
         ])
@@ -598,7 +602,7 @@ pub(crate) mod tests {
     fn strcat_char_array_multiple_rows_concatenates_per_row() {
         let first = CharArray::new(vec!['A', ' ', 'B', 'C'], 2, 2).expect("char");
         let second = CharArray::new(vec!['X', 'Y', 'Z', ' '], 2, 2).expect("char");
-        let result = strcat_builtin(vec![Value::CharArray(first), Value::CharArray(second)])
+        let result = run_strcat(vec![Value::CharArray(first), Value::CharArray(second)])
             .expect("strcat");
         match result {
             Value::CharArray(ca) => {
@@ -616,7 +620,7 @@ pub(crate) mod tests {
     fn strcat_char_array_trims_trailing_spaces() {
         let first = CharArray::new_row("GPU ");
         let second = CharArray::new_row(" Accel  ");
-        let result = strcat_builtin(vec![Value::CharArray(first), Value::CharArray(second)])
+        let result = run_strcat(vec![Value::CharArray(first), Value::CharArray(second)])
             .expect("strcat");
         match result {
             Value::CharArray(ca) => {
@@ -635,7 +639,7 @@ pub(crate) mod tests {
         let prefixes = CharArray::new(vec!['A', ' ', 'B', ' '], 2, 2).expect("char");
         let suffixes =
             StringArray::new(vec!["core".into(), "runtime".into()], vec![1, 2]).expect("strings");
-        let result = strcat_builtin(vec![
+        let result = run_strcat(vec![
             Value::CharArray(prefixes),
             Value::StringArray(suffixes),
         ])
@@ -669,7 +673,7 @@ pub(crate) mod tests {
         )
         .expect("cell");
         let suffix = Value::CharArray(CharArray::new_row("Core "));
-        let result = strcat_builtin(vec![cell, suffix]).expect("strcat");
+        let result = run_strcat(vec![cell, suffix]).expect("strcat");
         match result {
             Value::Cell(ca) => {
                 assert_eq!(ca.shape, vec![1, 2]);
@@ -701,7 +705,7 @@ pub(crate) mod tests {
         )
         .expect("cell");
         let suffix = Value::CharArray(CharArray::new_row("X"));
-        let result = strcat_builtin(vec![cell, suffix]).expect("strcat");
+        let result = run_strcat(vec![cell, suffix]).expect("strcat");
         match result {
             Value::Cell(ca) => {
                 assert_eq!(ca.shape, vec![2, 2]);
@@ -736,7 +740,7 @@ pub(crate) mod tests {
             vec![1, 2],
         )
         .unwrap();
-        let result = strcat_builtin(vec![
+        let result = run_strcat(vec![
             Value::String("job-".into()),
             Value::StringArray(array),
         ])
@@ -754,7 +758,7 @@ pub(crate) mod tests {
     #[test]
     fn strcat_empty_dimension_returns_empty_array() {
         let empty = StringArray::new(Vec::<String>::new(), vec![0, 2]).expect("string array");
-        let result = strcat_builtin(vec![
+        let result = run_strcat(vec![
             Value::StringArray(empty),
             Value::String("prefix".into()),
         ])
@@ -771,7 +775,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_errors_on_invalid_input_type() {
-        let err = strcat_builtin(vec![Value::Int(IntValue::I32(4))]).expect_err("expected error");
+        let err = run_strcat(vec![Value::Int(IntValue::I32(4))]).expect_err("expected error");
         assert!(err.to_string().contains("inputs must be strings"));
     }
 
@@ -780,7 +784,7 @@ pub(crate) mod tests {
     fn strcat_errors_on_mismatched_sizes() {
         let left = CharArray::new(vec!['A', 'B'], 2, 1).expect("char");
         let right = CharArray::new(vec!['C', 'D', 'E'], 3, 1).expect("char");
-        let err = strcat_builtin(vec![Value::CharArray(left), Value::CharArray(right)])
+        let err = run_strcat(vec![Value::CharArray(left), Value::CharArray(right)])
             .expect_err("expected broadcast error");
         let err_text = err.to_string();
         assert!(
@@ -793,7 +797,7 @@ pub(crate) mod tests {
     #[test]
     fn strcat_errors_on_invalid_cell_element() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell");
-        let err = strcat_builtin(vec![Value::Cell(cell)]).expect_err("expected error");
+        let err = run_strcat(vec![Value::Cell(cell)]).expect_err("expected error");
         assert!(err
             .to_string()
             .contains("cell array elements must be character vectors"));
@@ -802,7 +806,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_errors_on_empty_argument_list() {
-        let err = strcat_builtin(Vec::new()).expect_err("expected error");
+        let err = run_strcat(Vec::new()).expect_err("expected error");
         assert_eq!(err.to_string(), ERROR_NOT_ENOUGH_INPUTS);
     }
 
@@ -817,7 +821,7 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let err = strcat_builtin(vec![Value::GpuTensor(handle)]).expect_err("expected error");
+            let err = run_strcat(vec![Value::GpuTensor(handle)]).expect_err("expected error");
             assert!(err.to_string().contains("inputs must be strings"));
         });
     }

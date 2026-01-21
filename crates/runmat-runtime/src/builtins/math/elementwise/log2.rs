@@ -243,9 +243,9 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::log2"
 )]
-fn log2_builtin(value: Value) -> BuiltinResult<Value> {
+async fn log2_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => log2_gpu(handle),
+        Value::GpuTensor(handle) => log2_gpu(handle).await,
         Value::Complex(re, im) => {
             let (r, i) = log2_complex_parts(re, im);
             Ok(Value::Complex(r, i))
@@ -259,7 +259,7 @@ fn log2_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn log2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn log2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match detect_gpu_requires_complex(provider, &handle) {
             Ok(false) => {
@@ -268,7 +268,8 @@ fn log2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 }
             }
             Ok(true) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)
+                let tensor = gpu_helpers::gather_tensor_async(&handle)
+                    .await
                     .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
                 return log2_tensor(tensor);
             }
@@ -280,7 +281,8 @@ fn log2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     log2_tensor(tensor)
 }
@@ -370,7 +372,12 @@ fn log2_complex_parts(re: f64, im: f64) -> (f64, f64) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{LogicalArray, StringArray, Tensor, Value};
+
+    fn log2_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::log2_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

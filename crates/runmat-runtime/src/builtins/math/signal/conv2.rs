@@ -247,7 +247,7 @@ fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     builtin_path = "crate::builtins::math::signal::conv2"
 )]
-fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut extras = rest;
     let mode = extract_mode(&mut extras)?;
 
@@ -256,15 +256,15 @@ fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
             if let Some(device_value) = try_conv2_gpu(&a, &b, mode)? {
                 return Ok(device_value);
             }
-            let left = convert_matrix(a, "conv2", "A")?;
-            let right = convert_matrix(b, "conv2", "B")?;
+            let left = convert_matrix(a, "conv2", "A").await?;
+            let right = convert_matrix(b, "conv2", "B").await?;
             let result = conv2_matrices(&left, &right, mode);
             Ok(matrix_to_value(result)?)
         }
         1 => {
-            let signal = convert_matrix(extras.remove(0), "conv2", "A")?;
-            let column = convert_vector(a, "conv2", "H column")?;
-            let row = convert_vector(b, "conv2", "H row")?;
+            let signal = convert_matrix(extras.remove(0), "conv2", "A").await?;
+            let column = convert_vector(a, "conv2", "H column").await?;
+            let row = convert_vector(b, "conv2", "H row").await?;
             let kernel = outer_product(&column, &row);
             let result = conv2_matrices(&signal, &kernel, mode);
             Ok(matrix_to_value(result)?)
@@ -431,10 +431,11 @@ fn parse_mode_value(value: &Value) -> BuiltinResult<Option<Conv2Mode>> {
     Ok(Some(mode))
 }
 
-fn convert_matrix(value: Value, name: &str, arg: &str) -> BuiltinResult<Matrix> {
+async fn convert_matrix(value: Value, name: &str, arg: &str) -> BuiltinResult<Matrix> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
                 .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
             tensor_to_matrix(tensor, name, arg)
         }
@@ -470,8 +471,8 @@ fn convert_matrix(value: Value, name: &str, arg: &str) -> BuiltinResult<Matrix> 
     }
 }
 
-fn convert_vector(value: Value, name: &str, arg: &str) -> BuiltinResult<Vec<Complex<f64>>> {
-    let matrix = convert_matrix(value, name, arg)?;
+async fn convert_vector(value: Value, name: &str, arg: &str) -> BuiltinResult<Vec<Complex<f64>>> {
+    let matrix = convert_matrix(value, name, arg).await?;
     if matrix.rows > 1 && matrix.cols > 1 {
         return Err(runtime_error_for(format!(
             "{name}: {arg} must be a vector (row or column), got {}×{}",
@@ -611,6 +612,7 @@ fn matrix_to_value(matrix: Matrix) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{tensor, test_support};
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::LogicalArray;
 
@@ -954,5 +956,9 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::conv2_builtin(a, b, rest))
     }
 }

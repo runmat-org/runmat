@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::io::mat::load::read_mat_file_for_builtin;
-use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -184,12 +184,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::introspection::whos"
 )]
-fn whos_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn whos_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut gathered = Vec::with_capacity(args.len());
     for arg in args {
-        gathered.push(gather_if_needed(&arg).map_err(whos_flow)?);
+        gathered.push(gather_if_needed_async(&arg).await.map_err(whos_flow)?);
     }
-    let request = parse_request(&gathered)?;
+    let request = parse_request(&gathered).await?;
 
     let mut entries = match &request.source {
         WhosSource::Workspace => crate::workspace::snapshot().unwrap_or_default(),
@@ -287,7 +287,7 @@ impl WhosRecord {
     }
 }
 
-fn parse_request(values: &[Value]) -> BuiltinResult<WhosRequest> {
+async fn parse_request(values: &[Value]) -> BuiltinResult<WhosRequest> {
     let mut idx = 0usize;
     let mut path_value: Option<Value> = None;
     let mut names: Vec<String> = Vec::new();
@@ -318,7 +318,7 @@ fn parse_request(values: &[Value]) -> BuiltinResult<WhosRequest> {
                         if option_token(&values[idx])?.is_some() {
                             break;
                         }
-                        let candidates = extract_name_list(&values[idx])?;
+                        let candidates = extract_name_list(&values[idx]).await?;
                         if candidates.is_empty() {
                             return Err(whos_error(
                                 "whos: '-regexp' requires non-empty pattern strings",
@@ -345,7 +345,7 @@ fn parse_request(values: &[Value]) -> BuiltinResult<WhosRequest> {
             }
         }
 
-        let extracted = extract_name_list(&values[idx])?;
+        let extracted = extract_name_list(&values[idx]).await?;
         if extracted.is_empty() {
             idx += 1;
             continue;
@@ -463,7 +463,8 @@ fn option_token(value: &Value) -> BuiltinResult<Option<String>> {
     Ok(None)
 }
 
-fn extract_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
+#[async_recursion::async_recursion(?Send)]
+async fn extract_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(s) => Ok(vec![s.clone()]),
         Value::CharArray(ca) => Ok(char_array_rows_as_strings(ca)),
@@ -476,7 +477,7 @@ fn extract_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
                     names.push(text);
                     continue;
                 }
-                let gathered = gather_if_needed(inner).map_err(whos_flow)?;
+                let gathered = gather_if_needed_async(inner).await.map_err(whos_flow)?;
                 if let Some(text) = value_to_string_scalar(&gathered) {
                     names.push(text);
                 } else {
@@ -488,8 +489,8 @@ fn extract_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
             Ok(names)
         }
         Value::GpuTensor(_) => {
-            let gathered = gather_if_needed(value).map_err(whos_flow)?;
-            extract_name_list(&gathered)
+            let gathered = gather_if_needed_async(value).await.map_err(whos_flow)?;
+            extract_name_list(&gathered).await
         }
         _ => Err(whos_error(
             "whos: selections must be character vectors, string scalars, string arrays, or cell arrays of those types",
@@ -668,13 +669,17 @@ fn gpu_element_size_bytes() -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::call_builtin;
-    use once_cell::sync::OnceCell;
+    use crate::call_builtin_async;
+    use futures::executor::block_on;
     use runmat_builtins::{CellArray, CharArray, StructValue as TestStruct, Tensor};
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::{HashMap, HashSet};
     use tempfile::tempdir;
+
+    fn whos_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::whos_builtin(args))
+    }
 
     runmat_thread_local! {
         static TEST_WORKSPACE: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
@@ -682,18 +687,15 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn ensure_test_resolver() {
-        static INIT: OnceCell<()> = OnceCell::new();
-        INIT.get_or_init(|| {
-            crate::workspace::register_workspace_resolver(crate::workspace::WorkspaceResolver {
-                lookup: |name| TEST_WORKSPACE.with(|slot| slot.borrow().get(name).cloned()),
-                snapshot: || {
-                    let mut entries: Vec<(String, Value)> =
-                        TEST_WORKSPACE.with(|slot| slot.borrow().clone().into_iter().collect());
-                    entries.sort_by(|a, b| a.0.cmp(&b.0));
-                    entries
-                },
-                globals: || TEST_GLOBALS.with(|slot| slot.borrow().iter().cloned().collect()),
-            });
+        crate::workspace::register_workspace_resolver(crate::workspace::WorkspaceResolver {
+            lookup: |name| TEST_WORKSPACE.with(|slot| slot.borrow().get(name).cloned()),
+            snapshot: || {
+                let mut entries: Vec<(String, Value)> =
+                    TEST_WORKSPACE.with(|slot| slot.borrow().clone().into_iter().collect());
+                entries.sort_by(|a, b| a.0.cmp(&b.0));
+                entries
+            },
+            globals: || TEST_GLOBALS.with(|slot| slot.borrow().iter().cloned().collect()),
         });
     }
 
@@ -712,6 +714,10 @@ pub(crate) mod tests {
                 set.insert((*name).to_string());
             }
         });
+    }
+
+    fn workspace_guard() -> std::sync::MutexGuard<'static, ()> {
+        crate::workspace::test_guard()
     }
 
     fn structs_from_value(value: Value) -> Vec<TestStruct> {
@@ -800,6 +806,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_lists_workspace_variables() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
         set_workspace(
@@ -831,6 +838,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_filters_with_wildcard() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(
             &[("alpha", Value::Num(1.0)), ("beta", Value::Num(2.0))],
@@ -846,6 +854,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_filters_with_regex() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(
             &[
@@ -868,6 +877,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_filters_global_only() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(
             &[("shared", Value::Num(1.0)), ("local", Value::Num(2.0))],
@@ -885,6 +895,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_accepts_char_array_arguments() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(
             &[
@@ -908,6 +919,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_accepts_cell_array_arguments() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(
             &[
@@ -931,6 +943,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_rejects_numeric_selection() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[], &[]);
         let err = whos_builtin(vec![Value::Num(7.0)]).expect_err("whos should error");
@@ -944,6 +957,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_rejects_unknown_option() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[], &[]);
         let err = whos_builtin(vec![Value::from("-bogus")]).expect_err("whos should error");
@@ -957,6 +971,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_requires_filename_for_file_option() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[], &[]);
         let err = whos_builtin(vec![Value::from("-file")]).expect_err("whos should error");
@@ -970,6 +985,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_requires_pattern_for_regexp() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[], &[]);
         let err = whos_builtin(vec![Value::from("-regexp")]).expect_err("whos should error");
@@ -983,6 +999,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_rejects_invalid_regex() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[], &[]);
         let err = whos_builtin(vec![Value::from("-regexp"), Value::from("[")])
@@ -997,6 +1014,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_file_option_reads_mat_file() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         set_workspace(
@@ -1010,14 +1028,14 @@ pub(crate) mod tests {
         let dir = tempdir().expect("tempdir");
         let file_path = dir.path().join("snapshot.mat");
         let path_str = file_path.to_string_lossy().to_string();
-        call_builtin(
+        block_on(call_builtin_async(
             "save",
             &[
                 Value::from(path_str.clone()),
                 Value::from("alpha"),
                 Value::from("beta"),
             ],
-        )
+        ))
         .expect("save");
 
         set_workspace(&[], &[]);
@@ -1033,11 +1051,15 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_reports_gpu_bytes() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new((0..16).map(|v| v as f64).collect(), vec![4, 4]).unwrap();
-            let gpu_value = crate::call_builtin("gpuArray", &[Value::Tensor(tensor.clone())])
-                .expect("gpuArray");
+            let gpu_value = block_on(crate::call_builtin_async(
+                "gpuArray",
+                &[Value::Tensor(tensor.clone())],
+            ))
+            .expect("gpuArray");
             set_workspace(&[("G", gpu_value.clone())], &[]);
 
             let value = whos_builtin(vec![Value::from("G")]).expect("whos");
@@ -1055,11 +1077,15 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_reports_gpu_logical_bytes() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         test_support::with_test_provider(|_| {
             let tensor = Tensor::new(vec![0.0, 1.0, 0.0, 1.0], vec![4, 1]).unwrap();
-            let gpu_value = crate::call_builtin("gpuArray", &[Value::Tensor(tensor.clone())])
-                .expect("gpuArray");
+            let gpu_value = block_on(crate::call_builtin_async(
+                "gpuArray",
+                &[Value::Tensor(tensor.clone())],
+            ))
+            .expect("gpuArray");
             let handle = match gpu_value {
                 Value::GpuTensor(ref h) => {
                     runmat_accelerate_api::set_handle_logical(h, true);
@@ -1081,6 +1107,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn whos_reports_gpu_bytes_with_wgpu_provider() {
+        let _guard = workspace_guard();
         ensure_test_resolver();
         use runmat_accelerate_api::AccelProvider;
         let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -1088,8 +1115,11 @@ pub(crate) mod tests {
         )
         .expect("wgpu provider");
         let tensor = Tensor::new(vec![0.0; 12], vec![3, 4]).unwrap();
-        let gpu_value =
-            crate::call_builtin("gpuArray", &[Value::Tensor(tensor.clone())]).expect("gpuArray");
+        let gpu_value = block_on(crate::call_builtin_async(
+            "gpuArray",
+            &[Value::Tensor(tensor.clone())],
+        ))
+        .expect("gpuArray");
         set_workspace(&[("WG", gpu_value)], &[]);
 
         let value = whos_builtin(vec![Value::from("WG")]).expect("whos");

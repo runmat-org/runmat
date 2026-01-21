@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use runmat_filesystem as vfs;
 use std::collections::HashSet;
@@ -223,8 +223,8 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::genpath"
 )]
-fn genpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let gathered = gather_arguments(args)?;
+async fn genpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let gathered = gather_arguments(args).await?;
     match gathered.len() {
         0 => generate_from_current_directory(),
         1 => generate_from_root(&gathered[0], None),
@@ -272,10 +272,10 @@ fn generate_from_root(root: &Value, excludes: Option<&Value>) -> BuiltinResult<V
     Ok(char_array_value(&join_segments(&segments)))
 }
 
-fn gather_arguments(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
+async fn gather_arguments(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
     let mut gathered = Vec::with_capacity(args.len());
     for value in args {
-        let host_value = gather_if_needed(&value).map_err(map_control_flow)?;
+        let host_value = gather_if_needed_async(&value).await.map_err(map_control_flow)?;
         gathered.push(host_value);
     }
     Ok(gathered)
@@ -592,6 +592,10 @@ pub(crate) mod tests {
     use std::convert::TryFrom;
     use std::fs;
     use tempfile::tempdir;
+
+    fn genpath_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::genpath_builtin(args))
+    }
 
     struct DirGuard {
         previous: PathBuf,

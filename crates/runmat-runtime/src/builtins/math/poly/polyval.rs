@@ -262,31 +262,31 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::math::poly::polyval"
 )]
-fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(p, x, &rest, false)?;
+async fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(p, x, &rest, false).await?;
     Ok(eval.value())
 }
 
 /// Evaluate `polyval`, optionally computing the prediction interval.
-pub fn evaluate(
+pub async fn evaluate(
     coefficients: Value,
     points: Value,
     rest: &[Value],
     want_delta: bool,
 ) -> BuiltinResult<PolyvalEval> {
-    let options = parse_option_values(rest)?;
+    let options = parse_option_values(rest).await?;
 
     let coeff_clone = coefficients.clone();
     let points_clone = points.clone();
 
     let coeff_was_gpu = matches!(coefficients, Value::GpuTensor(_));
-    let (coeffs, coeff_real) = convert_coefficients(coeff_clone)?;
+    let (coeffs, coeff_real) = convert_coefficients(coeff_clone).await?;
 
-    let (mut inputs, prefer_gpu_points) = convert_points(points_clone)?;
+    let (mut inputs, prefer_gpu_points) = convert_points(points_clone).await?;
     let prefer_gpu_output = prefer_gpu_points || coeff_was_gpu;
 
     let mu = match options.mu.clone() {
-        Some(mu_value) => Some(parse_mu(mu_value)?),
+        Some(mu_value) => Some(parse_mu(mu_value).await?),
         None => None,
     };
 
@@ -301,7 +301,7 @@ pub fn evaluate(
     }
 
     let stats = if let Some(s_value) = options.s {
-        parse_stats(s_value, coeffs.len())?
+        parse_stats(s_value, coeffs.len()).await?
     } else {
         None
     };
@@ -537,11 +537,11 @@ struct ParsedOptions {
     mu: Option<Value>,
 }
 
-fn parse_option_values(rest: &[Value]) -> BuiltinResult<ParsedOptions> {
+async fn parse_option_values(rest: &[Value]) -> BuiltinResult<ParsedOptions> {
     match rest.len() {
         0 => Ok(ParsedOptions { s: None, mu: None }),
         1 => Ok(ParsedOptions {
-            s: if is_empty_value(&rest[0])? {
+            s: if is_empty_value(&rest[0]).await? {
                 None
             } else {
                 Some(rest[0].clone())
@@ -549,7 +549,7 @@ fn parse_option_values(rest: &[Value]) -> BuiltinResult<ParsedOptions> {
             mu: None,
         }),
         2 => Ok(ParsedOptions {
-            s: if is_empty_value(&rest[0])? {
+            s: if is_empty_value(&rest[0]).await? {
                 None
             } else {
                 Some(rest[0].clone())
@@ -560,11 +560,13 @@ fn parse_option_values(rest: &[Value]) -> BuiltinResult<ParsedOptions> {
     }
 }
 
-fn convert_coefficients(value: Value) -> BuiltinResult<(Vec<Complex64>, bool)> {
+#[async_recursion::async_recursion(?Send)]
+async fn convert_coefficients(value: Value) -> BuiltinResult<(Vec<Complex64>, bool)> {
     match value {
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_value(&Value::GpuTensor(handle.clone()))?;
-            convert_coefficients(gathered)
+            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
+                .await?;
+            convert_coefficients(gathered).await
         }
         Value::Tensor(mut tensor) => {
             ensure_vector_shape("polyval", &tensor.shape)?;
@@ -607,10 +609,10 @@ fn convert_coefficients(value: Value) -> BuiltinResult<(Vec<Complex64>, bool)> {
     }
 }
 
-fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
+async fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             let array = NumericArray {
                 data: tensor
                     .data
@@ -696,11 +698,12 @@ fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
     }
 }
 
-fn parse_mu(value: Value) -> BuiltinResult<Mu> {
+#[async_recursion::async_recursion(?Send)]
+async fn parse_mu(value: Value) -> BuiltinResult<Mu> {
     match value {
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_tensor(&handle)?;
-            parse_mu(Value::Tensor(gathered))
+            let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
+            parse_mu(Value::Tensor(gathered)).await
         }
         Value::Tensor(tensor) => {
             if tensor.data.len() < 2 {
@@ -742,15 +745,17 @@ fn parse_mu(value: Value) -> BuiltinResult<Mu> {
     }
 }
 
-fn parse_stats(value: Value, coeff_len: usize) -> BuiltinResult<Option<PolyfitStats>> {
-    if is_empty_value(&value)? {
+#[async_recursion::async_recursion(?Send)]
+async fn parse_stats(value: Value, coeff_len: usize) -> BuiltinResult<Option<PolyfitStats>> {
+    if is_empty_value(&value).await? {
         return Ok(None);
     }
     let struct_value = match value {
         Value::Struct(s) => s,
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_value(&Value::GpuTensor(handle))?;
-            return parse_stats(gathered, coeff_len);
+            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+                .await?;
+            return parse_stats(gathered, coeff_len).await;
         }
         other => {
             return Err(polyval_error(format!(
@@ -774,9 +779,9 @@ fn parse_stats(value: Value, coeff_len: usize) -> BuiltinResult<Option<PolyfitSt
         .cloned()
         .ok_or_else(|| polyval_error("polyval: S input is missing the field 'normr'"))?;
 
-    let (matrix, is_real) = convert_matrix(r_value, coeff_len)?;
-    let df = scalar_to_f64(df_value, "polyval: S.df")?;
-    let normr = scalar_to_f64(normr_value, "polyval: S.normr")?;
+    let (matrix, is_real) = convert_matrix(r_value, coeff_len).await?;
+    let df = scalar_to_f64(df_value, "polyval: S.df").await?;
+    let normr = scalar_to_f64(normr_value, "polyval: S.normr").await?;
 
     Ok(Some(PolyfitStats {
         r: matrix,
@@ -786,11 +791,12 @@ fn parse_stats(value: Value, coeff_len: usize) -> BuiltinResult<Option<PolyfitSt
     }))
 }
 
-fn convert_matrix(value: Value, coeff_len: usize) -> BuiltinResult<(Matrix, bool)> {
+#[async_recursion::async_recursion(?Send)]
+async fn convert_matrix(value: Value, coeff_len: usize) -> BuiltinResult<(Matrix, bool)> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
-            convert_matrix(Value::Tensor(tensor), coeff_len)
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+            convert_matrix(Value::Tensor(tensor), coeff_len).await
         }
         Value::Tensor(tensor) => {
             let Tensor {
@@ -851,7 +857,8 @@ fn convert_matrix(value: Value, coeff_len: usize) -> BuiltinResult<(Matrix, bool
     }
 }
 
-fn scalar_to_f64(value: Value, context: &str) -> BuiltinResult<f64> {
+#[async_recursion::async_recursion(?Send)]
+async fn scalar_to_f64(value: Value, context: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(n),
         Value::Int(i) => Ok(i.to_f64()),
@@ -869,8 +876,8 @@ fn scalar_to_f64(value: Value, context: &str) -> BuiltinResult<f64> {
             Ok(if array.data[0] != 0 { 1.0 } else { 0.0 })
         }
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
-            scalar_to_f64(Value::Tensor(tensor), context)
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+            scalar_to_f64(Value::Tensor(tensor), context).await
         }
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err(polyval_error(format!("{context} must be real-valued")))
@@ -1030,14 +1037,16 @@ fn is_vector_shape(shape: &[usize]) -> bool {
     shape.iter().filter(|&&dim| dim > 1).count() <= 1
 }
 
-fn is_empty_value(value: &Value) -> BuiltinResult<bool> {
+#[async_recursion::async_recursion(?Send)]
+async fn is_empty_value(value: &Value) -> BuiltinResult<bool> {
     match value {
         Value::Tensor(t) => Ok(t.data.is_empty()),
         Value::LogicalArray(l) => Ok(l.data.is_empty()),
         Value::Cell(ca) => Ok(ca.data.is_empty()),
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_value(&Value::GpuTensor(handle.clone()))?;
-            is_empty_value(&gathered)
+            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
+                .await?;
+            is_empty_value(&gathered).await
         }
         _ => Ok(false),
     }
@@ -1051,6 +1060,7 @@ fn values_are_real(values: &[Complex64]) -> bool {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::StructValue;
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
@@ -1154,8 +1164,13 @@ pub(crate) mod tests {
         st.fields.insert("df".to_string(), Value::Num(4.0));
         st.fields.insert("normr".to_string(), Value::Num(2.0));
         let stats = Value::Struct(st);
-        let eval = evaluate(Value::Tensor(coeffs), Value::Tensor(points), &[stats], true)
-            .expect("polyval");
+        let eval = futures::executor::block_on(evaluate(
+            Value::Tensor(coeffs),
+            Value::Tensor(points),
+            &[stats],
+            true,
+        ))
+        .expect("polyval");
         let (_, delta) = eval.into_pair().expect("delta available");
         match delta {
             Value::Tensor(tensor) => {
@@ -1171,8 +1186,13 @@ pub(crate) mod tests {
     fn polyval_delta_requires_stats() {
         let coeffs = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
         let points = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let err = evaluate(Value::Tensor(coeffs), Value::Tensor(points), &[], true)
-            .expect_err("expected error");
+        let err = futures::executor::block_on(evaluate(
+            Value::Tensor(coeffs),
+            Value::Tensor(points),
+            &[],
+            true,
+        ))
+        .expect_err("expected error");
         assert_error_contains(err, "S input");
     }
 
@@ -1315,5 +1335,9 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::polyval_builtin(p, x, rest))
     }
 }

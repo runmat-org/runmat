@@ -238,7 +238,7 @@ fn fieldnames_flow(message: impl Into<String>) -> RuntimeError {
     keywords = "fieldnames,struct,introspection,fields",
     builtin_path = "crate::builtins::structs::core::fieldnames"
 )]
-fn fieldnames_builtin(value: Value) -> BuiltinResult<Value> {
+async fn fieldnames_builtin(value: Value) -> BuiltinResult<Value> {
     let names = match &value {
         Value::Struct(st) => collect_struct_fieldnames(st),
         Value::Cell(cell) => collect_struct_array_fieldnames(cell)?,
@@ -353,13 +353,17 @@ pub(crate) mod tests {
         err.message().to_string()
     }
 
+    fn run_fieldnames(value: Value) -> BuiltinResult<Value> {
+        futures::executor::block_on(fieldnames_builtin(value))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_returns_sorted_names_for_scalar_struct() {
         let mut fields = StructValue::new();
         fields.fields.insert("beta".to_string(), Value::Num(1.0));
         fields.fields.insert("alpha".to_string(), Value::Num(2.0));
-        let result = fieldnames_builtin(Value::Struct(fields)).expect("fieldnames");
+        let result = run_fieldnames(Value::Struct(fields)).expect("fieldnames");
         let Value::Cell(cell) = result else {
             panic!("expected cell array result");
         };
@@ -392,7 +396,7 @@ pub(crate) mod tests {
         )
         .expect("struct array");
 
-        let result = fieldnames_builtin(Value::Cell(cell)).expect("fieldnames");
+        let result = run_fieldnames(Value::Cell(cell)).expect("fieldnames");
         let Value::Cell(names) = result else {
             panic!("expected cell array result");
         };
@@ -412,7 +416,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_errors_for_non_struct_inputs() {
-        let err = error_message(fieldnames_builtin(Value::Num(1.0)).unwrap_err());
+        let err = error_message(run_fieldnames(Value::Num(1.0)).unwrap_err());
         assert!(
             err.contains("expected struct, struct array, or object"),
             "unexpected error message: {err}"
@@ -423,7 +427,7 @@ pub(crate) mod tests {
     #[test]
     fn fieldnames_handles_empty_struct_array() {
         let empty_array = CellArray::new(Vec::new(), 0, 0).expect("empty struct array backing");
-        let result = fieldnames_builtin(Value::Cell(empty_array)).expect("fieldnames");
+        let result = run_fieldnames(Value::Cell(empty_array)).expect("fieldnames");
         let Value::Cell(cell) = result else {
             panic!("expected cell array");
         };
@@ -435,7 +439,7 @@ pub(crate) mod tests {
     #[test]
     fn fieldnames_cell_without_struct_errors() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell");
-        let err = error_message(fieldnames_builtin(Value::Cell(cell)).unwrap_err());
+        let err = error_message(run_fieldnames(Value::Cell(cell)).unwrap_err());
         assert!(
             err.contains("expected struct array contents to be structs"),
             "unexpected error message: {err}"
@@ -448,7 +452,7 @@ pub(crate) mod tests {
         let mut fields = StructValue::new();
         fields.fields.insert("name".to_string(), Value::Num(1.0));
         fields.fields.insert("Name".to_string(), Value::Num(2.0));
-        let Value::Cell(cell) = fieldnames_builtin(Value::Struct(fields)).expect("fieldnames")
+        let Value::Cell(cell) = run_fieldnames(Value::Struct(fields)).expect("fieldnames")
         else {
             panic!("expected cell array result");
         };
@@ -493,7 +497,7 @@ pub(crate) mod tests {
         let mut obj = ObjectInstance::new(class_name.to_string());
         obj.properties.insert("Step".to_string(), Value::Num(2.0));
 
-        let Value::Cell(cell) = fieldnames_builtin(Value::Object(obj)).expect("fieldnames object")
+        let Value::Cell(cell) = run_fieldnames(Value::Object(obj)).expect("fieldnames object")
         else {
             panic!("expected cell array");
         };
@@ -539,7 +543,7 @@ pub(crate) mod tests {
         };
 
         let Value::Cell(cell) =
-            fieldnames_builtin(Value::HandleObject(handle)).expect("fieldnames handle")
+            run_fieldnames(Value::HandleObject(handle)).expect("fieldnames handle")
         else {
             panic!("expected cell array");
         };

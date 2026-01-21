@@ -3,6 +3,8 @@ use runmat_gc_api::GcPtr;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 
 use indexmap::IndexMap;
 use std::sync::OnceLock;
@@ -978,6 +980,9 @@ pub enum AccelTag {
 /// Control-flow type for builtins that may suspend or error.
 pub type BuiltinControlFlow = runmat_async::RuntimeError;
 
+/// Async result type for builtins.
+pub type BuiltinFuture = Pin<Box<dyn Future<Output = Result<Value, BuiltinControlFlow>> + 'static>>;
+
 /// Simple builtin function definition using the unified type system
 #[derive(Debug, Clone)]
 pub struct BuiltinFunction {
@@ -988,7 +993,7 @@ pub struct BuiltinFunction {
     pub examples: &'static str,
     pub param_types: Vec<Type>,
     pub return_type: Type,
-    pub implementation: fn(&[Value]) -> Result<Value, BuiltinControlFlow>,
+    pub implementation: fn(&[Value]) -> BuiltinFuture,
     pub accel_tags: &'static [AccelTag],
     pub is_sink: bool,
     pub suppress_auto_output: bool,
@@ -1004,7 +1009,7 @@ impl BuiltinFunction {
         examples: &'static str,
         param_types: Vec<Type>,
         return_type: Type,
-        implementation: fn(&[Value]) -> Result<Value, BuiltinControlFlow>,
+        implementation: fn(&[Value]) -> BuiltinFuture,
         accel_tags: &'static [AccelTag],
         is_sink: bool,
         suppress_auto_output: bool,

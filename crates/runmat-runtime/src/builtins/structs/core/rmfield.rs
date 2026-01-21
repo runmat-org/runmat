@@ -211,7 +211,7 @@ fn rmfield_flow(message: impl Into<String>) -> RuntimeError {
     keywords = "rmfield,struct,remove field,struct array",
     builtin_path = "crate::builtins::structs::core::rmfield"
 )]
-fn rmfield_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn rmfield_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let names = parse_field_names(&rest)?;
     if names.is_empty() {
         return Ok(value);
@@ -405,6 +405,10 @@ pub(crate) mod tests {
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
     }
+
+    fn run_rmfield(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(rmfield_builtin(value, rest))
+    }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
 
@@ -415,7 +419,7 @@ pub(crate) mod tests {
         st.fields.insert("name".to_string(), Value::from("Ada"));
         st.fields.insert("score".to_string(), Value::Num(42.0));
         let result =
-            rmfield_builtin(Value::Struct(st), vec![Value::from("score")]).expect("rmfield");
+            run_rmfield(Value::Struct(st), vec![Value::from("score")]).expect("rmfield");
         let Value::Struct(updated) = result else {
             panic!("expected struct result");
         };
@@ -432,7 +436,7 @@ pub(crate) mod tests {
         st.fields.insert("top".to_string(), Value::Num(3.0));
         let cell =
             CellArray::new(vec![Value::from("left"), Value::from("top")], 1, 2).expect("cell");
-        let result = rmfield_builtin(Value::Struct(st), vec![Value::Cell(cell)]).expect("rmfield");
+        let result = run_rmfield(Value::Struct(st), vec![Value::Cell(cell)]).expect("rmfield");
         let Value::Struct(updated) = result else {
             panic!("expected struct result");
         };
@@ -450,7 +454,7 @@ pub(crate) mod tests {
         st.fields.insert("gamma".to_string(), Value::Num(3.0));
         let strings = StringArray::new(vec!["alpha".into(), "gamma".into()], vec![1, 2]).unwrap();
         let result =
-            rmfield_builtin(Value::Struct(st), vec![Value::StringArray(strings)]).expect("rmfield");
+            run_rmfield(Value::Struct(st), vec![Value::StringArray(strings)]).expect("rmfield");
         let Value::Struct(updated) = result else {
             panic!("expected struct result");
         };
@@ -465,7 +469,7 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.fields.insert("name".to_string(), Value::from("Ada"));
         let err =
-            error_message(rmfield_builtin(Value::Struct(st), vec![Value::from("id")]).unwrap_err());
+            error_message(run_rmfield(Value::Struct(st), vec![Value::from("id")]).unwrap_err());
         assert!(
             err.contains("Reference to non-existent field 'id'."),
             "unexpected error: {err}"
@@ -492,7 +496,7 @@ pub(crate) mod tests {
         .expect("struct array");
 
         let result =
-            rmfield_builtin(Value::Cell(array), vec![Value::from("score")]).expect("rmfield");
+            run_rmfield(Value::Cell(array), vec![Value::from("score")]).expect("rmfield");
         let Value::Cell(updated) = result else {
             panic!("expected struct array");
         };
@@ -522,7 +526,7 @@ pub(crate) mod tests {
         .expect("struct array");
 
         let err = error_message(
-            rmfield_builtin(Value::Cell(array), vec![Value::from("missing")]).unwrap_err(),
+            run_rmfield(Value::Cell(array), vec![Value::from("missing")]).unwrap_err(),
         );
         assert!(
             err.contains("Reference to non-existent field 'missing'."),
@@ -534,7 +538,7 @@ pub(crate) mod tests {
     #[test]
     fn rmfield_rejects_non_struct_inputs() {
         let err = error_message(
-            rmfield_builtin(Value::Num(1.0), vec![Value::from("field")]).unwrap_err(),
+            run_rmfield(Value::Num(1.0), vec![Value::from("field")]).unwrap_err(),
         );
         assert!(
             err.contains("expected struct or struct array"),
@@ -548,7 +552,7 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.fields.insert("data".to_string(), Value::Num(1.0));
         let err =
-            error_message(rmfield_builtin(Value::Struct(st), vec![Value::from("")]).unwrap_err());
+            error_message(run_rmfield(Value::Struct(st), vec![Value::from("")]).unwrap_err());
         assert!(
             err.contains("field names must be nonempty"),
             "unexpected error: {err}"
@@ -569,7 +573,7 @@ pub(crate) mod tests {
             StringArray::new(vec!["gamma".into()], vec![1, 1]).expect("string scalar array");
         let cell = CellArray::new(vec![Value::from("delta")], 1, 1).expect("cell array of strings");
 
-        let result = rmfield_builtin(
+        let result = run_rmfield(
             Value::Struct(st),
             vec![
                 Value::from("alpha"),
@@ -593,7 +597,7 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.fields.insert("keep".to_string(), Value::Num(1.0));
         st.fields.insert("drop".to_string(), Value::Num(2.0));
-        let result = rmfield_builtin(
+        let result = run_rmfield(
             Value::Struct(st),
             vec![Value::from("drop"), Value::from("drop")],
         )
@@ -613,7 +617,7 @@ pub(crate) mod tests {
         let empty = CellArray::new(Vec::new(), 0, 0).expect("empty cell array");
         let original = st.clone();
         let result =
-            rmfield_builtin(Value::Struct(st), vec![Value::Cell(empty)]).expect("rmfield empty");
+            run_rmfield(Value::Struct(st), vec![Value::Cell(empty)]).expect("rmfield empty");
         assert_eq!(result, Value::Struct(original));
     }
 
@@ -622,7 +626,7 @@ pub(crate) mod tests {
     fn rmfield_requires_field_names() {
         let mut st = StructValue::new();
         st.fields.insert("value".to_string(), Value::Num(10.0));
-        let err = error_message(rmfield_builtin(Value::Struct(st), Vec::new()).unwrap_err());
+        let err = error_message(run_rmfield(Value::Struct(st), Vec::new()).unwrap_err());
         assert!(
             err.contains("rmfield: not enough input arguments"),
             "unexpected error: {err}"
@@ -649,7 +653,7 @@ pub(crate) mod tests {
         st.fields.insert("remove".to_string(), Value::Num(5.0));
 
         let result =
-            rmfield_builtin(Value::Struct(st), vec![Value::from("remove")]).expect("rmfield");
+            run_rmfield(Value::Struct(st), vec![Value::from("remove")]).expect("rmfield");
 
         let Value::Struct(updated) = result else {
             panic!("expected struct result");

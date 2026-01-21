@@ -255,10 +255,10 @@ enum BandSelector {
     accel = "structure",
     builtin_path = "crate::builtins::math::linalg::structure::bandwidth"
 )]
-fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let selector = parse_selector(&rest)?;
     let data = MatrixData::from_value(matrix)?;
-    let (lower, upper) = data.bandwidth()?;
+    let (lower, upper) = data.bandwidth().await?;
     match selector {
         BandSelector::Both => {
             let tensor = Tensor::new(vec![lower as f64, upper as f64], vec![1, 2])
@@ -353,16 +353,16 @@ impl MatrixData {
         }
     }
 
-    fn bandwidth(&self) -> BuiltinResult<(usize, usize)> {
+    async fn bandwidth(&self) -> BuiltinResult<(usize, usize)> {
         match self {
             MatrixData::Real(tensor) => bandwidth_host_real_tensor(tensor),
             MatrixData::Complex(tensor) => bandwidth_host_complex_tensor(tensor),
-            MatrixData::Gpu(handle) => bandwidth_gpu(handle),
+            MatrixData::Gpu(handle) => bandwidth_gpu(handle).await,
         }
     }
 }
 
-fn bandwidth_gpu(handle: &GpuTensorHandle) -> BuiltinResult<(usize, usize)> {
+async fn bandwidth_gpu(handle: &GpuTensorHandle) -> BuiltinResult<(usize, usize)> {
     let (rows, cols) = ensure_matrix_shape(&handle.shape)?;
     if rows == 0 || cols == 0 {
         return Ok((0, 0));
@@ -379,7 +379,7 @@ fn bandwidth_gpu(handle: &GpuTensorHandle) -> BuiltinResult<(usize, usize)> {
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(handle).await?;
     bandwidth_host_real_tensor(&tensor)
 }
 
@@ -477,6 +477,7 @@ fn compute_complex_bandwidth(rows: usize, cols: usize, data: &[(f64, f64)]) -> (
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::LogicalArray;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -672,5 +673,9 @@ pub(crate) mod tests {
         assert_eq!(gathered.shape, vec![1, 2]);
         assert_eq!(gathered.data, vec![cpu.0 as f64, cpu.1 as f64]);
         let _ = provider.free(&handle);
+    }
+
+    fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::bandwidth_builtin(matrix, rest))
     }
 }

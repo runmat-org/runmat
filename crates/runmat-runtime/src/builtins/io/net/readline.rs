@@ -4,12 +4,13 @@ use runmat_builtins::{IntValue, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 use std::io::{self, Read};
 use std::net::TcpStream;
+use std::time::{Duration, Instant};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
 
@@ -237,7 +238,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "readline,tcpclient,networking",
     builtin_path = "crate::builtins::io::net::readline"
 )]
-fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(readline_flow(
             MESSAGE_ID_INVALID_ARGUMENTS,
@@ -245,7 +246,7 @@ fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
         ));
     }
 
-    let client = gather_if_needed(&client)?;
+    let client = gather_if_needed_async(&client).await?;
     let client_struct = match &client {
         Value::Struct(st) => st,
         _ => {
@@ -293,7 +294,12 @@ fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
         ));
     }
 
-    let outcome = match read_line(&mut stream, &mut buffer) {
+    let timeout = if timeout.is_infinite() || timeout == 0.0 {
+        None
+    } else {
+        Some(Duration::from_secs_f64(timeout))
+    };
+    let outcome = match read_line(&mut stream, &mut buffer, timeout) {
         Ok(outcome) => outcome,
         Err(err) => {
             if let Ok(mut guard) = handle.lock() {
@@ -329,13 +335,25 @@ enum LineReadResult {
     Closed(Vec<u8>),
 }
 
-fn read_line(stream: &mut TcpStream, buffer: &mut Vec<u8>) -> Result<LineReadResult, io::Error> {
+fn read_line(
+    stream: &mut TcpStream,
+    buffer: &mut Vec<u8>,
+    timeout: Option<Duration>,
+) -> Result<LineReadResult, io::Error> {
     if let Some(line) = extract_line(buffer) {
         return Ok(LineReadResult::Complete(line));
     }
 
     let mut byte = [0u8; 1];
+    let start = Instant::now();
     loop {
+        if let Some(timeout) = timeout {
+            let elapsed = start.elapsed();
+            if elapsed >= timeout {
+                return Ok(LineReadResult::Timeout);
+            }
+            stream.set_read_timeout(Some(timeout - elapsed))?;
+        }
         match stream.read(&mut byte) {
             Ok(0) => {
                 if buffer.is_empty() {
@@ -352,11 +370,17 @@ fn read_line(stream: &mut TcpStream, buffer: &mut Vec<u8>) -> Result<LineReadRes
                 }
             }
             Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-            Err(err)
-                if err.kind() == io::ErrorKind::TimedOut
-                    || err.kind() == io::ErrorKind::WouldBlock =>
-            {
+            Err(err) if err.kind() == io::ErrorKind::TimedOut => {
                 return Ok(LineReadResult::Timeout);
+            }
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
+                if let Some(timeout) = timeout {
+                    if start.elapsed() >= timeout {
+                        return Ok(LineReadResult::Timeout);
+                    }
+                    continue;
+                }
+                return Err(err);
             }
             Err(err) => return Err(err),
         }
@@ -456,6 +480,10 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), Some(expected));
     }
 
+    fn run_readline(client: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(readline_builtin(client, rest))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_returns_line_without_terminator() {
@@ -469,7 +497,7 @@ pub(crate) mod tests {
         let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
         let client = make_client(stream, 1.0);
 
-        let line = readline_builtin(client.clone(), Vec::new()).expect("readline");
+        let line = run_readline(client.clone(), Vec::new()).expect("readline");
         match line {
             Value::String(text) => assert_eq!(text, "hello world"),
             other => panic!("expected string result, got {other:?}"),
@@ -492,7 +520,7 @@ pub(crate) mod tests {
         let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
         let client = make_client(stream, 1.0);
 
-        let line = readline_builtin(client.clone(), Vec::new()).expect("readline");
+        let line = run_readline(client.clone(), Vec::new()).expect("readline");
         match line {
             Value::String(text) => assert_eq!(text, "status OK"),
             other => panic!("expected string result, got {other:?}"),
@@ -517,7 +545,7 @@ pub(crate) mod tests {
         let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
         let client = make_client(stream, 0.1);
 
-        let value = readline_builtin(client.clone(), Vec::new()).expect("readline");
+        let value = run_readline(client.clone(), Vec::new()).expect("readline");
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
@@ -551,7 +579,7 @@ pub(crate) mod tests {
         let client = make_client(stream, 0.05);
         let id = client_id(&client);
 
-        let first = readline_builtin(client.clone(), Vec::new()).expect("readline");
+        let first = run_readline(client.clone(), Vec::new()).expect("readline");
         match first {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
@@ -563,7 +591,7 @@ pub(crate) mod tests {
         // Wait for the newline to arrive before attempting again.
         std::thread::sleep(Duration::from_millis(200));
 
-        let second = readline_builtin(client.clone(), Vec::new()).expect("readline");
+        let second = run_readline(client.clone(), Vec::new()).expect("readline");
         match second {
             Value::String(text) => assert_eq!(text, "partial payload"),
             other => panic!("expected buffered payload after newline, got {other:?}"),
@@ -596,7 +624,7 @@ pub(crate) mod tests {
         let client = make_client(stream, 1.0);
         let id = client_id(&client);
 
-        let value = readline_builtin(client.clone(), Vec::new()).expect("readline");
+        let value = run_readline(client.clone(), Vec::new()).expect("readline");
         match value {
             Value::String(text) => assert_eq!(text, "incomplete line"),
             other => panic!("expected partial string, got {other:?}"),
@@ -614,7 +642,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_errors_on_additional_arguments() {
-        let err = readline_builtin(Value::Num(42.0), vec![Value::Num(1.0)])
+        let err = run_readline(Value::Num(42.0), vec![Value::Num(1.0)])
             .expect_err("expected invalid argument error");
         assert_error_identifier(err, MESSAGE_ID_INVALID_ARGUMENTS);
     }
@@ -622,7 +650,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_rejects_non_struct_argument() {
-        let err = readline_builtin(Value::Num(5.0), Vec::new())
+        let err = run_readline(Value::Num(5.0), Vec::new())
             .expect_err("expected invalid client error");
         assert_error_identifier(err, MESSAGE_ID_INVALID_CLIENT);
     }
@@ -650,7 +678,7 @@ pub(crate) mod tests {
         }
 
         let err =
-            readline_builtin(client.clone(), Vec::new()).expect_err("expected not-connected error");
+            run_readline(client.clone(), Vec::new()).expect_err("expected not-connected error");
         assert_error_identifier(err, MESSAGE_ID_NOT_CONNECTED);
 
         handle.join().expect("server");

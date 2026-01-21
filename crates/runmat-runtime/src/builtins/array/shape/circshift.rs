@@ -259,7 +259,7 @@ fn circshift_error(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::circshift"
 )]
-fn circshift_builtin(value: Value, shift: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn circshift_builtin(value: Value, shift: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(circshift_error("circshift: too many input arguments"));
     }
@@ -296,7 +296,9 @@ fn circshift_builtin(value: Value, shift: Value, rest: Vec<Value>) -> crate::Bui
                 .map(tensor::tensor_into_value)
                 .map_err(Into::into)
         }
-        Value::GpuTensor(handle) => circshift_gpu(handle, dims, shifts).map_err(Into::into),
+        Value::GpuTensor(handle) => circshift_gpu(handle, dims, shifts)
+            .await
+            .map_err(Into::into),
         Value::Cell(_) => Err(circshift_error(
             "circshift: cell arrays are not yet supported",
         )),
@@ -739,7 +741,7 @@ fn circshift_char_array(
         .map_err(|e| circshift_error(format!("circshift: {e}")))
 }
 
-fn circshift_gpu(
+async fn circshift_gpu(
     handle: GpuTensorHandle,
     dims: &[usize],
     shifts: &[isize],
@@ -754,7 +756,7 @@ fn circshift_gpu(
         if plan.ext_shape != working.shape {
             match provider.reshape(&working, &plan.ext_shape) {
                 Ok(reshaped) => working = reshaped,
-                Err(_) => return circshift_gpu_fallback(handle, dims, shifts),
+                Err(_) => return circshift_gpu_fallback(handle, dims, shifts).await,
             }
         }
         if let Ok(out) = provider.circshift(&working, &plan.provider) {
@@ -762,15 +764,15 @@ fn circshift_gpu(
         }
     }
 
-    circshift_gpu_fallback(handle, dims, shifts)
+    circshift_gpu_fallback(handle, dims, shifts).await
 }
 
-fn circshift_gpu_fallback(
+async fn circshift_gpu_fallback(
     handle: GpuTensorHandle,
     dims: &[usize],
     shifts: &[isize],
 ) -> crate::BuiltinResult<Value> {
-    let host_tensor = gpu_helpers::gather_tensor(&handle)?;
+    let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let rotated = circshift_tensor(host_tensor, dims, shifts)?;
     if let Some(provider) = runmat_accelerate_api::provider() {
         let view = HostTensorView {
@@ -856,6 +858,15 @@ fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn circshift_builtin(
+        value: Value,
+        shift: Value,
+        rest: Vec<Value>,
+    ) -> crate::BuiltinResult<Value> {
+        block_on(super::circshift_builtin(value, shift, rest))
+    }
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor};
 

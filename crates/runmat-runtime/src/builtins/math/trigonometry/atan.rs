@@ -243,10 +243,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::atan"
 )]
-fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
     let base = match value {
-        Value::GpuTensor(handle) => atan_gpu(handle)?,
+        Value::GpuTensor(handle) => atan_gpu(handle).await?,
         Value::Complex(re, im) => {
             let (out_re, out_im) = atan_complex_components(re, im);
             Value::Complex(out_re, out_im)
@@ -258,16 +258,16 @@ fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         }
         other => atan_real(other)?,
     };
-    apply_output_template(base, &template)
+    apply_output_template(base, &template).await
 }
 
-fn atan_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn atan_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_atan(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     atan_tensor(tensor).map(tensor::tensor_into_value)
 }
 
@@ -360,26 +360,27 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     }
 }
 
-fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
+async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
     match template {
         OutputTemplate::Default => Ok(value),
-        OutputTemplate::Like(proto) => apply_like_template(value, proto),
+        OutputTemplate::Like(proto) => apply_like_template(value, proto).await,
     }
 }
 
-fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
-    let analysis = analyse_like_prototype(prototype)?;
+async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
+    let analysis = analyse_like_prototype(prototype).await?;
     match (analysis.class, analysis.device) {
-        (PrototypeClass::Real, DevicePreference::Host) => ensure_host_real(value),
+        (PrototypeClass::Real, DevicePreference::Host) => ensure_host_real(value).await,
         (PrototypeClass::Real, DevicePreference::Gpu) => ensure_gpu_real(value),
-        (PrototypeClass::Complex, DevicePreference::Host) => ensure_host_complex(value),
+        (PrototypeClass::Complex, DevicePreference::Host) => ensure_host_complex(value).await,
         (PrototypeClass::Complex, DevicePreference::Gpu) => Err(runtime_error_for(
             "atan: GPU 'like' prototypes with complex outputs are not supported",
         )),
     }
 }
 
-fn analyse_like_prototype(prototype: &Value) -> BuiltinResult<LikeAnalysis> {
+#[async_recursion::async_recursion(?Send)]
+async fn analyse_like_prototype(prototype: &Value) -> BuiltinResult<LikeAnalysis> {
     match prototype {
         Value::GpuTensor(_) => Ok(LikeAnalysis {
             device: DevicePreference::Gpu,
@@ -401,28 +402,28 @@ fn analyse_like_prototype(prototype: &Value) -> BuiltinResult<LikeAnalysis> {
             Err(runtime_error_for("atan: 'like' prototype must be numeric"))
         }
         other => {
-            let gathered = dispatcher::gather_if_needed(other)?;
+            let gathered = dispatcher::gather_if_needed_async(other).await?;
             if &gathered == other {
                 Err(runtime_error_for(format!(
                     "atan: unsupported 'like' prototype {other:?}"
                 )))
             } else {
-                analyse_like_prototype(&gathered)
+                analyse_like_prototype(&gathered).await
             }
         }
     }
 }
 
-fn ensure_host_value(value: Value) -> BuiltinResult<Value> {
+async fn ensure_host_value(value: Value) -> BuiltinResult<Value> {
     if let Value::GpuTensor(_) = &value {
-        gpu_helpers::gather_value(&value)
+        gpu_helpers::gather_value_async(&value).await
     } else {
         Ok(value)
     }
 }
 
-fn ensure_host_real(value: Value) -> BuiltinResult<Value> {
-    let host_value = ensure_host_value(value)?;
+async fn ensure_host_real(value: Value) -> BuiltinResult<Value> {
+    let host_value = ensure_host_value(value).await?;
     if is_complex_value(&host_value) {
         return Err(runtime_error_for(
             "atan: result is complex but 'like' prototype is real",
@@ -431,8 +432,8 @@ fn ensure_host_real(value: Value) -> BuiltinResult<Value> {
     Ok(host_value)
 }
 
-fn ensure_host_complex(value: Value) -> BuiltinResult<Value> {
-    let host_value = ensure_host_value(value)?;
+async fn ensure_host_complex(value: Value) -> BuiltinResult<Value> {
+    let host_value = ensure_host_value(value).await?;
     if is_complex_value(&host_value) {
         Ok(host_value)
     } else {
@@ -529,7 +530,12 @@ fn convert_real_value_to_gpu(value: Value) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor};
+
+    fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::atan_builtin(value, rest))
+    }
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
@@ -839,7 +845,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = atan_gpu(handle).unwrap();
+        let gpu = block_on(atan_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {

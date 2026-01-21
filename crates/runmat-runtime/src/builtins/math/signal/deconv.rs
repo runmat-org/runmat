@@ -248,15 +248,15 @@ fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     builtin_path = "crate::builtins::math::signal::deconv"
 )]
-fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(numerator, denominator)?;
+async fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(numerator, denominator).await?;
     Ok(eval.quotient())
 }
 
 /// Evaluate `deconv` and retain both outputs for multi-value contexts.
-pub fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<DeconvEval> {
-    let (num_input, mut prefer_gpu) = convert_value(numerator)?;
-    let (den_input, den_gpu) = convert_value(denominator)?;
+pub async fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<DeconvEval> {
+    let (num_input, mut prefer_gpu) = convert_value(numerator).await?;
+    let (den_input, den_gpu) = convert_value(denominator).await?;
     prefer_gpu |= den_gpu;
 
     let (quotient_raw, remainder_raw) = polynomial_division(&num_input.data, &den_input.data)?;
@@ -311,12 +311,14 @@ enum Orientation {
     Column,
 }
 
-fn convert_value(value: Value) -> BuiltinResult<(PolyInput, bool)> {
+#[async_recursion::async_recursion(?Send)]
+async fn convert_value(value: Value) -> BuiltinResult<(PolyInput, bool)> {
     match value {
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_value(&Value::GpuTensor(handle.clone()))
+            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
+                .await
                 .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-            let (input, _) = convert_value(gathered)?;
+            let (input, _) = convert_value(gathered).await?;
             Ok((input, true))
         }
         Value::Tensor(tensor) => convert_tensor(tensor).map(|input| (input, false)),
@@ -588,12 +590,17 @@ fn finalize_real(data: Vec<f64>, shape: Vec<usize>, prefer_gpu: bool) -> Builtin
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
+    }
+
+    fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<DeconvEval> {
+        block_on(super::evaluate(numerator, denominator))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -861,5 +868,9 @@ pub(crate) mod tests {
             out[idx] += v;
         }
         out
+    }
+
+    fn deconv_builtin(numerator: Value, denominator: Value) -> BuiltinResult<Value> {
+        block_on(super::deconv_builtin(numerator, denominator))
     }
 }

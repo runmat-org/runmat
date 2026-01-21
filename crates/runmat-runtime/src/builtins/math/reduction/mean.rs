@@ -395,7 +395,7 @@ enum MeanAxes {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::mean"
 )]
-fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     // Normalise argument order defensively:
     // If the primary 'value' is not data-like (e.g., 'all'), but a data-like
     // argument exists in 'rest', swap them so we interpret calls like
@@ -405,12 +405,12 @@ fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let input_meta = InputMeta::from_value(&value);
     let parsed = parse_arguments(&rest)?;
     let raw = match value {
-        Value::GpuTensor(handle) => mean_gpu(handle, &parsed)?,
+        Value::GpuTensor(handle) => mean_gpu(handle, &parsed).await?,
         Value::Complex(re, im) => mean_host_complex_scalar(re, im, &parsed)?,
         Value::ComplexTensor(ct) => mean_host_complex_tensor(ct, &parsed)?,
         other => mean_host(other, &parsed)?,
     };
-    apply_output_template(raw, &parsed.output, &input_meta)
+    apply_output_template(raw, &parsed.output, &input_meta).await
 }
 
 fn normalise_mean_call_args(value: Value, rest: Vec<Value>) -> (Value, Vec<Value>) {
@@ -659,7 +659,7 @@ fn mean_host_complex_tensor(tensor: ComplexTensor, args: &ParsedArguments) -> Bu
     Ok(complex_tensor_into_value(reduced))
 }
 
-fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
+async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -682,7 +682,7 @@ fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Va
         }
     }
 
-    let gathered = gpu_helpers::gather_tensor(&handle)?;
+    let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
     let reduced = mean_tensor(gathered, args.axes.clone(), args.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
@@ -1272,7 +1272,7 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
         .unwrap_or(1)
 }
 
-fn apply_output_template(
+async fn apply_output_template(
     value: Value,
     template: &OutputTemplate,
     meta: &InputMeta,
@@ -1280,14 +1280,14 @@ fn apply_output_template(
     match template {
         OutputTemplate::Double => Ok(value),
         OutputTemplate::Native => {
-            let value = apply_native_template(value, meta)?;
-            ensure_device(value, meta.device)
+            let value = apply_native_template(value, meta).await?;
+            ensure_device(value, meta.device).await
         }
-        OutputTemplate::Like(proto) => apply_like_template(value, proto),
+        OutputTemplate::Like(proto) => apply_like_template(value, proto).await,
     }
 }
 
-fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
+async fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
     match meta.class {
         InputClass::Integer(class) => match value {
             Value::Num(n) => class.to_value(n),
@@ -1296,7 +1296,7 @@ fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value>
         },
         _ => {
             if let Some(dtype) = meta.numeric_dtype {
-                coerce_value_to_dtype(value, dtype)
+                coerce_value_to_dtype(value, dtype).await
             } else {
                 Ok(value)
             }
@@ -1304,7 +1304,7 @@ fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value>
     }
 }
 
-fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Value> {
+async fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Value> {
     match dtype {
         NumericDType::F64 => Ok(value),
         NumericDType::F32 => match value {
@@ -1324,7 +1324,7 @@ fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Val
                 Ok(Value::Tensor(tensor))
             }
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                 let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
                 Ok(Value::Tensor(tensor))
             }
@@ -1348,11 +1348,11 @@ fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
     tensor
 }
 
-fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value> {
+async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value> {
     match device {
         DevicePreference::Host => match value {
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                 Ok(tensor::tensor_into_value(tensor))
             }
             _ => Ok(value),
@@ -1392,15 +1392,15 @@ fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     Ok(Value::GpuTensor(handle))
 }
 
-fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
-    let analysed = analyse_like_prototype(prototype)?;
+async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
+    let analysed = analyse_like_prototype(prototype).await?;
     match analysed.class {
         PrototypeClass::Real => match analysed.device {
-            DevicePreference::Host => ensure_device(value, DevicePreference::Host),
-            DevicePreference::Gpu => ensure_device(value, DevicePreference::Gpu),
+            DevicePreference::Host => ensure_device(value, DevicePreference::Host).await,
+            DevicePreference::Gpu => ensure_device(value, DevicePreference::Gpu).await,
         },
         PrototypeClass::Complex => {
-            let host_value = ensure_device(value, DevicePreference::Host)?;
+            let host_value = ensure_device(value, DevicePreference::Host).await?;
             real_to_complex(host_value)
         }
     }
@@ -1436,7 +1436,8 @@ enum PrototypeClass {
     Complex,
 }
 
-fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
+#[async_recursion::async_recursion(?Send)]
+async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
     match proto {
         Value::GpuTensor(_) => Ok(LikeAnalysis {
             device: DevicePreference::Gpu,
@@ -1455,9 +1456,10 @@ fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
             class: PrototypeClass::Complex,
         }),
         other => {
-            let gathered = dispatcher::gather_if_needed(other)
+            let gathered = dispatcher::gather_if_needed_async(other)
+                .await
                 .map_err(|e| mean_error(format!("mean: {e}")))?;
-            analyse_like_prototype(&gathered)
+            analyse_like_prototype(&gathered).await
         }
     }
 }
@@ -1466,7 +1468,12 @@ fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::IntValue;
+
+    fn mean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::mean_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1919,7 +1926,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = mean_gpu(h, &args).unwrap();
+        let gpu = block_on(mean_gpu(h, &args)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {

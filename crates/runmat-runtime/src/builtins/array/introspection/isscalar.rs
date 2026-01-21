@@ -214,7 +214,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::array::introspection::isscalar"
 )]
-fn isscalar_builtin(value: Value) -> crate::BuiltinResult<Value> {
+async fn isscalar_builtin(value: Value) -> crate::BuiltinResult<Value> {
     Ok(Value::Bool(value_is_scalar(&value)))
 }
 
@@ -229,6 +229,11 @@ fn value_is_scalar(value: &Value) -> bool {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+
+    fn isscalar_builtin(value: Value) -> crate::BuiltinResult<Value> {
+        block_on(super::isscalar_builtin(value))
+    }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_builtins::{CellArray, CharArray, StructValue, Tensor};

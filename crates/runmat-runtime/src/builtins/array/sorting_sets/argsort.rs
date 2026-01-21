@@ -207,8 +207,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::argsort"
 )]
-fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let evaluation = sort::evaluate(value, &rest)?;
+async fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let evaluation = sort::evaluate(value, &rest).await?;
     Ok(evaluation.indices_value())
 }
 
@@ -216,6 +216,11 @@ fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
 pub(crate) mod tests {
     use super::sort;
     use super::*;
+    use futures::executor::block_on;
+
+    fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::argsort_builtin(value, rest))
+    }
     use crate::builtins::common::test_support;
     use runmat_builtins::{ComplexTensor, IntValue, Tensor, Value};
 
@@ -256,7 +261,7 @@ pub(crate) mod tests {
         let args = vec![Value::Int(IntValue::I32(2))];
         let indices =
             argsort_builtin(Value::Tensor(tensor.clone()), args.clone()).expect("argsort");
-        let expected = sort::evaluate(Value::Tensor(tensor), &args)
+        let expected = futures::executor::block_on(sort::evaluate(Value::Tensor(tensor), &args))
             .expect("sort evaluate")
             .indices_value();
         assert_eq!(indices, expected);
@@ -300,7 +305,7 @@ pub(crate) mod tests {
         ];
         let indices =
             argsort_builtin(Value::Tensor(tensor.clone()), args.clone()).expect("argsort");
-        let expected = sort::evaluate(Value::Tensor(tensor), &args)
+        let expected = futures::executor::block_on(sort::evaluate(Value::Tensor(tensor), &args))
             .expect("sort evaluate")
             .indices_value();
         assert_eq!(indices, expected);

@@ -19,8 +19,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::dispatcher::gather_if_needed;
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const ERROR_NAME_ARG: &str = "exist: name must be a character vector or string scalar";
 const ERROR_TYPE_ARG: &str = "exist: type must be a character vector or string scalar";
@@ -228,16 +227,16 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "cpu",
     builtin_path = "crate::builtins::io::repl_fs::exist"
 )]
-fn exist_builtin(name: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn exist_builtin(name: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(exist_error("exist: too many input arguments"));
     }
 
-    let name_host = gather_if_needed(&name).map_err(map_control_flow)?;
-    let type_value = rest
-        .first()
-        .map(|value| gather_if_needed(value).map_err(map_control_flow))
-        .transpose()?;
+    let name_host = gather_if_needed_async(&name).await.map_err(map_control_flow)?;
+    let type_value = match rest.first() {
+        Some(value) => Some(gather_if_needed_async(value).await.map_err(map_control_flow)?),
+        None => None,
+    };
 
     let query = type_value
         .as_ref()
@@ -558,7 +557,6 @@ fn split_method_name(name: &str) -> Option<(String, String)> {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use once_cell::sync::OnceCell;
     use runmat_builtins::Value;
     use runmat_filesystem as vfs;
     use runmat_thread_local::runmat_thread_local;
@@ -570,23 +568,24 @@ pub(crate) mod tests {
     use std::path::PathBuf;
     use tempfile::tempdir;
 
+    fn exist_builtin(name: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::exist_builtin(name, rest))
+    }
+
     runmat_thread_local! {
         static TEST_WORKSPACE: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
     }
 
     fn ensure_test_resolver() {
-        static INIT: OnceCell<()> = OnceCell::new();
-        INIT.get_or_init(|| {
-            crate::workspace::register_workspace_resolver(crate::workspace::WorkspaceResolver {
-                lookup: |name| TEST_WORKSPACE.with(|slot| slot.borrow().get(name).cloned()),
-                snapshot: || {
-                    let mut entries: Vec<(String, Value)> =
-                        TEST_WORKSPACE.with(|slot| slot.borrow().clone().into_iter().collect());
-                    entries.sort_by(|a, b| a.0.cmp(&b.0));
-                    entries
-                },
-                globals: || Vec::new(),
-            });
+        crate::workspace::register_workspace_resolver(crate::workspace::WorkspaceResolver {
+            lookup: |name| TEST_WORKSPACE.with(|slot| slot.borrow().get(name).cloned()),
+            snapshot: || {
+                let mut entries: Vec<(String, Value)> =
+                    TEST_WORKSPACE.with(|slot| slot.borrow().clone().into_iter().collect());
+                entries.sort_by(|a, b| a.0.cmp(&b.0));
+                entries
+            },
+            globals: || Vec::new(),
         });
     }
 

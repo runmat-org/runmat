@@ -234,19 +234,27 @@ fn setdiff_error(message: impl Into<String>) -> crate::RuntimeError {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::setdiff"
 )]
-fn setdiff_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    Ok(evaluate(a, b, &rest)?.into_values_value())
+async fn setdiff_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    Ok(evaluate(a, b, &rest).await?.into_values_value())
 }
 
 /// Evaluate the `setdiff` builtin once and expose all outputs.
-pub fn evaluate(a: Value, b: Value, rest: &[Value]) -> crate::BuiltinResult<SetdiffEvaluation> {
+pub async fn evaluate(
+    a: Value,
+    b: Value,
+    rest: &[Value],
+) -> crate::BuiltinResult<SetdiffEvaluation> {
     let opts = parse_options(rest)?;
     match (a, b) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
-            setdiff_gpu_pair(handle_a, handle_b, &opts)
+            setdiff_gpu_pair(handle_a, handle_b, &opts).await
         }
-        (Value::GpuTensor(handle_a), other) => setdiff_gpu_mixed(handle_a, other, &opts, true),
-        (other, Value::GpuTensor(handle_b)) => setdiff_gpu_mixed(handle_b, other, &opts, false),
+        (Value::GpuTensor(handle_a), other) => {
+            setdiff_gpu_mixed(handle_a, other, &opts, true).await
+        }
+        (other, Value::GpuTensor(handle_b)) => {
+            setdiff_gpu_mixed(handle_b, other, &opts, false).await
+        }
         (left, right) => setdiff_host(left, right, &opts),
     }
 }
@@ -302,7 +310,7 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<SetdiffOptions> {
     Ok(opts)
 }
 
-fn setdiff_gpu_pair(
+async fn setdiff_gpu_pair(
     handle_a: GpuTensorHandle,
     handle_b: GpuTensorHandle,
     opts: &SetdiffOptions,
@@ -315,18 +323,18 @@ fn setdiff_gpu_pair(
             }
         }
     }
-    let a_tensor = gpu_helpers::gather_tensor(&handle_a)?;
-    let b_tensor = gpu_helpers::gather_tensor(&handle_b)?;
+    let a_tensor = gpu_helpers::gather_tensor_async(&handle_a).await?;
+    let b_tensor = gpu_helpers::gather_tensor_async(&handle_b).await?;
     setdiff_numeric(a_tensor, b_tensor, opts)
 }
 
-fn setdiff_gpu_mixed(
+async fn setdiff_gpu_mixed(
     handle_gpu: GpuTensorHandle,
     other: Value,
     opts: &SetdiffOptions,
     gpu_is_a: bool,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
-    let gpu_tensor = gpu_helpers::gather_tensor(&handle_gpu)?;
+    let gpu_tensor = gpu_helpers::gather_tensor_async(&handle_gpu).await?;
     let other_tensor =
         tensor::value_into_tensor_for("setdiff", other).map_err(|e| setdiff_error(e))?;
     if gpu_is_a {
@@ -1359,8 +1367,17 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, StringArray, Tensor, Value};
 
+
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    fn evaluate_sync(
+        a: Value,
+        b: Value,
+        rest: &[Value],
+    ) -> crate::BuiltinResult<SetdiffEvaluation> {
+        futures::executor::block_on(evaluate(a, b, rest))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1368,7 +1385,7 @@ pub(crate) mod tests {
     fn setdiff_numeric_sorted_default() {
         let a = Tensor::new(vec![5.0, 7.0, 5.0, 1.0], vec![4, 1]).unwrap();
         let b = Tensor::new(vec![7.0, 1.0, 3.0], vec![3, 1]).unwrap();
-        let eval = evaluate(Value::Tensor(a), Value::Tensor(b), &[]).expect("setdiff");
+        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("setdiff");
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
@@ -1385,7 +1402,7 @@ pub(crate) mod tests {
     fn setdiff_numeric_stable() {
         let a = Tensor::new(vec![4.0, 2.0, 4.0, 1.0, 3.0], vec![5, 1]).unwrap();
         let b = Tensor::new(vec![3.0, 4.0, 5.0, 1.0], vec![4, 1]).unwrap();
-        let eval = evaluate(Value::Tensor(a), Value::Tensor(b), &[Value::from("stable")])
+        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("stable")])
             .expect("setdiff");
         match eval.values_value() {
             Value::Tensor(t) => {
@@ -1404,7 +1421,8 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![1.0, 3.0, 1.0, 2.0, 4.0, 2.0], vec![3, 2]).unwrap();
         let b = Tensor::new(vec![3.0, 5.0, 4.0, 6.0], vec![2, 2]).unwrap();
         let eval =
-            evaluate(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")]).expect("setdiff");
+            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+                .expect("setdiff");
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
@@ -1421,7 +1439,7 @@ pub(crate) mod tests {
     fn setdiff_numeric_removes_nan() {
         let a = Tensor::new(vec![f64::NAN, 2.0, 3.0], vec![3, 1]).unwrap();
         let b = Tensor::new(vec![f64::NAN], vec![1, 1]).unwrap();
-        let eval = evaluate(Value::Tensor(a), Value::Tensor(b), &[]).expect("setdiff");
+        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("setdiff");
         let values = tensor::value_into_tensor_for("setdiff", eval.values_value()).expect("values");
         assert_eq!(values.data, vec![2.0, 3.0]);
         let ia = tensor::value_into_tensor_for("setdiff", eval.ia_value()).expect("ia tensor");
@@ -1433,7 +1451,8 @@ pub(crate) mod tests {
     fn setdiff_char_elements() {
         let a = CharArray::new(vec!['m', 'z', 'm', 'a'], 2, 2).unwrap();
         let b = CharArray::new(vec!['a', 'x', 'm', 'a'], 2, 2).unwrap();
-        let eval = evaluate(Value::CharArray(a), Value::CharArray(b), &[]).expect("setdiff");
+        let eval =
+            evaluate_sync(Value::CharArray(a), Value::CharArray(b), &[]).expect("setdiff");
         match eval.values_value() {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 1);
@@ -1469,7 +1488,7 @@ pub(crate) mod tests {
             vec![2, 2],
         )
         .unwrap();
-        let eval = evaluate(
+        let eval = evaluate_sync(
             Value::StringArray(a),
             Value::StringArray(b),
             &[Value::from("rows"), Value::from("stable")],
@@ -1489,7 +1508,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setdiff_type_mismatch_errors() {
-        let result = evaluate(Value::from(1.0), Value::String("a".into()), &[]);
+        let result = evaluate_sync(Value::from(1.0), Value::String("a".into()), &[]);
         assert!(result.is_err());
     }
 
@@ -1497,7 +1516,8 @@ pub(crate) mod tests {
     #[test]
     fn setdiff_rejects_legacy_option() {
         let err = error_message(
-            evaluate(Value::from(1.0), Value::from(2.0), &[Value::from("legacy")]).unwrap_err(),
+            evaluate_sync(Value::from(1.0), Value::from(2.0), &[Value::from("legacy")])
+                .unwrap_err(),
         );
         assert!(err.contains("setdiff: the 'legacy' behaviour is not supported"));
     }
@@ -1518,7 +1538,7 @@ pub(crate) mod tests {
             };
             let handle_a = provider.upload(&view_a).expect("upload a");
             let handle_b = provider.upload(&view_b).expect("upload b");
-            let eval = evaluate(Value::GpuTensor(handle_a), Value::GpuTensor(handle_b), &[])
+            let eval = evaluate_sync(Value::GpuTensor(handle_a), Value::GpuTensor(handle_b), &[])
                 .expect("setdiff");
             match eval.values_value() {
                 Value::Tensor(t) => {
@@ -1542,7 +1562,8 @@ pub(crate) mod tests {
         let b = Tensor::new(vec![2.0, 5.0], vec![2, 1]).unwrap();
 
         let cpu_eval =
-            evaluate(Value::Tensor(a.clone()), Value::Tensor(b.clone()), &[]).expect("setdiff");
+            evaluate_sync(Value::Tensor(a.clone()), Value::Tensor(b.clone()), &[])
+                .expect("setdiff");
         let cpu_values = tensor::value_into_tensor_for("setdiff", cpu_eval.values_value()).unwrap();
         let cpu_ia = tensor::value_into_tensor_for("setdiff", cpu_eval.ia_value()).unwrap();
 
@@ -1558,7 +1579,8 @@ pub(crate) mod tests {
         let handle_a = provider.upload(&view_a).expect("upload A");
         let handle_b = provider.upload(&view_b).expect("upload B");
         let gpu_eval =
-            evaluate(Value::GpuTensor(handle_a), Value::GpuTensor(handle_b), &[]).expect("setdiff");
+            evaluate_sync(Value::GpuTensor(handle_a), Value::GpuTensor(handle_b), &[])
+                .expect("setdiff");
         let gpu_values = tensor::value_into_tensor_for("setdiff", gpu_eval.values_value()).unwrap();
         let gpu_ia = tensor::value_into_tensor_for("setdiff", gpu_eval.ia_value()).unwrap();
 

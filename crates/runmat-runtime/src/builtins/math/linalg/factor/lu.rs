@@ -264,8 +264,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::math::linalg::factor::lu"
 )]
-fn lu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(value, &rest)?;
+async fn lu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(value, &rest).await?;
     Ok(eval.combined())
 }
 
@@ -361,22 +361,24 @@ impl Default for PivotMode {
 }
 
 /// Evaluate `lu` while preserving all output forms for later extraction.
-pub fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<LuEval> {
+pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<LuEval> {
     let pivot_mode = parse_pivot_mode(args)?;
     match value {
         Value::GpuTensor(handle) => {
             if let Some(eval) = evaluate_gpu(&handle, pivot_mode)? {
                 return Ok(eval);
             }
-            let tensor = gpu_helpers::gather_tensor(&handle).map_err(with_lu_context)?;
-            evaluate_host_value(Value::Tensor(tensor), pivot_mode)
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(with_lu_context)?;
+            evaluate_host_value(Value::Tensor(tensor), pivot_mode).await
         }
-        other => evaluate_host_value(other, pivot_mode),
+        other => evaluate_host_value(other, pivot_mode).await,
     }
 }
 
-fn evaluate_host_value(value: Value, pivot_mode: PivotMode) -> BuiltinResult<LuEval> {
-    let matrix = extract_matrix(value)?;
+async fn evaluate_host_value(value: Value, pivot_mode: PivotMode) -> BuiltinResult<LuEval> {
+    let matrix = extract_matrix(value).await?;
     let components = lu_factor(matrix)?;
     LuEval::from_components(components, pivot_mode)
 }
@@ -407,12 +409,14 @@ fn parse_pivot_mode(args: &[Value]) -> BuiltinResult<PivotMode> {
     }
 }
 
-fn extract_matrix(value: Value) -> BuiltinResult<RowMajorMatrix> {
+async fn extract_matrix(value: Value) -> BuiltinResult<RowMajorMatrix> {
     match value {
         Value::Tensor(t) => RowMajorMatrix::from_tensor(&t),
         Value::ComplexTensor(ct) => RowMajorMatrix::from_complex_tensor(&ct),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle).map_err(with_lu_context)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(with_lu_context)?;
             RowMajorMatrix::from_tensor(&tensor)
         }
         Value::LogicalArray(logical) => {
@@ -671,6 +675,7 @@ impl RowMajorMatrix {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{ComplexTensor as CMatrix, Tensor as Matrix};
 
     fn error_message(err: RuntimeError) -> String {
@@ -997,5 +1002,13 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn lu_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::lu_builtin(value, rest))
+    }
+
+    fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<LuEval> {
+        block_on(super::evaluate(value, args))
     }
 }

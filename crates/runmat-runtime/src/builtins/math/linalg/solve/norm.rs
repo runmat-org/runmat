@@ -244,10 +244,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::linalg::solve::norm"
 )]
-fn norm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn norm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let order = parse_order(&rest)?;
     match value {
-        Value::GpuTensor(handle) => norm_gpu(handle, order),
+        Value::GpuTensor(handle) => norm_gpu(handle, order).await,
         Value::ComplexTensor(tensor) => {
             let norm = norm_complex_tensor(&tensor, order)?;
             Ok(Value::Num(norm))
@@ -288,7 +288,7 @@ enum TensorKind {
     Matrix { rows: usize, cols: usize },
 }
 
-fn norm_gpu(handle: GpuTensorHandle, order: NormOrder) -> BuiltinResult<Value> {
+async fn norm_gpu(handle: GpuTensorHandle, order: NormOrder) -> BuiltinResult<Value> {
     let maybe_provider = runmat_accelerate_api::provider();
 
     if let Some(provider) = maybe_provider {
@@ -298,7 +298,9 @@ fn norm_gpu(handle: GpuTensorHandle, order: NormOrder) -> BuiltinResult<Value> {
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle).map_err(map_control_flow)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(map_control_flow)?;
     let norm = norm_real_tensor(&tensor, order)?;
 
     if let Some(provider) = maybe_provider {
@@ -799,6 +801,7 @@ pub fn norm_host_real_for_provider(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::CharArray;
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -1094,5 +1097,9 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn norm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::norm_builtin(value, rest))
     }
 }

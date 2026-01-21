@@ -51,11 +51,11 @@ pub fn matrix_mul(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
 }
 
 /// GPU-aware matmul entry: if both inputs are GpuTensor handles, call provider; otherwise fall back to CPU.
-pub fn value_matmul(
+pub async fn value_matmul(
     a: &runmat_builtins::Value,
     b: &runmat_builtins::Value,
 ) -> BuiltinResult<runmat_builtins::Value> {
-    crate::builtins::math::linalg::ops::mtimes::mtimes_eval(a, b)
+    crate::builtins::math::linalg::ops::mtimes::mtimes_eval(a, b).await
 }
 
 fn complex_matrix_mul(
@@ -165,7 +165,7 @@ pub fn matrix_eye(n: usize) -> Tensor {
 
 // Simple built-in function for testing matrix operations
 #[runtime_builtin(name = "matrix_zeros", builtin_path = "crate::matrix")]
-fn matrix_zeros_builtin(rows: i32, cols: i32) -> crate::BuiltinResult<Tensor> {
+async fn matrix_zeros_builtin(rows: i32, cols: i32) -> crate::BuiltinResult<Tensor> {
     if rows < 0 || cols < 0 {
         return Err(("Matrix dimensions must be non-negative".to_string()).into());
     }
@@ -173,7 +173,7 @@ fn matrix_zeros_builtin(rows: i32, cols: i32) -> crate::BuiltinResult<Tensor> {
 }
 
 #[runtime_builtin(name = "matrix_ones", builtin_path = "crate::matrix")]
-fn matrix_ones_builtin(rows: i32, cols: i32) -> crate::BuiltinResult<Tensor> {
+async fn matrix_ones_builtin(rows: i32, cols: i32) -> crate::BuiltinResult<Tensor> {
     if rows < 0 || cols < 0 {
         return Err(("Matrix dimensions must be non-negative".to_string()).into());
     }
@@ -181,7 +181,7 @@ fn matrix_ones_builtin(rows: i32, cols: i32) -> crate::BuiltinResult<Tensor> {
 }
 
 #[runtime_builtin(name = "matrix_eye", builtin_path = "crate::matrix")]
-fn matrix_eye_builtin(n: i32) -> crate::BuiltinResult<Tensor> {
+async fn matrix_eye_builtin(n: i32) -> crate::BuiltinResult<Tensor> {
     if n < 0 {
         return Err(("Matrix size must be non-negative".to_string()).into());
     }
@@ -189,9 +189,9 @@ fn matrix_eye_builtin(n: i32) -> crate::BuiltinResult<Tensor> {
 }
 
 #[runtime_builtin(name = "matrix_transpose", builtin_path = "crate::matrix")]
-fn matrix_transpose_builtin(a: Tensor) -> crate::BuiltinResult<Tensor> {
+async fn matrix_transpose_builtin(a: Tensor) -> crate::BuiltinResult<Tensor> {
     let args = [Value::Tensor(a)];
-    let result = crate::call_builtin("transpose", &args)?;
+    let result = crate::call_builtin_async("transpose", &args).await?;
     match result {
         Value::Tensor(tensor) => Ok(tensor),
         other => Err((format!("matrix_transpose: expected tensor, got {other:?}")).into()),

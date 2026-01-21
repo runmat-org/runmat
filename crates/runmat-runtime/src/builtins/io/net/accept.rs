@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use thiserror::Error;
 
 use runmat_time::Instant;
@@ -365,11 +365,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "accept,tcpserver,tcpclient",
     builtin_path = "crate::builtins::io::net::accept"
 )]
-pub(crate) fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let server = gather_if_needed(&server)?;
+pub(crate) async fn accept_builtin(
+    server: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let server = gather_if_needed_async(&server).await?;
     let server_id = extract_server_id(&server)?;
 
-    let options = parse_accept_options(rest)?;
+    let options = parse_accept_options(rest).await?;
 
     let shared_server = server_handle(server_id).ok_or_else(|| {
         accept_error(
@@ -460,7 +463,7 @@ struct AcceptOptions {
     timeout: Option<f64>,
 }
 
-fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> {
+async fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> {
     if rest.is_empty() {
         return Ok(AcceptOptions::default());
     }
@@ -477,7 +480,7 @@ fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> {
         let value_raw = iter
             .next()
             .expect("paired iteration guarantees value exists");
-        let name_value = gather_if_needed(&name_raw)?;
+        let name_value = gather_if_needed_async(&name_raw).await?;
         let name = match name_value {
             Value::String(ref s) => s.clone(),
             Value::CharArray(ref ca) if ca.rows == 1 => ca.data.iter().collect(),
@@ -492,7 +495,7 @@ fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> {
         let lower = name.to_ascii_lowercase();
         match lower.as_str() {
             "timeout" => {
-                let gathered = gather_if_needed(&value_raw)?;
+                let gathered = gather_if_needed_async(&value_raw).await?;
                 let timeout = parse_timeout_value(&gathered).map_err(|msg| {
                     accept_error(
                         MESSAGE_ID_INVALID_NAME_VALUE,
@@ -708,6 +711,14 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), Some(expected));
     }
 
+    fn run_accept(server: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(accept_builtin(server, rest))
+    }
+
+    fn run_tcpserver(address: Value, port: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(tcpserver_builtin(address, port, rest))
+    }
+
     fn server_id(value: &Value) -> u64 {
         match struct_field(value, SERVER_FIELD) {
             Value::Int(IntValue::U64(id)) => *id,
@@ -719,14 +730,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_rejects_non_struct() {
-        let err = accept_builtin(Value::Num(1.0), Vec::new()).unwrap_err();
+        let err = run_accept(Value::Num(1.0), Vec::new()).unwrap_err();
         assert_error_identifier(err, MESSAGE_ID_INVALID_SERVER);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_establishes_client_connection() {
-        let server_value = tcpserver_builtin(
+        let server_value = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
             Vec::new(),
@@ -742,7 +753,7 @@ pub(crate) mod tests {
             TcpStream::connect(("127.0.0.1", port)).expect("connect")
         });
 
-        let client = accept_builtin(server_value.clone(), Vec::new()).expect("accept");
+        let client = run_accept(server_value.clone(), Vec::new()).expect("accept");
         let stream = handle.join().expect("client thread");
         drop(stream);
 
@@ -767,13 +778,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_times_out_when_no_client_connects() {
-        let server_value = tcpserver_builtin(
+        let server_value = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
             Vec::new(),
         )
         .expect("tcpserver");
-        let err = accept_builtin(
+        let err = run_accept(
             server_value.clone(),
             vec![Value::from("Timeout"), Value::Num(0.05)],
         )
@@ -785,13 +796,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_rejects_invalid_timeout_name_value() {
-        let server_value = tcpserver_builtin(
+        let server_value = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
             Vec::new(),
         )
         .expect("tcpserver");
-        let err = accept_builtin(
+        let err = run_accept(
             server_value.clone(),
             vec![Value::from("Timeout"), Value::Num(-1.0)],
         )
@@ -810,7 +821,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_respects_per_call_timeout_override() {
-        let server_value = tcpserver_builtin(
+        let server_value = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
             Vec::new(),
@@ -826,7 +837,7 @@ pub(crate) mod tests {
             TcpStream::connect(("127.0.0.1", port)).expect("connect")
         });
 
-        let client = accept_builtin(
+        let client = run_accept(
             server_value.clone(),
             vec![Value::from("Timeout"), Value::Num(1.0)],
         )

@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
 
@@ -213,16 +213,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "write,tcpclient,networking",
     builtin_path = "crate::builtins::io::net::write"
 )]
-fn write_builtin(client: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let client = gather_if_needed(&client)
+async fn write_builtin(client: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let client = gather_if_needed_async(&client)
+        .await
         .map_err(|flow| map_write_flow(flow, MESSAGE_ID_INVALID_CLIENT, "write"))?;
-    let data = gather_if_needed(&data)
+    let data = gather_if_needed_async(&data)
+        .await
         .map_err(|flow| map_write_flow(flow, MESSAGE_ID_INVALID_DATA, "write"))?;
 
     let mut gathered_rest = Vec::with_capacity(rest.len());
     for value in rest {
         gathered_rest.push(
-            gather_if_needed(&value)
+            gather_if_needed_async(&value)
+                .await
                 .map_err(|flow| map_write_flow(flow, MESSAGE_ID_INVALID_DATATYPE, "write"))?,
         );
     }
@@ -868,6 +871,10 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), Some(expected));
     }
 
+    fn run_write(client: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(write_builtin(client, data, rest))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn write_default_uint8_sends_bytes() {
@@ -884,7 +891,7 @@ pub(crate) mod tests {
         let client = make_client(stream, 1.0, "little-endian");
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).unwrap();
         let result =
-            write_builtin(client.clone(), Value::Tensor(tensor), Vec::new()).expect("write");
+            run_write(client.clone(), Value::Tensor(tensor), Vec::new()).expect("write");
         match result {
             Value::Num(count) => assert_eq!(count, 4.0),
             other => panic!("expected numeric result, got {other:?}"),
@@ -909,7 +916,7 @@ pub(crate) mod tests {
         let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
         let client = make_client(stream, 1.0, "big-endian");
         let tensor = Tensor::new(vec![1.5, 2.5, 3.5], vec![1, 3]).unwrap();
-        let result = write_builtin(
+        let result = run_write(
             client.clone(),
             Value::Tensor(tensor),
             vec![Value::from("double")],
@@ -944,7 +951,7 @@ pub(crate) mod tests {
         let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
         let client = make_client(stream, 1.0, "little-endian");
         let chars = CharArray::new("RunMat".chars().collect(), 1, 6).unwrap();
-        let result = write_builtin(
+        let result = run_write(
             client.clone(),
             Value::CharArray(chars),
             vec![Value::from("char")],
@@ -983,7 +990,7 @@ pub(crate) mod tests {
 
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
         let err =
-            write_builtin(client.clone(), Value::Tensor(tensor), Vec::new()).expect_err("write");
+            run_write(client.clone(), Value::Tensor(tensor), Vec::new()).expect_err("write");
         assert_error_identifier(err, MESSAGE_ID_NOT_CONNECTED);
 
         remove_client_for_test(id);

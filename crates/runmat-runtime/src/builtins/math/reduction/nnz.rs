@@ -249,10 +249,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::nnz"
 )]
-fn nnz_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn nnz_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let dim = parse_dimension_arg(&rest)?;
     match value {
-        Value::GpuTensor(handle) => nnz_gpu(handle, dim),
+        Value::GpuTensor(handle) => nnz_gpu(handle, dim).await,
         other => nnz_host_value(other, dim),
     }
 }
@@ -268,7 +268,7 @@ fn parse_dimension_arg(args: &[Value]) -> BuiltinResult<Option<usize>> {
     }
 }
 
-fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<Value> {
+async fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider();
     match dim {
         None => {
@@ -282,7 +282,7 @@ fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<Value> 
                     return Ok(Value::Num(count));
                 }
             }
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             nnz_host_value(Value::Tensor(tensor), None)
         }
         Some(dim) => {
@@ -300,7 +300,7 @@ fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<Value> 
                     }
                 }
             }
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             nnz_host_value(Value::Tensor(tensor), Some(dim))
         }
     }
@@ -711,7 +711,7 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = nnz_gpu(handle, None).expect("nnz");
+            let result = futures::executor::block_on(nnz_gpu(handle, None)).expect("nnz");
             assert_eq!(result, Value::Num(3.0));
         });
     }

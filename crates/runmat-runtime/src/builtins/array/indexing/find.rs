@@ -226,25 +226,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::array::indexing::find"
 )]
-fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(value, &rest)?;
+async fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(value, &rest).await?;
     eval.linear_value()
 }
 
 /// Evaluate `find` and return an object that can materialise the various outputs.
-pub fn evaluate(value: Value, args: &[Value]) -> crate::BuiltinResult<FindEval> {
-    let options = parse_options(args)?;
+pub async fn evaluate(value: Value, args: &[Value]) -> crate::BuiltinResult<FindEval> {
+    let options = parse_options(args).await?;
     match value {
         Value::GpuTensor(handle) => {
             if let Some(result) = try_provider_find(&handle, &options) {
                 return Ok(FindEval::from_gpu(result));
             }
-            let (storage, _) = materialize_input(Value::GpuTensor(handle))?;
+            let (storage, _) = materialize_input(Value::GpuTensor(handle)).await?;
             let result = compute_find(&storage, &options);
             Ok(FindEval::from_host(result, true))
         }
         other => {
-            let (storage, input_was_gpu) = materialize_input(other)?;
+            let (storage, input_was_gpu) = materialize_input(other).await?;
             let result = compute_find(&storage, &options);
             Ok(FindEval::from_host(result, input_was_gpu))
         }
@@ -399,7 +399,7 @@ impl FindEval {
     }
 }
 
-fn parse_options(args: &[Value]) -> crate::BuiltinResult<FindOptions> {
+async fn parse_options(args: &[Value]) -> crate::BuiltinResult<FindOptions> {
     match args.len() {
         0 => Ok(FindOptions::default()),
         1 => {
@@ -413,7 +413,7 @@ fn parse_options(args: &[Value]) -> crate::BuiltinResult<FindOptions> {
                 let direction = direction_opt.unwrap_or(FindDirection::First);
                 Ok(FindOptions { limit, direction })
             } else {
-                let limit = parse_limit(&args[0])?;
+                let limit = parse_limit(&args[0]).await?;
                 Ok(FindOptions {
                     limit: Some(limit),
                     direction: FindDirection::First,
@@ -421,7 +421,7 @@ fn parse_options(args: &[Value]) -> crate::BuiltinResult<FindOptions> {
             }
         }
         2 => {
-            let limit = parse_limit(&args[0])?;
+            let limit = parse_limit(&args[0]).await?;
             let direction = parse_direction(&args[1])?
                 .ok_or_else(|| find_error("find: third argument must be 'first' or 'last'"))?;
             Ok(FindOptions {
@@ -455,10 +455,10 @@ fn is_direction_like(value: &Value) -> bool {
     }
 }
 
-fn parse_limit(value: &Value) -> crate::BuiltinResult<usize> {
+async fn parse_limit(value: &Value) -> crate::BuiltinResult<usize> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(handle).await?;
             parse_limit_tensor(&tensor)
         }
         _ => {
@@ -489,10 +489,10 @@ fn parse_limit_scalar(value: f64) -> crate::BuiltinResult<usize> {
     Ok(rounded as usize)
 }
 
-fn materialize_input(value: Value) -> crate::BuiltinResult<(DataStorage, bool)> {
+async fn materialize_input(value: Value) -> crate::BuiltinResult<(DataStorage, bool)> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             Ok((DataStorage::Real(tensor), true))
         }
         Value::Tensor(tensor) => Ok((DataStorage::Real(tensor), false)),
@@ -701,7 +701,16 @@ fn find_error(message: impl Into<String>) -> RuntimeError {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{CharArray, IntValue};
+
+    fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::find_builtin(value, rest))
+    }
+
+    fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<FindEval> {
+        block_on(super::evaluate(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

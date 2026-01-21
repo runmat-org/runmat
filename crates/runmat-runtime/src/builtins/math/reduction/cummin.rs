@@ -229,15 +229,15 @@ impl CumminEvaluation {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::cummin"
 )]
-fn cummin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    evaluate(value, &rest).map(|eval| eval.into_value())
+async fn cummin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    evaluate(value, &rest).await.map(|eval| eval.into_value())
 }
 
 /// Evaluate the builtin once and expose both outputs (value + indices).
-pub fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CumminEvaluation> {
+pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CumminEvaluation> {
     let (dim, direction, nan_mode) = parse_arguments(rest)?;
     match value {
-        Value::GpuTensor(handle) => cummin_gpu(handle, dim, direction, nan_mode),
+        Value::GpuTensor(handle) => cummin_gpu(handle, dim, direction, nan_mode).await,
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| cummin_error(format!("cummin: {e}")))?;
@@ -366,7 +366,7 @@ fn cummin_host(
     })
 }
 
-fn cummin_gpu(
+async fn cummin_gpu(
     handle: GpuTensorHandle,
     dim: Option<usize>,
     direction: CumminDirection,
@@ -424,7 +424,7 @@ fn cummin_gpu(
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let (values, indices) = cummin_tensor(&tensor, target_dim, direction, nan_mode)?;
     Ok(CumminEvaluation {
         values: tensor::tensor_into_value(values),
@@ -826,7 +826,12 @@ fn dim_product(dims: &[usize]) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::IntValue;
+
+    fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CumminEvaluation> {
+        block_on(super::evaluate(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

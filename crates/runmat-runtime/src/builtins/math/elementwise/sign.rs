@@ -248,9 +248,9 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::sign"
 )]
-fn sign_builtin(value: Value) -> BuiltinResult<Value> {
+async fn sign_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => sign_gpu(handle),
+        Value::GpuTensor(handle) => sign_gpu(handle).await,
         Value::Complex(re, im) => {
             let (re_out, im_out) = sign_complex(re, im);
             Ok(Value::Complex(re_out, im_out))
@@ -264,13 +264,14 @@ fn sign_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn sign_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn sign_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_sign(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     Ok(tensor::tensor_into_value(sign_tensor(tensor)?))
 }
@@ -357,7 +358,12 @@ fn sign_complex(re: f64, im: f64) -> (f64, f64) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray};
+
+    fn sign_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::sign_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

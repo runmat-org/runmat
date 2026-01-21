@@ -1,5 +1,6 @@
 //! MATLAB-compatible `times` builtin with GPU-aware semantics for RunMat.
 
+use async_recursion::async_recursion;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -285,15 +286,15 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     accel = "elementwise",
     builtin_path = "crate::builtins::math::elementwise::times"
 )]
-fn times_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn times_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
     let base = match (lhs, rhs) {
-        (Value::GpuTensor(la), Value::GpuTensor(lb)) => times_gpu_pair(la, lb),
-        (Value::GpuTensor(la), rhs) => times_gpu_host_left(la, rhs),
-        (lhs, Value::GpuTensor(rb)) => times_gpu_host_right(lhs, rb),
-        (lhs, rhs) => times_host(lhs, rhs),
+        (Value::GpuTensor(la), Value::GpuTensor(lb)) => times_gpu_pair(la, lb).await,
+        (Value::GpuTensor(la), rhs) => times_gpu_host_left(la, rhs).await,
+        (lhs, Value::GpuTensor(rb)) => times_gpu_host_right(lhs, rb).await,
+        (lhs, rhs) => Ok(times_host(lhs, rhs)?),
     }?;
-    apply_output_template(base, &template)
+    apply_output_template(base, &template).await
 }
 
 #[derive(Clone)]
@@ -325,10 +326,10 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     Err(builtin_error("times: too many input arguments"))
 }
 
-fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
+async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
     match template {
         OutputTemplate::Default => Ok(value),
-        OutputTemplate::Like(proto) => apply_like_template(value, proto),
+        OutputTemplate::Like(proto) => apply_like_template(value, proto).await,
     }
 }
 
@@ -349,31 +350,32 @@ struct LikeAnalysis {
     class: PrototypeClass,
 }
 
-fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
-    let analysed = analyse_like_prototype(prototype)?;
+async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
+    let analysed = analyse_like_prototype(prototype).await?;
     match analysed.class {
         PrototypeClass::Real => match analysed.device {
-            DevicePreference::Host => ensure_device(value, DevicePreference::Host),
-            DevicePreference::Gpu => ensure_device(value, DevicePreference::Gpu),
+            DevicePreference::Host => ensure_device(value, DevicePreference::Host).await,
+            DevicePreference::Gpu => ensure_device(value, DevicePreference::Gpu).await,
         },
         PrototypeClass::Complex => {
-            let host_value = ensure_device(value, DevicePreference::Host)?;
-            real_to_complex(host_value)
+            let host_value = ensure_device(value, DevicePreference::Host).await?;
+            real_to_complex(host_value).await
         }
     }
 }
 
-fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value> {
+async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value> {
     match device {
-        DevicePreference::Host => convert_to_host_like(value),
+        DevicePreference::Host => convert_to_host_like(value).await,
         DevicePreference::Gpu => convert_to_gpu(value),
     }
 }
 
-fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
+async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     if let Value::GpuTensor(handle) = value {
         let temp = Value::GpuTensor(handle);
-        gpu_helpers::gather_value(&temp)
+        gpu_helpers::gather_value_async(&temp)
+            .await
             .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))
     } else {
         Ok(value)
@@ -432,7 +434,8 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
+#[async_recursion(?Send)]
+async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
     match proto {
         Value::GpuTensor(_) => Ok(LikeAnalysis {
             device: DevicePreference::Gpu,
@@ -452,15 +455,16 @@ fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
             class: PrototypeClass::Complex,
         }),
         other => {
-            let gathered = gather_like_prototype(other)?;
-            analyse_like_prototype(&gathered)
+            let gathered = gather_like_prototype(other).await?;
+            analyse_like_prototype(&gathered).await
         }
     }
 }
 
-fn gather_like_prototype(value: &Value) -> BuiltinResult<Value> {
+async fn gather_like_prototype(value: &Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(_) => gpu_helpers::gather_value(value)
+        Value::GpuTensor(_) => gpu_helpers::gather_value_async(value)
+            .await
             .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME)),
         Value::Tensor(_)
         | Value::Num(_)
@@ -476,7 +480,8 @@ fn gather_like_prototype(value: &Value) -> BuiltinResult<Value> {
     }
 }
 
-fn real_to_complex(value: Value) -> BuiltinResult<Value> {
+#[async_recursion(?Send)]
+async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
@@ -489,16 +494,17 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
                 .map_err(|e| builtin_error(format!("times: {e}")))?;
-            real_to_complex(Value::Tensor(tensor))
+            real_to_complex(Value::Tensor(tensor)).await
         }
         Value::CharArray(chars) => {
             let tensor = char_array_to_tensor(&chars)?;
-            real_to_complex(Value::Tensor(tensor))
+            real_to_complex(Value::Tensor(tensor)).await
         }
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_value(&Value::GpuTensor(handle.clone()))
+            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
+                .await
                 .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-            real_to_complex(gathered)
+            real_to_complex(gathered).await
         }
         other => Err(builtin_error(format!(
             "times: cannot convert value {other:?} to complex output"
@@ -506,7 +512,7 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn times_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn times_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if lhs.shape == rhs.shape {
             if let Ok(handle) = provider.elem_mul(&lhs, &rhs) {
@@ -549,23 +555,25 @@ fn times_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinResult<V
             }
         }
         if is_scalar_shape(&lhs.shape) {
-            if let Some(scalar) = gpu_scalar_value(&lhs)? {
+            if let Some(scalar) = gpu_scalar_value(&lhs).await? {
                 if let Ok(handle) = provider.scalar_mul(&rhs, scalar) {
                     return Ok(Value::GpuTensor(handle));
                 }
             }
         }
         if is_scalar_shape(&rhs.shape) {
-            if let Some(scalar) = gpu_scalar_value(&rhs)? {
+            if let Some(scalar) = gpu_scalar_value(&rhs).await? {
                 if let Ok(handle) = provider.scalar_mul(&lhs, scalar) {
                     return Ok(Value::GpuTensor(handle));
                 }
             }
         }
     }
-    let left = gpu_helpers::gather_tensor(&lhs)
+    let left = gpu_helpers::gather_tensor_async(&lhs)
+        .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    let right = gpu_helpers::gather_tensor(&rhs)
+    let right = gpu_helpers::gather_tensor_async(&rhs)
+        .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     times_host(Value::Tensor(left), Value::Tensor(right))
 }
@@ -600,7 +608,7 @@ fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, V
     Some((out, reps_a, reps_b))
 }
 
-fn times_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<Value> {
+async fn times_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&rhs)? {
             if let Ok(handle) = provider.scalar_mul(&lhs, scalar) {
@@ -608,12 +616,13 @@ fn times_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<Value>
             }
         }
     }
-    let host_lhs = gpu_helpers::gather_tensor(&lhs)
+    let host_lhs = gpu_helpers::gather_tensor_async(&lhs)
+        .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     times_host(Value::Tensor(host_lhs), rhs)
 }
 
-fn times_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn times_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&lhs)? {
             if let Ok(handle) = provider.scalar_mul(&rhs, scalar) {
@@ -621,7 +630,8 @@ fn times_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult<Value
             }
         }
     }
-    let host_rhs = gpu_helpers::gather_tensor(&rhs)
+    let host_rhs = gpu_helpers::gather_tensor_async(&rhs)
+        .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     times_host(lhs, Value::Tensor(host_rhs))
 }
@@ -799,11 +809,11 @@ fn is_scalar_shape(shape: &[usize]) -> bool {
     shape.iter().copied().product::<usize>() <= 1
 }
 
-fn gpu_scalar_value(handle: &GpuTensorHandle) -> BuiltinResult<Option<f64>> {
+async fn gpu_scalar_value(handle: &GpuTensorHandle) -> BuiltinResult<Option<f64>> {
     if !is_scalar_shape(&handle.shape) {
         return Ok(None);
     }
-    let tensor = gpu_helpers::gather_tensor(handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(handle).await?;
     Ok(tensor.data.first().copied())
 }
 
@@ -811,10 +821,15 @@ fn gpu_scalar_value(handle: &GpuTensorHandle) -> BuiltinResult<Option<f64>> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor};
 
     const EPS: f64 = 1e-12;
+
+    fn times_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::times_builtin(lhs, rhs, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1144,7 +1159,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view_r)
             .unwrap();
-        let gpu = times_gpu_pair(ha, hb).unwrap();
+        let gpu = block_on(times_gpu_pair(ha, hb)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
             Value::Tensor(t) => assert_eq!(gathered.data, t.data),

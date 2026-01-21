@@ -202,7 +202,7 @@ fn isfield_flow(message: impl Into<String>) -> RuntimeError {
     keywords = "isfield,struct,field existence",
     builtin_path = "crate::builtins::structs::core::isfield"
 )]
-fn isfield_builtin(target: Value, names: Value) -> BuiltinResult<Value> {
+async fn isfield_builtin(target: Value, names: Value) -> BuiltinResult<Value> {
     let context = classify_struct(&target)?;
     let parsed = parse_field_names(names)?;
     match context {
@@ -469,17 +469,21 @@ pub(crate) mod tests {
         err.message().to_string()
     }
 
+    fn run_isfield(target: Value, names: Value) -> BuiltinResult<Value> {
+        futures::executor::block_on(isfield_builtin(target, names))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfield_scalar_struct_single_name() {
         let mut st = StructValue::new();
         st.fields.insert("name".to_string(), Value::from("Ada"));
         assert_eq!(
-            isfield_builtin(Value::Struct(st.clone()), Value::from("name")).unwrap(),
+            run_isfield(Value::Struct(st.clone()), Value::from("name")).unwrap(),
             Value::Bool(true)
         );
         assert_eq!(
-            isfield_builtin(Value::Struct(st), Value::from("score")).unwrap(),
+            run_isfield(Value::Struct(st), Value::from("score")).unwrap(),
             Value::Bool(false)
         );
     }
@@ -490,7 +494,7 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.fields.insert("alpha".into(), Value::Num(1.0));
         let chars = CharArray::new("alpha".chars().collect(), 1, 5).unwrap();
-        let result = isfield_builtin(Value::Struct(st), Value::CharArray(chars)).unwrap();
+        let result = run_isfield(Value::Struct(st), Value::CharArray(chars)).unwrap();
         assert_eq!(result, Value::Bool(true));
     }
 
@@ -511,7 +515,7 @@ pub(crate) mod tests {
             2,
         )
         .unwrap();
-        let result = isfield_builtin(Value::Struct(st), Value::Cell(names)).expect("isfield");
+        let result = run_isfield(Value::Struct(st), Value::Cell(names)).expect("isfield");
         let expected = LogicalArray::new(vec![1, 1, 0, 0], vec![2, 2]).expect("logical array");
         assert_eq!(result, Value::LogicalArray(expected));
     }
@@ -533,7 +537,7 @@ pub(crate) mod tests {
             3,
         )
         .unwrap();
-        let result = isfield_builtin(Value::Struct(st), Value::Cell(cell)).unwrap();
+        let result = run_isfield(Value::Struct(st), Value::Cell(cell)).unwrap();
         let expected = LogicalArray::new(vec![1, 1, 0], vec![1, 3]).unwrap();
         assert_eq!(result, Value::LogicalArray(expected));
     }
@@ -557,18 +561,18 @@ pub(crate) mod tests {
         .unwrap();
 
         let res_id =
-            isfield_builtin(Value::Cell(struct_array.clone()), Value::from("id")).expect("isfield");
+            run_isfield(Value::Cell(struct_array.clone()), Value::from("id")).expect("isfield");
         assert_eq!(res_id, Value::Bool(false));
 
         let res_name =
-            isfield_builtin(Value::Cell(struct_array), Value::from("name")).expect("isfield");
+            run_isfield(Value::Cell(struct_array), Value::from("name")).expect("isfield");
         assert_eq!(res_name, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfield_non_struct_returns_false() {
-        let result = isfield_builtin(Value::Num(5.0), Value::from("field")).unwrap();
+        let result = run_isfield(Value::Num(5.0), Value::from("field")).unwrap();
         assert_eq!(result, Value::Bool(false));
     }
 
@@ -579,7 +583,7 @@ pub(crate) mod tests {
         st.fields.insert("alpha".into(), Value::Num(1.0));
         st.fields.insert("beta".into(), Value::Num(2.0));
         let names = StringArray::new(vec!["alpha".into(), "gamma".into()], vec![2, 1]).unwrap();
-        let result = isfield_builtin(Value::Struct(st), Value::StringArray(names)).unwrap();
+        let result = run_isfield(Value::Struct(st), Value::StringArray(names)).unwrap();
         let expected = LogicalArray::new(vec![1, 0], vec![2, 1]).expect("logical array");
         assert_eq!(result, Value::LogicalArray(expected));
     }
@@ -590,7 +594,7 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.fields.insert("alpha".into(), Value::Num(1.0));
         let err =
-            error_message(isfield_builtin(Value::Struct(st), Value::from(5_i32)).unwrap_err());
+            error_message(run_isfield(Value::Struct(st), Value::from(5_i32)).unwrap_err());
         assert!(err.contains("field names must be strings"));
     }
 
@@ -601,7 +605,7 @@ pub(crate) mod tests {
         st.fields.insert("alpha".into(), Value::Num(1.0));
         let matrix = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
         let err = error_message(
-            isfield_builtin(Value::Struct(st), Value::CharArray(matrix)).unwrap_err(),
+            run_isfield(Value::Struct(st), Value::CharArray(matrix)).unwrap_err(),
         );
         assert!(err.contains("field names must be strings"));
     }

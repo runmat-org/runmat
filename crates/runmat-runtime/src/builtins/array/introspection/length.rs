@@ -204,7 +204,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::array::introspection::length"
 )]
-fn length_builtin(value: Value) -> crate::BuiltinResult<Value> {
+async fn length_builtin(value: Value) -> crate::BuiltinResult<Value> {
     if let Some(count) = map_length(&value) {
         return Ok(Value::Num(count as f64));
     }
@@ -221,6 +221,11 @@ fn max_dimension(value: &Value) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+
+    fn length_builtin(value: Value) -> crate::BuiltinResult<Value> {
+        block_on(super::length_builtin(value))
+    }
     use runmat_builtins::{
         CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
     };

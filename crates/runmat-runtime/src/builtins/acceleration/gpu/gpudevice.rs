@@ -227,7 +227,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         builtin_path = "crate::builtins::acceleration::gpu::gpudevice"
     )
 )]
-fn gpu_device_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn gpu_device_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     match args.as_slice() {
         [] => active_device_struct().map(Value::Struct),
         [arg] => handle_single_argument(arg),
@@ -400,12 +400,17 @@ fn num_to_index(raw: f64) -> BuiltinResult<Option<u32>> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+
+    fn call(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(gpu_device_builtin(args))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_device_returns_struct() {
         test_support::with_test_provider(|_| {
-            let value = gpu_device_builtin(Vec::new()).expect("gpuDevice");
+            let value = call(Vec::new()).expect("gpuDevice");
             match value {
                 Value::Struct(s) => {
                     assert!(s.fields.contains_key("device_id"));
@@ -435,7 +440,7 @@ pub(crate) mod tests {
                 Value::LogicalArray(logical_scalar),
             ];
             for case in cases {
-                let value = gpu_device_builtin(vec![case]).expect("gpuDevice");
+                let value = call(vec![case]).expect("gpuDevice");
                 assert!(matches!(value, Value::Struct(_)));
             }
         });
@@ -445,7 +450,7 @@ pub(crate) mod tests {
     #[test]
     fn gpu_device_out_of_range_index_errors() {
         test_support::with_test_provider(|_| {
-            let err = gpu_device_builtin(vec![Value::Num(2.0)])
+            let err = call(vec![Value::Num(2.0)])
                 .unwrap_err()
                 .to_string();
             assert!(
@@ -459,7 +464,7 @@ pub(crate) mod tests {
     #[test]
     fn gpu_device_unsupported_argument_errors() {
         test_support::with_test_provider(|_| {
-            let err = gpu_device_builtin(vec![Value::from("status")])
+            let err = call(vec![Value::from("status")])
                 .unwrap_err()
                 .to_string();
             assert_eq!(err, ERR_UNSUPPORTED_ARGUMENT);
@@ -470,7 +475,7 @@ pub(crate) mod tests {
     #[test]
     fn gpu_device_reset_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
-            let err = gpu_device_builtin(vec![Value::from(" RESET ")])
+            let err = call(vec![Value::from(" RESET ")])
                 .unwrap_err()
                 .to_string();
             assert_eq!(err, ERR_RESET_NOT_SUPPORTED);
@@ -482,7 +487,7 @@ pub(crate) mod tests {
     fn gpu_device_reset_char_array_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
             let chars = runmat_builtins::CharArray::new("reset".chars().collect(), 1, 5).unwrap();
-            let err = gpu_device_builtin(vec![Value::CharArray(chars)])
+            let err = call(vec![Value::CharArray(chars)])
                 .unwrap_err()
                 .to_string();
             assert_eq!(err, ERR_RESET_NOT_SUPPORTED);
@@ -494,7 +499,7 @@ pub(crate) mod tests {
     fn gpu_device_empty_array_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
             let empty = runmat_builtins::Tensor::zeros(vec![0, 0]);
-            let err = gpu_device_builtin(vec![Value::Tensor(empty)])
+            let err = call(vec![Value::Tensor(empty)])
                 .unwrap_err()
                 .to_string();
             assert_eq!(err, ERR_RESET_NOT_SUPPORTED);
@@ -517,7 +522,7 @@ pub(crate) mod tests {
                 Value::Tensor(runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
             ];
             for case in cases {
-                let err = gpu_device_builtin(vec![case]).unwrap_err().to_string();
+                let err = call(vec![case]).unwrap_err().to_string();
                 assert_eq!(err, ERR_INVALID_INDEX);
             }
         });
@@ -531,7 +536,7 @@ pub(crate) mod tests {
 
         let _ =
             wgpu_provider::register_wgpu_provider(wgpu_provider::WgpuProviderOptions::default());
-        let value = gpu_device_builtin(Vec::new()).expect("gpuDevice");
+        let value = call(Vec::new()).expect("gpuDevice");
         match value {
             Value::Struct(info) => {
                 let name = info

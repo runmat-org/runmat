@@ -251,17 +251,17 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::pow2"
 )]
-fn pow2_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn pow2_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     match rest.len() {
-        0 => pow2_unary(first),
-        1 => pow2_binary(first, rest.into_iter().next().unwrap()),
+        0 => pow2_unary(first).await,
+        1 => pow2_binary(first, rest.into_iter().next().unwrap()).await,
         _ => Err(builtin_error("pow2: expected at most two arguments")),
     }
 }
 
-fn pow2_unary(value: Value) -> BuiltinResult<Value> {
+async fn pow2_unary(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => pow2_gpu(handle),
+        Value::GpuTensor(handle) => pow2_gpu(handle).await,
         Value::Complex(re, im) => {
             let (rr, ii) = pow2_complex(re, im);
             Ok(Value::Complex(rr, ii))
@@ -275,16 +275,18 @@ fn pow2_unary(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn pow2_binary(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
+async fn pow2_binary(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
     match (mantissa, exponent) {
-        (Value::GpuTensor(mh), Value::GpuTensor(eh)) => pow2_gpu_scale(mh, eh),
+        (Value::GpuTensor(mh), Value::GpuTensor(eh)) => pow2_gpu_scale(mh, eh).await,
         (Value::GpuTensor(mh), other) => {
-            let gathered = gpu_helpers::gather_tensor(&mh)
+            let gathered = gpu_helpers::gather_tensor_async(&mh)
+                .await
                 .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
             pow2_host_scale(Value::Tensor(gathered), other)
         }
         (other, Value::GpuTensor(eh)) => {
-            let gathered = gpu_helpers::gather_tensor(&eh)
+            let gathered = gpu_helpers::gather_tensor_async(&eh)
+                .await
                 .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
             pow2_host_scale(other, Value::Tensor(gathered))
         }
@@ -292,18 +294,22 @@ fn pow2_binary(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn pow2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn pow2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_pow2(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     Ok(tensor::tensor_into_value(pow2_tensor(tensor)?))
 }
 
-fn pow2_gpu_scale(mantissa: GpuTensorHandle, exponent: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn pow2_gpu_scale(
+    mantissa: GpuTensorHandle,
+    exponent: GpuTensorHandle,
+) -> BuiltinResult<Value> {
     if mantissa.device_id == exponent.device_id {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&mantissa) {
             if mantissa.shape == exponent.shape {
@@ -313,9 +319,11 @@ fn pow2_gpu_scale(mantissa: GpuTensorHandle, exponent: GpuTensorHandle) -> Built
             }
         }
     }
-    let m = gpu_helpers::gather_tensor(&mantissa)
+    let m = gpu_helpers::gather_tensor_async(&mantissa)
+        .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    let e = gpu_helpers::gather_tensor(&exponent)
+    let e = gpu_helpers::gather_tensor_async(&exponent)
+        .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     pow2_host_scale(Value::Tensor(m), Value::Tensor(e))
 }
@@ -485,7 +493,12 @@ impl NumericArray {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor};
+
+    fn pow2_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::pow2_builtin(first, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

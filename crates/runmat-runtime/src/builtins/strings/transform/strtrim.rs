@@ -9,7 +9,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError,
+};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -229,13 +231,13 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::strtrim"
 )]
-fn strtrim_builtin(value: Value) -> BuiltinResult<Value> {
-    let gathered = gather_if_needed(&value).map_err(map_flow)?;
+async fn strtrim_builtin(value: Value) -> BuiltinResult<Value> {
+    let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
     match gathered {
         Value::String(text) => Ok(Value::String(trim_string(text))),
         Value::StringArray(array) => strtrim_string_array(array),
         Value::CharArray(array) => strtrim_char_array(array),
-        Value::Cell(cell) => strtrim_cell_array(cell),
+        Value::Cell(cell) => strtrim_cell_array(cell).await,
         _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
     }
 }
@@ -277,21 +279,21 @@ fn strtrim_char_array(array: CharArray) -> BuiltinResult<Value> {
         .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn strtrim_cell_array(cell: CellArray) -> BuiltinResult<Value> {
+async fn strtrim_cell_array(cell: CellArray) -> BuiltinResult<Value> {
     let CellArray {
         data, rows, cols, ..
     } = cell;
     let mut trimmed_values = Vec::with_capacity(rows * cols);
     for value in &data {
-        let trimmed = strtrim_cell_element(value)?;
+        let trimmed = strtrim_cell_element(value).await?;
         trimmed_values.push(trimmed);
     }
     make_cell(trimmed_values, rows, cols)
         .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn strtrim_cell_element(value: &Value) -> BuiltinResult<Value> {
-    match gather_if_needed(value).map_err(map_flow)? {
+async fn strtrim_cell_element(value: &Value) -> BuiltinResult<Value> {
+    match gather_if_needed_async(value).await.map_err(map_flow)? {
         Value::String(text) => Ok(Value::String(trim_string(text))),
         Value::StringArray(sa) if sa.data.len() == 1 => {
             let text = sa.data.into_iter().next().unwrap();
@@ -332,11 +334,15 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    fn run_strtrim(value: Value) -> BuiltinResult<Value> {
+        futures::executor::block_on(strtrim_builtin(value))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_string_scalar_trims_whitespace() {
         let result =
-            strtrim_builtin(Value::String("  RunMat  ".into())).expect("strtrim string scalar");
+            run_strtrim(Value::String("  RunMat  ".into())).expect("strtrim string scalar");
         assert_eq!(result, Value::String("RunMat".into()));
     }
 
@@ -353,7 +359,7 @@ pub(crate) mod tests {
             vec![2, 2],
         )
         .unwrap();
-        let result = strtrim_builtin(Value::StringArray(array)).expect("strtrim string array");
+        let result = run_strtrim(Value::StringArray(array)).expect("strtrim string array");
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
@@ -376,7 +382,7 @@ pub(crate) mod tests {
     fn strtrim_char_array_multiple_rows() {
         let data: Vec<char> = "  cat  ".chars().chain(" dog   ".chars()).collect();
         let array = CharArray::new(data, 2, 7).unwrap();
-        let result = strtrim_builtin(Value::CharArray(array)).expect("strtrim char array");
+        let result = run_strtrim(Value::CharArray(array)).expect("strtrim char array");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
@@ -391,7 +397,7 @@ pub(crate) mod tests {
     #[test]
     fn strtrim_char_array_all_whitespace_yields_zero_width() {
         let array = CharArray::new("   ".chars().collect(), 1, 3).unwrap();
-        let result = strtrim_builtin(Value::CharArray(array)).expect("strtrim char whitespace");
+        let result = run_strtrim(Value::CharArray(array)).expect("strtrim char whitespace");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
@@ -414,7 +420,7 @@ pub(crate) mod tests {
             2,
         )
         .unwrap();
-        let result = strtrim_builtin(Value::Cell(cell)).expect("strtrim cell array");
+        let result = run_strtrim(Value::Cell(cell)).expect("strtrim cell array");
         match result {
             Value::Cell(out) => {
                 let first = out.get(0, 0).unwrap();
@@ -430,7 +436,7 @@ pub(crate) mod tests {
     #[test]
     fn strtrim_preserves_missing_strings() {
         let result =
-            strtrim_builtin(Value::String("<missing>".into())).expect("strtrim missing string");
+            run_strtrim(Value::String("<missing>".into())).expect("strtrim missing string");
         assert_eq!(result, Value::String("<missing>".into()));
     }
 
@@ -438,7 +444,7 @@ pub(crate) mod tests {
     #[test]
     fn strtrim_handles_tabs_and_newlines() {
         let input = Value::String("\tMetrics \n".into());
-        let result = strtrim_builtin(input).expect("strtrim tab/newline");
+        let result = run_strtrim(input).expect("strtrim tab/newline");
         assert_eq!(result, Value::String("Metrics".into()));
     }
 
@@ -446,7 +452,7 @@ pub(crate) mod tests {
     #[test]
     fn strtrim_trims_unicode_whitespace() {
         let input = Value::String("\u{00A0}RunMat\u{2003}".into());
-        let result = strtrim_builtin(input).expect("strtrim unicode whitespace");
+        let result = run_strtrim(input).expect("strtrim unicode whitespace");
         assert_eq!(result, Value::String("RunMat".into()));
     }
 
@@ -454,7 +460,8 @@ pub(crate) mod tests {
     #[test]
     fn strtrim_char_array_zero_rows_stable() {
         let array = CharArray::new(Vec::new(), 0, 0).unwrap();
-        let result = strtrim_builtin(Value::CharArray(array.clone())).expect("strtrim 0x0 char");
+        let result =
+            run_strtrim(Value::CharArray(array.clone())).expect("strtrim 0x0 char");
         assert_eq!(result, Value::CharArray(array));
     }
 
@@ -463,7 +470,7 @@ pub(crate) mod tests {
     fn strtrim_cell_array_accepts_string_scalar() {
         let scalar = StringArray::new(vec![" padded ".into()], vec![1, 1]).unwrap();
         let cell = CellArray::new(vec![Value::StringArray(scalar)], 1, 1).unwrap();
-        let trimmed = strtrim_builtin(Value::Cell(cell)).expect("strtrim cell string scalar");
+        let trimmed = run_strtrim(Value::Cell(cell)).expect("strtrim cell string scalar");
         match trimmed {
             Value::Cell(out) => {
                 let value = out.get(0, 0).expect("cell element");
@@ -477,14 +484,14 @@ pub(crate) mod tests {
     #[test]
     fn strtrim_cell_array_rejects_non_text() {
         let cell = CellArray::new(vec![Value::Num(5.0)], 1, 1).unwrap();
-        let err = strtrim_builtin(Value::Cell(cell)).expect_err("strtrim cell non-text");
+        let err = run_strtrim(Value::Cell(cell)).expect_err("strtrim cell non-text");
         assert!(err.to_string().contains("cell array elements"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_errors_on_invalid_input() {
-        let err = strtrim_builtin(Value::Num(1.0)).unwrap_err();
+        let err = run_strtrim(Value::Num(1.0)).unwrap_err();
         assert!(err.to_string().contains("strtrim"));
     }
 

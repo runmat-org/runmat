@@ -265,10 +265,10 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::factorial"
 )]
-fn factorial_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn factorial_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let output = parse_output_template(&rest)?;
     let base = match value {
-        Value::GpuTensor(handle) => factorial_gpu(handle)?,
+        Value::GpuTensor(handle) => factorial_gpu(handle).await?,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             return Err(builtin_error(
                 "factorial: complex inputs are not supported; use gamma(z + 1) instead",
@@ -285,7 +285,7 @@ fn factorial_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             factorial_tensor(tensor).map(tensor::tensor_into_value)?
         }
     };
-    apply_output_template(base, &output)
+    apply_output_template(base, &output).await
 }
 
 #[derive(Clone)]
@@ -319,13 +319,14 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     }
 }
 
-fn factorial_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn factorial_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_factorial(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     Ok(tensor::tensor_into_value(factorial_tensor(tensor)?))
 }
@@ -382,13 +383,13 @@ fn classify_nonnegative_integer(value: f64) -> Option<usize> {
     Some(rounded as usize)
 }
 
-fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
+async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
     match template {
         OutputTemplate::Default => Ok(value),
         OutputTemplate::Like(proto) => {
-            let analysis = analyse_like_prototype(proto)?;
+            let analysis = analyse_like_prototype(proto).await?;
             match analysis.device {
-                DevicePreference::Host => convert_to_host_like(value),
+                DevicePreference::Host => convert_to_host_like(value).await,
                 DevicePreference::Gpu => convert_to_gpu_like(value),
             }
         }
@@ -405,7 +406,8 @@ struct LikeAnalysis {
     device: DevicePreference,
 }
 
-fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
+#[async_recursion::async_recursion(?Send)]
+async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
     match proto {
         Value::GpuTensor(_) => Ok(LikeAnalysis {
             device: DevicePreference::Gpu,
@@ -423,17 +425,21 @@ fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
             "factorial: prototype must be numeric or a gpuArray",
         )),
         other => {
-            let gathered = gpu_helpers::gather_value(other)
+            let gathered = gpu_helpers::gather_value_async(other)
+                .await
                 .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-            analyse_like_prototype(&gathered)
+            analyse_like_prototype(&gathered).await
         }
     }
 }
 
-fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
+async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => gpu_helpers::gather_value(&Value::GpuTensor(handle))
-            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME)),
+        Value::GpuTensor(handle) => {
+            gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+                .await
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))
+        }
         other => Ok(other),
     }
 }
@@ -483,7 +489,12 @@ fn upload_tensor(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
+
+    fn factorial_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::factorial_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

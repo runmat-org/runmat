@@ -208,7 +208,7 @@ fn numel_error(message: impl Into<String>) -> RuntimeError {
     accel = "metadata",
     builtin_path = "crate::builtins::array::introspection::numel"
 )]
-fn numel_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn numel_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
         return Ok(Value::Num(value_numel(&value) as f64));
     }
@@ -294,6 +294,11 @@ fn dimension_extent(dimensions: &[usize], dim: usize) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+
+    fn numel_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::numel_builtin(value, rest))
+    }
     use runmat_builtins::{CellArray, CharArray, Tensor};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

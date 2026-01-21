@@ -226,9 +226,9 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::real"
 )]
-fn real_builtin(value: Value) -> BuiltinResult<Value> {
+async fn real_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => real_gpu(handle),
+        Value::GpuTensor(handle) => real_gpu(handle).await,
         Value::Complex(re, _) => Ok(Value::Num(re)),
         Value::ComplexTensor(ct) => real_complex_tensor(ct),
         Value::CharArray(ca) => real_char_array(ca),
@@ -247,13 +247,14 @@ fn real_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn real_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn real_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_real(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     Ok(tensor::tensor_into_value(real_tensor(tensor)?))
 }
@@ -290,7 +291,12 @@ fn real_char_array(ca: CharArray) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray};
+
+    fn real_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::real_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

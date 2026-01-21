@@ -220,10 +220,10 @@ fn ifft_error(message: impl Into<String>) -> RuntimeError {
     keywords = "ifft,inverse fft,inverse fourier transform,symmetric,gpu",
     builtin_path = "crate::builtins::math::fft::ifft"
 )]
-fn ifft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn ifft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (length, dimension, symmetric) = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => ifft_gpu(handle, length, dimension, symmetric),
+        Value::GpuTensor(handle) => ifft_gpu(handle, length, dimension, symmetric).await,
         other => ifft_host(other, length, dimension, symmetric),
     }
 }
@@ -239,7 +239,7 @@ fn ifft_host(
     finalize_ifft_output(transformed, symmetric)
 }
 
-fn ifft_gpu(
+async fn ifft_gpu(
     handle: GpuTensorHandle,
     length: Option<usize>,
     dimension: Option<usize>,
@@ -288,7 +288,7 @@ fn ifft_gpu(
         return finalize_ifft_output(transformed, symmetric);
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let Tensor { data, shape, .. } = tensor;
     let host = HostTensorOwned { data, shape };
     let complex = host_to_complex_tensor(host, BUILTIN_NAME)?;
@@ -513,6 +513,7 @@ fn parse_symflag(value: &Value) -> BuiltinResult<Option<bool>> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use num_complex::Complex;
     use runmat_builtins::{ComplexTensor as HostComplexTensor, IntValue};
 
@@ -800,5 +801,9 @@ pub(crate) mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    fn ifft_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::ifft_builtin(value, rest))
     }
 }

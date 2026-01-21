@@ -11,7 +11,8 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{
-    build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeError,
+    build_runtime_error, call_builtin_async, gather_if_needed_async, make_cell_with_shape,
+    BuiltinResult, RuntimeError,
 };
 
 #[cfg_attr(
@@ -274,7 +275,7 @@ fn cellfun_error_with_identifier(message: impl Into<String>, identifier: &str) -
     accel = "host",
     builtin_path = "crate::builtins::cells::core::cellfun"
 )]
-fn cellfun_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn cellfun_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let callable = Callable::from_function(func)?;
     let mut args = rest;
 
@@ -359,6 +360,7 @@ fn cellfun_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value>
             error_handler,
             &reference_shape,
         )
+        .await
     } else {
         execute_cell(
             &callable,
@@ -367,10 +369,11 @@ fn cellfun_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value>
             error_handler,
             &reference_shape,
         )
+        .await
     }
 }
 
-fn execute_uniform(
+async fn execute_uniform(
     callable: &Callable,
     cell_inputs: &[CellArray],
     extra_args: &[Value],
@@ -384,7 +387,7 @@ fn execute_uniform(
         )
     })?;
 
-    let host_extra_args = prepare_extra_args(extra_args)?;
+    let host_extra_args = prepare_extra_args(extra_args).await?;
     let mut collector = UniformCollector::Pending;
     let mut cell_values: Vec<Value> = Vec::with_capacity(cell_inputs.len());
     let mut call_args: Vec<Value> = Vec::with_capacity(cell_inputs.len() + host_extra_args.len());
@@ -393,14 +396,14 @@ fn execute_uniform(
         cell_values.clear();
         for cell in cell_inputs {
             let raw = deref_cell_value(cell, linear_idx);
-            let host_value = gather_if_needed(&raw)?;
+            let host_value = gather_if_needed_async(&raw).await?;
             cell_values.push(host_value);
         }
         call_args.clear();
         call_args.extend(cell_values.iter().cloned());
         call_args.extend(host_extra_args.iter().cloned());
 
-        let result = match callable.call(&call_args) {
+        let result = match callable.call(&call_args).await {
             Ok(value) => value,
             Err(err) => {
                 let Some(handler) = error_handler.as_ref() else {
@@ -412,18 +415,18 @@ fn execute_uniform(
                 handler_args.push(err_value);
                 handler_args.extend(cell_values.clone());
                 handler_args.extend(host_extra_args.iter().cloned());
-                handler.call(&handler_args)?
+                handler.call(&handler_args).await?
             }
         };
 
-        let host_value = gather_if_needed(&result)?;
+        let host_value = gather_if_needed_async(&result).await?;
         collector.push(&host_value)?;
     }
 
     collector.finish(shape)
 }
 
-fn execute_cell(
+async fn execute_cell(
     callable: &Callable,
     cell_inputs: &[CellArray],
     extra_args: &[Value],
@@ -436,7 +439,7 @@ fn execute_cell(
             IDENT_INVALID_INPUT,
         )
     })?;
-    let host_extra_args = prepare_extra_args(extra_args)?;
+    let host_extra_args = prepare_extra_args(extra_args).await?;
     let mut outputs: Vec<Value> = Vec::with_capacity(element_count);
     let mut cell_values: Vec<Value> = Vec::with_capacity(cell_inputs.len());
     let mut call_args: Vec<Value> = Vec::with_capacity(cell_inputs.len() + host_extra_args.len());
@@ -445,14 +448,14 @@ fn execute_cell(
         cell_values.clear();
         for cell in cell_inputs {
             let raw = deref_cell_value(cell, linear_idx);
-            let host_value = gather_if_needed(&raw)?;
+            let host_value = gather_if_needed_async(&raw).await?;
             cell_values.push(host_value);
         }
         call_args.clear();
         call_args.extend(cell_values.iter().cloned());
         call_args.extend(host_extra_args.iter().cloned());
 
-        let result = match callable.call(&call_args) {
+        let result = match callable.call(&call_args).await {
             Ok(value) => value,
             Err(err) => {
                 let Some(handler) = error_handler.as_ref() else {
@@ -464,11 +467,11 @@ fn execute_cell(
                 handler_args.push(err_value);
                 handler_args.extend(cell_values.clone());
                 handler_args.extend(host_extra_args.iter().cloned());
-                handler.call(&handler_args)?
+                handler.call(&handler_args).await?
             }
         };
 
-        let host_value = gather_if_needed(&result)?;
+        let host_value = gather_if_needed_async(&result).await?;
         outputs.push(host_value);
     }
 
@@ -502,10 +505,10 @@ fn extract_string(value: &Value) -> Option<String> {
     }
 }
 
-fn prepare_extra_args(extra_args: &[Value]) -> BuiltinResult<Vec<Value>> {
+async fn prepare_extra_args(extra_args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut host_args = Vec::with_capacity(extra_args.len());
     for arg in extra_args {
-        host_args.push(gather_if_needed(arg)?);
+        host_args.push(gather_if_needed_async(arg).await?);
     }
     Ok(host_args)
 }
@@ -695,15 +698,15 @@ impl Callable {
         }
     }
 
-    fn call(&self, args: &[Value]) -> BuiltinResult<Value> {
+    async fn call(&self, args: &[Value]) -> BuiltinResult<Value> {
         match self {
-            Callable::Builtin { name } => crate::call_builtin(name, args),
+            Callable::Builtin { name } => call_builtin_async(name, args).await,
             Callable::Closure(c) => {
                 let mut captures = c.captures.clone();
                 captures.extend_from_slice(args);
-                crate::call_builtin(&c.function_name, &captures)
+                call_builtin_async(&c.function_name, &captures).await
             }
-            Callable::Special(special) => special.call(args),
+            Callable::Special(special) => special.call(args).await,
         }
     }
 }
@@ -715,7 +718,7 @@ enum SpecialCallable {
 }
 
 impl SpecialCallable {
-    fn call(&self, args: &[Value]) -> BuiltinResult<Value> {
+    async fn call(&self, args: &[Value]) -> BuiltinResult<Value> {
         match self {
             SpecialCallable::ProdOfSize => {
                 let value = args.first().ok_or_else(|| {
@@ -740,7 +743,7 @@ impl SpecialCallable {
                         IDENT_INVALID_INPUT,
                     )
                 })?;
-                let class_value = crate::call_builtin("class", &[left])?;
+                let class_value = call_builtin_async("class", &[left]).await?;
                 let class_str = extract_string(&class_value).ok_or_else(|| {
                     cellfun_error_with_identifier(
                         "cellfun: failed to evaluate class name",
@@ -893,9 +896,14 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, StringArray};
     use std::convert::TryInto;
+
+    fn cellfun_builtin(func: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::cellfun_builtin(func, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

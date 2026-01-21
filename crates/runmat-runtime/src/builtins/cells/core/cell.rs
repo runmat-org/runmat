@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{
-    build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeError,
+    build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
 
 #[cfg_attr(
@@ -275,8 +275,8 @@ fn cell_error_with_identifier(message: impl Into<String>, identifier: &str) -> R
     sink = true,
     builtin_path = "crate::builtins::cells::core::cell"
 )]
-fn cell_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let parsed = ParsedCell::parse(args)?;
+async fn cell_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let parsed = ParsedCell::parse(args).await?;
     build_cell(parsed)
 }
 
@@ -286,7 +286,7 @@ struct ParsedCell {
 }
 
 impl ParsedCell {
-    fn parse(args: Vec<Value>) -> BuiltinResult<Self> {
+    async fn parse(args: Vec<Value>) -> BuiltinResult<Self> {
         let mut dims: Vec<Value> = Vec::new();
         let mut prototype: Option<Value> = None;
         let mut idx = 0;
@@ -325,7 +325,7 @@ impl ParsedCell {
             idx += 1;
         }
 
-        let shape = parse_shape_arguments(&dims, prototype.as_ref())?;
+        let shape = parse_shape_arguments(&dims, prototype.as_ref()).await?;
         Ok(Self { shape, prototype })
     }
 }
@@ -365,7 +365,10 @@ fn ensure_min_rank(dims: Vec<usize>) -> Vec<usize> {
     }
 }
 
-fn parse_shape_arguments(args: &[Value], prototype: Option<&Value>) -> BuiltinResult<Vec<usize>> {
+async fn parse_shape_arguments(
+    args: &[Value],
+    prototype: Option<&Value>,
+) -> BuiltinResult<Vec<usize>> {
     if args.is_empty() {
         if let Some(proto) = prototype {
             return shape_from_value(proto, "cell")
@@ -375,13 +378,13 @@ fn parse_shape_arguments(args: &[Value], prototype: Option<&Value>) -> BuiltinRe
     }
 
     if args.len() == 1 {
-        let host = gather_if_needed(&args[0])?;
+        let host = gather_if_needed_async(&args[0]).await?;
         return parse_single_argument(&host);
     }
 
     let mut dims = Vec::with_capacity(args.len());
     for value in args {
-        let host = gather_if_needed(value)?;
+        let host = gather_if_needed_async(value).await?;
         dims.push(parse_size_scalar(&host, "cell")?);
     }
     Ok(dims)
@@ -597,6 +600,11 @@ pub(crate) mod tests {
     use super::*;
 
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+
+    fn cell_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::cell_builtin(args))
+    }
 
     fn expect_cell_with<F>(value: Value, expected_shape: &[usize], mut check: F)
     where

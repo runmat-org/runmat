@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const FN_NAME: &str = "strncmp";
 
@@ -201,10 +201,10 @@ fn remap_strncmp_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     builtin_path = "crate::builtins::strings::core::strncmp"
 )]
-fn strncmp_builtin(a: Value, b: Value, n: Value) -> crate::BuiltinResult<Value> {
-    let a = gather_if_needed(&a).map_err(remap_strncmp_flow)?;
-    let b = gather_if_needed(&b).map_err(remap_strncmp_flow)?;
-    let n = gather_if_needed(&n).map_err(remap_strncmp_flow)?;
+async fn strncmp_builtin(a: Value, b: Value, n: Value) -> crate::BuiltinResult<Value> {
+    let a = gather_if_needed_async(&a).await.map_err(remap_strncmp_flow)?;
+    let b = gather_if_needed_async(&b).await.map_err(remap_strncmp_flow)?;
+    let n = gather_if_needed_async(&n).await.map_err(remap_strncmp_flow)?;
 
     let limit = parse_prefix_length(n)?;
     let left = TextCollection::from_argument(FN_NAME, a, "first argument")?;
@@ -341,6 +341,10 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::{CellArray, CharArray, IntValue, LogicalArray, StringArray, Tensor};
+
+    fn strncmp_builtin(a: Value, b: Value, n: Value) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::strncmp_builtin(a, b, n))
+    }
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
