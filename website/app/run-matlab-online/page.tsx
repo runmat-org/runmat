@@ -268,7 +268,7 @@ export default function MatlabOnlinePage() {
             <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/15 via-[#0E1421] to-[#0A0F1C] p-8 shadow-lg">
               <div className="text-center space-y-2">
                 <h3 className="text-xl md:text-2xl font-semibold text-foreground">
-                  How RunMat addresses these challenges
+                  Key differences from MATLAB Online
                 </h3>
               </div>
               <div className="mt-8 grid gap-6 md:grid-cols-2">
