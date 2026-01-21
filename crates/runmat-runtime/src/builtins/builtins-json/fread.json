@@ -131,7 +131,7 @@
     "label": "`crates/runmat-runtime/src/builtins/io/filetext/fread.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fread.rs"
   },
-  "gpu_residency": "```matlab\nfid = fopen('samples.bin', 'w+b');\nfwrite(fid, [2.5 4.5 6.5 8.5], 'double');\nfrewind(fid);\n\nprototype = gpuArray.zeros(4, 1);\n[values, count] = fread(fid, 4, 'double', 'like', prototype);\n% When a GPU provider is active, values stays on the GPU and count == 4.\n\nfclose(fid);\ndelete('samples.bin');\n```\n`values` stays on the GPU when an acceleration provider is active. Without a provider the function still returns correct data on the host.",
+  "gpu_residency": "```matlab:runnable\nfid = fopen('samples.bin', 'w+b');\nfwrite(fid, [2.5 4.5 6.5 8.5], 'double');\nfrewind(fid);\n\nprototype = gpuArray.zeros(4, 1);\n[values, count] = fread(fid, 4, 'double', 'like', prototype);\n% When a GPU provider is active, values stays on the GPU and count == 4.\n\nfclose(fid);\ndelete('samples.bin');\n```\n`values` stays on the GPU when an acceleration provider is active. Without a provider the function still returns correct data on the host.",
   "gpu_behavior": [
     "`fread` is a host-only operation. When the file identifier or optional arguments (size vectors, precision strings, skip counts) live on the GPU, RunMat gathers them to the host first. File handles are managed by the shared registry established by `fopen`, and GPU providers never participate in file I/O. When a `'like'` prototype is a GPU tensor, the builtin uploads the host result after the read so that the output mirrors the prototype's residency. Providers that fail the upload silently fall back to returning the host tensor."
   ]

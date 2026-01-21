@@ -119,7 +119,7 @@
     "label": "`crates/runmat-runtime/src/builtins/array/shape/tril.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/tril.rs"
   },
-  "gpu_residency": "```matlab\nG = gpuArray(rand(5));\nL = tril(G, -2);\nisa(L, 'gpuArray')\n```\nExpected output:\n```matlab\nans =\n  logical\n   1\n```",
+  "gpu_residency": "```matlab:runnable\nG = gpuArray(rand(5));\nL = tril(G, -2);\nisa(L, 'gpuArray')\n```\nExpected output:\n```matlab\nans =\n  logical\n   1\n```",
   "gpu_behavior": [
     "If the active acceleration provider implements the custom `tril` hook the entire operation runs on the GPU.",
     "When the hook is missing, RunMat gathers the data once, computes the result on the host, uploads the lower triangular tensor back to the device, and returns a gpuArray handle so residency is preserved for downstream kernels.",

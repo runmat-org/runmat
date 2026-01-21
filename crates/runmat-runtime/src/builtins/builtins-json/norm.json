@@ -129,7 +129,7 @@
     "label": "`crates/runmat-runtime/src/builtins/math/linalg/solve/norm.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/solve/norm.rs"
   },
-  "gpu_residency": "```matlab\nG = gpuArray([3 4 12]);\nmag = norm(G);      % falls back to CPU today; future providers can stay on device\n```\nExpected output:\n```matlab\nmag = 13\n```",
+  "gpu_residency": "```matlab:runnable\nG = gpuArray([3 4 12]);\nmag = norm(G);      % falls back to CPU today; future providers can stay on device\n```\nExpected output:\n```matlab\nmag = 13\n```",
   "gpu_behavior": [
     "When an acceleration provider is active, RunMat keeps GPU inputs resident. If the provider exposes a dedicated norm hook in the future it can execute entirely on the device. Until then RunMat gathers the input tensor to the host, computes the norm with the shared CPU implementation, and returns the scalar result. This mirrors MATLAB semantics while guaranteeing correctness even in the absence of specialized kernels."
   ]

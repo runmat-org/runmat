@@ -67,6 +67,28 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
   const mergeClassNames = (...classes: Array<string | null | undefined | false>) =>
     classes.filter(Boolean).join(' ');
 
+  const hasRunnableMarker = (props: Record<string, unknown> & { className?: string; 'data-runnable'?: string }): boolean => {
+    if (props['data-runnable'] === 'true') return true;
+    const className = props.className ?? '';
+    if (className.includes('language-matlab:runnable')) return true;
+    if (className.includes('language-matlab') && className.includes('runnable')) return true;
+    const dataLanguage = props['data-language'] ?? props['data-lang'];
+    if (typeof dataLanguage === 'string' && dataLanguage.includes('matlab') && dataLanguage.includes('runnable')) return true;
+    const dataMeta = props['data-meta'];
+    if (typeof dataMeta === 'string' && dataMeta.split(/\s+/).includes('runnable')) return true;
+    return false;
+  };
+
+  const hasRunnableChild = (node: React.ReactNode): boolean => {
+    if (!React.isValidElement(node)) return false;
+    const nodeProps = node.props as Record<string, unknown> & { className?: string; children?: React.ReactNode; 'data-runnable'?: string };
+    if (hasRunnableMarker(nodeProps)) return true;
+    if (nodeProps.children) {
+      return React.Children.toArray(nodeProps.children).some(hasRunnableChild);
+    }
+    return false;
+  };
+
   const defaultComponents: MarkdownRendererComponents = {
     h1: ({ children, ...props }: { children: React.ReactNode }) => (
       <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mt-12 mb-6 text-foreground first:mt-0 break-words" {...props}>{children}</h1>
@@ -199,7 +221,11 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const childrenArray = React.Children.toArray(children);
 
       // We rely on the rehypeRunnable plugin to have tagged runnable blocks with data-runnable.
-      let isRunnable = (props as any)['data-runnable'] === 'true';
+      const preProps = props as Record<string, unknown> & { className?: string; 'data-runnable'?: string };
+      let isRunnable = hasRunnableMarker(preProps);
+      if (!isRunnable) {
+        isRunnable = React.Children.toArray(children).some(hasRunnableChild);
+      }
 
       const hasCodeBlock = childrenArray.some((child) => {
         if (React.isValidElement(child)) {
@@ -351,5 +377,4 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
     />
   );
 }
-
 

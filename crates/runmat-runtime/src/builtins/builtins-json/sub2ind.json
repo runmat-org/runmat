@@ -140,7 +140,7 @@
     "label": "`crates/runmat-runtime/src/builtins/array/indexing/sub2ind.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/indexing/sub2ind.rs"
   },
-  "gpu_residency": "```matlab\nrows = gpuArray((1:100)');\ncols = gpuArray(ones(100, 1) * 4);\nidx = sub2ind([100 4], rows, cols);\n```\n\nExpected behavior:\n\n```matlab\n% idx remains a gpuArray containing the column-major indices.\ndisp(gather(idx(1:5)));\n% Output:\n%    301\n%    302\n%    303\n%    304\n%    305\n```",
+  "gpu_residency": "```matlab:runnable\nrows = gpuArray((1:100)');\ncols = gpuArray(ones(100, 1) * 4);\nidx = sub2ind([100 4], rows, cols);\n```\n\nExpected behavior:\n\n```matlab\n% idx remains a gpuArray containing the column-major indices.\ndisp(gather(idx(1:5)));\n% Output:\n%    301\n%    302\n%    303\n%    304\n%    305\n```",
   "gpu_behavior": [
     "When a WGPU-backed provider is active, `sub2ind` executes entirely on the GPU. The shader mirrors MATLAB's validation rules: it rejects non-finite values, non-integer subscripts, and out-of-range indices, surfacing the same diagnostic messages as the CPU path. Providers that do not yet implement the hook fall back to the host implementation; after the indices are computed they are uploaded back to the active provider so downstream fused kernels continue operating on device data."
   ]

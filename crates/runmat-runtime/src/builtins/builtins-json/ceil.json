@@ -146,7 +146,7 @@
     "label": "`crates/runmat-runtime/src/builtins/math/rounding/ceil.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/rounding/ceil.rs"
   },
-  "gpu_residency": "```matlab\nA = [1.8 -0.2; 2.7 3.4];\nproto = gpuArray(0);\nG = ceil(A, 'like', proto);   % Result remains on the GPU\nresult = gather(G);\n```\n\nExpected output:\n\n```matlab\nresult =\n    [ 2  0;\n      3  4]\n```",
+  "gpu_residency": "```matlab:runnable\nA = [1.8 -0.2; 2.7 3.4];\nproto = gpuArray(0);\nG = ceil(A, 'like', proto);   % Result remains on the GPU\nresult = gather(G);\n```\n\nExpected output:\n\n```matlab\nresult =\n    [ 2  0;\n      3  4]\n```",
   "gpu_behavior": [
     "When tensors already reside on the GPU, RunMat consults the active acceleration provider. If the provider implements the `unary_ceil` hook, `ceil(X)` executes entirely on the device and keeps tensors resident. When decimal or significant-digit rounding is requested\u2014or when the provider lacks `unary_ceil`\u2014RunMat gathers the tensor to host memory, applies the CPU implementation, and honours any `'like'` GPU prototype by uploading the result back to the device. This maintains MATLAB-compatible behaviour while exposing GPU acceleration whenever it is available."
   ]

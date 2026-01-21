@@ -115,7 +115,7 @@
     "label": "`crates/runmat-runtime/src/builtins/math/rounding/fix.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/rounding/fix.rs"
   },
-  "gpu_residency": "```matlab\nG = gpuArray(linspace(-2.4, 2.4, 6));\ntruncGpu = fix(G);\nhostValues = gather(truncGpu);\n```\n\nExpected output:\n\n```matlab\nhostValues = [-2 -1 0 0 1 2];\n```",
+  "gpu_residency": "```matlab:runnable\nG = gpuArray(linspace(-2.4, 2.4, 6));\ntruncGpu = fix(G);\nhostValues = gather(truncGpu);\n```\n\nExpected output:\n\n```matlab\nhostValues = [-2 -1 0 0 1 2];\n```",
   "gpu_behavior": [
     "When a tensor already resides on the GPU, RunMat Accelerate checks whether the active provider implements the optional `unary_fix` hook. If available, the truncation is executed directly on the device and the result stays on the GPU. If the hook is missing, RunMat gathers the values to the host, applies the CPU implementation, and returns a host-resident result\u2014ensuring MATLAB-compatible semantics everywhere."
   ]

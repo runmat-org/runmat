@@ -162,7 +162,7 @@
     "label": "`crates/runmat-runtime/src/builtins/array/creation/fill.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/fill.rs"
   },
-  "gpu_residency": "```matlab\nA = rand(512, 512);\nJ = fill(0.5, size(A), 'like', gpuArray(A));\n```\n\nExpected output:\n\n```matlab\nisa(J, 'gpuArray')  % true\n```",
+  "gpu_residency": "```matlab:runnable\nA = rand(512, 512);\nJ = fill(0.5, size(A), 'like', gpuArray(A));\n```\n\nExpected output:\n\n```matlab\nisa(J, 'gpuArray')  % true\n```",
   "gpu_behavior": [
     "RunMat asks the active acceleration provider to materialise the constant directly via the dedicated `fill` hook. Providers that do not supply this capability fall back to a zero buffer plus scalar add or, as a last resort, upload the fully materialised host tensor. This guarantees MATLAB-compatible results while still benefiting from GPU residency whenever possible."
   ]

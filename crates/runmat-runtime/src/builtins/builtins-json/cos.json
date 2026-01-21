@@ -121,7 +121,7 @@
     "label": "`crates/runmat-runtime/src/builtins/math/trigonometry/cos.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/cos.rs"
   },
-  "gpu_residency": "```matlab\nA = reshape(0:5, [3 2]);\nresult = cos(A);        % planner keeps the tensor on device when beneficial\n```\n\nExpected output (after `gather(result)`):\n\n```matlab\nresult =\n    1.0000   -0.9899\n    0.5403   -0.6536\n   -0.4161    0.2837\n```",
+  "gpu_residency": "```matlab:runnable\nA = reshape(0:5, [3 2]);\nresult = cos(A);        % planner keeps the tensor on device when beneficial\n```\n\nExpected output (after `gather(result)`):\n\n```matlab\nresult =\n    1.0000   -0.9899\n    0.5403   -0.6536\n   -0.4161    0.2837\n```",
   "gpu_behavior": [
     "With RunMat Accelerate active, tensors remain on the device and execute through the provider\u2019s `unary_cos` hook (or fused elementwise kernels) without leaving GPU memory.",
     "If the provider declines the operation\u2014for example, when only CPU precision is available or the operand type is unsupported\u2014RunMat transparently gathers to the host, computes the result, and reapplies the requested residency rules (including `'like'` prototypes).",

@@ -72,15 +72,15 @@
     },
     {
       "question": "How do I create a single precision array of random numbers?",
-      "answer": "Pass `'single'` as the last argument:\n```matlab\nS = rand(5, 5, 'single');\n```\nThis produces a 5x5 single precision matrix of random numbers."
+      "answer": "Pass `'single'` as the last argument:\n```matlab:runnable\nS = rand(5, 5, 'single');\n```\nThis produces a 5x5 single precision matrix of random numbers."
     },
     {
       "question": "How do I match the type and device residency of an existing array?",
-      "answer": "Use the `'like', prototype` syntax:\n```matlab\nA = gpuArray(rand(2,2));\nB = rand(2, 2, 'like', A);\n```\n`B` will be a GPU array with the same type and shape as `A`."
+      "answer": "Use the `'like', prototype` syntax:\n```matlab:runnable\nA = gpuArray(rand(2,2));\nB = rand(2, 2, 'like', A);\n```\n`B` will be a GPU array with the same type and shape as `A`."
     },
     {
       "question": "Can I create N-dimensional arrays with `rand`?",
-      "answer": "Yes! Pass more than two dimension arguments (or a size vector):\n```matlab\nT = rand(2, 3, 4);\n```\nThis creates a 2\u00d73\u00d74 tensor of random numbers."
+      "answer": "Yes! Pass more than two dimension arguments (or a size vector):\n```matlab:runnable\nT = rand(2, 3, 4);\n```\nThis creates a 2\u00d73\u00d74 tensor of random numbers."
     },
     {
       "question": "How does `rand(A)` behave?",

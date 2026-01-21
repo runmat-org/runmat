@@ -73,15 +73,15 @@
     },
     {
       "question": "How do I create a logical array of zeros?",
-      "answer": "Pass `'logical'` as the last argument:\n```matlab\nmask = zeros(5, 1, 'logical');\n```\nThis produces a 5x1 logical array, i.e., all elements have value `false` (`0` in binary)."
+      "answer": "Pass `'logical'` as the last argument:\n```matlab:runnable\nmask = zeros(5, 1, 'logical');\n```\nThis produces a 5x1 logical array, i.e., all elements have value `false` (`0` in binary)."
     },
     {
       "question": "How do I match the type and device residency of an existing array?",
-      "answer": "Use the `'like', prototype` syntax:\n```matlab\nA = gpuArray(rand(2,2));\nB = zeros(2, 2, 'like', A);\n```\n`B` will be a GPU array with the same type and shape as `A`."
+      "answer": "Use the `'like', prototype` syntax:\n```matlab:runnable\nA = gpuArray(rand(2,2));\nB = zeros(2, 2, 'like', A);\n```\n`B` will be a GPU array with the same type and shape as `A`."
     },
     {
       "question": "Can I create N-dimensional arrays with zeros?",
-      "answer": "Yes! Pass more than two dimension arguments (or a size vector):\n```matlab\nT = zeros(2, 3, 4);\n```\nThis creates a 2\u00d73\u00d74 tensor of zeros."
+      "answer": "Yes! Pass more than two dimension arguments (or a size vector):\n```matlab:runnable\nT = zeros(2, 3, 4);\n```\nThis creates a 2\u00d73\u00d74 tensor of zeros."
     },
     {
       "question": "How does `zeros(A)` behave?",

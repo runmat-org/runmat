@@ -128,7 +128,7 @@
     "label": "`crates/runmat-runtime/src/builtins/math/elementwise/log1p.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/log1p.rs"
   },
-  "gpu_residency": "```matlab\nG = gpuArray(linspace(-0.5, 0.5, 5));\nout = log1p(G);\nrealResult = gather(out);\n```\n\nExpected output:\n\n```matlab\nrealResult = [-0.6931 -0.2877 0 0.2231 0.4055];\n```",
+  "gpu_residency": "```matlab:runnable\nG = gpuArray(linspace(-0.5, 0.5, 5));\nout = log1p(G);\nrealResult = gather(out);\n```\n\nExpected output:\n\n```matlab\nrealResult = [-0.6931 -0.2877 0 0.2231 0.4055];\n```",
   "gpu_behavior": [
     "RunMat Accelerate keeps tensors resident on the GPU whenever the provider exposes the `unary_log1p` hook together with `reduce_min`. The runtime uses the device-side minimum to ensure that `1 + X` stays non-negative; when complex outputs are required or either hook is missing, RunMat automatically gathers the tensor, computes on the CPU using double precision, and returns the result with the expected MATLAB semantics."
   ]

@@ -127,7 +127,7 @@
     "label": "crates/runmat-runtime/src/builtins/math/linalg/solve/cond.rs",
     "url": "crates/runmat-runtime/src/builtins/math/linalg/solve/cond.rs"
   },
-  "gpu_residency": "```matlab\nG = gpuArray([]);      % Empty 0x0 matrix on the GPU\nk = cond(G);           % Returns 0 and keeps residency when possible\nresult = gather(k);\n```\nExpected output:\n```matlab\nresult = 0\n```",
+  "gpu_residency": "```matlab:runnable\nG = gpuArray([]);      % Empty 0x0 matrix on the GPU\nk = cond(G);           % Returns 0 and keeps residency when possible\nresult = gather(k);\n```\nExpected output:\n```matlab\nresult = 0\n```",
   "gpu_behavior": [
     "When the input already lives on a GPU, RunMat first looks for an acceleration provider that exposes the custom `cond` hook registered below. Current providers gather the matrix to host memory, reuse the shared CPU implementation, and then re-upload the scalar so downstream GPU computations preserve residency. This mirrors MATLAB semantics while keeping the user-facing API uniform."
   ]

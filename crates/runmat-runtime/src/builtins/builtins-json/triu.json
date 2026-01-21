@@ -118,7 +118,7 @@
     "label": "`crates/runmat-runtime/src/builtins/array/shape/triu.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/triu.rs"
   },
-  "gpu_residency": "```matlab\nG = gpuArray(rand(5));\nU = triu(G, -2);\nisa(U, 'gpuArray')\n```\nExpected output:\n```matlab\nans =\n  logical\n   1\n```",
+  "gpu_residency": "```matlab:runnable\nG = gpuArray(rand(5));\nU = triu(G, -2);\nisa(U, 'gpuArray')\n```\nExpected output:\n```matlab\nans =\n  logical\n   1\n```",
   "gpu_behavior": [
     "If the active acceleration provider implements a `triu` kernel the entire operation executes on the GPU.",
     "Without a provider hook, RunMat gathers the tensor to host memory once, applies the mask, uploads the result, and returns a gpuArray so residency is preserved for downstream kernels.",
