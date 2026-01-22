@@ -785,6 +785,8 @@ fn set_entry(buffer: &mut [f64], dim: usize, row: usize, col: usize, value: f64)
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    #[cfg(feature = "wgpu")]
+    use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor, Value};
 
@@ -1095,7 +1097,7 @@ pub(crate) mod tests {
             normalization: CorrcoefNormalization::Unbiased,
             rows: CorrcoefRows::All,
         };
-        let gpu = provider.corrcoef(&handle, &options).expect("corrcoef");
+        let gpu = block_on(provider.corrcoef(&handle, &options)).expect("corrcoef");
         let host = block_on(download_handle_async(provider, &gpu)).expect("download");
         let gathered =
             Tensor::new(host.data.clone(), host.shape.clone()).expect("tensor reconstruction");

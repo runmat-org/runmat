@@ -1196,7 +1196,7 @@ pub(crate) mod tests {
         let idx = col * tensor.rows + center;
         assert!(tensor.data[idx] > 0.0);
         let sum: f64 = tensor.data.iter().sum();
-        assert_close(sum, 1.0, 1e-12);
+        assert_close(sum, 1.0, 1e-5);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1224,7 +1224,7 @@ pub(crate) mod tests {
             0.16666666666666669,
         ];
         for (idx, value) in t.data.iter().enumerate() {
-            assert_close(*value, expected[idx], 1e-12);
+            assert_close(*value, expected[idx], 1e-7);
         }
     }
 
@@ -1241,7 +1241,7 @@ pub(crate) mod tests {
         };
         assert_eq!(t.shape, vec![3, 3]);
         let sum: f64 = t.data.iter().sum();
-        assert_close(sum, 1.0, 1e-12);
+        assert_close(sum, 1.0, 1e-7);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

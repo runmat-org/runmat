@@ -15,7 +15,7 @@ name = "runmat"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

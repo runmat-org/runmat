@@ -405,7 +405,7 @@ pub(crate) mod tests {
         };
         let lhs_handle = provider.upload(&lhs_view).expect("upload lhs");
         let rhs_handle = provider.upload(&rhs_view).expect("upload rhs");
-        let mask_handle = provider.elem_eq(&lhs_handle, &rhs_handle).expect("elem_eq");
+        let mask_handle = block_on(provider.elem_eq(&lhs_handle, &rhs_handle)).expect("elem_eq");
 
         let result = run_islogical(Value::GpuTensor(mask_handle.clone())).expect("islogical");
         assert_eq!(result, Value::Bool(true));

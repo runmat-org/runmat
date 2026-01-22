@@ -564,6 +564,8 @@ fn is_vector(t: &Tensor) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
 
     fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

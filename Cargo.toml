@@ -41,7 +41,7 @@ proc-macro2 = "1"
 logos = "0.15"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", default-features = false }
 zmq = "0.10"
 uuid = { version = "1", features = ["v4"] }
 clap = { version = "4", features = ["derive", "env"] }
@@ -82,4 +82,3 @@ runmat-accelerate = { version = "=0.2.8", path = "crates/runmat-accelerate" }
 runmat-accelerate-api = { version = "=0.2.8", path = "crates/runmat-accelerate-api" }
 runmat-gc-api = { version = "=0.2.8", path = "crates/runmat-gc-api" }
 runmat-thread-local = { version = "0.1.0", path = "crates/runmat-thread-local" }
-

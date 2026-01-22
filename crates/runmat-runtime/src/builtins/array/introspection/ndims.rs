@@ -328,13 +328,21 @@ pub(crate) mod tests {
     #[test]
     fn ndims_gpu_tensor_without_metadata_defaults_correctly() {
         // Simulate a provider that does not populate shape metadata.
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![],
-            device_id: 0,
-            buffer_id: 42,
-        };
-        let result = ndims_builtin(Value::GpuTensor(handle)).expect("ndims");
-        assert_eq!(result, Value::Num(2.0));
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0], vec![1]).unwrap();
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let handle = runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![],
+                device_id: handle.device_id,
+                buffer_id: handle.buffer_id,
+            };
+            let result = ndims_builtin(Value::GpuTensor(handle)).expect("ndims");
+            assert_eq!(result, Value::Num(2.0));
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

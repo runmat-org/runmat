@@ -518,6 +518,8 @@ fn parse_numeric(value: f64, allow_zero: bool, message: &str) -> crate::BuiltinR
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
+    #[cfg(feature = "wgpu")]
+    use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
 
     fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

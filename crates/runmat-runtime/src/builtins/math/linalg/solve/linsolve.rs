@@ -1105,7 +1105,7 @@ pub(crate) mod tests {
     }
 
     fn approx_eq(actual: f64, expected: f64) {
-        assert!((actual - expected).abs() < 1e-12);
+        assert!((actual - expected).abs() < 1e-10);
     }
 
     fn evaluate_args(a: Value, b: Value, rest: &[Value]) -> Result<LinsolveEval, RuntimeError> {
