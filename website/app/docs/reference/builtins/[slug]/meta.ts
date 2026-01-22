@@ -174,16 +174,20 @@ export function builtinJsonLD(slug: string): string {
                 "@type": "HowTo",
                 "@id": "#how-to-guide",
                 "name": `How to use ${builtin?.title} in RunMat`,
-                "step": (builtin?.examples ?? []).map(example => ({
-                    "@type": "HowToStep",
-                    "name": example.description,
-                    "url": `https://runmat.org/docs/reference/builtins/${builtin?.title}#${example.description.toLowerCase().replace(/\s+/g, '-').toLowerCase()}`,
-                    "text": example.input,
-                    "itemListElement": {
-                        "@type": "HowToDirection",
-                        "text": example.input
-                    }
-                }))
+                "step": (builtin?.examples ?? []).map(example => {
+                    const description = example.description?.trim() || 'Example';
+                    const anchor = description.toLowerCase().replace(/\s+/g, '-');
+                    return {
+                        "@type": "HowToStep",
+                        "name": description,
+                        "url": `https://runmat.org/docs/reference/builtins/${builtin?.title}#${anchor}`,
+                        "text": example.input,
+                        "itemListElement": {
+                            "@type": "HowToDirection",
+                            "text": example.input
+                        }
+                    };
+                })
             },
 
             {
