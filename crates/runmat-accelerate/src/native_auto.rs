@@ -1533,7 +1533,7 @@ fn compare_elemwise(
     let ha = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
     let hb = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
     let start = Instant::now();
-    let hc = match provider.elem_add(&ha, &hb) {
+    let hc = match futures::executor::block_on(provider.elem_add(&ha, &hb)) {
         Ok(h) => h,
         Err(_) => {
             let _ = provider.free(&ha);
@@ -1601,7 +1601,7 @@ fn compare_reduction(
     };
     let h = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
     let start = Instant::now();
-    let out = match provider.reduce_sum(&h) {
+    let out = match futures::executor::block_on(provider.reduce_sum(&h)) {
         Ok(hc) => hc,
         Err(_) => {
             provider.free(&h).ok();
@@ -1691,7 +1691,7 @@ fn compare_matmul(
         .upload(&view_b)
         .map_err(|e| anyhow!(e.to_string()))?;
     let start = Instant::now();
-    let hc = match provider.matmul(&ha, &hb) {
+    let hc = match futures::executor::block_on(provider.matmul(&ha, &hb)) {
         Ok(h) => h,
         Err(_) => {
             let _ = provider.free(&ha);

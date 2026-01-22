@@ -459,8 +459,7 @@ pub(crate) mod tests {
         };
         assert_eq!(gpu_handle.shape, vec![3, 4]);
 
-        let downloaded = provider
-            .download(&gpu_handle)
+        let downloaded = block_on(download_handle_async(provider, &gpu_handle))
             .expect("download squeezed tensor");
         assert_eq!(downloaded.shape.as_slice(), &[3, 4]);
         assert_eq!(downloaded.data.as_slice(), tensor.data.as_slice());

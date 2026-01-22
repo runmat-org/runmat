@@ -6064,6 +6064,7 @@ dependencies = [
  "smallvec",
  "tempfile",
  "thiserror 1.0.69",
+ "tokio",
  "tracing",
  "wgpu",
 ]
@@ -6375,6 +6376,7 @@ name = "runmat-runtime"
 version = "0.2.8"
 dependencies = [
  "accelerate-src",
+ "anyhow",
  "async-recursion",
  "axum 0.7.9",
  "base64 0.22.1",
@@ -6422,6 +6424,7 @@ dependencies = [
  "tracing",
  "url",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "wasm-bindgen-test",
  "web-sys",
  "wgpu",

@@ -293,7 +293,7 @@ async fn norm_gpu(handle: GpuTensorHandle, order: NormOrder) -> BuiltinResult<Va
 
     if let Some(provider) = maybe_provider {
         let provider_order = ProviderNormOrder::from(order);
-        if let Ok(result) = provider.norm(&handle, provider_order) {
+        if let Ok(result) = provider.norm(&handle, provider_order).await {
             return Ok(Value::GpuTensor(result));
         }
     }

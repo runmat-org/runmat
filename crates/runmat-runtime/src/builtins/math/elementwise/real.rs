@@ -249,7 +249,7 @@ async fn real_builtin(value: Value) -> BuiltinResult<Value> {
 
 async fn real_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_real(&handle) {
+        if let Ok(out) = provider.unary_real(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }

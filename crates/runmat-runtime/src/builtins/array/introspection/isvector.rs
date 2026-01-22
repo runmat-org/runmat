@@ -248,13 +248,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::introspection::isvector"
 )]
 async fn isvector_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    Ok(Value::Bool(value_is_vector(&value)))
+    Ok(Value::Bool(value_is_vector(&value).await?))
 }
 
-fn value_is_vector(value: &Value) -> bool {
-    let dims = value_dimensions(value);
+async fn value_is_vector(value: &Value) -> crate::BuiltinResult<bool> {
+    let dims = value_dimensions(value).await?;
     if dims.len() > 2 {
-        return false;
+        return Ok(false);
     }
     let mut non_singleton_dims = 0usize;
 
@@ -262,11 +262,11 @@ fn value_is_vector(value: &Value) -> bool {
         if dim != 1 {
             non_singleton_dims += 1;
             if non_singleton_dims > 1 {
-                return false;
+                return Ok(false);
             }
         }
     }
-    true
+    Ok(true)
 }
 
 #[cfg(test)]

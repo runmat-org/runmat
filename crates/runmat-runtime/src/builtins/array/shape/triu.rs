@@ -353,7 +353,7 @@ async fn triu_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResul
         }
     }
     if let Some(provider) = runmat_accelerate_api::provider() {
-        match provider.triu(&handle, offset) {
+        match provider.triu(&handle, offset).await {
             Ok(out) => return Ok(Value::GpuTensor(out)),
             Err(_) => {
                 // Fall through to the gather path.

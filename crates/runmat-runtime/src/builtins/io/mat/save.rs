@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use futures::future::LocalBoxFuture;
 use regex::Regex;
-use runmat_builtins::{CharArray, StructValue, Tensor, Value};
+use runmat_builtins::{CharArray, StructValue, Value};
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 
@@ -752,17 +752,8 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                 })
             }
             Value::GpuTensor(handle) => {
-                let provider = runmat_accelerate_api::provider()
-                    .ok_or_else(|| save_error("save: no acceleration provider registered"))?;
-                let host = match provider.download(&handle) {
-                    Ok(host) => host,
-                    Err(err) => {
-                        return Err(save_error_with_source(format!("save: {err}"), err));
-                    }
-                };
-                let tensor = Tensor::new(host.data, host.shape)
-                    .map_err(|e| save_error(format!("save: {e}")))?;
-                convert_value(Value::Tensor(tensor)).await
+                let gathered = gather_if_needed_async(&Value::GpuTensor(handle)).await?;
+                convert_value(gathered).await
             }
             unsupported => Err(save_error(format!(
                 "save: value of type '{:?}' is not supported",
@@ -947,7 +938,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use once_cell::sync::OnceCell;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::StringArray;
+    use runmat_builtins::{StringArray, Tensor};
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::HashMap;

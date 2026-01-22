@@ -329,7 +329,7 @@ async fn union_gpu_pair(
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     if let Some(provider) = runmat_accelerate_api::provider() {
-        match provider.union(&handle_a, &handle_b, opts) {
+        match provider.union(&handle_a, &handle_b, opts).await {
             Ok(result) => return UnionEvaluation::from_union_result(result),
             Err(_) => {
                 // Fall back to host gather when provider union is unavailable.

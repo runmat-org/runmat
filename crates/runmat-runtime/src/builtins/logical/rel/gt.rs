@@ -255,16 +255,19 @@ fn gt_error(message: impl Into<String>, identifier: &'static str) -> RuntimeErro
 )]
 async fn gt_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
-        if let Some(result) = try_gt_gpu(a, b) {
+        if let Some(result) = try_gt_gpu(a, b).await {
             return result;
         }
     }
     gt_host(lhs, rhs).await
 }
 
-fn try_gt_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<crate::BuiltinResult<Value>> {
+async fn try_gt_gpu(
+    a: &GpuTensorHandle,
+    b: &GpuTensorHandle,
+) -> Option<crate::BuiltinResult<Value>> {
     let provider = runmat_accelerate_api::provider()?;
-    match provider.elem_gt(a, b) {
+    match provider.elem_gt(a, b).await {
         Ok(handle) => Some(Ok(gpu_helpers::logical_gpu_value(handle))),
         Err(err) => {
             drop(err);

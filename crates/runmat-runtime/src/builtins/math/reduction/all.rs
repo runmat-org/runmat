@@ -10,7 +10,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "all";
 
@@ -269,7 +269,7 @@ async fn all_gpu(
         Some(p) => p,
         None => return gpu_fallback(handle, spec, nan_mode).await,
     };
-    match try_all_gpu(provider, &handle, &spec, nan_mode)? {
+    match try_all_gpu(provider, &handle, &spec, nan_mode).await? {
         Some(host) => logical_from_host(host),
         None => gpu_fallback(handle, spec, nan_mode).await,
     }
@@ -284,7 +284,7 @@ async fn gpu_fallback(
     all_host(Value::Tensor(tensor), spec, nan_mode).await
 }
 
-fn try_all_gpu(
+async fn try_all_gpu(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     handle: &GpuTensorHandle,
     spec: &ReductionSpec,
@@ -293,19 +293,19 @@ fn try_all_gpu(
     let omit_nan = matches!(nan_mode, ReductionNaN::Omit);
 
     if let ReductionSpec::All = spec {
-        if let Ok(tmp) = provider.reduce_all(handle, omit_nan) {
-            let host = provider
-                .download(&tmp)
+        if let Ok(tmp) = provider.reduce_all(handle, omit_nan).await {
+            let host = download_handle_async(provider, &tmp)
+                .await
                 .map_err(|e| all_error(format!("all: {e}")))?;
             let _ = provider.free(&tmp);
             return Ok(Some(host));
         }
     }
 
-    reduce_dims_gpu(provider, handle, spec, omit_nan)
+    reduce_dims_gpu(provider, handle, spec, omit_nan).await
 }
 
-fn reduce_dims_gpu(
+async fn reduce_dims_gpu(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     handle: &GpuTensorHandle,
     spec: &ReductionSpec,
@@ -342,7 +342,7 @@ fn reduce_dims_gpu(
             }
             return Ok(None);
         }
-        let next = provider.reduce_all_dim(&current, axis, omit_nan);
+        let next = provider.reduce_all_dim(&current, axis, omit_nan).await;
         match next {
             Ok(new_handle) => {
                 if current_owned {
@@ -367,8 +367,8 @@ fn reduce_dims_gpu(
         return Ok(None);
     }
 
-    let host = provider
-        .download(&current)
+    let host = download_handle_async(provider, &current)
+        .await
         .map_err(|e| all_error(format!("all: {e}")))?;
     let _ = provider.free(&current);
     for owned in intermediates {

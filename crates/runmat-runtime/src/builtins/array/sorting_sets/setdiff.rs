@@ -316,7 +316,7 @@ async fn setdiff_gpu_pair(
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     if let Some(provider) = runmat_accelerate_api::provider() {
-        match provider.setdiff(&handle_a, &handle_b, opts) {
+        match provider.setdiff(&handle_a, &handle_b, opts).await {
             Ok(result) => return SetdiffEvaluation::from_setdiff_result(result),
             Err(_) => {
                 // Fall back to host gather when provider does not support setdiff.

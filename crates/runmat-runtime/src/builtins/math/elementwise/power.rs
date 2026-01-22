@@ -460,7 +460,7 @@ fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
 async fn power_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if lhs.shape == rhs.shape {
-            if let Ok(handle) = provider.elem_pow(&lhs, &rhs) {
+            if let Ok(handle) = provider.elem_pow(&lhs, &rhs).await {
                 return Ok(Value::GpuTensor(handle));
             }
         }
@@ -484,6 +484,7 @@ async fn power_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinRe
             };
             let result = provider
                 .elem_pow(&left_expanded, &right_expanded)
+                .await
                 .map_err(|e| builtin_error(format!("power: {e}")));
             if made_left {
                 let _ = provider.free(&left_expanded);
@@ -550,7 +551,7 @@ async fn power_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&rhs)? {
             if let Ok(filled) = provider.fill_like(&lhs, scalar) {
-                if let Ok(handle) = provider.elem_pow(&lhs, &filled) {
+                if let Ok(handle) = provider.elem_pow(&lhs, &filled).await {
                     let _ = provider.free(&filled);
                     return Ok(Value::GpuTensor(handle));
                 }
@@ -563,7 +564,7 @@ async fn power_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<
                     shape: &tensor_rhs.shape,
                 };
                 if let Ok(uploaded) = provider.upload(&view) {
-                    let result = provider.elem_pow(&lhs, &uploaded);
+                    let result = provider.elem_pow(&lhs, &uploaded).await;
                     let _ = provider.free(&uploaded);
                     if let Ok(handle) = result {
                         return Ok(Value::GpuTensor(handle));
@@ -590,7 +591,7 @@ async fn power_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&lhs)? {
             if let Ok(filled) = provider.fill_like(&rhs, scalar) {
-                if let Ok(handle) = provider.elem_pow(&filled, &rhs) {
+                if let Ok(handle) = provider.elem_pow(&filled, &rhs).await {
                     let _ = provider.free(&filled);
                     return Ok(Value::GpuTensor(handle));
                 }
@@ -603,7 +604,7 @@ async fn power_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult
                     shape: &tensor_lhs.shape,
                 };
                 if let Ok(uploaded) = provider.upload(&view) {
-                    let result = provider.elem_pow(&uploaded, &rhs);
+                    let result = provider.elem_pow(&uploaded, &rhs).await;
                     let _ = provider.free(&uploaded);
                     if let Ok(handle) = result {
                         return Ok(Value::GpuTensor(handle));

@@ -274,14 +274,14 @@ async fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult
     }
 }
 
-fn try_gpu_derivative_single(value: &Value) -> BuiltinResult<Option<Value>> {
+async fn try_gpu_derivative_single(value: &Value) -> BuiltinResult<Option<Value>> {
     let Value::GpuTensor(handle) = value else {
         return Ok(None);
     };
     let Some(provider) = runmat_accelerate_api::provider() else {
         return Ok(None);
     };
-    match provider.polyder_single(handle) {
+    match provider.polyder_single(handle).await {
         Ok(out) => Ok(Some(Value::GpuTensor(out))),
         Err(err) => {
             trace!("polyder: provider polyder_single fallback: {err}");
@@ -290,13 +290,13 @@ fn try_gpu_derivative_single(value: &Value) -> BuiltinResult<Option<Value>> {
     }
 }
 
-fn try_gpu_derivative_product(first: &Value, second: &Value) -> BuiltinResult<Option<Value>> {
+async fn try_gpu_derivative_product(first: &Value, second: &Value) -> BuiltinResult<Option<Value>> {
     match (first, second) {
         (Value::GpuTensor(p), Value::GpuTensor(q)) => {
             let Some(provider) = runmat_accelerate_api::provider() else {
                 return Ok(None);
             };
-            match provider.polyder_product(p, q) {
+            match provider.polyder_product(p, q).await {
                 Ok(out) => Ok(Some(Value::GpuTensor(out))),
                 Err(err) => {
                     trace!("polyder: provider polyder_product fallback: {err}");
@@ -308,13 +308,13 @@ fn try_gpu_derivative_product(first: &Value, second: &Value) -> BuiltinResult<Op
     }
 }
 
-fn try_gpu_quotient(u: &Value, v: &Value) -> BuiltinResult<Option<PolyderEval>> {
+async fn try_gpu_quotient(u: &Value, v: &Value) -> BuiltinResult<Option<PolyderEval>> {
     match (u, v) {
         (Value::GpuTensor(uh), Value::GpuTensor(vh)) => {
             let Some(provider) = runmat_accelerate_api::provider() else {
                 return Ok(None);
             };
-            match provider.polyder_quotient(uh, vh) {
+            match provider.polyder_quotient(uh, vh).await {
                 Ok(result) => Ok(Some(PolyderEval {
                     numerator: Value::GpuTensor(result.numerator),
                     denominator: Value::GpuTensor(result.denominator),
@@ -331,7 +331,7 @@ fn try_gpu_quotient(u: &Value, v: &Value) -> BuiltinResult<Option<PolyderEval>> 
 
 /// Evaluate the quotient rule derivative `[num, den] = polyder(u, v)`.
 pub async fn evaluate_quotient(u: Value, v: Value) -> BuiltinResult<PolyderEval> {
-    if let Some(eval) = try_gpu_quotient(&u, &v)? {
+    if let Some(eval) = try_gpu_quotient(&u, &v).await? {
         return Ok(eval);
     }
     let u_poly = parse_polynomial("polyder", "U", u).await?;
@@ -364,7 +364,7 @@ impl PolyderEval {
 }
 
 pub async fn derivative_single(value: Value) -> BuiltinResult<Value> {
-    if let Some(out) = try_gpu_derivative_single(&value)? {
+    if let Some(out) = try_gpu_derivative_single(&value).await? {
         return Ok(out);
     }
     let poly = parse_polynomial("polyder", "P", value).await?;
@@ -372,7 +372,7 @@ pub async fn derivative_single(value: Value) -> BuiltinResult<Value> {
 }
 
 pub async fn derivative_product(first: Value, second: Value) -> BuiltinResult<Value> {
-    if let Some(out) = try_gpu_derivative_product(&first, &second)? {
+    if let Some(out) = try_gpu_derivative_product(&first, &second).await? {
         return Ok(out);
     }
     let p = parse_polynomial("polyder", "P", first).await?;

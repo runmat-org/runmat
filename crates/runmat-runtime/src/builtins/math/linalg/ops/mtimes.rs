@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{linalg, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "mtimes";
 
@@ -281,13 +281,13 @@ async fn mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 pub(crate) async fn mtimes_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
-    if let Some(result) = try_gpu_matmul(lhs, rhs)? {
+    if let Some(result) = try_gpu_matmul(lhs, rhs).await? {
         return Ok(result);
     }
     mtimes_cpu(lhs.clone(), rhs.clone()).await
 }
 
-fn try_gpu_matmul(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
+async fn try_gpu_matmul(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),
@@ -301,7 +301,7 @@ fn try_gpu_matmul(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
         return Ok(None);
     }
 
-    if let Some(result) = try_gpu_scalar_mul(provider, lhs, rhs)? {
+    if let Some(result) = try_gpu_scalar_mul(provider, lhs, rhs).await? {
         return Ok(Some(result));
     }
 
@@ -317,7 +317,10 @@ fn try_gpu_matmul(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
         }
     };
 
-    match provider.matmul(lhs_operand.handle(), rhs_operand.handle()) {
+    match provider
+        .matmul(lhs_operand.handle(), rhs_operand.handle())
+        .await
+    {
         Ok(handle) => {
             release_operand(provider, &mut lhs_operand);
             release_operand(provider, &mut rhs_operand);
@@ -331,12 +334,12 @@ fn try_gpu_matmul(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
     }
 }
 
-fn try_gpu_scalar_mul(
+async fn try_gpu_scalar_mul(
     provider: &'static dyn AccelProvider,
     lhs: &Value,
     rhs: &Value,
 ) -> BuiltinResult<Option<Value>> {
-    if let Some(scalar) = real_scalar_value(provider, lhs)? {
+    if let Some(scalar) = real_scalar_value(provider, lhs).await? {
         if let Some(mut operand) = prepare_gpu_operand(rhs, provider)? {
             let result = provider.scalar_mul(operand.handle(), scalar);
             release_operand(provider, &mut operand);
@@ -347,7 +350,7 @@ fn try_gpu_scalar_mul(
         }
     }
 
-    if let Some(scalar) = real_scalar_value(provider, rhs)? {
+    if let Some(scalar) = real_scalar_value(provider, rhs).await? {
         if let Some(mut operand) = prepare_gpu_operand(lhs, provider)? {
             let result = provider.scalar_mul(operand.handle(), scalar);
             release_operand(provider, &mut operand);
@@ -361,7 +364,7 @@ fn try_gpu_scalar_mul(
     Ok(None)
 }
 
-fn real_scalar_value(
+async fn real_scalar_value(
     provider: &'static dyn AccelProvider,
     value: &Value,
 ) -> BuiltinResult<Option<f64>> {
@@ -374,8 +377,8 @@ fn real_scalar_value(
             Ok(Some(if logical.data[0] != 0 { 1.0 } else { 0.0 }))
         }
         Value::GpuTensor(handle) if is_scalar_handle(handle) => {
-            let host = provider
-                .download(handle)
+            let host = download_handle_async(provider, handle)
+                .await
                 .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
             Ok(host.data.first().copied())
         }

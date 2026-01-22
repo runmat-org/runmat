@@ -302,7 +302,7 @@ async fn double_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 
     if let Some(provider) = provider {
         if provider.precision() == ProviderPrecision::F64 {
-            match provider.unary_double(&handle) {
+            match provider.unary_double(&handle).await {
                 Ok(result) => {
                     return Ok(Value::GpuTensor(result));
                 }

@@ -355,7 +355,7 @@ pub async fn evaluate(value: Value, args: &[Value], require_left: bool) -> Built
     let options = parse_options(args)?;
     match value {
         Value::GpuTensor(handle) => {
-            if let Some(eval) = evaluate_gpu(&handle, options, require_left)? {
+            if let Some(eval) = evaluate_gpu(&handle, options, require_left).await? {
                 return Ok(eval);
             }
             let tensor = gpu_helpers::gather_tensor_async(&handle)
@@ -367,7 +367,7 @@ pub async fn evaluate(value: Value, args: &[Value], require_left: bool) -> Built
     }
 }
 
-fn evaluate_gpu(
+async fn evaluate_gpu(
     handle: &GpuTensorHandle,
     options: EigOptions,
     require_left: bool,
@@ -382,7 +382,7 @@ fn evaluate_gpu(
         Some(p) => p,
         None => return Ok(None),
     };
-    match provider.eig(handle, require_left) {
+    match provider.eig(handle, require_left).await {
         Ok(result) => {
             if require_left && result.left.is_none() {
                 Ok(None)

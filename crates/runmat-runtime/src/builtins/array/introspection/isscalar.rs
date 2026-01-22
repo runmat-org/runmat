@@ -215,14 +215,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::introspection::isscalar"
 )]
 async fn isscalar_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    Ok(Value::Bool(value_is_scalar(&value)))
+    Ok(Value::Bool(value_is_scalar(&value).await?))
 }
 
-fn value_is_scalar(value: &Value) -> bool {
-    if value_numel(value) != 1 {
-        return false;
+async fn value_is_scalar(value: &Value) -> crate::BuiltinResult<bool> {
+    if value_numel(value).await? != 1 {
+        return Ok(false);
     }
-    value_dimensions(value).into_iter().all(|dim| dim == 1)
+    Ok(value_dimensions(value)
+        .await?
+        .into_iter()
+        .all(|dim| dim == 1))
 }
 
 #[cfg(test)]

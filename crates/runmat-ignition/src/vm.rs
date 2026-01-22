@@ -1593,7 +1593,8 @@ async fn run_interpreter(
                     kind = ?plan.group.kind
                 )
                 .entered();
-                match try_execute_fusion_group(&plan, graph, &mut stack, &mut vars, &context) {
+                match try_execute_fusion_group(&plan, graph, &mut stack, &mut vars, &context).await
+                {
                     Ok(result) => {
                         stack.push(result);
                         pc = plan.group.span.end + 1;
@@ -6877,6 +6878,7 @@ async fn run_interpreter(
                         }
                         let host = provider
                             .download(handle)
+                            .await
                             .map_err(|e| format!("slice: {e}"))?;
                         let tensor = runmat_builtins::Tensor::new(host.data, host.shape)
                             .map_err(|e| format!("slice: {e}"))?;
@@ -7858,6 +7860,7 @@ async fn run_interpreter(
                             .ok_or_else(|| "No acceleration provider registered".to_string())?;
                         let host = provider
                             .download(&h)
+                            .await
                             .map_err(|e| format!("gather for slice assign: {e}"))?;
                         let mut t = runmat_builtins::Tensor::new(host.data, host.shape)
                             .map_err(|e| format!("slice assign: {e}"))?;
@@ -8370,6 +8373,7 @@ async fn run_interpreter(
                         }
                         let host = provider
                             .download(handle)
+                            .await
                             .map_err(|e| format!("slice assign: {e}"))?;
                         let tensor = runmat_builtins::Tensor::new(host.data, host.shape)
                             .map_err(|e| format!("slice assign: {e}"))?;
@@ -8979,6 +8983,7 @@ async fn run_interpreter(
                             .ok_or_else(|| "No acceleration provider registered".to_string())?;
                         let host = provider
                             .download(&h)
+                            .await
                             .map_err(|e| format!("gather for range-end assign: {e}"))?;
                         let mut t = runmat_builtins::Tensor::new(host.data, host.shape)
                             .map_err(|e| format!("range-end assign: {e}"))?;
@@ -9752,7 +9757,7 @@ async fn run_interpreter(
                     }
                     Value::Tensor(mut t) => {
                         // Helper to coerce RHS to scalar f64, supporting 1x1 tensors and gpu tensors
-                        let rhs_to_scalar = |rhs: &Value| -> VmResult<f64> {
+                        async fn rhs_to_scalar(rhs: &Value) -> Result<f64, RuntimeError> {
                             match rhs {
                                 Value::Num(x) => Ok(*x),
                                 Value::Tensor(t2) => {
@@ -9770,6 +9775,7 @@ async fn run_interpreter(
                                     if let Some(p) = runmat_accelerate_api::provider() {
                                         let host = p
                                             .download(h2)
+                                            .await
                                             .map_err(|e| format!("gather rhs: {e}"))?;
                                         Ok(host.data[0])
                                     } else {
@@ -9782,7 +9788,7 @@ async fn run_interpreter(
                                     .try_into()
                                     .map_err(|_| "RHS must be numeric".to_string().into()),
                             }
-                        };
+                        }
                         // 1D linear or 2D scalar assignment only for now
                         if indices.len() == 1 {
                             let total = t.rows() * t.cols();
@@ -9790,7 +9796,7 @@ async fn run_interpreter(
                             if idx == 0 || idx > total {
                                 return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                             }
-                            let val: f64 = rhs_to_scalar(&rhs)?;
+                            let val: f64 = rhs_to_scalar(&rhs).await?;
                             t.data[idx - 1] = val;
                             stack.push(Value::Tensor(t));
                         } else if indices.len() == 2 {
@@ -9818,7 +9824,7 @@ async fn run_interpreter(
                                 }
                                 return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
                             }
-                            let val: f64 = rhs_to_scalar(&rhs)?;
+                            let val: f64 = rhs_to_scalar(&rhs).await?;
                             let idx = (i - 1) + (j - 1) * rows;
                             t.data[idx] = val;
                             stack.push(Value::Tensor(t));
@@ -9834,11 +9840,15 @@ async fn run_interpreter(
                             .ok_or_else(|| "No acceleration provider registered".to_string())?;
                         let host = provider
                             .download(&h)
+                            .await
                             .map_err(|e| format!("gather for assignment: {e}"))?;
                         let mut t = runmat_builtins::Tensor::new(host.data, host.shape)
                             .map_err(|e| format!("assignment: {e}"))?;
                         // Reuse same scalar coercion
-                        let rhs_to_scalar = |rhs: &Value| -> VmResult<f64> {
+                        async fn rhs_to_scalar(
+                            rhs: &Value,
+                            provider: &dyn runmat_accelerate_api::AccelProvider,
+                        ) -> Result<f64, RuntimeError> {
                             match rhs {
                                 Value::Num(x) => Ok(*x),
                                 Value::Tensor(t2) => {
@@ -9855,6 +9865,7 @@ async fn run_interpreter(
                                     }
                                     let host2 = provider
                                         .download(h2)
+                                        .await
                                         .map_err(|e| format!("gather rhs: {e}"))?;
                                     Ok(host2.data[0])
                                 }
@@ -9862,14 +9873,14 @@ async fn run_interpreter(
                                     .try_into()
                                     .map_err(|_| "RHS must be numeric".to_string().into()),
                             }
-                        };
+                        }
                         if indices.len() == 1 {
                             let total = t.rows() * t.cols();
                             let idx = indices[0];
                             if idx == 0 || idx > total {
                                 return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                             }
-                            let val: f64 = rhs_to_scalar(&rhs)?;
+                            let val: f64 = rhs_to_scalar(&rhs, provider).await?;
                             t.data[idx - 1] = val;
                         } else if indices.len() == 2 {
                             let i = indices[0];
@@ -9896,12 +9907,12 @@ async fn run_interpreter(
                                 }
                                 return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
                             }
-                            let val: f64 = rhs_to_scalar(&rhs)?;
+                            let val: f64 = rhs_to_scalar(&rhs, provider).await?;
                             let idx = (i - 1) + (j - 1) * rows;
                             t.data[idx] = val;
                         } else if indices.is_empty() {
                             // Trivial colon slice cases from parser may encode as zero indices; handle full-row/col scalar broadcast
-                            let val: f64 = rhs_to_scalar(&rhs)?;
+                            let val: f64 = rhs_to_scalar(&rhs, provider).await?;
                             for k in 0..t.data.len() {
                                 t.data[k] = val;
                             }
@@ -10802,7 +10813,7 @@ impl Drop for StackSliceGuard<'_> {
 }
 
 #[cfg(feature = "native-accel")]
-fn try_execute_fusion_group(
+async fn try_execute_fusion_group(
     plan: &runmat_accelerate::FusionGroupPlan,
     graph: &runmat_accelerate::AccelGraph,
     stack: &mut Vec<Value>,
@@ -11590,7 +11601,7 @@ fn try_execute_fusion_group(
             Err(err) => Err(err.to_string().into()),
         }
     } else if plan.group.kind == FusionKind::CenteredGram {
-        match execute_centered_gram(request) {
+        match execute_centered_gram(request).await {
             Ok(result) => {
                 stack_guard.commit();
                 Ok(result)
@@ -11598,7 +11609,7 @@ fn try_execute_fusion_group(
             Err(err) => Err(err.to_string().into()),
         }
     } else if plan.group.kind == FusionKind::PowerStepNormalize {
-        match execute_power_step_normalize(request) {
+        match execute_power_step_normalize(request).await {
             Ok(result) => {
                 stack_guard.commit();
                 Ok(result)
@@ -11607,7 +11618,7 @@ fn try_execute_fusion_group(
         }
     } else if plan.group.kind == FusionKind::ExplainedVariance {
         log::debug!("explained variance plan inputs {:?}", plan.inputs);
-        match execute_explained_variance(request) {
+        match execute_explained_variance(request).await {
             Ok(result) => {
                 stack_guard.commit();
                 Ok(result)
@@ -11618,7 +11629,7 @@ fn try_execute_fusion_group(
             }
         }
     } else if plan.group.kind == FusionKind::MatmulEpilogue {
-        match execute_matmul_epilogue(request) {
+        match execute_matmul_epilogue(request).await {
             Ok(result) => {
                 stack_guard.commit();
                 Ok(result)
@@ -11626,7 +11637,7 @@ fn try_execute_fusion_group(
             Err(err) => Err(err.to_string().into()),
         }
     } else if plan.group.kind == FusionKind::ImageNormalize {
-        match execute_image_normalize(request) {
+        match execute_image_normalize(request).await {
             Ok(result) => {
                 stack_guard.commit();
                 Ok(result)

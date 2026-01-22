@@ -260,7 +260,7 @@ pub async fn evaluate(
     rhs: Value,
     options: SolveOptions,
 ) -> BuiltinResult<LinsolveEval> {
-    if let Some(eval) = try_gpu_linsolve(&lhs, &rhs, &options)? {
+    if let Some(eval) = try_gpu_linsolve(&lhs, &rhs, &options).await? {
         return Ok(eval);
     }
 
@@ -381,7 +381,7 @@ pub async fn evaluate_args(lhs: Value, rhs: Value, rest: &[Value]) -> BuiltinRes
     evaluate(lhs, rhs, options).await
 }
 
-fn try_gpu_linsolve(
+async fn try_gpu_linsolve(
     lhs: &Value,
     rhs: &Value,
     options: &SolveOptions,
@@ -416,6 +416,7 @@ fn try_gpu_linsolve(
     let provider_opts: ProviderLinsolveOptions = options.into();
     let result = provider
         .linsolve(lhs_operand.handle(), rhs_operand.handle(), &provider_opts)
+        .await
         .ok();
 
     release_operand(provider, &mut lhs_operand);

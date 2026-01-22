@@ -231,7 +231,7 @@ async fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
 
 async fn sinh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_sinh(&handle) {
+        if let Ok(out) = provider.unary_sinh(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }

@@ -256,7 +256,7 @@ async fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> BuiltinResult<Valu
     let maybe_provider = runmat_accelerate_api::provider();
 
     if let Some(provider) = maybe_provider {
-        if let Some(value) = cond_gpu_via_provider(provider, &handle, norm)? {
+        if let Some(value) = cond_gpu_via_provider(provider, &handle, norm).await? {
             return Ok(value);
         }
     }
@@ -304,13 +304,13 @@ async fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> BuiltinResult<Valu
     Ok(Value::Num(cond_value))
 }
 
-fn cond_gpu_via_provider(
+async fn cond_gpu_via_provider(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     handle: &GpuTensorHandle,
     norm: CondNorm,
 ) -> BuiltinResult<Option<Value>> {
     let provider_norm = ProviderCondNorm::from(norm);
-    match provider.cond(handle, provider_norm) {
+    match provider.cond(handle, provider_norm).await {
         Ok(result) => Ok(Some(Value::GpuTensor(result))),
         Err(_err) => Ok(None),
     }

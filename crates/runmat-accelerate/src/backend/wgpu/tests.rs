@@ -1,6 +1,5 @@
 use crate::backend::wgpu::provider_impl::host_tensor_from_value;
 use anyhow::{anyhow, Result};
-use futures::executor::block_on;
 use runmat_builtins::{NumericDType, Tensor, Value};
 
 fn invert_upper_triangular(data: &[f64], n: usize) -> Result<Vec<f64>> {
@@ -68,8 +67,8 @@ fn invert_upper_triangular_produces_identity() {
     }
 }
 
-#[test]
-fn cholesky_qr_matches_host_qr() {
+#[tokio::test]
+async fn cholesky_qr_matches_host_qr() {
     let rows = 12;
     let cols = 4;
     let data = make_column_major(rows, cols, |r, c| {
@@ -100,12 +99,11 @@ fn cholesky_qr_matches_host_qr() {
         cols,
         dtype: NumericDType::F64,
     };
-    let chol_eval = block_on(
-        runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
-            Value::Tensor(tensor_gram),
-            &[],
-        ),
+    let chol_eval = runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
+        Value::Tensor(tensor_gram),
+        &[],
     )
+    .await
     .expect("chol");
     let r_tensor = host_tensor_from_value("qr_chol_r", chol_eval.factor()).expect("chol factor");
     let r_inv = invert_upper_triangular(&r_tensor.data, cols).expect("invert");

@@ -228,7 +228,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn corrcoef_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let args = CorrcoefArgs::parse(value, rest)?;
-    if let Some(result) = corrcoef_try_gpu(&args)? {
+    if let Some(result) = corrcoef_try_gpu(&args).await? {
         return Ok(result);
     }
     corrcoef_host(args).await
@@ -327,7 +327,7 @@ impl CorrcoefArgs {
     }
 }
 
-fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Option<Value>> {
+async fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Option<Value>> {
     if args.rows != CorrcoefRows::All {
         return Ok(None);
     }
@@ -365,7 +365,7 @@ fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Option<Value>> {
         rows: args.rows,
     };
 
-    match provider.corrcoef(&matrix_handle, &options) {
+    match provider.corrcoef(&matrix_handle, &options).await {
         Ok(result) => {
             if let Some(temp) = owned_concat {
                 let _ = provider.free(&temp);
@@ -1096,7 +1096,7 @@ pub(crate) mod tests {
             rows: CorrcoefRows::All,
         };
         let gpu = provider.corrcoef(&handle, &options).expect("corrcoef");
-        let host = provider.download(&gpu).expect("download");
+        let host = block_on(download_handle_async(provider, &gpu)).expect("download");
         let gathered =
             Tensor::new(host.data.clone(), host.shape.clone()).expect("tensor reconstruction");
         assert_tensor_close(&gathered, &cpu.data, 1.0e-6);

@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -492,7 +492,7 @@ async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
 async fn minus_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if lhs.shape == rhs.shape {
-            if let Ok(handle) = provider.elem_sub(&lhs, &rhs) {
+            if let Ok(handle) = provider.elem_sub(&lhs, &rhs).await {
                 return Ok(Value::GpuTensor(handle));
             }
         }
@@ -516,6 +516,7 @@ async fn minus_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinRe
             };
             let result = provider
                 .elem_sub(&left_expanded, &right_expanded)
+                .await
                 .map_err(|e| builtin_error(format!("minus: {e}")));
             if made_left {
                 let _ = provider.free(&left_expanded);
@@ -532,14 +533,14 @@ async fn minus_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinRe
             }
         }
         if is_scalar_shape(&lhs.shape) {
-            if let Some(scalar) = gpu_scalar_value(&lhs)? {
+            if let Some(scalar) = gpu_scalar_value(&lhs).await? {
                 if let Ok(handle) = provider.scalar_rsub(&rhs, scalar) {
                     return Ok(Value::GpuTensor(handle));
                 }
             }
         }
         if is_scalar_shape(&rhs.shape) {
-            if let Some(scalar) = gpu_scalar_value(&rhs)? {
+            if let Some(scalar) = gpu_scalar_value(&rhs).await? {
                 if let Ok(handle) = provider.scalar_sub(&lhs, scalar) {
                     return Ok(Value::GpuTensor(handle));
                 }
@@ -751,15 +752,15 @@ fn is_scalar_shape(shape: &[usize]) -> bool {
     shape.iter().copied().product::<usize>() <= 1
 }
 
-fn gpu_scalar_value(handle: &GpuTensorHandle) -> BuiltinResult<Option<f64>> {
+async fn gpu_scalar_value(handle: &GpuTensorHandle) -> BuiltinResult<Option<f64>> {
     let Some(provider) = runmat_accelerate_api::provider() else {
         return Ok(None);
     };
     if !is_scalar_shape(&handle.shape) {
         return Ok(None);
     }
-    let host = provider
-        .download(handle)
+    let host = download_handle_async(provider, handle)
+        .await
         .map_err(|e| builtin_error(format!("minus: {e}")))?;
     if host.data.len() == 1 {
         Ok(Some(host.data[0]))

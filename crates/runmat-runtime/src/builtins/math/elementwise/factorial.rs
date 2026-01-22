@@ -321,7 +321,7 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
 
 async fn factorial_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_factorial(&handle) {
+        if let Ok(out) = provider.unary_factorial(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }

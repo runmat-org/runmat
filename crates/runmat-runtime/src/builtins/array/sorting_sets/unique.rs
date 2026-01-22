@@ -417,7 +417,7 @@ async fn unique_gpu(
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
     if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(result) = provider.unique(&handle, opts) {
+        if let Ok(result) = provider.unique(&handle, opts).await {
             return UniqueEvaluation::from_unique_result(result);
         }
     }

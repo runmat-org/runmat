@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "acosh";
 const ZERO_EPS: f64 = 1.0e-12;
@@ -276,9 +276,9 @@ async fn acosh_builtin(value: Value) -> BuiltinResult<Value> {
 
 async fn acosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        match detect_gpu_requires_complex(provider, &handle) {
+        match detect_gpu_requires_complex(provider, &handle).await {
             Ok(false) => {
-                if let Ok(out) = provider.unary_acosh(&handle) {
+                if let Ok(out) = provider.unary_acosh(&handle).await {
                     return Ok(Value::GpuTensor(out));
                 }
             }
@@ -295,17 +295,20 @@ async fn acosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     acosh_tensor_real(tensor)
 }
 
-fn detect_gpu_requires_complex(
+async fn detect_gpu_requires_complex(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<bool> {
     let min_handle = provider
         .reduce_min(handle)
+        .await
         .map_err(|e| runtime_error_for(format!("acosh: reduce_min failed: {e}")))?;
-    let min_host = provider.download(&min_handle).map_err(|e| {
-        let _ = provider.free(&min_handle);
-        runtime_error_for(format!("acosh: reduce_min download failed: {e}"))
-    })?;
+    let min_host = download_handle_async(provider, &min_handle)
+        .await
+        .map_err(|e| {
+            let _ = provider.free(&min_handle);
+            runtime_error_for(format!("acosh: reduce_min download failed: {e}"))
+        })?;
     let _ = provider.free(&min_handle);
     let min_value = min_host.data.iter().copied().fold(f64::INFINITY, f64::min);
     if !min_value.is_finite() {

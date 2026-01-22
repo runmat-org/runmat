@@ -414,7 +414,7 @@ async fn det_gpu_via_provider(
         return Ok(Some(Value::GpuTensor(uploaded)));
     }
 
-    let lu_result = match provider.lu(handle) {
+    let lu_result = match provider.lu(handle).await {
         Ok(result) => result,
         Err(_) => return Ok(None),
     };

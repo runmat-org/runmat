@@ -317,7 +317,7 @@ fn floor_char_array(ca: CharArray, strategy: FloorStrategy) -> BuiltinResult<Val
 async fn floor_gpu(handle: GpuTensorHandle, args: &FloorArgs) -> BuiltinResult<Value> {
     if matches!(args.strategy, FloorStrategy::Integer) {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-            if let Ok(out) = provider.unary_floor(&handle) {
+            if let Ok(out) = provider.unary_floor(&handle).await {
                 return Ok(Value::GpuTensor(out));
             }
         }

@@ -211,12 +211,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::introspection::isempty"
 )]
 async fn isempty_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    let is_empty = value_is_empty(&value);
+    let is_empty = value_is_empty(&value).await?;
     Ok(Value::Bool(is_empty))
 }
 
-fn value_is_empty(value: &Value) -> bool {
-    value_numel(value) == 0
+async fn value_is_empty(value: &Value) -> crate::BuiltinResult<bool> {
+    Ok(value_numel(value).await? == 0)
 }
 
 #[cfg(test)]

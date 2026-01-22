@@ -11,7 +11,8 @@ use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 #[cfg(feature = "wgpu")]
 use runmat_accelerate::provider_cache_stats;
 use runmat_accelerate_api::{
-    AccelProvider, GpuTensorHandle, HostTensorOwned, HostTensorView, ReductionFlavor,
+    AccelProvider, AccelProviderFuture, GpuTensorHandle, HostTensorOwned, HostTensorView,
+    ReductionFlavor,
 };
 use serde::Serialize;
 #[cfg(feature = "wgpu")]
@@ -19,7 +20,8 @@ use wgpu::PowerPreference;
 const VALUE_TOLERANCE: f64 = 1e-5;
 const VALUE_REL_TOLERANCE: f64 = 1e-4;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let args = std::env::args().skip(1).collect::<Vec<_>>();
@@ -119,116 +121,107 @@ fn main() -> Result<()> {
     let mut reports = Vec::new();
 
     if !only_reduce_sweep {
-        reports.push(run_elementwise_case(
-            provider,
-            "elementwise_add_256",
-            ElementwiseOp::Add,
-            256,
-            256,
-            3,
-        )?);
-        reports.push(run_elementwise_case(
-            provider,
-            "elementwise_add_4096",
-            ElementwiseOp::Add,
-            4096,
-            4096,
-            3,
-        )?);
-        reports.push(run_elementwise_case(
-            provider,
-            "elementwise_mul_engineering",
-            ElementwiseOp::Mul,
-            2048,
-            128,
-            3,
-        )?);
+        reports.push(
+            run_elementwise_case(
+                provider,
+                "elementwise_add_256",
+                ElementwiseOp::Add,
+                256,
+                256,
+                3,
+            )
+            .await?,
+        );
+        reports.push(
+            run_elementwise_case(
+                provider,
+                "elementwise_add_4096",
+                ElementwiseOp::Add,
+                4096,
+                4096,
+                3,
+            )
+            .await?,
+        );
+        reports.push(
+            run_elementwise_case(
+                provider,
+                "elementwise_mul_engineering",
+                ElementwiseOp::Mul,
+                2048,
+                128,
+                3,
+            )
+            .await?,
+        );
 
-        reports.push(run_matmul_case(provider, "matmul_256", 256, 256, 256, 3)?);
-        reports.push(run_matmul_case(
-            provider,
-            "matmul_1024",
-            1024,
-            1024,
-            1024,
-            3,
-        )?);
-        reports.push(run_matmul_case(
-            provider,
-            "matmul_tall_skinny",
-            2048,
-            64,
-            256,
-            3,
-        )?);
-        reports.push(run_matmul_case(
-            provider,
-            "matmul_wide_short",
-            128,
-            2048,
-            128,
-            3,
-        )?);
+        reports.push(run_matmul_case(provider, "matmul_256", 256, 256, 256, 3).await?);
+        reports.push(run_matmul_case(provider, "matmul_1024", 1024, 1024, 1024, 3).await?);
+        reports.push(run_matmul_case(provider, "matmul_tall_skinny", 2048, 64, 256, 3).await?);
+        reports.push(run_matmul_case(provider, "matmul_wide_short", 128, 2048, 128, 3).await?);
 
-        reports.push(run_transpose_case(
-            provider,
-            "transpose_4096",
-            4096,
-            4096,
-            3,
-        )?);
+        reports.push(run_transpose_case(provider, "transpose_4096", 4096, 4096, 3).await?);
 
-        reports.push(run_reduction_case(
-            provider,
-            "reduction_sum_all",
-            ReductionKind::SumAll,
-            1_048_576,
-            1,
-            3,
-        )?);
-        reports.push(run_reduction_case(
-            provider,
-            "reduction_sum_row",
-            ReductionKind::SumDim(1),
-            1024,
-            256,
-            3,
-        )?);
-        reports.push(run_reduction_case(
-            provider,
-            "reduction_mean_col",
-            ReductionKind::MeanDim(2),
-            1024,
-            256,
-            3,
-        )?);
+        reports.push(
+            run_reduction_case(
+                provider,
+                "reduction_sum_all",
+                ReductionKind::SumAll,
+                1_048_576,
+                1,
+                3,
+            )
+            .await?,
+        );
+        reports.push(
+            run_reduction_case(
+                provider,
+                "reduction_sum_row",
+                ReductionKind::SumDim(1),
+                1024,
+                256,
+                3,
+            )
+            .await?,
+        );
+        reports.push(
+            run_reduction_case(
+                provider,
+                "reduction_mean_col",
+                ReductionKind::MeanDim(2),
+                1024,
+                256,
+                3,
+            )
+            .await?,
+        );
 
-        reports.push(run_minmax_case(
-            provider,
-            "min_indices_dim1",
-            MinMaxKind::Min,
-            1024,
-            256,
-            1,
-            3,
-        )?);
-        reports.push(run_minmax_case(
-            provider,
-            "max_indices_dim2",
-            MinMaxKind::Max,
-            1024,
-            256,
-            2,
-            3,
-        )?);
+        reports.push(
+            run_minmax_case(
+                provider,
+                "min_indices_dim1",
+                MinMaxKind::Min,
+                1024,
+                256,
+                1,
+                3,
+            )
+            .await?,
+        );
+        reports.push(
+            run_minmax_case(
+                provider,
+                "max_indices_dim2",
+                MinMaxKind::Max,
+                1024,
+                256,
+                2,
+                3,
+            )
+            .await?,
+        );
 
-        reports.push(run_composite_atda_case(
-            provider,
-            "composite_atda",
-            1536,
-            256,
-            3,
-        )?);
+        reports.push(run_composite_atda_case(provider, "composite_atda", 1536, 256, 3).await?);
     }
 
     // Optionally append reduction sweep reports
@@ -238,7 +231,7 @@ fn main() -> Result<()> {
             quick, sweep_max_secs
         );
         let sweep_reports =
-            run_reduction_sweep(provider, quick, sweep_max_secs, sweep_first, wg_override)?;
+            run_reduction_sweep(provider, quick, sweep_max_secs, sweep_first, wg_override).await?;
         info!("reduction sweep produced {} reports", sweep_reports.len());
         reports.extend(sweep_reports);
 
@@ -262,7 +255,8 @@ fn main() -> Result<()> {
             sweep_max_secs,
             sweep_first,
             wg_override,
-        )?;
+        )
+        .await?;
         info!("fused sweep produced {} reports", fused_reports.len());
         reports.extend(fused_reports);
     }
@@ -270,7 +264,7 @@ fn main() -> Result<()> {
     if do_fused_wgsl {
         info!("starting fused WGSL (single-kernel sin→sum) sweep");
         let fused_wgsl_reports =
-            run_fused_wgsl_sweep(provider, quick, sweep_max_secs, sweep_first, wg_override)?;
+            run_fused_wgsl_sweep(provider, quick, sweep_max_secs, sweep_first, wg_override).await?;
         info!(
             "fused WGSL sweep produced {} reports",
             fused_wgsl_reports.len()
@@ -291,7 +285,7 @@ fn main() -> Result<()> {
 
     Ok(())
 }
-fn run_fused_elementwise_reduction_sweep(
+async fn run_fused_elementwise_reduction_sweep(
     provider: &'static dyn AccelProvider,
     quick: bool,
     sweep_max_secs: Option<u64>,
@@ -331,9 +325,10 @@ fn run_fused_elementwise_reduction_sweep(
                     "fused-sweep enqueue rows={} cols={} wg={} iters={}",
                     rows, cols, wg_use, iters
                 );
-                out.push(run_fused_elementwise_reduction_case(
-                    provider, rows, cols, wg_use, iters,
-                )?);
+                out.push(
+                    run_fused_elementwise_reduction_case(provider, rows, cols, wg_use, iters)
+                        .await?,
+                );
                 if sweep_first {
                     break 'outer;
                 }
@@ -343,7 +338,7 @@ fn run_fused_elementwise_reduction_sweep(
     Ok(out)
 }
 
-fn run_fused_elementwise_reduction_case(
+async fn run_fused_elementwise_reduction_case(
     provider: &'static dyn AccelProvider,
     rows: usize,
     cols: usize,
@@ -377,11 +372,11 @@ fn run_fused_elementwise_reduction_case(
 
         // GPU fused: unary_sin then reduce_sum_dim
         let compute_start = Instant::now();
-        let sin_handle = provider.unary_sin(&handle_a)?;
-        let reduced_handle = provider.reduce_sum_dim(&sin_handle, 0)?; // dim=1 -> index 0
+        let sin_handle = provider.unary_sin(&handle_a).await?;
+        let reduced_handle = provider.reduce_sum_dim(&sin_handle, 0).await?; // dim=1 -> index 0
         let compute_time = compute_start.elapsed();
 
-        let (_out_matrix, download_time) = download_matrix(provider, &reduced_handle)?;
+        let (_out_matrix, download_time) = download_matrix(provider, &reduced_handle).await?;
         provider.free(&handle_a)?;
         provider.free(&sin_handle)?;
         provider.free(&reduced_handle)?;
@@ -473,7 +468,7 @@ impl DurationSummary {
     }
 }
 
-fn run_fused_wgsl_sweep(
+async fn run_fused_wgsl_sweep(
     provider: &'static dyn AccelProvider,
     quick: bool,
     sweep_max_secs: Option<u64>,
@@ -513,7 +508,7 @@ fn run_fused_wgsl_sweep(
                     "fused-wgsl enqueue rows={} cols={} wg={} iters={}",
                     rows, cols, wg_use, iters
                 );
-                out.push(run_fused_wgsl_case(provider, rows, cols, wg_use, iters)?);
+                out.push(run_fused_wgsl_case(provider, rows, cols, wg_use, iters).await?);
                 if sweep_first {
                     break 'outer;
                 }
@@ -523,7 +518,7 @@ fn run_fused_wgsl_sweep(
     Ok(out)
 }
 
-fn run_fused_wgsl_case(
+async fn run_fused_wgsl_case(
     provider: &'static dyn AccelProvider,
     rows: usize,
     cols: usize,
@@ -569,7 +564,7 @@ fn run_fused_wgsl_case(
             ReductionFlavor::Sum,
         )?;
         let compute_time = compute_start.elapsed();
-        let (_out_matrix, download_time) = download_matrix(provider, &handle_matrix)?;
+        let (_out_matrix, download_time) = download_matrix(provider, &handle_matrix).await?;
         provider.free(&handle_matrix)?;
 
         if !warmup {
@@ -679,7 +674,7 @@ enum MinMaxKind {
     Max,
 }
 
-fn run_elementwise_case(
+async fn run_elementwise_case(
     provider: &'static dyn AccelProvider,
     name: &str,
     op: ElementwiseOp,
@@ -707,9 +702,10 @@ fn run_elementwise_case(
         },
         move |inputs| cpu_elementwise(&inputs[0], &inputs[1], op),
     )
+    .await
 }
 
-fn run_matmul_case(
+async fn run_matmul_case(
     provider: &'static dyn AccelProvider,
     name: &str,
     m: usize,
@@ -731,9 +727,10 @@ fn run_matmul_case(
         move |prov, handles| prov.matmul(&handles[0], &handles[1]),
         move |inputs| cpu_matmul(&inputs[0], &inputs[1]),
     )
+    .await
 }
 
-fn run_transpose_case(
+async fn run_transpose_case(
     provider: &'static dyn AccelProvider,
     name: &str,
     rows: usize,
@@ -750,12 +747,13 @@ fn run_transpose_case(
         vec![matrix],
         iterations,
         VALUE_TOLERANCE,
-        move |prov, handles| prov.transpose(&handles[0]),
+        move |prov, handles| Box::pin(async move { prov.transpose(&handles[0]) }),
         move |inputs| cpu_transpose(&inputs[0]),
     )
+    .await
 }
 
-fn run_reduction_case(
+async fn run_reduction_case(
     provider: &'static dyn AccelProvider,
     name: &str,
     kind: ReductionKind,
@@ -784,9 +782,10 @@ fn run_reduction_case(
             ReductionKind::MeanDim(dim) => cpu_reduce_mean_dim(&inputs[0], dim),
         },
     )
+    .await
 }
 
-fn run_reduction_sweep_case(
+async fn run_reduction_sweep_case(
     provider: &'static dyn AccelProvider,
     rows: usize,
     cols: usize,
@@ -841,7 +840,7 @@ fn run_reduction_sweep_case(
             "    compute done: {:.3} ms",
             compute_time.as_secs_f64() * 1000.0
         );
-        let (_, download_time) = download_matrix(provider, &handle_matrix)?; // just to measure path; not used
+        let (_, download_time) = download_matrix(provider, &handle_matrix).await?; // just to measure path; not used
         provider.free(&handle_matrix)?;
         info!(
             "    download done: {:.3} ms",
@@ -893,7 +892,7 @@ fn run_reduction_sweep_case(
     })
 }
 
-fn run_reduction_sweep(
+async fn run_reduction_sweep(
     provider: &'static dyn AccelProvider,
     quick: bool,
     sweep_max_secs: Option<u64>,
@@ -934,9 +933,7 @@ fn run_reduction_sweep(
                     "reduce-sweep enqueue rows={} cols={} wg={} iters={}",
                     rows, cols, wg_use, iters
                 );
-                out.push(run_reduction_sweep_case(
-                    provider, rows, cols, wg_use, iters,
-                )?);
+                out.push(run_reduction_sweep_case(provider, rows, cols, wg_use, iters).await?);
                 if sweep_first {
                     break 'outer;
                 }
@@ -946,7 +943,7 @@ fn run_reduction_sweep(
     Ok(out)
 }
 
-fn run_minmax_case(
+async fn run_minmax_case(
     provider: &'static dyn AccelProvider,
     name: &str,
     kind: MinMaxKind,
@@ -968,13 +965,13 @@ fn run_minmax_case(
 
         let compute_start = Instant::now();
         let result = match kind {
-            MinMaxKind::Min => provider.reduce_min_dim(&handle_matrix, dim - 1)?,
-            MinMaxKind::Max => provider.reduce_max_dim(&handle_matrix, dim - 1)?,
+            MinMaxKind::Min => provider.reduce_min_dim(&handle_matrix, dim - 1).await?,
+            MinMaxKind::Max => provider.reduce_max_dim(&handle_matrix, dim - 1).await?,
         };
         let compute_time = compute_start.elapsed();
 
-        let (values_matrix, download_values) = download_matrix(provider, &result.values)?;
-        let (indices_matrix, download_indices) = download_matrix(provider, &result.indices)?;
+        let (values_matrix, download_values) = download_matrix(provider, &result.values).await?;
+        let (indices_matrix, download_indices) = download_matrix(provider, &result.indices).await?;
 
         provider.free(&handle_matrix)?;
         provider.free(&result.values)?;
@@ -1018,7 +1015,7 @@ fn run_minmax_case(
     })
 }
 
-fn run_composite_atda_case(
+async fn run_composite_atda_case(
     provider: &'static dyn AccelProvider,
     name: &str,
     rows: usize,
@@ -1040,7 +1037,7 @@ fn run_composite_atda_case(
         let (handle_d, upload_d) = upload_matrix(provider, &diag_matrix)?;
 
         let compute_start = Instant::now();
-        let scaled_handle = provider.elem_mul(&handle_a, &handle_d)?;
+        let scaled_handle = provider.elem_mul(&handle_a, &handle_d).await?;
         let step1 = compute_start.elapsed();
 
         let transpose_start = Instant::now();
@@ -1048,10 +1045,10 @@ fn run_composite_atda_case(
         let step2 = transpose_start.elapsed();
 
         let matmul_start = Instant::now();
-        let result_handle = provider.matmul(&a_t_handle, &scaled_handle)?;
+        let result_handle = provider.matmul(&a_t_handle, &scaled_handle).await?;
         let step3 = matmul_start.elapsed();
 
-        let (result_matrix, download_time) = download_matrix(provider, &result_handle)?;
+        let (result_matrix, download_time) = download_matrix(provider, &result_handle).await?;
 
         provider.free(&handle_a)?;
         provider.free(&handle_d)?;
@@ -1097,7 +1094,7 @@ fn run_composite_atda_case(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn generic_single_output_case<FGpu, FCpu>(
+async fn generic_single_output_case<FGpu, FCpu>(
     provider: &'static dyn AccelProvider,
     name: &str,
     category: &str,
@@ -1109,7 +1106,10 @@ fn generic_single_output_case<FGpu, FCpu>(
     cpu_op: FCpu,
 ) -> Result<CaseReport>
 where
-    FGpu: Fn(&'static dyn AccelProvider, &[GpuTensorHandle]) -> Result<GpuTensorHandle>,
+    FGpu: for<'a> Fn(
+        &'static dyn AccelProvider,
+        &'a [GpuTensorHandle],
+    ) -> AccelProviderFuture<'a, GpuTensorHandle>,
     FCpu: Fn(&[Matrix]) -> Matrix,
 {
     let mut upload_stats = TimeStats::new();
@@ -1134,10 +1134,10 @@ where
         let cpu_time = cpu_start.elapsed();
 
         let compute_start = Instant::now();
-        let result_handle = gpu_op(provider, &handles)?;
+        let result_handle = gpu_op(provider, &handles).await?;
         let compute_time = compute_start.elapsed();
 
-        let (result_matrix, download_time) = download_matrix(provider, &result_handle)?;
+        let (result_matrix, download_time) = download_matrix(provider, &result_handle).await?;
 
         for handle in &handles {
             provider.free(handle)?;
@@ -1195,12 +1195,12 @@ fn upload_matrix(
     Ok((handle, start.elapsed()))
 }
 
-fn download_matrix(
+async fn download_matrix(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> Result<(Matrix, Duration)> {
     let start = Instant::now();
-    let host = provider.download(handle)?;
+    let host = provider.download(handle).await?;
     let elapsed = start.elapsed();
     let matrix = Matrix::from_host(&host)?;
     Ok((matrix, elapsed))

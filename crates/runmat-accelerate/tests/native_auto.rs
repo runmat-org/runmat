@@ -1,6 +1,5 @@
 use std::sync::Once;
 
-use futures::executor::block_on;
 use runmat_accelerate::simple_provider::register_inprocess_provider;
 use runmat_accelerate::{prepare_builtin_args, promote_binary, BinaryOp};
 use runmat_builtins::{Tensor, Value};
@@ -32,12 +31,12 @@ fn promotes_large_tensors_to_gpu_for_elementwise() {
     assert!(matches!(b_gpu, Value::GpuTensor(_)));
 }
 
-#[test]
-fn gather_occurs_for_sink_builtins() {
+#[tokio::test]
+async fn gather_occurs_for_sink_builtins() {
     ensure_auto_init();
     let tensor = make_tensor(4);
     let value = Value::Tensor(tensor.clone());
     let (gpu, _) = promote_binary(BinaryOp::Elementwise, &value, &value).expect("promote");
-    let prepared = block_on(prepare_builtin_args("disp", &[gpu])).expect("prepare");
+    let prepared = prepare_builtin_args("disp", &[gpu]).await.expect("prepare");
     assert!(matches!(prepared.as_slice(), [Value::Tensor(_)]));
 }

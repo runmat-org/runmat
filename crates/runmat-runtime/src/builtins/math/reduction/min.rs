@@ -541,7 +541,7 @@ fn parse_dimension_tensor(tensor: &Tensor) -> BuiltinResult<Option<DimSelection>
 async fn reduction_min(value: Value, args: ReductionArgs) -> BuiltinResult<MinEvaluation> {
     match value {
         Value::GpuTensor(handle) => {
-            if let Some(eval) = reduction_min_gpu(handle.clone(), &args)? {
+            if let Some(eval) = reduction_min_gpu(handle.clone(), &args).await? {
                 return Ok(eval);
             }
             // Fall back to host if GPU path is unavailable.
@@ -552,7 +552,7 @@ async fn reduction_min(value: Value, args: ReductionArgs) -> BuiltinResult<MinEv
     }
 }
 
-fn reduction_min_gpu(
+async fn reduction_min_gpu(
     handle: GpuTensorHandle,
     args: &ReductionArgs,
 ) -> BuiltinResult<Option<MinEvaluation>> {
@@ -598,7 +598,7 @@ fn reduction_min_gpu(
     if zero_based >= handle.shape.len() {
         return Ok(None);
     }
-    match provider.reduce_min_dim(&handle, zero_based) {
+    match provider.reduce_min_dim(&handle, zero_based).await {
         Ok(ReduceDimResult { values, indices }) => Ok(Some(MinEvaluation {
             values: Value::GpuTensor(values),
             indices: Value::GpuTensor(indices),
@@ -1341,9 +1341,9 @@ async fn elementwise_min_gpu_pair(
     let provider = runmat_accelerate_api::provider()?;
     // Equal-shape fast path
     if a.shape == b.shape {
-        let values = provider.elem_min(a, b).ok()?;
+        let values = provider.elem_min(a, b).await.ok()?;
         // Try device mask first; if unavailable, compute indices on host while keeping values on device
-        if let Ok(mask) = provider.elem_le(a, b) {
+        if let Ok(mask) = provider.elem_le(a, b).await {
             let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
             let _ = provider.free(&mask);
             let mut indices = Vec::with_capacity(mask_host.data.len());
@@ -1382,8 +1382,8 @@ async fn elementwise_min_gpu_pair(
     } else {
         b.clone()
     };
-    let values = provider.elem_min(&a_exp, &b_exp).ok();
-    let mask = provider.elem_le(&a_exp, &b_exp).ok();
+    let values = provider.elem_min(&a_exp, &b_exp).await.ok();
+    let mask = provider.elem_le(&a_exp, &b_exp).await.ok();
     if !std::ptr::eq(&a_exp, a) {
         let _ = provider.free(&a_exp);
     }
@@ -1462,7 +1462,7 @@ async fn elementwise_min_gpu_scalar_left(
     let values = provider.scalar_min(a, scalar).ok()?;
     // Try device mask; if unavailable, compute on host
     let index_tensor = if let Ok(fill) = provider.fill_like(a, scalar) {
-        if let Ok(mask) = provider.elem_le(a, &fill) {
+        if let Ok(mask) = provider.elem_le(a, &fill).await {
             let _ = provider.free(&fill);
             let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
             let _ = provider.free(&mask);
@@ -1507,7 +1507,7 @@ async fn elementwise_min_gpu_scalar_right(
     let values = provider.scalar_min(b, scalar).ok()?;
     // Try device mask; if unavailable, compute on host
     let index_tensor = if let Ok(fill) = provider.fill_like(b, scalar) {
-        if let Ok(mask) = provider.elem_le(&fill, b) {
+        if let Ok(mask) = provider.elem_le(&fill, b).await {
             let _ = provider.free(&fill);
             let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
             let _ = provider.free(&mask);

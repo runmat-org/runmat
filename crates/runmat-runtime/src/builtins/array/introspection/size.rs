@@ -205,7 +205,7 @@ fn size_error(message: impl Into<String>) -> RuntimeError {
     builtin_path = "crate::builtins::array::introspection::size"
 )]
 async fn size_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let dims = value_dimensions(&value);
+    let dims = value_dimensions(&value).await?;
     match rest.len() {
         0 => dimensions_to_value(&dims),
         1 => match parse_dim_selection(&rest[0])? {

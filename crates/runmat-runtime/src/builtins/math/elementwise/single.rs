@@ -319,7 +319,7 @@ fn single_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
 
 async fn single_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        match provider.unary_single(&handle) {
+        match provider.unary_single(&handle).await {
             Ok(result) => {
                 let _ = provider.free(&handle);
                 return Ok(Value::GpuTensor(result));

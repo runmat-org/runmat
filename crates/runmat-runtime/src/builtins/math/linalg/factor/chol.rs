@@ -346,7 +346,7 @@ pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<CholEval> {
     let triangle = parse_triangle(args)?;
     match value {
         Value::GpuTensor(handle) => {
-            if let Some(eval) = evaluate_gpu(&handle, triangle)? {
+            if let Some(eval) = evaluate_gpu(&handle, triangle).await? {
                 return Ok(eval);
             }
             let tensor = gpu_helpers::gather_tensor_async(&handle)
@@ -367,13 +367,13 @@ async fn evaluate_host_value(value: Value, triangle: CholTriangle) -> BuiltinRes
     CholEval::from_components(components, triangle)
 }
 
-fn evaluate_gpu(
+async fn evaluate_gpu(
     handle: &GpuTensorHandle,
     triangle: CholTriangle,
 ) -> BuiltinResult<Option<CholEval>> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let lower = matches!(triangle, CholTriangle::Lower);
-        if let Ok(result) = provider.chol(handle, lower) {
+        if let Ok(result) = provider.chol(handle, lower).await {
             return Ok(Some(CholEval::from_provider(result, triangle)));
         }
     }

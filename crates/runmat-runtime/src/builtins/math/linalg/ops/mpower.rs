@@ -232,7 +232,7 @@ async fn mpower_builtin(base: Value, exponent: Value) -> BuiltinResult<Value> {
 }
 
 pub(crate) async fn mpower_eval(base: &Value, exponent: &Value) -> BuiltinResult<Value> {
-    if let Some(result) = try_gpu_mpower(base, exponent)? {
+    if let Some(result) = try_gpu_mpower(base, exponent).await? {
         return Ok(result);
     }
 
@@ -262,7 +262,7 @@ pub(crate) async fn mpower_eval(base: &Value, exponent: &Value) -> BuiltinResult
     Ok(result)
 }
 
-fn try_gpu_mpower(base: &Value, exponent: &Value) -> BuiltinResult<Option<Value>> {
+async fn try_gpu_mpower(base: &Value, exponent: &Value) -> BuiltinResult<Option<Value>> {
     // Only attempt a GPU path when the base already resides on the GPU.
     let handle = match base {
         Value::GpuTensor(handle) => handle,
@@ -307,7 +307,7 @@ fn try_gpu_mpower(base: &Value, exponent: &Value) -> BuiltinResult<Option<Value>
         return Ok(Some(Value::GpuTensor(handle.clone())));
     }
 
-    gpu_binary_exponentiation(provider, handle, exponent_value as u32)
+    gpu_binary_exponentiation(provider, handle, exponent_value as u32).await
 }
 
 fn gpu_identity_like(
@@ -331,7 +331,7 @@ fn gpu_identity_like(
     }
 }
 
-fn gpu_binary_exponentiation(
+async fn gpu_binary_exponentiation(
     provider: &'static dyn AccelProvider,
     base: &GpuTensorHandle,
     exponent: u32,
@@ -343,7 +343,7 @@ fn gpu_binary_exponentiation(
     while exp > 0 {
         if exp & 1 == 1 {
             if let Some(ref mut current) = result_state {
-                match provider.matmul(&current.handle, &base_state.handle) {
+                match provider.matmul(&current.handle, &base_state.handle).await {
                     Ok(new_handle) => {
                         if current.owned {
                             let _ = provider.free(&current.handle);
@@ -368,7 +368,10 @@ fn gpu_binary_exponentiation(
 
         exp >>= 1;
         if exp > 0 {
-            match provider.matmul(&base_state.handle, &base_state.handle) {
+            match provider
+                .matmul(&base_state.handle, &base_state.handle)
+                .await
+            {
                 Ok(new_handle) => {
                     if base_state.owned {
                         let _ = provider.free(&base_state.handle);

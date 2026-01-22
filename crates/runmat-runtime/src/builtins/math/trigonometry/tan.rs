@@ -282,7 +282,7 @@ async fn tan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 
 async fn tan_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_tan(&handle) {
+        if let Ok(out) = provider.unary_tan(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }

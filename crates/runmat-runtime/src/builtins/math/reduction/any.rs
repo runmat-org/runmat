@@ -10,7 +10,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "any";
 
@@ -298,7 +298,7 @@ async fn any_gpu(
         // Logical reductions return host results; gather to ensure exact omitnan semantics
         return gpu_fallback(handle, spec, nan_mode).await;
     }
-    match try_any_gpu(provider, &handle, &spec, nan_mode)? {
+    match try_any_gpu(provider, &handle, &spec, nan_mode).await? {
         Some(host) => logical_from_host(host),
         None => gpu_fallback(handle, spec, nan_mode).await,
     }
@@ -313,7 +313,7 @@ async fn gpu_fallback(
     any_host(Value::Tensor(tensor), spec, nan_mode).await
 }
 
-fn try_any_gpu(
+async fn try_any_gpu(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     handle: &GpuTensorHandle,
     spec: &ReductionSpec,
@@ -324,9 +324,9 @@ fn try_any_gpu(
     // For omitnan, prefer explicit truth-mask path to ensure semantics match host exactly
     if !omit_nan {
         if let ReductionSpec::All = spec {
-            if let Ok(tmp) = provider.reduce_any(handle, omit_nan) {
-                let host = provider
-                    .download(&tmp)
+            if let Ok(tmp) = provider.reduce_any(handle, omit_nan).await {
+                let host = download_handle_async(provider, &tmp)
+                    .await
                     .map_err(|e| any_error(format!("any: {e}")))?;
                 let _ = provider.free(&tmp);
                 return Ok(Some(host));
@@ -334,10 +334,10 @@ fn try_any_gpu(
         }
     }
 
-    reduce_dims_gpu(provider, handle, spec, omit_nan)
+    reduce_dims_gpu(provider, handle, spec, omit_nan).await
 }
 
-fn reduce_dims_gpu(
+async fn reduce_dims_gpu(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     handle: &GpuTensorHandle,
     spec: &ReductionSpec,
@@ -381,6 +381,7 @@ fn reduce_dims_gpu(
                 .map_err(|e| any_error(format!("any: {e}")))?;
             let ne_zero = provider
                 .elem_ne(&current, &zeros)
+                .await
                 .map_err(|e| any_error(format!("any: {e}")))?;
             let _ = provider.free(&zeros);
             let is_nan = provider
@@ -399,6 +400,7 @@ fn reduce_dims_gpu(
             // Sum along axis to count any true; then threshold > 0
             let summed = provider
                 .reduce_sum_dim(&truth, axis)
+                .await
                 .map_err(|e| any_error(format!("any: {e}")))?;
             let _ = provider.free(&truth);
             let zeros_out = provider
@@ -406,6 +408,7 @@ fn reduce_dims_gpu(
                 .map_err(|e| any_error(format!("any: {e}")))?;
             let gt_zero = provider
                 .elem_gt(&summed, &zeros_out)
+                .await
                 .map_err(|e| any_error(format!("any: {e}")))?;
             let _ = provider.free(&summed);
             let _ = provider.free(&zeros_out);
@@ -413,6 +416,7 @@ fn reduce_dims_gpu(
         } else {
             provider
                 .reduce_any_dim(&current, axis, omit_nan)
+                .await
                 .map_err(|e| any_error(format!("any: {e}")))
         };
         match next {
@@ -439,8 +443,8 @@ fn reduce_dims_gpu(
         return Ok(None);
     }
 
-    let host = provider
-        .download(&current)
+    let host = download_handle_async(provider, &current)
+        .await
         .map_err(|e| any_error(format!("any: {e}")))?;
     let _ = provider.free(&current);
     for owned in intermediates {

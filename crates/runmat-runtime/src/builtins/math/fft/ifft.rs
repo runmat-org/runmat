@@ -16,7 +16,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -273,14 +273,14 @@ async fn ifft_gpu(
 
     if let Some(provider) = runmat_accelerate_api::provider() {
         if target_len != 0 {
-            if let Ok(out) = provider.ifft_dim(&handle, length, dim_index) {
-                let complex = ifft_download_gpu_result(provider, &out)?;
+            if let Ok(out) = provider.ifft_dim(&handle, length, dim_index).await {
+                let complex = ifft_download_gpu_result(provider, &out).await?;
                 return finalize_ifft_output(complex, symmetric);
             }
         }
 
-        let host = provider
-            .download(&handle)
+        let host = download_handle_async(provider, &handle)
+            .await
             .map_err(|e| ifft_error(format!("ifft: {e}")))?;
         runmat_accelerate_api::clear_residency(&handle);
         let complex = host_to_complex_tensor(host, BUILTIN_NAME)?;
@@ -407,12 +407,12 @@ fn finalize_ifft_output(tensor: ComplexTensor, symmetric: bool) -> BuiltinResult
     }
 }
 
-fn ifft_download_gpu_result(
+async fn ifft_download_gpu_result(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<ComplexTensor> {
-    let host = provider
-        .download(handle)
+    let host = download_handle_async(provider, handle)
+        .await
         .map_err(|e| ifft_error(format!("ifft: {e}")))?;
     provider.free(handle).ok();
     runmat_accelerate_api::clear_residency(handle);

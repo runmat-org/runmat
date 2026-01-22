@@ -262,7 +262,7 @@ pub async fn evaluate(
     rest: &[Value],
 ) -> BuiltinResult<FilterEvaluation> {
     let args = FilterArgs::parse(b, a, x, rest).await?;
-    if let Some(eval) = try_filter_gpu(&args)? {
+    if let Some(eval) = try_filter_gpu(&args).await? {
         return Ok(eval);
     }
     filter_host(&args)
@@ -785,7 +785,7 @@ fn is_empty_placeholder(value: &Value) -> bool {
     }
 }
 
-fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluation>> {
+async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluation>> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -873,7 +873,9 @@ fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluation>> 
         zi: zi_handle_opt,
     };
 
-    let result = provider.iir_filter(&b_handle, &a_handle, &signal_handle, options);
+    let result = provider
+        .iir_filter(&b_handle, &a_handle, &signal_handle, options)
+        .await;
 
     cleanup_temp_handles(provider, temp_handles);
 

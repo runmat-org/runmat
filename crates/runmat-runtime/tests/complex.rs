@@ -1,6 +1,7 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 // Complex numbers end-to-end tests
+use futures::executor::block_on;
 use runmat_builtins::Value;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -15,14 +16,14 @@ fn complex_scalar_arithmetic() {
     } else {
         panic!("expected complex");
     }
-    let m = runmat_runtime::elementwise_mul(&a, &b).unwrap();
+    let m = block_on(runmat_runtime::elementwise_mul(&a, &b)).unwrap();
     if let Value::Complex(re, im) = m {
         assert!((re - (3.0 * 1.5 - 2.0 * (-4.0))).abs() < 1e-12);
         assert!((im - (3.0 * (-4.0) + 2.0 * 1.5)).abs() < 1e-12);
     } else {
         panic!("expected complex");
     }
-    let d = runmat_runtime::elementwise_div(&a, &b).unwrap();
+    let d = block_on(runmat_runtime::elementwise_div(&a, &b)).unwrap();
     if let Value::Complex(re, im) = d {
         assert!(re.is_finite());
         assert!(im.is_finite());
@@ -42,14 +43,14 @@ fn complex_scalar_with_real() {
     } else {
         panic!();
     }
-    let m = runmat_runtime::elementwise_mul(&a, &Value::Num(2.0)).unwrap();
+    let m = block_on(runmat_runtime::elementwise_mul(&a, &Value::Num(2.0))).unwrap();
     if let Value::Complex(re, im) = m {
         assert!((re - 4.0).abs() < 1e-12);
         assert!((im + 2.0).abs() < 1e-12);
     } else {
         panic!();
     }
-    let d = runmat_runtime::elementwise_div(&Value::Num(5.0), &a).unwrap();
+    let d = block_on(runmat_runtime::elementwise_div(&Value::Num(5.0), &a)).unwrap();
     if let Value::Complex(re, im) = d {
         assert!(re.is_finite());
         assert!(im.is_finite());

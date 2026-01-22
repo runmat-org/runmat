@@ -271,9 +271,9 @@ async fn rcond_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     }
 
     if let Some(provider) = runmat_accelerate_api::provider() {
-        match provider.rcond(&handle) {
+        match provider.rcond(&handle).await {
             Ok(result) => return Ok(Value::GpuTensor(result)),
-            Err(_) => match rcond_gpu_via_linsolve(provider, &handle, rows) {
+            Err(_) => match rcond_gpu_via_linsolve(provider, &handle, rows).await {
                 Ok(Some(value)) => return Ok(value),
                 Ok(None) => {}
                 Err(err) => {
@@ -330,7 +330,7 @@ async fn rcond_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     Ok(Value::Num(estimate))
 }
 
-fn rcond_gpu_via_linsolve(
+async fn rcond_gpu_via_linsolve(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     handle: &GpuTensorHandle,
     order: usize,
@@ -356,7 +356,7 @@ fn rcond_gpu_via_linsolve(
         rcond: None,
         ..Default::default()
     };
-    let outcome = provider.linsolve(handle, &identity, &options);
+    let outcome = provider.linsolve(handle, &identity, &options).await;
 
     let _ = provider.free(&identity);
 

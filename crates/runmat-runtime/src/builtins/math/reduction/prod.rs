@@ -604,14 +604,14 @@ async fn prod_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinR
     }
 
     if resolved.dims_in_bounds.len() == handle.shape.len() && !handle.shape.is_empty() {
-        if let Ok(reduced) = provider.reduce_prod(&handle) {
+        if let Ok(reduced) = provider.reduce_prod(&handle).await {
             return Ok(Value::GpuTensor(reduced));
         }
     }
 
     let mut current = handle.clone();
     for &dim in &resolved.dims_in_bounds {
-        match provider.reduce_prod_dim(&current, dim) {
+        match provider.reduce_prod_dim(&current, dim).await {
             Ok(next) => {
                 current = next;
             }

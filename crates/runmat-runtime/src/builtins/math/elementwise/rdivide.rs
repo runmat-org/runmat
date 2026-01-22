@@ -521,7 +521,7 @@ async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
 async fn rdivide_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if lhs.shape == rhs.shape {
-            if let Ok(handle) = provider.elem_div(&lhs, &rhs) {
+            if let Ok(handle) = provider.elem_div(&lhs, &rhs).await {
                 return Ok(Value::GpuTensor(handle));
             }
         }
@@ -545,6 +545,7 @@ async fn rdivide_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> Builtin
             };
             let result = provider
                 .elem_div(&left_expanded, &right_expanded)
+                .await
                 .map_err(|e| builtin_error(format!("rdivide: {e}")));
             if made_left {
                 let _ = provider.free(&left_expanded);

@@ -1,5 +1,6 @@
 use anyhow::{anyhow, ensure, Result};
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
+use futures::channel::oneshot;
 use log::{debug, error, info, warn};
 use num_complex::Complex;
 use once_cell::sync::OnceCell;
@@ -7,21 +8,22 @@ use once_cell::sync::OnceCell;
 use pollster::block_on;
 use rand::seq::SliceRandom;
 use runmat_accelerate_api::{
-    AccelContextHandle, AccelContextKind, AccelProvider, ApiDeviceInfo, CorrcoefNormalization,
-    CorrcoefOptions, CorrcoefRows, CovNormalization, CovRows, CovarianceOptions, FindDirection,
-    FspecialRequest, GpuTensorHandle, HostTensorOwned, HostTensorView, ImfilterOptions,
-    ImfilterPadding, IsMemberOptions, IsMemberResult, MeshgridAxisView, PagefunOp, PagefunRequest,
-    ProviderBandwidth, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
-    ProviderConvMode, ProviderConvOrientation, ProviderCummaxResult, ProviderCumminResult,
-    ProviderEigResult, ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions,
-    ProviderIirFilterResult, ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult,
-    ProviderLuResult, ProviderMeshgridResult, ProviderNanMode, ProviderNormOrder,
-    ProviderPinvOptions, ProviderPolyderQuotient, ProviderPolyfitResult, ProviderPolyvalOptions,
-    ProviderPrecision, ProviderQrOptions, ProviderQrPivot, ProviderQrPowerIterResult,
-    ProviderQrResult, ProviderScanDirection, ProviderStdNormalization, ProviderSymmetryKind,
-    ReduceDimResult, ReductionFlavor, ReductionTwoPassMode, SetdiffOptions, SetdiffResult,
-    SortComparison, SortOrder, SortResult, SortRowsColumnSpec, UnionOptions, UnionResult,
-    UniqueOptions, UniqueResult, WgpuBufferRef, WgpuContextHandle,
+    AccelContextHandle, AccelContextKind, AccelDownloadFuture, AccelProvider, AccelProviderFuture,
+    ApiDeviceInfo, CorrcoefNormalization, CorrcoefOptions, CorrcoefRows, CovNormalization, CovRows,
+    CovarianceOptions, FindDirection, FspecialRequest, GpuTensorHandle, HostTensorOwned,
+    HostTensorView, ImfilterOptions, ImfilterPadding, IsMemberOptions, IsMemberResult,
+    MeshgridAxisView, PagefunOp, PagefunRequest, ProviderBandwidth, ProviderCholResult,
+    ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation,
+    ProviderCummaxResult, ProviderCumminResult, ProviderEigResult, ProviderFindResult,
+    ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions,
+    ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderMeshgridResult,
+    ProviderNanMode, ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient,
+    ProviderPolyfitResult, ProviderPolyvalOptions, ProviderPrecision, ProviderQrOptions,
+    ProviderQrPivot, ProviderQrPowerIterResult, ProviderQrResult, ProviderScanDirection,
+    ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult, ReductionFlavor,
+    ReductionTwoPassMode, SetdiffOptions, SetdiffResult, SortComparison, SortOrder, SortResult,
+    SortRowsColumnSpec, UnionOptions, UnionResult, UniqueOptions, UniqueResult, WgpuBufferRef,
+    WgpuContextHandle,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::image::filters::fspecial::{
@@ -96,16 +98,6 @@ fn runtime_flow_to_anyhow(_context: &str, err: RuntimeError) -> anyhow::Error {
     anyhow::Error::new(err)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn block_on_runtime<F: std::future::Future>(future: F) -> F::Output {
-    block_on(future)
-}
-
-#[cfg(target_arch = "wasm32")]
-fn block_on_runtime<F: std::future::Future>(future: F) -> F::Output {
-    futures::executor::block_on(future)
-}
-
 #[derive(Clone, Debug)]
 pub struct WgpuProviderOptions {
     pub power_preference: wgpu::PowerPreference,
@@ -163,18 +155,6 @@ pub struct WgpuProvider {
     // Optimization caches
     pow2_of: Mutex<HashMap<u64, u64>>, // squared_buffer_id -> base_buffer_id
     moments_cache: Mutex<MomentsCache>, // (base_buffer_id, dims) -> (mean, ex2)
-
-    /// wasm/WebGPU only: tracks in-flight `map_async` readbacks so we can suspend the VM
-    /// instead of blocking the worker event loop.
-    #[cfg(target_arch = "wasm32")]
-    pending_map_reads: Mutex<HashMap<u64, PendingWasmMapRead>>,
-}
-
-#[cfg(target_arch = "wasm32")]
-struct PendingWasmMapRead {
-    staging: wgpu::Buffer,
-    size_bytes: u64,
-    rx: mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -2296,12 +2276,12 @@ impl WgpuProvider {
         Ok(())
     }
 
-    fn image_normalize_cpu_fallback(
+    async fn image_normalize_cpu_fallback(
         &self,
         input: &GpuTensorHandle,
         desc: &runmat_accelerate_api::ImageNormalizeDescriptor,
     ) -> Result<GpuTensorHandle> {
-        let mut host = self.download(input)?;
+        let mut host = <Self as AccelProvider>::download(self, input).await?;
         ensure!(
             host.shape.len() == 3,
             "image_normalize: expected 3-D tensor, got {:?}",
@@ -2785,8 +2765,6 @@ impl WgpuProvider {
             autotune_device_tag,
             pow2_of: Mutex::new(HashMap::new()),
             moments_cache: Mutex::new(HashMap::new()),
-            #[cfg(target_arch = "wasm32")]
-            pending_map_reads: Mutex::new(HashMap::new()),
         })
     }
 
@@ -3061,17 +3039,17 @@ impl WgpuProvider {
         Ok((q_result, r_handle, r_inv_result))
     }
 
-    fn qr_power_iter_host(
+    async fn qr_power_iter_host(
         &self,
         product: &GpuTensorHandle,
         options: &ProviderQrOptions,
     ) -> Result<Option<ProviderQrPowerIterResult>> {
-        let host_product = self.download(product)?;
+        let host_product = <Self as AccelProvider>::download(self, product).await?;
         let tensor =
             Tensor::new(host_product.data.clone(), host_product.shape.clone()).map_err(|e| {
                 anyhow!("qr_power_iter: failed to construct host tensor for fallback: {e}")
             })?;
-        let host_result = self.qr_host_result(tensor, options)?;
+        let host_result = self.qr_host_result(tensor, options).await?;
         let _ = self.free(product);
         Ok(Some(ProviderQrPowerIterResult {
             q: host_result.q,
@@ -3143,7 +3121,7 @@ impl WgpuProvider {
         }))
     }
 
-    fn qr_host_result(
+    async fn qr_host_result(
         &self,
         tensor: Tensor,
         options: &ProviderQrOptions,
@@ -3155,12 +3133,11 @@ impl WgpuProvider {
         if matches!(options.pivot, ProviderQrPivot::Vector) {
             args.push(Value::from("vector"));
         }
-        let eval = block_on_runtime(
-            runmat_runtime::builtins::math::linalg::factor::qr::evaluate(
-                Value::Tensor(tensor),
-                &args,
-            ),
+        let eval = runmat_runtime::builtins::math::linalg::factor::qr::evaluate(
+            Value::Tensor(tensor),
+            &args,
         )
+        .await
         .map_err(|err| runtime_flow_to_anyhow("qr", err))?;
 
         let q_tensor = host_tensor_from_value("qr", eval.q())?;
@@ -3193,12 +3170,12 @@ impl WgpuProvider {
         })
     }
 
-    fn trim_polynomial_handle(
+    async fn trim_polynomial_handle(
         &self,
         handle: GpuTensorHandle,
         orientation: PolynomialOrientation,
     ) -> Result<GpuTensorHandle> {
-        let host = self.download(&handle)?;
+        let host = <Self as AccelProvider>::download(self, &handle).await?;
         let trimmed = trim_leading_zeros_real(&host.data);
         if trimmed.len() == host.data.len() {
             return Ok(handle);
@@ -5739,7 +5716,7 @@ impl WgpuProvider {
         Ok(handle)
     }
 
-    pub(crate) fn tril_exec(
+    pub(crate) async fn tril_exec(
         &self,
         handle: &GpuTensorHandle,
         offset: isize,
@@ -5756,10 +5733,10 @@ impl WgpuProvider {
             return Ok(handle.clone());
         }
         if plane > entry.len {
-            return self.tril_exec_fallback(handle, offset);
+            return self.tril_exec_fallback(handle, offset).await;
         }
         if entry.len % plane != 0 {
-            return self.tril_exec_fallback(handle, offset);
+            return self.tril_exec_fallback(handle, offset).await;
         }
         let pages = entry.len / plane;
         let max_u32 = u32::MAX as usize;
@@ -5771,7 +5748,7 @@ impl WgpuProvider {
             || rows > i32::MAX as usize
             || cols > i32::MAX as usize
         {
-            return self.tril_exec_fallback(handle, offset);
+            return self.tril_exec_fallback(handle, offset).await;
         }
 
         let diag_offset = if offset > i32::MAX as isize {
@@ -5868,12 +5845,13 @@ impl WgpuProvider {
         Ok(handle)
     }
 
-    fn tril_exec_fallback(
+    async fn tril_exec_fallback(
         &self,
         handle: &GpuTensorHandle,
         offset: isize,
     ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { mut data, shape } = self.download(handle)?;
+        let HostTensorOwned { mut data, shape } =
+            <Self as AccelProvider>::download(self, handle).await?;
         apply_tril_mask_host(&mut data, &shape, offset)?;
         let view = HostTensorView {
             data: &data,
@@ -5882,7 +5860,7 @@ impl WgpuProvider {
         <Self as AccelProvider>::upload(self, &view)
     }
 
-    pub(crate) fn triu_exec(
+    pub(crate) async fn triu_exec(
         &self,
         handle: &GpuTensorHandle,
         offset: isize,
@@ -5899,7 +5877,7 @@ impl WgpuProvider {
             return Ok(handle.clone());
         }
         if plane > entry.len || entry.len % plane != 0 {
-            return self.triu_exec_fallback(handle, offset);
+            return self.triu_exec_fallback(handle, offset).await;
         }
         let pages = entry.len / plane;
         let max_u32 = u32::MAX as usize;
@@ -5911,7 +5889,7 @@ impl WgpuProvider {
             || rows > i32::MAX as usize
             || cols > i32::MAX as usize
         {
-            return self.triu_exec_fallback(handle, offset);
+            return self.triu_exec_fallback(handle, offset).await;
         }
 
         let diag_offset = if offset > i32::MAX as isize {
@@ -6008,12 +5986,13 @@ impl WgpuProvider {
         Ok(handle)
     }
 
-    fn triu_exec_fallback(
+    async fn triu_exec_fallback(
         &self,
         handle: &GpuTensorHandle,
         offset: isize,
     ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { mut data, shape } = self.download(handle)?;
+        let HostTensorOwned { mut data, shape } =
+            <Self as AccelProvider>::download(self, handle).await?;
         apply_triu_mask_host(&mut data, &shape, offset)?;
         let view = HostTensorView {
             data: &data,
@@ -6286,7 +6265,7 @@ impl WgpuProvider {
 
         Ok(handle)
     }
-    pub(crate) fn iir_filter_exec(
+    pub(crate) async fn iir_filter_exec(
         &self,
         b: &GpuTensorHandle,
         a: &GpuTensorHandle,
@@ -6317,8 +6296,8 @@ impl WgpuProvider {
             "iir_filter: denominator coefficients must not be empty"
         );
 
-        let b_host = self.download(b)?;
-        let a_host = self.download(a)?;
+        let b_host = <Self as AccelProvider>::download(self, b).await?;
+        let a_host = <Self as AccelProvider>::download(self, a).await?;
         let a0 = *a_host
             .data
             .first()
@@ -7481,7 +7460,6 @@ impl WgpuProvider {
         let k = view_a.cols;
 
         let debug_matmul = std::env::var("RUNMAT_DEBUG_MATMUL").is_ok();
-        let debug_matmul_dump = std::env::var("RUNMAT_DEBUG_MATMUL_DUMP").is_ok();
         if debug_matmul {
             log::debug!(
                 "[matmul_debug] ptr_a={:p} ptr_b={:p}",
@@ -7498,22 +7476,6 @@ impl WgpuProvider {
                 view_a.transpose,
                 view_b.transpose
             );
-            if debug_matmul_dump {
-                if let Ok(lhs_host) = self.download(a) {
-                    let max_a = lhs_host
-                        .data
-                        .iter()
-                        .fold(0.0f64, |acc, value| acc.max(value.abs()));
-                    log::debug!("[matmul_debug] lhs max_abs={:.6e}", max_a);
-                }
-                if let Ok(rhs_host) = self.download(b) {
-                    let max_b = rhs_host
-                        .data
-                        .iter()
-                        .fold(0.0f64, |acc, value| acc.max(value.abs()));
-                    log::debug!("[matmul_debug] rhs max_abs={:.6e}", max_b);
-                }
-            }
         }
 
         let out_shape = vec![m, n];
@@ -7653,7 +7615,11 @@ impl WgpuProvider {
                 acc = match acc {
                     None => Some(partial),
                     Some(prev) => {
-                        let sum = self.elem_add(&prev, &partial)?;
+                        let sum = self.binary_op_exec(
+                            crate::backend::wgpu::types::BinaryOpCode::Add,
+                            &prev,
+                            &partial,
+                        )?;
                         self.free(&prev).ok();
                         self.free(&partial).ok();
                         Some(sum)
@@ -7776,20 +7742,6 @@ impl WgpuProvider {
             self.register_existing_buffer_with_usage(out_buffer, out_shape, len, out_usage);
         if debug_matmul {
             log::debug!("[matmul_debug] out_ptr={:p} len={}", out_ptr, len);
-            if debug_matmul_dump {
-                if let Ok(out_host) = self.download(&handle) {
-                    let max_out = out_host
-                        .data
-                        .iter()
-                        .fold(0.0f64, |acc, value| acc.max(value.abs()));
-                    let sample_len = out_host.data.len().min(8);
-                    log::debug!("[matmul_debug] out max_abs={:.6e}", max_out);
-                    log::debug!(
-                        "[matmul_debug] out sample {:?}",
-                        &out_host.data[0..sample_len]
-                    );
-                }
-            }
         }
         self.remember_matmul_sources(&handle, a, b);
         self.telemetry.record_matmul_duration(start.elapsed());
@@ -8011,7 +7963,7 @@ impl WgpuProvider {
 
         Ok(handle)
     }
-    fn centered_gram_exec_kernel(
+    async fn centered_gram_exec_kernel(
         &self,
         matrix: &GpuTensorHandle,
         matrix_entry: &BufferEntry,
@@ -8025,7 +7977,9 @@ impl WgpuProvider {
         let mut means_used = means.clone();
         let mut casted_means = false;
         if means_entry.precision != matrix_entry.precision {
-            means_used = self.cast_tensor_precision(means, matrix_entry.precision)?;
+            means_used = self
+                .cast_tensor_precision(means, matrix_entry.precision)
+                .await?;
             casted_means = true;
         }
 
@@ -8065,15 +8019,18 @@ impl WgpuProvider {
         self.mark_buffer_usage(&handle, BufferUsageClass::FusionOut);
 
         if std::env::var("RUNMAT_DEBUG_CENTERED_GRAM").is_ok() {
-            if let Err(err) = self.debug_centered_gram(
-                matrix,
-                matrix_entry.precision,
-                &means_used,
-                &handle,
-                rows,
-                cols,
-                denom,
-            ) {
+            if let Err(err) = self
+                .debug_centered_gram(
+                    matrix,
+                    matrix_entry.precision,
+                    &means_used,
+                    &handle,
+                    rows,
+                    cols,
+                    denom,
+                )
+                .await
+            {
                 log::warn!("centered_gram debug instrumentation failed: {err}");
             }
         }
@@ -8085,7 +8042,7 @@ impl WgpuProvider {
         Ok(handle)
     }
     #[allow(clippy::too_many_arguments)]
-    fn debug_centered_gram(
+    async fn debug_centered_gram(
         &self,
         matrix: &GpuTensorHandle,
         precision: NumericPrecision,
@@ -8095,9 +8052,9 @@ impl WgpuProvider {
         cols: usize,
         denom: f64,
     ) -> Result<()> {
-        let matrix_host = self.download(matrix)?;
-        let means_gpu = self.download(means)?;
-        let output_gpu = self.download(output)?;
+        let matrix_host = <Self as AccelProvider>::download(self, matrix).await?;
+        let means_gpu = <Self as AccelProvider>::download(self, means).await?;
+        let output_gpu = <Self as AccelProvider>::download(self, output).await?;
         if matrix_host.data.len() != rows * cols {
             return Err(anyhow!(
                 "centered_gram debug: matrix download length mismatch ({} vs {})",
@@ -8215,7 +8172,7 @@ impl WgpuProvider {
         Ok(())
     }
     #[allow(clippy::too_many_arguments)]
-    fn debug_qr_power_iter(
+    async fn debug_qr_power_iter(
         &self,
         product: &GpuTensorHandle,
         product_entry: &BufferEntry,
@@ -8232,10 +8189,10 @@ impl WgpuProvider {
             return Ok(());
         }
 
-        let product_host = self.download(product)?;
-        let q_gpu_host = self.download(q_result)?;
-        let r_gpu_host = self.download(r_handle)?;
-        let r_inv_gpu_host = self.download(r_inv_handle)?;
+        let product_host = <Self as AccelProvider>::download(self, product).await?;
+        let q_gpu_host = <Self as AccelProvider>::download(self, q_result).await?;
+        let r_gpu_host = <Self as AccelProvider>::download(self, r_handle).await?;
+        let r_inv_gpu_host = <Self as AccelProvider>::download(self, r_inv_handle).await?;
         let max_r_inv_abs = r_inv_gpu_host
             .data
             .iter()
@@ -8260,7 +8217,7 @@ impl WgpuProvider {
             let gram_tmp =
                 self.matmul_exec_with_usage(&product_t_tmp, product, BufferUsageClass::FusionOut)?;
             let _ = self.free(&product_t_tmp);
-            let owned = self.download(&gram_tmp)?;
+            let owned = <Self as AccelProvider>::download(self, &gram_tmp).await?;
             let _ = self.free(&gram_tmp);
             Cow::Owned(owned)
         };
@@ -8472,7 +8429,7 @@ impl WgpuProvider {
 
         Ok(())
     }
-    pub(crate) fn covariance_exec(
+    pub(crate) async fn covariance_exec(
         &self,
         matrix: &GpuTensorHandle,
         options: &CovarianceOptions,
@@ -8526,11 +8483,13 @@ impl WgpuProvider {
             0,
             crate::backend::wgpu::types::DimReduceOp::Mean,
         )?;
-        let result = self.centered_gram_exec_kernel(matrix, &entry, &means, rows, cols, denom);
+        let result = self
+            .centered_gram_exec_kernel(matrix, &entry, &means, rows, cols, denom)
+            .await;
         let _ = self.free(&means);
         result
     }
-    pub(crate) fn corrcoef_exec(
+    pub(crate) async fn corrcoef_exec(
         &self,
         matrix: &GpuTensorHandle,
         options: &CorrcoefOptions,
@@ -8614,7 +8573,7 @@ impl WgpuProvider {
         )?;
 
         // Clamp tiny negative variances to zero to stabilise sqrt
-        let mut host_variance = self.download(&variance)?;
+        let mut host_variance = <Self as AccelProvider>::download(self, &variance).await?;
         for value in host_variance.data.iter_mut() {
             if *value < 0.0 && *value > -1.0e-12 {
                 *value = 0.0;
@@ -9429,7 +9388,7 @@ impl WgpuProvider {
 
         Ok(self.register_existing_buffer(out_buffer, shape_vec, total_len))
     }
-    pub(crate) fn imfilter_exec(
+    pub(crate) async fn imfilter_exec(
         &self,
         image: &GpuTensorHandle,
         kernel: &GpuTensorHandle,
@@ -9444,10 +9403,10 @@ impl WgpuProvider {
             })
             .unwrap_or(false)
         {
-            return self.imfilter_exec_fallback(image, kernel, options);
+            return self.imfilter_exec_fallback(image, kernel, options).await;
         }
         let image_entry = self.get_entry(image)?;
-        let kernel_host = self.download(kernel)?;
+        let kernel_host = <Self as AccelProvider>::download(self, kernel).await?;
         let kernel_tensor = Tensor::new(kernel_host.data.clone(), kernel_host.shape.clone())
             .map_err(|e| anyhow!("imfilter: {e}"))?;
 
@@ -9463,7 +9422,7 @@ impl WgpuProvider {
         };
 
         if plan.rank > crate::backend::wgpu::params::IMFILTER_MAX_RANK {
-            return self.imfilter_exec_fallback(image, kernel, options);
+            return self.imfilter_exec_fallback(image, kernel, options).await;
         }
 
         let image_ext_product = plan
@@ -9472,7 +9431,7 @@ impl WgpuProvider {
             .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
             .ok_or_else(|| anyhow!("imfilter: image dimensions exceed GPU limits"))?;
         if image_ext_product != image_entry.len {
-            return self.imfilter_exec_fallback(image, kernel, options);
+            return self.imfilter_exec_fallback(image, kernel, options).await;
         }
 
         let output_len = plan
@@ -9481,23 +9440,23 @@ impl WgpuProvider {
             .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
             .ok_or_else(|| anyhow!("imfilter: output dimensions exceed GPU limits"))?;
         if output_len > u32::MAX as usize || image_entry.len > u32::MAX as usize {
-            return self.imfilter_exec_fallback(image, kernel, options);
+            return self.imfilter_exec_fallback(image, kernel, options).await;
         }
 
         let kernel_points_len = plan.kernel_points.len();
         if kernel_points_len > u32::MAX as usize {
-            return self.imfilter_exec_fallback(image, kernel, options);
+            return self.imfilter_exec_fallback(image, kernel, options).await;
         }
 
         let mut kernel_offsets = Vec::with_capacity(kernel_points_len * plan.rank);
         let mut kernel_values_f64 = Vec::with_capacity(kernel_points_len);
         for point in &plan.kernel_points {
             if point.offsets.len() != plan.rank {
-                return self.imfilter_exec_fallback(image, kernel, options);
+                return self.imfilter_exec_fallback(image, kernel, options).await;
             }
             for &offset in &point.offsets {
                 if offset < i32::MIN as isize || offset > i32::MAX as isize {
-                    return self.imfilter_exec_fallback(image, kernel, options);
+                    return self.imfilter_exec_fallback(image, kernel, options).await;
                 }
                 kernel_offsets.push(offset as i32);
             }
@@ -9505,7 +9464,7 @@ impl WgpuProvider {
         }
 
         if kernel_offsets.len() > u32::MAX as usize {
-            return self.imfilter_exec_fallback(image, kernel, options);
+            return self.imfilter_exec_fallback(image, kernel, options).await;
         }
 
         let kernel_offsets_buffer =
@@ -9816,14 +9775,14 @@ impl WgpuProvider {
         Ok(ProviderMeshgridResult { outputs })
     }
 
-    fn imfilter_exec_fallback(
+    async fn imfilter_exec_fallback(
         &self,
         image: &GpuTensorHandle,
         kernel: &GpuTensorHandle,
         options: &ImfilterOptions,
     ) -> Result<GpuTensorHandle> {
-        let image_host = self.download(image)?;
-        let kernel_host = self.download(kernel)?;
+        let image_host = <Self as AccelProvider>::download(self, image).await?;
+        let kernel_host = <Self as AccelProvider>::download(self, kernel).await?;
 
         let image_tensor = Tensor::new(image_host.data.clone(), image_host.shape.clone())
             .map_err(|e| anyhow!("imfilter: {e}"))?;
@@ -10727,7 +10686,10 @@ impl WgpuProvider {
         let out_shape = shape_for_orientation(orientation, output_len);
         Ok(self.register_existing_buffer(out_buffer, out_shape, output_len))
     }
-    pub(crate) fn polyder_exec(&self, polynomial: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+    pub(crate) async fn polyder_exec(
+        &self,
+        polynomial: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(polynomial)?;
         ensure!(
             entry.precision == self.precision,
@@ -10816,10 +10778,10 @@ impl WgpuProvider {
 
         let out_shape = shape_for_orientation(orientation, output_len);
         let handle = self.register_existing_buffer(out_buffer, out_shape, output_len);
-        self.trim_polynomial_handle(handle, orientation)
+        self.trim_polynomial_handle(handle, orientation).await
     }
 
-    pub(crate) fn polyder_product_exec(
+    pub(crate) async fn polyder_product_exec(
         &self,
         p: &GpuTensorHandle,
         q: &GpuTensorHandle,
@@ -10833,23 +10795,27 @@ impl WgpuProvider {
         let orientation = polynomial_orientation(&p_entry.shape)?;
         let conv_orientation = conv_orientation_for(orientation);
 
-        let dp = self.polyder_exec(p)?;
-        let dq = self.polyder_exec(q)?;
+        let dp = self.polyder_exec(p).await?;
+        let dq = self.polyder_exec(q).await?;
         let options = ProviderConv1dOptions {
             mode: ProviderConvMode::Full,
             orientation: conv_orientation,
         };
         let term1 = self.conv1d_exec(&dp, q, options)?;
         let term2 = self.conv1d_exec(p, &dq, options)?;
-        let result = self.elem_add(&term1, &term2)?;
+        let result = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Add,
+            &term1,
+            &term2,
+        )?;
         self.free(&dp).ok();
         self.free(&dq).ok();
         self.free(&term1).ok();
         self.free(&term2).ok();
-        self.trim_polynomial_handle(result, orientation)
+        self.trim_polynomial_handle(result, orientation).await
     }
 
-    pub(crate) fn polyder_quotient_exec(
+    pub(crate) async fn polyder_quotient_exec(
         &self,
         u: &GpuTensorHandle,
         v: &GpuTensorHandle,
@@ -10871,19 +10837,27 @@ impl WgpuProvider {
             orientation: conv_orientation_for(orientation_v),
         };
 
-        let du = self.polyder_exec(u)?;
-        let dv = self.polyder_exec(v)?;
+        let du = self.polyder_exec(u).await?;
+        let dv = self.polyder_exec(v).await?;
         let term1 = self.conv1d_exec(&du, v, options_num)?;
         let term2 = self.conv1d_exec(u, &dv, options_num)?;
-        let numerator_handle = self.elem_sub(&term1, &term2)?;
+        let numerator_handle = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Sub,
+            &term1,
+            &term2,
+        )?;
         let denominator_handle = self.conv1d_exec(v, v, options_den)?;
         self.free(&du).ok();
         self.free(&dv).ok();
         self.free(&term1).ok();
         self.free(&term2).ok();
 
-        let numerator = self.trim_polynomial_handle(numerator_handle, orientation_u)?;
-        let denominator = self.trim_polynomial_handle(denominator_handle, orientation_v)?;
+        let numerator = self
+            .trim_polynomial_handle(numerator_handle, orientation_u)
+            .await?;
+        let denominator = self
+            .trim_polynomial_handle(denominator_handle, orientation_v)
+            .await?;
         Ok(ProviderPolyderQuotient {
             numerator,
             denominator,
@@ -11386,67 +11360,7 @@ impl WgpuProvider {
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
         if std::env::var("RUNMAT_DISABLE_BINARY").is_ok() {
-            // Debug-only CPU fallback for common ops
-            let ha = self.download(a)?;
-            let hb = self.download(b)?;
-            ensure!(ha.shape == hb.shape, "binary cpu: shape mismatch");
-            let len = ha.data.len();
-            let mut out = vec![0.0f64; len];
-            match op {
-                crate::backend::wgpu::types::BinaryOpCode::Add => {
-                    for ((out_val, lhs), rhs) in
-                        out.iter_mut().zip(ha.data.iter()).zip(hb.data.iter())
-                    {
-                        *out_val = *lhs + *rhs;
-                    }
-                }
-                crate::backend::wgpu::types::BinaryOpCode::Sub => {
-                    for ((out_val, lhs), rhs) in
-                        out.iter_mut().zip(ha.data.iter()).zip(hb.data.iter())
-                    {
-                        *out_val = *lhs - *rhs;
-                    }
-                }
-                crate::backend::wgpu::types::BinaryOpCode::Mul => {
-                    for ((out_val, lhs), rhs) in
-                        out.iter_mut().zip(ha.data.iter()).zip(hb.data.iter())
-                    {
-                        *out_val = *lhs * *rhs;
-                    }
-                }
-                crate::backend::wgpu::types::BinaryOpCode::Div => {
-                    for ((out_val, lhs), rhs) in
-                        out.iter_mut().zip(ha.data.iter()).zip(hb.data.iter())
-                    {
-                        *out_val = *lhs / *rhs;
-                    }
-                }
-                crate::backend::wgpu::types::BinaryOpCode::Max => {
-                    for ((out_val, lhs), rhs) in
-                        out.iter_mut().zip(ha.data.iter()).zip(hb.data.iter())
-                    {
-                        *out_val = lhs.max(*rhs);
-                    }
-                }
-                crate::backend::wgpu::types::BinaryOpCode::Min => {
-                    for ((out_val, lhs), rhs) in
-                        out.iter_mut().zip(ha.data.iter()).zip(hb.data.iter())
-                    {
-                        *out_val = lhs.min(*rhs);
-                    }
-                }
-                _ => {
-                    // Fallback to GPU for unhandled ops
-                    // continue to GPU path
-                    // (do nothing here)
-                }
-            }
-            if !out.is_empty() {
-                return self.upload(&HostTensorView {
-                    data: &out,
-                    shape: &ha.shape,
-                });
-            }
+            return Err(anyhow!("binary ops disabled via RUNMAT_DISABLE_BINARY"));
         }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
@@ -11703,7 +11617,7 @@ impl WgpuProvider {
         Ok(handle)
     }
 
-    fn cast_tensor_precision(
+    async fn cast_tensor_precision(
         &self,
         tensor: &GpuTensorHandle,
         target: NumericPrecision,
@@ -11713,7 +11627,7 @@ impl WgpuProvider {
             return Ok(tensor.clone());
         }
 
-        let mut host = self.download(tensor)?;
+        let mut host = <Self as AccelProvider>::download(self, tensor).await?;
         if matches!(target, NumericPrecision::F32) {
             for value in host.data.iter_mut() {
                 *value = (*value as f32) as f64;
@@ -12083,37 +11997,7 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
         if std::env::var("RUNMAT_DISABLE_UNARY").is_ok() {
-            // Debug-only CPU fallback for common ops
-            let ha = self.download(a)?;
-            let len = ha.data.len();
-            let mut out = vec![0.0f64; len];
-            let handled = match op {
-                crate::backend::wgpu::types::UnaryOpCode::Exp => {
-                    for (out_val, input) in out.iter_mut().zip(ha.data.iter()) {
-                        *out_val = input.exp();
-                    }
-                    true
-                }
-                crate::backend::wgpu::types::UnaryOpCode::Sqrt => {
-                    for (out_val, input) in out.iter_mut().zip(ha.data.iter()) {
-                        *out_val = input.sqrt();
-                    }
-                    true
-                }
-                crate::backend::wgpu::types::UnaryOpCode::Abs => {
-                    for (out_val, input) in out.iter_mut().zip(ha.data.iter()) {
-                        *out_val = input.abs();
-                    }
-                    true
-                }
-                _ => false,
-            };
-            if handled {
-                return self.upload(&HostTensorView {
-                    data: &out,
-                    shape: &ha.shape,
-                });
-            }
+            return Err(anyhow!("unary ops disabled via RUNMAT_DISABLE_UNARY"));
         }
         let entry_a = self.get_entry(a)?;
         let len = entry_a.len;
@@ -12326,30 +12210,9 @@ impl WgpuProvider {
             );
         }
         if std::env::var("RUNMAT_DISABLE_REDUCE_GLOBAL").is_ok() {
-            // Debug-only CPU fallback
-            let host = self.download(a)?;
-            let val = match op {
-                crate::backend::wgpu::types::GlobalReduceOp::Sum => {
-                    host.data.iter().copied().sum::<f64>()
-                }
-                crate::backend::wgpu::types::GlobalReduceOp::Prod => {
-                    host.data.iter().copied().product::<f64>()
-                }
-                crate::backend::wgpu::types::GlobalReduceOp::Min => {
-                    host.data.iter().fold(f64::INFINITY, |m, &v| m.min(v))
-                }
-                crate::backend::wgpu::types::GlobalReduceOp::Max => {
-                    host.data.iter().fold(f64::NEG_INFINITY, |m, &v| m.max(v))
-                }
-                crate::backend::wgpu::types::GlobalReduceOp::CountNonZero => {
-                    host.data.iter().filter(|&&v| v != 0.0).count() as f64
-                }
-            };
-            let out = self.upload(&HostTensorView {
-                data: &[val],
-                shape: &[1, 1],
-            })?;
-            return Ok(out);
+            return Err(anyhow!(
+                "reduce_global disabled via RUNMAT_DISABLE_REDUCE_GLOBAL"
+            ));
         }
         if entry.len == 0 {
             let default = match op {
@@ -12536,53 +12399,7 @@ impl WgpuProvider {
             );
         }
         if std::env::var("RUNMAT_DISABLE_REDUCE_DIM").is_ok() {
-            // Debug-only CPU fallback for sum/mean
-            if entry.shape.len() != 2 {
-                return Err(anyhow!("reduce: only 2D tensors supported"));
-            }
-            let rows = entry.shape[0];
-            let cols = entry.shape[1];
-            let host = self.download(a)?;
-            let mut out: Vec<f64>;
-            let out_shape: Vec<usize>;
-            match dim {
-                0 => {
-                    // Reduce over rows -> [1, cols]
-                    out = vec![0.0; cols];
-                    for (c, out_value) in out.iter_mut().enumerate().take(cols) {
-                        let mut acc = 0.0;
-                        let base = c * rows;
-                        for r in 0..rows {
-                            acc += host.data[r + base];
-                        }
-                        if matches!(op, crate::backend::wgpu::types::DimReduceOp::Mean) {
-                            acc /= rows as f64;
-                        }
-                        *out_value = acc;
-                    }
-                    out_shape = vec![1, cols];
-                }
-                1 => {
-                    // Reduce over cols -> [rows, 1]
-                    out = vec![0.0; rows];
-                    for (r, out_value) in out.iter_mut().enumerate().take(rows) {
-                        let mut acc = 0.0;
-                        for c in 0..cols {
-                            acc += host.data[r + c * rows];
-                        }
-                        if matches!(op, crate::backend::wgpu::types::DimReduceOp::Mean) {
-                            acc /= cols as f64;
-                        }
-                        *out_value = acc;
-                    }
-                    out_shape = vec![rows, 1];
-                }
-                _ => return Err(anyhow!("reduce_dim: only dims 0 or 1 supported")),
-            }
-            return self.upload(&HostTensorView {
-                data: &out,
-                shape: &out_shape,
-            });
+            return Err(anyhow!("reduce_dim disabled via RUNMAT_DISABLE_REDUCE_DIM"));
         }
         if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
             eprintln!(
@@ -13038,13 +12855,14 @@ impl WgpuProvider {
 
         Ok(std_handle)
     }
-    pub(crate) fn fft_dim_exec(
+    pub(crate) async fn fft_dim_exec(
         &self,
         handle: &GpuTensorHandle,
         len: Option<usize>,
         dim: usize,
     ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, mut shape } = self.download(handle)?;
+        let HostTensorOwned { data, mut shape } =
+            <Self as AccelProvider>::download(self, handle).await?;
         let mut complex_axis = false;
         if shape.last() == Some(&2) {
             complex_axis = true;
@@ -13161,13 +12979,14 @@ impl WgpuProvider {
         let result = self.upload(&view)?;
         Ok(result)
     }
-    pub(crate) fn ifft_dim_exec(
+    pub(crate) async fn ifft_dim_exec(
         &self,
         handle: &GpuTensorHandle,
         len: Option<usize>,
         dim: usize,
     ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, mut shape } = self.download(handle)?;
+        let HostTensorOwned { data, mut shape } =
+            <Self as AccelProvider>::download(self, handle).await?;
         let mut complex_axis = false;
         if shape.last() == Some(&2) {
             complex_axis = true;
@@ -13574,13 +13393,13 @@ impl AccelProvider for WgpuProvider {
         self.fspecial_exec(request)
     }
 
-    fn imfilter(
-        &self,
-        image: &GpuTensorHandle,
-        kernel: &GpuTensorHandle,
-        options: &ImfilterOptions,
-    ) -> Result<GpuTensorHandle> {
-        self.imfilter_exec(image, kernel, options)
+    fn imfilter<'a>(
+        &'a self,
+        image: &'a GpuTensorHandle,
+        kernel: &'a GpuTensorHandle,
+        options: &'a ImfilterOptions,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.imfilter_exec(image, kernel, options).await })
     }
 
     fn random_integer_range(
@@ -13622,50 +13441,59 @@ impl AccelProvider for WgpuProvider {
         self.polyval_exec(coeffs, points, options)
     }
 
-    fn polyfit(
-        &self,
-        x: &GpuTensorHandle,
-        y: &GpuTensorHandle,
+    fn polyfit<'a>(
+        &'a self,
+        x: &'a GpuTensorHandle,
+        y: &'a GpuTensorHandle,
         degree: usize,
-        weights: Option<&GpuTensorHandle>,
-    ) -> Result<ProviderPolyfitResult> {
-        let x_host = self.download(x)?;
-        let y_host = self.download(y)?;
-        ensure!(
-            x_host.data.len() == y_host.data.len(),
-            "polyfit: X and Y vectors must match in length"
-        );
-        let weights_host = match weights {
-            Some(handle) => Some(self.download(handle)?),
-            None => None,
-        };
-        let weights_slice = weights_host.as_ref().map(|w| w.data.as_slice());
-        let host_result =
-            polyfit_host_real_for_provider(&x_host.data, &y_host.data, degree, weights_slice)
-                .map_err(|err| anyhow!(err))?;
-        Ok(ProviderPolyfitResult {
-            coefficients: host_result.coefficients,
-            r_matrix: host_result.r_matrix,
-            normr: host_result.normr,
-            df: host_result.df,
-            mu: host_result.mu,
+        weights: Option<&'a GpuTensorHandle>,
+    ) -> AccelProviderFuture<'a, ProviderPolyfitResult> {
+        Box::pin(async move {
+            let x_host = <Self as AccelProvider>::download(self, x).await?;
+            let y_host = <Self as AccelProvider>::download(self, y).await?;
+            ensure!(
+                x_host.data.len() == y_host.data.len(),
+                "polyfit: X and Y vectors must match in length"
+            );
+            let weights_host = match weights {
+                Some(handle) => Some(<Self as AccelProvider>::download(self, handle).await?),
+                None => None,
+            };
+            let weights_slice = weights_host.as_ref().map(|w| w.data.as_slice());
+            let host_result =
+                polyfit_host_real_for_provider(&x_host.data, &y_host.data, degree, weights_slice)
+                    .map_err(|err| anyhow!(err))?;
+            Ok(ProviderPolyfitResult {
+                coefficients: host_result.coefficients,
+                r_matrix: host_result.r_matrix,
+                normr: host_result.normr,
+                df: host_result.df,
+                mu: host_result.mu,
+            })
         })
     }
 
-    fn polyder_single(&self, polynomial: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.polyder_exec(polynomial)
+    fn polyder_single<'a>(
+        &'a self,
+        polynomial: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.polyder_exec(polynomial).await })
     }
 
-    fn polyder_product(&self, p: &GpuTensorHandle, q: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.polyder_product_exec(p, q)
+    fn polyder_product<'a>(
+        &'a self,
+        p: &'a GpuTensorHandle,
+        q: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.polyder_product_exec(p, q).await })
     }
 
-    fn polyder_quotient(
-        &self,
-        u: &GpuTensorHandle,
-        v: &GpuTensorHandle,
-    ) -> Result<ProviderPolyderQuotient> {
-        self.polyder_quotient_exec(u, v)
+    fn polyder_quotient<'a>(
+        &'a self,
+        u: &'a GpuTensorHandle,
+        v: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, ProviderPolyderQuotient> {
+        Box::pin(async move { self.polyder_quotient_exec(u, v).await })
     }
 
     fn polyint(&self, polynomial: &GpuTensorHandle, constant: f64) -> Result<GpuTensorHandle> {
@@ -13680,80 +13508,154 @@ impl AccelProvider for WgpuProvider {
         self.diag_extract_exec(matrix, offset)
     }
 
-    fn tril(&self, matrix: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
-        self.tril_exec(matrix, offset)
+    fn tril<'a>(
+        &'a self,
+        matrix: &'a GpuTensorHandle,
+        offset: isize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.tril_exec(matrix, offset).await })
     }
 
-    fn triu(&self, matrix: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
-        self.triu_exec(matrix, offset)
+    fn triu<'a>(
+        &'a self,
+        matrix: &'a GpuTensorHandle,
+        offset: isize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.triu_exec(matrix, offset).await })
     }
 
-    fn reduce_mean_nd(
-        &self,
-        a: &GpuTensorHandle,
-        dims_zero_based: &[usize],
-    ) -> Result<GpuTensorHandle> {
-        self.reduce_nd_mean_exec(a, dims_zero_based)
+    fn reduce_mean_nd<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dims_zero_based: &'a [usize],
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.reduce_nd_mean_exec(a, dims_zero_based).await })
     }
 
-    fn reduce_moments_nd(
-        &self,
-        a: &GpuTensorHandle,
-        dims_zero_based: &[usize],
-    ) -> Result<runmat_accelerate_api::ProviderMoments2> {
-        self.reduce_moments_nd_exec(a, dims_zero_based)
+    fn reduce_moments_nd<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dims_zero_based: &'a [usize],
+    ) -> AccelProviderFuture<'a, runmat_accelerate_api::ProviderMoments2> {
+        Box::pin(async move { self.reduce_moments_nd_exec(a, dims_zero_based) })
     }
 
-    fn elem_add(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Add, a, b)
+    fn elem_add<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Add, a, b)
+        })
     }
 
-    fn elem_mul(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, a, b)
+    fn elem_mul<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, a, b)
+        })
     }
 
-    fn elem_sub(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, a, b)
+    fn elem_sub<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, a, b)
+        })
     }
 
-    fn elem_max(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Max, a, b)
+    fn elem_max<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Max, a, b)
+        })
     }
 
-    fn elem_min(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Min, a, b)
+    fn elem_min<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Min, a, b)
+        })
     }
 
-    fn elem_div(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Div, a, b)
+    fn elem_div<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Div, a, b)
+        })
     }
 
-    fn elem_pow(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Pow, a, b)
+    fn elem_pow<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Pow, a, b)
+        })
     }
 
-    fn elem_ge(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.elem_ge_exec(a, b)
+    fn elem_ge<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.elem_ge_exec(a, b) })
     }
 
-    fn elem_le(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.elem_le_exec(a, b)
+    fn elem_le<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.elem_le_exec(a, b) })
     }
 
-    fn elem_lt(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.elem_lt_exec(a, b)
+    fn elem_lt<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.elem_lt_exec(a, b) })
     }
 
-    fn elem_gt(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.elem_gt_exec(a, b)
+    fn elem_gt<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.elem_gt_exec(a, b) })
     }
 
-    fn elem_eq(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.elem_eq_exec(a, b)
+    fn elem_eq<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.elem_eq_exec(a, b) })
     }
 
-    fn elem_ne(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.elem_ne_exec(a, b)
+    fn elem_ne<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.elem_ne_exec(a, b) })
     }
 
     fn logical_and(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -13794,126 +13696,247 @@ impl AccelProvider for WgpuProvider {
         self.logical_isinf_exec(a)
     }
 
-    fn elem_hypot(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Hypot, a, b)
+    fn elem_hypot<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Hypot, a, b)
+        })
     }
 
-    fn elem_atan2(&self, y: &GpuTensorHandle, x: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Atan2, y, x)
+    fn elem_atan2<'a>(
+        &'a self,
+        y: &'a GpuTensorHandle,
+        x: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Atan2, y, x)
+        })
     }
 
-    fn unary_sin(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sin, a)
+    fn unary_sin<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sin, a) },
+        )
     }
 
-    fn unary_gamma(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Gamma, a)
+    fn unary_gamma<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Gamma, a) },
+        )
     }
 
-    fn unary_factorial(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Factorial, a)
+    fn unary_factorial<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Factorial, a)
+        })
     }
 
-    fn unary_asinh(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Asinh, a)
+    fn unary_asinh<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Asinh, a) },
+        )
     }
 
-    fn unary_sinh(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sinh, a)
+    fn unary_sinh<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sinh, a) },
+        )
     }
 
-    fn unary_cosh(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Cosh, a)
+    fn unary_cosh<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Cosh, a) },
+        )
     }
 
-    fn unary_asin(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Asin, a)
+    fn unary_asin<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Asin, a) },
+        )
     }
 
-    fn unary_acos(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Acos, a)
+    fn unary_acos<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Acos, a) },
+        )
     }
 
-    fn unary_acosh(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Acosh, a)
+    fn unary_acosh<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Acosh, a) },
+        )
     }
 
-    fn unary_tan(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Tan, a)
+    fn unary_tan<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Tan, a) },
+        )
     }
 
-    fn unary_tanh(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Tanh, a)
+    fn unary_tanh<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Tanh, a) },
+        )
     }
 
-    fn unary_atan(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Atan, a)
+    fn unary_atan<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Atan, a) },
+        )
     }
-    fn unary_atanh(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Atanh, a)
-    }
-
-    fn unary_ceil(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Ceil, a)
-    }
-
-    fn unary_floor(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Floor, a)
-    }
-
-    fn unary_fix(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Fix, a)
+    fn unary_atanh<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Atanh, a) },
+        )
     }
 
-    fn unary_cos(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Cos, a)
+    fn unary_ceil<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Ceil, a) },
+        )
     }
 
-    fn unary_abs(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Abs, a)
+    fn unary_floor<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Floor, a) },
+        )
     }
 
-    fn unary_conj(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Conj, a)
+    fn unary_fix<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Fix, a) },
+        )
     }
 
-    fn unary_exp(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Exp, a)
+    fn unary_cos<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Cos, a) },
+        )
     }
 
-    fn unary_log(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Log, a)
+    fn unary_abs<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Abs, a) },
+        )
     }
 
-    fn unary_log1p(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Log1p, a)
+    fn unary_conj<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Conj, a) },
+        )
     }
 
-    fn unary_sqrt(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sqrt, a)
+    fn unary_exp<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Exp, a) },
+        )
     }
 
-    fn unary_double(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        if self.precision != NumericPrecision::F64 {
-            return Err(anyhow!(
-                "wgpu provider: shader-f64 unavailable; cannot materialise double precision"
-            ));
-        }
-        let entry = self.get_entry(a)?;
-        Ok(self.register_existing_buffer(entry.buffer, entry.shape, entry.len))
+    fn unary_log<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Log, a) },
+        )
     }
 
-    fn unary_single(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Single, a)
+    fn unary_log1p<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Log1p, a) },
+        )
     }
 
-    fn unary_pow2(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        let out = self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Pow2, a)?;
-        // Record squared->base mapping for later reduction fusion (moments reuse)
-        if let Ok(mut map) = self.pow2_of.lock() {
-            map.insert(out.buffer_id, a.buffer_id);
-        }
-        Ok(out)
+    fn unary_sqrt<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sqrt, a) },
+        )
+    }
+
+    fn unary_double<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            if self.precision != NumericPrecision::F64 {
+                return Err(anyhow!(
+                    "wgpu provider: shader-f64 unavailable; cannot materialise double precision"
+                ));
+            }
+            let entry = self.get_entry(a)?;
+            Ok(self.register_existing_buffer(entry.buffer, entry.shape, entry.len))
+        })
+    }
+
+    fn unary_single<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Single, a) },
+        )
+    }
+
+    fn unary_pow2<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let out = self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Pow2, a)?;
+            // Record squared->base mapping for later reduction fusion (moments reuse)
+            if let Ok(mut map) = self.pow2_of.lock() {
+                map.insert(out.buffer_id, a.buffer_id);
+            }
+            Ok(out)
+        })
     }
 
     fn pow2_scale(
@@ -13925,7 +13948,11 @@ impl AccelProvider for WgpuProvider {
             return Err(anyhow!("pow2_scale requires matching shapes"));
         }
         let pow = self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Pow2, exponent)?;
-        let result = self.elem_mul(mantissa, &pow);
+        let result = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Mul,
+            mantissa,
+            &pow,
+        );
         let _ = self.free(&pow);
         result
     }
@@ -13962,48 +13989,53 @@ impl AccelProvider for WgpuProvider {
         self.scalar_op_exec(crate::backend::wgpu::types::ScalarOpCode::Div, a, scalar)
     }
 
-    fn sort_dim(
-        &self,
-        a: &GpuTensorHandle,
+    fn sort_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
         dim: usize,
         order: SortOrder,
         comparison: SortComparison,
-    ) -> Result<SortResult> {
-        let host = self.download(a)?;
-        let shape = host.shape.clone();
-        let (values, indices) = sort_host_tensor(&host.data, &host.shape, dim, order, comparison)?;
-        Ok(SortResult {
-            values: HostTensorOwned {
-                data: values,
-                shape: shape.clone(),
-            },
-            indices: HostTensorOwned {
-                data: indices,
-                shape,
-            },
+    ) -> AccelProviderFuture<'a, SortResult> {
+        Box::pin(async move {
+            let host = <Self as AccelProvider>::download(self, a).await?;
+            let shape = host.shape.clone();
+            let (values, indices) =
+                sort_host_tensor(&host.data, &host.shape, dim, order, comparison)?;
+            Ok(SortResult {
+                values: HostTensorOwned {
+                    data: values,
+                    shape: shape.clone(),
+                },
+                indices: HostTensorOwned {
+                    data: indices,
+                    shape,
+                },
+            })
         })
     }
-    fn sort_rows(
-        &self,
-        a: &GpuTensorHandle,
-        columns: &[SortRowsColumnSpec],
+    fn sort_rows<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        columns: &'a [SortRowsColumnSpec],
         comparison: SortComparison,
-    ) -> Result<SortResult> {
-        let host = self.download(a)?;
-        let SortRowsHostOutputs {
-            values,
-            indices,
-            indices_shape,
-        } = sort_rows_host(&host.data, &host.shape, columns, comparison)?;
-        Ok(SortResult {
-            values: HostTensorOwned {
-                data: values,
-                shape: host.shape.clone(),
-            },
-            indices: HostTensorOwned {
-                data: indices,
-                shape: indices_shape,
-            },
+    ) -> AccelProviderFuture<'a, SortResult> {
+        Box::pin(async move {
+            let host = <Self as AccelProvider>::download(self, a).await?;
+            let SortRowsHostOutputs {
+                values,
+                indices,
+                indices_shape,
+            } = sort_rows_host(&host.data, &host.shape, columns, comparison)?;
+            Ok(SortResult {
+                values: HostTensorOwned {
+                    data: values,
+                    shape: host.shape.clone(),
+                },
+                indices: HostTensorOwned {
+                    data: indices,
+                    shape: indices_shape,
+                },
+            })
         })
     }
 
@@ -14027,14 +14059,14 @@ impl AccelProvider for WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         self.conv1d_exec(signal, kernel, options)
     }
-    fn iir_filter(
-        &self,
-        b: &GpuTensorHandle,
-        a: &GpuTensorHandle,
-        x: &GpuTensorHandle,
+    fn iir_filter<'a>(
+        &'a self,
+        b: &'a GpuTensorHandle,
+        a: &'a GpuTensorHandle,
+        x: &'a GpuTensorHandle,
         options: ProviderIirFilterOptions,
-    ) -> Result<ProviderIirFilterResult> {
-        self.iir_filter_exec(b, a, x, options)
+    ) -> AccelProviderFuture<'a, ProviderIirFilterResult> {
+        Box::pin(async move { self.iir_filter_exec(b, a, x, options).await })
     }
     fn conv2d(
         &self,
@@ -14098,30 +14130,34 @@ impl AccelProvider for WgpuProvider {
         self.circshift_exec(handle, shifts)
     }
 
-    fn fft_dim(
-        &self,
-        handle: &GpuTensorHandle,
+    fn fft_dim<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
         len: Option<usize>,
         dim: usize,
-    ) -> Result<GpuTensorHandle> {
-        self.fft_dim_exec(handle, len, dim)
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.fft_dim_exec(handle, len, dim).await })
     }
 
-    fn ifft_dim(
-        &self,
-        handle: &GpuTensorHandle,
+    fn ifft_dim<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
         len: Option<usize>,
         dim: usize,
-    ) -> Result<GpuTensorHandle> {
-        self.ifft_dim_exec(handle, len, dim)
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.ifft_dim_exec(handle, len, dim).await })
     }
 
-    fn unique(&self, handle: &GpuTensorHandle, options: &UniqueOptions) -> Result<UniqueResult> {
-        let host = self.download(handle)?;
-        let HostTensorOwned { data, shape } = host;
-        let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("unique: {e}"))?;
-        let eval =
-            match runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
+    fn unique<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+        options: &'a UniqueOptions,
+    ) -> AccelProviderFuture<'a, UniqueResult> {
+        Box::pin(async move {
+            let host = <Self as AccelProvider>::download(self, handle).await?;
+            let HostTensorOwned { data, shape } = host;
+            let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("unique: {e}"))?;
+            let eval = match runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
                 tensor, options,
             ) {
                 Ok(eval) => eval,
@@ -14129,51 +14165,56 @@ impl AccelProvider for WgpuProvider {
                     return Err(anyhow!("unique: {err}"));
                 }
             };
-        match eval.into_numeric_unique_result() {
-            Ok(result) => Ok(result),
-            Err(err) => Err(anyhow!("unique: {err}")),
-        }
-    }
-    fn ismember(
-        &self,
-        a: &GpuTensorHandle,
-        b: &GpuTensorHandle,
-        options: &IsMemberOptions,
-    ) -> Result<IsMemberResult> {
-        let host_a = self.download(a)?;
-        let host_b = self.download(b)?;
-        let tensor_a =
-            Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("ismember: {e}"))?;
-        let tensor_b =
-            Tensor::new(host_b.data, host_b.shape).map_err(|e| anyhow!("ismember: {e}"))?;
-        let eval = match runmat_runtime::builtins::array::sorting_sets::ismember::ismember_numeric_from_tensors(
-            tensor_a,
-            tensor_b,
-            options.rows,
-        ) {
-            Ok(eval) => eval,
-            Err(err) => {
-                return Err(anyhow!("ismember: {err}"));
+            match eval.into_numeric_unique_result() {
+                Ok(result) => Ok(result),
+                Err(err) => Err(anyhow!("unique: {err}")),
             }
-        };
-        match eval.into_numeric_ismember_result() {
-            Ok(result) => Ok(result),
-            Err(err) => Err(anyhow!("ismember: {err}")),
-        }
+        })
+    }
+    fn ismember<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+        options: &'a IsMemberOptions,
+    ) -> AccelProviderFuture<'a, IsMemberResult> {
+        Box::pin(async move {
+            let host_a = <Self as AccelProvider>::download(self, a).await?;
+            let host_b = <Self as AccelProvider>::download(self, b).await?;
+            let tensor_a =
+                Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("ismember: {e}"))?;
+            let tensor_b =
+                Tensor::new(host_b.data, host_b.shape).map_err(|e| anyhow!("ismember: {e}"))?;
+            let eval = match runmat_runtime::builtins::array::sorting_sets::ismember::ismember_numeric_from_tensors(
+                tensor_a,
+                tensor_b,
+                options.rows,
+            ) {
+                Ok(eval) => eval,
+                Err(err) => {
+                    return Err(anyhow!("ismember: {err}"));
+                }
+            };
+            match eval.into_numeric_ismember_result() {
+                Ok(result) => Ok(result),
+                Err(err) => Err(anyhow!("ismember: {err}")),
+            }
+        })
     }
 
-    fn union(
-        &self,
-        a: &GpuTensorHandle,
-        b: &GpuTensorHandle,
-        options: &UnionOptions,
-    ) -> Result<UnionResult> {
-        let host_a = self.download(a)?;
-        let host_b = self.download(b)?;
-        let tensor_a = Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("union: {e}"))?;
-        let tensor_b = Tensor::new(host_b.data, host_b.shape).map_err(|e| anyhow!("union: {e}"))?;
-        let eval =
-            match runmat_runtime::builtins::array::sorting_sets::union::union_numeric_from_tensors(
+    fn union<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+        options: &'a UnionOptions,
+    ) -> AccelProviderFuture<'a, UnionResult> {
+        Box::pin(async move {
+            let host_a = <Self as AccelProvider>::download(self, a).await?;
+            let host_b = <Self as AccelProvider>::download(self, b).await?;
+            let tensor_a =
+                Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("union: {e}"))?;
+            let tensor_b =
+                Tensor::new(host_b.data, host_b.shape).map_err(|e| anyhow!("union: {e}"))?;
+            let eval = match runmat_runtime::builtins::array::sorting_sets::union::union_numeric_from_tensors(
                 tensor_a, tensor_b, options,
             ) {
                 Ok(eval) => eval,
@@ -14181,35 +14222,38 @@ impl AccelProvider for WgpuProvider {
                     return Err(anyhow!("union: {err}"));
                 }
             };
-        match eval.into_numeric_union_result() {
-            Ok(result) => Ok(result),
-            Err(err) => Err(anyhow!("union: {err}")),
-        }
-    }
-    fn setdiff(
-        &self,
-        a: &GpuTensorHandle,
-        b: &GpuTensorHandle,
-        options: &SetdiffOptions,
-    ) -> Result<SetdiffResult> {
-        let host_a = self.download(a)?;
-        let host_b = self.download(b)?;
-        let tensor_a =
-            Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("setdiff: {e}"))?;
-        let tensor_b =
-            Tensor::new(host_b.data, host_b.shape).map_err(|e| anyhow!("setdiff: {e}"))?;
-        let eval = match runmat_runtime::builtins::array::sorting_sets::setdiff::setdiff_numeric_from_tensors(
-            tensor_a, tensor_b, options,
-        ) {
-            Ok(eval) => eval,
-            Err(err) => {
-                return Err(anyhow!("setdiff: {err}"));
+            match eval.into_numeric_union_result() {
+                Ok(result) => Ok(result),
+                Err(err) => Err(anyhow!("union: {err}")),
             }
-        };
-        match eval.into_numeric_setdiff_result() {
-            Ok(result) => Ok(result),
-            Err(err) => Err(anyhow!("setdiff: {err}")),
-        }
+        })
+    }
+    fn setdiff<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+        options: &'a SetdiffOptions,
+    ) -> AccelProviderFuture<'a, SetdiffResult> {
+        Box::pin(async move {
+            let host_a = <Self as AccelProvider>::download(self, a).await?;
+            let host_b = <Self as AccelProvider>::download(self, b).await?;
+            let tensor_a =
+                Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("setdiff: {e}"))?;
+            let tensor_b =
+                Tensor::new(host_b.data, host_b.shape).map_err(|e| anyhow!("setdiff: {e}"))?;
+            let eval = match runmat_runtime::builtins::array::sorting_sets::setdiff::setdiff_numeric_from_tensors(
+                tensor_a, tensor_b, options,
+            ) {
+                Ok(eval) => eval,
+                Err(err) => {
+                    return Err(anyhow!("setdiff: {err}"));
+                }
+            };
+            match eval.into_numeric_setdiff_result() {
+                Ok(result) => Ok(result),
+                Err(err) => Err(anyhow!("setdiff: {err}")),
+            }
+        })
     }
 
     fn cat(&self, dim: usize, inputs: &[GpuTensorHandle]) -> Result<GpuTensorHandle> {
@@ -14246,82 +14290,95 @@ impl AccelProvider for WgpuProvider {
         Ok(updated)
     }
 
-    fn lu(&self, a: &GpuTensorHandle) -> Result<ProviderLuResult> {
-        let host = self.download(a)?;
-        let LuHostFactors {
-            combined,
-            lower,
-            upper,
-            perm_matrix,
-            pivot_vector,
-            combined_shape,
-            lower_shape,
-            upper_shape,
-            perm_shape,
-            pivot_shape,
-        } = lu_factor_host(&host.data, &host.shape)?;
-        let combined = self.upload(&HostTensorView {
-            data: &combined,
-            shape: &combined_shape,
-        })?;
-        let lower = self.upload(&HostTensorView {
-            data: &lower,
-            shape: &lower_shape,
-        })?;
-        let upper = self.upload(&HostTensorView {
-            data: &upper,
-            shape: &upper_shape,
-        })?;
-        let perm_matrix = self.upload(&HostTensorView {
-            data: &perm_matrix,
-            shape: &perm_shape,
-        })?;
-        let perm_vector = self.upload(&HostTensorView {
-            data: &pivot_vector,
-            shape: &pivot_shape,
-        })?;
-        Ok(ProviderLuResult {
-            combined,
-            lower,
-            upper,
-            perm_matrix,
-            perm_vector,
+    fn lu<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, ProviderLuResult> {
+        Box::pin(async move {
+            let host = <Self as AccelProvider>::download(self, a).await?;
+            let LuHostFactors {
+                combined,
+                lower,
+                upper,
+                perm_matrix,
+                pivot_vector,
+                combined_shape,
+                lower_shape,
+                upper_shape,
+                perm_shape,
+                pivot_shape,
+            } = lu_factor_host(&host.data, &host.shape)?;
+            let combined = self.upload(&HostTensorView {
+                data: &combined,
+                shape: &combined_shape,
+            })?;
+            let lower = self.upload(&HostTensorView {
+                data: &lower,
+                shape: &lower_shape,
+            })?;
+            let upper = self.upload(&HostTensorView {
+                data: &upper,
+                shape: &upper_shape,
+            })?;
+            let perm_matrix = self.upload(&HostTensorView {
+                data: &perm_matrix,
+                shape: &perm_shape,
+            })?;
+            let perm_vector = self.upload(&HostTensorView {
+                data: &pivot_vector,
+                shape: &pivot_shape,
+            })?;
+            Ok(ProviderLuResult {
+                combined,
+                lower,
+                upper,
+                perm_matrix,
+                perm_vector,
+            })
         })
     }
 
-    fn chol(&self, a: &GpuTensorHandle, lower: bool) -> Result<ProviderCholResult> {
-        let host = self.download(a)?;
-        let tensor =
-            Tensor::new(host.data.clone(), host.shape.clone()).map_err(|e| anyhow!("chol: {e}"))?;
-        let mut args = Vec::new();
-        if lower {
-            args.push(Value::from("lower"));
-        }
-        let eval = block_on_runtime(
-            runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
+    fn chol<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        lower: bool,
+    ) -> AccelProviderFuture<'a, ProviderCholResult> {
+        Box::pin(async move {
+            let host = <Self as AccelProvider>::download(self, a).await?;
+            let tensor = Tensor::new(host.data.clone(), host.shape.clone())
+                .map_err(|e| anyhow!("chol: {e}"))?;
+            let mut args = Vec::new();
+            if lower {
+                args.push(Value::from("lower"));
+            }
+            let eval = runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
                 Value::Tensor(tensor),
                 &args,
-            ),
-        )
-        .map_err(|err| runtime_flow_to_anyhow("chol", err))?;
-        let factor_tensor = host_tensor_from_value("chol", eval.factor())?;
-        let factor = self.upload(&HostTensorView {
-            data: &factor_tensor.data,
-            shape: &factor_tensor.shape,
-        })?;
-        Ok(ProviderCholResult {
-            factor,
-            info: eval.flag_index() as u32,
+            )
+            .await
+            .map_err(|err| runtime_flow_to_anyhow("chol", err))?;
+            let factor_tensor = host_tensor_from_value("chol", eval.factor())?;
+            let factor = self.upload(&HostTensorView {
+                data: &factor_tensor.data,
+                shape: &factor_tensor.shape,
+            })?;
+            Ok(ProviderCholResult {
+                factor,
+                info: eval.flag_index() as u32,
+            })
         })
     }
-    fn qr(&self, handle: &GpuTensorHandle, options: ProviderQrOptions) -> Result<ProviderQrResult> {
-        if let Some(result) = self.try_qr_device(handle, &options)? {
-            return Ok(result);
-        }
-        let host = self.download(handle)?;
-        let tensor =
-            Tensor::new(host.data.clone(), host.shape.clone()).map_err(|e| anyhow!("qr: {e}"))?;
-        self.qr_host_result(tensor, &options)
+    fn qr<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+        options: ProviderQrOptions,
+    ) -> AccelProviderFuture<'a, ProviderQrResult> {
+        Box::pin(async move {
+            if let Some(result) = self.try_qr_device(handle, &options)? {
+                return Ok(result);
+            }
+            let host = <Self as AccelProvider>::download(self, handle).await?;
+            let tensor = Tensor::new(host.data.clone(), host.shape.clone())
+                .map_err(|e| anyhow!("qr: {e}"))?;
+            self.qr_host_result(tensor, &options).await
+        })
     }
 
     fn take_matmul_sources(
@@ -14338,728 +14395,759 @@ impl AccelProvider for WgpuProvider {
         res
     }
 
-    fn qr_power_iter(
-        &self,
-        product: &GpuTensorHandle,
-        product_lhs: Option<&GpuTensorHandle>,
-        q_handle: &GpuTensorHandle,
-        options: &ProviderQrOptions,
-    ) -> Result<Option<ProviderQrPowerIterResult>> {
-        let debug_qr = std::env::var("RUNMAT_DEBUG_QR").is_ok();
-        if !options.economy {
-            return Ok(None);
-        }
-
-        let product_entry = self.get_entry(product)?;
-        if product_entry.shape.len() != 2 {
-            return Ok(None);
-        }
-        let rows = product_entry.shape[0];
-        let cols = product_entry.shape[1];
-        if rows == 0 || cols == 0 {
-            return Ok(None);
-        }
-        if cols > QR_DEVICE_MAX_COLS {
-            if debug_qr {
-                log::debug!(
-                    "qr_power_iter: column count {} exceeds device kernel limit {}; falling back",
-                    cols,
-                    QR_DEVICE_MAX_COLS
-                );
+    fn qr_power_iter<'a>(
+        &'a self,
+        product: &'a GpuTensorHandle,
+        product_lhs: Option<&'a GpuTensorHandle>,
+        q_handle: &'a GpuTensorHandle,
+        options: &'a ProviderQrOptions,
+    ) -> AccelProviderFuture<'a, Option<ProviderQrPowerIterResult>> {
+        Box::pin(async move {
+            let debug_qr = std::env::var("RUNMAT_DEBUG_QR").is_ok();
+            if !options.economy {
+                return Ok(None);
             }
-            return Ok(None);
-        }
-        if self.precision() != ProviderPrecision::F32 {
-            if debug_qr {
-                log::debug!(
-                    "qr_power_iter: precision {:?} unsupported for device QR kernel; falling back",
-                    self.precision()
-                );
-            }
-            return Ok(None);
-        }
-        let q_entry = self.get_entry(q_handle)?;
-        if q_entry.shape != product_entry.shape {
-            return Ok(None);
-        }
-        let k = cols;
 
-        let mut pre_product_max = match self.download(product) {
-            Ok(host) => Some(
-                host.data
-                    .iter()
-                    .fold(0.0f64, |acc, value| acc.max(value.abs())),
-            ),
-            Err(err) => {
-                log::warn!("qr_power_iter pre-download failed: {err}");
-                None
+            let product_entry = self.get_entry(product)?;
+            if product_entry.shape.len() != 2 {
+                return Ok(None);
             }
-        };
-
-        let pre_q_max = match self.download(q_handle) {
-            Ok(host) => Some(
-                host.data
-                    .iter()
-                    .fold(0.0f64, |acc, value| acc.max(value.abs())),
-            ),
-            Err(err) => {
-                log::warn!("qr_power_iter q-handle pre-download failed: {err}");
-                None
+            let rows = product_entry.shape[0];
+            let cols = product_entry.shape[1];
+            if rows == 0 || cols == 0 {
+                return Ok(None);
             }
-        };
+            if cols > QR_DEVICE_MAX_COLS {
+                if debug_qr {
+                    log::debug!(
+                        "qr_power_iter: column count {} exceeds device kernel limit {}; falling back",
+                        cols,
+                        QR_DEVICE_MAX_COLS
+                    );
+                }
+                return Ok(None);
+            }
+            if self.precision() != ProviderPrecision::F32 {
+                if debug_qr {
+                    log::debug!(
+                        "qr_power_iter: precision {:?} unsupported for device QR kernel; falling back",
+                        self.precision()
+                    );
+                }
+                return Ok(None);
+            }
+            let q_entry = self.get_entry(q_handle)?;
+            if q_entry.shape != product_entry.shape {
+                return Ok(None);
+            }
+            let k = cols;
 
-        const PRODUCT_EPS: f64 = 1.0e-12;
-        const Q_EPS: f64 = 1.0e-6;
-        if pre_product_max.unwrap_or(0.0) <= PRODUCT_EPS && pre_q_max.unwrap_or(0.0) > Q_EPS {
-            let debug_zero_host = std::env::var("RUNMAT_DEBUG_QR_ZEROHOST").is_ok();
-            if debug_zero_host {
-                if let Some(lhs_handle) = product_lhs {
-                    match (self.download(lhs_handle), self.download(q_handle)) {
-                        (Ok(lhs_host), Ok(q_host)) => {
-                            let lhs_rows = lhs_host.shape.first().copied().unwrap_or(0);
-                            let lhs_cols = lhs_host.shape.get(1).copied().unwrap_or(0);
-                            let q_rows = q_host.shape.first().copied().unwrap_or(0);
-                            let q_cols = q_host.shape.get(1).copied().unwrap_or(0);
-                            if lhs_rows == q_rows
-                                && lhs_cols == q_rows
-                                && q_rows == rows
-                                && q_cols == cols
-                            {
-                                let mut max_host_product = 0.0f64;
-                                for col in 0..cols {
-                                    for row in 0..rows {
-                                        let mut sum = 0.0f64;
-                                        for k_idx in 0..lhs_cols {
-                                            let lhs_idx = row + k_idx * lhs_rows;
-                                            let q_idx = k_idx + col * q_rows;
-                                            sum += lhs_host.data[lhs_idx] * q_host.data[q_idx];
+            let mut pre_product_max = match <Self as AccelProvider>::download(self, product).await {
+                Ok(host) => Some(
+                    host.data
+                        .iter()
+                        .fold(0.0f64, |acc, value| acc.max(value.abs())),
+                ),
+                Err(err) => {
+                    log::warn!("qr_power_iter pre-download failed: {err}");
+                    None
+                }
+            };
+
+            let pre_q_max = match <Self as AccelProvider>::download(self, q_handle).await {
+                Ok(host) => Some(
+                    host.data
+                        .iter()
+                        .fold(0.0f64, |acc, value| acc.max(value.abs())),
+                ),
+                Err(err) => {
+                    log::warn!("qr_power_iter q-handle pre-download failed: {err}");
+                    None
+                }
+            };
+
+            const PRODUCT_EPS: f64 = 1.0e-12;
+            const Q_EPS: f64 = 1.0e-6;
+            if pre_product_max.unwrap_or(0.0) <= PRODUCT_EPS && pre_q_max.unwrap_or(0.0) > Q_EPS {
+                let debug_zero_host = std::env::var("RUNMAT_DEBUG_QR_ZEROHOST").is_ok();
+                if debug_zero_host {
+                    if let Some(lhs_handle) = product_lhs {
+                        let lhs_download =
+                            <Self as AccelProvider>::download(self, lhs_handle).await;
+                        let q_download = <Self as AccelProvider>::download(self, q_handle).await;
+                        match (lhs_download, q_download) {
+                            (Ok(lhs_host), Ok(q_host)) => {
+                                let lhs_rows = lhs_host.shape.first().copied().unwrap_or(0);
+                                let lhs_cols = lhs_host.shape.get(1).copied().unwrap_or(0);
+                                let q_rows = q_host.shape.first().copied().unwrap_or(0);
+                                let q_cols = q_host.shape.get(1).copied().unwrap_or(0);
+                                if lhs_rows == q_rows
+                                    && lhs_cols == q_rows
+                                    && q_rows == rows
+                                    && q_cols == cols
+                                {
+                                    let mut max_host_product = 0.0f64;
+                                    for col in 0..cols {
+                                        for row in 0..rows {
+                                            let mut sum = 0.0f64;
+                                            for k_idx in 0..lhs_cols {
+                                                let lhs_idx = row + k_idx * lhs_rows;
+                                                let q_idx = k_idx + col * q_rows;
+                                                sum += lhs_host.data[lhs_idx] * q_host.data[q_idx];
+                                            }
+                                            max_host_product = max_host_product.max(sum.abs());
                                         }
-                                        max_host_product = max_host_product.max(sum.abs());
                                     }
+                                    log::info!(
+                                    "qr_power_iter host check: rows={} cols={} host_max_product={:.6e}",
+                                    rows,
+                                    cols,
+                                    max_host_product
+                                );
+                                } else {
+                                    log::info!(
+                                    "qr_power_iter host check skipped: lhs_shape={:?} q_shape={:?} rows={} cols={}",
+                                    lhs_host.shape,
+                                    q_host.shape,
+                                    rows,
+                                    cols
+                                );
                                 }
+                            }
+                            (lhs_res, q_res) => {
                                 log::info!(
-                                "qr_power_iter host check: rows={} cols={} host_max_product={:.6e}",
-                                rows,
-                                cols,
-                                max_host_product
-                            );
-                            } else {
-                                log::info!(
-                                "qr_power_iter host check skipped: lhs_shape={:?} q_shape={:?} rows={} cols={}",
-                                lhs_host.shape,
-                                q_host.shape,
-                                rows,
-                                cols
-                            );
+                                    "qr_power_iter host check download failed: lhs={:?} q={:?} product_id={}",
+                                    lhs_res.err(),
+                                    q_res.err(),
+                                    product.buffer_id
+                                );
                             }
                         }
-                        (lhs_res, q_res) => {
-                            log::info!(
-                                "qr_power_iter host check download failed: lhs={:?} q={:?} product_id={}",
-                                lhs_res.err(),
-                                q_res.err(),
-                                product.buffer_id
-                            );
-                        }
-                    }
-                } else {
-                    log::info!(
-                        "qr_power_iter host check skipped: product_lhs unavailable (product_id={})",
-                        product.buffer_id
-                    );
-                }
-            }
-            if let Some(lhs_handle) = product_lhs {
-                log::warn!(
-                    "qr_power_iter: detected zero matmul product (product_id={} max_product_abs_pre={:?} max_q_abs_pre={:?}); recomputing",
-                    product.buffer_id,
-                    pre_product_max,
-                    pre_q_max
-                );
-                if let Ok(lhs_entry) = self.get_entry(lhs_handle) {
-                    if let Ok(rhs_entry) = self.get_entry(q_handle) {
-                        let lhs_view = build_matrix_operand_view(lhs_handle, &lhs_entry).unwrap_or(
-                            MatrixOperandView {
-                                rows: 0,
-                                cols: 0,
-                                lda: 0,
-                                transpose: false,
-                            },
-                        );
-                        let rhs_view = build_matrix_operand_view(q_handle, &rhs_entry).unwrap_or(
-                            MatrixOperandView {
-                                rows: 0,
-                                cols: 0,
-                                lda: 0,
-                                transpose: false,
-                            },
-                        );
+                    } else {
                         log::info!(
-                            "qr_power_iter recompute operands: product_id={} lhs_shape={:?} rhs_shape={:?} lhs_view={{rows:{} cols:{} lda:{} transpose:{}}} rhs_view={{rows:{} cols:{} lda:{} transpose:{}}}",
-                            product.buffer_id,
-                            lhs_entry.shape,
-                            rhs_entry.shape,
-                            lhs_view.rows,
-                            lhs_view.cols,
-                            lhs_view.lda,
-                            lhs_view.transpose,
-                            rhs_view.rows,
-                            rhs_view.cols,
-                            rhs_view.lda,
-                            rhs_view.transpose
-                        );
-                        log::info!(
-                            "qr_power_iter recompute buffers: product_id={} lhs_ptr={:p} rhs_ptr={:p}",
-                            product.buffer_id,
-                            lhs_entry.buffer.as_ref(),
-                            rhs_entry.buffer.as_ref()
+                            "qr_power_iter host check skipped: product_lhs unavailable (product_id={})",
+                            product.buffer_id
                         );
                     }
                 }
-                let recomputed =
-                    self.matmul_exec_with_usage(lhs_handle, q_handle, BufferUsageClass::FusionOut)?;
-                let mut recomputed_max: Option<f64> = None;
-                if debug_zero_host {
-                    match self.download(&recomputed) {
-                        Ok(host) => {
-                            let max_recomputed = host
-                                .data
-                                .iter()
-                                .fold(0.0f64, |acc, value| acc.max(value.abs()));
-                            log::info!(
-                                "qr_power_iter recompute check: product_id={} max_recomputed_abs={:.6e}",
-                                product.buffer_id,
-                                max_recomputed
-                            );
-                            recomputed_max = Some(max_recomputed);
-                        }
-                        Err(err) => {
-                            log::info!(
-                                "qr_power_iter recompute check failed: product_id={} err={}",
-                                product.buffer_id,
-                                err
-                            );
-                        }
-                    }
-                }
-                let recomputed_entry = self.get_entry(&recomputed)?;
-                log::info!(
-                    "qr_power_iter recompute start: product_id={} original_len={} recomputed_len={}",
-                    product.buffer_id,
-                    product_entry.len,
-                    recomputed_entry.len
-                );
-                let bytes = (recomputed_entry.len as u64) * self.element_size as u64;
-                log::info!(
-                    "qr_power_iter recompute copy detail: product_id={} product_ptr={:p} recomputed_ptr={:p}",
-                    product.buffer_id,
-                    product_entry.buffer.as_ref(),
-                    recomputed_entry.buffer.as_ref()
-                );
-                if bytes > 0 {
-                    let mut encoder =
-                        self.device
-                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: Some("runmat-qr-product-recompute"),
-                            });
-                    encoder.copy_buffer_to_buffer(
-                        recomputed_entry.buffer.as_ref(),
-                        0,
-                        product_entry.buffer.as_ref(),
-                        0,
-                        bytes,
+                if let Some(lhs_handle) = product_lhs {
+                    log::warn!(
+                        "qr_power_iter: detected zero matmul product (product_id={} max_product_abs_pre={:?} max_q_abs_pre={:?}); recomputing",
+                        product.buffer_id,
+                        pre_product_max,
+                        pre_q_max
                     );
-                    self.submit(encoder);
-                }
-
-                let max_val = if let Some(val) = recomputed_max {
-                    val
-                } else {
-                    match self.download(product) {
-                        Ok(host) => host
-                            .data
-                            .iter()
-                            .fold(0.0f64, |acc, value| acc.max(value.abs())),
-                        Err(err) => {
-                            log::warn!("qr_power_iter recompute verification failed: {err}");
-                            0.0
+                    if let Ok(lhs_entry) = self.get_entry(lhs_handle) {
+                        if let Ok(rhs_entry) = self.get_entry(q_handle) {
+                            let lhs_view = build_matrix_operand_view(lhs_handle, &lhs_entry)
+                                .unwrap_or(MatrixOperandView {
+                                    rows: 0,
+                                    cols: 0,
+                                    lda: 0,
+                                    transpose: false,
+                                });
+                            let rhs_view = build_matrix_operand_view(q_handle, &rhs_entry)
+                                .unwrap_or(MatrixOperandView {
+                                    rows: 0,
+                                    cols: 0,
+                                    lda: 0,
+                                    transpose: false,
+                                });
+                            log::info!(
+                                "qr_power_iter recompute operands: product_id={} lhs_shape={:?} rhs_shape={:?} lhs_view={{rows:{} cols:{} lda:{} transpose:{}}} rhs_view={{rows:{} cols:{} lda:{} transpose:{}}}",
+                                product.buffer_id,
+                                lhs_entry.shape,
+                                rhs_entry.shape,
+                                lhs_view.rows,
+                                lhs_view.cols,
+                                lhs_view.lda,
+                                lhs_view.transpose,
+                                rhs_view.rows,
+                                rhs_view.cols,
+                                rhs_view.lda,
+                                rhs_view.transpose
+                            );
+                            log::info!(
+                                "qr_power_iter recompute buffers: product_id={} lhs_ptr={:p} rhs_ptr={:p}",
+                                product.buffer_id,
+                                lhs_entry.buffer.as_ref(),
+                                rhs_entry.buffer.as_ref()
+                            );
                         }
                     }
-                };
-                log::info!(
-                    "qr_power_iter recompute copy: product_id={} bytes={} post_max={:.6e}",
-                    product.buffer_id,
-                    bytes,
-                    max_val
-                );
-                if max_val == 0.0 {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        let q_download = self.download(q_handle);
-                        if let Ok(lhs_dump) = self.download(lhs_handle) {
-                            if let Ok(ref q_dump) = q_download {
-                                let dump_dir = Path::new("target/matmul_zero");
-                                let _ = fs::create_dir_all(dump_dir);
-                                let lhs_path = dump_dir.join(format!(
-                                    "lhs_{}_{}.bin",
+                    let recomputed = self.matmul_exec_with_usage(
+                        lhs_handle,
+                        q_handle,
+                        BufferUsageClass::FusionOut,
+                    )?;
+                    let mut recomputed_max: Option<f64> = None;
+                    if debug_zero_host {
+                        match <Self as AccelProvider>::download(self, &recomputed).await {
+                            Ok(host) => {
+                                let max_recomputed = host
+                                    .data
+                                    .iter()
+                                    .fold(0.0f64, |acc, value| acc.max(value.abs()));
+                                log::info!(
+                                    "qr_power_iter recompute check: product_id={} max_recomputed_abs={:.6e}",
                                     product.buffer_id,
-                                    lhs_dump.data.len()
-                                ));
-                                let rhs_path = dump_dir.join(format!(
-                                    "rhs_{}_{}.bin",
+                                    max_recomputed
+                                );
+                                recomputed_max = Some(max_recomputed);
+                            }
+                            Err(err) => {
+                                log::info!(
+                                    "qr_power_iter recompute check failed: product_id={} err={}",
                                     product.buffer_id,
-                                    q_dump.data.len()
-                                ));
-                                let _ = fs::write(&lhs_path, cast_slice(lhs_dump.data.as_slice()));
-                                let _ = fs::write(&rhs_path, cast_slice(q_dump.data.as_slice()));
-                                log::warn!(
-                                    "qr_power_iter dump written: product_id={} lhs_path={} rhs_path={}",
-                                    product.buffer_id,
-                                    lhs_path.display(),
-                                    rhs_path.display()
+                                    err
                                 );
                             }
                         }
                     }
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        log::warn!("qr_power_iter: skipping matmul dump because filesystem APIs are unavailable on wasm");
-                    }
-                    log::warn!(
-                        "qr_power_iter: recomputed product is still zero; falling back to host QR"
+                    let recomputed_entry = self.get_entry(&recomputed)?;
+                    log::info!(
+                        "qr_power_iter recompute start: product_id={} original_len={} recomputed_len={}",
+                        product.buffer_id,
+                        product_entry.len,
+                        recomputed_entry.len
                     );
-                    let _ = self.free(&recomputed);
-                    if let Some(handle) = self.qr_power_iter_host(product, options)? {
-                        return Ok(Some(handle));
+                    let bytes = (recomputed_entry.len as u64) * self.element_size as u64;
+                    log::info!(
+                        "qr_power_iter recompute copy detail: product_id={} product_ptr={:p} recomputed_ptr={:p}",
+                        product.buffer_id,
+                        product_entry.buffer.as_ref(),
+                        recomputed_entry.buffer.as_ref()
+                    );
+                    if bytes > 0 {
+                        let mut encoder =
+                            self.device
+                                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                    label: Some("runmat-qr-product-recompute"),
+                                });
+                        encoder.copy_buffer_to_buffer(
+                            recomputed_entry.buffer.as_ref(),
+                            0,
+                            product_entry.buffer.as_ref(),
+                            0,
+                            bytes,
+                        );
+                        self.submit(encoder);
                     }
-                    return Ok(None);
+
+                    let max_val = if let Some(val) = recomputed_max {
+                        val
+                    } else {
+                        match <Self as AccelProvider>::download(self, product).await {
+                            Ok(host) => host
+                                .data
+                                .iter()
+                                .fold(0.0f64, |acc, value| acc.max(value.abs())),
+                            Err(err) => {
+                                log::warn!("qr_power_iter recompute verification failed: {err}");
+                                0.0
+                            }
+                        }
+                    };
+                    log::info!(
+                        "qr_power_iter recompute copy: product_id={} bytes={} post_max={:.6e}",
+                        product.buffer_id,
+                        bytes,
+                        max_val
+                    );
+                    if max_val == 0.0 {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            let q_download =
+                                <Self as AccelProvider>::download(self, q_handle).await;
+                            if let Ok(lhs_dump) =
+                                <Self as AccelProvider>::download(self, lhs_handle).await
+                            {
+                                if let Ok(ref q_dump) = q_download {
+                                    let dump_dir = Path::new("target/matmul_zero");
+                                    let _ = fs::create_dir_all(dump_dir);
+                                    let lhs_path = dump_dir.join(format!(
+                                        "lhs_{}_{}.bin",
+                                        product.buffer_id,
+                                        lhs_dump.data.len()
+                                    ));
+                                    let rhs_path = dump_dir.join(format!(
+                                        "rhs_{}_{}.bin",
+                                        product.buffer_id,
+                                        q_dump.data.len()
+                                    ));
+                                    let _ =
+                                        fs::write(&lhs_path, cast_slice(lhs_dump.data.as_slice()));
+                                    let _ =
+                                        fs::write(&rhs_path, cast_slice(q_dump.data.as_slice()));
+                                    log::warn!(
+                                        "qr_power_iter dump written: product_id={} lhs_path={} rhs_path={}",
+                                        product.buffer_id,
+                                        lhs_path.display(),
+                                        rhs_path.display()
+                                    );
+                                }
+                            }
+                        }
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            log::warn!("qr_power_iter: skipping matmul dump because filesystem APIs are unavailable on wasm");
+                        }
+                        log::warn!(
+                            "qr_power_iter: recomputed product is still zero; falling back to host QR"
+                        );
+                        let _ = self.free(&recomputed);
+                        if let Some(handle) = self.qr_power_iter_host(product, options).await? {
+                            return Ok(Some(handle));
+                        }
+                        return Ok(None);
+                    }
+                    pre_product_max = Some(max_val);
+
+                    let _ = self.free(&recomputed);
+                } else {
+                    log::warn!(
+                        "qr_power_iter: zero product detected for buffer {} without lhs handle; proceeding with existing data",
+                        product.buffer_id
+                    );
                 }
-                pre_product_max = Some(max_val);
-
-                let _ = self.free(&recomputed);
-            } else {
-                log::warn!(
-                    "qr_power_iter: zero product detected for buffer {} without lhs handle; proceeding with existing data",
-                    product.buffer_id
-                );
             }
-        }
 
-        let (q_result, r_handle, mut r_inv_opt) =
-            self.qr_factor_device(product, rows, cols, Some(q_handle), "runmat-qr-power", true)?;
-
-        let mut fallback_needed = false;
-        if let Ok(host_r) = self.download(&r_handle) {
-            for col in 0..cols {
-                let diag = host_r.data[col + col * cols];
-                if !diag.is_finite() || diag.abs() <= 1.0e-12 {
-                    fallback_needed = true;
-                    break;
-                }
-            }
-        }
-
-        if fallback_needed {
-            if let Some(handle) = r_inv_opt.take() {
-                let _ = self.free(&handle);
-            }
-            let _ = self.free(&q_result);
-            let _ = self.free(&r_handle);
-            return self.qr_power_iter_host(product, options);
-        }
-
-        if pre_product_max.unwrap_or(0.0) <= 1.0e-8 {
-            if let Some(handle) = r_inv_opt.take() {
-                let _ = self.free(&handle);
-            }
-            let _ = self.free(&q_result);
-            let _ = self.free(&r_handle);
-            return self.qr_power_iter_host(product, options);
-        }
-
-        if debug_qr {
-            if let Err(err) = self.debug_qr_power_iter(
+            let (q_result, r_handle, mut r_inv_opt) = self.qr_factor_device(
                 product,
-                &product_entry,
-                pre_product_max,
-                pre_q_max,
-                &q_result,
-                &r_handle,
-                r_inv_opt
-                    .as_ref()
-                    .expect("retain_r_inv=true must provide inverse handle"),
-                None::<&runmat_accelerate_api::HostTensorOwned>,
                 rows,
                 cols,
-            ) {
-                log::warn!("qr_power_iter debug failed: {err}");
+                Some(q_handle),
+                "runmat-qr-power",
+                true,
+            )?;
+
+            let mut fallback_needed = false;
+            if let Ok(host_r) = <Self as AccelProvider>::download(self, &r_handle).await {
+                for col in 0..cols {
+                    let diag = host_r.data[col + col * cols];
+                    if !diag.is_finite() || diag.abs() <= 1.0e-12 {
+                        fallback_needed = true;
+                        break;
+                    }
+                }
             }
-        }
 
-        if let Some(handle) = r_inv_opt.take() {
-            let _ = self.free(&handle);
-        }
+            if fallback_needed {
+                if let Some(handle) = r_inv_opt.take() {
+                    let _ = self.free(&handle);
+                }
+                let _ = self.free(&q_result);
+                let _ = self.free(&r_handle);
+                return self.qr_power_iter_host(product, options).await;
+            }
 
-        let mut perm_matrix = vec![0.0f64; k * k];
-        for i in 0..k {
-            perm_matrix[i + i * k] = 1.0;
-        }
-        let perm_vector: Vec<f64> = (1..=k).map(|v| v as f64).collect();
+            if pre_product_max.unwrap_or(0.0) <= 1.0e-8 {
+                if let Some(handle) = r_inv_opt.take() {
+                    let _ = self.free(&handle);
+                }
+                let _ = self.free(&q_result);
+                let _ = self.free(&r_handle);
+                return self.qr_power_iter_host(product, options).await;
+            }
 
-        let perm_matrix_shape = [k, k];
-        let perm_matrix_handle = self.upload(&HostTensorView {
-            data: &perm_matrix,
-            shape: &perm_matrix_shape,
-        })?;
-        let perm_vector_shape = vec![k, 1];
-        let perm_vector_handle = self.upload(&HostTensorView {
-            data: &perm_vector,
-            shape: &perm_vector_shape,
-        })?;
+            if debug_qr {
+                if let Err(err) = self
+                    .debug_qr_power_iter(
+                        product,
+                        &product_entry,
+                        pre_product_max,
+                        pre_q_max,
+                        &q_result,
+                        &r_handle,
+                        r_inv_opt
+                            .as_ref()
+                            .expect("retain_r_inv=true must provide inverse handle"),
+                        None::<&runmat_accelerate_api::HostTensorOwned>,
+                        rows,
+                        cols,
+                    )
+                    .await
+                {
+                    log::warn!("qr_power_iter debug failed: {err}");
+                }
+            }
 
-        let _ = self.free(product);
+            if let Some(handle) = r_inv_opt.take() {
+                let _ = self.free(&handle);
+            }
 
-        Ok(Some(ProviderQrPowerIterResult {
-            q: q_result,
-            r: r_handle,
-            perm_matrix: perm_matrix_handle,
-            perm_vector: perm_vector_handle,
-        }))
+            let mut perm_matrix = vec![0.0f64; k * k];
+            for i in 0..k {
+                perm_matrix[i + i * k] = 1.0;
+            }
+            let perm_vector: Vec<f64> = (1..=k).map(|v| v as f64).collect();
+
+            let perm_matrix_shape = [k, k];
+            let perm_matrix_handle = self.upload(&HostTensorView {
+                data: &perm_matrix,
+                shape: &perm_matrix_shape,
+            })?;
+            let perm_vector_shape = vec![k, 1];
+            let perm_vector_handle = self.upload(&HostTensorView {
+                data: &perm_vector,
+                shape: &perm_vector_shape,
+            })?;
+
+            let _ = self.free(product);
+
+            Ok(Some(ProviderQrPowerIterResult {
+                q: q_result,
+                r: r_handle,
+                perm_matrix: perm_matrix_handle,
+                perm_vector: perm_vector_handle,
+            }))
+        })
     }
-    fn matmul(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.matmul_exec(a, b)
+    fn matmul<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.matmul_exec(a, b) })
     }
 
     fn syrk(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.syrk_exec(a)
     }
-    fn matmul_epilogue(
-        &self,
-        a: &GpuTensorHandle,
-        b: &GpuTensorHandle,
-        ep: &runmat_accelerate_api::MatmulEpilogue,
-    ) -> Result<GpuTensorHandle> {
-        use runmat_accelerate_api::ProviderPrecision;
-        let entry_a = self.get_entry(a)?;
-        let entry_b = self.get_entry(b)?;
-        if entry_a.shape.len() != 2 || entry_b.shape.len() != 2 {
-            return Err(anyhow!("matmul_epilogue: only 2D tensors supported"));
-        }
-        let view_a =
-            build_matrix_operand_view(a, &entry_a).map_err(|e| anyhow!("matmul_epilogue: {e}"))?;
-        let view_b =
-            build_matrix_operand_view(b, &entry_b).map_err(|e| anyhow!("matmul_epilogue: {e}"))?;
-
-        if view_a.cols != view_b.rows {
-            return Err(anyhow!("matmul_epilogue: inner dimensions must match"));
-        }
-        let m = view_a.rows;
-        let n = view_b.cols;
-        let k = view_a.cols;
-
-        let out_shape = vec![m, n];
-        let len = m * n;
-        let out_buffer = self.create_storage_buffer_checked(len, "runmat-matmul-epilogue-out")?;
-        if len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, out_shape, len));
-        }
-
-        let start = Instant::now();
-
-        let m_u32 =
-            u32::try_from(m).map_err(|_| anyhow!("matmul_epilogue: m exceeds GPU limits"))?;
-        let n_u32 =
-            u32::try_from(n).map_err(|_| anyhow!("matmul_epilogue: n exceeds GPU limits"))?;
-        let k_u32 =
-            u32::try_from(k).map_err(|_| anyhow!("matmul_epilogue: k exceeds GPU limits"))?;
-        let mut flags = 0u32;
-        if view_a.transpose {
-            flags |= crate::backend::wgpu::params::MATMUL_FLAG_TRANSPOSE_A;
-        }
-        if view_b.transpose {
-            flags |= crate::backend::wgpu::params::MATMUL_FLAG_TRANSPOSE_B;
-        }
-
-        let params = crate::backend::wgpu::params::MatmulParams {
-            m: m_u32,
-            n: n_u32,
-            k: k_u32,
-            lda: view_a.lda,
-            ldb: view_b.lda,
-            ldc: m_u32,
-            offset_a: 0,
-            offset_b: 0,
-            offset_out: 0,
-            flags,
-        };
-        let params_buffer = self.uniform_buffer(&params, "runmat-matmul-epilogue-params");
-
-        // Resolve optional scales and epilogue params by precision
-        use crate::backend::wgpu::params::{
-            MATMUL_EPILOGUE_FLAG_CLAMP_MAX, MATMUL_EPILOGUE_FLAG_CLAMP_MIN,
-            MATMUL_EPILOGUE_FLAG_COL_DIV, MATMUL_EPILOGUE_FLAG_COL_SCALE,
-            MATMUL_EPILOGUE_FLAG_DIAG_WRITE, MATMUL_EPILOGUE_FLAG_POW,
-            MATMUL_EPILOGUE_FLAG_ROW_DIV, MATMUL_EPILOGUE_FLAG_ROW_SCALE,
-        };
-        let has_row = ep.row_scale.is_some();
-        let has_col = ep.col_scale.is_some();
-        let dummy_rowcol = self.create_storage_buffer(1, "runmat-matmul-epilogue-dummy-scale");
-        let row_buf = match &ep.row_scale {
-            Some(h) => self.get_entry(h)?.buffer.clone(),
-            None => dummy_rowcol.clone(),
-        };
-        let col_buf = match &ep.col_scale {
-            Some(h) => self.get_entry(h)?.buffer.clone(),
-            None => dummy_rowcol.clone(),
-        };
-
-        let (diag_rows, diag_stride, diag_offset, has_diag) = match &ep.diag_output {
-            Some(_) => {
-                return Err(anyhow!(
-                    "matmul_epilogue: diag_output is not supported by the WGPU provider yet"
-                ));
+    fn matmul_epilogue<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+        ep: &'a runmat_accelerate_api::MatmulEpilogue,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            use runmat_accelerate_api::ProviderPrecision;
+            let entry_a = self.get_entry(a)?;
+            let entry_b = self.get_entry(b)?;
+            if entry_a.shape.len() != 2 || entry_b.shape.len() != 2 {
+                return Err(anyhow!("matmul_epilogue: only 2D tensors supported"));
             }
-            None => (0u32, 1u32, 0u32, false),
-        };
+            let view_a = build_matrix_operand_view(a, &entry_a)
+                .map_err(|e| anyhow!("matmul_epilogue: {e}"))?;
+            let view_b = build_matrix_operand_view(b, &entry_b)
+                .map_err(|e| anyhow!("matmul_epilogue: {e}"))?;
 
-        let mut flags: u32 = 0;
-        if has_row {
-            flags |= MATMUL_EPILOGUE_FLAG_ROW_SCALE;
-            if matches!(ep.row_op, runmat_accelerate_api::ScaleOp::Divide) {
-                flags |= MATMUL_EPILOGUE_FLAG_ROW_DIV;
+            if view_a.cols != view_b.rows {
+                return Err(anyhow!("matmul_epilogue: inner dimensions must match"));
             }
-        }
-        if has_col {
-            flags |= MATMUL_EPILOGUE_FLAG_COL_SCALE;
-            if matches!(ep.col_op, runmat_accelerate_api::ScaleOp::Divide) {
-                flags |= MATMUL_EPILOGUE_FLAG_COL_DIV;
+            let m = view_a.rows;
+            let n = view_b.cols;
+            let k = view_a.cols;
+
+            let out_shape = vec![m, n];
+            let len = m * n;
+            let out_buffer =
+                self.create_storage_buffer_checked(len, "runmat-matmul-epilogue-out")?;
+            if len == 0 {
+                return Ok(self.register_existing_buffer(out_buffer, out_shape, len));
             }
-        }
 
-        let mut clamp_min = 0.0f64;
-        if let Some(v) = ep.clamp_min {
-            clamp_min = v;
-            flags |= MATMUL_EPILOGUE_FLAG_CLAMP_MIN;
-        }
-        let mut clamp_max = 0.0f64;
-        if let Some(v) = ep.clamp_max {
-            clamp_max = v;
-            flags |= MATMUL_EPILOGUE_FLAG_CLAMP_MAX;
-        }
-        let mut pow_exponent = 1.0f64;
-        if let Some(v) = ep.pow_exponent {
-            pow_exponent = v;
-            flags |= MATMUL_EPILOGUE_FLAG_POW;
-        }
-        if has_diag {
-            flags |= MATMUL_EPILOGUE_FLAG_DIAG_WRITE;
-        }
+            let start = Instant::now();
 
-        let tile = crate::backend::wgpu::config::effective_matmul_tile();
-        let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(n as u32, tile);
-        let groups_y = crate::backend::wgpu::dispatch::common::dispatch_size_dim(m as u32, tile);
-
-        // Build a layout tag incorporating the epilogue mask for cache keying
-        let layout_tag = format!("runmat-matmul-epilogue-layout-flags-{flags:08x}");
-
-        // Create module from the static WGSL (token substitution handled inside)
-        let (shader_src, ep_buf, pipeline_layout) = match self.precision() {
-            ProviderPrecision::F64 => {
-                let ep_params = crate::backend::wgpu::params::MatmulEpilogueParamsF64 {
-                    alpha: ep.alpha,
-                    beta: ep.beta,
-                    clamp_min,
-                    clamp_max,
-                    pow_exponent,
-                    flags,
-                    diag_offset,
-                    diag_stride,
-                    diag_rows,
-                    _pad: 0,
-                    _pad2: 0,
-                };
-                let ep_buf = self.uniform_buffer(&ep_params, "runmat-matmul-epilogue-uniform");
-                let pl = crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
-                    self.device_ref(),
-                    "runmat-matmul-epilogue-pl",
-                    &self.pipelines.matmul_epilogue.layout,
-                );
-                (
-                    crate::backend::wgpu::shaders::matmul::MATMUL_EPILOGUE_SHADER_F64,
-                    ep_buf,
-                    pl,
-                )
+            let m_u32 =
+                u32::try_from(m).map_err(|_| anyhow!("matmul_epilogue: m exceeds GPU limits"))?;
+            let n_u32 =
+                u32::try_from(n).map_err(|_| anyhow!("matmul_epilogue: n exceeds GPU limits"))?;
+            let k_u32 =
+                u32::try_from(k).map_err(|_| anyhow!("matmul_epilogue: k exceeds GPU limits"))?;
+            let mut flags = 0u32;
+            if view_a.transpose {
+                flags |= crate::backend::wgpu::params::MATMUL_FLAG_TRANSPOSE_A;
             }
-            ProviderPrecision::F32 => {
-                let ep_params = crate::backend::wgpu::params::MatmulEpilogueParamsF32 {
-                    alpha: ep.alpha as f32,
-                    beta: ep.beta as f32,
-                    clamp_min: clamp_min as f32,
-                    clamp_max: clamp_max as f32,
-                    pow_exponent: pow_exponent as f32,
-                    flags,
-                    diag_offset,
-                    diag_stride,
-                    diag_rows,
-                    _pad: 0,
-                };
-                let ep_buf = self.uniform_buffer(&ep_params, "runmat-matmul-epilogue-uniform");
-                let pl = crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
-                    self.device_ref(),
-                    "runmat-matmul-epilogue-pl",
-                    &self.pipelines.matmul_epilogue.layout,
-                );
-                (
-                    crate::backend::wgpu::shaders::matmul::MATMUL_EPILOGUE_SHADER_F32,
-                    ep_buf,
-                    pl,
-                )
+            if view_b.transpose {
+                flags |= crate::backend::wgpu::params::MATMUL_FLAG_TRANSPOSE_B;
             }
-        };
 
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-matmul-epilogue-module",
-            shader_src,
-        );
-        let key = self.compute_pipeline_hash_bytes(shader_src.as_bytes(), &layout_tag, Some(tile));
-        let pipeline = self.get_or_create_pipeline(
-            key,
-            &pipeline_layout,
-            &module,
-            "runmat-matmul-epilogue",
-            Some(shader_src.as_bytes()),
-            Some(&layout_tag),
-            Some(tile),
-        );
+            let params = crate::backend::wgpu::params::MatmulParams {
+                m: m_u32,
+                n: n_u32,
+                k: k_u32,
+                lda: view_a.lda,
+                ldb: view_b.lda,
+                ldc: m_u32,
+                offset_a: 0,
+                offset_b: 0,
+                offset_out: 0,
+                flags,
+            };
+            let params_buffer = self.uniform_buffer(&params, "runmat-matmul-epilogue-params");
 
-        let bg = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-matmul-epilogue-bind"),
-                layout: &self.pipelines.matmul_epilogue.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry_a.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: entry_b.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: row_buf.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: col_buf.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: ep_buf.as_entire_binding(),
-                    },
-                ],
-            });
-        crate::backend::wgpu::dispatch::matmul::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &pipeline,
-            &bg,
-            groups_x,
-            groups_y,
-        );
-        let handle = self.register_existing_buffer_with_usage(
-            out_buffer,
-            out_shape,
-            len,
-            BufferUsageClass::FusionOut,
-        );
+            // Resolve optional scales and epilogue params by precision
+            use crate::backend::wgpu::params::{
+                MATMUL_EPILOGUE_FLAG_CLAMP_MAX, MATMUL_EPILOGUE_FLAG_CLAMP_MIN,
+                MATMUL_EPILOGUE_FLAG_COL_DIV, MATMUL_EPILOGUE_FLAG_COL_SCALE,
+                MATMUL_EPILOGUE_FLAG_DIAG_WRITE, MATMUL_EPILOGUE_FLAG_POW,
+                MATMUL_EPILOGUE_FLAG_ROW_DIV, MATMUL_EPILOGUE_FLAG_ROW_SCALE,
+            };
+            let has_row = ep.row_scale.is_some();
+            let has_col = ep.col_scale.is_some();
+            let dummy_rowcol = self.create_storage_buffer(1, "runmat-matmul-epilogue-dummy-scale");
+            let row_buf = match &ep.row_scale {
+                Some(h) => self.get_entry(h)?.buffer.clone(),
+                None => dummy_rowcol.clone(),
+            };
+            let col_buf = match &ep.col_scale {
+                Some(h) => self.get_entry(h)?.buffer.clone(),
+                None => dummy_rowcol.clone(),
+            };
 
-        self.telemetry.record_matmul_duration(start.elapsed());
+            let (diag_rows, diag_stride, diag_offset, has_diag) = match &ep.diag_output {
+                Some(_) => {
+                    return Err(anyhow!(
+                        "matmul_epilogue: diag_output is not supported by the WGPU provider yet"
+                    ));
+                }
+                None => (0u32, 1u32, 0u32, false),
+            };
 
-        Ok(handle)
+            let mut flags: u32 = 0;
+            if has_row {
+                flags |= MATMUL_EPILOGUE_FLAG_ROW_SCALE;
+                if matches!(ep.row_op, runmat_accelerate_api::ScaleOp::Divide) {
+                    flags |= MATMUL_EPILOGUE_FLAG_ROW_DIV;
+                }
+            }
+            if has_col {
+                flags |= MATMUL_EPILOGUE_FLAG_COL_SCALE;
+                if matches!(ep.col_op, runmat_accelerate_api::ScaleOp::Divide) {
+                    flags |= MATMUL_EPILOGUE_FLAG_COL_DIV;
+                }
+            }
+
+            let mut clamp_min = 0.0f64;
+            if let Some(v) = ep.clamp_min {
+                clamp_min = v;
+                flags |= MATMUL_EPILOGUE_FLAG_CLAMP_MIN;
+            }
+            let mut clamp_max = 0.0f64;
+            if let Some(v) = ep.clamp_max {
+                clamp_max = v;
+                flags |= MATMUL_EPILOGUE_FLAG_CLAMP_MAX;
+            }
+            let mut pow_exponent = 1.0f64;
+            if let Some(v) = ep.pow_exponent {
+                pow_exponent = v;
+                flags |= MATMUL_EPILOGUE_FLAG_POW;
+            }
+            if has_diag {
+                flags |= MATMUL_EPILOGUE_FLAG_DIAG_WRITE;
+            }
+
+            let tile = crate::backend::wgpu::config::effective_matmul_tile();
+            let groups_x =
+                crate::backend::wgpu::dispatch::common::dispatch_size_dim(n as u32, tile);
+            let groups_y =
+                crate::backend::wgpu::dispatch::common::dispatch_size_dim(m as u32, tile);
+
+            // Build a layout tag incorporating the epilogue mask for cache keying
+            let layout_tag = format!("runmat-matmul-epilogue-layout-flags-{flags:08x}");
+
+            // Create module from the static WGSL (token substitution handled inside)
+            let (shader_src, ep_buf, pipeline_layout) = match self.precision() {
+                ProviderPrecision::F64 => {
+                    let ep_params = crate::backend::wgpu::params::MatmulEpilogueParamsF64 {
+                        alpha: ep.alpha,
+                        beta: ep.beta,
+                        clamp_min,
+                        clamp_max,
+                        pow_exponent,
+                        flags,
+                        diag_offset,
+                        diag_stride,
+                        diag_rows,
+                        _pad: 0,
+                        _pad2: 0,
+                    };
+                    let ep_buf = self.uniform_buffer(&ep_params, "runmat-matmul-epilogue-uniform");
+                    let pl = crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
+                        self.device_ref(),
+                        "runmat-matmul-epilogue-pl",
+                        &self.pipelines.matmul_epilogue.layout,
+                    );
+                    (
+                        crate::backend::wgpu::shaders::matmul::MATMUL_EPILOGUE_SHADER_F64,
+                        ep_buf,
+                        pl,
+                    )
+                }
+                ProviderPrecision::F32 => {
+                    let ep_params = crate::backend::wgpu::params::MatmulEpilogueParamsF32 {
+                        alpha: ep.alpha as f32,
+                        beta: ep.beta as f32,
+                        clamp_min: clamp_min as f32,
+                        clamp_max: clamp_max as f32,
+                        pow_exponent: pow_exponent as f32,
+                        flags,
+                        diag_offset,
+                        diag_stride,
+                        diag_rows,
+                        _pad: 0,
+                    };
+                    let ep_buf = self.uniform_buffer(&ep_params, "runmat-matmul-epilogue-uniform");
+                    let pl = crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
+                        self.device_ref(),
+                        "runmat-matmul-epilogue-pl",
+                        &self.pipelines.matmul_epilogue.layout,
+                    );
+                    (
+                        crate::backend::wgpu::shaders::matmul::MATMUL_EPILOGUE_SHADER_F32,
+                        ep_buf,
+                        pl,
+                    )
+                }
+            };
+
+            let module = crate::backend::wgpu::pipelines::create_shader_module(
+                self.device_ref(),
+                "runmat-matmul-epilogue-module",
+                shader_src,
+            );
+            let key =
+                self.compute_pipeline_hash_bytes(shader_src.as_bytes(), &layout_tag, Some(tile));
+            let pipeline = self.get_or_create_pipeline(
+                key,
+                &pipeline_layout,
+                &module,
+                "runmat-matmul-epilogue",
+                Some(shader_src.as_bytes()),
+                Some(&layout_tag),
+                Some(tile),
+            );
+
+            let bg = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-matmul-epilogue-bind"),
+                    layout: &self.pipelines.matmul_epilogue.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry_a.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: entry_b.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: row_buf.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: col_buf.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 6,
+                            resource: ep_buf.as_entire_binding(),
+                        },
+                    ],
+                });
+            crate::backend::wgpu::dispatch::matmul::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &pipeline,
+                &bg,
+                groups_x,
+                groups_y,
+            );
+            let handle = self.register_existing_buffer_with_usage(
+                out_buffer,
+                out_shape,
+                len,
+                BufferUsageClass::FusionOut,
+            );
+
+            self.telemetry.record_matmul_duration(start.elapsed());
+
+            Ok(handle)
+        })
     }
     fn pagefun(&self, request: &PagefunRequest) -> Result<GpuTensorHandle> {
         self.pagefun_exec(request)
     }
-    fn image_normalize(
-        &self,
-        input: &GpuTensorHandle,
-        desc: &runmat_accelerate_api::ImageNormalizeDescriptor,
-    ) -> Result<GpuTensorHandle> {
-        let entry = self.get_entry(input)?;
-        ensure!(
-            entry.shape.len() == 3,
-            "image_normalize: expected 3-D tensor, got {:?}",
-            entry.shape
-        );
-        ensure!(
-            entry.shape[0] == desc.batch
-                && entry.shape[1] == desc.height
-                && entry.shape[2] == desc.width,
-            "image_normalize: descriptor dims {:?} do not match tensor shape {:?}",
-            (desc.batch, desc.height, desc.width),
-            entry.shape
-        );
+    fn image_normalize<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        desc: &'a runmat_accelerate_api::ImageNormalizeDescriptor,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let entry = self.get_entry(input)?;
+            ensure!(
+                entry.shape.len() == 3,
+                "image_normalize: expected 3-D tensor, got {:?}",
+                entry.shape
+            );
+            ensure!(
+                entry.shape[0] == desc.batch
+                    && entry.shape[1] == desc.height
+                    && entry.shape[2] == desc.width,
+                "image_normalize: descriptor dims {:?} do not match tensor shape {:?}",
+                (desc.batch, desc.height, desc.width),
+                entry.shape
+            );
 
-        if entry.len == 0 {
-            return self.image_normalize_cpu_fallback(input, desc);
-        }
+            if entry.len == 0 {
+                return self.image_normalize_cpu_fallback(input, desc).await;
+            }
 
-        match self.precision {
-            NumericPrecision::F64 => self.image_normalize_cpu_fallback(input, desc),
-            NumericPrecision::F32 => {
-                ensure!(
-                    desc.epsilon.is_finite(),
-                    "image_normalize: epsilon must be finite"
-                );
-                ensure!(
-                    desc.epsilon >= 0.0,
-                    "image_normalize: epsilon must be non-negative"
-                );
+            match self.precision {
+                NumericPrecision::F64 => self.image_normalize_cpu_fallback(input, desc).await,
+                NumericPrecision::F32 => {
+                    ensure!(
+                        desc.epsilon.is_finite(),
+                        "image_normalize: epsilon must be finite"
+                    );
+                    ensure!(
+                        desc.epsilon >= 0.0,
+                        "image_normalize: epsilon must be non-negative"
+                    );
 
-                let batches = entry.shape[0];
-                let height = entry.shape[1];
-                let width = entry.shape[2];
-                let plane = height
-                    .checked_mul(width)
-                    .ok_or_else(|| anyhow!("image_normalize: height*width overflow"))?;
-                ensure!(
-                    entry.len == plane * batches,
-                    "image_normalize: inconsistent tensor length {} vs dims {:?}",
-                    entry.len,
-                    entry.shape
-                );
+                    let batches = entry.shape[0];
+                    let height = entry.shape[1];
+                    let width = entry.shape[2];
+                    let plane = height
+                        .checked_mul(width)
+                        .ok_or_else(|| anyhow!("image_normalize: height*width overflow"))?;
+                    ensure!(
+                        entry.len == plane * batches,
+                        "image_normalize: inconsistent tensor length {} vs dims {:?}",
+                        entry.len,
+                        entry.shape
+                    );
 
-                let stride_h = batches;
-                let stride_w = batches
-                    .checked_mul(height)
-                    .ok_or_else(|| anyhow!("image_normalize: stride overflow"))?;
+                    let stride_h = batches;
+                    let stride_w = batches
+                        .checked_mul(height)
+                        .ok_or_else(|| anyhow!("image_normalize: stride overflow"))?;
 
-                let batches_u32 = u32::try_from(batches)
-                    .map_err(|_| anyhow!("image_normalize: batch size too large"))?;
-                let height_u32 = u32::try_from(height)
-                    .map_err(|_| anyhow!("image_normalize: height too large"))?;
-                let width_u32 = u32::try_from(width)
-                    .map_err(|_| anyhow!("image_normalize: width too large"))?;
-                let plane_u32 = u32::try_from(plane)
-                    .map_err(|_| anyhow!("image_normalize: plane size too large"))?;
-                let stride_h_u32 = u32::try_from(stride_h)
-                    .map_err(|_| anyhow!("image_normalize: stride_h too large"))?;
-                let stride_w_u32 = u32::try_from(stride_w)
-                    .map_err(|_| anyhow!("image_normalize: stride_w too large"))?;
-                let (tuning, cache_hit) =
-                    self.resolve_image_normalize_tuning(batches_u32, plane_u32);
-                log::debug!(
+                    let batches_u32 = u32::try_from(batches)
+                        .map_err(|_| anyhow!("image_normalize: batch size too large"))?;
+                    let height_u32 = u32::try_from(height)
+                        .map_err(|_| anyhow!("image_normalize: height too large"))?;
+                    let width_u32 = u32::try_from(width)
+                        .map_err(|_| anyhow!("image_normalize: width too large"))?;
+                    let plane_u32 = u32::try_from(plane)
+                        .map_err(|_| anyhow!("image_normalize: plane size too large"))?;
+                    let stride_h_u32 = u32::try_from(stride_h)
+                        .map_err(|_| anyhow!("image_normalize: stride_h too large"))?;
+                    let stride_w_u32 = u32::try_from(stride_w)
+                        .map_err(|_| anyhow!("image_normalize: stride_w too large"))?;
+                    let (tuning, cache_hit) =
+                        self.resolve_image_normalize_tuning(batches_u32, plane_u32);
+                    log::debug!(
                     "image_normalize tuning batches={} plane={} lane={} spatial={} values/thread={} cache_hit={}",
                     batches_u32,
                     plane_u32,
@@ -15068,590 +15156,646 @@ impl AccelProvider for WgpuProvider {
                     tuning.values_per_thread,
                     cache_hit
                 );
-                let pipeline = self.image_normalize_pipeline(&tuning)?;
+                    let pipeline = self.image_normalize_pipeline(&tuning)?;
 
-                let mut flags = 0u32;
-                if desc.gain.is_some() {
-                    flags |= IMAGE_NORMALIZE_FLAG_GAIN;
-                }
-                if desc.bias.is_some() {
-                    flags |= IMAGE_NORMALIZE_FLAG_BIAS;
-                }
-                if desc.gamma.is_some() {
-                    flags |= IMAGE_NORMALIZE_FLAG_GAMMA;
-                }
+                    let mut flags = 0u32;
+                    if desc.gain.is_some() {
+                        flags |= IMAGE_NORMALIZE_FLAG_GAIN;
+                    }
+                    if desc.bias.is_some() {
+                        flags |= IMAGE_NORMALIZE_FLAG_BIAS;
+                    }
+                    if desc.gamma.is_some() {
+                        flags |= IMAGE_NORMALIZE_FLAG_GAMMA;
+                    }
 
-                let mut uniforms = ImageNormalizeUniforms {
-                    batch_count: 0,
-                    height: height_u32,
-                    width: width_u32,
-                    plane: plane_u32,
-                    stride_h: stride_h_u32,
-                    stride_w: stride_w_u32,
-                    flags,
-                    batch_stride: batches_u32,
-                    batch_offset: 0,
-                    _pad0: 0,
-                    epsilon: desc.epsilon as f32,
-                    gain: desc.gain.unwrap_or(1.0) as f32,
-                    bias: desc.bias.unwrap_or(0.0) as f32,
-                    gamma: desc.gamma.unwrap_or(1.0) as f32,
-                    _pad1: 0,
-                };
+                    let mut uniforms = ImageNormalizeUniforms {
+                        batch_count: 0,
+                        height: height_u32,
+                        width: width_u32,
+                        plane: plane_u32,
+                        stride_h: stride_h_u32,
+                        stride_w: stride_w_u32,
+                        flags,
+                        batch_stride: batches_u32,
+                        batch_offset: 0,
+                        _pad0: 0,
+                        epsilon: desc.epsilon as f32,
+                        gain: desc.gain.unwrap_or(1.0) as f32,
+                        bias: desc.bias.unwrap_or(0.0) as f32,
+                        gamma: desc.gamma.unwrap_or(1.0) as f32,
+                        _pad1: 0,
+                    };
 
-                let out_buffer = self.create_storage_buffer_checked_with_usage(
-                    entry.len,
-                    "runmat-image-normalize-out",
-                    BufferUsageClass::FusionOut,
-                )?;
-                let uniform_buf = self.kernel_resources.uniform_buffer(
-                    self.device_ref(),
-                    UniformBufferKey::ImageNormalizeUniforms,
-                    std::mem::size_of::<ImageNormalizeUniforms>() as u64,
-                    "runmat-image-normalize-uniform",
-                );
-                let stream_hot_cap = self
-                    .image_normalize_hot_stream_cap(plane_u32, batches_u32)
-                    .max(1);
-                let cold_cap = stream_hot_cap.min((Self::IMAGE_NORMALIZE_STREAM_COLD_CAP).max(1));
-                let chunk_limit = if cache_hit {
-                    stream_hot_cap
-                } else {
-                    cold_cap.max(1)
-                };
-
-                let bind_entries = [
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: uniform_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                ];
-                let layout = &self.pipelines.image_normalize.layout;
-                let bind_group =
-                    self.bind_group_cache
-                        .get_or_create(layout, &bind_entries, || {
-                            Arc::new(self.device_ref().create_bind_group(
-                                &wgpu::BindGroupDescriptor {
-                                    label: Some("runmat-image-normalize-bind"),
-                                    layout,
-                                    entries: &bind_entries,
-                                },
-                            ))
-                        });
-
-                let mut offset = 0u32;
-                while offset < batches_u32 {
-                    let remaining = batches_u32 - offset;
-                    let chunk = remaining.min(chunk_limit).max(1);
-                    uniforms.batch_count = chunk;
-                    uniforms.batch_offset = offset;
-                    self.queue
-                        .write_buffer(uniform_buf.as_ref(), 0, bytes_of(&uniforms));
-                    crate::backend::wgpu::dispatch::image_normalize::run(
+                    let out_buffer = self.create_storage_buffer_checked_with_usage(
+                        entry.len,
+                        "runmat-image-normalize-out",
+                        BufferUsageClass::FusionOut,
+                    )?;
+                    let uniform_buf = self.kernel_resources.uniform_buffer(
                         self.device_ref(),
-                        self.queue_ref(),
-                        pipeline.as_ref(),
-                        bind_group.as_ref(),
-                        chunk,
-                        tuning.batch_tile,
+                        UniformBufferKey::ImageNormalizeUniforms,
+                        std::mem::size_of::<ImageNormalizeUniforms>() as u64,
+                        "runmat-image-normalize-uniform",
                     );
-                    offset += chunk;
-                }
+                    let stream_hot_cap = self
+                        .image_normalize_hot_stream_cap(plane_u32, batches_u32)
+                        .max(1);
+                    let cold_cap =
+                        stream_hot_cap.min((Self::IMAGE_NORMALIZE_STREAM_COLD_CAP).max(1));
+                    let chunk_limit = if cache_hit {
+                        stream_hot_cap
+                    } else {
+                        cold_cap.max(1)
+                    };
 
-                Ok(self.register_existing_buffer_with_usage(
-                    out_buffer,
-                    entry.shape.clone(),
-                    entry.len,
-                    BufferUsageClass::FusionOut,
-                ))
-            }
-        }
-    }
-    fn matmul_power_step(
-        &self,
-        lhs: &GpuTensorHandle,
-        rhs: &GpuTensorHandle,
-        epilogue: &runmat_accelerate_api::PowerStepEpilogue,
-    ) -> Result<GpuTensorHandle> {
-        let rhs_entry = self.get_entry(rhs)?;
-        let product = self.matmul_exec(lhs, rhs)?;
-        let squared = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Mul,
-            &product,
-            &product,
-        )?;
-        let mut sum_sq = self.reduce_dim_sum_mean_exec(
-            &squared,
-            0,
-            crate::backend::wgpu::types::DimReduceOp::Sum,
-        )?;
-        let _ = self.free(&squared);
-        if epilogue.epsilon != 0.0 {
-            let eps = self.fill_exec(&sum_sq.shape, epilogue.epsilon)?;
-            let adjusted = self.binary_op_exec(
-                crate::backend::wgpu::types::BinaryOpCode::Add,
-                &sum_sq,
-                &eps,
-            )?;
-            let _ = self.free(&sum_sq);
-            let _ = self.free(&eps);
-            sum_sq = adjusted;
-        }
-        let norms = self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sqrt, &sum_sq)?;
-        let _ = self.free(&sum_sq);
-        let normalized = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Div,
-            &product,
-            &norms,
-        )?;
-        let _ = self.free(&product);
-        let _ = self.free(&norms);
-
-        let mut reused = false;
-        let rhs_shape_match = rhs_entry.shape == normalized.shape;
-        let rhs_transposed = runmat_accelerate_api::handle_transpose_info(rhs).is_some();
-        let rhs_ref_count = Arc::strong_count(&rhs_entry.buffer);
-        if rhs_shape_match && !rhs_transposed && rhs_entry.len > 0 && rhs_ref_count <= 2 {
-            if let Ok(normalized_entry) = self.get_entry(&normalized) {
-                let bytes = (rhs_entry.len as u64) * self.element_size as u64;
-                if bytes > 0 {
-                    let mut encoder =
-                        self.device_ref()
-                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: Some("runmat-power-step-copy"),
+                    let bind_entries = [
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: uniform_buf.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                    ];
+                    let layout = &self.pipelines.image_normalize.layout;
+                    let bind_group =
+                        self.bind_group_cache
+                            .get_or_create(layout, &bind_entries, || {
+                                Arc::new(self.device_ref().create_bind_group(
+                                    &wgpu::BindGroupDescriptor {
+                                        label: Some("runmat-image-normalize-bind"),
+                                        layout,
+                                        entries: &bind_entries,
+                                    },
+                                ))
                             });
-                    encoder.copy_buffer_to_buffer(
-                        normalized_entry.buffer.as_ref(),
-                        0,
-                        rhs_entry.buffer.as_ref(),
-                        0,
-                        bytes,
-                    );
-                    self.submit(encoder);
-                }
-                let _ = self.free(&normalized);
-                self.mark_buffer_usage(rhs, BufferUsageClass::FusionOut);
-                log::debug!(
-                    "matmul_power_step: reused rhs buffer {} for normalized output (len={})",
-                    rhs.buffer_id,
-                    rhs_entry.len
-                );
-                reused = true;
-            }
-        }
 
-        if reused {
-            Ok(rhs.clone())
-        } else {
-            log::debug!(
+                    let mut offset = 0u32;
+                    while offset < batches_u32 {
+                        let remaining = batches_u32 - offset;
+                        let chunk = remaining.min(chunk_limit).max(1);
+                        uniforms.batch_count = chunk;
+                        uniforms.batch_offset = offset;
+                        self.queue
+                            .write_buffer(uniform_buf.as_ref(), 0, bytes_of(&uniforms));
+                        crate::backend::wgpu::dispatch::image_normalize::run(
+                            self.device_ref(),
+                            self.queue_ref(),
+                            pipeline.as_ref(),
+                            bind_group.as_ref(),
+                            chunk,
+                            tuning.batch_tile,
+                        );
+                        offset += chunk;
+                    }
+
+                    Ok(self.register_existing_buffer_with_usage(
+                        out_buffer,
+                        entry.shape.clone(),
+                        entry.len,
+                        BufferUsageClass::FusionOut,
+                    ))
+                }
+            }
+        })
+    }
+    fn matmul_power_step<'a>(
+        &'a self,
+        lhs: &'a GpuTensorHandle,
+        rhs: &'a GpuTensorHandle,
+        epilogue: &'a runmat_accelerate_api::PowerStepEpilogue,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let rhs_entry = self.get_entry(rhs)?;
+            let product = self.matmul_exec(lhs, rhs)?;
+            let squared = self.binary_op_exec(
+                crate::backend::wgpu::types::BinaryOpCode::Mul,
+                &product,
+                &product,
+            )?;
+            let mut sum_sq = self.reduce_dim_sum_mean_exec(
+                &squared,
+                0,
+                crate::backend::wgpu::types::DimReduceOp::Sum,
+            )?;
+            let _ = self.free(&squared);
+            if epilogue.epsilon != 0.0 {
+                let eps = self.fill_exec(&sum_sq.shape, epilogue.epsilon)?;
+                let adjusted = self.binary_op_exec(
+                    crate::backend::wgpu::types::BinaryOpCode::Add,
+                    &sum_sq,
+                    &eps,
+                )?;
+                let _ = self.free(&sum_sq);
+                let _ = self.free(&eps);
+                sum_sq = adjusted;
+            }
+            let norms =
+                self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sqrt, &sum_sq)?;
+            let _ = self.free(&sum_sq);
+            let normalized = self.binary_op_exec(
+                crate::backend::wgpu::types::BinaryOpCode::Div,
+                &product,
+                &norms,
+            )?;
+            let _ = self.free(&product);
+            let _ = self.free(&norms);
+
+            let mut reused = false;
+            let rhs_shape_match = rhs_entry.shape == normalized.shape;
+            let rhs_transposed = runmat_accelerate_api::handle_transpose_info(rhs).is_some();
+            let rhs_ref_count = Arc::strong_count(&rhs_entry.buffer);
+            if rhs_shape_match && !rhs_transposed && rhs_entry.len > 0 && rhs_ref_count <= 2 {
+                if let Ok(normalized_entry) = self.get_entry(&normalized) {
+                    let bytes = (rhs_entry.len as u64) * self.element_size as u64;
+                    if bytes > 0 {
+                        let mut encoder = self.device_ref().create_command_encoder(
+                            &wgpu::CommandEncoderDescriptor {
+                                label: Some("runmat-power-step-copy"),
+                            },
+                        );
+                        encoder.copy_buffer_to_buffer(
+                            normalized_entry.buffer.as_ref(),
+                            0,
+                            rhs_entry.buffer.as_ref(),
+                            0,
+                            bytes,
+                        );
+                        self.submit(encoder);
+                    }
+                    let _ = self.free(&normalized);
+                    self.mark_buffer_usage(rhs, BufferUsageClass::FusionOut);
+                    log::debug!(
+                        "matmul_power_step: reused rhs buffer {} for normalized output (len={})",
+                        rhs.buffer_id,
+                        rhs_entry.len
+                    );
+                    reused = true;
+                }
+            }
+
+            if reused {
+                Ok(rhs.clone())
+            } else {
+                log::debug!(
                 "matmul_power_step: fallback reuse (shape_match={} transpose={} len={} ref_count={})",
                 rhs_shape_match,
                 rhs_transposed,
                 rhs_entry.len,
                 rhs_ref_count
             );
-            Ok(normalized)
-        }
-    }
-    fn covariance(
-        &self,
-        matrix: &GpuTensorHandle,
-        second: Option<&GpuTensorHandle>,
-        weights: Option<&GpuTensorHandle>,
-        options: &CovarianceOptions,
-    ) -> Result<GpuTensorHandle> {
-        if options.rows != CovRows::All {
-            return Err(anyhow!(
-                "covariance: rows option {:?} not supported by WGPU provider",
-                options.rows
-            ));
-        }
-        if options.has_weight_vector || weights.is_some() {
-            return Err(anyhow!(
-                "covariance: weight vectors are not supported by WGPU provider"
-            ));
-        }
-
-        let combined = if let Some(rhs) = second {
-            let left_entry = self.get_entry(matrix)?;
-            let right_entry = self.get_entry(rhs)?;
-
-            let rows_left = match left_entry.shape.len() {
-                0 => 1usize,
-                1 => left_entry.shape[0],
-                2 => left_entry.shape[0],
-                _ => {
-                    return Err(anyhow!(
-                        "covariance: inputs must be 2-D matrices or vectors (got shape {:?})",
-                        left_entry.shape
-                    ))
-                }
-            };
-            let rows_right = match right_entry.shape.len() {
-                0 => 1usize,
-                1 => right_entry.shape[0],
-                2 => right_entry.shape[0],
-                _ => {
-                    return Err(anyhow!(
-                        "covariance: inputs must be 2-D matrices or vectors (got shape {:?})",
-                        right_entry.shape
-                    ))
-                }
-            };
-
-            ensure!(
-                rows_left == rows_right,
-                "covariance: inputs must have the same number of rows (got {} and {})",
-                rows_left,
-                rows_right
-            );
-
-            let cat_inputs = vec![matrix.clone(), rhs.clone()];
-            Some(self.cat_exec(2, &cat_inputs)?)
-        } else {
-            None
-        };
-
-        let result = {
-            let source = combined.as_ref().unwrap_or(matrix);
-            self.covariance_exec(source, options)
-        };
-
-        if let Some(handle) = combined {
-            let _ = self.free(&handle);
-        }
-
-        result
-    }
-    fn corrcoef(
-        &self,
-        matrix: &GpuTensorHandle,
-        options: &CorrcoefOptions,
-    ) -> Result<GpuTensorHandle> {
-        self.corrcoef_exec(matrix, options)
-    }
-    fn linsolve(
-        &self,
-        lhs: &GpuTensorHandle,
-        rhs: &GpuTensorHandle,
-        options: &ProviderLinsolveOptions,
-    ) -> Result<ProviderLinsolveResult> {
-        let HostTensorOwned {
-            data: lhs_data,
-            shape: lhs_shape,
-        } = self.download(lhs)?;
-        let HostTensorOwned {
-            data: rhs_data,
-            shape: rhs_shape,
-        } = self.download(rhs)?;
-
-        let lhs_tensor = Tensor::new(lhs_data, lhs_shape).map_err(|e| anyhow!("linsolve: {e}"))?;
-        let rhs_tensor = Tensor::new(rhs_data, rhs_shape).map_err(|e| anyhow!("linsolve: {e}"))?;
-
-        let (solution, rcond) = linsolve_host_real_for_provider(&lhs_tensor, &rhs_tensor, options)
-            .map_err(|e| anyhow!("{e}"))?;
-
-        let handle = self.upload(&HostTensorView {
-            data: &solution.data,
-            shape: &solution.shape,
-        })?;
-
-        Ok(ProviderLinsolveResult {
-            solution: handle,
-            reciprocal_condition: rcond,
+                Ok(normalized)
+            }
         })
     }
-    fn inv(
-        &self,
-        matrix: &GpuTensorHandle,
+    fn covariance<'a>(
+        &'a self,
+        matrix: &'a GpuTensorHandle,
+        second: Option<&'a GpuTensorHandle>,
+        weights: Option<&'a GpuTensorHandle>,
+        options: &'a CovarianceOptions,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            if options.rows != CovRows::All {
+                return Err(anyhow!(
+                    "covariance: rows option {:?} not supported by WGPU provider",
+                    options.rows
+                ));
+            }
+            if options.has_weight_vector || weights.is_some() {
+                return Err(anyhow!(
+                    "covariance: weight vectors are not supported by WGPU provider"
+                ));
+            }
+
+            let combined = if let Some(rhs) = second {
+                let left_entry = self.get_entry(matrix)?;
+                let right_entry = self.get_entry(rhs)?;
+
+                let rows_left = match left_entry.shape.len() {
+                    0 => 1usize,
+                    1 => left_entry.shape[0],
+                    2 => left_entry.shape[0],
+                    _ => {
+                        return Err(anyhow!(
+                            "covariance: inputs must be 2-D matrices or vectors (got shape {:?})",
+                            left_entry.shape
+                        ))
+                    }
+                };
+                let rows_right = match right_entry.shape.len() {
+                    0 => 1usize,
+                    1 => right_entry.shape[0],
+                    2 => right_entry.shape[0],
+                    _ => {
+                        return Err(anyhow!(
+                            "covariance: inputs must be 2-D matrices or vectors (got shape {:?})",
+                            right_entry.shape
+                        ))
+                    }
+                };
+
+                ensure!(
+                    rows_left == rows_right,
+                    "covariance: inputs must have the same number of rows (got {} and {})",
+                    rows_left,
+                    rows_right
+                );
+
+                let cat_inputs = vec![matrix.clone(), rhs.clone()];
+                Some(self.cat_exec(2, &cat_inputs)?)
+            } else {
+                None
+            };
+
+            let result = {
+                let source = combined.as_ref().unwrap_or(matrix);
+                self.covariance_exec(source, options).await
+            };
+
+            if let Some(handle) = combined {
+                let _ = self.free(&handle);
+            }
+
+            result
+        })
+    }
+    fn corrcoef<'a>(
+        &'a self,
+        matrix: &'a GpuTensorHandle,
+        options: &'a CorrcoefOptions,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.corrcoef_exec(matrix, options).await })
+    }
+    fn linsolve<'a>(
+        &'a self,
+        lhs: &'a GpuTensorHandle,
+        rhs: &'a GpuTensorHandle,
+        options: &'a ProviderLinsolveOptions,
+    ) -> AccelProviderFuture<'a, ProviderLinsolveResult> {
+        Box::pin(async move {
+            let HostTensorOwned {
+                data: lhs_data,
+                shape: lhs_shape,
+            } = <Self as AccelProvider>::download(self, lhs).await?;
+            let HostTensorOwned {
+                data: rhs_data,
+                shape: rhs_shape,
+            } = <Self as AccelProvider>::download(self, rhs).await?;
+
+            let lhs_tensor =
+                Tensor::new(lhs_data, lhs_shape).map_err(|e| anyhow!("linsolve: {e}"))?;
+            let rhs_tensor =
+                Tensor::new(rhs_data, rhs_shape).map_err(|e| anyhow!("linsolve: {e}"))?;
+
+            let (solution, rcond) =
+                linsolve_host_real_for_provider(&lhs_tensor, &rhs_tensor, options)
+                    .map_err(|e| anyhow!("{e}"))?;
+
+            let handle = self.upload(&HostTensorView {
+                data: &solution.data,
+                shape: &solution.shape,
+            })?;
+
+            Ok(ProviderLinsolveResult {
+                solution: handle,
+                reciprocal_condition: rcond,
+            })
+        })
+    }
+    fn inv<'a>(
+        &'a self,
+        matrix: &'a GpuTensorHandle,
         _options: ProviderInvOptions,
-    ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, shape } = self.download(matrix)?;
-        let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("inv: {e}"))?;
-        let result = inv_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
-        self.upload(&HostTensorView {
-            data: &result.data,
-            shape: &result.shape,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let HostTensorOwned { data, shape } =
+                <Self as AccelProvider>::download(self, matrix).await?;
+            let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("inv: {e}"))?;
+            let result = inv_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
+            self.upload(&HostTensorView {
+                data: &result.data,
+                shape: &result.shape,
+            })
         })
     }
 
-    fn pinv(
-        &self,
-        matrix: &GpuTensorHandle,
+    fn pinv<'a>(
+        &'a self,
+        matrix: &'a GpuTensorHandle,
         options: ProviderPinvOptions,
-    ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, shape } = self.download(matrix)?;
-        let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("pinv: {e}"))?;
-        let result =
-            pinv_host_real_for_provider(&tensor, options.tolerance).map_err(|e| anyhow!("{e}"))?;
-        self.upload(&HostTensorView {
-            data: &result.data,
-            shape: &result.shape,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let HostTensorOwned { data, shape } =
+                <Self as AccelProvider>::download(self, matrix).await?;
+            let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("pinv: {e}"))?;
+            let result = pinv_host_real_for_provider(&tensor, options.tolerance)
+                .map_err(|e| anyhow!("{e}"))?;
+            self.upload(&HostTensorView {
+                data: &result.data,
+                shape: &result.shape,
+            })
         })
     }
 
-    fn cond(&self, matrix: &GpuTensorHandle, norm: ProviderCondNorm) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, shape } = self.download(matrix)?;
-        let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("cond: {e}"))?;
-        let cond_value = cond_host_real_for_provider(&tensor, norm).map_err(|e| anyhow!("{e}"))?;
-        let scalar = [cond_value];
-        let shape = [1usize, 1usize];
-        self.upload(&HostTensorView {
-            data: &scalar,
-            shape: &shape,
+    fn cond<'a>(
+        &'a self,
+        matrix: &'a GpuTensorHandle,
+        norm: ProviderCondNorm,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let HostTensorOwned { data, shape } =
+                <Self as AccelProvider>::download(self, matrix).await?;
+            let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("cond: {e}"))?;
+            let cond_value =
+                cond_host_real_for_provider(&tensor, norm).map_err(|e| anyhow!("{e}"))?;
+            let scalar = [cond_value];
+            let shape = [1usize, 1usize];
+            self.upload(&HostTensorView {
+                data: &scalar,
+                shape: &shape,
+            })
         })
     }
 
-    fn norm(&self, tensor: &GpuTensorHandle, order: ProviderNormOrder) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, shape } = self.download(tensor)?;
-        let host_tensor = Tensor::new(data, shape).map_err(|e| anyhow!("norm: {e}"))?;
-        let value = norm_host_real_for_provider(&host_tensor, order).map_err(|e| anyhow!("{e}"))?;
-        let scalar = [value];
-        let shape = [1usize, 1usize];
-        self.upload(&HostTensorView {
-            data: &scalar,
-            shape: &shape,
+    fn norm<'a>(
+        &'a self,
+        tensor: &'a GpuTensorHandle,
+        order: ProviderNormOrder,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let HostTensorOwned { data, shape } =
+                <Self as AccelProvider>::download(self, tensor).await?;
+            let host_tensor = Tensor::new(data, shape).map_err(|e| anyhow!("norm: {e}"))?;
+            let value =
+                norm_host_real_for_provider(&host_tensor, order).map_err(|e| anyhow!("{e}"))?;
+            let scalar = [value];
+            let shape = [1usize, 1usize];
+            self.upload(&HostTensorView {
+                data: &scalar,
+                shape: &shape,
+            })
         })
     }
 
-    fn rank(&self, matrix: &GpuTensorHandle, tolerance: Option<f64>) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, shape } = self.download(matrix)?;
-        let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("rank: {e}"))?;
-        let rank =
-            rank_host_real_for_provider(&tensor, tolerance).map_err(|e| anyhow!("{e}"))? as f64;
-        let scalar = [rank];
-        let shape = [1usize, 1usize];
-        self.upload(&HostTensorView {
-            data: &scalar,
-            shape: &shape,
+    fn rank<'a>(
+        &'a self,
+        matrix: &'a GpuTensorHandle,
+        tolerance: Option<f64>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let HostTensorOwned { data, shape } =
+                <Self as AccelProvider>::download(self, matrix).await?;
+            let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("rank: {e}"))?;
+            let rank =
+                rank_host_real_for_provider(&tensor, tolerance).map_err(|e| anyhow!("{e}"))? as f64;
+            let scalar = [rank];
+            let shape = [1usize, 1usize];
+            self.upload(&HostTensorView {
+                data: &scalar,
+                shape: &shape,
+            })
         })
     }
 
-    fn rcond(&self, matrix: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, shape } = self.download(matrix)?;
-        let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("rcond: {e}"))?;
-        let estimate = rcond_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
-        let scalar = [estimate];
-        let shape = [1usize, 1usize];
-        self.upload(&HostTensorView {
-            data: &scalar,
-            shape: &shape,
+    fn rcond<'a>(
+        &'a self,
+        matrix: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let HostTensorOwned { data, shape } =
+                <Self as AccelProvider>::download(self, matrix).await?;
+            let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("rcond: {e}"))?;
+            let estimate = rcond_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
+            let scalar = [estimate];
+            let shape = [1usize, 1usize];
+            self.upload(&HostTensorView {
+                data: &scalar,
+                shape: &shape,
+            })
         })
     }
 
-    fn mldivide(&self, lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        let HostTensorOwned {
-            data: lhs_data,
-            shape: lhs_shape,
-        } = self.download(lhs)?;
-        let HostTensorOwned {
-            data: rhs_data,
-            shape: rhs_shape,
-        } = self.download(rhs)?;
+    fn mldivide<'a>(
+        &'a self,
+        lhs: &'a GpuTensorHandle,
+        rhs: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let HostTensorOwned {
+                data: lhs_data,
+                shape: lhs_shape,
+            } = <Self as AccelProvider>::download(self, lhs).await?;
+            let HostTensorOwned {
+                data: rhs_data,
+                shape: rhs_shape,
+            } = <Self as AccelProvider>::download(self, rhs).await?;
 
-        let lhs_tensor = Tensor::new(lhs_data, lhs_shape).map_err(|e| anyhow!("mldivide: {e}"))?;
-        let rhs_tensor = Tensor::new(rhs_data, rhs_shape).map_err(|e| anyhow!("mldivide: {e}"))?;
+            let lhs_tensor =
+                Tensor::new(lhs_data, lhs_shape).map_err(|e| anyhow!("mldivide: {e}"))?;
+            let rhs_tensor =
+                Tensor::new(rhs_data, rhs_shape).map_err(|e| anyhow!("mldivide: {e}"))?;
 
-        let result = mldivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
-            .map_err(|e| anyhow!("{e}"))?;
+            let result = mldivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
+                .map_err(|e| anyhow!("{e}"))?;
 
-        let handle = self.upload(&HostTensorView {
-            data: &result.data,
-            shape: &result.shape,
-        })?;
-        Ok(handle)
+            let handle = self.upload(&HostTensorView {
+                data: &result.data,
+                shape: &result.shape,
+            })?;
+            Ok(handle)
+        })
     }
 
-    fn mrdivide(&self, lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        let HostTensorOwned {
-            data: lhs_data,
-            shape: lhs_shape,
-        } = self.download(lhs)?;
-        let HostTensorOwned {
-            data: rhs_data,
-            shape: rhs_shape,
-        } = self.download(rhs)?;
+    fn mrdivide<'a>(
+        &'a self,
+        lhs: &'a GpuTensorHandle,
+        rhs: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let HostTensorOwned {
+                data: lhs_data,
+                shape: lhs_shape,
+            } = <Self as AccelProvider>::download(self, lhs).await?;
+            let HostTensorOwned {
+                data: rhs_data,
+                shape: rhs_shape,
+            } = <Self as AccelProvider>::download(self, rhs).await?;
 
-        let lhs_tensor = Tensor::new(lhs_data, lhs_shape).map_err(|e| anyhow!("mrdivide: {e}"))?;
-        let rhs_tensor = Tensor::new(rhs_data, rhs_shape).map_err(|e| anyhow!("mrdivide: {e}"))?;
+            let lhs_tensor =
+                Tensor::new(lhs_data, lhs_shape).map_err(|e| anyhow!("mrdivide: {e}"))?;
+            let rhs_tensor =
+                Tensor::new(rhs_data, rhs_shape).map_err(|e| anyhow!("mrdivide: {e}"))?;
 
-        let result = mrdivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
-            .map_err(|e| anyhow!("{e}"))?;
+            let result = mrdivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
+                .map_err(|e| anyhow!("{e}"))?;
 
-        let handle = self.upload(&HostTensorView {
-            data: &result.data,
-            shape: &result.shape,
-        })?;
-        Ok(handle)
+            let handle = self.upload(&HostTensorView {
+                data: &result.data,
+                shape: &result.shape,
+            })?;
+            Ok(handle)
+        })
     }
 
-    fn dot(
-        &self,
-        lhs: &GpuTensorHandle,
-        rhs: &GpuTensorHandle,
+    fn dot<'a>(
+        &'a self,
+        lhs: &'a GpuTensorHandle,
+        rhs: &'a GpuTensorHandle,
         dim: Option<usize>,
-    ) -> Result<GpuTensorHandle> {
-        self.dot_exec(lhs, rhs, dim)
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.dot_exec(lhs, rhs, dim) })
     }
-    fn eig(&self, handle: &GpuTensorHandle, compute_left: bool) -> Result<ProviderEigResult> {
-        let host = self.download(handle)?;
-        let tensor =
-            Tensor::new(host.data.clone(), host.shape.clone()).map_err(|e| anyhow!("eig: {e}"))?;
-        let eval = block_on_runtime(
-            runmat_runtime::builtins::math::linalg::factor::eig::evaluate(
+    fn eig<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+        compute_left: bool,
+    ) -> AccelProviderFuture<'a, ProviderEigResult> {
+        Box::pin(async move {
+            let host = <Self as AccelProvider>::download(self, handle).await?;
+            let tensor = Tensor::new(host.data.clone(), host.shape.clone())
+                .map_err(|e| anyhow!("eig: {e}"))?;
+            let eval = runmat_runtime::builtins::math::linalg::factor::eig::evaluate(
                 Value::Tensor(tensor),
                 &[],
                 compute_left,
-            ),
-        )
-        .map_err(|err| runtime_flow_to_anyhow("eig", err))?;
-
-        let eigenvalues_tensor = host_tensor_from_value("eig", eval.eigenvalues())?;
-        let diagonal_tensor = host_tensor_from_value("eig", eval.diagonal_matrix())?;
-        let right_tensor = host_tensor_from_value("eig", eval.right())?;
-
-        let left_value = if compute_left {
-            Some(
-                eval.left()
-                    .map_err(|err| runtime_flow_to_anyhow("eig", err))?,
             )
-        } else {
-            None
-        };
+            .await
+            .map_err(|err| runtime_flow_to_anyhow("eig", err))?;
 
-        let left_tensor = match left_value {
-            Some(value) => Some(host_tensor_from_value("eig", value)?),
-            None => None,
-        };
+            let eigenvalues_tensor = host_tensor_from_value("eig", eval.eigenvalues())?;
+            let diagonal_tensor = host_tensor_from_value("eig", eval.diagonal_matrix())?;
+            let right_tensor = host_tensor_from_value("eig", eval.right())?;
 
-        let eigenvalues = self.upload(&HostTensorView {
-            data: &eigenvalues_tensor.data,
-            shape: &eigenvalues_tensor.shape,
-        })?;
-        let diagonal = self.upload(&HostTensorView {
-            data: &diagonal_tensor.data,
-            shape: &diagonal_tensor.shape,
-        })?;
-        let right = self.upload(&HostTensorView {
-            data: &right_tensor.data,
-            shape: &right_tensor.shape,
-        })?;
-        let left = match left_tensor {
-            Some(tensor) => Some(self.upload(&HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            })?),
-            None => None,
-        };
+            let left_value = if compute_left {
+                Some(
+                    eval.left()
+                        .map_err(|err| runtime_flow_to_anyhow("eig", err))?,
+                )
+            } else {
+                None
+            };
 
-        if compute_left && left.is_none() {
-            return Err(anyhow!(
-                "eig: left eigenvectors are not available for the requested matrix"
-            ));
-        }
+            let left_tensor = match left_value {
+                Some(value) => Some(host_tensor_from_value("eig", value)?),
+                None => None,
+            };
 
-        Ok(ProviderEigResult {
-            eigenvalues,
-            diagonal,
-            right,
-            left,
+            let eigenvalues = self.upload(&HostTensorView {
+                data: &eigenvalues_tensor.data,
+                shape: &eigenvalues_tensor.shape,
+            })?;
+            let diagonal = self.upload(&HostTensorView {
+                data: &diagonal_tensor.data,
+                shape: &diagonal_tensor.shape,
+            })?;
+            let right = self.upload(&HostTensorView {
+                data: &right_tensor.data,
+                shape: &right_tensor.shape,
+            })?;
+            let left = match left_tensor {
+                Some(tensor) => Some(self.upload(&HostTensorView {
+                    data: &tensor.data,
+                    shape: &tensor.shape,
+                })?),
+                None => None,
+            };
+
+            if compute_left && left.is_none() {
+                return Err(anyhow!(
+                    "eig: left eigenvectors are not available for the requested matrix"
+                ));
+            }
+
+            Ok(ProviderEigResult {
+                eigenvalues,
+                diagonal,
+                right,
+                left,
+            })
         })
     }
 
-    fn reduce_sum_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<GpuTensorHandle> {
-        self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Sum)
+    fn reduce_sum_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Sum)
+        })
     }
-    fn reduce_nnz_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<GpuTensorHandle> {
-        self.reduce_dim_sum_mean_exec(
-            a,
-            dim,
-            crate::backend::wgpu::types::DimReduceOp::CountNonZero,
-        )
+    fn reduce_nnz_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.reduce_dim_sum_mean_exec(
+                a,
+                dim,
+                crate::backend::wgpu::types::DimReduceOp::CountNonZero,
+            )
+        })
     }
-    fn reduce_prod_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<GpuTensorHandle> {
-        self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Prod)
+    fn reduce_prod_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Prod)
+        })
     }
-    fn reduce_mean_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<GpuTensorHandle> {
-        self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Mean)
+    fn reduce_mean_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Mean)
+        })
     }
-    fn reduce_any_dim(
-        &self,
-        a: &GpuTensorHandle,
+    fn reduce_any_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
         dim: usize,
         omit_nan: bool,
-    ) -> Result<GpuTensorHandle> {
-        let op = if omit_nan {
-            crate::backend::wgpu::types::DimReduceOp::AnyOmit
-        } else {
-            crate::backend::wgpu::types::DimReduceOp::AnyInclude
-        };
-        self.reduce_dim_sum_mean_exec(a, dim, op)
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let op = if omit_nan {
+                crate::backend::wgpu::types::DimReduceOp::AnyOmit
+            } else {
+                crate::backend::wgpu::types::DimReduceOp::AnyInclude
+            };
+            self.reduce_dim_sum_mean_exec(a, dim, op)
+        })
     }
-    fn reduce_any(&self, a: &GpuTensorHandle, omit_nan: bool) -> Result<GpuTensorHandle> {
-        let op = if omit_nan {
-            crate::backend::wgpu::types::DimReduceOp::AnyOmit
-        } else {
-            crate::backend::wgpu::types::DimReduceOp::AnyInclude
-        };
-        let first = self.reduce_dim_sum_mean_exec(a, 0, op)?;
-        match self.reduce_dim_sum_mean_exec(&first, 1, op) {
-            Ok(handle) => {
-                let _ = self.free(&first);
-                Ok(handle)
-            }
-            Err(err) => {
-                let _ = self.free(&first);
-                Err(err)
-            }
-        }
-    }
-
-    fn reduce_all_dim(
-        &self,
-        a: &GpuTensorHandle,
-        dim: usize,
+    fn reduce_any<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
         omit_nan: bool,
-    ) -> Result<GpuTensorHandle> {
-        let op = if omit_nan {
-            crate::backend::wgpu::types::DimReduceOp::AllOmit
-        } else {
-            crate::backend::wgpu::types::DimReduceOp::AllInclude
-        };
-        self.reduce_dim_sum_mean_exec(a, dim, op)
-    }
-
-    fn reduce_all(&self, a: &GpuTensorHandle, omit_nan: bool) -> Result<GpuTensorHandle> {
-        let op = if omit_nan {
-            crate::backend::wgpu::types::DimReduceOp::AllOmit
-        } else {
-            crate::backend::wgpu::types::DimReduceOp::AllInclude
-        };
-        let total_elems = if a.shape.is_empty() {
-            1
-        } else {
-            product_checked(&a.shape)
-                .ok_or_else(|| anyhow!("reduce_all: tensor size exceeds GPU limits"))?
-        };
-        if total_elems == 0 {
-            return self.fill(&[1usize, 1usize], f64::NAN);
-        }
-        if a.shape.len() <= 2 {
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let op = if omit_nan {
+                crate::backend::wgpu::types::DimReduceOp::AnyOmit
+            } else {
+                crate::backend::wgpu::types::DimReduceOp::AnyInclude
+            };
             let first = self.reduce_dim_sum_mean_exec(a, 0, op)?;
             match self.reduce_dim_sum_mean_exec(&first, 1, op) {
                 Ok(handle) => {
@@ -15663,144 +15807,249 @@ impl AccelProvider for WgpuProvider {
                     Err(err)
                 }
             }
-        } else {
-            let original_shape = a.shape.clone();
-            let flattened_shape = vec![total_elems, 1usize];
-            let flattened = self.reshape(a, &flattened_shape)?;
-            let result = self.reduce_dim_sum_mean_exec(&flattened, 0, op);
-            let _ = self.reshape(a, &original_shape);
-            result
-        }
-    }
-
-    fn reduce_median(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        let host = self.download(a)?;
-        let median = median_from_slice(&host.data);
-        let data = [median];
-        let shape = [1usize, 1usize];
-        self.upload(&HostTensorView {
-            data: &data,
-            shape: &shape,
         })
     }
 
-    fn reduce_median_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<GpuTensorHandle> {
-        let host = self.download(a)?;
-        if host.shape.len() != 2 {
-            return Err(anyhow!("reduce_median_dim: only 2D supported"));
-        }
-        let rows = host.shape[0];
-        let cols = host.shape[1];
-        let mut scratch = Vec::<f64>::with_capacity(rows.max(cols));
-        let (out, shape) = if dim <= 1 {
-            let mut values = vec![f64::NAN; cols];
-            for (c, value) in values.iter_mut().enumerate().take(cols) {
-                scratch.clear();
-                let mut saw_nan = false;
-                for r in 0..rows {
-                    let v = host.data[r + c * rows];
-                    if v.is_nan() {
-                        saw_nan = true;
-                        scratch.clear();
-                        break;
-                    }
-                    scratch.push(v);
-                }
-                *value = if saw_nan || scratch.is_empty() {
-                    f64::NAN
-                } else {
-                    compute_median_inplace(&mut scratch)
-                };
-            }
-            (values, vec![1usize, cols])
-        } else {
-            let mut values = vec![f64::NAN; rows];
-            for (r, value) in values.iter_mut().enumerate().take(rows) {
-                scratch.clear();
-                let mut saw_nan = false;
-                for c in 0..cols {
-                    let v = host.data[r + c * rows];
-                    if v.is_nan() {
-                        saw_nan = true;
-                        scratch.clear();
-                        break;
-                    }
-                    scratch.push(v);
-                }
-                *value = if saw_nan || scratch.is_empty() {
-                    f64::NAN
-                } else {
-                    compute_median_inplace(&mut scratch)
-                };
-            }
-            (values, vec![rows, 1usize])
-        };
-        self.upload(&HostTensorView {
-            data: &out,
-            shape: &shape,
+    fn reduce_all_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+        omit_nan: bool,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let op = if omit_nan {
+                crate::backend::wgpu::types::DimReduceOp::AllOmit
+            } else {
+                crate::backend::wgpu::types::DimReduceOp::AllInclude
+            };
+            self.reduce_dim_sum_mean_exec(a, dim, op)
         })
     }
 
-    fn reduce_sum(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Sum)
+    fn reduce_all<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        omit_nan: bool,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let op = if omit_nan {
+                crate::backend::wgpu::types::DimReduceOp::AllOmit
+            } else {
+                crate::backend::wgpu::types::DimReduceOp::AllInclude
+            };
+            let total_elems = if a.shape.is_empty() {
+                1
+            } else {
+                product_checked(&a.shape)
+                    .ok_or_else(|| anyhow!("reduce_all: tensor size exceeds GPU limits"))?
+            };
+            if total_elems == 0 {
+                return self.fill(&[1usize, 1usize], f64::NAN);
+            }
+            if a.shape.len() <= 2 {
+                let first = self.reduce_dim_sum_mean_exec(a, 0, op)?;
+                match self.reduce_dim_sum_mean_exec(&first, 1, op) {
+                    Ok(handle) => {
+                        let _ = self.free(&first);
+                        Ok(handle)
+                    }
+                    Err(err) => {
+                        let _ = self.free(&first);
+                        Err(err)
+                    }
+                }
+            } else {
+                let original_shape = a.shape.clone();
+                let flattened_shape = vec![total_elems, 1usize];
+                let flattened = self.reshape(a, &flattened_shape)?;
+                let result = self.reduce_dim_sum_mean_exec(&flattened, 0, op);
+                let _ = self.reshape(a, &original_shape);
+                result
+            }
+        })
     }
 
-    fn reduce_nnz(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::CountNonZero)
+    fn reduce_median<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let host = <Self as AccelProvider>::download(self, a).await?;
+            let median = median_from_slice(&host.data);
+            let data = [median];
+            let shape = [1usize, 1usize];
+            self.upload(&HostTensorView {
+                data: &data,
+                shape: &shape,
+            })
+        })
     }
 
-    fn reduce_prod(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Prod)
+    fn reduce_median_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let host = <Self as AccelProvider>::download(self, a).await?;
+            if host.shape.len() != 2 {
+                return Err(anyhow!("reduce_median_dim: only 2D supported"));
+            }
+            let rows = host.shape[0];
+            let cols = host.shape[1];
+            let mut scratch = Vec::<f64>::with_capacity(rows.max(cols));
+            let (out, shape) = if dim <= 1 {
+                let mut values = vec![f64::NAN; cols];
+                for (c, value) in values.iter_mut().enumerate().take(cols) {
+                    scratch.clear();
+                    let mut saw_nan = false;
+                    for r in 0..rows {
+                        let v = host.data[r + c * rows];
+                        if v.is_nan() {
+                            saw_nan = true;
+                            scratch.clear();
+                            break;
+                        }
+                        scratch.push(v);
+                    }
+                    *value = if saw_nan || scratch.is_empty() {
+                        f64::NAN
+                    } else {
+                        compute_median_inplace(&mut scratch)
+                    };
+                }
+                (values, vec![1usize, cols])
+            } else {
+                let mut values = vec![f64::NAN; rows];
+                for (r, value) in values.iter_mut().enumerate().take(rows) {
+                    scratch.clear();
+                    let mut saw_nan = false;
+                    for c in 0..cols {
+                        let v = host.data[r + c * rows];
+                        if v.is_nan() {
+                            saw_nan = true;
+                            scratch.clear();
+                            break;
+                        }
+                        scratch.push(v);
+                    }
+                    *value = if saw_nan || scratch.is_empty() {
+                        f64::NAN
+                    } else {
+                        compute_median_inplace(&mut scratch)
+                    };
+                }
+                (values, vec![rows, 1usize])
+            };
+            self.upload(&HostTensorView {
+                data: &out,
+                shape: &shape,
+            })
+        })
     }
 
-    fn reduce_mean(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        // Mean over all elements: compute via single-pass sum then divide by len
-        let sum_handle =
-            self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Sum)?;
-        let total_elems: usize = self.get_entry(a)?.len.max(1);
-        let scalar = 1.0 / (total_elems as f64);
-        let out = self.scalar_op_exec(
-            crate::backend::wgpu::types::ScalarOpCode::Mul,
-            &sum_handle,
-            scalar,
-        )?;
-        // Free temporary sum buffer
-        let _ = self.free(&sum_handle);
-        Ok(out)
+    fn reduce_sum<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Sum)
+        })
     }
-    fn reduce_std(
-        &self,
-        a: &GpuTensorHandle,
+
+    fn reduce_nnz<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::CountNonZero)
+        })
+    }
+
+    fn reduce_prod<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Prod)
+        })
+    }
+
+    fn reduce_mean<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            // Mean over all elements: compute via single-pass sum then divide by len
+            let sum_handle =
+                self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Sum)?;
+            let total_elems: usize = self.get_entry(a)?.len.max(1);
+            let scalar = 1.0 / (total_elems as f64);
+            let out = self.scalar_op_exec(
+                crate::backend::wgpu::types::ScalarOpCode::Mul,
+                &sum_handle,
+                scalar,
+            )?;
+            // Free temporary sum buffer
+            let _ = self.free(&sum_handle);
+            Ok(out)
+        })
+    }
+    fn reduce_std<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
         normalization: ProviderStdNormalization,
         nan_mode: ProviderNanMode,
-    ) -> Result<GpuTensorHandle> {
-        self.reduce_std_exec(a, normalization, nan_mode)
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.reduce_std_exec(a, normalization, nan_mode) })
     }
 
-    fn reduce_std_dim(
-        &self,
-        a: &GpuTensorHandle,
+    fn reduce_std_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
         dim: usize,
         normalization: ProviderStdNormalization,
         nan_mode: ProviderNanMode,
-    ) -> Result<GpuTensorHandle> {
-        self.reduce_std_dim_exec(a, dim, normalization, nan_mode)
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.reduce_std_dim_exec(a, dim, normalization, nan_mode) })
     }
 
-    fn reduce_min(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Min)
+    fn reduce_min<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Min)
+        })
     }
 
-    fn reduce_max(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Max)
+    fn reduce_max<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Max)
+        })
     }
 
-    fn reduce_min_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<ReduceDimResult> {
-        self.reduce_dim_minmax_exec(a, dim, crate::backend::wgpu::types::DimReduceExtrema::Min)
+    fn reduce_min_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, ReduceDimResult> {
+        Box::pin(async move {
+            self.reduce_dim_minmax_exec(a, dim, crate::backend::wgpu::types::DimReduceExtrema::Min)
+        })
     }
 
-    fn reduce_max_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<ReduceDimResult> {
-        self.reduce_dim_minmax_exec(a, dim, crate::backend::wgpu::types::DimReduceExtrema::Max)
+    fn reduce_max_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, ReduceDimResult> {
+        Box::pin(async move {
+            self.reduce_dim_minmax_exec(a, dim, crate::backend::wgpu::types::DimReduceExtrema::Max)
+        })
     }
 
     fn find(
@@ -15973,29 +16222,34 @@ impl AccelProvider for WgpuProvider {
         Ok(flag != 0)
     }
 
-    fn ishermitian(
-        &self,
-        matrix: &GpuTensorHandle,
+    fn ishermitian<'a>(
+        &'a self,
+        matrix: &'a GpuTensorHandle,
         kind: ProviderHermitianKind,
         tolerance: f64,
-    ) -> Result<bool> {
-        if !tolerance.is_finite() || tolerance < 0.0 {
-            return Err(anyhow!(
-                "ishermitian: tolerance must be finite and non-negative"
-            ));
-        }
-        let host = self.download(matrix)?;
-        let skew = matches!(kind, ProviderHermitianKind::Skew);
-        ishermitian_host_real_data(&host.shape, &host.data, skew, tolerance).map_err(|e| anyhow!(e))
+    ) -> AccelProviderFuture<'a, bool> {
+        Box::pin(async move {
+            if !tolerance.is_finite() || tolerance < 0.0 {
+                return Err(anyhow!(
+                    "ishermitian: tolerance must be finite and non-negative"
+                ));
+            }
+            let host = <Self as AccelProvider>::download(self, matrix).await?;
+            let skew = matches!(kind, ProviderHermitianKind::Skew);
+            ishermitian_host_real_data(&host.shape, &host.data, skew, tolerance)
+                .map_err(|e| anyhow!(e))
+        })
     }
 
     fn bandwidth(&self, matrix: &GpuTensorHandle) -> Result<ProviderBandwidth> {
         self.bandwidth_exec(matrix)
     }
 
-    fn sym_rcm(&self, matrix: &GpuTensorHandle) -> Result<Vec<usize>> {
-        let host = self.download(matrix)?;
-        symrcm_host_real_data(&host.shape, &host.data).map_err(|e| anyhow!(e))
+    fn sym_rcm<'a>(&'a self, matrix: &'a GpuTensorHandle) -> AccelProviderFuture<'a, Vec<usize>> {
+        Box::pin(async move {
+            let host = <Self as AccelProvider>::download(self, matrix).await?;
+            symrcm_host_real_data(&host.shape, &host.data).map_err(|e| anyhow!(e))
+        })
     }
     fn read_scalar(&self, h: &GpuTensorHandle, linear_index: usize) -> Result<f64> {
         let entry = self.get_entry(h)?;
@@ -16364,184 +16618,100 @@ impl AccelProvider for WgpuProvider {
         self.telemetry.record_upload_bytes(bytes);
         Ok(self.register_existing_buffer(buffer, shape, len))
     }
-    fn download(&self, h: &GpuTensorHandle) -> Result<HostTensorOwned> {
-        let _span = info_span!(
-            "gpu.transfer.download",
-            shape = ?h.shape,
-            buffer_id = h.buffer_id
-        )
-        .entered();
-        log::trace!("wgpu download id={} shape={:?}", h.buffer_id, &h.shape);
-        let entry = self.get_entry(h)?;
-        if let Some(last) = entry.last_submission_id {
-            log::trace!(
-                "wgpu download id={} last_submission_id={}",
-                h.buffer_id,
-                last
+    fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        Box::pin(async move {
+            let span = info_span!(
+                "gpu.transfer.download",
+                shape = ?h.shape,
+                buffer_id = h.buffer_id
             );
-        } else {
-            log::trace!("wgpu download id={} last_submission_id=<none>", h.buffer_id);
-        }
-        if entry.len == 0 {
-            return Ok(HostTensorOwned {
-                data: Vec::new(),
-                shape: h.shape.clone(),
-            });
-        }
-
-        let size_bytes = (entry.len * self.element_size) as u64;
-
-        // Shared post-map readback logic: decode mapped bytes, unmap, record telemetry,
-        // apply transpose metadata, and return host tensor.
-        let finish_readback = |staging: wgpu::Buffer, size_bytes: u64| -> Result<HostTensorOwned> {
-            let slice = staging.slice(..);
-            let data = slice.get_mapped_range();
-            log::trace!(
-                "wgpu download copying data id={} len={} bytes={}",
-                h.buffer_id,
-                entry.len,
-                size_bytes
-            );
-
-            let mut out = vec![0.0f64; entry.len];
-            match entry.precision {
-                NumericPrecision::F64 => out.copy_from_slice(cast_slice(&data)),
-                NumericPrecision::F32 => {
-                    let f32_slice: &[f32] = cast_slice(&data);
-                    for (dst, src) in out.iter_mut().zip(f32_slice.iter()) {
-                        *dst = *src as f64;
-                    }
-                }
+            let entry = {
+                let _guard = span.enter();
+                log::trace!("wgpu download id={} shape={:?}", h.buffer_id, &h.shape);
+                self.get_entry(h)?
+            };
+            if let Some(last) = entry.last_submission_id {
+                log::trace!(
+                    "wgpu download id={} last_submission_id={}",
+                    h.buffer_id,
+                    last
+                );
+            } else {
+                log::trace!("wgpu download id={} last_submission_id=<none>", h.buffer_id);
             }
-            drop(data);
-            staging.unmap();
-            log::trace!("wgpu download finished copy id={}", h.buffer_id);
-            self.telemetry.record_download_bytes(size_bytes);
-
-            let mut shape = h.shape.clone();
-            if let Some(info) = runmat_accelerate_api::handle_transpose_info(h) {
-                let base_rows = info.base_rows;
-                let base_cols = info.base_cols;
-                if base_rows * base_cols != out.len() {
-                    return Err(anyhow!(
-                        "download: transpose metadata mismatch for buffer {}",
-                        h.buffer_id
-                    ));
-                }
-                if shape.len() == 2 {
-                    let rows_t = base_cols;
-                    let cols_t = base_rows;
-                    let mut transposed = vec![0.0f64; out.len()];
-                    for col in 0..base_cols {
-                        for row in 0..base_rows {
-                            let src_idx = row + col * base_rows;
-                            let dst_idx = col + row * base_cols;
-                            transposed[dst_idx] = out[src_idx];
-                        }
-                    }
-                    out = transposed;
-                    shape[0] = rows_t;
-                    shape[1] = cols_t;
-                }
+            if entry.len == 0 {
+                return Ok(HostTensorOwned {
+                    data: Vec::new(),
+                    shape: h.shape.clone(),
+                });
             }
 
-            log::trace!(
-                "wgpu download complete id={} final_shape={:?}",
-                h.buffer_id,
-                shape
-            );
+            let size_bytes = (entry.len * self.element_size) as u64;
 
-            Ok(HostTensorOwned { data: out, shape })
-        };
+            // Shared post-map readback logic: decode mapped bytes, unmap, record telemetry,
+            // apply transpose metadata, and return host tensor.
+            let finish_readback =
+                |staging: wgpu::Buffer, size_bytes: u64| -> Result<HostTensorOwned> {
+                    let slice = staging.slice(..);
+                    let data = slice.get_mapped_range();
+                    log::trace!(
+                        "wgpu download copying data id={} len={} bytes={}",
+                        h.buffer_id,
+                        entry.len,
+                        size_bytes
+                    );
 
-        // wasm/WebGPU: never block waiting for map_async. Instead, schedule the map once and
-        // suspend the interpreter, letting the host resume on the next tick.
-        #[cfg(target_arch = "wasm32")]
-        {
-            // If we already have an in-flight map for this buffer id, check if it's completed.
-            if let Ok(mut pending) = self.pending_map_reads.lock() {
-                if let Some(state) = pending.get_mut(&h.buffer_id) {
-                    match state.rx.try_recv() {
-                        Ok(map_result) => {
-                            let PendingWasmMapRead {
-                                staging,
-                                size_bytes,
-                                ..
-                            } = pending.remove(&h.buffer_id).unwrap();
-                            map_result.map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
-                            return finish_readback(staging, size_bytes);
+                    let mut out = vec![0.0f64; entry.len];
+                    match entry.precision {
+                        NumericPrecision::F64 => out.copy_from_slice(cast_slice(&data)),
+                        NumericPrecision::F32 => {
+                            let f32_slice: &[f32] = cast_slice(&data);
+                            for (dst, src) in out.iter_mut().zip(f32_slice.iter()) {
+                                *dst = *src as f64;
+                            }
                         }
-                        Err(std::sync::mpsc::TryRecvError::Empty) => {
-                            let label = format!(
-                                "wgpu pending map_async id={} bytes={}",
-                                h.buffer_id, state.size_bytes
-                            );
-                            return Err(anyhow!(label));
-                        }
-                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                            pending.remove(&h.buffer_id);
+                    }
+                    drop(data);
+                    staging.unmap();
+                    log::trace!("wgpu download finished copy id={}", h.buffer_id);
+                    self.telemetry.record_download_bytes(size_bytes);
+
+                    let mut shape = h.shape.clone();
+                    if let Some(info) = runmat_accelerate_api::handle_transpose_info(h) {
+                        let base_rows = info.base_rows;
+                        let base_cols = info.base_cols;
+                        if base_rows * base_cols != out.len() {
                             return Err(anyhow!(
-                                "map_async callback dropped for buffer {}",
+                                "download: transpose metadata mismatch for buffer {}",
                                 h.buffer_id
                             ));
                         }
+                        if shape.len() == 2 {
+                            let rows_t = base_cols;
+                            let cols_t = base_rows;
+                            let mut transposed = vec![0.0f64; out.len()];
+                            for col in 0..base_cols {
+                                for row in 0..base_rows {
+                                    let src_idx = row + col * base_rows;
+                                    let dst_idx = col + row * base_cols;
+                                    transposed[dst_idx] = out[src_idx];
+                                }
+                            }
+                            out = transposed;
+                            shape[0] = rows_t;
+                            shape[1] = cols_t;
+                        }
                     }
-                }
-            }
 
-            // No in-flight map yet; schedule one now.
-            log::trace!(
-                "wgpu download (wasm) creating staging buffer id={} bytes={}",
-                h.buffer_id,
-                size_bytes
-            );
-            let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("runmat-download-staging"),
-                size: size_bytes,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let mut encoder = self
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-download-encoder"),
-                });
-            encoder.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, &staging, 0, size_bytes);
-            self.submit(encoder);
+                    log::trace!(
+                        "wgpu download complete id={} final_shape={:?}",
+                        h.buffer_id,
+                        shape
+                    );
 
-            let slice = staging.slice(..);
-            let (tx, rx) = mpsc::channel();
-            let map_buffer_id = h.buffer_id;
-            slice.map_async(wgpu::MapMode::Read, move |res| {
-                log::trace!(
-                    "wgpu download map_async callback id={} status={:?}",
-                    map_buffer_id,
-                    res
-                );
-                let _ = tx.send(res);
-            });
+                    Ok(HostTensorOwned { data: out, shape })
+                };
 
-            if let Ok(mut pending) = self.pending_map_reads.lock() {
-                pending.insert(
-                    h.buffer_id,
-                    PendingWasmMapRead {
-                        staging,
-                        size_bytes,
-                        rx,
-                    },
-                );
-            }
-
-            let label = format!(
-                "wgpu pending map_async id={} bytes={}",
-                h.buffer_id, size_bytes
-            );
-            return Err(anyhow!(label));
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            // native: blocking readback
             log::trace!(
                 "wgpu download creating staging buffer id={} bytes={}",
                 h.buffer_id,
@@ -16561,7 +16731,7 @@ impl AccelProvider for WgpuProvider {
             encoder.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, &staging, 0, size_bytes);
             self.submit(encoder);
             let slice = staging.slice(..);
-            let (tx, rx) = mpsc::channel();
+            let (tx, rx) = oneshot::channel();
 
             let map_buffer_id = h.buffer_id;
             slice.map_async(wgpu::MapMode::Read, move |res| {
@@ -16577,13 +16747,18 @@ impl AccelProvider for WgpuProvider {
                 h.buffer_id,
                 size_bytes
             );
-            self.device.poll(wgpu::Maintain::Wait);
-            let map_result = wait_for_map_async(rx, self.device.as_ref(), h.buffer_id)?;
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.device.poll(wgpu::Maintain::Wait);
+            }
+            let map_result = rx
+                .await
+                .map_err(|_| anyhow!("map_async callback dropped for buffer {}", h.buffer_id))?;
 
             log::trace!("wgpu download map_async success id={}", h.buffer_id);
             map_result.map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
             finish_readback(staging, size_bytes)
-        }
+        })
     }
     fn free(&self, h: &GpuTensorHandle) -> Result<()> {
         // Remove from handle table and return buffer to pool for reuse
@@ -16635,7 +16810,7 @@ impl AccelProvider for WgpuProvider {
     }
 }
 impl WgpuProvider {
-    fn reduce_nd_mean_exec(
+    async fn reduce_nd_mean_exec(
         &self,
         a: &GpuTensorHandle,
         dims_zero_based: &[usize],
@@ -16737,7 +16912,7 @@ impl WgpuProvider {
             let mut current = a.clone();
             let mut owned = false;
             for &d in &reduce {
-                let next = self.reduce_mean_dim(&current, d)?;
+                let next = self.reduce_mean_dim(&current, d).await?;
                 if owned {
                     let _ = self.free(&current);
                 }
@@ -17096,41 +17271,6 @@ impl WgpuProvider {
             mean: mean_handle,
             ex2: ex2_handle,
         })
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn wait_for_map_async(
-    rx: mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
-    device: &wgpu::Device,
-    buffer_id: u64,
-) -> Result<Result<(), wgpu::BufferAsyncError>> {
-    use std::sync::mpsc::RecvTimeoutError::{Disconnected, Timeout};
-    const POLL_INTERVAL: Duration = Duration::from_millis(50);
-    const LOG_INTERVAL: Duration = Duration::from_secs(5);
-    let mut waited = Duration::ZERO;
-    loop {
-        match rx.recv_timeout(POLL_INTERVAL) {
-            Ok(res) => return Ok(res),
-            Err(Timeout) => {
-                waited += POLL_INTERVAL;
-                device.poll(wgpu::Maintain::Poll);
-                if waited >= LOG_INTERVAL {
-                    log::warn!(
-                        "wgpu download map_async still pending id={} waited_ms={}",
-                        buffer_id,
-                        waited.as_millis()
-                    );
-                    waited = Duration::ZERO;
-                }
-            }
-            Err(Disconnected) => {
-                return Err(anyhow!(
-                    "map_async callback dropped for buffer {}",
-                    buffer_id
-                ));
-            }
-        }
     }
 }
 

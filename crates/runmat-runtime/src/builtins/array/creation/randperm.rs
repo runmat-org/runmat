@@ -741,9 +741,8 @@ pub(crate) mod tests {
             other => panic!("expected GPU tensor result, got {other:?}"),
         };
 
-        let host = provider
-            .download(&gpu_handle)
-            .expect("download permutation");
+        let host =
+            block_on(download_handle_async(provider, &gpu_handle)).expect("download permutation");
         assert_eq!(host.shape, vec![1, 7]);
         assert_eq!(host.data.len(), 7);
 

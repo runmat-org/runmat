@@ -326,7 +326,7 @@ async fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(diagonal) = provider.diag_extract(&handle, 0) {
-            let reduced = provider.reduce_sum(&diagonal);
+            let reduced = provider.reduce_sum(&diagonal).await;
             let _ = provider.free(&diagonal);
             if let Ok(result) = reduced {
                 return Ok(Value::GpuTensor(result));
@@ -388,6 +388,7 @@ fn matrix_extents_from_shape(shape: &[usize]) -> (usize, usize) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
@@ -478,7 +479,7 @@ pub(crate) mod tests {
             let result = trace_builtin(Value::GpuTensor(handle)).expect("trace");
             match result {
                 Value::GpuTensor(out) => {
-                    let host = provider.download(&out).expect("download");
+                    let host = block_on(download_handle_async(provider, &out)).expect("download");
                     assert_eq!(host.shape, vec![1, 1]);
                     assert_eq!(host.data.len(), 1);
                     assert!((host.data[0] - 6.0).abs() < 1e-12);
@@ -503,7 +504,7 @@ pub(crate) mod tests {
             let result = trace_builtin(Value::GpuTensor(handle)).expect("trace");
             match result {
                 Value::GpuTensor(out) => {
-                    let host = provider.download(&out).expect("download");
+                    let host = block_on(download_handle_async(provider, &out)).expect("download");
                     assert_eq!(host.data, vec![0.0]);
                     let _ = provider.free(&out);
                 }

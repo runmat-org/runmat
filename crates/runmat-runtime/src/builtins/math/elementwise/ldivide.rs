@@ -502,7 +502,7 @@ async fn ldivide_gpu_pair(
 ) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if divisor.shape == numerator.shape {
-            if let Ok(handle) = provider.elem_div(&numerator, &divisor) {
+            if let Ok(handle) = provider.elem_div(&numerator, &divisor).await {
                 return Ok(Value::GpuTensor(handle));
             }
         }
@@ -528,6 +528,7 @@ async fn ldivide_gpu_pair(
             };
             let result = provider
                 .elem_div(&num_expanded, &div_expanded)
+                .await
                 .map_err(|e| builtin_error(format!("ldivide: {e}")));
             if made_num {
                 let _ = provider.free(&num_expanded);

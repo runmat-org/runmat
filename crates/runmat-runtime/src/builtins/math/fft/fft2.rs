@@ -219,18 +219,18 @@ async fn fft2_gpu(
     }
 
     if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(first) = provider.fft_dim(&handle, lengths.0, 0) {
-            match provider.fft_dim(&first, lengths.1, 1) {
+        if let Ok(first) = provider.fft_dim(&handle, lengths.0, 0).await {
+            match provider.fft_dim(&first, lengths.1, 1).await {
                 Ok(second) => {
                     if first.buffer_id != second.buffer_id {
                         provider.free(&first).ok();
                         runmat_accelerate_api::clear_residency(&first);
                     }
-                    let complex = fft2_download_gpu_result(provider, &second)?;
+                    let complex = fft2_download_gpu_result(provider, &second).await?;
                     return Ok(complex_tensor_into_value(complex));
                 }
                 Err(_) => {
-                    let partial = fft2_download_gpu_result(provider, &first)?;
+                    let partial = fft2_download_gpu_result(provider, &first).await?;
                     let completed = fft_complex_tensor(partial, lengths.1, Some(2))?;
                     return Ok(complex_tensor_into_value(completed));
                 }
@@ -241,11 +241,11 @@ async fn fft2_gpu(
     fft2_gpu_fallback(handle, lengths).await
 }
 
-fn fft2_download_gpu_result(
+async fn fft2_download_gpu_result(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<ComplexTensor> {
-    fft_download_gpu_result(provider, handle, BUILTIN_NAME)
+    fft_download_gpu_result(provider, handle, BUILTIN_NAME).await
 }
 
 async fn fft2_gpu_fallback(

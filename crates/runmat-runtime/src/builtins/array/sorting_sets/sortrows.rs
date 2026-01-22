@@ -274,7 +274,10 @@ async fn sortrows_gpu(
         if let Some(provider) = runmat_accelerate_api::provider() {
             let provider_columns = args.to_provider_columns();
             let provider_comparison = args.provider_comparison();
-            match provider.sort_rows(&handle, &provider_columns, provider_comparison) {
+            match provider
+                .sort_rows(&handle, &provider_columns, provider_comparison)
+                .await
+            {
                 Ok(result) => return sortrows_from_provider_result(result),
                 Err(_err) => {
                     // fall back to host path when provider cannot service the request

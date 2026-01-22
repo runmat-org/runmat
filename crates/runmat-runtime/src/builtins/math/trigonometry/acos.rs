@@ -16,7 +16,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "acos";
 const ZERO_EPS: f64 = 1e-12;
@@ -269,9 +269,9 @@ async fn acos_builtin(value: Value) -> BuiltinResult<Value> {
 
 async fn acos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        match detect_gpu_requires_complex(provider, &handle) {
+        match detect_gpu_requires_complex(provider, &handle).await {
             Ok(false) => {
-                if let Ok(out) = provider.unary_acos(&handle) {
+                if let Ok(out) = provider.unary_acos(&handle).await {
                     return Ok(Value::GpuTensor(out));
                 }
             }
@@ -288,21 +288,22 @@ async fn acos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     acos_tensor_real(tensor)
 }
 
-fn detect_gpu_requires_complex(
+async fn detect_gpu_requires_complex(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<bool> {
     let min_handle = provider
         .reduce_min(handle)
+        .await
         .map_err(|e| runtime_error_for(format!("acos: reduce_min failed: {e}")))?;
-    let max_handle = match provider.reduce_max(handle) {
+    let max_handle = match provider.reduce_max(handle).await {
         Ok(handle) => handle,
         Err(err) => {
             let _ = provider.free(&min_handle);
             return Err(runtime_error_for(format!("acos: reduce_max failed: {err}")));
         }
     };
-    let min_host = match provider.download(&min_handle) {
+    let min_host = match download_handle_async(provider, &min_handle).await {
         Ok(host) => host,
         Err(err) => {
             let _ = provider.free(&min_handle);
@@ -312,7 +313,7 @@ fn detect_gpu_requires_complex(
             )));
         }
     };
-    let max_host = match provider.download(&max_handle) {
+    let max_host = match download_handle_async(provider, &max_handle).await {
         Ok(host) => host,
         Err(err) => {
             let _ = provider.free(&min_handle);

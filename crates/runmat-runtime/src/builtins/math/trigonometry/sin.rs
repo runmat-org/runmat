@@ -235,7 +235,7 @@ async fn sin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 
 async fn sin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_sin(&handle) {
+        if let Ok(out) = provider.unary_sin(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }

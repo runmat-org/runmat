@@ -254,7 +254,7 @@ async fn conj_builtin(value: Value) -> BuiltinResult<Value> {
 
 async fn conj_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_conj(&handle) {
+        if let Ok(out) = provider.unary_conj(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }

@@ -268,7 +268,7 @@ pub async fn evaluate(
 ) -> BuiltinResult<PolyfitEval> {
     let deg = parse_degree(&degree)?;
 
-    if let Some(eval) = try_gpu_polyfit(&x, &y, deg, rest)? {
+    if let Some(eval) = try_gpu_polyfit(&x, &y, deg, rest).await? {
         return Ok(eval);
     }
 
@@ -305,7 +305,7 @@ pub async fn evaluate(
     PolyfitEval::from_solution(solution)
 }
 
-fn try_gpu_polyfit(
+async fn try_gpu_polyfit(
     x: &Value,
     y: &Value,
     degree: usize,
@@ -335,7 +335,10 @@ fn try_gpu_polyfit(
         None => None,
     };
 
-    let result = match provider.polyfit(x_handle, y_handle, degree, weight_handle) {
+    let result = match provider
+        .polyfit(x_handle, y_handle, degree, weight_handle)
+        .await
+    {
         Ok(res) => res,
         Err(err) => {
             trace!("polyfit: provider path unavailable ({err}); falling back to host");

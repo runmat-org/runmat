@@ -259,7 +259,7 @@ async fn ishermitian_gpu(
             HermitianMode::Hermitian => ProviderHermitianKind::Hermitian,
             HermitianMode::Skew => ProviderHermitianKind::Skew,
         };
-        match provider.ishermitian(&handle, provider_mode, tol) {
+        match provider.ishermitian(&handle, provider_mode, tol).await {
             Ok(result) => return Ok(Value::Bool(result)),
             Err(err) => {
                 log::debug!("ishermitian: provider hook unavailable, falling back to host: {err}");

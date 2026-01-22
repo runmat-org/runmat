@@ -256,7 +256,7 @@ async fn inv_builtin(value: Value) -> BuiltinResult<Value> {
 async fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let options = ProviderInvOptions::default();
-        match provider.inv(&handle, options) {
+        match provider.inv(&handle, options).await {
             Ok(result) => return Ok(Value::GpuTensor(result)),
             Err(_) => {
                 // Fall back to host implementation and attempt to re-upload.

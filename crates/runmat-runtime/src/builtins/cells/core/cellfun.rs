@@ -727,7 +727,7 @@ impl SpecialCallable {
                         IDENT_INVALID_INPUT,
                     )
                 })?;
-                Ok(Value::Num(value_numel(value) as f64))
+                Ok(Value::Num(value_numel(value).await? as f64))
             }
             SpecialCallable::IsClass => {
                 if args.len() < 2 {

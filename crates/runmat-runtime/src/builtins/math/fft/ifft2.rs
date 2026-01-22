@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorOwned};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -232,18 +232,18 @@ async fn ifft2_gpu(
     }
 
     if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(first) = provider.ifft_dim(&handle, lengths.0, 0) {
-            match provider.ifft_dim(&first, lengths.1, 1) {
+        if let Ok(first) = provider.ifft_dim(&handle, lengths.0, 0).await {
+            match provider.ifft_dim(&first, lengths.1, 1).await {
                 Ok(second) => {
                     if first.buffer_id != second.buffer_id {
                         provider.free(&first).ok();
                         runmat_accelerate_api::clear_residency(&first);
                     }
-                    let complex = ifft2_download_gpu_result(provider, &second)?;
+                    let complex = ifft2_download_gpu_result(provider, &second).await?;
                     return finalize_ifft2_output(complex, symmetric);
                 }
                 Err(_) => {
-                    let partial = ifft2_download_gpu_result(provider, &first)?;
+                    let partial = ifft2_download_gpu_result(provider, &first).await?;
                     let completed = ifft_complex_tensor(partial, lengths.1, Some(2))?;
                     return finalize_ifft2_output(completed, symmetric);
                 }
@@ -254,12 +254,12 @@ async fn ifft2_gpu(
     ifft2_gpu_fallback(handle, lengths, symmetric).await
 }
 
-fn ifft2_download_gpu_result(
+async fn ifft2_download_gpu_result(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<ComplexTensor> {
-    let host = provider
-        .download(handle)
+    let host = download_handle_async(provider, handle)
+        .await
         .map_err(|e| ifft2_error(format!("ifft2: {e}")))?;
     provider.free(handle).ok();
     runmat_accelerate_api::clear_residency(handle);

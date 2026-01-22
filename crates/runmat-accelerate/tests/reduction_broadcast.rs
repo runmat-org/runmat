@@ -24,8 +24,8 @@ fn upload_matrix(
         .expect("upload")
 }
 
-#[test]
-fn reduce_sum_dim_semantics() {
+#[tokio::test]
+async fn reduce_sum_dim_semantics() {
     let _guard = TEST_MUTEX.lock().unwrap();
     let provider = WgpuProvider::new(WgpuProviderOptions::default()).expect("create provider");
     // 4x3 matrix with simple pattern: M[r,c] = r + 10*c
@@ -40,8 +40,10 @@ fn reduce_sum_dim_semantics() {
     let m = upload_matrix(&provider, rows, cols, &host);
 
     // Sum over dim=0 (rows) → shape [1, cols]
-    let sum_dim0 = provider.reduce_sum_dim(&m, 0).expect("sum dim0");
-    let sum_dim0_host = provider.download(&sum_dim0).expect("dl dim0");
+    let sum_dim0 = provider.reduce_sum_dim(&m, 0).await.expect("sum dim0");
+    let sum_dim0_host = AccelProvider::download(&provider, &sum_dim0)
+        .await
+        .expect("dl dim0");
     let expected_dim0: Vec<f64> = (0..cols)
         .map(|c| (0..rows).map(|r| host[r + c * rows]).sum::<f64>())
         .collect();
@@ -59,8 +61,10 @@ fn reduce_sum_dim_semantics() {
     }
 
     // Sum over dim=1 (cols) → shape [rows, 1]
-    let sum_dim1 = provider.reduce_sum_dim(&m, 1).expect("sum dim1");
-    let sum_dim1_host = provider.download(&sum_dim1).expect("dl dim1");
+    let sum_dim1 = provider.reduce_sum_dim(&m, 1).await.expect("sum dim1");
+    let sum_dim1_host = AccelProvider::download(&provider, &sum_dim1)
+        .await
+        .expect("dl dim1");
     let expected_dim1: Vec<f64> = (0..rows)
         .map(|r| (0..cols).map(|c| host[r + c * rows]).sum::<f64>())
         .collect();
@@ -78,8 +82,8 @@ fn reduce_sum_dim_semantics() {
     }
 }
 
-#[test]
-fn elementwise_broadcast_pxc_times_1xc() {
+#[tokio::test]
+async fn elementwise_broadcast_pxc_times_1xc() {
     let _guard = TEST_MUTEX.lock().unwrap();
     let provider = WgpuProvider::new(WgpuProviderOptions::default()).expect("create provider");
     let rows = 4usize;
@@ -105,8 +109,8 @@ fn elementwise_broadcast_pxc_times_1xc() {
         .expect("upload S");
 
     // Y = X .* S (expect broadcast over rows)
-    let y = provider.elem_mul(&x, &s).expect("mul");
-    let yh = provider.download(&y).expect("dl y");
+    let y = provider.elem_mul(&x, &s).await.expect("mul");
+    let yh = AccelProvider::download(&provider, &y).await.expect("dl y");
     assert_eq!(yh.shape, vec![rows, cols]);
     for c in 0..cols {
         for r in 0..rows {
@@ -117,8 +121,8 @@ fn elementwise_broadcast_pxc_times_1xc() {
     }
 }
 
-#[test]
-fn fused_dot_per_column_matches_manual() {
+#[tokio::test]
+async fn fused_dot_per_column_matches_manual() {
     let _guard = TEST_MUTEX.lock().unwrap();
     let provider = WgpuProvider::new(WgpuProviderOptions::default()).expect("create provider");
     let rows = 5usize;
@@ -134,9 +138,12 @@ fn fused_dot_per_column_matches_manual() {
     }
     let x = upload_matrix(&provider, rows, cols, &xh);
     let w = upload_matrix(&provider, rows, cols, &wh);
-    let prod = provider.elem_mul(&x, &w).expect("mul");
-    let y = provider.reduce_sum_dim(&prod, 0).expect("sum per col");
-    let yh = provider.download(&y).expect("dl y");
+    let prod = provider.elem_mul(&x, &w).await.expect("mul");
+    let y = provider
+        .reduce_sum_dim(&prod, 0)
+        .await
+        .expect("sum per col");
+    let yh = AccelProvider::download(&provider, &y).await.expect("dl y");
     // Manual per-column dot
     for c in 0..cols {
         let mut acc = 0.0;

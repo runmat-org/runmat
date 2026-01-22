@@ -212,7 +212,7 @@ async fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
         return Err(reshape_error("reshape: size information missing"));
     }
     let tokens = parse_size_arguments(&rest)?;
-    let numel = value_numel(&value);
+    let numel = value_numel(&value).await?;
     let dims = finalize_dimensions(tokens, numel)?;
     reshape_value(value, &dims)
 }
@@ -733,7 +733,7 @@ pub(crate) mod tests {
             panic!("expected gpu tensor");
         };
         assert_eq!(reshaped.shape, vec![2, 6]);
-        let host = provider.download(&reshaped).expect("download");
+        let host = block_on(download_handle_async(provider, &reshaped)).expect("download");
         assert_eq!(host.shape, vec![2, 6]);
         assert_eq!(host.data, tensor.data);
     }

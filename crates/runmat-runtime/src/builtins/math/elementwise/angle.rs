@@ -255,7 +255,7 @@ async fn angle_builtin(value: Value) -> BuiltinResult<Value> {
 
 async fn angle_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(device_result) = provider.unary_angle(&handle) {
+        if let Ok(device_result) = provider.unary_angle(&handle).await {
             return Ok(Value::GpuTensor(device_result));
         }
     }

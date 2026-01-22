@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "atanh";
 const ZERO_EPS: f64 = 1.0e-12;
@@ -278,9 +278,9 @@ async fn atanh_builtin(value: Value) -> BuiltinResult<Value> {
 
 async fn atanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        match gpu_domain_is_real(provider, &handle) {
+        match gpu_domain_is_real(provider, &handle).await {
             Ok(true) => {
-                if let Ok(out) = provider.unary_atanh(&handle) {
+                if let Ok(out) = provider.unary_atanh(&handle).await {
                     return Ok(Value::GpuTensor(out));
                 }
             }
@@ -296,19 +296,20 @@ async fn atanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     atanh_tensor_real(tensor)
 }
 
-fn gpu_domain_is_real(
+async fn gpu_domain_is_real(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<bool> {
     let min_handle = provider
         .reduce_min(handle)
+        .await
         .map_err(|e| runtime_error_for(format!("atanh: reduce_min failed: {e}")))?;
-    let max_handle = provider.reduce_max(handle).map_err(|e| {
+    let max_handle = provider.reduce_max(handle).await.map_err(|e| {
         let _ = provider.free(&min_handle);
         runtime_error_for(format!("atanh: reduce_max failed: {e}"))
     })?;
 
-    let min_host = match provider.download(&min_handle) {
+    let min_host = match download_handle_async(provider, &min_handle).await {
         Ok(values) => values,
         Err(err) => {
             let _ = provider.free(&min_handle);
@@ -318,7 +319,7 @@ fn gpu_domain_is_real(
             )));
         }
     };
-    let max_host = match provider.download(&max_handle) {
+    let max_host = match download_handle_async(provider, &max_handle).await {
         Ok(values) => values,
         Err(err) => {
             let _ = provider.free(&min_handle);

@@ -322,7 +322,10 @@ async fn filter2_gpu(
 
     let kernel_handle_clone = kernel_handle.clone();
 
-    match provider.imfilter(&image_handle, &kernel_handle, options) {
+    match provider
+        .imfilter(&image_handle, &kernel_handle, options)
+        .await
+    {
         Ok(output) => {
             if let Some(uploaded) = uploaded_kernel {
                 let _ = provider.free(&uploaded);

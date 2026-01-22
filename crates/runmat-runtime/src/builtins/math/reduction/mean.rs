@@ -671,12 +671,12 @@ async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinRes
     if let Some(provider) = runmat_accelerate_api::provider() {
         // Include-NaN: use provider reduce_mean_* hooks
         if args.nan_mode == ReductionNaN::Include {
-            if let Some(device_result) = mean_gpu_try(provider, &handle, &args.axes) {
+            if let Some(device_result) = mean_gpu_try(provider, &handle, &args.axes).await {
                 return Ok(Value::GpuTensor(device_result));
             }
         } else {
             // Omit-NaN: compute fully on device via cleaned sum and non-NaN counts
-            if let Some(device_result) = mean_gpu_omitnan(provider, &handle, &args.axes) {
+            if let Some(device_result) = mean_gpu_omitnan(provider, &handle, &args.axes).await {
                 return Ok(Value::GpuTensor(device_result));
             }
         }
@@ -687,7 +687,7 @@ async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinRes
     Ok(tensor::tensor_into_value(reduced))
 }
 
-fn mean_gpu_try(
+async fn mean_gpu_try(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
     axes: &MeanAxes,
@@ -698,9 +698,9 @@ fn mean_gpu_try(
                 return Some(handle.clone());
             }
             let dim = default_dimension_from_shape(&handle.shape);
-            reduce_mean_dim_gpu(provider, handle.clone(), dim)
+            reduce_mean_dim_gpu(provider, handle.clone(), dim).await
         }
-        MeanAxes::Dim(dim) => reduce_mean_dim_gpu(provider, handle.clone(), *dim),
+        MeanAxes::Dim(dim) => reduce_mean_dim_gpu(provider, handle.clone(), *dim).await,
         MeanAxes::Vec(dims) => {
             // Prefer provider N-D reduce if available
             let mut dims0: Vec<usize> = dims
@@ -710,12 +710,12 @@ fn mean_gpu_try(
             dims0.sort_unstable();
             dims0.dedup();
             if !dims0.is_empty() {
-                if let Ok(out) = provider.reduce_mean_nd(handle, &dims0) {
+                if let Ok(out) = provider.reduce_mean_nd(handle, &dims0).await {
                     return Some(out);
                 }
             }
             // Try fast permute+2D fallback
-            if let Some(nd) = reduce_mean_vecdim_nd_gpu(provider, handle, dims) {
+            if let Some(nd) = reduce_mean_vecdim_nd_gpu(provider, handle, dims).await {
                 return Some(nd);
             }
             // Sequential per-dimension reductions
@@ -727,7 +727,7 @@ fn mean_gpu_try(
                 if result.shape.is_empty() {
                     break;
                 }
-                result = reduce_mean_dim_gpu(provider, result, dim)?;
+                result = reduce_mean_dim_gpu(provider, result, dim).await?;
             }
             Some(result)
         }
@@ -735,7 +735,7 @@ fn mean_gpu_try(
             if handle.shape.is_empty() {
                 return Some(handle.clone());
             }
-            match provider.reduce_mean(handle) {
+            match provider.reduce_mean(handle).await {
                 Ok(out) => Some(out),
                 Err(err) => {
                     log::trace!("mean: provider reduce_mean fallback triggered: {err}");
@@ -744,13 +744,20 @@ fn mean_gpu_try(
                         Some(handle.clone())
                     } else {
                         let dims: Vec<usize> = (1..=rank).collect();
-                        reduce_mean_vecdim_nd_gpu(provider, handle, &dims).or_else(|| {
+                        if let Some(result) =
+                            reduce_mean_vecdim_nd_gpu(provider, handle, &dims).await
+                        {
+                            Some(result)
+                        } else {
                             let mut result = handle.clone();
                             for dim in 1..=rank {
-                                result = reduce_mean_dim_gpu(provider, result, dim)?;
+                                match reduce_mean_dim_gpu(provider, result, dim).await {
+                                    Some(updated) => result = updated,
+                                    None => return None,
+                                }
                             }
                             Some(result)
-                        })
+                        }
                     }
                 }
             }
@@ -758,7 +765,7 @@ fn mean_gpu_try(
     }
 }
 
-fn reduce_mean_dim_gpu(
+async fn reduce_mean_dim_gpu(
     provider: &dyn AccelProvider,
     handle: GpuTensorHandle,
     dim: usize,
@@ -771,6 +778,7 @@ fn reduce_mean_dim_gpu(
     }
     provider
         .reduce_mean_dim(&handle, dim - 1)
+        .await
         .map_err(|err| {
             log::trace!("mean: provider reduce_mean_dim fallback triggered: {err}");
             err
@@ -782,7 +790,7 @@ fn reduce_mean_dim_gpu(
 /// permuting reduce dims to the front, reshaping to 2-D, reducing rows, and
 /// reshaping/permuting back to the original order with size-1 dims preserved.
 // (N-D mean fast path omitted for now; sequential per-dimension GPU reductions used instead.)
-fn reduce_mean_vecdim_nd_gpu(
+async fn reduce_mean_vecdim_nd_gpu(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
     dims_1based: &[usize],
@@ -830,7 +838,7 @@ fn reduce_mean_vecdim_nd_gpu(
         .reshape(&permuted, &[reduce_len, num_slices])
         .ok()?;
     // Reduce along rows (dim 0) -> [1, num_slices]
-    let reduced_rows = provider.reduce_mean_dim(&reshaped2d, 0).ok()?;
+    let reduced_rows = provider.reduce_mean_dim(&reshaped2d, 0).await.ok()?;
     let _ = provider.free(&reshaped2d);
     let _ = provider.free(&permuted);
     // Reshape to kept sizes (permuted order)
@@ -860,7 +868,7 @@ fn reduce_mean_vecdim_nd_gpu(
     Some(out)
 }
 
-fn mean_gpu_omitnan(
+async fn mean_gpu_omitnan(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
     axes: &MeanAxes,
@@ -914,12 +922,12 @@ fn mean_gpu_omitnan(
     let mut sum_h = cleaned.clone();
     let mut cnt_h = mask.clone();
     for &dim in &dims_in_bounds {
-        sum_h = provider.reduce_sum_dim(&sum_h, dim).ok()?;
-        cnt_h = provider.reduce_sum_dim(&cnt_h, dim).ok()?;
+        sum_h = provider.reduce_sum_dim(&sum_h, dim).await.ok()?;
+        cnt_h = provider.reduce_sum_dim(&cnt_h, dim).await.ok()?;
     }
 
     // mean = sum ./ count (0/0 -> NaN when all NaN)
-    let out = provider.elem_div(&sum_h, &cnt_h).ok()?;
+    let out = provider.elem_div(&sum_h, &cnt_h).await.ok()?;
 
     // Free intermediates
     let _ = provider.free(&cleaned);

@@ -257,20 +257,20 @@ async fn ge_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     // Prefer device paths when any operand is a GPU tensor
     match (&lhs, &rhs) {
         (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) => {
-            if let Some(result) = try_ge_gpu(a, b) {
+            if let Some(result) = try_ge_gpu(a, b).await {
                 return result;
             }
         }
         (Value::GpuTensor(ref a), other) => {
             if let Some(handle) = try_fill_like(a, other) {
-                if let Some(result) = try_ge_gpu(a, &handle) {
+                if let Some(result) = try_ge_gpu(a, &handle).await {
                     return result;
                 }
             }
         }
         (other, Value::GpuTensor(ref b)) => {
             if let Some(handle) = try_fill_like(b, other) {
-                if let Some(result) = try_ge_gpu(&handle, b) {
+                if let Some(result) = try_ge_gpu(&handle, b).await {
                     return result;
                 }
             }
@@ -280,9 +280,12 @@ async fn ge_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     ge_host(lhs, rhs).await
 }
 
-fn try_ge_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<crate::BuiltinResult<Value>> {
+async fn try_ge_gpu(
+    a: &GpuTensorHandle,
+    b: &GpuTensorHandle,
+) -> Option<crate::BuiltinResult<Value>> {
     let provider = runmat_accelerate_api::provider()?;
-    match provider.elem_ge(a, b) {
+    match provider.elem_ge(a, b).await {
         Ok(handle) => Some(Ok(gpu_helpers::logical_gpu_value(handle))),
         Err(err) => {
             drop(err);

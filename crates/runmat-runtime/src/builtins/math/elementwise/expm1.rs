@@ -251,7 +251,7 @@ async fn expm1_builtin(value: Value) -> BuiltinResult<Value> {
 
 async fn expm1_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_expm1(&handle) {
+        if let Ok(out) = provider.unary_expm1(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }

@@ -240,7 +240,7 @@ async fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 
 async fn cos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_cos(&handle) {
+        if let Ok(out) = provider.unary_cos(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }

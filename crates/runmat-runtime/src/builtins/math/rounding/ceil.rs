@@ -317,7 +317,7 @@ fn ceil_char_array(ca: CharArray, strategy: CeilStrategy) -> BuiltinResult<Value
 async fn ceil_gpu(handle: GpuTensorHandle, args: &CeilArgs) -> BuiltinResult<Value> {
     if matches!(args.strategy, CeilStrategy::Integer) {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-            if let Ok(out) = provider.unary_ceil(&handle) {
+            if let Ok(out) = provider.unary_ceil(&handle).await {
                 return Ok(Value::GpuTensor(out));
             }
         }

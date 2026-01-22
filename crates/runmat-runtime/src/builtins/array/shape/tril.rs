@@ -359,7 +359,7 @@ async fn tril_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResul
         }
     }
     if let Some(provider) = runmat_accelerate_api::provider() {
-        match provider.tril(&handle, offset) {
+        match provider.tril(&handle, offset).await {
             Ok(out) => return Ok(Value::GpuTensor(out)),
             Err(_) => {
                 // Fall through to gather path.

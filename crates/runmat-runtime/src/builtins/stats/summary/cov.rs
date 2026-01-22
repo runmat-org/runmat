@@ -242,7 +242,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn cov_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let args = CovArgs::parse(value, rest)?;
-    if let Some(result) = cov_try_gpu(&args)? {
+    if let Some(result) = cov_try_gpu(&args).await? {
         return Ok(result);
     }
     cov_host(args).await
@@ -368,7 +368,7 @@ pub enum CovWeightSpec {
     Vector(Vec<f64>),
 }
 
-fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> {
+async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> {
     if args.rows != CovRows::All || args.weight_vector.is_some() {
         return Ok(None);
     }
@@ -395,7 +395,10 @@ fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> {
         has_weight_vector: false,
     };
 
-    match provider.covariance(first_handle, maybe_second_handle, None, &options) {
+    match provider
+        .covariance(first_handle, maybe_second_handle, None, &options)
+        .await
+    {
         Ok(result) => Ok(Some(Value::GpuTensor(result))),
         Err(_) => Ok(None),
     }

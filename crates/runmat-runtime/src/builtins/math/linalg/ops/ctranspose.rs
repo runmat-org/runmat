@@ -470,7 +470,7 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
 
         if let Some(transposed_handle) = transposed {
-            match provider.unary_conj(&transposed_handle) {
+            match provider.unary_conj(&transposed_handle).await {
                 Ok(conjugated) => {
                     if let Some(info) =
                         runmat_accelerate_api::handle_transpose_info(&transposed_handle)

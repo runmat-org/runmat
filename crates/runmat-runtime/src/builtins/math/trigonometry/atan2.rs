@@ -252,7 +252,7 @@ async fn atan2_gpu_pair(y: GpuTensorHandle, x: GpuTensorHandle) -> BuiltinResult
     if y.device_id == x.device_id {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&y) {
             if y.shape == x.shape {
-                if let Ok(handle) = provider.elem_atan2(&y, &x) {
+                if let Ok(handle) = provider.elem_atan2(&y, &x).await {
                     return Ok(Value::GpuTensor(handle));
                 }
             }

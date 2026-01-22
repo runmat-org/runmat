@@ -251,7 +251,7 @@ async fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<
 
     if let (Value::GpuTensor(lhs_handle), Value::GpuTensor(rhs_handle)) = (&lhs, &rhs) {
         if let Some(provider) = runmat_accelerate_api::provider() {
-            match provider.dot(lhs_handle, rhs_handle, dim) {
+            match provider.dot(lhs_handle, rhs_handle, dim).await {
                 Ok(handle) => return Ok(Value::GpuTensor(handle)),
                 Err(err) => {
                     log::trace!("dot: provider dot fallback triggered: {err}");

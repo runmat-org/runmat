@@ -262,10 +262,10 @@ async fn rem_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
     if a.device_id == b.device_id {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&a) {
             if a.shape == b.shape {
-                if let Ok(div) = provider.elem_div(&a, &b) {
-                    match provider.unary_fix(&div) {
-                        Ok(fixed) => match provider.elem_mul(&b, &fixed) {
-                            Ok(mul) => match provider.elem_sub(&a, &mul) {
+                if let Ok(div) = provider.elem_div(&a, &b).await {
+                    match provider.unary_fix(&div).await {
+                        Ok(fixed) => match provider.elem_mul(&b, &fixed).await {
+                            Ok(mul) => match provider.elem_sub(&a, &mul).await {
                                 Ok(out) => {
                                     let _ = provider.free(&div);
                                     let _ = provider.free(&fixed);

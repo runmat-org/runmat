@@ -25,14 +25,14 @@ fn complex_pow_scalar(base_re: f64, base_im: f64, exp_re: f64, exp_im: f64) -> (
     (mag * b.cos(), mag * b.sin())
 }
 
-fn to_host_value(v: &Value) -> Result<Value, String> {
+async fn to_host_value(v: &Value) -> Result<Value, String> {
     match v {
         Value::GpuTensor(h) => {
-            if let Some(p) = runmat_accelerate_api::provider_for_handle(h) {
-                let ht = p.download(h).map_err(|e| e.to_string())?;
-                Ok(Value::Tensor(
-                    Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?,
-                ))
+            if runmat_accelerate_api::provider_for_handle(h).is_some() {
+                let gathered = crate::dispatcher::gather_if_needed_async(v)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok(gathered)
             } else {
                 // Fallback: zeros tensor with same shape
                 let total: usize = h.shape.iter().product();
@@ -70,7 +70,8 @@ pub fn elementwise_neg(a: &Value) -> Result<Value, String> {
 
 /// Element-wise multiplication: A .* B
 /// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
-pub fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
+#[async_recursion::async_recursion(?Send)]
+pub async fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
     // GPU+scalar: keep on device if provider supports scalar mul
     if let Some(p) = runmat_accelerate_api::provider() {
         match (a, b) {
@@ -99,13 +100,13 @@ pub fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
     }
     // If exactly one is GPU and no scalar fast-path, gather to host and recurse
     if matches!(a, Value::GpuTensor(_)) ^ matches!(b, Value::GpuTensor(_)) {
-        let ah = to_host_value(a)?;
-        let bh = to_host_value(b)?;
-        return elementwise_mul(&ah, &bh);
+        let ah = to_host_value(a).await?;
+        let bh = to_host_value(b).await?;
+        return elementwise_mul(&ah, &bh).await;
     }
     if let Some(p) = runmat_accelerate_api::provider() {
         if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
-            if let Ok(hc) = p.elem_mul(ha, hb) {
+            if let Ok(hc) = p.elem_mul(ha, hb).await {
                 return Ok(Value::GpuTensor(hc));
             }
         }
@@ -207,7 +208,8 @@ pub fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
 
 /// Element-wise division: A ./ B
 /// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
-pub fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
+#[async_recursion::async_recursion(?Send)]
+pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
     // GPU+scalar: use scalar div when form is G ./ s or left-scalar s ./ G
     if let Some(p) = runmat_accelerate_api::provider() {
         match (a, b) {
@@ -235,13 +237,13 @@ pub fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
         }
     }
     if matches!(a, Value::GpuTensor(_)) ^ matches!(b, Value::GpuTensor(_)) {
-        let ah = to_host_value(a)?;
-        let bh = to_host_value(b)?;
-        return elementwise_div(&ah, &bh);
+        let ah = to_host_value(a).await?;
+        let bh = to_host_value(b).await?;
+        return elementwise_div(&ah, &bh).await;
     }
     if let Some(p) = runmat_accelerate_api::provider() {
         if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
-            if let Ok(hc) = p.elem_div(ha, hb) {
+            if let Ok(hc) = p.elem_div(ha, hb).await {
                 return Ok(Value::GpuTensor(hc));
             }
         }
@@ -667,19 +669,20 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::executor::block_on;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_elementwise_mul_scalars() {
         assert_eq!(
-            elementwise_mul(&Value::Num(3.0), &Value::Num(4.0)).unwrap(),
+            block_on(elementwise_mul(&Value::Num(3.0), &Value::Num(4.0))).unwrap(),
             Value::Num(12.0)
         );
         assert_eq!(
-            elementwise_mul(
+            block_on(elementwise_mul(
                 &Value::Int(runmat_builtins::IntValue::I32(3)),
                 &Value::Num(4.5)
-            )
+            ))
             .unwrap(),
             Value::Num(13.5)
         );
@@ -689,7 +692,7 @@ mod tests {
     #[test]
     fn test_elementwise_mul_matrix_scalar() {
         let matrix = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
-        let result = elementwise_mul(&Value::Tensor(matrix), &Value::Num(2.0)).unwrap();
+        let result = block_on(elementwise_mul(&Value::Tensor(matrix), &Value::Num(2.0))).unwrap();
 
         if let Value::Tensor(m) = result {
             assert_eq!(m.data, vec![2.0, 4.0, 6.0, 8.0]);
@@ -705,7 +708,7 @@ mod tests {
     fn test_elementwise_mul_matrices() {
         let m1 = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
         let m2 = Tensor::new_2d(vec![2.0, 3.0, 4.0, 5.0], 2, 2).unwrap();
-        let result = elementwise_mul(&Value::Tensor(m1), &Value::Tensor(m2)).unwrap();
+        let result = block_on(elementwise_mul(&Value::Tensor(m1), &Value::Tensor(m2))).unwrap();
 
         if let Value::Tensor(m) = result {
             assert_eq!(m.data, vec![2.0, 6.0, 12.0, 20.0]);
@@ -717,7 +720,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_elementwise_div_with_zero() {
-        let result = elementwise_div(&Value::Num(5.0), &Value::Num(0.0)).unwrap();
+        let result = block_on(elementwise_div(&Value::Num(5.0), &Value::Num(0.0))).unwrap();
         if let Value::Num(n) = result {
             assert!(n.is_infinite() && n.is_sign_positive());
         } else {
@@ -744,6 +747,6 @@ mod tests {
         let m1 = Tensor::new_2d(vec![1.0, 2.0], 1, 2).unwrap();
         let m2 = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
 
-        assert!(elementwise_mul(&Value::Tensor(m1), &Value::Tensor(m2)).is_err());
+        assert!(block_on(elementwise_mul(&Value::Tensor(m1), &Value::Tensor(m2))).is_err());
     }
 }

@@ -594,7 +594,7 @@ fn parse_dimension_tensor(tensor: &Tensor) -> BuiltinResult<Option<DimSelection>
 async fn reduction_max(value: Value, args: ReductionArgs) -> BuiltinResult<MaxEvaluation> {
     match value {
         Value::GpuTensor(handle) => {
-            if let Some(eval) = reduction_max_gpu(handle.clone(), &args)? {
+            if let Some(eval) = reduction_max_gpu(handle.clone(), &args).await? {
                 return Ok(eval);
             }
             // Fall back to host if GPU path is unavailable.
@@ -605,7 +605,7 @@ async fn reduction_max(value: Value, args: ReductionArgs) -> BuiltinResult<MaxEv
     }
 }
 
-fn reduction_max_gpu(
+async fn reduction_max_gpu(
     handle: GpuTensorHandle,
     args: &ReductionArgs,
 ) -> BuiltinResult<Option<MaxEvaluation>> {
@@ -651,7 +651,7 @@ fn reduction_max_gpu(
     if zero_based >= handle.shape.len() {
         return Ok(None);
     }
-    match provider.reduce_max_dim(&handle, zero_based) {
+    match provider.reduce_max_dim(&handle, zero_based).await {
         Ok(ReduceDimResult { values, indices }) => Ok(Some(MaxEvaluation {
             values: Value::GpuTensor(values),
             indices: Value::GpuTensor(indices),
@@ -1434,9 +1434,9 @@ async fn elementwise_max_gpu_pair(
     let provider = runmat_accelerate_api::provider()?;
     // Equal-shape fast path
     if a.shape == b.shape {
-        let values = provider.elem_max(a, b).ok()?;
+        let values = provider.elem_max(a, b).await.ok()?;
         // Try device mask first; if unavailable, compute indices on host while keeping values on device
-        if let Ok(mask) = provider.elem_ge(a, b) {
+        if let Ok(mask) = provider.elem_ge(a, b).await {
             let indices = gpu_mask_indices(provider, &mask)?;
             let _ = provider.free(&mask);
             return Some(MaxEvaluation {
@@ -1470,8 +1470,8 @@ async fn elementwise_max_gpu_pair(
     } else {
         b.clone()
     };
-    let values = provider.elem_max(&a_exp, &b_exp).ok();
-    let mask = provider.elem_ge(&a_exp, &b_exp).ok();
+    let values = provider.elem_max(&a_exp, &b_exp).await.ok();
+    let mask = provider.elem_ge(&a_exp, &b_exp).await.ok();
     if !std::ptr::eq(&a_exp, a) {
         let _ = provider.free(&a_exp);
     }
@@ -1549,7 +1549,7 @@ async fn elementwise_max_gpu_scalar_left(
     let scalar = extract_scalar(other)?;
     // Prefer tensorize + elem_max for broader provider compatibility
     let values = if let Ok(fill) = provider.fill_like(a, scalar) {
-        let vals = provider.elem_max(a, &fill).ok();
+        let vals = provider.elem_max(a, &fill).await.ok();
         let _ = provider.free(&fill);
         vals?
     } else {
@@ -1557,7 +1557,7 @@ async fn elementwise_max_gpu_scalar_left(
     };
     // Try device mask; if unavailable, compute on host
     let index_tensor = if let Ok(fill) = provider.fill_like(a, scalar) {
-        if let Ok(mask) = provider.elem_ge(a, &fill) {
+        if let Ok(mask) = provider.elem_ge(a, &fill).await {
             let _ = provider.free(&fill);
             let indices = gpu_mask_indices(provider, &mask)?;
             let _ = provider.free(&mask);
@@ -1599,7 +1599,7 @@ async fn elementwise_max_gpu_scalar_right(
     let provider = runmat_accelerate_api::provider()?;
     let scalar = extract_scalar(other)?;
     let values = if let Ok(fill) = provider.fill_like(b, scalar) {
-        let vals = provider.elem_max(&fill, b).ok();
+        let vals = provider.elem_max(&fill, b).await.ok();
         let _ = provider.free(&fill);
         vals?
     } else {
@@ -1607,7 +1607,7 @@ async fn elementwise_max_gpu_scalar_right(
     };
     // Try device mask; if unavailable, compute on host (origin 1 if scalar >= b)
     let index_tensor = if let Ok(fill) = provider.fill_like(b, scalar) {
-        if let Ok(mask) = provider.elem_ge(&fill, b) {
+        if let Ok(mask) = provider.elem_ge(&fill, b).await {
             let _ = provider.free(&fill);
             let indices = gpu_mask_indices(provider, &mask)?;
             let _ = provider.free(&mask);

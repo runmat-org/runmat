@@ -296,7 +296,7 @@ async fn pow2_binary(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
 
 async fn pow2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_pow2(&handle) {
+        if let Ok(out) = provider.unary_pow2(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }

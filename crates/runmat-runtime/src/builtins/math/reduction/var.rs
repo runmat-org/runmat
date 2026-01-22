@@ -652,14 +652,14 @@ async fn var_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResu
         }
     }
     if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Some(device_value) = var_gpu_reduce(provider, &handle, args) {
+        if let Some(device_value) = var_gpu_reduce(provider, &handle, args).await {
             return Ok(Value::GpuTensor(device_value));
         }
     }
     var_gpu_fallback(&handle, args).await
 }
 
-fn var_gpu_reduce(
+async fn var_gpu_reduce(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
     args: &ParsedArguments,
@@ -688,6 +688,7 @@ fn var_gpu_reduce(
         }
         provider
             .reduce_std(handle, normalization, nan_mode)
+            .await
             .map_err(|err| {
                 log::trace!("var: provider reduce_std fallback triggered: {err}");
                 err
@@ -695,13 +696,14 @@ fn var_gpu_reduce(
             .ok()?
     } else if dims.len() == 1 {
         let dim = dims[0] + 1;
-        reduce_std_dim_gpu(provider, handle.clone(), dim, normalization, nan_mode)?
+        reduce_std_dim_gpu(provider, handle.clone(), dim, normalization, nan_mode).await?
     } else {
         return None;
     };
 
     provider
         .elem_mul(&std_handle, &std_handle)
+        .await
         .map_err(|err| {
             log::trace!("var: provider elem_mul fallback triggered: {err}");
             err
@@ -709,7 +711,7 @@ fn var_gpu_reduce(
         .ok()
 }
 
-fn reduce_std_dim_gpu(
+async fn reduce_std_dim_gpu(
     provider: &dyn AccelProvider,
     handle: GpuTensorHandle,
     dim: usize,
@@ -724,6 +726,7 @@ fn reduce_std_dim_gpu(
     }
     provider
         .reduce_std_dim(&handle, dim - 1, normalization, nan_mode)
+        .await
         .map_err(|err| {
             log::trace!("var: provider reduce_std_dim fallback triggered: {err}");
             err

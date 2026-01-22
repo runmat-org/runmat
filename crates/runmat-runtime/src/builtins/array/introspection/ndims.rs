@@ -211,7 +211,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::introspection::ndims"
 )]
 async fn ndims_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    let rank = value_ndims(&value) as f64;
+    let rank = value_ndims(&value).await? as f64;
     Ok(Value::Num(rank))
 }
 

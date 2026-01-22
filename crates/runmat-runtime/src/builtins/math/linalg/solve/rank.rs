@@ -280,7 +280,7 @@ async fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 
 async fn rank_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
-        match provider.rank(&handle, tol) {
+        match provider.rank(&handle, tol).await {
             Ok(device_scalar) => return Ok(Value::GpuTensor(device_scalar)),
             Err(_) => {
                 // Fall through to host-based fallback.

@@ -256,7 +256,7 @@ async fn logspace_builtin(
 
     let prefer_gpu =
         sequence_gpu_preference(count, SequenceIntent::Logspace, start_gpu || stop_gpu).prefer_gpu;
-    build_sequence(start_scalar, stop_scalar, count, prefer_gpu)
+    build_sequence(start_scalar, stop_scalar, count, prefer_gpu).await
 }
 
 #[derive(Clone, Copy)]
@@ -363,7 +363,7 @@ fn parse_numeric_count(raw: f64) -> crate::BuiltinResult<usize> {
     Ok(rounded as usize)
 }
 
-fn build_sequence(
+async fn build_sequence(
     start: Scalar,
     stop: Scalar,
     count: usize,
@@ -381,7 +381,7 @@ fn build_sequence(
     }
 
     if prefer_gpu {
-        if let Some(value) = try_gpu_logspace(start_re, stop_re, count) {
+        if let Some(value) = try_gpu_logspace(start_re, stop_re, count).await {
             return Ok(value);
         }
     }
@@ -413,7 +413,7 @@ fn build_sequence(
     Ok(Value::Tensor(tensor))
 }
 
-fn try_gpu_logspace(start: f64, stop: f64, count: usize) -> Option<Value> {
+async fn try_gpu_logspace(start: f64, stop: f64, count: usize) -> Option<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if runmat_accelerate_api::provider().is_none() {
@@ -434,7 +434,7 @@ fn try_gpu_logspace(start: f64, stop: f64, count: usize) -> Option<Value> {
     };
     provider.free(&exponents).ok();
 
-    let result = match provider.unary_exp(&scaled) {
+    let result = match provider.unary_exp(&scaled).await {
         Ok(handle) => handle,
         Err(_) => {
             provider.free(&scaled).ok();

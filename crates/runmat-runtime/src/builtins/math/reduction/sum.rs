@@ -600,14 +600,14 @@ async fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinRe
     }
 
     if resolved.dims_in_bounds.len() == handle.shape.len() && !handle.shape.is_empty() {
-        if let Ok(reduced) = provider.reduce_sum(&handle) {
+        if let Ok(reduced) = provider.reduce_sum(&handle).await {
             return Ok(Value::GpuTensor(reduced));
         }
     }
 
     let mut current = handle.clone();
     for &dim in &resolved.dims_in_bounds {
-        match provider.reduce_sum_dim(&current, dim) {
+        match provider.reduce_sum_dim(&current, dim).await {
             Ok(next) => {
                 current = next;
             }
@@ -645,7 +645,7 @@ async fn sum_gpu_with_omitnan(
     // Reduce along requested dimensions iteratively on device.
     let mut current = cleaned.clone();
     for &dim in &resolved.dims_in_bounds {
-        match provider.reduce_sum_dim(&current, dim) {
+        match provider.reduce_sum_dim(&current, dim).await {
             Ok(next) => {
                 // free previous intermediate if it is owned
                 if !std::ptr::eq(&current, &cleaned) {

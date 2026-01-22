@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyval";
@@ -291,7 +291,9 @@ pub async fn evaluate(
     };
 
     if prefer_gpu_output && !want_delta && options.s.is_none() {
-        if let Some(value) = try_gpu_polyval(&coeffs, coeff_real, &inputs, mu, prefer_gpu_output)? {
+        if let Some(value) =
+            try_gpu_polyval(&coeffs, coeff_real, &inputs, mu, prefer_gpu_output).await?
+        {
             return Ok(PolyvalEval::new(value, None));
         }
     }
@@ -353,7 +355,7 @@ pub async fn evaluate(
     Ok(PolyvalEval::new(result_value, delta_value))
 }
 
-fn try_gpu_polyval(
+async fn try_gpu_polyval(
     coeffs: &[Complex64],
     coeff_real: bool,
     inputs: &NumericArray,
@@ -423,7 +425,7 @@ fn try_gpu_polyval(
         return Ok(Some(Value::GpuTensor(result_handle)));
     }
 
-    let host = match provider.download(&result_handle) {
+    let host = match download_handle_async(provider, &result_handle).await {
         Ok(host) => host,
         Err(err) => {
             debug!("polyval: GPU download failed, falling back: {err}");

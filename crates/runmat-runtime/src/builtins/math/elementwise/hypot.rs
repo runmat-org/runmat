@@ -262,7 +262,7 @@ async fn hypot_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 async fn hypot_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if a.shape == b.shape {
-            if let Ok(handle) = provider.elem_hypot(&a, &b) {
+            if let Ok(handle) = provider.elem_hypot(&a, &b).await {
                 return Ok(Value::GpuTensor(handle));
             }
         }

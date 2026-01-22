@@ -287,7 +287,7 @@ async fn gamma_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 
 async fn gamma_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_gamma(&handle) {
+        if let Ok(out) = provider.unary_gamma(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }

@@ -1,4 +1,5 @@
 use crate::{build_runtime_error, make_cell_with_shape, new_object_builtin, RuntimeError};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorOwned};
 use runmat_builtins::{builtin_functions, LogicalArray, NumericDType, Tensor, Value};
 
 /// Return `true` when the passed value is a GPU-resident tensor handle.
@@ -23,6 +24,13 @@ pub async fn gather_if_needed_async(value: &Value) -> Result<Value, RuntimeError
     gather_if_needed_async_impl(value).await
 }
 
+pub async fn download_handle_async(
+    provider: &dyn AccelProvider,
+    handle: &GpuTensorHandle,
+) -> anyhow::Result<HostTensorOwned> {
+    provider.download(handle).await
+}
+
 fn gather_if_needed_async_impl<'a>(
     value: &'a Value,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + 'a>> {
@@ -43,12 +51,9 @@ fn gather_if_needed_async_impl<'a>(
                         build_runtime_error("gather: no acceleration provider registered").build()
                     })?;
                 let is_logical = runmat_accelerate_api::handle_is_logical(handle);
-                let host = match provider.download(handle) {
-                    Ok(host) => host,
-                    Err(err) => {
-                        return Err(build_runtime_error(format!("gather: {err}")).build());
-                    }
-                };
+                let host = download_handle_async(provider, handle)
+                    .await
+                    .map_err(|err| build_runtime_error(format!("gather: {err}")).build())?;
                 runmat_accelerate_api::clear_residency(handle);
                 let runmat_accelerate_api::HostTensorOwned { data, shape } = host;
                 if is_logical {

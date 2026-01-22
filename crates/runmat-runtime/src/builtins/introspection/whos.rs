@@ -9,6 +9,7 @@ use runmat_accelerate_api::{handle_is_logical, ProviderPrecision};
 use runmat_builtins::{StructValue, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::shape::value_dimensions;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -215,7 +216,7 @@ async fn whos_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         if request.only_global && !is_global {
             continue;
         }
-        let record = WhosRecord::from_value(name, &value, is_global)?;
+        let record = WhosRecord::from_value(name, &value, is_global).await?;
         records.push(record);
     }
 
@@ -243,8 +244,8 @@ struct WhosRecord {
 }
 
 impl WhosRecord {
-    fn from_value(name: String, value: &Value, is_global: bool) -> BuiltinResult<Self> {
-        let dims = value_dimensions(value);
+    async fn from_value(name: String, value: &Value, is_global: bool) -> BuiltinResult<Self> {
+        let dims = value_dimensions(value).await?;
         let size_tensor = dims_to_tensor(&dims)?;
         let mut seen = HashSet::new();
         let bytes = value_memory_bytes(value, &mut seen);
@@ -518,30 +519,6 @@ fn char_array_rows_as_strings(ca: &runmat_builtins::CharArray) -> Vec<String> {
         rows.push(row.trim_end_matches([' ', '\0']).to_string());
     }
     rows
-}
-
-fn value_dimensions(value: &Value) -> Vec<usize> {
-    match value {
-        Value::Tensor(t) => normalise_dims(&t.shape),
-        Value::LogicalArray(la) => normalise_dims(&la.shape),
-        Value::ComplexTensor(t) => normalise_dims(&t.shape),
-        Value::StringArray(sa) => normalise_dims(&sa.shape),
-        Value::CharArray(ca) => normalise_dims(&[ca.rows, ca.cols]),
-        Value::Cell(ca) => normalise_dims(&ca.shape),
-        Value::GpuTensor(handle) => normalise_dims(&handle.shape),
-        _ => vec![1, 1],
-    }
-}
-
-fn normalise_dims(shape: &[usize]) -> Vec<usize> {
-    if shape.is_empty() {
-        return vec![1, 1];
-    }
-    if shape.len() == 1 {
-        vec![shape[0], 1]
-    } else {
-        shape.to_vec()
-    }
 }
 
 fn dims_to_tensor(dims: &[usize]) -> BuiltinResult<runmat_builtins::Tensor> {

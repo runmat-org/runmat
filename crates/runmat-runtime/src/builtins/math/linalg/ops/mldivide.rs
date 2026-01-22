@@ -256,7 +256,7 @@ async fn mldivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 pub(crate) async fn mldivide_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
-    if let Some(result) = try_gpu_mldivide(lhs, rhs)? {
+    if let Some(result) = try_gpu_mldivide(lhs, rhs).await? {
         return Ok(result);
     }
 
@@ -269,7 +269,7 @@ pub(crate) async fn mldivide_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Val
     mldivide_cpu(lhs_host, rhs_host)
 }
 
-fn try_gpu_mldivide(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
+async fn try_gpu_mldivide(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),
@@ -299,6 +299,7 @@ fn try_gpu_mldivide(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
 
     let result = provider
         .mldivide(lhs_operand.handle(), rhs_operand.handle())
+        .await
         .ok();
     release_operand(provider, &mut lhs_operand);
     release_operand(provider, &mut rhs_operand);

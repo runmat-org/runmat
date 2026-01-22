@@ -258,7 +258,10 @@ async fn sort_gpu(
             let order = args.direction.to_provider();
             let comparison = args.comparison.to_provider();
             let zero_based = dim - 1;
-            if let Ok(result) = provider.sort_dim(&handle, zero_based, order, comparison) {
+            if let Ok(result) = provider
+                .sort_dim(&handle, zero_based, order, comparison)
+                .await
+            {
                 let sorted_tensor = Tensor::new(result.values.data, result.values.shape)
                     .map_err(|e| sort_error(format!("sort: {e}")))?;
                 let sorted_value = tensor::tensor_into_value(sorted_tensor);

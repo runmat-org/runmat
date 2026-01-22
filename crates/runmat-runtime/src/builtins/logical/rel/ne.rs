@@ -240,16 +240,19 @@ fn ne_error(message: impl Into<String>, identifier: &'static str) -> RuntimeErro
 )]
 async fn ne_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
-        if let Some(result) = try_ne_gpu(a, b) {
+        if let Some(result) = try_ne_gpu(a, b).await {
             return result;
         }
     }
     ne_host(lhs, rhs).await
 }
 
-fn try_ne_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<crate::BuiltinResult<Value>> {
+async fn try_ne_gpu(
+    a: &GpuTensorHandle,
+    b: &GpuTensorHandle,
+) -> Option<crate::BuiltinResult<Value>> {
     let provider = runmat_accelerate_api::provider()?;
-    match provider.elem_ne(a, b) {
+    match provider.elem_ne(a, b).await {
         Ok(handle) => Some(Ok(gpu_helpers::logical_gpu_value(handle))),
         Err(err) => {
             drop(err);

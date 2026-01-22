@@ -300,7 +300,7 @@ fn logical_to_tensor(name: &str, logical: &LogicalArray) -> BuiltinResult<Tensor
 
 async fn symrcm_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
-        match provider.sym_rcm(&handle) {
+        match provider.sym_rcm(&handle).await {
             Ok(ordering) => return permutation_to_value(&ordering),
             Err(err) => {
                 debug!("symrcm: provider hook unavailable, falling back to host: {err}");

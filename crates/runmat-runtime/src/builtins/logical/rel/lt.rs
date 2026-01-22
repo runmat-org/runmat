@@ -256,16 +256,19 @@ fn lt_error(message: impl Into<String>, identifier: &'static str) -> RuntimeErro
 )]
 async fn lt_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
-        if let Some(result) = try_lt_gpu(a, b) {
+        if let Some(result) = try_lt_gpu(a, b).await {
             return result;
         }
     }
     lt_host(lhs, rhs).await
 }
 
-fn try_lt_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<crate::BuiltinResult<Value>> {
+async fn try_lt_gpu(
+    a: &GpuTensorHandle,
+    b: &GpuTensorHandle,
+) -> Option<crate::BuiltinResult<Value>> {
     let provider = runmat_accelerate_api::provider()?;
-    match provider.elem_lt(a, b) {
+    match provider.elem_lt(a, b).await {
         Ok(handle) => Some(Ok(gpu_helpers::logical_gpu_value(handle))),
         Err(err) => {
             drop(err);

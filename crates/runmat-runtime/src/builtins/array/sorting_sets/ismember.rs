@@ -315,7 +315,10 @@ async fn ismember_gpu_pair(
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let provider_opts = opts.into_provider_options();
-        match provider.ismember(&handle_a, &handle_b, &provider_opts) {
+        match provider
+            .ismember(&handle_a, &handle_b, &provider_opts)
+            .await
+        {
             Ok(result) => return IsMemberEvaluation::from_provider_result(result),
             Err(_) => {
                 // Fall back to host gather when the provider lacks an ismember implementation.

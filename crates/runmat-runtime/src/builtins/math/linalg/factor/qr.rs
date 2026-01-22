@@ -5,7 +5,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
@@ -268,10 +268,10 @@ struct QrOptions {
 
 /// Evaluate the builtin with full access to multiple outputs.
 pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<QrEval> {
-    let options = parse_options(args)?;
+    let options = parse_options(args).await?;
     match value {
         Value::GpuTensor(handle) => {
-            if let Some(eval) = evaluate_gpu(&handle, &options)? {
+            if let Some(eval) = evaluate_gpu(&handle, &options).await? {
                 return Ok(eval);
             }
             let tensor = gpu_helpers::gather_tensor_async(&handle)
@@ -284,7 +284,10 @@ pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<QrEval> {
     }
 }
 
-fn evaluate_gpu(handle: &GpuTensorHandle, options: &QrOptions) -> BuiltinResult<Option<QrEval>> {
+async fn evaluate_gpu(
+    handle: &GpuTensorHandle,
+    options: &QrOptions,
+) -> BuiltinResult<Option<QrEval>> {
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),
@@ -305,7 +308,10 @@ fn evaluate_gpu(handle: &GpuTensorHandle, options: &QrOptions) -> BuiltinResult<
         );
     }
     if let Some((lhs, rhs)) = provider.take_matmul_sources(handle) {
-        match provider.qr_power_iter(handle, Some(&lhs), &rhs, &provider_options) {
+        match provider
+            .qr_power_iter(handle, Some(&lhs), &rhs, &provider_options)
+            .await
+        {
             Ok(Some(result)) => {
                 return Ok(Some(QrEval {
                     q: Value::GpuTensor(result.q),
@@ -324,7 +330,7 @@ fn evaluate_gpu(handle: &GpuTensorHandle, options: &QrOptions) -> BuiltinResult<
             }
         }
     }
-    match provider.qr(handle, provider_options) {
+    match provider.qr(handle, provider_options).await {
         Ok(result) => Ok(Some(QrEval {
             q: Value::GpuTensor(result.q),
             r: Value::GpuTensor(result.r),
@@ -347,13 +353,13 @@ async fn evaluate_host_value(
     assemble_eval(components, options, prefer_gpu)
 }
 
-fn parse_options(args: &[Value]) -> BuiltinResult<QrOptions> {
+async fn parse_options(args: &[Value]) -> BuiltinResult<QrOptions> {
     if args.len() > 2 {
         return Err(qr_error("qr: too many option arguments"));
     }
     let mut opts = QrOptions::default();
     for arg in args {
-        if is_zero_scalar(arg) {
+        if is_zero_scalar(arg).await {
             opts.mode = QrMode::Economy;
             continue;
         }
@@ -380,7 +386,7 @@ fn parse_options(args: &[Value]) -> BuiltinResult<QrOptions> {
     Ok(opts)
 }
 
-fn is_zero_scalar(value: &Value) -> bool {
+async fn is_zero_scalar(value: &Value) -> bool {
     match value {
         Value::Num(n) => n.abs() <= EPS_SCALAR,
         Value::Int(i) => i.to_i64() == 0,
@@ -396,7 +402,7 @@ fn is_zero_scalar(value: &Value) -> bool {
             // Best-effort: treat 1-element gpuArray with ~0 value as zero option
             if handle.shape.iter().product::<usize>() == 1 {
                 if let Some(p) = runmat_accelerate_api::provider() {
-                    if let Ok(host) = p.download(handle) {
+                    if let Ok(host) = download_handle_async(p, handle).await {
                         return host
                             .data
                             .first()

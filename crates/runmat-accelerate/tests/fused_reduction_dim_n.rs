@@ -28,8 +28,8 @@ fn upload(
         .expect("upload")
 }
 
-#[test]
-fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
+#[tokio::test]
+async fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
     let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         WgpuProviderOptions::default(),
     )
@@ -202,7 +202,9 @@ fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
             Value::GpuTensor(h) => h,
             _ => panic!("expected GPU tensor"),
         };
-        let out = provider.download(&out_handle).expect("download");
+        let out = AccelProvider::download(provider, &out_handle)
+            .await
+            .expect("download");
 
         if dim_val == 1.0 {
             assert_eq!(out.shape, vec![cols]);

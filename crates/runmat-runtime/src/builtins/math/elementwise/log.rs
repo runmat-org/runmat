@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const IMAG_EPS: f64 = 1e-12;
@@ -262,9 +263,9 @@ async fn log_builtin(value: Value) -> BuiltinResult<Value> {
 
 async fn log_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        match detect_gpu_requires_complex(provider, &handle) {
+        match detect_gpu_requires_complex(provider, &handle).await {
             Ok(false) => {
-                if let Ok(out) = provider.unary_log(&handle) {
+                if let Ok(out) = provider.unary_log(&handle).await {
                     return Ok(Value::GpuTensor(out));
                 }
             }
@@ -288,15 +289,16 @@ async fn log_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     log_tensor_real(tensor)
 }
 
-pub(super) fn detect_gpu_requires_complex(
+pub(super) async fn detect_gpu_requires_complex(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<bool> {
     let min_handle = provider
         .reduce_min(handle)
+        .await
         .map_err(|e| builtin_error(format!("log: reduce_min failed: {e}")))?;
-    let download = provider
-        .download(&min_handle)
+    let download = download_handle_async(provider, &min_handle)
+        .await
         .map_err(|e| builtin_error(format!("log: reduce_min download failed: {e}")));
     let _ = provider.free(&min_handle);
     let host = download?;

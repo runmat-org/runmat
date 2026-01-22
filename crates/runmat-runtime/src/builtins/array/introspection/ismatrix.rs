@@ -243,11 +243,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::introspection::ismatrix"
 )]
 async fn ismatrix_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    Ok(Value::Bool(value_is_matrix(&value)))
+    Ok(Value::Bool(value_is_matrix(&value).await?))
 }
 
-fn value_is_matrix(value: &Value) -> bool {
-    value_dimensions(value).len() <= 2
+async fn value_is_matrix(value: &Value) -> crate::BuiltinResult<bool> {
+    Ok(value_dimensions(value).await?.len() <= 2)
 }
 
 #[cfg(test)]
@@ -425,11 +425,17 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_gpu_handle_without_shape_falls_back() {
-        test_support::with_test_provider(|_| {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0], vec![1]).unwrap();
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
             let handle = runmat_accelerate_api::GpuTensorHandle {
                 shape: Vec::new(),
-                device_id: 0,
-                buffer_id: u64::MAX,
+                device_id: handle.device_id,
+                buffer_id: handle.buffer_id,
             };
             let result = ismatrix_builtin(Value::GpuTensor(handle)).expect("ismatrix gpu fallback");
             assert_eq!(result, Value::Bool(true));
@@ -438,11 +444,29 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn ismatrix_gpu_handle_invalid_buffer_errors() {
+        test_support::with_test_provider(|provider| {
+            let handle = runmat_accelerate_api::GpuTensorHandle {
+                shape: Vec::new(),
+                device_id: provider.device_id(),
+                buffer_id: u64::MAX,
+            };
+            let err = ismatrix_builtin(Value::GpuTensor(handle)).unwrap_err();
+            assert!(err.message.contains("gather"));
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn value_is_matrix_matches_dimensions_helper() {
         let tensor = Tensor::new(vec![0.0; 12], vec![3, 4]).unwrap();
-        assert!(value_is_matrix(&Value::Tensor(tensor)));
+        let is_matrix = futures::executor::block_on(value_is_matrix(&Value::Tensor(tensor)))
+            .expect("value_is_matrix");
+        assert!(is_matrix);
         let higher = Tensor::new(vec![0.0; 8], vec![2, 2, 2]).unwrap();
-        assert!(!value_is_matrix(&Value::Tensor(higher)));
+        let is_matrix = futures::executor::block_on(value_is_matrix(&Value::Tensor(higher)))
+            .expect("value_is_matrix");
+        assert!(!is_matrix);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

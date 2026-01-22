@@ -329,7 +329,7 @@ async fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinRe
 
     if uniform_output {
         if let Some(gpu_result) =
-            try_gpu_fast_path(&callable, &inputs_snapshot, error_handler.as_ref())?
+            try_gpu_fast_path(&callable, &inputs_snapshot, error_handler.as_ref()).await?
         {
             return Ok(gpu_result);
         }
@@ -784,7 +784,7 @@ impl Callable {
     }
 }
 
-fn try_gpu_fast_path(
+async fn try_gpu_fast_path(
     callable: &Callable,
     inputs: &[Value],
     error_handler: Option<&Callable>,
@@ -839,17 +839,17 @@ fn try_gpu_fast_path(
     }
 
     let result = match name.as_str() {
-        "sin" if handles.len() == 1 => provider.unary_sin(&handles[0]),
-        "cos" if handles.len() == 1 => provider.unary_cos(&handles[0]),
-        "abs" if handles.len() == 1 => provider.unary_abs(&handles[0]),
-        "exp" if handles.len() == 1 => provider.unary_exp(&handles[0]),
-        "log" if handles.len() == 1 => provider.unary_log(&handles[0]),
-        "sqrt" if handles.len() == 1 => provider.unary_sqrt(&handles[0]),
-        "plus" if handles.len() == 2 => provider.elem_add(&handles[0], &handles[1]),
-        "minus" if handles.len() == 2 => provider.elem_sub(&handles[0], &handles[1]),
-        "times" if handles.len() == 2 => provider.elem_mul(&handles[0], &handles[1]),
-        "rdivide" if handles.len() == 2 => provider.elem_div(&handles[0], &handles[1]),
-        "ldivide" if handles.len() == 2 => provider.elem_div(&handles[1], &handles[0]),
+        "sin" if handles.len() == 1 => provider.unary_sin(&handles[0]).await,
+        "cos" if handles.len() == 1 => provider.unary_cos(&handles[0]).await,
+        "abs" if handles.len() == 1 => provider.unary_abs(&handles[0]).await,
+        "exp" if handles.len() == 1 => provider.unary_exp(&handles[0]).await,
+        "log" if handles.len() == 1 => provider.unary_log(&handles[0]).await,
+        "sqrt" if handles.len() == 1 => provider.unary_sqrt(&handles[0]).await,
+        "plus" if handles.len() == 2 => provider.elem_add(&handles[0], &handles[1]).await,
+        "minus" if handles.len() == 2 => provider.elem_sub(&handles[0], &handles[1]).await,
+        "times" if handles.len() == 2 => provider.elem_mul(&handles[0], &handles[1]).await,
+        "rdivide" if handles.len() == 2 => provider.elem_div(&handles[0], &handles[1]).await,
+        "ldivide" if handles.len() == 2 => provider.elem_div(&handles[1], &handles[0]).await,
         _ => return Ok(None),
     };
 

@@ -515,7 +515,7 @@ async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
 async fn times_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if lhs.shape == rhs.shape {
-            if let Ok(handle) = provider.elem_mul(&lhs, &rhs) {
+            if let Ok(handle) = provider.elem_mul(&lhs, &rhs).await {
                 return Ok(Value::GpuTensor(handle));
             }
         }
@@ -539,6 +539,7 @@ async fn times_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinRe
             };
             let result = provider
                 .elem_mul(&left_expanded, &right_expanded)
+                .await
                 .map_err(|e| builtin_error(format!("times: {e}")));
             if made_left {
                 let _ = provider.free(&left_expanded);

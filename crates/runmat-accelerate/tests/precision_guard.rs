@@ -1,6 +1,6 @@
 use runmat_accelerate::precision::ensure_provider_supports_dtype;
 use runmat_accelerate_api::{
-    AccelProvider, GpuTensorHandle, HostTensorOwned, HostTensorView, ProviderPrecision,
+    AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostTensorView, ProviderPrecision,
 };
 use runmat_builtins::NumericDType;
 
@@ -32,8 +32,8 @@ impl AccelProvider for F32TestProvider {
         unreachable!("upload should not be invoked in this test")
     }
 
-    fn download(&self, _: &GpuTensorHandle) -> anyhow::Result<HostTensorOwned> {
-        unreachable!("download should not be invoked in this test")
+    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        Box::pin(async move { unreachable!("download should not be invoked in this test") })
     }
 
     fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {

@@ -352,7 +352,7 @@ fn median_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {
 async fn median_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
     if args.nan_mode == ReductionNaN::Include {
         if let Some(provider) = runmat_accelerate_api::provider() {
-            if let Some(device_result) = median_gpu_try(provider, &handle, &args.axes) {
+            if let Some(device_result) = median_gpu_try(provider, &handle, &args.axes).await {
                 return Ok(Value::GpuTensor(device_result));
             }
         }
@@ -363,7 +363,7 @@ async fn median_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinR
     Ok(tensor::tensor_into_value(reduced))
 }
 
-fn median_gpu_try(
+async fn median_gpu_try(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
     axes: &MedianAxes,
@@ -374,17 +374,20 @@ fn median_gpu_try(
                 Some(handle.clone())
             } else {
                 let dim = default_dimension_from_shape(&handle.shape);
-                reduce_median_dim_gpu(provider, handle.clone(), dim)
+                reduce_median_dim_gpu(provider, handle.clone(), dim).await
             }
         }
-        MedianAxes::Dim(dim) => reduce_median_dim_gpu(provider, handle.clone(), *dim),
+        MedianAxes::Dim(dim) => reduce_median_dim_gpu(provider, handle.clone(), *dim).await,
         MedianAxes::Vec(dims) => {
             let mut result = handle.clone();
             let mut dims_sorted = dims.clone();
             dims_sorted.sort_unstable();
             dims_sorted.dedup();
             for dim in dims_sorted {
-                result = reduce_median_dim_gpu(provider, result, dim)?;
+                match reduce_median_dim_gpu(provider, result, dim).await {
+                    Some(next) => result = next,
+                    None => return None,
+                }
             }
             Some(result)
         }
@@ -394,6 +397,7 @@ fn median_gpu_try(
             } else {
                 provider
                     .reduce_median(handle)
+                    .await
                     .map_err(|err| {
                         log::trace!("median: provider reduce_median fallback triggered: {err}");
                         err
@@ -404,7 +408,7 @@ fn median_gpu_try(
     }
 }
 
-fn reduce_median_dim_gpu(
+async fn reduce_median_dim_gpu(
     provider: &dyn AccelProvider,
     handle: GpuTensorHandle,
     dim: usize,
@@ -417,6 +421,7 @@ fn reduce_median_dim_gpu(
     }
     provider
         .reduce_median_dim(&handle, dim - 1)
+        .await
         .map_err(|err| {
             log::trace!("median: provider reduce_median_dim fallback triggered: {err}");
             err

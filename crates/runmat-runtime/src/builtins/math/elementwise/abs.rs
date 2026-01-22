@@ -257,7 +257,7 @@ async fn abs_builtin(value: Value) -> BuiltinResult<Value> {
 
 async fn abs_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_abs(&handle) {
+        if let Ok(out) = provider.unary_abs(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }

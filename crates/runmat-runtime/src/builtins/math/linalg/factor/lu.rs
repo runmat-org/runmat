@@ -365,7 +365,7 @@ pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<LuEval> {
     let pivot_mode = parse_pivot_mode(args)?;
     match value {
         Value::GpuTensor(handle) => {
-            if let Some(eval) = evaluate_gpu(&handle, pivot_mode)? {
+            if let Some(eval) = evaluate_gpu(&handle, pivot_mode).await? {
                 return Ok(eval);
             }
             let tensor = gpu_helpers::gather_tensor_async(&handle)
@@ -383,9 +383,12 @@ async fn evaluate_host_value(value: Value, pivot_mode: PivotMode) -> BuiltinResu
     LuEval::from_components(components, pivot_mode)
 }
 
-fn evaluate_gpu(handle: &GpuTensorHandle, pivot_mode: PivotMode) -> BuiltinResult<Option<LuEval>> {
+async fn evaluate_gpu(
+    handle: &GpuTensorHandle,
+    pivot_mode: PivotMode,
+) -> BuiltinResult<Option<LuEval>> {
     if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(result) = provider.lu(handle) {
+        if let Ok(result) = provider.lu(handle).await {
             return Ok(Some(LuEval::from_provider(result, pivot_mode)));
         }
     }

@@ -309,7 +309,7 @@ async fn logical_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 trace!("logical: provider logical_islogical hook unavailable, falling back ({err})")
             }
         }
-        if let Some(result) = try_gpu_cast(p, &handle) {
+        if let Some(result) = try_gpu_cast(p, &handle).await {
             return Ok(gpu_helpers::logical_gpu_value(result));
         } else {
             trace!(
@@ -363,12 +363,12 @@ fn logical_buffer_to_gpu(
     }
 }
 
-fn try_gpu_cast(
+async fn try_gpu_cast(
     provider: &'static dyn AccelProvider,
     input: &GpuTensorHandle,
 ) -> Option<GpuTensorHandle> {
     let zeros = provider.zeros_like(input).ok()?;
-    let result = provider.elem_ne(input, &zeros).ok();
+    let result = provider.elem_ne(input, &zeros).await.ok();
     let _ = provider.free(&zeros);
     result
 }

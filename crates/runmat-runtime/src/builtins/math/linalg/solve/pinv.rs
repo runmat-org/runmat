@@ -255,7 +255,7 @@ async fn pinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 async fn pinv_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let options = ProviderPinvOptions { tolerance: tol };
-        match provider.pinv(&handle, options) {
+        match provider.pinv(&handle, options).await {
             Ok(result) => return Ok(Value::GpuTensor(result)),
             Err(_) => {
                 // Fall through to host implementation and attempt to re-upload

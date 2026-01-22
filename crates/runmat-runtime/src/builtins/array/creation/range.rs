@@ -448,7 +448,7 @@ async fn range_gpu(
     let resolved = resolve_dims(&handle.shape, &selection)?;
 
     if should_use_global_reduce(&handle.shape, &selection, &resolved) {
-        if let Some(diff) = range_gpu_all(provider, &handle) {
+        if let Some(diff) = range_gpu_all(provider, &handle).await {
             return Ok(Value::GpuTensor(diff));
         }
         return range_gpu_fallback(&handle, selection, nan_mode).await;
@@ -465,7 +465,7 @@ async fn range_gpu(
         return range_gpu_fallback(&handle, selection, nan_mode).await;
     }
 
-    if let Some(diff) = range_gpu_single_dim(provider, &handle, dim, &expected_shape) {
+    if let Some(diff) = range_gpu_single_dim(provider, &handle, dim, &expected_shape).await {
         return Ok(Value::GpuTensor(diff));
     }
 
@@ -496,19 +496,19 @@ fn should_use_global_reduce(
     matches!(selection, DimSelection::All) || resolved.dims_in_bounds.len() == shape.len()
 }
 
-fn range_gpu_all(
+async fn range_gpu_all(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     handle: &GpuTensorHandle,
 ) -> Option<GpuTensorHandle> {
-    let min_handle = provider.reduce_min(handle).ok()?;
-    let max_handle = match provider.reduce_max(handle) {
+    let min_handle = provider.reduce_min(handle).await.ok()?;
+    let max_handle = match provider.reduce_max(handle).await {
         Ok(h) => h,
         Err(_) => {
             let _ = provider.free(&min_handle);
             return None;
         }
     };
-    let diff = match provider.elem_sub(&max_handle, &min_handle) {
+    let diff = match provider.elem_sub(&max_handle, &min_handle).await {
         Ok(h) => h,
         Err(_) => {
             let _ = provider.free(&min_handle);
@@ -521,7 +521,7 @@ fn range_gpu_all(
     Some(diff)
 }
 
-fn range_gpu_single_dim(
+async fn range_gpu_single_dim(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     handle: &GpuTensorHandle,
     dim_zero_based: usize,
@@ -539,7 +539,7 @@ fn range_gpu_single_dim(
         if !seen.insert(candidate) {
             continue;
         }
-        let min_result = match provider.reduce_min_dim(handle, candidate) {
+        let min_result = match provider.reduce_min_dim(handle, candidate).await {
             Ok(res) => res,
             Err(_) => continue,
         };
@@ -548,7 +548,7 @@ fn range_gpu_single_dim(
             let _ = provider.free(&min_result.indices);
             continue;
         }
-        let max_result = match provider.reduce_max_dim(handle, candidate) {
+        let max_result = match provider.reduce_max_dim(handle, candidate).await {
             Ok(res) => res,
             Err(_) => {
                 let _ = provider.free(&min_result.values);
@@ -563,7 +563,10 @@ fn range_gpu_single_dim(
             let _ = provider.free(&max_result.indices);
             continue;
         }
-        let diff = match provider.elem_sub(&max_result.values, &min_result.values) {
+        let diff = match provider
+            .elem_sub(&max_result.values, &min_result.values)
+            .await
+        {
             Ok(handle) => handle,
             Err(_) => {
                 let _ = provider.free(&min_result.values);

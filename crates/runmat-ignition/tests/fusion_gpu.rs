@@ -7,11 +7,12 @@ use runmat_accelerate::{
     configure_auto_offload, fusion_residency, AutoOffloadLogLevel, AutoOffloadOptions,
 };
 use runmat_accelerate_api::{
-    AccelProvider, ApiDeviceInfo, CorrcoefOptions, CovNormalization, CovRows, CovarianceOptions,
-    FspecialRequest, GpuTensorHandle, HostTensorOwned, HostTensorView, ImageNormalizeDescriptor,
-    PagefunRequest, PowerStepEpilogue, ProviderCondNorm, ProviderConvMode, ProviderEigResult,
-    ProviderLinsolveOptions, ProviderLinsolveResult, ProviderNormOrder, ProviderPinvOptions,
-    ProviderPrecision, UniqueOptions, UniqueResult,
+    AccelDownloadFuture, AccelProvider, AccelProviderFuture, ApiDeviceInfo, CorrcoefOptions,
+    CovNormalization, CovRows, CovarianceOptions, FspecialRequest, GpuTensorHandle,
+    HostTensorOwned, HostTensorView, ImageNormalizeDescriptor, PagefunRequest, PowerStepEpilogue,
+    ProviderCondNorm, ProviderConvMode, ProviderEigResult, ProviderLinsolveOptions,
+    ProviderLinsolveResult, ProviderNormOrder, ProviderPinvOptions, ProviderPrecision,
+    UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_gc::gc_test_context;
@@ -144,9 +145,11 @@ impl AccelProvider for TestProvider {
         Ok(self.push(host.data.to_vec(), host.shape.to_vec()))
     }
 
-    fn download(&self, handle: &GpuTensorHandle) -> anyhow::Result<HostTensorOwned> {
-        let (data, shape) = self.pull(handle)?;
-        Ok(HostTensorOwned { data, shape })
+    fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        Box::pin(async move {
+            let (data, shape) = self.pull(handle)?;
+            Ok(HostTensorOwned { data, shape })
+        })
     }
 
     fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
@@ -184,284 +187,308 @@ impl AccelProvider for TestProvider {
         Ok(self.push(tensor.data.clone(), tensor.shape.clone()))
     }
 
-    fn covariance(
-        &self,
-        matrix: &GpuTensorHandle,
-        second: Option<&GpuTensorHandle>,
-        weights: Option<&GpuTensorHandle>,
-        options: &CovarianceOptions,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        if second.is_some() {
-            bail!("test provider: covariance secondary input unsupported");
-        }
-        if weights.is_some() || options.has_weight_vector {
-            bail!("test provider: covariance weights unsupported");
-        }
-        if options.rows != CovRows::All {
-            bail!(
-                "test provider: covariance row option {:?} unsupported",
-                options.rows
-            );
-        }
-        let (data, shape) = self.pull(matrix)?;
-        let rows = shape.first().copied().unwrap_or(1);
-        let cols = if shape.len() > 1 { shape[1] } else { 1 };
-        if rows == 0 || cols == 0 {
-            return Ok(self.push(Vec::new(), vec![cols, cols]));
-        }
-        let mut means = vec![0.0f64; cols];
-        for (c, mean) in means.iter_mut().enumerate().take(cols) {
-            for r in 0..rows {
-                let idx = r + rows * c;
-                if let Some(value) = data.get(idx) {
-                    *mean += *value;
-                }
+    fn covariance<'a>(
+        &'a self,
+        matrix: &'a GpuTensorHandle,
+        second: Option<&'a GpuTensorHandle>,
+        weights: Option<&'a GpuTensorHandle>,
+        options: &'a CovarianceOptions,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            if second.is_some() {
+                bail!("test provider: covariance secondary input unsupported");
             }
-            *mean /= rows as f64;
-        }
-        let denom = match options.normalization {
-            CovNormalization::Unbiased => (rows as f64) - 1.0,
-            CovNormalization::Biased => rows as f64,
-        };
-        let denom = if denom <= 0.0 { 1.0 } else { denom };
-        let mut cov = vec![0.0f64; cols * cols];
-        for c1 in 0..cols {
-            for c2 in 0..cols {
-                let mut acc = 0.0f64;
+            if weights.is_some() || options.has_weight_vector {
+                bail!("test provider: covariance weights unsupported");
+            }
+            if options.rows != CovRows::All {
+                bail!(
+                    "test provider: covariance row option {:?} unsupported",
+                    options.rows
+                );
+            }
+            let (data, shape) = self.pull(matrix)?;
+            let rows = shape.first().copied().unwrap_or(1);
+            let cols = if shape.len() > 1 { shape[1] } else { 1 };
+            if rows == 0 || cols == 0 {
+                return Ok(self.push(Vec::new(), vec![cols, cols]));
+            }
+            let mut means = vec![0.0f64; cols];
+            for (c, mean) in means.iter_mut().enumerate().take(cols) {
                 for r in 0..rows {
-                    let idx1 = r + rows * c1;
-                    let idx2 = r + rows * c2;
-                    let val1 = data.get(idx1).copied().unwrap_or(0.0);
-                    let val2 = data.get(idx2).copied().unwrap_or(0.0);
-                    acc += (val1 - means[c1]) * (val2 - means[c2]);
+                    let idx = r + rows * c;
+                    if let Some(value) = data.get(idx) {
+                        *mean += *value;
+                    }
                 }
-                let idx = c1 + cols * c2;
-                cov[idx] = acc / denom;
+                *mean /= rows as f64;
             }
-        }
-        Ok(self.push(cov, vec![cols, cols]))
-    }
-
-    fn image_normalize(
-        &self,
-        input: &GpuTensorHandle,
-        desc: &ImageNormalizeDescriptor,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        let (data, shape) = self.pull(input)?;
-        if shape.len() != 3 {
-            bail!("test provider: image_normalize expects 3-D tensor");
-        }
-        let batch = shape[0];
-        let height = shape[1];
-        let width = shape[2];
-        if batch != desc.batch || height != desc.height || width != desc.width {
-            bail!(
-                "test provider: image_normalize descriptor mismatch tensor {:?} vs {:?}",
-                shape,
-                (desc.batch, desc.height, desc.width)
-            );
-        }
-        let plane = height * width;
-        if plane == 0 {
-            return Ok(self.push(Vec::new(), shape));
-        }
-
-        let mut out = data.clone();
-        for b in 0..batch {
-            let mut sum = 0.0f64;
-            for idx in 0..plane {
-                let offset = b + batch * idx;
-                sum += data[offset];
-            }
-            let mean = sum / plane as f64;
-
-            let mut sq_sum = 0.0f64;
-            for idx in 0..plane {
-                let offset = b + batch * idx;
-                let diff = data[offset] - mean;
-                sq_sum += diff * diff;
-            }
-            let variance = sq_sum / plane as f64;
-            let sigma = (variance + desc.epsilon).sqrt();
-            let inv_sigma = if sigma > 0.0 { 1.0 / sigma } else { 0.0 };
-
-            for idx in 0..plane {
-                let offset = b + batch * idx;
-                let mut value = (data[offset] - mean) * inv_sigma;
-                if let Some(g) = desc.gain {
-                    value *= g;
-                }
-                if let Some(bias) = desc.bias {
-                    value += bias;
-                }
-                value = value.max(0.0);
-                if let Some(gamma) = desc.gamma {
-                    value = value.powf(gamma);
-                }
-                out[offset] = value;
-            }
-        }
-
-        Ok(self.push(out, shape))
-    }
-
-    fn matmul_power_step(
-        &self,
-        lhs: &GpuTensorHandle,
-        rhs: &GpuTensorHandle,
-        epilogue: &PowerStepEpilogue,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        let (lhs_data, lhs_shape) = self.pull(lhs)?;
-        let (rhs_data, rhs_shape) = self.pull(rhs)?;
-        if lhs_shape.len() != 2 || rhs_shape.len() != 2 {
-            bail!("test provider: matmul_power_step expects 2D inputs");
-        }
-        let m = lhs_shape[0];
-        let k = lhs_shape[1];
-        if rhs_shape[0] != k {
-            bail!("test provider: matmul_power_step inner dimensions mismatch");
-        }
-        let n = rhs_shape[1];
-        let mut product = vec![0.0f64; m * n];
-        for col in 0..n {
-            for row in 0..m {
-                let mut acc = 0.0f64;
-                for kk in 0..k {
-                    let lhs_idx = row + m * kk;
-                    let rhs_idx = kk + k * col;
-                    acc += lhs_data[lhs_idx] * rhs_data[rhs_idx];
-                }
-                product[row + m * col] = acc;
-            }
-        }
-        let mut norms = vec![0.0f64; n];
-        for (col, norm) in norms.iter_mut().enumerate().take(n) {
-            let mut acc = 0.0f64;
-            for row in 0..m {
-                let val = product[row + m * col];
-                acc += val * val;
-            }
-            acc += epilogue.epsilon;
-            *norm = acc.sqrt();
-        }
-        for (col, norm) in norms.iter().copied().enumerate().take(n) {
-            for row in 0..m {
-                let idx = row + m * col;
-                product[idx] /= norm;
-            }
-        }
-        Ok(self.push(product, vec![m, n]))
-    }
-
-    fn eig(&self, _a: &GpuTensorHandle, _compute_left: bool) -> anyhow::Result<ProviderEigResult> {
-        bail!("eig not supported by test provider")
-    }
-
-    fn linsolve(
-        &self,
-        _lhs: &GpuTensorHandle,
-        _rhs: &GpuTensorHandle,
-        _options: &ProviderLinsolveOptions,
-    ) -> anyhow::Result<ProviderLinsolveResult> {
-        bail!("linsolve not supported by test provider")
-    }
-
-    fn pinv(
-        &self,
-        _matrix: &GpuTensorHandle,
-        _options: ProviderPinvOptions,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        bail!("pinv not supported by test provider")
-    }
-
-    fn cond(
-        &self,
-        _matrix: &GpuTensorHandle,
-        _norm: ProviderCondNorm,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        bail!("cond not supported by test provider")
-    }
-
-    fn norm(
-        &self,
-        _tensor: &GpuTensorHandle,
-        _order: ProviderNormOrder,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        bail!("norm not supported by test provider")
-    }
-
-    fn reduce_sum_dim(&self, a: &GpuTensorHandle, dim: usize) -> anyhow::Result<GpuTensorHandle> {
-        let (data, shape) = self.pull(a)?;
-        if shape.len() != 2 {
-            bail!("reduce_sum_dim: only 2D supported in test provider");
-        }
-        let rows = shape[0];
-        let cols = shape[1];
-        match dim {
-            0 => {
-                // Column-wise: sum over rows -> shape [1, cols]
-                let mut out = vec![0.0f64; cols];
-                for c in 0..cols {
+            let denom = match options.normalization {
+                CovNormalization::Unbiased => (rows as f64) - 1.0,
+                CovNormalization::Biased => rows as f64,
+            };
+            let denom = if denom <= 0.0 { 1.0 } else { denom };
+            let mut cov = vec![0.0f64; cols * cols];
+            for c1 in 0..cols {
+                for c2 in 0..cols {
                     let mut acc = 0.0f64;
-                    let mut saw_nan = false;
                     for r in 0..rows {
-                        let v = data[r + c * rows];
-                        if v.is_nan() {
-                            saw_nan = true;
-                            break;
-                        }
-                        acc += v;
+                        let idx1 = r + rows * c1;
+                        let idx2 = r + rows * c2;
+                        let val1 = data.get(idx1).copied().unwrap_or(0.0);
+                        let val2 = data.get(idx2).copied().unwrap_or(0.0);
+                        acc += (val1 - means[c1]) * (val2 - means[c2]);
                     }
-                    out[c] = if saw_nan { f64::NAN } else { acc };
+                    let idx = c1 + cols * c2;
+                    cov[idx] = acc / denom;
                 }
-                Ok(self.push(out, vec![1, cols]))
             }
-            1 => {
-                // Row-wise: sum over cols -> shape [rows, 1]
-                let mut out = vec![0.0f64; rows];
-                for r in 0..rows {
+            Ok(self.push(cov, vec![cols, cols]))
+        })
+    }
+
+    fn image_normalize<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        desc: &'a ImageNormalizeDescriptor,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let (data, shape) = self.pull(input)?;
+            if shape.len() != 3 {
+                bail!("test provider: image_normalize expects 3-D tensor");
+            }
+            let batch = shape[0];
+            let height = shape[1];
+            let width = shape[2];
+            if batch != desc.batch || height != desc.height || width != desc.width {
+                bail!(
+                    "test provider: image_normalize descriptor mismatch tensor {:?} vs {:?}",
+                    shape,
+                    (desc.batch, desc.height, desc.width)
+                );
+            }
+            let plane = height * width;
+            if plane == 0 {
+                return Ok(self.push(Vec::new(), shape));
+            }
+
+            let mut out = data.clone();
+            for b in 0..batch {
+                let mut sum = 0.0f64;
+                for idx in 0..plane {
+                    let offset = b + batch * idx;
+                    sum += data[offset];
+                }
+                let mean = sum / plane as f64;
+
+                let mut sq_sum = 0.0f64;
+                for idx in 0..plane {
+                    let offset = b + batch * idx;
+                    let diff = data[offset] - mean;
+                    sq_sum += diff * diff;
+                }
+                let variance = sq_sum / plane as f64;
+                let sigma = (variance + desc.epsilon).sqrt();
+                let inv_sigma = if sigma > 0.0 { 1.0 / sigma } else { 0.0 };
+
+                for idx in 0..plane {
+                    let offset = b + batch * idx;
+                    let mut value = (data[offset] - mean) * inv_sigma;
+                    if let Some(g) = desc.gain {
+                        value *= g;
+                    }
+                    if let Some(bias) = desc.bias {
+                        value += bias;
+                    }
+                    value = value.max(0.0);
+                    if let Some(gamma) = desc.gamma {
+                        value = value.powf(gamma);
+                    }
+                    out[offset] = value;
+                }
+            }
+
+            Ok(self.push(out, shape))
+        })
+    }
+
+    fn matmul_power_step<'a>(
+        &'a self,
+        lhs: &'a GpuTensorHandle,
+        rhs: &'a GpuTensorHandle,
+        epilogue: &'a PowerStepEpilogue,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let (lhs_data, lhs_shape) = self.pull(lhs)?;
+            let (rhs_data, rhs_shape) = self.pull(rhs)?;
+            if lhs_shape.len() != 2 || rhs_shape.len() != 2 {
+                bail!("test provider: matmul_power_step expects 2D inputs");
+            }
+            let m = lhs_shape[0];
+            let k = lhs_shape[1];
+            if rhs_shape[0] != k {
+                bail!("test provider: matmul_power_step inner dimensions mismatch");
+            }
+            let n = rhs_shape[1];
+            let mut product = vec![0.0f64; m * n];
+            for col in 0..n {
+                for row in 0..m {
                     let mut acc = 0.0f64;
-                    let mut saw_nan = false;
-                    for c in 0..cols {
-                        let v = data[r + c * rows];
-                        if v.is_nan() {
-                            saw_nan = true;
-                            break;
-                        }
-                        acc += v;
+                    for kk in 0..k {
+                        let lhs_idx = row + m * kk;
+                        let rhs_idx = kk + k * col;
+                        acc += lhs_data[lhs_idx] * rhs_data[rhs_idx];
                     }
-                    out[r] = if saw_nan { f64::NAN } else { acc };
+                    product[row + m * col] = acc;
                 }
-                Ok(self.push(out, vec![rows, 1]))
             }
-            _ => bail!("reduce_sum_dim: only dims 0 or 1 supported in test provider"),
-        }
+            let mut norms = vec![0.0f64; n];
+            for (col, norm) in norms.iter_mut().enumerate().take(n) {
+                let mut acc = 0.0f64;
+                for row in 0..m {
+                    let val = product[row + m * col];
+                    acc += val * val;
+                }
+                acc += epilogue.epsilon;
+                *norm = acc.sqrt();
+            }
+            for (col, norm) in norms.iter().copied().enumerate().take(n) {
+                for row in 0..m {
+                    let idx = row + m * col;
+                    product[idx] /= norm;
+                }
+            }
+            Ok(self.push(product, vec![m, n]))
+        })
     }
 
-    fn reduce_any_dim(
-        &self,
-        _a: &GpuTensorHandle,
+    fn eig<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _compute_left: bool,
+    ) -> AccelProviderFuture<'a, ProviderEigResult> {
+        Box::pin(async move { bail!("eig not supported by test provider") })
+    }
+
+    fn linsolve<'a>(
+        &'a self,
+        _lhs: &'a GpuTensorHandle,
+        _rhs: &'a GpuTensorHandle,
+        _options: &'a ProviderLinsolveOptions,
+    ) -> AccelProviderFuture<'a, ProviderLinsolveResult> {
+        Box::pin(async move { bail!("linsolve not supported by test provider") })
+    }
+
+    fn pinv<'a>(
+        &'a self,
+        _matrix: &'a GpuTensorHandle,
+        _options: ProviderPinvOptions,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { bail!("pinv not supported by test provider") })
+    }
+
+    fn cond<'a>(
+        &'a self,
+        _matrix: &'a GpuTensorHandle,
+        _norm: ProviderCondNorm,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { bail!("cond not supported by test provider") })
+    }
+
+    fn norm<'a>(
+        &'a self,
+        _tensor: &'a GpuTensorHandle,
+        _order: ProviderNormOrder,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { bail!("norm not supported by test provider") })
+    }
+
+    fn reduce_sum_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let (data, shape) = self.pull(a)?;
+            if shape.len() != 2 {
+                bail!("reduce_sum_dim: only 2D supported in test provider");
+            }
+            let rows = shape[0];
+            let cols = shape[1];
+            match dim {
+                0 => {
+                    // Column-wise: sum over rows -> shape [1, cols]
+                    let mut out = vec![0.0f64; cols];
+                    for c in 0..cols {
+                        let mut acc = 0.0f64;
+                        let mut saw_nan = false;
+                        for r in 0..rows {
+                            let v = data[r + c * rows];
+                            if v.is_nan() {
+                                saw_nan = true;
+                                break;
+                            }
+                            acc += v;
+                        }
+                        out[c] = if saw_nan { f64::NAN } else { acc };
+                    }
+                    Ok(self.push(out, vec![1, cols]))
+                }
+                1 => {
+                    // Row-wise: sum over cols -> shape [rows, 1]
+                    let mut out = vec![0.0f64; rows];
+                    for r in 0..rows {
+                        let mut acc = 0.0f64;
+                        let mut saw_nan = false;
+                        for c in 0..cols {
+                            let v = data[r + c * rows];
+                            if v.is_nan() {
+                                saw_nan = true;
+                                break;
+                            }
+                            acc += v;
+                        }
+                        out[r] = if saw_nan { f64::NAN } else { acc };
+                    }
+                    Ok(self.push(out, vec![rows, 1]))
+                }
+                _ => bail!("reduce_sum_dim: only dims 0 or 1 supported in test provider"),
+            }
+        })
+    }
+
+    fn reduce_any_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
         _dim: usize,
         _omit_nan: bool,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        bail!("reduce_any_dim not supported by test provider")
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { bail!("reduce_any_dim not supported by test provider") })
     }
 
-    fn reduce_any(&self, _a: &GpuTensorHandle, _omit_nan: bool) -> anyhow::Result<GpuTensorHandle> {
-        bail!("reduce_any not supported by test provider")
+    fn reduce_any<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _omit_nan: bool,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { bail!("reduce_any not supported by test provider") })
     }
 
-    fn reduce_all_dim(
-        &self,
-        _a: &GpuTensorHandle,
+    fn reduce_all_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
         _dim: usize,
         _omit_nan: bool,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        bail!("reduce_all_dim not supported by test provider")
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { bail!("reduce_all_dim not supported by test provider") })
     }
 
-    fn reduce_all(&self, _a: &GpuTensorHandle, _omit_nan: bool) -> anyhow::Result<GpuTensorHandle> {
-        bail!("reduce_all not supported by test provider")
+    fn reduce_all<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _omit_nan: bool,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { bail!("reduce_all not supported by test provider") })
     }
 
     fn conv2d(
@@ -473,51 +500,55 @@ impl AccelProvider for TestProvider {
         bail!("conv2d not supported by test provider")
     }
 
-    fn mrdivide(
-        &self,
-        lhs: &GpuTensorHandle,
-        rhs: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        let (lhs_data, lhs_shape) = self.pull(lhs)?;
-        let (rhs_data, rhs_shape) = self.pull(rhs)?;
+    fn mrdivide<'a>(
+        &'a self,
+        lhs: &'a GpuTensorHandle,
+        rhs: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let (lhs_data, lhs_shape) = self.pull(lhs)?;
+            let (rhs_data, rhs_shape) = self.pull(rhs)?;
 
-        let lhs_tensor = Tensor::new(lhs_data, lhs_shape)
-            .map_err(|e| anyhow!("mrdivide (test provider): {e}"))?;
-        let rhs_tensor = Tensor::new(rhs_data, rhs_shape)
-            .map_err(|e| anyhow!("mrdivide (test provider): {e}"))?;
-        let result = mrdivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
-            .map_err(|e| anyhow!("{e}"))?;
-        let Tensor { data, shape, .. } = result;
-        Ok(self.push(data, shape))
+            let lhs_tensor = Tensor::new(lhs_data, lhs_shape)
+                .map_err(|e| anyhow!("mrdivide (test provider): {e}"))?;
+            let rhs_tensor = Tensor::new(rhs_data, rhs_shape)
+                .map_err(|e| anyhow!("mrdivide (test provider): {e}"))?;
+            let result = mrdivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
+                .map_err(|e| anyhow!("{e}"))?;
+            let Tensor { data, shape, .. } = result;
+            Ok(self.push(data, shape))
+        })
     }
 
-    fn sym_rcm(&self, _matrix: &GpuTensorHandle) -> anyhow::Result<Vec<usize>> {
-        bail!("symrcm not supported by test provider")
+    fn sym_rcm<'a>(&'a self, _matrix: &'a GpuTensorHandle) -> AccelProviderFuture<'a, Vec<usize>> {
+        Box::pin(async move { bail!("symrcm not supported by test provider") })
     }
 
-    fn unique(
-        &self,
-        handle: &GpuTensorHandle,
-        options: &UniqueOptions,
-    ) -> anyhow::Result<UniqueResult> {
-        let (data, shape) = self.pull(handle)?;
-        let tensor =
-            Tensor::new(data, shape).map_err(|e| anyhow!("unique (test provider): {e}"))?;
-        let eval =
-            runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
-                tensor, options,
-            )
-            .map_err(|err| anyhow!("unique (test provider): {err}"))?;
-        eval.into_numeric_unique_result()
-            .map_err(|err| anyhow!("unique (test provider): {err}"))
+    fn unique<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+        options: &'a UniqueOptions,
+    ) -> AccelProviderFuture<'a, UniqueResult> {
+        Box::pin(async move {
+            let (data, shape) = self.pull(handle)?;
+            let tensor =
+                Tensor::new(data, shape).map_err(|e| anyhow!("unique (test provider): {e}"))?;
+            let eval =
+                runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
+                    tensor, options,
+                )
+                .map_err(|err| anyhow!("unique (test provider): {err}"))?;
+            eval.into_numeric_unique_result()
+                .map_err(|err| anyhow!("unique (test provider): {err}"))
+        })
     }
 
-    fn corrcoef(
-        &self,
-        _matrix: &GpuTensorHandle,
-        _options: &CorrcoefOptions,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow!("corrcoef (test provider): not implemented"))
+    fn corrcoef<'a>(
+        &'a self,
+        _matrix: &'a GpuTensorHandle,
+        _options: &'a CorrcoefOptions,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { Err(anyhow!("corrcoef (test provider): not implemented")) })
     }
 
     fn fused_elementwise(
@@ -598,36 +629,38 @@ impl AccelProvider for TestProvider {
         Ok(self.push(out, new_shape))
     }
 
-    fn matmul(
-        &self,
-        lhs: &GpuTensorHandle,
-        rhs: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        let (lhs_data, lhs_shape) = self.pull(lhs)?;
-        let (rhs_data, rhs_shape) = self.pull(rhs)?;
-        if lhs_shape.len() != 2 || rhs_shape.len() != 2 {
-            bail!("test provider: matmul expects 2D inputs");
-        }
-        let m = lhs_shape[0];
-        let k = lhs_shape[1];
-        if rhs_shape[0] != k {
-            bail!("test provider: matmul inner dimensions mismatch");
-        }
-        let n = rhs_shape[1];
-        let mut out = vec![0.0f64; m * n];
-        for row in 0..m {
-            for col in 0..n {
-                let mut acc = 0.0;
-                for inner in 0..k {
-                    let lhs_idx = row + m * inner;
-                    let rhs_idx = inner + k * col;
-                    acc += lhs_data[lhs_idx] * rhs_data[rhs_idx];
-                }
-                let dst = row + m * col;
-                out[dst] = acc;
+    fn matmul<'a>(
+        &'a self,
+        lhs: &'a GpuTensorHandle,
+        rhs: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let (lhs_data, lhs_shape) = self.pull(lhs)?;
+            let (rhs_data, rhs_shape) = self.pull(rhs)?;
+            if lhs_shape.len() != 2 || rhs_shape.len() != 2 {
+                bail!("test provider: matmul expects 2D inputs");
             }
-        }
-        Ok(self.push(out, vec![m, n]))
+            let m = lhs_shape[0];
+            let k = lhs_shape[1];
+            if rhs_shape[0] != k {
+                bail!("test provider: matmul inner dimensions mismatch");
+            }
+            let n = rhs_shape[1];
+            let mut out = vec![0.0f64; m * n];
+            for row in 0..m {
+                for col in 0..n {
+                    let mut acc = 0.0;
+                    for inner in 0..k {
+                        let lhs_idx = row + m * inner;
+                        let rhs_idx = inner + k * col;
+                        acc += lhs_data[lhs_idx] * rhs_data[rhs_idx];
+                    }
+                    let dst = row + m * col;
+                    out[dst] = acc;
+                }
+            }
+            Ok(self.push(out, vec![m, n]))
+        })
     }
 
     fn diag_extract(
@@ -1776,10 +1809,8 @@ fn provider_reduce_sum_dim_parity_simple() {
         }
 
         // Provider dim=0 (MATLAB dim=1): column-wise
-        let col_gpu = provider
-            .reduce_sum_dim(&gpu, 0)
-            .expect("reduce dim=0 (cols)");
-        let host_col = provider.download(&col_gpu).expect("download col");
+        let col_gpu = block_on(provider.reduce_sum_dim(&gpu, 0)).expect("reduce dim=0 (cols)");
+        let host_col = block_on(provider.download(&col_gpu)).expect("download col");
         assert_eq!(host_col.shape, vec![1, cols]);
         assert_eq!(host_col.data.len(), cols);
         for (i, (a, b)) in col_sums_cpu.iter().zip(host_col.data.iter()).enumerate() {
@@ -1797,10 +1828,8 @@ fn provider_reduce_sum_dim_parity_simple() {
         }
 
         // Provider dim=1 (MATLAB dim=2): row-wise
-        let row_gpu = provider
-            .reduce_sum_dim(&gpu, 1)
-            .expect("reduce dim=1 (rows)");
-        let host_row = provider.download(&row_gpu).expect("download row");
+        let row_gpu = block_on(provider.reduce_sum_dim(&gpu, 1)).expect("reduce dim=1 (rows)");
+        let host_row = block_on(provider.download(&row_gpu)).expect("download row");
         assert_eq!(host_row.shape, vec![rows, 1]);
         assert_eq!(host_row.data.len(), rows);
         for (i, (a, b)) in row_sums_cpu.iter().zip(host_row.data.iter()).enumerate() {

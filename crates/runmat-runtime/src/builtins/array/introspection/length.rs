@@ -6,6 +6,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::containers::map::map_length;
+use crate::runtime_error::RuntimeError;
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
@@ -59,9 +60,8 @@ extent across every dimension.
 ## `length` Function GPU Execution Behaviour
 `length` is a metadata query. When the input is a GPU tensor, RunMat looks at the shape embedded in
 the GPU handle (`GpuTensorHandle.shape`). If the active provider leaves that metadata empty, the
-runtime invokes `provider.download(handle)` a single time to recover the shape, ensuring
-MATLAB-compatible behaviour. No GPU kernels are launched and no device buffers are allocated by this
-builtin.
+runtime gathers the tensor once to recover the shape, ensuring MATLAB-compatible behaviour. No GPU
+kernels are launched and no device buffers are allocated by this builtin.
 
 ## Examples of using the `length` function in MATLAB / RunMat
 
@@ -208,13 +208,13 @@ async fn length_builtin(value: Value) -> crate::BuiltinResult<Value> {
     if let Some(count) = map_length(&value) {
         return Ok(Value::Num(count as f64));
     }
-    let len = max_dimension(&value) as f64;
+    let len = max_dimension(&value).await? as f64;
     Ok(Value::Num(len))
 }
 
-fn max_dimension(value: &Value) -> usize {
-    let dims = value_dimensions(value);
-    dims.into_iter().max().unwrap_or(0)
+async fn max_dimension(value: &Value) -> Result<usize, RuntimeError> {
+    let dims = value_dimensions(value).await?;
+    Ok(dims.into_iter().max().unwrap_or(0))
 }
 
 #[cfg(test)]

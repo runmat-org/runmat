@@ -6,6 +6,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::dispatcher::download_handle_async;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -273,9 +274,9 @@ async fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<V
     match dim {
         None => {
             if let Some(p) = provider {
-                if let Ok(result) = p.reduce_nnz(&handle) {
-                    let host = p
-                        .download(&result)
+                if let Ok(result) = p.reduce_nnz(&handle).await {
+                    let host = download_handle_async(p, &result)
+                        .await
                         .map_err(|e| nnz_error(format!("nnz: {e}")))?;
                     let _ = p.free(&result);
                     let count = host.data.into_iter().next().unwrap_or(0.0);
@@ -289,9 +290,9 @@ async fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<V
             if let Some(p) = provider {
                 let zero_based = dim.saturating_sub(1);
                 if zero_based < handle.shape.len() {
-                    if let Ok(result) = p.reduce_nnz_dim(&handle, zero_based) {
-                        let host = p
-                            .download(&result)
+                    if let Ok(result) = p.reduce_nnz_dim(&handle, zero_based).await {
+                        let host = download_handle_async(p, &result)
+                            .await
                             .map_err(|e| nnz_error(format!("nnz: {e}")))?;
                         let _ = p.free(&result);
                         let tensor = Tensor::new(host.data, host.shape)

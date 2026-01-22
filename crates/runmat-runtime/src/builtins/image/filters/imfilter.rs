@@ -314,7 +314,10 @@ async fn imfilter_gpu(
         }
     };
 
-    match provider.imfilter(&image_handle, &kernel_handle, &options) {
+    match provider
+        .imfilter(&image_handle, &kernel_handle, &options)
+        .await
+    {
         Ok(output) => {
             if let Some(uploaded) = uploaded_handle {
                 let _ = provider.free(&uploaded);

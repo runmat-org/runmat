@@ -210,11 +210,11 @@ fn numel_error(message: impl Into<String>) -> RuntimeError {
 )]
 async fn numel_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        return Ok(Value::Num(value_numel(&value) as f64));
+        return Ok(Value::Num(value_numel(&value).await? as f64));
     }
 
     let dims = parse_dimension_args(&rest)?;
-    let shape = value_dimensions(&value);
+    let shape = value_dimensions(&value).await?;
 
     let mut product = 1usize;
     for dim in dims {

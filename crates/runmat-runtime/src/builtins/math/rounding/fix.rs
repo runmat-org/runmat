@@ -230,7 +230,7 @@ async fn fix_builtin(value: Value) -> BuiltinResult<Value> {
 
 async fn fix_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_fix(&handle) {
+        if let Ok(out) = provider.unary_fix(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }
