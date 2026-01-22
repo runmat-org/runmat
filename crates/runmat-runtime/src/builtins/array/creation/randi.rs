@@ -250,7 +250,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::creation::randi"
 )]
 async fn randi_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let parsed = ParsedRandi::parse(args)?;
+    let parsed = ParsedRandi::parse(args).await?;
     build_output(parsed).await
 }
 
@@ -300,14 +300,14 @@ impl Bounds {
 }
 
 impl ParsedRandi {
-    fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
+    async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
         if args.is_empty() {
             return Err(builtin_error("randi: requires at least one input argument"));
         }
 
         let mut iter = args.into_iter();
         let bounds_value = iter.next().unwrap();
-        let bounds = parse_bounds(bounds_value)?;
+        let bounds = parse_bounds(bounds_value).await?;
 
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
@@ -388,7 +388,7 @@ impl ParsedRandi {
                 }
             }
 
-            if let Some(parsed_dims) = extract_dims(&arg)? {
+            if let Some(parsed_dims) = extract_dims(&arg).await? {
                 saw_dims_arg = true;
                 if dims.is_empty() {
                     dims = parsed_dims;
@@ -575,15 +575,18 @@ fn generate_integer_data(bounds: &Bounds, len: usize) -> crate::BuiltinResult<Ve
     Ok(out)
 }
 
-fn parse_bounds(value: Value) -> crate::BuiltinResult<Bounds> {
+async fn parse_bounds(value: Value) -> crate::BuiltinResult<Bounds> {
+    let value = match value {
+        Value::GpuTensor(_) => crate::dispatcher::gather_if_needed_async(&value)
+            .await
+            .map_err(|e| builtin_error(format!("randi: {e}")))?,
+        other => other,
+    };
     match value {
-        Value::Int(i) => parse_upper_scalar(i.to_i64()),
-        Value::Num(n) => parse_upper_num(n),
         Value::Tensor(t) => parse_bounds_tensor(&t),
         Value::LogicalArray(_) | Value::Bool(_) => Err(builtin_error(
             "randi: bounds must be numeric scalars or vectors",
         )),
-        Value::GpuTensor(_) => Err(builtin_error("randi: bounds must be specified on the host")),
         Value::String(s) => Err(builtin_error(format!(
             "randi: unexpected option '{s}' in first argument"
         ))),
@@ -594,9 +597,17 @@ fn parse_bounds(value: Value) -> crate::BuiltinResult<Bounds> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err(builtin_error("randi: complex bounds are not supported"))
         }
-        other => Err(builtin_error(format!(
-            "randi: unsupported bounds argument {other:?}"
-        ))),
+        other => {
+            let Some(raw) = tensor::scalar_f64_from_value_async(&other)
+                .await
+                .map_err(|e| builtin_error(format!("randi: {e}")))?
+            else {
+                return Err(builtin_error(format!(
+                    "randi: unsupported bounds argument {other:?}"
+                )));
+            };
+            parse_upper_num(raw)
+        }
     }
 }
 
@@ -665,55 +676,26 @@ fn keyword_of(value: &Value) -> Option<String> {
     }
 }
 
-fn extract_dims(value: &Value) -> crate::BuiltinResult<Option<Vec<usize>>> {
-    match value {
-        Value::Int(i) => {
-            let dim = i.to_i64();
-            if dim < 0 {
-                return Err(builtin_error(
-                    "randi: matrix dimensions must be non-negative",
-                ));
-            }
-            Ok(Some(vec![dim as usize]))
-        }
-        Value::Num(n) => parse_numeric_dimension(*n).map(|d| Some(vec![d])),
-        Value::Tensor(t) => dims_from_tensor(t),
-        Value::LogicalArray(_) => Ok(None),
-        _ => Ok(None),
-    }
-}
-
-fn parse_numeric_dimension(n: f64) -> crate::BuiltinResult<usize> {
-    if !n.is_finite() {
-        return Err(builtin_error("randi: dimensions must be finite"));
-    }
-    if n < 0.0 {
-        return Err(builtin_error(
-            "randi: matrix dimensions must be non-negative",
-        ));
-    }
-    let rounded = n.round();
-    if (rounded - n).abs() > f64::EPSILON {
-        return Err(builtin_error("randi: dimensions must be integers"));
-    }
-    Ok(rounded as usize)
-}
-
-fn dims_from_tensor(tensor: &Tensor) -> crate::BuiltinResult<Option<Vec<usize>>> {
-    let is_row = tensor.rows() == 1;
-    let is_col = tensor.cols() == 1;
-    let is_scalar = tensor.data.len() == 1;
-    if !(is_row || is_col || is_scalar || tensor.shape.len() == 1) {
+async fn extract_dims(value: &Value) -> crate::BuiltinResult<Option<Vec<usize>>> {
+    if matches!(value, Value::LogicalArray(_)) {
         return Ok(None);
     }
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for &v in &tensor.data {
-        match parse_numeric_dimension(v) {
-            Ok(dim) => dims.push(dim),
-            Err(_) => return Ok(None),
+    let gpu_scalar = match value {
+        Value::GpuTensor(handle) => tensor::element_count(&handle.shape) == 1,
+        _ => false,
+    };
+    match tensor::dims_from_value_async(value).await {
+        Ok(dims) => Ok(dims),
+        Err(err) => {
+            if matches!(value, Value::Tensor(_))
+                || (matches!(value, Value::GpuTensor(_)) && !gpu_scalar)
+            {
+                Ok(None)
+            } else {
+                Err(builtin_error(format!("randi: {err}")))
+            }
         }
     }
-    Ok(Some(dims))
 }
 
 fn shape_from_value(value: &Value) -> crate::BuiltinResult<Vec<usize>> {

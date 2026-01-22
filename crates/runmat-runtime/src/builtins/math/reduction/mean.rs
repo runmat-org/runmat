@@ -403,7 +403,7 @@ async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     let (value, rest) = normalise_mean_call_args(value, rest);
 
     let input_meta = InputMeta::from_value(&value);
-    let parsed = parse_arguments(&rest)?;
+    let parsed = parse_arguments(&rest).await?;
     let raw = match value {
         Value::GpuTensor(handle) => mean_gpu(handle, &parsed).await?,
         Value::Complex(re, im) => mean_host_complex_scalar(re, im, &parsed)?,
@@ -444,7 +444,7 @@ fn is_data_like(v: &Value) -> bool {
     )
 }
 
-fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
+async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut axes = MeanAxes::Default;
     let mut axes_set = false;
     let mut nan_mode = ReductionNaN::Include;
@@ -520,7 +520,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         }
 
         if !axes_set || matches!(axes, MeanAxes::Default) {
-            if let Some(selection) = parse_axes(arg)? {
+            if let Some(selection) = parse_axes(arg).await? {
                 if matches!(selection, MeanAxes::All)
                     && axes_set
                     && !matches!(axes, MeanAxes::Default)
@@ -537,7 +537,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         }
 
         if axes_set && !matches!(axes, MeanAxes::Default) {
-            if let Some(selection) = parse_axes(arg)? {
+            if let Some(selection) = parse_axes(arg).await? {
                 if matches!(selection, MeanAxes::All) {
                     return Err(mean_error(
                         "mean: 'all' cannot be combined with an explicit dimension",
@@ -559,7 +559,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     })
 }
 
-fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
+async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
     if let Some(text) = value_as_str(value) {
         let lowered = text.trim().to_ascii_lowercase();
         return match lowered.as_str() {
@@ -570,42 +570,52 @@ fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
         };
     }
 
-    match value {
-        Value::Tensor(t) => {
-            if t.data.is_empty() {
-                return Ok(Some(MeanAxes::Default));
-            }
-            if t.data.len() == 1 {
-                let scalar = Value::Num(t.data[0]);
-                let dim = tensor::parse_dimension(&scalar, "mean").map_err(mean_error)?;
-                return Ok(Some(MeanAxes::Dim(dim)));
-            }
-            let dims = parse_dimension_vector(t)?;
-            Ok(Some(MeanAxes::Vec(dims)))
+    let scalar_hint = match value {
+        Value::Num(_) | Value::Int(_) => true,
+        Value::Tensor(t) => t.data.len() == 1,
+        Value::LogicalArray(logical) => logical.data.len() == 1,
+        Value::GpuTensor(handle) => {
+            handle.shape.is_empty() || tensor::element_count(&handle.shape) == 1
         }
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(logical).map_err(mean_error)?;
-            if tensor.data.is_empty() {
-                return Ok(Some(MeanAxes::Default));
-            }
-            if tensor.data.len() == 1 {
-                let scalar = Value::Num(tensor.data[0]);
-                let dim = tensor::parse_dimension(&scalar, "mean").map_err(mean_error)?;
-                return Ok(Some(MeanAxes::Dim(dim)));
-            }
-            let dims = parse_dimension_vector(&tensor)?;
-            Ok(Some(MeanAxes::Vec(dims)))
+        _ => false,
+    };
+
+    let dims = match value {
+        Value::Tensor(_)
+        | Value::LogicalArray(_)
+        | Value::Int(_)
+        | Value::Num(_)
+        | Value::GpuTensor(_) => tensor::dims_from_value_async(value)
+            .await
+            .map_err(|err| map_dims_error(err, scalar_hint))?,
+        Value::Bool(_) => {
+            return Err(mean_error("mean: dimension must be numeric"));
         }
-        Value::Int(_) | Value::Num(_) => {
-            let dim = tensor::parse_dimension(value, "mean").map_err(mean_error)?;
-            Ok(Some(MeanAxes::Dim(dim)))
-        }
-        Value::GpuTensor(_) => Err(mean_error(
-            "mean: dimension arguments cannot be GPU tensors",
-        )),
-        Value::Bool(_) => Err(mean_error("mean: dimension must be numeric")),
-        _ => Ok(None),
+        _ => return Ok(None),
+    };
+
+    let Some(mut dims) = dims else {
+        return Ok(None);
+    };
+    if dims.is_empty() {
+        return Ok(Some(MeanAxes::Default));
     }
+    if dims.len() == 1 {
+        let dim = dims[0];
+        if dim < 1 {
+            return Err(mean_error("mean: dimension must be >= 1"));
+        }
+        return Ok(Some(MeanAxes::Dim(dim)));
+    }
+    for dim in &mut dims {
+        if *dim == 0 {
+            *dim = 1;
+        }
+        if *dim < 1 {
+            return Err(mean_error("mean: dimension entries must be >= 1"));
+        }
+    }
+    Ok(Some(MeanAxes::Vec(dims)))
 }
 
 fn value_as_str(value: &Value) -> Option<String> {
@@ -617,29 +627,22 @@ fn value_as_str(value: &Value) -> Option<String> {
     }
 }
 
-fn parse_dimension_vector(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for &val in &tensor.data {
-        if !val.is_finite() {
-            return Err(mean_error(
-                "mean: dimension entries must be finite integers",
-            ));
+fn map_dims_error(message: String, scalar: bool) -> RuntimeError {
+    if message.contains("non-negative") {
+        if scalar {
+            return mean_error("mean: dimension must be >= 1");
         }
-        let rounded = val.round();
-        let adjusted = if (0.0..1.0).contains(&rounded) {
-            1.0
-        } else {
-            rounded
-        };
-        if adjusted < 1.0 {
-            return Err(mean_error("mean: dimension entries must be >= 1"));
+        return mean_error("mean: dimension entries must be >= 1");
+    }
+    if scalar {
+        if message.contains("finite") {
+            return mean_error("mean: dimension must be finite");
         }
-        dims.push(adjusted as usize);
+        if message.contains("integer") {
+            return mean_error("mean: dimension must be an integer");
+        }
     }
-    if dims.is_empty() {
-        return Err(mean_error("mean: dimension vector must not be empty"));
-    }
-    Ok(dims)
+    mean_error("mean: dimension entries must be finite integers")
 }
 
 fn mean_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {

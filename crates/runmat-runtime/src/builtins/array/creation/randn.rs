@@ -242,7 +242,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::creation::randn"
 )]
 async fn randn_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let parsed = ParsedRandn::parse(rest)?;
+    let parsed = ParsedRandn::parse(rest).await?;
     build_output(parsed).await
 }
 
@@ -259,7 +259,7 @@ enum RandnTemplate {
 }
 
 impl ParsedRandn {
-    fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
+    async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
         let mut shape_source: Option<Vec<usize>> = None;
@@ -301,7 +301,7 @@ impl ParsedRandn {
                 }
             }
 
-            if let Some(parsed_dims) = extract_dims(&arg, "randn")? {
+            if let Some(parsed_dims) = extract_dims(&arg, "randn").await? {
                 saw_dims_arg = true;
                 if dims.is_empty() {
                     dims = parsed_dims;

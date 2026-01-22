@@ -251,7 +251,7 @@ async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             "repmat: replication factors must be specified",
         ));
     }
-    let raw_reps = parse_replication_factors(&rest)?;
+    let raw_reps = parse_replication_factors(&rest).await?;
     match value {
         Value::Tensor(t) => {
             let tiled = repmat_tensor(&t, &raw_reps)?;
@@ -309,18 +309,18 @@ async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
     }
 }
 
-fn parse_replication_factors(args: &[Value]) -> crate::BuiltinResult<Vec<usize>> {
+async fn parse_replication_factors(args: &[Value]) -> crate::BuiltinResult<Vec<usize>> {
     if args.is_empty() {
         return Err(repmat_error(
             "repmat: replication factors must be specified",
         ));
     }
     if args.len() == 1 {
-        parse_replication_vector(&args[0])
+        parse_replication_vector(&args[0]).await
     } else {
         let mut factors = Vec::with_capacity(args.len());
         for (idx, value) in args.iter().enumerate() {
-            let factor = parse_replication_scalar(value)?;
+            let factor = parse_replication_scalar(value).await?;
             factors.push(factor);
             if factor == 0 && idx + 1 < args.len() {
                 // no-op: just allows subsequent arguments to parse.
@@ -330,7 +330,48 @@ fn parse_replication_factors(args: &[Value]) -> crate::BuiltinResult<Vec<usize>>
     }
 }
 
-fn parse_replication_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
+async fn parse_replication_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
+    match value {
+        Value::Tensor(t) => {
+            if t.data.is_empty() {
+                return Err(repmat_error(
+                    "repmat: replication vector must contain at least one element",
+                ));
+            }
+        }
+        Value::LogicalArray(la) => {
+            if la.data.is_empty() {
+                return Err(repmat_error(
+                    "repmat: replication vector must contain at least one element",
+                ));
+            }
+        }
+        _ => {}
+    }
+
+    match tensor::dims_from_value_async(value).await {
+        Ok(Some(dims)) => {
+            if dims.is_empty() {
+                return Err(repmat_error(
+                    "repmat: replication vector must contain at least one element",
+                ));
+            }
+            return Ok(dims);
+        }
+        Ok(None) => {
+            if matches!(value, Value::GpuTensor(_)) {
+                return Err(repmat_error(
+                    "repmat: replication vector must be a row or column vector",
+                ));
+            }
+        }
+        Err(err) => {
+            if matches!(value, Value::GpuTensor(_)) {
+                return Err(repmat_error(format!("repmat: {err}")));
+            }
+        }
+    }
+
     let tensor =
         tensor::value_into_tensor_for("repmat", value.clone()).map_err(|e| repmat_error(e))?;
     if tensor.data.is_empty() {
@@ -345,29 +386,34 @@ fn parse_replication_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
     Ok(factors)
 }
 
-fn parse_replication_scalar(value: &Value) -> crate::BuiltinResult<usize> {
+async fn parse_replication_scalar(value: &Value) -> crate::BuiltinResult<usize> {
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                Err(repmat_error(
-                    "repmat: replication factors must be non-negative integers",
-                ))
-            } else {
-                Ok(raw as usize)
-            }
-        }
-        Value::Num(n) => coerce_rep_factor(*n, 1),
-        Value::Bool(flag) => Ok(if *flag { 1 } else { 0 }),
-        other => {
-            let tensor = tensor::value_into_tensor_for("repmat", other.clone())
-                .map_err(|e| repmat_error(e))?;
-            if tensor.data.len() != 1 {
+        Value::Tensor(t) => {
+            if t.data.len() != 1 {
                 return Err(repmat_error("repmat: size arguments must be scalars"));
             }
-            coerce_rep_factor(tensor.data[0], 1)
         }
+        Value::LogicalArray(la) => {
+            if la.data.len() != 1 {
+                return Err(repmat_error("repmat: size arguments must be scalars"));
+            }
+        }
+        _ => {}
     }
+
+    if let Some(raw) = tensor::scalar_f64_from_value_async(value)
+        .await
+        .map_err(|e| repmat_error(format!("repmat: {e}")))?
+    {
+        return coerce_rep_factor(raw, 1);
+    }
+
+    let tensor =
+        tensor::value_into_tensor_for("repmat", value.clone()).map_err(|e| repmat_error(e))?;
+    if tensor.data.len() != 1 {
+        return Err(repmat_error("repmat: size arguments must be scalars"));
+    }
+    coerce_rep_factor(tensor.data[0], 1)
 }
 
 fn coerce_rep_factor(value: f64, position: usize) -> crate::BuiltinResult<usize> {

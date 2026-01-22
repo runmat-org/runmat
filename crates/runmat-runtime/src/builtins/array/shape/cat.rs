@@ -371,7 +371,30 @@ async fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
     if rest.len() < 2 {
         return Err(cat_err("cat: at least two input arrays are required"));
     }
-    let dim_index = tensor::parse_dimension(&dim, "cat").map_err(cat_err)?;
+    let dim_index = match dim {
+        Value::Int(_) | Value::Num(_) | Value::GpuTensor(_) => match tensor::dimension_from_value_async(
+            &dim,
+            "cat",
+            false,
+        )
+        .await
+        .map_err(cat_err)?
+        {
+            Some(index) => index,
+            None => {
+                return Err(cat_err(format!(
+                    "cat: dimension must be numeric, got {:?}",
+                    dim
+                )))
+            }
+        },
+        _ => {
+            return Err(cat_err(format!(
+                "cat: dimension must be numeric, got {:?}",
+                dim
+            )))
+        }
+    };
     let dim_zero = dim_index - 1;
 
     let (inputs, like) = extract_like(rest)?;

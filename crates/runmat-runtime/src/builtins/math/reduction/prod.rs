@@ -242,7 +242,7 @@ async fn prod_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     if matches!(input_meta.class, InputClass::Complex) {
         return Err(prod_error("prod: complex inputs are not yet supported"));
     }
-    let parsed = parse_arguments(&rest)?;
+    let parsed = parse_arguments(&rest).await?;
     let raw_result = match value {
         Value::GpuTensor(handle) => prod_gpu(handle, &parsed).await?,
         Value::Tensor(_)
@@ -405,7 +405,7 @@ impl IntClass {
     }
 }
 
-fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
+async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut selection = DimSelection::Auto;
     let mut selection_set = false;
     let mut nan_mode = ReductionNaN::Include;
@@ -481,7 +481,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         }
 
         if !selection_set || matches!(selection, DimSelection::Auto) {
-            if let Some(sel) = parse_dimension_spec(arg)? {
+            if let Some(sel) = parse_dimension_spec(arg).await? {
                 selection = sel;
                 selection_set = true;
                 idx += 1;
@@ -499,70 +499,60 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     })
 }
 
-fn parse_dimension_spec(value: &Value) -> BuiltinResult<Option<DimSelection>> {
+async fn parse_dimension_spec(value: &Value) -> BuiltinResult<Option<DimSelection>> {
     match value {
-        Value::Int(i) => {
-            let dim = i.to_i64();
-            if dim < 1 {
-                return Err(prod_error("prod: dimension must be >= 1"));
-            }
-            Ok(Some(DimSelection::Dim(dim as usize)))
+        Value::Int(_) | Value::Num(_) => {
+            let dim = tensor::dimension_from_value_async(value, "prod", false)
+                .await
+                .map_err(prod_error)?;
+            Ok(dim.map(DimSelection::Dim))
         }
-        Value::Num(n) => {
-            if !n.is_finite() {
-                return Err(prod_error("prod: dimension must be finite"));
-            }
-            let rounded = n.round();
-            if (rounded - n).abs() > f64::EPSILON {
-                return Err(prod_error("prod: dimension must be an integer"));
-            }
-            if rounded < 1.0 {
-                return Err(prod_error("prod: dimension must be >= 1"));
-            }
-            Ok(Some(DimSelection::Dim(rounded as usize)))
-        }
-        Value::Tensor(t) => parse_dimension_tensor(t),
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(logical).map_err(prod_error)?;
-            parse_dimension_tensor(&tensor)
-        }
-        Value::GpuTensor(_) => Err(prod_error(
-            "prod: dimension arguments must reside on the host",
-        )),
+        Value::Tensor(t) => parse_dimension_tensor(value, &t.shape).await,
+        Value::LogicalArray(logical) => parse_dimension_tensor(value, &logical.shape).await,
+        Value::GpuTensor(handle) => parse_dimension_tensor(value, &handle.shape).await,
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Ok(None),
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(None),
         _ => Ok(None),
     }
 }
 
-fn parse_dimension_tensor(tensor: &Tensor) -> BuiltinResult<Option<DimSelection>> {
-    if tensor.data.is_empty() {
-        return Ok(Some(DimSelection::Auto));
-    }
-    if !is_vector_shape(&tensor.shape) {
+async fn parse_dimension_tensor(
+    value: &Value,
+    shape: &[usize],
+) -> BuiltinResult<Option<DimSelection>> {
+    if !is_vector_shape(shape) {
         return Err(prod_error(
             "prod: dimension vector must be a row or column vector",
         ));
     }
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for &v in &tensor.data {
-        if !v.is_finite() {
-            return Err(prod_error("prod: dimensions must be finite"));
-        }
-        let rounded = v.round();
-        if (rounded - v).abs() > f64::EPSILON {
-            return Err(prod_error("prod: dimensions must contain integers"));
-        }
-        if rounded < 1.0 {
+    let dims = tensor::dims_from_value_async(value)
+        .await
+        .map_err(map_dims_error)?;
+    let Some(dims) = dims else {
+        return Ok(None);
+    };
+    if dims.is_empty() {
+        return Ok(Some(DimSelection::Auto));
+    }
+    for &dim in &dims {
+        if dim < 1 {
             return Err(prod_error("prod: dimension indices must be >= 1"));
         }
-        dims.push(rounded as usize);
     }
-    if dims.is_empty() {
-        Ok(Some(DimSelection::Auto))
-    } else {
-        Ok(Some(DimSelection::Vec(dims)))
+    Ok(Some(DimSelection::Vec(dims)))
+}
+
+fn map_dims_error(message: String) -> RuntimeError {
+    if message.contains("non-negative") {
+        return prod_error("prod: dimension indices must be >= 1");
     }
+    if message.contains("finite") {
+        return prod_error("prod: dimensions must be finite");
+    }
+    if message.contains("integer") {
+        return prod_error("prod: dimensions must contain integers");
+    }
+    prod_error(message)
 }
 
 fn is_vector_shape(shape: &[usize]) -> bool {

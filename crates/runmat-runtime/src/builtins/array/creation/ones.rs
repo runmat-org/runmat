@@ -1,7 +1,7 @@
 //! MATLAB-compatible `ones` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{ComplexTensor, LogicalArray, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
@@ -241,7 +241,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::creation::ones"
 )]
 async fn ones_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let parsed = ParsedOnes::parse(rest)?;
+    let parsed = ParsedOnes::parse(rest).await?;
     build_output(parsed).await
 }
 
@@ -261,7 +261,7 @@ enum OutputTemplate {
 }
 
 impl ParsedOnes {
-    fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
+    async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
         let mut shape_source: Option<Vec<usize>> = None;
@@ -329,7 +329,7 @@ impl ParsedOnes {
                 }
             }
 
-            if let Some(parsed_dims) = extract_dims(&arg)? {
+            if let Some(parsed_dims) = extract_dims(&arg).await? {
                 saw_dims_arg = true;
                 if dims.is_empty() {
                     dims = parsed_dims;
@@ -480,59 +480,26 @@ fn keyword_of(value: &Value) -> Option<String> {
     }
 }
 
-fn extract_dims(value: &Value) -> crate::BuiltinResult<Option<Vec<usize>>> {
-    match value {
-        Value::Int(i) => {
-            let dim = i.to_i64();
-            if dim < 0 {
-                return Err(builtin_error(
-                    "ones: matrix dimensions must be non-negative",
-                ));
-            }
-            Ok(Some(vec![dim as usize]))
-        }
-        Value::Num(n) => parse_numeric_dimension(*n).map(|d| Some(vec![d])),
-        Value::Tensor(t) => dims_from_tensor(t),
-        Value::LogicalArray(l) => dims_from_logical(l),
-        _ => Ok(None),
-    }
-}
-
-fn parse_numeric_dimension(n: f64) -> crate::BuiltinResult<usize> {
-    if !n.is_finite() {
-        return Err(builtin_error("ones: dimensions must be finite"));
-    }
-    if n < 0.0 {
-        return Err(builtin_error(
-            "ones: matrix dimensions must be non-negative",
-        ));
-    }
-    let rounded = n.round();
-    if (rounded - n).abs() > f64::EPSILON {
-        return Err(builtin_error("ones: dimensions must be integers"));
-    }
-    Ok(rounded as usize)
-}
-
-fn dims_from_tensor(tensor: &Tensor) -> crate::BuiltinResult<Option<Vec<usize>>> {
-    let is_row = tensor.rows() == 1;
-    let is_column = tensor.cols() == 1;
-    let is_scalar = tensor.data.len() == 1;
-    if !(is_row || is_column || is_scalar || tensor.shape.len() == 1) {
+async fn extract_dims(value: &Value) -> crate::BuiltinResult<Option<Vec<usize>>> {
+    if matches!(value, Value::LogicalArray(_)) {
         return Ok(None);
     }
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for &v in &tensor.data {
-        match parse_numeric_dimension(v) {
-            Ok(dim) => dims.push(dim),
-            Err(_) => return Ok(None),
+    let gpu_scalar = match value {
+        Value::GpuTensor(handle) => tensor::element_count(&handle.shape) == 1,
+        _ => false,
+    };
+    match tensor::dims_from_value_async(value).await {
+        Ok(dims) => Ok(dims),
+        Err(err) => {
+            if matches!(value, Value::Tensor(_))
+                || (matches!(value, Value::GpuTensor(_)) && !gpu_scalar)
+            {
+                Ok(None)
+            } else {
+                Err(builtin_error(format!("ones: {err}")))
+            }
         }
     }
-    Ok(Some(dims))
-}
-
-fn dims_from_logical(_logical: &LogicalArray) -> crate::BuiltinResult<Option<Vec<usize>>> {
-    Ok(None)
 }
 
 fn shape_from_value(value: &Value) -> crate::BuiltinResult<Vec<usize>> {

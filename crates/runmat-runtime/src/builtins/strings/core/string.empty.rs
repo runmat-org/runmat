@@ -290,7 +290,10 @@ async fn parse_shape(args: &[Value]) -> BuiltinResult<Vec<usize>> {
             // be validated under numeric size parsing below.
         }
 
-        if let Some(parsed) = extract_dims(&arg_host, LABEL).map_err(string_empty_flow)? {
+        if let Some(parsed) = extract_dims(&arg_host, LABEL)
+            .await
+            .map_err(string_empty_flow)?
+        {
             if explicit_dims.is_empty() {
                 explicit_dims = parsed;
             } else {

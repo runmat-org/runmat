@@ -257,7 +257,7 @@ async fn max_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 
 /// Evaluate the builtin once and expose both outputs (value + indices).
 pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MaxEvaluation> {
-    let parsed = parse_call(rest)?;
+    let parsed = parse_call(rest).await?;
     if std::env::var("RUNMAT_DEBUG_MAX").is_ok() {
         let call_label = match &parsed {
             ParsedCall::Reduction(_) => "reduction",
@@ -323,7 +323,7 @@ struct ElementwiseArgs {
     comparison: ComparisonMethod,
 }
 
-fn parse_call(rest: &[Value]) -> BuiltinResult<ParsedCall> {
+async fn parse_call(rest: &[Value]) -> BuiltinResult<ParsedCall> {
     if rest.is_empty() {
         return Ok(ParsedCall::Reduction(ReductionArgs::default()));
     }
@@ -338,7 +338,7 @@ fn parse_call(rest: &[Value]) -> BuiltinResult<ParsedCall> {
     }
 
     let mut args = ReductionArgs::default();
-    parse_reduction_options(&mut args, &rest[1..])?;
+    parse_reduction_options(&mut args, &rest[1..]).await?;
     Ok(ParsedCall::Reduction(args))
 }
 
@@ -394,7 +394,7 @@ fn is_empty_placeholder(value: &Value) -> bool {
     }
 }
 
-fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> BuiltinResult<()> {
+async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> BuiltinResult<()> {
     let mut idx = 0usize;
     let mut selection_set = !matches!(args.selection, DimSelection::Auto);
     let mut comparison_set = matches!(args.comparison, ComparisonMethod::Auto);
@@ -448,7 +448,7 @@ fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> BuiltinR
         }
 
         if !selection_set {
-            if let Some(selection) = parse_dimension_value(&rest[idx])? {
+            if let Some(selection) = parse_dimension_value(&rest[idx]).await? {
                 args.selection = selection;
                 selection_set = true;
                 idx += 1;
@@ -519,76 +519,74 @@ fn parse_comparison_method(value: &Value) -> BuiltinResult<ComparisonMethod> {
     }
 }
 
-fn parse_dimension_value(value: &Value) -> BuiltinResult<Option<DimSelection>> {
+async fn parse_dimension_value(value: &Value) -> BuiltinResult<Option<DimSelection>> {
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 1 {
-                return Err(max_error("max: dimension must be >= 1"));
-            }
-            Ok(Some(DimSelection::Dim(raw as usize)))
-        }
-        Value::Num(n) => {
-            if !n.is_finite() {
-                return Err(max_error("max: dimension must be finite"));
-            }
-            let rounded = n.round();
-            if (rounded - n).abs() > f64::EPSILON {
-                return Err(max_error("max: dimension must be integral"));
-            }
-            if rounded < 1.0 {
-                return Err(max_error("max: dimension must be >= 1"));
-            }
-            Ok(Some(DimSelection::Dim(rounded as usize)))
-        }
-        Value::Tensor(t) => parse_dimension_tensor(t),
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(logical).map_err(|err| max_error(err))?;
-            parse_dimension_tensor(&tensor)
-        }
-        Value::GpuTensor(_) => Err(max_error(
-            "max: dimension arguments must reside on the host (they cannot be gpuArray values)",
-        )),
+        Value::Int(_) | Value::Num(_) => tensor::dimension_from_value_async(value, "max", false)
+            .await
+            .map_err(map_scalar_dim_error)
+            .map(|dim| dim.map(DimSelection::Dim)),
+        Value::Tensor(t) => parse_dimension_tensor(value, &t.shape).await,
+        Value::LogicalArray(logical) => parse_dimension_tensor(value, &logical.shape).await,
+        Value::GpuTensor(handle) => parse_dimension_tensor(value, &handle.shape).await,
         _ => Ok(None),
     }
 }
 
-fn parse_dimension_tensor(tensor: &Tensor) -> BuiltinResult<Option<DimSelection>> {
-    if tensor.data.is_empty() {
+async fn parse_dimension_tensor(
+    value: &Value,
+    shape: &[usize],
+) -> BuiltinResult<Option<DimSelection>> {
+    if tensor::element_count(shape) == 0 {
         return Ok(Some(DimSelection::Auto));
     }
-    if tensor.rows() != 1 && tensor.cols() != 1 && tensor.shape.len() != 1 {
+    let is_vector = shape.len() == 1
+        || shape.get(0).copied().unwrap_or(1) == 1
+        || shape.get(1).copied().unwrap_or(1) == 1;
+    if !is_vector {
         return Err(max_error(
             "max: dimension vector must be a row or column vector",
         ));
     }
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for &value in &tensor.data {
-        if !value.is_finite() {
-            return Err(max_error("max: dimension entries must be finite"));
-        }
-        let rounded = value.round();
-        if (rounded - value).abs() > f64::EPSILON {
-            return Err(max_error("max: dimension entries must be integers"));
-        }
-        if rounded < 1.0 {
+    let dims = tensor::dims_from_value_async(value)
+        .await
+        .map_err(map_vector_dim_error)?;
+    let Some(dims) = dims else {
+        return Ok(None);
+    };
+    if dims.is_empty() {
+        return Ok(Some(DimSelection::Auto));
+    }
+    let mut seen = BTreeSet::new();
+    let mut uniq = Vec::with_capacity(dims.len());
+    for dim in dims {
+        if dim < 1 {
             return Err(max_error("max: dimension indices must be >= 1"));
         }
-        dims.push(rounded as usize);
-    }
-    if dims.is_empty() {
-        Ok(Some(DimSelection::Auto))
-    } else {
-        // MATLAB treats duplicate entries gracefully; remove duplicates while preserving order.
-        let mut seen = BTreeSet::new();
-        let mut uniq = Vec::with_capacity(dims.len());
-        for dim in dims {
-            if seen.insert(dim) {
-                uniq.push(dim);
-            }
+        if seen.insert(dim) {
+            uniq.push(dim);
         }
-        Ok(Some(DimSelection::Vec(uniq)))
     }
+    Ok(Some(DimSelection::Vec(uniq)))
+}
+
+fn map_scalar_dim_error(message: String) -> RuntimeError {
+    if message.contains("integer") {
+        return max_error("max: dimension must be integral");
+    }
+    max_error(message)
+}
+
+fn map_vector_dim_error(message: String) -> RuntimeError {
+    if message.contains("non-negative") {
+        return max_error("max: dimension indices must be >= 1");
+    }
+    if message.contains("finite") {
+        return max_error("max: dimension entries must be finite");
+    }
+    if message.contains("integer") {
+        return max_error("max: dimension entries must be integers");
+    }
+    max_error(message)
 }
 
 async fn reduction_max(value: Value, args: ReductionArgs) -> BuiltinResult<MaxEvaluation> {

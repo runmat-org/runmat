@@ -257,7 +257,7 @@ enum NormParse {
     builtin_path = "crate::builtins::math::reduction::var"
 )]
 async fn var_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let parsed = parse_arguments(&rest)?;
+    let parsed = parse_arguments(&rest).await?;
     match value {
         Value::GpuTensor(handle) => var_gpu(handle, &parsed).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
@@ -267,7 +267,7 @@ async fn var_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
     }
 }
 
-fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
+async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut axes = VarAxes::Default;
     let mut axes_set = false;
     let mut normalization = VarNormalization::Sample;
@@ -328,7 +328,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         }
 
         if !axes_set || matches!(axes, VarAxes::Default) {
-            if let Some(selection) = parse_axes(arg)? {
+            if let Some(selection) = parse_axes(arg).await? {
                 if axes_set && !matches!(axes, VarAxes::Default) {
                     return Err(var_error("var: multiple dimension specifications provided"));
                 }
@@ -345,7 +345,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 idx += 1;
                 continue;
             }
-        } else if parse_axes(arg)?.is_some() {
+        } else if parse_axes(arg).await?.is_some() {
             return Err(var_error("var: multiple dimension specifications provided"));
         }
 
@@ -409,7 +409,7 @@ fn parse_normalization_scalar(value: f64) -> BuiltinResult<NormParse> {
     Err(var_error("var: normalisation flag must be 0, 1, or []"))
 }
 
-fn parse_axes(value: &Value) -> BuiltinResult<Option<VarAxes>> {
+async fn parse_axes(value: &Value) -> BuiltinResult<Option<VarAxes>> {
     if let Some(keyword) = keyword_of(value) {
         if keyword == "all" {
             return Ok(Some(VarAxes::All));
@@ -417,7 +417,10 @@ fn parse_axes(value: &Value) -> BuiltinResult<Option<VarAxes>> {
         return Ok(None);
     }
 
-    let Some(dims) = extract_dims(value, "var").map_err(var_error)? else {
+    let Some(dims) = extract_dims(value, "var")
+        .await
+        .map_err(var_error)?
+    else {
         return Ok(None);
     };
     if dims.is_empty() {

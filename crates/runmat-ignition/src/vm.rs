@@ -526,22 +526,39 @@ fn total_len_from_shape(shape: &[usize]) -> usize {
     }
 }
 
-fn indices_from_value_linear(value: &Value, total_len: usize) -> VmResult<Vec<usize>> {
+fn index_scalar_from_host_value(value: &Value) -> Option<i64> {
     match value {
-        Value::Num(n) => {
-            let idx = *n as isize;
-            if idx < 1 || (idx as usize) > total_len {
-                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-            }
-            Ok(vec![idx as usize])
+        Value::Num(n) => Some(*n as i64),
+        Value::Int(int_val) => Some(int_val.to_i64()),
+        Value::Bool(b) => Some(if *b { 1 } else { 0 }),
+        Value::Tensor(t) if t.data.len() == 1 => Some(t.data[0] as i64),
+        Value::LogicalArray(la) if la.data.len() == 1 => {
+            Some(if la.data[0] != 0 { 1 } else { 0 })
         }
-        Value::Int(int_val) => {
-            let idx = int_val.to_i64();
-            if idx < 1 || (idx as usize) > total_len {
-                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-            }
-            Ok(vec![idx as usize])
+        _ => None,
+    }
+}
+
+async fn index_scalar_from_value(value: &Value) -> VmResult<Option<i64>> {
+    if let Value::GpuTensor(handle) = value {
+        let total = handle.shape.iter().copied().product::<usize>();
+        if total != 1 {
+            return Ok(None);
         }
+        let gathered = runmat_runtime::dispatcher::gather_if_needed_async(value).await?;
+        return Ok(index_scalar_from_host_value(&gathered));
+    }
+    Ok(index_scalar_from_host_value(value))
+}
+
+async fn indices_from_value_linear(value: &Value, total_len: usize) -> VmResult<Vec<usize>> {
+    if let Some(idx_val) = index_scalar_from_value(value).await? {
+        if idx_val < 1 || (idx_val as usize) > total_len {
+            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+        }
+        return Ok(vec![idx_val as usize]);
+    }
+    match value {
         Value::Tensor(idx_t) => {
             let len = idx_t.shape.iter().product::<usize>();
             if len == total_len {
@@ -586,22 +603,14 @@ fn indices_from_value_linear(value: &Value, total_len: usize) -> VmResult<Vec<us
     }
 }
 
-fn selector_from_value_dim(value: &Value, dim_len: usize) -> VmResult<SliceSelector> {
+async fn selector_from_value_dim(value: &Value, dim_len: usize) -> VmResult<SliceSelector> {
+    if let Some(idx_val) = index_scalar_from_value(value).await? {
+        if idx_val < 1 || (idx_val as usize) > dim_len {
+            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+        }
+        return Ok(SliceSelector::Scalar(idx_val as usize));
+    }
     match value {
-        Value::Num(n) => {
-            let idx = *n as isize;
-            if idx < 1 || (idx as usize) > dim_len {
-                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-            }
-            Ok(SliceSelector::Scalar(idx as usize))
-        }
-        Value::Int(int_val) => {
-            let idx = int_val.to_i64();
-            if idx < 1 || (idx as usize) > dim_len {
-                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-            }
-            Ok(SliceSelector::Scalar(idx as usize))
-        }
         Value::Tensor(idx_t) => {
             let len = idx_t.shape.iter().product::<usize>();
             if len == dim_len {
@@ -646,7 +655,7 @@ fn selector_from_value_dim(value: &Value, dim_len: usize) -> VmResult<SliceSelec
     }
 }
 
-fn build_slice_selectors(
+async fn build_slice_selectors(
     dims: usize,
     colon_mask: u32,
     end_mask: u32,
@@ -670,7 +679,7 @@ fn build_slice_selectors(
                 "missing numeric index for linear slice",
             )
         })?;
-        let idxs = indices_from_value_linear(value, total_len)?;
+        let idxs = indices_from_value_linear(value, total_len).await?;
         selectors.push(SliceSelector::Indices(idxs));
         return Ok(selectors);
     }
@@ -692,7 +701,7 @@ fn build_slice_selectors(
             .get(numeric_iter)
             .ok_or_else(|| mex("MissingNumericIndex", "missing numeric index for slice"))?;
         numeric_iter += 1;
-        selectors.push(selector_from_value_dim(value, dim_len)?);
+        selectors.push(selector_from_value_dim(value, dim_len).await?);
     }
     Ok(selectors)
 }
@@ -5761,10 +5770,20 @@ async fn run_interpreter(
                 let mut indices = Vec::new();
                 let count = num_indices;
                 for _ in 0..count {
-                    let index_val: f64 = (&stack
+                    let mut index_value = stack
                         .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                        .try_into()?;
+                        .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                    let original_value = index_value.clone();
+                    if matches!(index_value, Value::GpuTensor(_)) {
+                        index_value =
+                            runmat_runtime::dispatcher::gather_if_needed_async(&index_value).await?;
+                    }
+                    let index_val = match index_scalar_from_value(&index_value).await? {
+                        Some(val) => val as f64,
+                        None => {
+                            return Err(format!("cannot convert {original_value:?} to f64").into())
+                        }
+                    };
                     indices.push(index_val);
                 }
                 indices.reverse();
@@ -6261,6 +6280,7 @@ async fn run_interpreter(
                             &numeric,
                             &base_shape,
                         )
+                        .await
                         .map_err(|e| format!("slice: {e}"))?;
                         let plan = build_slice_plan(&selectors, dims, &base_shape)
                             .map_err(|e| map_slice_plan_error("slice", e))?;
@@ -6813,9 +6833,15 @@ async fn run_interpreter(
                         }
                     }
                     Value::StringArray(sa) => {
-                        let selectors =
-                            build_slice_selectors(dims, colon_mask, end_mask, &numeric, &sa.shape)
-                                .map_err(|e| format!("slice: {e}"))?;
+                        let selectors = build_slice_selectors(
+                            dims,
+                            colon_mask,
+                            end_mask,
+                            &numeric,
+                            &sa.shape,
+                        )
+                        .await
+                        .map_err(|e| format!("slice: {e}"))?;
                         let plan = build_slice_plan(&selectors, dims, &sa.shape)
                             .map_err(|e| map_slice_plan_error("slice", e))?;
                         let result =
@@ -6857,7 +6883,9 @@ async fn run_interpreter(
                             end_mask,
                             &adjusted,
                             &handle.shape,
-                        ) {
+                        )
+                        .await
+                        {
                             if let Ok(plan) = build_slice_plan(&selectors, dims, &handle.shape) {
                                 if plan.indices.is_empty() {
                                     let zeros = provider
@@ -7317,55 +7345,21 @@ async fn run_interpreter(
                         if dims == 1 {
                             let total = t.data.len();
                             // Build linear index list
-                            let mut lin_indices: Vec<usize> = Vec::new();
                             let is_colon = (colon_mask & 1u32) != 0;
                             let is_end = (end_mask & 1u32) != 0;
-                            if is_colon {
-                                lin_indices = (1..=total).collect();
+                            let lin_indices = if is_colon {
+                                (1..=total).collect()
                             } else if is_end {
-                                lin_indices = vec![total];
+                                vec![total]
                             } else {
                                 let v = numeric
                                     .first()
                                     .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
-                                match v {
-                                    Value::Num(n) => {
-                                        let i = *n as isize;
-                                        if i < 1 || (i as usize) > total {
-                                            vm_bail!(mex(
-                                                "IndexOutOfBounds",
-                                                "Index out of bounds"
-                                            ));
-                                        }
-                                        lin_indices.push(i as usize);
-                                    }
-                                    Value::Tensor(idx_t) => {
-                                        let len = idx_t.shape.iter().product::<usize>();
-                                        if len == total {
-                                            for (i, &val) in idx_t.data.iter().enumerate() {
-                                                if val != 0.0 {
-                                                    lin_indices.push(i + 1);
-                                                }
-                                            }
-                                        } else {
-                                            for &val in &idx_t.data {
-                                                let i = val as isize;
-                                                if i < 1 || (i as usize) > total {
-                                                    vm_bail!(mex(
-                                                        "IndexOutOfBounds",
-                                                        "Index out of bounds"
-                                                    ));
-                                                }
-                                                lin_indices.push(i as usize);
-                                            }
-                                        }
-                                    }
-                                    _ => vm_bail!(mex(
-                                        "UnsupportedIndexType",
-                                        "Unsupported index type"
-                                    )),
+                                match indices_from_value_linear(v, total).await {
+                                    Ok(idxs) => idxs,
+                                    Err(err) => vm_bail!(err),
                                 }
-                            }
+                            };
                             // Scatter RHS
                             match rhs {
                                 Value::Num(v) => {
@@ -7394,69 +7388,29 @@ async fn run_interpreter(
                             stack.push(Value::Tensor(t));
                         } else {
                             let rank = t.shape.len();
-                            #[derive(Clone)]
-                            enum Sel {
-                                Colon,
-                                Scalar(usize),
-                                Indices(Vec<usize>),
-                            }
-                            let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
+                            let mut selectors: Vec<SliceSelector> = Vec::with_capacity(dims);
                             let mut num_iter = 0usize;
                             for d in 0..dims {
                                 let is_colon = (colon_mask & (1u32 << d)) != 0;
                                 let is_end = (end_mask & (1u32 << d)) != 0;
                                 if is_colon {
-                                    selectors.push(Sel::Colon);
+                                    selectors.push(SliceSelector::Colon);
                                 } else if is_end {
-                                    selectors.push(Sel::Scalar(*t.shape.get(d).unwrap_or(&1)));
+                                    selectors.push(SliceSelector::Scalar(
+                                        *t.shape.get(d).unwrap_or(&1),
+                                    ));
                                 } else {
                                     let v = numeric.get(num_iter).ok_or(mex(
                                         "MissingNumericIndex",
                                         "missing numeric index",
                                     ))?;
                                     num_iter += 1;
-                                    match v {
-                                        Value::Num(n) => {
-                                            let idx = *n as isize;
-                                            if idx < 1 {
-                                                vm_bail!(mex(
-                                                    "IndexOutOfBounds",
-                                                    "Index out of bounds"
-                                                ));
-                                            }
-                                            selectors.push(Sel::Scalar(idx as usize));
-                                        }
-                                        Value::Tensor(idx_t) => {
-                                            let dim_len = *t.shape.get(d).unwrap_or(&1);
-                                            let len = idx_t.shape.iter().product::<usize>();
-                                            if len == dim_len {
-                                                let mut v = Vec::new();
-                                                for (i, &val) in idx_t.data.iter().enumerate() {
-                                                    if val != 0.0 {
-                                                        v.push(i + 1);
-                                                    }
-                                                }
-                                                selectors.push(Sel::Indices(v));
-                                            } else {
-                                                let mut v = Vec::with_capacity(len);
-                                                for &val in &idx_t.data {
-                                                    let idx = val as isize;
-                                                    if idx < 1 {
-                                                        vm_bail!(mex(
-                                                            "IndexOutOfBounds",
-                                                            "Index out of bounds"
-                                                        ));
-                                                    }
-                                                    v.push(idx as usize);
-                                                }
-                                                selectors.push(Sel::Indices(v));
-                                            }
-                                        }
-                                        _ => vm_bail!(mex(
-                                            "UnsupportedIndexType",
-                                            "Unsupported index type"
-                                        )),
-                                    }
+                                    let dim_len = *t.shape.get(d).unwrap_or(&1);
+                                    let selector = match selector_from_value_dim(v, dim_len).await {
+                                        Ok(selector) => selector,
+                                        Err(err) => vm_bail!(err),
+                                    };
+                                    selectors.push(selector);
                                 }
                             }
                             // 2-D write fast paths (full column/row) with strict broadcast checks
@@ -7465,7 +7419,7 @@ async fn run_interpreter(
                                 let cols = if rank >= 2 { t.shape[1] } else { 1 };
                                 match (&selectors[0], &selectors[1]) {
                                     // A(:, j) = rhs
-                                    (Sel::Colon, Sel::Scalar(j)) => {
+                                    (SliceSelector::Colon, SliceSelector::Scalar(j)) => {
                                         let j0 = *j - 1;
                                         // Size growth semantics: extend columns if needed
                                         if j0 >= cols {
@@ -7516,7 +7470,7 @@ async fn run_interpreter(
                                         continue;
                                     }
                                     // A(i, :) = rhs
-                                    (Sel::Scalar(i), Sel::Colon) => {
+                                    (SliceSelector::Scalar(i), SliceSelector::Colon) => {
                                         let i0 = *i - 1;
                                         // Size growth semantics: extend rows if needed
                                         if i0 >= rows {
@@ -7580,9 +7534,9 @@ async fn run_interpreter(
                             for d in 0..dims {
                                 let dim_len = full_shape[d];
                                 let idxs = match &selectors[d] {
-                                    Sel::Colon => (1..=dim_len).collect(),
-                                    Sel::Scalar(i) => vec![*i],
-                                    Sel::Indices(v) => v.clone(),
+                                    SliceSelector::Colon => (1..=dim_len).collect(),
+                                    SliceSelector::Scalar(i) => vec![*i],
+                                    SliceSelector::Indices(v) => v.clone(),
                                 };
                                 if idxs.iter().any(|&i| i == 0 || i > dim_len) {
                                     vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
@@ -7703,7 +7657,9 @@ async fn run_interpreter(
                                 end_mask,
                                 &numeric,
                                 &base_shape,
-                            ) {
+                            )
+                            .await
+                            {
                                 if let Ok(plan) = build_slice_plan(&selectors, dims, &base_shape) {
                                     if plan.indices.is_empty() {
                                         stack.push(Value::GpuTensor(handle));
@@ -8279,9 +8235,15 @@ async fn run_interpreter(
                         }
                     }
                     Value::StringArray(mut sa) => {
-                        let selectors =
-                            build_slice_selectors(dims, colon_mask, end_mask, &numeric, &sa.shape)
-                                .map_err(|e| format!("slice assign: {e}"))?;
+                        let selectors = build_slice_selectors(
+                            dims,
+                            colon_mask,
+                            end_mask,
+                            &numeric,
+                            &sa.shape,
+                        )
+                        .await
+                        .map_err(|e| format!("slice assign: {e}"))?;
                         let plan = build_slice_plan(&selectors, dims, &sa.shape)
                             .map_err(|e| map_slice_plan_error("slice assign", e))?;
                         if plan.indices.is_empty() {
@@ -8338,7 +8300,9 @@ async fn run_interpreter(
                             end_mask,
                             &adjusted,
                             &handle.shape,
-                        ) {
+                        )
+                        .await
+                        {
                             if let Ok(plan) = build_slice_plan(&selectors, dims, &handle.shape) {
                                 let values = if plan.dims == 1 {
                                     let count =
@@ -8432,69 +8396,30 @@ async fn run_interpreter(
                             .ok_or(mex("StackUnderflow", "stack underflow"))?;
                         match base {
                             Value::Tensor(mut t) => {
-                                #[derive(Clone)]
-                                enum Sel {
-                                    Colon,
-                                    Scalar(usize),
-                                    Indices(Vec<usize>),
-                                }
-                                let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
+                                let mut selectors: Vec<SliceSelector> = Vec::with_capacity(dims);
                                 let mut num_iter = 0usize;
                                 for d in 0..dims {
                                     let is_colon = (colon_mask & (1u32 << d)) != 0;
                                     let is_end = (end_mask & (1u32 << d)) != 0;
                                     if is_colon {
-                                        selectors.push(Sel::Colon);
+                                        selectors.push(SliceSelector::Colon);
                                     } else if is_end {
-                                        selectors.push(Sel::Scalar(*t.shape.get(d).unwrap_or(&1)));
+                                        selectors.push(SliceSelector::Scalar(
+                                            *t.shape.get(d).unwrap_or(&1),
+                                        ));
                                     } else {
                                         let v = numeric.get(num_iter).ok_or(mex(
                                             "MissingNumericIndex",
                                             "missing numeric index",
                                         ))?;
                                         num_iter += 1;
-                                        match v {
-                                            Value::Num(n) => {
-                                                let idx = *n as isize;
-                                                if idx < 1 {
-                                                    vm_bail!(mex(
-                                                        "IndexOutOfBounds",
-                                                        "Index out of bounds"
-                                                    ));
-                                                }
-                                                selectors.push(Sel::Scalar(idx as usize));
-                                            }
-                                            Value::Tensor(idx_t) => {
-                                                let dim_len = *t.shape.get(d).unwrap_or(&1);
-                                                let len = idx_t.shape.iter().product::<usize>();
-                                                if len == dim_len {
-                                                    let mut vi = Vec::new();
-                                                    for (i, &val) in idx_t.data.iter().enumerate() {
-                                                        if val != 0.0 {
-                                                            vi.push(i + 1);
-                                                        }
-                                                    }
-                                                    selectors.push(Sel::Indices(vi));
-                                                } else {
-                                                    let mut vi = Vec::with_capacity(len);
-                                                    for &val in &idx_t.data {
-                                                        let idx = val as isize;
-                                                        if idx < 1 {
-                                                            vm_bail!(mex(
-                                                                "IndexOutOfBounds",
-                                                                "Index out of bounds"
-                                                            ));
-                                                        }
-                                                        vi.push(idx as usize);
-                                                    }
-                                                    selectors.push(Sel::Indices(vi));
-                                                }
-                                            }
-                                            _ => vm_bail!(mex(
-                                                "UnsupportedIndexType",
-                                                "Unsupported index type"
-                                            )),
-                                        }
+                                        let dim_len = *t.shape.get(d).unwrap_or(&1);
+                                        let selector = match selector_from_value_dim(v, dim_len).await
+                                        {
+                                            Ok(selector) => selector,
+                                            Err(err) => vm_bail!(err),
+                                        };
+                                        selectors.push(selector);
                                     }
                                 }
                                 // Compute per-dim indices and strides
@@ -8502,9 +8427,9 @@ async fn run_interpreter(
                                 for (d, sel) in selectors.iter().enumerate().take(dims) {
                                     let dim_len = *t.shape.get(d).unwrap_or(&1);
                                     let idxs = match sel {
-                                        Sel::Colon => (1..=dim_len).collect::<Vec<usize>>(),
-                                        Sel::Scalar(i) => vec![*i],
-                                        Sel::Indices(v) => v.clone(),
+                                        SliceSelector::Colon => (1..=dim_len).collect::<Vec<usize>>(),
+                                        SliceSelector::Scalar(i) => vec![*i],
+                                        SliceSelector::Indices(v) => v.clone(),
                                     };
                                     per_dim_indices.push(idxs);
                                 }
@@ -8626,8 +8551,13 @@ async fn run_interpreter(
                             }
                             Value::StringArray(mut sa) => {
                                 let selectors = build_slice_selectors(
-                                    dims, colon_mask, end_mask, &numeric, &sa.shape,
+                                    dims,
+                                    colon_mask,
+                                    end_mask,
+                                    &numeric,
+                                    &sa.shape,
                                 )
+                                .await
                                 .map_err(|e| format!("slice assign: {e}"))?;
                                 let plan = build_slice_plan(&selectors, dims, &sa.shape)
                                     .map_err(|e| map_slice_plan_error("slice assign", e))?;
@@ -9654,14 +9584,17 @@ async fn run_interpreter(
                     } else {
                         for k in 0..num_indices {
                             let idx_pos = base_pos + k;
-                            match (&stack[idx_pos]).try_into() as Result<f64, _> {
-                                Ok(v) => indices.push(v as usize),
-                                Err(_) => {
+                            let idx_val = match index_scalar_from_value(&stack[idx_pos]).await {
+                                Ok(Some(val)) => val,
+                                Ok(None) => {
                                     contiguous_ok = false;
                                     indices.clear();
                                     break;
                                 }
-                            }
+                                Err(err) => vm_bail!(err),
+                            };
+                            let idx_val = if idx_val <= 0 { 0 } else { idx_val as usize };
+                            indices.push(idx_val);
                         }
                     }
                     if contiguous_ok {
@@ -9692,8 +9625,9 @@ async fn run_interpreter(
                         if assignable(&stack[idx]) {
                             break;
                         }
-                        if let Ok(v) = (&stack[idx]).try_into() as Result<f64, _> {
-                            numeric_above.push((idx, v as usize));
+                        if let Some(v) = index_scalar_from_value(&stack[idx]).await? {
+                            let v = if v <= 0 { 0 } else { v as usize };
+                            numeric_above.push((idx, v));
                         }
                         kk -= 1;
                         scan_limit -= 1;

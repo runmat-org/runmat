@@ -385,7 +385,7 @@ enum NormParse {
 )]
 async fn std_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let input_meta = InputMeta::from_value(&value);
-    let parsed = parse_arguments(&rest)?;
+    let parsed = parse_arguments(&rest).await?;
     let raw = match value {
         Value::GpuTensor(handle) => std_gpu(handle, &parsed).await?,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
@@ -396,7 +396,7 @@ async fn std_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
     apply_output_template(raw, &parsed.output, &input_meta).await
 }
 
-fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
+async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut axes = StdAxes::Default;
     let mut axes_set = false;
     let mut normalization = StdNormalization::Sample;
@@ -487,7 +487,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         }
 
         if !axes_set || matches!(axes, StdAxes::Default) {
-            if let Some(selection) = parse_axes(arg)? {
+            if let Some(selection) = parse_axes(arg).await? {
                 if matches!(selection, StdAxes::All)
                     && axes_set
                     && !matches!(axes, StdAxes::Default)
@@ -501,7 +501,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 idx += 1;
                 continue;
             }
-        } else if let Some(selection) = parse_axes(arg)? {
+        } else if let Some(selection) = parse_axes(arg).await? {
             if matches!(selection, StdAxes::All) {
                 return Err(std_error(
                     "std: 'all' cannot be combined with an explicit dimension",
@@ -571,7 +571,7 @@ fn parse_normalization_scalar(value: f64) -> BuiltinResult<NormParse> {
     Ok(NormParse::NotMatched)
 }
 
-fn parse_axes(value: &Value) -> BuiltinResult<Option<StdAxes>> {
+async fn parse_axes(value: &Value) -> BuiltinResult<Option<StdAxes>> {
     if let Some(text) = value_as_str(value) {
         let lowered = text.trim().to_ascii_lowercase();
         return match lowered.as_str() {
@@ -582,40 +582,53 @@ fn parse_axes(value: &Value) -> BuiltinResult<Option<StdAxes>> {
         };
     }
 
-    match value {
-        Value::Tensor(t) => {
-            if t.data.is_empty() {
-                return Ok(Some(StdAxes::Default));
-            }
-            if t.data.len() == 1 {
-                let dim =
-                    tensor::parse_dimension(&Value::Num(t.data[0]), "std").map_err(std_error)?;
-                return Ok(Some(StdAxes::Dim(dim)));
-            }
-            let dims = parse_dimension_vector(t)?;
-            Ok(Some(StdAxes::Vec(dims)))
+    let (scalar_hint, is_empty) = match value {
+        Value::Num(_) | Value::Int(_) => (true, false),
+        Value::Tensor(t) => (t.data.len() == 1, t.data.is_empty()),
+        Value::LogicalArray(logical) => (logical.data.len() == 1, logical.data.is_empty()),
+        Value::GpuTensor(handle) => {
+            let count = tensor::element_count(&handle.shape);
+            (handle.shape.is_empty() || count == 1, count == 0)
         }
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(logical).map_err(std_error)?;
-            if tensor.data.is_empty() {
-                return Ok(Some(StdAxes::Default));
-            }
-            if tensor.data.len() == 1 {
-                let dim = tensor::parse_dimension(&Value::Num(tensor.data[0]), "std")
-                    .map_err(std_error)?;
-                return Ok(Some(StdAxes::Dim(dim)));
-            }
-            let dims = parse_dimension_vector(&tensor)?;
-            Ok(Some(StdAxes::Vec(dims)))
-        }
-        Value::Int(_) | Value::Num(_) => {
-            let dim = tensor::parse_dimension(value, "std").map_err(std_error)?;
-            Ok(Some(StdAxes::Dim(dim)))
-        }
-        Value::GpuTensor(_) => Err(std_error("std: dimension arguments cannot be GPU tensors")),
-        Value::Bool(_) => Err(std_error("std: dimension must be numeric")),
-        _ => Ok(None),
+        _ => (false, false),
+    };
+    if is_empty {
+        return Ok(Some(StdAxes::Default));
     }
+
+    let dims = match value {
+        Value::Tensor(_)
+        | Value::LogicalArray(_)
+        | Value::Int(_)
+        | Value::Num(_)
+        | Value::GpuTensor(_) => tensor::dims_from_value_async(value)
+            .await
+            .map_err(|err| map_dims_error(err, scalar_hint))?,
+        Value::Bool(_) => {
+            return Err(std_error("std: dimension must be numeric"));
+        }
+        _ => return Ok(None),
+    };
+
+    let Some(dims) = dims else {
+        return Ok(None);
+    };
+    if dims.is_empty() {
+        return Err(std_error("std: dimension vector must not be empty"));
+    }
+    if dims.len() == 1 {
+        let dim = dims[0];
+        if dim < 1 {
+            return Err(std_error("std: dimension must be >= 1"));
+        }
+        return Ok(Some(StdAxes::Dim(dim)));
+    }
+    for &dim in &dims {
+        if dim < 1 {
+            return Err(std_error("std: dimension entries must be >= 1"));
+        }
+    }
+    Ok(Some(StdAxes::Vec(dims)))
 }
 
 fn value_as_str(value: &Value) -> Option<String> {
@@ -627,25 +640,26 @@ fn value_as_str(value: &Value) -> Option<String> {
     }
 }
 
-fn parse_dimension_vector(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for &val in &tensor.data {
-        if !val.is_finite() {
-            return Err(std_error("std: dimension entries must be finite integers"));
+fn map_dims_error(message: String, scalar: bool) -> RuntimeError {
+    if message.contains("non-negative") {
+        if scalar {
+            return std_error("std: dimension must be >= 1");
         }
-        let rounded = val.round();
-        if (rounded - val).abs() > f64::EPSILON {
-            return Err(std_error("std: dimension entries must be integers"));
-        }
-        if rounded < 1.0 {
-            return Err(std_error("std: dimension entries must be >= 1"));
-        }
-        dims.push(rounded as usize);
+        return std_error("std: dimension entries must be >= 1");
     }
-    if dims.is_empty() {
-        return Err(std_error("std: dimension vector must not be empty"));
+    if message.contains("finite") {
+        if scalar {
+            return std_error("std: dimension must be finite");
+        }
+        return std_error("std: dimension entries must be finite integers");
     }
-    Ok(dims)
+    if message.contains("integer") {
+        if scalar {
+            return std_error("std: dimension must be an integer");
+        }
+        return std_error("std: dimension entries must be integers");
+    }
+    std_error(message)
 }
 
 fn std_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {

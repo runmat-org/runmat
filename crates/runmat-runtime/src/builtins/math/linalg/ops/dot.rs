@@ -198,6 +198,21 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(DOT_NAME).build()
 }
 
+async fn parse_dimension_arg(value: &Value) -> Result<usize, String> {
+    match value {
+        Value::Int(_) | Value::Num(_) => tensor::dimension_from_value_async(value, DOT_NAME, false)
+            .await
+            .and_then(|dim| {
+                dim.ok_or_else(|| {
+                    format!("{DOT_NAME}: dimension must be numeric, got {value:?}")
+                })
+            }),
+        _ => Err(format!(
+            "{DOT_NAME}: dimension must be numeric, got {value:?}"
+        )),
+    }
+}
+
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
     if err.message() == "interaction pending..." {
         return build_runtime_error("interaction pending...")
@@ -243,11 +258,10 @@ async fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<
     if rest.len() > 1 {
         return Err(builtin_error("dot: too many input arguments"));
     }
-    let dim = rest
-        .first()
-        .map(|value| tensor::parse_dimension(value, DOT_NAME))
-        .transpose()
-        .map_err(builtin_error)?;
+    let dim = match rest.first() {
+        Some(value) => Some(parse_dimension_arg(value).await.map_err(builtin_error)?),
+        None => None,
+    };
 
     if let (Value::GpuTensor(lhs_handle), Value::GpuTensor(rhs_handle)) = (&lhs, &rhs) {
         if let Some(provider) = runmat_accelerate_api::provider() {

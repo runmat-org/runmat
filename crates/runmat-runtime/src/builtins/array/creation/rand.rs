@@ -234,7 +234,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::creation::rand"
 )]
 async fn rand_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let parsed = ParsedRand::parse(rest)?;
+    let parsed = ParsedRand::parse(rest).await?;
     build_output(parsed).await
 }
 
@@ -251,7 +251,7 @@ enum RandTemplate {
 }
 
 impl ParsedRand {
-    fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
+    async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
         let mut shape_source: Option<Vec<usize>> = None;
@@ -290,7 +290,7 @@ impl ParsedRand {
                 }
             }
 
-            if let Some(parsed_dims) = extract_dims(&arg, "rand")? {
+            if let Some(parsed_dims) = extract_dims(&arg, "rand").await? {
                 saw_dims_arg = true;
                 if dims.is_empty() {
                     dims = parsed_dims;

@@ -1,7 +1,7 @@
 //! MATLAB-compatible `randperm` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{IntValue, Tensor, Value};
+use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
@@ -250,7 +250,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::creation::randperm"
 )]
 async fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let parsed = ParsedRandPerm::parse(args)?;
+    let parsed = ParsedRandPerm::parse(args).await?;
     build_output(parsed)
 }
 
@@ -267,7 +267,7 @@ enum OutputTemplate {
 }
 
 impl ParsedRandPerm {
-    fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
+    async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
         if args.is_empty() {
             return Err(builtin_error(
                 "randperm: requires at least one input argument",
@@ -278,7 +278,8 @@ impl ParsedRandPerm {
             &args[0],
             true,
             "randperm: N must be a non-negative integer (and <= 2^53)",
-        )?;
+        )
+        .await?;
         if n == 0 && args.len() == 1 {
             return Ok(Self {
                 n,
@@ -335,7 +336,8 @@ impl ParsedRandPerm {
                     &arg,
                     true,
                     "randperm: K must be a non-negative integer (and <= N)",
-                )?);
+                )
+                .await?);
                 idx += 1;
                 continue;
             }
@@ -437,81 +439,62 @@ fn randperm_tensor(n: usize, k: usize) -> crate::BuiltinResult<Tensor> {
     Tensor::new(values, vec![1, k]).map_err(|e| builtin_error(format!("randperm: {e}")))
 }
 
-fn parse_size_argument(
+async fn parse_size_argument(
     value: &Value,
     allow_zero: bool,
     message: &str,
 ) -> crate::BuiltinResult<usize> {
-    match value {
-        Value::Int(i) => parse_intvalue(i, allow_zero, message),
-        Value::Num(n) => parse_numeric(*n, allow_zero, message),
-        Value::Tensor(t) => {
-            if t.data.len() != 1 {
+    let is_vector = match value {
+        Value::Tensor(t) => t.data.len() != 1,
+        Value::GpuTensor(handle) => tensor::element_count(&handle.shape) != 1,
+        _ => false,
+    };
+
+    if let Ok(Some(dim)) = tensor::dimension_from_value_async(value, "randperm", allow_zero).await
+    {
+        return validate_size_argument(dim, allow_zero, message);
+    }
+
+    match tensor::dims_from_value_async(value).await {
+        Ok(Some(dims)) => {
+            if dims.len() != 1 {
                 return Err(builtin_error("randperm: size arguments must be scalar"));
             }
-            parse_numeric(t.data[0], allow_zero, message)
+            validate_size_argument(dims[0], allow_zero, message)
         }
-        other => Err(builtin_error(format!(
-            "randperm: size arguments must be numeric scalars, got {other:?}"
-        ))),
+        Ok(None) => {
+            if is_vector {
+                Err(builtin_error("randperm: size arguments must be scalar"))
+            } else {
+                Err(builtin_error(format!(
+                    "randperm: size arguments must be numeric scalars, got {value:?}"
+                )))
+            }
+        }
+        Err(_) => {
+            if is_vector {
+                Err(builtin_error("randperm: size arguments must be scalar"))
+            } else {
+                Err(builtin_error(message))
+            }
+        }
     }
 }
 
-fn parse_intvalue(
-    value: &IntValue,
+fn validate_size_argument(
+    value: usize,
     allow_zero: bool,
     message: &str,
 ) -> crate::BuiltinResult<usize> {
-    let raw = match value {
-        IntValue::I8(v) => *v as i128,
-        IntValue::I16(v) => *v as i128,
-        IntValue::I32(v) => *v as i128,
-        IntValue::I64(v) => *v as i128,
-        IntValue::U8(v) => *v as i128,
-        IntValue::U16(v) => *v as i128,
-        IntValue::U32(v) => *v as i128,
-        IntValue::U64(v) => *v as i128,
-    };
-    if raw < 0 {
+    if !allow_zero && value == 0 {
         return Err(builtin_error(message));
     }
-    if !allow_zero && raw == 0 {
-        return Err(builtin_error(message));
-    }
-    if raw as u128 > MAX_SAFE_INTEGER as u128 {
+    if value as u64 > MAX_SAFE_INTEGER {
         return Err(builtin_error(
             "randperm: values larger than 2^53 are not supported",
         ));
     }
-    if raw > usize::MAX as i128 {
-        return Err(builtin_error("randperm: input exceeds platform limits"));
-    }
-    Ok(raw as usize)
-}
-
-fn parse_numeric(value: f64, allow_zero: bool, message: &str) -> crate::BuiltinResult<usize> {
-    if !value.is_finite() {
-        return Err(builtin_error(message));
-    }
-    let rounded = value.round();
-    if (rounded - value).abs() > f64::EPSILON {
-        return Err(builtin_error(message));
-    }
-    if rounded < 0.0 {
-        return Err(builtin_error(message));
-    }
-    if !allow_zero && rounded == 0.0 {
-        return Err(builtin_error(message));
-    }
-    if rounded > MAX_SAFE_INTEGER as f64 {
-        return Err(builtin_error(
-            "randperm: values larger than 2^53 are not supported",
-        ));
-    }
-    if rounded > usize::MAX as f64 {
-        return Err(builtin_error("randperm: input exceeds platform limits"));
-    }
-    Ok(rounded as usize)
+    Ok(value)
 }
 
 #[cfg(test)]

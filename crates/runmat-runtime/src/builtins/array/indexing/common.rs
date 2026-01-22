@@ -1,6 +1,7 @@
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::Value;
 
 use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 /// Materialise a value so indexing helpers can operate on host tensors.
@@ -18,11 +19,14 @@ pub(crate) async fn materialize_value(
 }
 
 /// Parse a MATLAB-style size vector into concrete dimension extents.
-pub(crate) fn parse_dims(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
+pub(crate) async fn parse_dims(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Tensor(tensor) => dims_from_tensor(tensor, builtin),
-        Value::Num(n) => Ok(vec![coerce_positive_int(*n, builtin)?]),
-        Value::Int(i) => Ok(vec![coerce_positive_int(i.to_f64(), builtin)?]),
+        Value::Num(_) | Value::Int(_) => parse_scalar_dims(value, builtin).await,
+        Value::Tensor(tensor) if tensor.data.len() == 1 => parse_scalar_dims(value, builtin).await,
+        Value::GpuTensor(handle) if tensor::element_count(&handle.shape) == 1 => {
+            parse_scalar_dims(value, builtin).await
+        }
+        Value::Tensor(_) | Value::GpuTensor(_) => parse_vector_dims(value, builtin).await,
         Value::Cell(ca) => {
             if ca.data.is_empty() {
                 return Err(indexing_error(
@@ -53,30 +57,34 @@ pub(crate) fn parse_dims(value: &Value, builtin: &str) -> BuiltinResult<Vec<usiz
     }
 }
 
-fn dims_from_tensor(tensor: &Tensor, builtin: &str) -> BuiltinResult<Vec<usize>> {
-    if !is_vector_shape(&tensor.shape) {
-        return Err(indexing_error(builtin, "Size vector must be a row vector."));
-    }
-    if tensor.data.is_empty() {
+async fn parse_scalar_dims(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
+    let Some(dim) = tensor::dimension_from_value_async(value, builtin, false)
+        .await
+        .map_err(|_| indexing_error(builtin, "Size arguments must be positive integers."))?
+    else {
+        return Err(indexing_error(builtin, "Size vector must be a numeric vector."));
+    };
+    Ok(vec![dim])
+}
+
+async fn parse_vector_dims(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
+    let dims = tensor::dims_from_value_async(value)
+        .await
+        .map_err(|_| indexing_error(builtin, "Size arguments must be positive integers."))?
+        .ok_or_else(|| indexing_error(builtin, "Size vector must be a row vector."))?;
+    if dims.is_empty() {
         return Err(indexing_error(
             builtin,
             "Size vector must have at least one element.",
         ));
     }
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for &value in &tensor.data {
-        dims.push(coerce_positive_int(value, builtin)?);
+    if dims.iter().any(|&dim| dim == 0) {
+        return Err(indexing_error(
+            builtin,
+            "Size arguments must be positive integers.",
+        ));
     }
     Ok(dims)
-}
-
-fn is_vector_shape(shape: &[usize]) -> bool {
-    match shape.len() {
-        0 => true,
-        1 => true,
-        2 => shape[0] == 1 || shape[1] == 1,
-        _ => false,
-    }
 }
 
 /// Coerce a floating-point value into a strictly positive integer.

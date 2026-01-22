@@ -211,7 +211,7 @@ async fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
     if rest.is_empty() {
         return Err(reshape_error("reshape: size information missing"));
     }
-    let tokens = parse_size_arguments(&rest)?;
+    let tokens = parse_size_arguments(&rest).await?;
     let numel = value_numel(&value).await?;
     let dims = finalize_dimensions(tokens, numel)?;
     reshape_value(value, &dims)
@@ -371,25 +371,55 @@ enum DimToken {
     Auto,
 }
 
-fn parse_size_arguments(args: &[Value]) -> crate::BuiltinResult<Vec<DimToken>> {
+async fn parse_size_arguments(args: &[Value]) -> crate::BuiltinResult<Vec<DimToken>> {
     if args.len() == 1 {
-        match &args[0] {
-            Value::Tensor(t) => parse_size_vector(t),
-            Value::Int(_) | Value::Num(_) | Value::Bool(_) => {
-                Ok(vec![parse_size_scalar(&args[0])?])
+        let value = &args[0];
+        match value {
+            Value::Tensor(t) => {
+                if t.data.is_empty() {
+                    return Err(reshape_error(
+                        "reshape: size vector must contain at least one element",
+                    ));
+                }
+                let dims = tensor::dims_from_value_async(value)
+                    .await
+                    .map_err(|e| reshape_error(format!("reshape: {e}")))?;
+                let Some(dims) = dims else {
+                    return Err(reshape_error(
+                        "reshape: size vector must be a row or column vector",
+                    ));
+                };
+                Ok(dims.into_iter().map(DimToken::Known).collect())
             }
-            Value::GpuTensor(_) => Err(reshape_error(
-                "reshape: size vector must be numeric; gpu tensors are not supported as size arguments",
-            )),
             Value::LogicalArray(la) => {
                 if la.data.is_empty() {
-                    Err(reshape_error("reshape: size vector must contain at least one element"))
-                } else {
-                    let tensor = tensor::logical_to_tensor(la).map_err(|e| {
-                        reshape_error(format!("reshape: failed to parse size vector: {e}"))
-                    })?;
-                    parse_size_vector(&tensor)
+                    return Err(reshape_error(
+                        "reshape: size vector must contain at least one element",
+                    ));
                 }
+                let dims = tensor::dims_from_value_async(value)
+                    .await
+                    .map_err(|e| reshape_error(format!("reshape: {e}")))?;
+                let Some(dims) = dims else {
+                    return Err(reshape_error(
+                        "reshape: size vector must be a row or column vector",
+                    ));
+                };
+                Ok(dims.into_iter().map(DimToken::Known).collect())
+            }
+            Value::GpuTensor(_) => {
+                let dims = tensor::dims_from_value_async(value)
+                    .await
+                    .map_err(|e| reshape_error(format!("reshape: {e}")))?;
+                let Some(dims) = dims else {
+                    return Err(reshape_error(
+                        "reshape: size vector must be a row or column vector",
+                    ));
+                };
+                Ok(dims.into_iter().map(DimToken::Known).collect())
+            }
+            Value::Int(_) | Value::Num(_) | Value::Bool(_) => {
+                Ok(vec![parse_size_scalar(value).await?])
             }
             other => Err(reshape_error(format!(
                 "reshape: size vector must be numeric, got {:?}",
@@ -397,104 +427,44 @@ fn parse_size_arguments(args: &[Value]) -> crate::BuiltinResult<Vec<DimToken>> {
             ))),
         }
     } else {
-        args.iter().map(parse_size_scalar).collect()
-    }
-}
-
-fn parse_size_vector(t: &Tensor) -> crate::BuiltinResult<Vec<DimToken>> {
-    if !is_vector(t) {
-        return Err(reshape_error(
-            "reshape: size vector must be a row or column vector",
-        ));
-    }
-    if t.data.is_empty() {
-        return Err(reshape_error(
-            "reshape: size vector must contain at least one element",
-        ));
-    }
-    t.data.iter().map(|&v| parse_dim_value(v)).collect()
-}
-
-fn parse_size_scalar(value: &Value) -> crate::BuiltinResult<DimToken> {
-    match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(reshape_error(
-                    "reshape: size arguments must be nonnegative integers",
-                ));
-            }
-            Ok(DimToken::Known(raw as usize))
+        let mut tokens = Vec::with_capacity(args.len());
+        for value in args {
+            tokens.push(parse_size_scalar(value).await?);
         }
-        Value::Num(n) => parse_num_scalar(*n).map(DimToken::Known),
-        Value::Bool(b) => Ok(DimToken::Known(if *b { 1 } else { 0 })),
+        Ok(tokens)
+    }
+}
+async fn parse_size_scalar(value: &Value) -> crate::BuiltinResult<DimToken> {
+    match value {
         Value::Tensor(t) => {
             if t.data.is_empty() {
-                Ok(DimToken::Auto)
-            } else if t.data.len() == 1 {
-                parse_dim_value(t.data[0])
-            } else {
-                Err(reshape_error("reshape: size arguments must be scalars"))
+                return Ok(DimToken::Auto);
+            }
+            if t.data.len() != 1 {
+                return Err(reshape_error("reshape: size arguments must be scalars"));
             }
         }
         Value::LogicalArray(la) => {
             if la.data.is_empty() {
-                Ok(DimToken::Auto)
-            } else if la.data.len() == 1 {
-                Ok(DimToken::Known(if la.data[0] != 0 { 1 } else { 0 }))
-            } else {
-                Err(reshape_error("reshape: size arguments must be scalars"))
+                return Ok(DimToken::Auto);
+            }
+            if la.data.len() != 1 {
+                return Err(reshape_error("reshape: size arguments must be scalars"));
             }
         }
-        Value::GpuTensor(_) => Err(reshape_error(
-            "reshape: size arguments must be numeric scalars; gpu tensors are not supported",
-        )),
-        other => Err(reshape_error(format!(
+        _ => {}
+    }
+
+    let Some(dim) = tensor::dimension_from_value_async(value, "reshape", true)
+        .await
+        .map_err(|e| reshape_error(format!("reshape: {e}")))?
+    else {
+        return Err(reshape_error(format!(
             "reshape: size arguments must be numeric scalars, got {:?}",
-            other
-        ))),
-    }
-}
-
-fn parse_dim_value(raw: f64) -> crate::BuiltinResult<DimToken> {
-    if !raw.is_finite() {
-        return Err(reshape_error("reshape: size arguments must be finite"));
-    }
-    if raw == 0.0 {
-        return Ok(DimToken::Known(0));
-    }
-    let rounded = raw.round();
-    if (rounded - raw).abs() > f64::EPSILON {
-        return Err(reshape_error("reshape: size arguments must be integers"));
-    }
-    if rounded < 0.0 {
-        return Err(reshape_error(
-            "reshape: size arguments must be nonnegative integers",
-        ));
-    }
-    if rounded > (usize::MAX as f64) {
-        return Err(reshape_error("reshape: size argument is too large"));
-    }
-    Ok(DimToken::Known(rounded as usize))
-}
-
-fn parse_num_scalar(raw: f64) -> crate::BuiltinResult<usize> {
-    if !raw.is_finite() {
-        return Err(reshape_error("reshape: size arguments must be finite"));
-    }
-    let rounded = raw.round();
-    if (rounded - raw).abs() > f64::EPSILON {
-        return Err(reshape_error("reshape: size arguments must be integers"));
-    }
-    if rounded < 0.0 {
-        return Err(reshape_error(
-            "reshape: size arguments must be nonnegative integers",
-        ));
-    }
-    if rounded > (usize::MAX as f64) {
-        return Err(reshape_error("reshape: size argument is too large"));
-    }
-    Ok(rounded as usize)
+            value
+        )));
+    };
+    Ok(DimToken::Known(dim))
 }
 
 fn finalize_dimensions(tokens: Vec<DimToken>, numel: usize) -> crate::BuiltinResult<Vec<usize>> {
@@ -555,10 +525,6 @@ fn finalize_dimensions(tokens: Vec<DimToken>, numel: usize) -> crate::BuiltinRes
     }
 
     Ok(dims)
-}
-
-fn is_vector(t: &Tensor) -> bool {
-    t.shape.iter().filter(|&&dim| dim > 1).count() <= 1
 }
 
 #[cfg(test)]

@@ -209,7 +209,7 @@ fn builtin_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
     builtin_path = "crate::builtins::math::fft::forward"
 )]
 async fn fft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let (length, dimension) = parse_arguments(&rest)?;
+    let (length, dimension) = parse_arguments(&rest).await?;
     match value {
         Value::GpuTensor(handle) => fft_gpu(handle, length, dimension).await,
         other => fft_host(other, length, dimension),
@@ -279,7 +279,23 @@ pub(super) async fn fft_download_gpu_result(
     host_to_complex_tensor(host, builtin)
 }
 
-fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<usize>)> {
+async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
+    match value {
+        Value::Int(_) | Value::Num(_) => tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
+            .await
+            .map_err(fft_error)?
+            .ok_or_else(|| {
+                fft_error(format!(
+                    "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
+                ))
+            }),
+        _ => Err(fft_error(format!(
+            "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
+        ))),
+    }
+}
+
+async fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<usize>)> {
     match args.len() {
         0 => Ok((None, None)),
         1 => {
@@ -288,8 +304,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<usize
         }
         2 => {
             let len = parse_length(&args[0], BUILTIN_NAME)?;
-            let dim =
-                Some(tensor::parse_dimension(&args[1], BUILTIN_NAME).map_err(|e| fft_error(e))?);
+            let dim = Some(parse_dimension_arg(&args[1]).await?);
             Ok((len, dim))
         }
         _ => Err(fft_error(
@@ -644,20 +659,20 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_non_numeric_length() {
-        assert!(parse_arguments(&[Value::Bool(true)]).is_err());
+        assert!(block_on(parse_arguments(&[Value::Bool(true)])).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_negative_length() {
-        let err = error_message(parse_arguments(&[Value::Num(-1.0)]).unwrap_err());
+        let err = error_message(block_on(parse_arguments(&[Value::Num(-1.0)])).unwrap_err());
         assert!(err.contains("length must be non-negative"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_fractional_length() {
-        let err = error_message(parse_arguments(&[Value::Num(1.5)]).unwrap_err());
+        let err = error_message(block_on(parse_arguments(&[Value::Num(1.5)])).unwrap_err());
         assert!(err.contains("length must be an integer"));
     }
 
@@ -665,7 +680,8 @@ pub(crate) mod tests {
     #[test]
     fn fft_rejects_dimension_zero() {
         let err = error_message(
-            parse_arguments(&[Value::Num(4.0), Value::Int(IntValue::I32(0))]).unwrap_err(),
+            block_on(parse_arguments(&[Value::Num(4.0), Value::Int(IntValue::I32(0))]))
+                .unwrap_err(),
         );
         assert!(err.contains("dimension must be >= 1"));
     }

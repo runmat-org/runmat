@@ -224,7 +224,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinResult<Value> {
     let (dims_value, dims_was_gpu) = materialize_value(dims_val, "ind2sub").await?;
-    let dims = parse_dims(&dims_value, "ind2sub")?;
+    let dims = parse_dims(&dims_value, "ind2sub").await?;
     if dims.is_empty() {
         return Err(ind2sub_error("Size vector must have at least one element."));
     }

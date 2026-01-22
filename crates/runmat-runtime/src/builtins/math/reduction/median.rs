@@ -255,14 +255,14 @@ struct ParsedArguments {
     builtin_path = "crate::builtins::math::reduction::median"
 )]
 async fn median_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let parsed = parse_arguments(&rest)?;
+    let parsed = parse_arguments(&rest).await?;
     match value {
         Value::GpuTensor(handle) => median_gpu(handle, &parsed).await,
         other => median_host(other, &parsed),
     }
 }
 
-fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
+async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut axes = MedianAxes::Default;
     let mut axes_set = false;
     let mut nan_mode = ReductionNaN::Include;
@@ -314,7 +314,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         }
 
         if !axes_set || matches!(axes, MedianAxes::Default) {
-            if let Some(selection) = parse_axes(arg)? {
+            if let Some(selection) = parse_axes(arg).await? {
                 if matches!(selection, MedianAxes::All) {
                     if axes_set && !matches!(axes, MedianAxes::Default) {
                         return Err(median_error(
@@ -329,7 +329,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 idx += 1;
                 continue;
             }
-        } else if parse_axes(arg)?.is_some() {
+        } else if parse_axes(arg).await?.is_some() {
             return Err(median_error(
                 "median: multiple dimension specifications provided",
             ));
@@ -469,7 +469,7 @@ fn median_tensor(
     }
 }
 
-fn parse_axes(value: &Value) -> BuiltinResult<Option<MedianAxes>> {
+async fn parse_axes(value: &Value) -> BuiltinResult<Option<MedianAxes>> {
     if let Some(text) = value_as_str(value) {
         let trimmed = text.trim();
         if trimmed.is_empty() {
@@ -485,70 +485,75 @@ fn parse_axes(value: &Value) -> BuiltinResult<Option<MedianAxes>> {
         };
     }
 
-    match value {
-        Value::Tensor(t) => {
-            if t.data.is_empty() {
-                return Ok(Some(MedianAxes::Default));
-            }
-            if t.data.len() == 1 {
-                let scalar = Value::Num(t.data[0]);
-                let dim = tensor::parse_dimension(&scalar, "median").map_err(median_error)?;
-                return Ok(Some(MedianAxes::Dim(dim)));
-            }
-            let dims = parse_dimension_vector(t)?;
-            if dims.is_empty() {
-                Ok(Some(MedianAxes::Default))
-            } else {
-                Ok(Some(MedianAxes::Vec(dims)))
-            }
+    let (scalar_hint, is_empty) = match value {
+        Value::Num(_) | Value::Int(_) => (true, false),
+        Value::Tensor(t) => (t.data.len() == 1, t.data.is_empty()),
+        Value::LogicalArray(logical) => (logical.data.len() == 1, logical.data.is_empty()),
+        Value::GpuTensor(handle) => {
+            let count = tensor::element_count(&handle.shape);
+            (handle.shape.is_empty() || count == 1, count == 0)
         }
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(logical).map_err(median_error)?;
-            if tensor.data.is_empty() {
-                return Ok(Some(MedianAxes::Default));
-            }
-            if tensor.data.len() == 1 {
-                let scalar = Value::Num(tensor.data[0]);
-                let dim = tensor::parse_dimension(&scalar, "median").map_err(median_error)?;
-                return Ok(Some(MedianAxes::Dim(dim)));
-            }
-            let dims = parse_dimension_vector(&tensor)?;
-            if dims.is_empty() {
-                Ok(Some(MedianAxes::Default))
-            } else {
-                Ok(Some(MedianAxes::Vec(dims)))
-            }
-        }
-        Value::Int(_) | Value::Num(_) => {
-            let dim = tensor::parse_dimension(value, "median").map_err(median_error)?;
-            Ok(Some(MedianAxes::Dim(dim)))
-        }
-        Value::GpuTensor(_) => Err(median_error(
-            "median: dimension arguments cannot be GPU tensors",
-        )),
-        Value::Bool(_) => Err(median_error("median: dimension must be numeric")),
-        _ => Ok(None),
+        _ => (false, false),
+    };
+    if is_empty {
+        return Ok(Some(MedianAxes::Default));
     }
-}
 
-fn parse_dimension_vector(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for &entry in &tensor.data {
-        if !entry.is_finite() {
-            return Err(median_error(
-                "median: dimension entries must be finite integers",
-            ));
+    let dims = match value {
+        Value::Tensor(_)
+        | Value::LogicalArray(_)
+        | Value::Int(_)
+        | Value::Num(_)
+        | Value::GpuTensor(_) => tensor::dims_from_value_async(value)
+            .await
+            .map_err(|err| map_dims_error(err, scalar_hint))?,
+        Value::Bool(_) => {
+            return Err(median_error("median: dimension must be numeric"));
         }
-        let rounded = entry.round();
-        if (rounded - entry).abs() > f64::EPSILON {
-            return Err(median_error("median: dimension entries must be integers"));
+        _ => return Ok(None),
+    };
+
+    let Some(dims) = dims else {
+        return Ok(None);
+    };
+    if dims.is_empty() {
+        return Ok(Some(MedianAxes::Default));
+    }
+    if dims.len() == 1 {
+        let dim = dims[0];
+        if dim < 1 {
+            return Err(median_error("median: dimension must be >= 1"));
         }
-        if rounded < 1.0 {
+        return Ok(Some(MedianAxes::Dim(dim)));
+    }
+    for &dim in &dims {
+        if dim < 1 {
             return Err(median_error("median: dimension entries must be >= 1"));
         }
-        dims.push(rounded as usize);
     }
-    Ok(dims)
+    Ok(Some(MedianAxes::Vec(dims)))
+}
+
+fn map_dims_error(message: String, scalar: bool) -> RuntimeError {
+    if message.contains("non-negative") {
+        if scalar {
+            return median_error("median: dimension must be >= 1");
+        }
+        return median_error("median: dimension entries must be >= 1");
+    }
+    if message.contains("finite") {
+        if scalar {
+            return median_error("median: dimension must be finite");
+        }
+        return median_error("median: dimension entries must be finite integers");
+    }
+    if message.contains("integer") {
+        if scalar {
+            return median_error("median: dimension must be an integer");
+        }
+        return median_error("median: dimension entries must be integers");
+    }
+    median_error(message)
 }
 
 fn value_as_str(value: &Value) -> Option<String> {

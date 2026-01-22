@@ -227,7 +227,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::creation::eye"
 )]
 async fn eye_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let parsed = ParsedEye::parse(rest)?;
+    let parsed = ParsedEye::parse(rest).await?;
     build_output(parsed).await.map_err(Into::into)
 }
 
@@ -244,7 +244,7 @@ enum EyeTemplate {
 }
 
 impl ParsedEye {
-    fn parse(args: Vec<Value>) -> Result<Self, String> {
+    async fn parse(args: Vec<Value>) -> Result<Self, String> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
         let mut shape_source: Option<Vec<usize>> = None;
@@ -304,7 +304,7 @@ impl ParsedEye {
                 }
             }
 
-            if let Some(parsed_dims) = extract_dims(&arg)? {
+            if let Some(parsed_dims) = extract_dims(&arg).await? {
                 saw_dims_arg = true;
                 if dims.is_empty() {
                     dims = parsed_dims;
@@ -455,53 +455,13 @@ fn keyword_of(value: &Value) -> Option<String> {
     }
 }
 
-fn extract_dims(value: &Value) -> Result<Option<Vec<usize>>, String> {
-    match value {
-        Value::Int(i) => {
-            let dim = i.to_i64();
-            if dim < 0 {
-                return Err("eye: matrix dimensions must be non-negative".to_string());
-            }
-            Ok(Some(vec![dim as usize]))
-        }
-        Value::Num(n) => parse_numeric_dimension(*n).map(|d| Some(vec![d])),
-        Value::Tensor(t) => dims_from_tensor(t),
-        Value::LogicalArray(l) => dims_from_logical(l),
-        _ => Ok(None),
-    }
-}
-
-fn parse_numeric_dimension(n: f64) -> Result<usize, String> {
-    if !n.is_finite() {
-        return Err("eye: dimensions must be finite".to_string());
-    }
-    if n < 0.0 {
-        return Err("eye: matrix dimensions must be non-negative".to_string());
-    }
-    let rounded = n.round();
-    if (rounded - n).abs() > f64::EPSILON {
-        return Err("eye: dimensions must be integers".to_string());
-    }
-    Ok(rounded as usize)
-}
-
-fn dims_from_tensor(tensor: &Tensor) -> Result<Option<Vec<usize>>, String> {
-    let is_row = tensor.rows() == 1;
-    let is_column = tensor.cols() == 1;
-    let is_scalar = tensor.data.len() == 1;
-    if !(is_row || is_column || is_scalar || tensor.shape.len() == 1) {
+async fn extract_dims(value: &Value) -> Result<Option<Vec<usize>>, String> {
+    if matches!(value, Value::LogicalArray(_)) {
         return Ok(None);
     }
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for &v in &tensor.data {
-        let dim = parse_numeric_dimension(v)?;
-        dims.push(dim);
-    }
-    Ok(Some(dims))
-}
-
-fn dims_from_logical(_logical: &LogicalArray) -> Result<Option<Vec<usize>>, String> {
-    Ok(None)
+    tensor::dims_from_value_async(value)
+        .await
+        .map_err(|e| format!("eye: {e}"))
 }
 
 fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {

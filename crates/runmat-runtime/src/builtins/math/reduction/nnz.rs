@@ -251,19 +251,27 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::reduction::nnz"
 )]
 async fn nnz_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let dim = parse_dimension_arg(&rest)?;
+    let dim = parse_dimension_arg(&rest).await?;
     match value {
         Value::GpuTensor(handle) => nnz_gpu(handle, dim).await,
         other => nnz_host_value(other, dim),
     }
 }
 
-fn parse_dimension_arg(args: &[Value]) -> BuiltinResult<Option<usize>> {
+async fn parse_dimension_arg(args: &[Value]) -> BuiltinResult<Option<usize>> {
     match args.len() {
         0 => Ok(None),
         1 => {
-            let dim = tensor::parse_dimension(&args[0], "nnz").map_err(|err| nnz_error(err))?;
-            Ok(Some(dim))
+            let dim = tensor::dimension_from_value_async(&args[0], "nnz", false)
+                .await
+                .map_err(nnz_error)?;
+            match dim {
+                Some(dim) => Ok(Some(dim)),
+                None => Err(nnz_error(format!(
+                    "nnz: dimension must be numeric, got {:?}",
+                    args[0]
+                ))),
+            }
         }
         _ => Err(nnz_error("nnz: too many input arguments")),
     }

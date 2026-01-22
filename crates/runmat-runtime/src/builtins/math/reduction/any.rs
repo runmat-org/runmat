@@ -260,7 +260,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::reduction::any"
 )]
 async fn any_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let (spec, nan_mode) = parse_arguments(&rest)?;
+    let (spec, nan_mode) = parse_arguments(&rest).await?;
     match value {
         Value::GpuTensor(handle) => any_gpu(handle, spec, nan_mode).await,
         other => any_host(other, spec, nan_mode).await,
@@ -775,7 +775,7 @@ fn apply_reduction(
     }
 }
 
-fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, ReductionNaN)> {
+async fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, ReductionNaN)> {
     let mut spec = ReductionSpec::Default;
     let mut nan_mode = ReductionNaN::Include;
 
@@ -796,7 +796,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, ReductionNaN
             nan_mode = mode;
             continue;
         }
-        let dims = parse_dimensions(arg)?;
+        let dims = parse_dimensions(arg).await?;
         if dims.is_empty() {
             return Err(any_error(
                 "any: dimension vector must contain at least one entry",
@@ -840,32 +840,46 @@ fn is_all_token(value: &Value) -> bool {
         .unwrap_or(false)
 }
 
-fn parse_dimensions(value: &Value) -> BuiltinResult<Vec<usize>> {
-    let tensor = tensor::value_to_tensor(value).map_err(|err| any_error(err))?;
-    if tensor.data.is_empty() {
+async fn parse_dimensions(value: &Value) -> BuiltinResult<Vec<usize>> {
+    let dims = tensor::dims_from_value_async(value)
+        .await
+        .map_err(map_dims_error)?;
+    let dims = match dims {
+        Some(dims) => dims,
+        None => match tensor::dimension_from_value_async(value, "any", false)
+            .await
+            .map_err(map_dims_error)?
+        {
+            Some(dim) => vec![dim],
+            None => return Ok(Vec::new()),
+        },
+    };
+    if dims.is_empty() {
         return Ok(Vec::new());
     }
-    let mut dims = Vec::new();
-    for raw in tensor.data {
-        if !raw.is_finite() {
-            return Err(any_error("any: dimension values must be finite"));
-        }
-        let rounded = raw.round();
-        if (rounded - raw).abs() > f64::EPSILON {
-            return Err(any_error("any: dimension values must be integers"));
-        }
-        if rounded < 1.0 {
+    let mut out = Vec::new();
+    for dim in dims {
+        if dim < 1 {
             return Err(any_error("any: dimension values must be >= 1"));
         }
-        if rounded > (usize::MAX as f64) {
-            return Err(any_error("any: dimension value is too large"));
-        }
-        let dim = rounded as usize;
-        if !dims.contains(&dim) {
-            dims.push(dim);
+        if !out.contains(&dim) {
+            out.push(dim);
         }
     }
-    Ok(dims)
+    Ok(out)
+}
+
+fn map_dims_error(message: String) -> RuntimeError {
+    if message.contains("finite") {
+        return any_error("any: dimension values must be finite");
+    }
+    if message.contains("integer") {
+        return any_error("any: dimension values must be integers");
+    }
+    if message.contains("non-negative") {
+        return any_error("any: dimension values must be >= 1");
+    }
+    any_error(message)
 }
 
 fn extract_text_token(value: &Value) -> Option<String> {

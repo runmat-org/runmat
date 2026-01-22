@@ -294,7 +294,7 @@ async fn fill_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         .await
         .map_err(|e| format!("fill: {e}"))?;
     let scalar = FillScalar::from_value(&gathered_value)?;
-    let parsed = ParsedFill::parse(scalar, rest)?;
+    let parsed = ParsedFill::parse(scalar, rest).await?;
     build_output(parsed).map_err(Into::into)
 }
 
@@ -396,7 +396,7 @@ impl FillScalar {
 }
 
 impl ParsedFill {
-    fn parse(fill: FillScalar, args: Vec<Value>) -> Result<Self, String> {
+    async fn parse(fill: FillScalar, args: Vec<Value>) -> Result<Self, String> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
         let mut shape_source: Option<Vec<usize>> = None;
@@ -464,7 +464,7 @@ impl ParsedFill {
                 }
             }
 
-            if let Some(parsed_dims) = extract_dims(&arg, "fill")? {
+            if let Some(parsed_dims) = extract_dims(&arg, "fill").await? {
                 saw_dims_arg = true;
                 if dims.is_empty() {
                     dims = parsed_dims;
