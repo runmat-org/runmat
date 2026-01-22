@@ -27,7 +27,7 @@ export function builtinMetadataForSlug(slug: string): Metadata {
     const description = (builtin.description || builtin.summary || FALLBACK_DESCRIPTION).trim();
 
     return {
-        title: { absolute: `${builtin.title} in MATLAB - runnable examples online + source | RunMat docs` },
+        title: { absolute: `${builtin.title} in MATLAB: Free Online Compiler & Reference` },
         description,
         openGraph: {
             title: builtin.title,
