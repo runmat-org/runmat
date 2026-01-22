@@ -161,8 +161,15 @@ export default function HomePage() {
       {/* SEO-optimized opening content */}
       <div className="sr-only">
         <h1>RunMat: Free Runtime for MATLAB Code (Browser & Desktop)</h1>
+<<<<<<< ours
         <p>
           Execute .m files instantly with automatic GPU acceleration. An open-source runtime compatible with standard MATLAB code. No license or installation required.
+=======
+       
+       
+        <p>
+        Execute .m files instantly with automatic GPU acceleration. An open-source runtime compatible with standard MATLAB code. No license or installation required.
+>>>>>>> theirs
         </p>
       </div>
 
