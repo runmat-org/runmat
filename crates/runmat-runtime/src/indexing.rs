@@ -93,7 +93,7 @@ pub fn matrix_get_col(tensor: &Tensor, col: usize) -> Result<Tensor, RuntimeErro
 /// In MATLAB, indexing is 1-based and supports:
 /// - Single element: A(i) for vectors, A(i,j) for tensors
 /// - Multiple indices: A(i1, i2, ..., iN)
-pub fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, RuntimeError> {
+pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, RuntimeError> {
     match base {
         Value::GpuTensor(h) => {
             let provider = runmat_accelerate_api::provider().ok_or_else(|| {
@@ -113,9 +113,7 @@ pub fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, RuntimeE
                     ));
                 }
                 let lin0 = idx - 1; // 0-based
-                let val = provider
-                    .read_scalar(h, lin0)
-                    .map_err(|e| indexing_error(format!("gpu index: {e}")))?;
+                let val = gpu_index_scalar(provider, h, lin0).await?;
                 return Ok(Value::Num(val));
             } else if indices.len() == 2 {
                 let row = indices[0] as usize;
@@ -129,9 +127,7 @@ pub fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, RuntimeE
                     ));
                 }
                 let lin0 = (row - 1) + (col - 1) * rows;
-                let val = provider
-                    .read_scalar(h, lin0)
-                    .map_err(|e| indexing_error(format!("gpu index: {e}")))?;
+                let val = gpu_index_scalar(provider, h, lin0).await?;
                 return Ok(Value::Num(val));
             }
             Err(indexing_error_with_identifier(
@@ -258,5 +254,33 @@ pub fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, RuntimeE
             format!("Cannot index value of type {base:?}"),
             "MATLAB:SliceNonTensor",
         )),
+    }
+}
+
+async fn gpu_index_scalar(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    lin0: usize,
+) -> Result<f64, RuntimeError> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let host = provider
+            .download(handle)
+            .await
+            .map_err(|e| indexing_error(format!("gpu index: {e}")))?;
+        if lin0 >= host.data.len() {
+            return Err(indexing_error(format!(
+                "gpu index: index {} out of bounds (len {})",
+                lin0 + 1,
+                host.data.len()
+            )));
+        }
+        Ok(host.data[lin0])
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        provider
+            .read_scalar(handle, lin0)
+            .map_err(|e| indexing_error(format!("gpu index: {e}")))
     }
 }

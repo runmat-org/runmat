@@ -14,10 +14,10 @@ use crate::builtins::common::spec::{
 };
 
 use super::common::numeric_pair;
-use super::gpu_helpers::{gather_tensor_from_gpu, gpu_xy_bounds};
 use super::plotting_error;
 use super::state::{
-    next_line_style_for_axes, render_active_plot, set_line_style_order_for_axes, PlotRenderOptions,
+    current_axes_state, current_hold_enabled, next_line_style_for_axes, render_active_plot,
+    set_line_style_order_for_axes, PlotRenderOptions,
 };
 use super::style::{
     looks_like_option_name, marker_metadata_from_appearance, parse_line_style_args,
@@ -122,15 +122,18 @@ const BUILTIN_NAME: &str = "plot";
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::plot"
 )]
-pub fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
+pub async fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let mut args = Vec::with_capacity(2 + rest.len());
     args.push(x);
     args.push(y);
     args.extend(rest);
 
     let (mut series_plans, line_style_order) = parse_series_specs(args)?;
+    let axes = current_axes_state().active_index;
+    let hold_enabled = current_hold_enabled();
     if let Some(order) = line_style_order.as_ref() {
         apply_line_style_order(&mut series_plans, order);
+        set_line_style_order_for_axes(axes, order);
     }
     let opts = PlotRenderOptions {
         title: "Plot",
@@ -138,11 +141,64 @@ pub fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResul
         y_label: "Y",
         ..Default::default()
     };
-    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
-        if let Some(order) = line_style_order.clone() {
-            set_line_style_order_for_axes(axes, &order);
+    let total = series_plans.len();
+    let mut plots: Vec<LinePlot> = Vec::with_capacity(series_plans.len());
+    for (series_idx, mut plan) in series_plans.drain(..).enumerate() {
+        if !plan.line_style_explicit {
+            plan.appearance.line_style = if hold_enabled {
+                next_line_style_for_axes(axes)
+            } else {
+                match series_idx % 4 {
+                    0 => LineStyle::Solid,
+                    1 => LineStyle::Dashed,
+                    2 => LineStyle::Dotted,
+                    _ => LineStyle::DashDot,
+                }
+            };
+            plan.line_style_explicit = true;
         }
-        render_series(figure, axes, &mut series_plans)
+        let label = plan.label.unwrap_or_else(|| {
+            if total == 1 {
+                "Data".to_string()
+            } else {
+                format!("Series {}", series_idx + 1)
+            }
+        });
+        let SeriesRenderPlan {
+            data,
+            appearance,
+            requires_cpu,
+            ..
+        } = plan;
+
+        if !requires_cpu {
+            if let Some((x_gpu, y_gpu)) = data.gpu_handles() {
+                match build_line_gpu_plot_async(x_gpu, y_gpu, &label, &appearance).await {
+                    Ok(line_plot) => {
+                        plots.push(line_plot);
+                        continue;
+                    }
+                    Err(err) => {
+                        warn!("plot GPU path unavailable: {err}");
+                    }
+                }
+            }
+        }
+
+        let (x_tensor, y_tensor) = data.into_tensors_async("plot").await?;
+        let (x_vals, y_vals) = numeric_pair(x_tensor, y_tensor, "plot")?;
+        plots.push(build_line_plot(x_vals, y_vals, &label, &appearance)?);
+    }
+
+    let mut plots_opt = Some(plots);
+    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes_index| {
+        let plots = plots_opt
+            .take()
+            .expect("plot series consumed exactly once");
+        for plot in plots {
+            figure.add_line_plot_on_axes(plot, axes_index);
+        }
+        Ok(())
     })?;
     Ok(rendered)
 }
@@ -190,12 +246,6 @@ impl LineInput {
         }
     }
 
-    fn into_tensor(self, name: &'static str) -> BuiltinResult<Tensor> {
-        match self {
-            Self::Host(tensor) => Ok(tensor),
-            Self::Gpu(handle) => gather_tensor_from_gpu(handle, name),
-        }
-    }
 }
 
 fn parse_series_specs(
@@ -297,7 +347,7 @@ fn apply_marker_metadata(plot: &mut LinePlot, appearance: &LineAppearance) {
     }
 }
 
-fn build_line_gpu_plot(
+async fn build_line_gpu_plot_async(
     x: &GpuTensorHandle,
     y: &GpuTensorHandle,
     label: &str,
@@ -376,7 +426,7 @@ fn build_line_gpu_plot(
         None
     };
 
-    let bounds = gpu_xy_bounds(x, y, "plot")?;
+    let bounds = super::gpu_helpers::gpu_xy_bounds_async(x, y, "plot").await?;
     let gpu_style = LineGpuStyle {
         color: appearance.color,
         line_width: appearance.line_width,
@@ -398,55 +448,6 @@ fn build_line_gpu_plot(
     );
     plot = plot.with_label(label);
     Ok(plot)
-}
-
-fn render_series(
-    figure: &mut runmat_plot::plots::Figure,
-    axes_index: usize,
-    plans: &mut Vec<SeriesRenderPlan>,
-) -> BuiltinResult<()> {
-    let total = plans.len();
-    for (series_idx, plan) in plans.drain(..).enumerate() {
-        let SeriesRenderPlan {
-            data,
-            mut appearance,
-            requires_cpu,
-            line_style_explicit,
-            label,
-        } = plan;
-
-        if !line_style_explicit {
-            appearance.line_style = next_line_style_for_axes(axes_index);
-        }
-
-        let label = label.unwrap_or_else(|| {
-            if total == 1 {
-                "Data".to_string()
-            } else {
-                format!("Series {}", series_idx + 1)
-            }
-        });
-
-        if !requires_cpu {
-            if let Some((x_gpu, y_gpu)) = data.gpu_handles() {
-                match build_line_gpu_plot(x_gpu, y_gpu, &label, &appearance) {
-                    Ok(line_plot) => {
-                        figure.add_line_plot_on_axes(line_plot, axes_index);
-                        continue;
-                    }
-                    Err(err) => {
-                        warn!("plot GPU path unavailable: {err}");
-                    }
-                }
-            }
-        }
-
-        let (x_tensor, y_tensor) = data.into_tensors("plot")?;
-        let (x_vals, y_vals) = numeric_pair(x_tensor, y_tensor, "plot")?;
-        let line_plot = build_line_plot(x_vals, y_vals, &label, &appearance)?;
-        figure.add_line_plot_on_axes(line_plot, axes_index);
-    }
-    Ok(())
 }
 
 #[derive(Debug)]
@@ -479,9 +480,15 @@ impl PlotSeriesInput {
         }
     }
 
-    fn into_tensors(self, name: &'static str) -> BuiltinResult<(Tensor, Tensor)> {
-        let x = self.x.into_tensor(name)?;
-        let y = self.y.into_tensor(name)?;
+    async fn into_tensors_async(self, name: &'static str) -> BuiltinResult<(Tensor, Tensor)> {
+        let x = match self.x {
+            LineInput::Host(t) => t,
+            LineInput::Gpu(h) => super::gpu_helpers::gather_tensor_from_gpu_async(h, name).await?,
+        };
+        let y = match self.y {
+            LineInput::Host(t) => t,
+            LineInput::Gpu(h) => super::gpu_helpers::gather_tensor_from_gpu_async(h, name).await?,
+        };
         Ok((x, y))
     }
 }
@@ -491,6 +498,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
     use crate::RuntimeError;
+    use futures::executor::block_on;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -531,11 +539,11 @@ pub(crate) mod tests {
     #[test]
     fn plot_builtin_produces_figure_even_without_backend() {
         setup_plot_tests();
-        let result = plot_builtin(
+        let result = block_on(plot_builtin(
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Vec::new(),
-        );
+        ));
         if let Err(flow) = result {
             assert_plotting_unavailable(&flow);
         }

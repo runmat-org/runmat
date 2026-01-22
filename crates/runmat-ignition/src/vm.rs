@@ -5455,10 +5455,12 @@ async fn run_interpreter(
                 #[cfg(feature = "plot-core")]
                 {
                     if name == "hist" && !args.is_empty() {
-                        let eval = match runmat_runtime::builtins::plotting::ops::hist::evaluate(
+                        let eval = match runmat_runtime::builtins::plotting::ops::hist::evaluate_async(
                             args[0].clone(),
                             &args[1..],
-                        ) {
+                        )
+                        .await
+                        {
                             Ok(eval) => eval,
                             Err(err) => vm_bail!(err.to_string()),
                         };
@@ -5814,7 +5816,7 @@ async fn run_interpreter(
                         }
                     }
                     other => {
-                        let result = match runmat_runtime::perform_indexing(&other, &indices) {
+                        let result = match runmat_runtime::perform_indexing(&other, &indices).await {
                             Ok(v) => v,
                             Err(e) => vm_bail!(e),
                         };
@@ -6547,7 +6549,7 @@ async fn run_interpreter(
                                     _ => 1.0,
                                 }
                             };
-                            let v = match runmat_runtime::perform_indexing(&other, &[idx_val]) {
+                            let v = match runmat_runtime::perform_indexing(&other, &[idx_val]).await {
                                 Ok(v) => v,
                                 Err(_e) => vm_bail!(mex(
                                     "SliceNonTensor",

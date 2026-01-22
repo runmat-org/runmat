@@ -4,6 +4,7 @@
 //! culling, level-of-detail, and batch rendering capabilities.
 
 use crate::core::renderer::{PipelineType, Vertex};
+use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3, Vec4};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -69,6 +70,11 @@ impl RenderData {
 pub struct GpuVertexBuffer {
     pub buffer: Arc<wgpu::Buffer>,
     pub vertex_count: usize,
+    /// Optional indirect draw arguments buffer (GPU-driven vertex count).
+    ///
+    /// When present, renderers should prefer `draw_indirect` over issuing explicit draw ranges
+    /// based on `vertex_count`. This avoids CPU readbacks on wasm/WebGPU.
+    pub indirect: Option<GpuIndirectDraw>,
 }
 
 impl GpuVertexBuffer {
@@ -76,8 +82,44 @@ impl GpuVertexBuffer {
         Self {
             buffer,
             vertex_count,
+            indirect: None,
         }
     }
+
+    pub fn with_indirect(
+        buffer: Arc<wgpu::Buffer>,
+        vertex_count: usize,
+        indirect_args: Arc<wgpu::Buffer>,
+    ) -> Self {
+        Self {
+            buffer,
+            vertex_count,
+            indirect: Some(GpuIndirectDraw {
+                args: indirect_args,
+                offset: 0,
+            }),
+        }
+    }
+}
+
+/// GPU-driven draw call arguments for `draw_indirect`.
+#[derive(Debug, Clone)]
+pub struct GpuIndirectDraw {
+    pub args: Arc<wgpu::Buffer>,
+    pub offset: u64,
+}
+
+/// POD layout matching `wgpu`'s non-indexed indirect draw arguments.
+///
+/// This buffer is written once from the CPU to set instance_count=1, and then
+/// shaders atomically update `vertex_count` to drive draws without CPU readback.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct DrawIndirectArgsRaw {
+    pub vertex_count: u32,
+    pub instance_count: u32,
+    pub first_vertex: u32,
+    pub first_instance: u32,
 }
 
 /// CPU-side image payload for textured rendering

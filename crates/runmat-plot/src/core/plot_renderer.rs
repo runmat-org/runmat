@@ -131,6 +131,16 @@ impl PlotRenderer {
         Some((vertex_buffer, index_buffer))
     }
 
+    fn gpu_indirect_args<'a>(
+        render_data: &'a crate::core::RenderData,
+    ) -> Option<(&'a wgpu::Buffer, u64)> {
+        render_data
+            .gpu_vertices
+            .as_ref()
+            .and_then(|buf| buf.indirect.as_ref())
+            .map(|indirect| (indirect.args.as_ref(), indirect.offset))
+    }
+
     /// Create a new plot renderer
     pub async fn new(
         device: Arc<wgpu::Device>,
@@ -648,6 +658,10 @@ impl PlotRenderer {
                             &[],
                         );
                         render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                        if let Some((args, offset)) = Self::gpu_indirect_args(render_data) {
+                            render_pass.draw_indirect(args, offset);
+                            continue;
+                        }
                         for draw_call in &render_data.draw_calls {
                             render_pass.draw(
                                 draw_call.vertex_offset as u32
@@ -698,6 +712,10 @@ impl PlotRenderer {
                                 render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
                             }
                         } else {
+                            if let Some((args, offset)) = Self::gpu_indirect_args(render_data) {
+                                render_pass.draw_indirect(args, offset);
+                                continue;
+                            }
                             for dc in &render_data.draw_calls {
                                 render_pass.draw(
                                     dc.vertex_offset as u32
@@ -743,6 +761,10 @@ impl PlotRenderer {
                                 if let Some(ref bg) = point_style_bind_groups[idx] {
                                     render_pass.set_bind_group(1, bg, &[]);
                                 }
+                            }
+                            if let Some((args, offset)) = Self::gpu_indirect_args(render_data) {
+                                render_pass.draw_indirect(args, offset);
+                                continue;
                             }
                             for dc in &render_data.draw_calls {
                                 render_pass.draw(
@@ -920,6 +942,10 @@ impl PlotRenderer {
                     }
                 } else {
                     log::trace!(target: "runmat_plot", "draw direct vertices");
+                    if let Some((args, offset)) = Self::gpu_indirect_args(render_data) {
+                        render_pass.draw_indirect(args, offset);
+                        continue;
+                    }
                     // Use draw_calls from render_data for proper vertex range handling
                     for draw_call in &render_data.draw_calls {
                         log::trace!(

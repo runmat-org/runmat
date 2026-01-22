@@ -8,6 +8,7 @@ use crate::plots::Figure;
 use egui::{Align2, Color32, FontId, Pos2};
 #[cfg(feature = "gui")]
 use egui_wgpu;
+use futures::channel::oneshot;
 use std::io::Cursor;
 use std::path::Path;
 use std::sync::Arc;
@@ -416,15 +417,10 @@ impl ImageExporter {
 
         // Map and extract actual bytes (strip row padding)
         let buffer_slice = output_buffer.slice(..);
-        // Map synchronously with poll
-        let (tx, rx) = std::sync::mpsc::channel();
-        buffer_slice.map_async(wgpu::MapMode::Read, move |v| {
-            let _ = tx.send(v);
-        });
-        self.device.poll(wgpu::Maintain::Wait);
-        rx.recv()
-            .map_err(|_| "map failed".to_string())?
-            .map_err(|_| "map error".to_string())?;
+        // IMPORTANT (wasm): do not block the worker/event loop while waiting for map_async.
+        // Blocking (Maintain::Wait + recv()) can deadlock on WebGPU because the completion
+        // callback is delivered on the JS event loop.
+        map_read_async(&self.device, &buffer_slice).await?;
         let data = buffer_slice.get_mapped_range();
         let mut pixels = vec![0u8; (self.settings.width * self.settings.height * 4) as usize];
         for y in 0..self.settings.height as usize {
@@ -484,4 +480,27 @@ impl ImageExporter {
     pub fn settings(&self) -> &ImageExportSettings {
         &self.settings
     }
+}
+
+async fn map_read_async(
+    device: &wgpu::Device,
+    slice: &wgpu::BufferSlice<'_>,
+) -> Result<(), String> {
+    let (tx, rx) = oneshot::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = tx.send(result);
+    });
+
+    // On native targets we can synchronously drive completion.
+    #[cfg(not(target_arch = "wasm32"))]
+    device.poll(wgpu::Maintain::Wait);
+
+    // On wasm, Maintain::Wait can deadlock; Poll is a no-op or non-blocking.
+    #[cfg(target_arch = "wasm32")]
+    device.poll(wgpu::Maintain::Poll);
+
+    rx.await
+        .map_err(|_| "map failed".to_string())?
+        .map_err(|_| "map error".to_string())?;
+    Ok(())
 }

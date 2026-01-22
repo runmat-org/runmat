@@ -1021,6 +1021,7 @@ impl WgpuRenderer {
         vertex_buffer: &'a wgpu::Buffer,
         vertex_count: u32,
         index_buffer: Option<(&'a wgpu::Buffer, u32)>,
+        indirect: Option<(&'a wgpu::Buffer, u64)>,
     ) {
         // Ensure the pipeline exists first
         self.ensure_pipeline(pipeline_type);
@@ -1030,6 +1031,11 @@ impl WgpuRenderer {
         render_pass.set_pipeline(pipeline);
         render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
         render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+
+        if let Some((args, offset)) = indirect {
+            render_pass.draw_indirect(args, offset);
+            return;
+        }
 
         match index_buffer {
             Some((indices, index_count)) => {

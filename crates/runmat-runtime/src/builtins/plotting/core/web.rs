@@ -85,6 +85,7 @@ pub(crate) mod wasm {
         WEB_RENDERERS.with(|map_cell| {
             let mut map = map_cell.borrow_mut();
             if let Some(renderer) = map.get_mut(&handle) {
+                debug!("plot-web: using per-figure renderer for handle={handle}");
                 return f(renderer)
                     .map_err(|err| web_error(format!("Plotting failed: {err}")));
             }
@@ -96,6 +97,7 @@ pub(crate) mod wasm {
                         "RunMat plotting canvas not registered. Call registerPlotCanvas() before plotting.",
                     )
                 })?;
+                debug!("plot-web: using default renderer fallback for handle={handle}");
                 f(renderer).map_err(|err| web_error(format!("Plotting failed: {err}")))
             })
         })

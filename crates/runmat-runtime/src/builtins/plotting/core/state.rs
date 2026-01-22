@@ -492,6 +492,13 @@ pub fn current_axes_state() -> FigureAxesState {
     }
 }
 
+pub fn current_hold_enabled() -> bool {
+    let reg = registry();
+    let handle = reg.current;
+    let state = reg.figures.get(&handle).expect("current figure must exist");
+    *state.hold_per_axes.get(&state.active_axes).unwrap_or(&false)
+}
+
 pub fn figure_handles() -> Vec<FigureHandle> {
     let reg = registry();
     reg.figures.keys().copied().collect()

@@ -12,8 +12,11 @@ struct LineParams {
     _pad: u32,
 };
 
-struct Counter {
-    value: atomic<u32>,
+struct IndirectArgs {
+    vertex_count: atomic<u32>,
+    instance_count: u32,
+    first_vertex: u32,
+    first_instance: u32,
 };
 
 @group(0) @binding(0)
@@ -26,7 +29,7 @@ var<storage, read> buf_y: array<f32>;
 var<storage, read_write> out_vertices: array<VertexRaw>;
 
 @group(0) @binding(3)
-var<storage, read_write> counter: Counter;
+var<storage, read_write> indirect: IndirectArgs;
 
 @group(0) @binding(4)
 var<uniform> params: LineParams;
@@ -85,7 +88,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let thick = params.line_width > 1.0;
     if (!thick) {
-        let base = atomicAdd(&(counter.value), 2u);
+        let base = atomicAdd(&(indirect.vertex_count), 2u);
         write_vertex(base + 0u, p0, params.color);
         write_vertex(base + 1u, p1, params.color);
         return;
@@ -103,7 +106,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let v2 = p1 - offset;
     let v3 = p0 - offset;
 
-    let base = atomicAdd(&(counter.value), 6u);
+    let base = atomicAdd(&(indirect.vertex_count), 6u);
     write_vertex(base + 0u, v0, params.color);
     write_vertex(base + 1u, v1, params.color);
     write_vertex(base + 2u, v2, params.color);
@@ -127,8 +130,11 @@ struct LineParams {
     _pad: u32,
 };
 
-struct Counter {
-    value: atomic<u32>;
+struct IndirectArgs {
+    vertex_count: atomic<u32>,
+    instance_count: u32,
+    first_vertex: u32,
+    first_instance: u32,
 };
 
 @group(0) @binding(0)
@@ -141,7 +147,7 @@ var<storage, read> buf_y: array<f64>;
 var<storage, read_write> out_vertices: array<VertexRaw>;
 
 @group(0) @binding(3)
-var<storage, read_write> counter: Counter;
+var<storage, read_write> indirect: IndirectArgs;
 
 @group(0) @binding(4)
 var<uniform> params: LineParams;
@@ -200,7 +206,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let thick = params.line_width > 1.0;
     if (!thick) {
-        let base = atomicAdd(&(counter.value), 2u);
+        let base = atomicAdd(&(indirect.vertex_count), 2u);
         write_vertex(base + 0u, p0, params.color);
         write_vertex(base + 1u, p1, params.color);
         return;
@@ -218,7 +224,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let v2 = p1 - offset;
     let v3 = p0 - offset;
 
-    let base = atomicAdd(&(counter.value), 6u);
+    let base = atomicAdd(&(indirect.vertex_count), 6u);
     write_vertex(base + 0u, v0, params.color);
     write_vertex(base + 1u, v1, params.color);
     write_vertex(base + 2u, v2, params.color);

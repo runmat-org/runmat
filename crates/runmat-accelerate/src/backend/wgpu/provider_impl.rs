@@ -61,7 +61,7 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering as AtomicOrdering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::info_span;
 use wgpu::util::DeviceExt;
@@ -1917,6 +1917,52 @@ fn rng_state() -> &'static Mutex<u64> {
 static NEXT_SUBMISSION_ID: AtomicU32 = AtomicU32::new(1);
 
 impl WgpuProvider {
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn map_readback_bytes(
+        &self,
+        staging: wgpu::Buffer,
+        size_bytes: u64,
+        context: &str,
+    ) -> Result<Vec<u8>> {
+        let size_usize = usize::try_from(size_bytes)
+            .map_err(|_| anyhow!("{context}: readback size overflow"))?;
+        let slice = staging.slice(..);
+        let (tx, rx) = oneshot::channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| {
+            let _ = tx.send(res);
+        });
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.device.poll(wgpu::Maintain::Wait);
+        }
+        let map_result = rx
+            .await
+            .map_err(|_| anyhow!("{context}: map_async callback dropped"))?;
+        map_result.map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
+        let data = slice.get_mapped_range();
+        let mut out = vec![0u8; size_usize];
+        out.copy_from_slice(&data);
+        drop(data);
+        staging.unmap();
+        Ok(out)
+    }
+
+    fn map_readback_bytes_sync(
+        &self,
+        staging: wgpu::Buffer,
+        size_bytes: u64,
+        context: &str,
+    ) -> Result<Vec<u8>> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (staging, size_bytes);
+            return Err(anyhow!("{context}: readback requires async path on wasm"));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            block_on(self.map_readback_bytes(staging, size_bytes, context))
+        }
+    }
     const BUFFER_RESIDENCY_MAX_PER_KEY: usize = 8;
     const IMAGE_NORMALIZE_AUTOTUNE_VERSION: u8 = 1;
     const IMAGE_NORMALIZE_STREAM_COLD_CAP: u32 = 8;
@@ -3446,21 +3492,10 @@ impl WgpuProvider {
         encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging, 0, staging_size);
         self.submit(encoder);
 
-        let slice = staging.slice(..);
-        let (tx, rx) = mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| {
-            let _ = tx.send(res);
-        });
-        self.device.poll(wgpu::Maintain::Wait);
-        rx.recv()
-            .map_err(|_| anyhow!("bandwidth: map_async callback dropped"))?
-            .map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
-        let mapped = slice.get_mapped_range();
-        let words: &[u32] = cast_slice(&mapped);
+        let bytes = self.map_readback_bytes_sync(staging, staging_size, "bandwidth")?;
+        let words: &[u32] = cast_slice(&bytes);
         let lower = words.first().copied().unwrap_or(0);
         let upper = words.get(1).copied().unwrap_or(0);
-        drop(mapped);
-        staging.unmap();
 
         Ok(ProviderBandwidth { lower, upper })
     }
@@ -4991,22 +5026,11 @@ impl WgpuProvider {
             });
         encoder.copy_buffer_to_buffer(error_buffer.as_ref(), 0, &staging, 0, error_size);
         self.submit(encoder);
-        let slice = staging.slice(..);
-        let (tx, rx) = mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| {
-            let _ = tx.send(res);
-        });
-        self.device.poll(wgpu::Maintain::Wait);
-        rx.recv()
-            .map_err(|_| anyhow!("failed to receive map_async result"))?
-            .map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
-        let mapped = slice.get_mapped_range();
-        let words: &[u32] = cast_slice(&mapped);
+        let bytes = self.map_readback_bytes_sync(staging, error_size, "sub2ind")?;
+        let words: &[u32] = cast_slice(&bytes);
         let code = words.first().copied().unwrap_or(0);
         let dim_word = words.get(1).copied().unwrap_or(0);
         let extra = words.get(2).copied().unwrap_or(0);
-        drop(mapped);
-        staging.unmap();
 
         if code != 0 {
             let dim_index = dim_word.max(1) as usize;
@@ -5201,20 +5225,9 @@ impl WgpuProvider {
             });
         encoder.copy_buffer_to_buffer(error_buffer.as_ref(), 0, &staging, 0, error_size);
         self.submit(encoder);
-        let slice = staging.slice(..);
-        let (tx, rx) = mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| {
-            let _ = tx.send(res);
-        });
-        self.device.poll(wgpu::Maintain::Wait);
-        rx.recv()
-            .map_err(|_| anyhow!("failed to receive map_async result"))?
-            .map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
-        let mapped = slice.get_mapped_range();
-        let words: &[u32] = cast_slice(&mapped);
+        let bytes = self.map_readback_bytes_sync(staging, error_size, "ind2sub")?;
+        let words: &[u32] = cast_slice(&bytes);
         let code = words.first().copied().unwrap_or(0);
-        drop(mapped);
-        staging.unmap();
 
         if code != 0 {
             let err = match code {
@@ -13254,20 +13267,9 @@ impl WgpuProvider {
                 });
         copy_encoder.copy_buffer_to_buffer(&count_storage, 0, &count_staging, 0, 8);
         self.submit(copy_encoder);
-        let slice = count_staging.slice(..8);
-        let (tx, rx) = mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| {
-            let _ = tx.send(res);
-        });
-        self.device.poll(wgpu::Maintain::Wait);
-        rx.recv()
-            .map_err(|_| anyhow!("map_async callback dropped"))?
-            .map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
-        let mapped = slice.get_mapped_range();
-        let counts: &[u32] = cast_slice(&mapped);
+        let bytes = self.map_readback_bytes_sync(count_staging, 8, "find")?;
+        let counts: &[u32] = cast_slice(&bytes);
         let count = counts.first().copied().unwrap_or(0) as usize;
-        drop(mapped);
-        count_staging.unmap();
 
         let shape = vec![count, 1];
         let linear = self.register_existing_buffer(indices_buffer, shape.clone(), count);
@@ -16204,20 +16206,9 @@ impl AccelProvider for WgpuProvider {
         encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging, 0, staging_size);
         self.submit(encoder);
 
-        let slice = staging.slice(..);
-        let (tx, rx) = mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| {
-            let _ = tx.send(res);
-        });
-        self.device.poll(wgpu::Maintain::Wait);
-        rx.recv()
-            .map_err(|_| anyhow!("issymmetric: map_async callback dropped"))?
-            .map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
-        let mapped = slice.get_mapped_range();
-        let words: &[u32] = cast_slice(&mapped);
+        let bytes = self.map_readback_bytes_sync(staging, staging_size, "issymmetric")?;
+        let words: &[u32] = cast_slice(&bytes);
         let flag = words.first().copied().unwrap_or(0);
-        drop(mapped);
-        staging.unmap();
 
         Ok(flag != 0)
     }
@@ -16280,28 +16271,18 @@ impl AccelProvider for WgpuProvider {
             });
         encoder.copy_buffer_to_buffer(entry.buffer.as_ref(), total_bytes, &staging, 0, elem_size);
         self.submit(encoder);
-        let slice = staging.slice(..);
-        let (tx, rx) = mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| {
-            let _ = tx.send(res);
-        });
-        self.device.poll(wgpu::Maintain::Wait);
-        rx.recv()
-            .map_err(|_| anyhow!("read_scalar: map_async dropped"))?
-            .map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
-        let mapped = slice.get_mapped_range();
+        let bytes =
+            self.map_readback_bytes_sync(staging, elem_size, "read_scalar")?;
         let value = match entry.precision {
             NumericPrecision::F64 => {
-                let words: &[f64] = cast_slice(&mapped);
+                let words: &[f64] = cast_slice(&bytes);
                 words.first().copied().unwrap_or(0.0)
             }
             NumericPrecision::F32 => {
-                let words: &[f32] = cast_slice(&mapped);
+                let words: &[f32] = cast_slice(&bytes);
                 words.first().copied().unwrap_or(0.0) as f64
             }
         };
-        drop(mapped);
-        staging.unmap();
         Ok(value)
     }
 

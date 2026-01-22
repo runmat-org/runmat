@@ -20,13 +20,14 @@ use crate::builtins::common::spec::{
 };
 
 use super::bar::apply_bar_style;
-use super::common::{gather_tensor_from_gpu, numeric_vector, value_as_f64};
-use super::gpu_helpers::axis_bounds;
+use super::common::{numeric_vector, value_as_f64};
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarStyle, BarStyleDefaults};
 
 use crate::{BuiltinResult, RuntimeError};
+
+use crate::builtins::plotting::gpu_helpers::{axis_bounds_async, gather_tensor_from_gpu_async};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -279,7 +280,7 @@ impl HistWeightsInput {
         }
     }
 
-    fn resolve_for_cpu(
+    async fn resolve_for_cpu_async(
         &self,
         context: &'static str,
         sample_len: usize,
@@ -292,7 +293,7 @@ impl HistWeightsInput {
                 Ok((Some(values), total))
             }
             HistWeightsInput::Gpu(handle) => {
-                let tensor = gather_tensor_from_gpu(handle.clone(), context)?;
+                let tensor = gather_tensor_from_gpu_async(handle.clone(), context).await?;
                 let values = numeric_vector(tensor);
                 let total = values.iter().copied().sum::<f64>();
                 Ok((Some(values), total))
@@ -358,14 +359,14 @@ impl HistWeightsInput {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::hist"
 )]
-pub fn hist_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let evaluation = evaluate(data, &rest)?;
+pub async fn hist_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let evaluation = evaluate_async(data, &rest).await?;
     evaluation.render_plot()?;
     Ok(evaluation.counts_value())
 }
 
 /// Evaluate the histogram inputs once so renderers and MATLAB outputs share the same data.
-pub fn evaluate(data: Value, rest: &[Value]) -> BuiltinResult<HistEvaluation> {
+pub async fn evaluate_async(data: Value, rest: &[Value]) -> BuiltinResult<HistEvaluation> {
     let mut input = Some(HistInput::from_value(data)?);
     let sample_len = input.as_ref().map(|value| value.len()).unwrap_or(0);
     let (bin_options, normalization, style_args, weights_value) =
@@ -381,14 +382,16 @@ pub fn evaluate(data: Value, rest: &[Value]) -> BuiltinResult<HistEvaluation> {
     let computation = if !bar_style.requires_cpu_path() {
         if let Some(handle) = input.as_ref().and_then(|value| value.gpu_handle()) {
             if bin_options.is_uniform() {
-                match build_histogram_gpu_chart(
+                match build_histogram_gpu_chart_async(
                     handle,
                     &bin_options,
                     sample_len,
                     normalization,
                     &bar_style,
                     &weights_input,
-                ) {
+                )
+                .await
+                {
                     Ok(chart) => Some(chart),
                     Err(err) => {
                         warn!("hist GPU path unavailable: {err}");
@@ -409,10 +412,14 @@ pub fn evaluate(data: Value, rest: &[Value]) -> BuiltinResult<HistEvaluation> {
         Some(chart) => chart,
         None => {
             let data_arg = input.take().expect("hist input consumed once");
-            let tensor = data_arg.into_tensor("hist")?;
+            let tensor = match data_arg {
+                HistInput::Host(tensor) => tensor,
+                HistInput::Gpu(handle) => gather_tensor_from_gpu_async(handle, "hist").await?,
+            };
             let samples = numeric_vector(tensor);
-            let (weight_values, total_weight) =
-                weights_input.resolve_for_cpu("hist weights", sample_len)?;
+            let (weight_values, total_weight) = weights_input
+                .resolve_for_cpu_async("hist weights", sample_len)
+                .await?;
             build_histogram_chart(
                 samples,
                 &bin_options,
@@ -1155,7 +1162,7 @@ fn apply_normalization(
     }
 }
 
-fn build_histogram_gpu_chart(
+async fn build_histogram_gpu_chart_async(
     values: &GpuTensorHandle,
     bin_options: &HistBinOptions,
     sample_len: usize,
@@ -1177,7 +1184,7 @@ fn build_histogram_gpu_chart(
     let sample_count_u32 = u32::try_from(exported.len)
         .map_err(|_| hist_err("hist: sample count exceeds supported range"))?;
     let gpu_weights = weights.to_gpu_weights(sample_len)?;
-    let (min_value_f32, max_value_f32) = axis_bounds(values, "hist")?;
+    let (min_value_f32, max_value_f32) = axis_bounds_async(values, "hist").await?;
     let stats = HistDataStats {
         min: Some(min_value_f32 as f64),
         max: Some(max_value_f32 as f64),
@@ -1223,6 +1230,7 @@ fn build_histogram_gpu_chart(
         &histogram_params,
         normalization_mode,
     )
+    .await
     .map_err(|e| hist_err(format!("hist: failed to build GPU histogram counts: {e}")))?;
 
     let HistogramGpuOutput {
@@ -1294,6 +1302,7 @@ fn build_histogram_gpu_chart(
         bar_inputs.values_buffer.as_ref(),
         bin_count,
     )
+    .await
     .map_err(|e| hist_err(format!("hist: failed to read GPU histogram counts: {e}")))?;
     let counts: Vec<f64> = counts_f32.iter().map(|v| *v as f64).collect();
 
@@ -1352,12 +1361,6 @@ impl HistInput {
         }
     }
 
-    fn into_tensor(self, context: &'static str) -> BuiltinResult<Tensor> {
-        match self {
-            Self::Host(tensor) => Ok(tensor),
-            Self::Gpu(handle) => gather_tensor_from_gpu(handle, context),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1365,6 +1368,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
     use crate::RuntimeError;
+    use futures::executor::block_on;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -1394,7 +1398,7 @@ pub(crate) mod tests {
         setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[1.0, 2.0, 3.0, 4.0]));
         let bins = vec![Value::from(2.0)];
-        let result = hist_builtin(data, bins);
+        let result = block_on(hist_builtin(data, bins));
         if let Err(flow) = result {
             assert_plotting_unavailable(&flow);
         }
@@ -1406,7 +1410,7 @@ pub(crate) mod tests {
         setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0, 1.5]));
         let centers = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0]));
-        let result = hist_builtin(data, vec![centers]);
+        let result = block_on(hist_builtin(data, vec![centers]));
         if let Err(flow) = result {
             assert_plotting_unavailable(&flow);
         }
@@ -1417,10 +1421,10 @@ pub(crate) mod tests {
     fn hist_accepts_probability_normalization() {
         setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
-        let result = hist_builtin(
+        let result = block_on(hist_builtin(
             data,
             vec![Value::from(3.0), Value::String("probability".into())],
-        );
+        ));
         if let Err(flow) = result {
             assert_plotting_unavailable(&flow);
         }
@@ -1431,7 +1435,7 @@ pub(crate) mod tests {
     fn hist_accepts_string_only_normalization() {
         setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
-        let result = hist_builtin(data, vec![Value::String("pdf".into())]);
+        let result = block_on(hist_builtin(data, vec![Value::String("pdf".into())]));
         if let Err(flow) = result {
             assert_plotting_unavailable(&flow);
         }
@@ -1442,13 +1446,13 @@ pub(crate) mod tests {
     fn hist_accepts_normalization_name_value_pair() {
         setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
-        let result = hist_builtin(
+        let result = block_on(hist_builtin(
             data,
             vec![
                 Value::String("Normalization".into()),
                 Value::String("probability".into()),
             ],
-        );
+        ));
         if let Err(flow) = result {
             assert_plotting_unavailable(&flow);
         }
@@ -1460,7 +1464,10 @@ pub(crate) mod tests {
         setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.1, 0.4, 0.7]));
         let edges = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
-        let result = hist_builtin(data, vec![Value::String("BinEdges".into()), edges]);
+        let result = block_on(hist_builtin(
+            data,
+            vec![Value::String("BinEdges".into()), edges],
+        ));
         if let Err(flow) = result {
             assert_plotting_unavailable(&flow);
         }
@@ -1471,7 +1478,7 @@ pub(crate) mod tests {
     fn hist_evaluate_returns_counts_and_centers() {
         setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.0, 0.2, 0.8, 1.0]));
-        let eval = evaluate(data, &[]).expect("hist evaluate");
+        let eval = block_on(evaluate_async(data, &[])).expect("hist evaluate");
         let counts = match eval.counts_value() {
             Value::Tensor(tensor) => tensor.data,
             other => panic!("unexpected value: {other:?}"),
@@ -1490,7 +1497,7 @@ pub(crate) mod tests {
         setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0, 1.5]));
         let args = vec![Value::String("NumBins".into()), Value::Num(4.0)];
-        let eval = evaluate(data, &args).expect("hist evaluate");
+        let eval = block_on(evaluate_async(data, &args)).expect("hist evaluate");
         let centers = match eval.centers_value() {
             Value::Tensor(tensor) => tensor.data,
             other => panic!("unexpected centers: {other:?}"),
@@ -1509,7 +1516,7 @@ pub(crate) mod tests {
             Value::String("BinLimits".into()),
             Value::Tensor(tensor_from(&[0.0, 1.0])),
         ];
-        let eval = evaluate(data, &args).expect("hist evaluate");
+        let eval = block_on(evaluate_async(data, &args)).expect("hist evaluate");
         let centers = match eval.centers_value() {
             Value::Tensor(tensor) => tensor.data,
             other => panic!("unexpected centers: {other:?}"),
@@ -1527,7 +1534,7 @@ pub(crate) mod tests {
             Value::String("BinMethod".into()),
             Value::String("sqrt".into()),
         ];
-        let eval = evaluate(data, &args).expect("hist evaluate");
+        let eval = block_on(evaluate_async(data, &args)).expect("hist evaluate");
         let centers = match eval.centers_value() {
             Value::Tensor(tensor) => tensor.data,
             other => panic!("unexpected centers: {other:?}"),
