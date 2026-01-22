@@ -363,9 +363,12 @@ export default function BlogPostPage({ params }: { params: Promise<{ slug: strin
     return dateString;
   };
 
+  const baseUrl = "https://runmat.org";
+  const canonicalUrl = post.frontmatter.canonical ?? `${baseUrl}/blog/${post.slug}`;
   const fallbackJsonLd: JsonLdObject = {
     "@context": "https://schema.org",
     "@type": "Article",
+    "@id": `${canonicalUrl}#article`,
     headline: post.frontmatter.title,
     description: post.frontmatter.description,
     datePublished: post.frontmatter.date,
@@ -376,10 +379,10 @@ export default function BlogPostPage({ params }: { params: Promise<{ slug: strin
       ...(author.url ? { url: author.url } : {}),
     })),
     publisher: {
-      "@type": "Organization",
-      name: "RunMat",
+      "@id": "https://runmat.org/#organization",
     },
-    ...(post.frontmatter.canonical ? { mainEntityOfPage: post.frontmatter.canonical } : {}),
+    mainEntityOfPage: { "@id": canonicalUrl },
+    isPartOf: { "@id": "https://runmat.org/#website" },
     ...(post.frontmatter.image ? { image: post.frontmatter.image } : {}),
   };
 

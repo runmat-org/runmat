@@ -72,17 +72,20 @@ export function builtinJsonLD(slug: string): string {
                 "url": `https://runmat.org/docs/reference/builtins/${builtin?.title}`,
                 "name": `${builtin?.title} - RunMat Reference`,
                 "isPartOf": {"@id": "https://runmat.org/#website"},
+                "author": {"@id": "https://runmat.org/#organization"},
+                "publisher": {"@id": "https://runmat.org/#organization"},
                 "primaryImageOfPage": {
                     "@type": "ImageObject",
                     "url": "https://web.runmatstatic.com/runmat-sandbox-dark.png"
                 },
-                "breadcrumb": {"@id": "#breadcrumbs"},
+                "breadcrumb": {"@id": `https://runmat.org/docs/reference/builtins/${builtin?.title}#breadcrumbs`},
                 "mainEntity": {"@id": "#article"}
             },
 
 
             {
                 "@type": "BreadcrumbList",
+                "@id": `https://runmat.org/docs/reference/builtins/${builtin?.title}#breadcrumbs`,
                 "itemListElement": [
                     {
                         "@type": "ListItem",
@@ -124,12 +127,8 @@ export function builtinJsonLD(slug: string): string {
                     "alternateName": "RunMat"
                 },
 
-                "author": {
-                    "@type": "Organization",
-                    "name": "RunMat",
-                    "url": "https://runmat.org",
-                    "alternateName": ["RunMat by Dystr", "Dystr"]
-                },
+                "author": {"@id": "https://runmat.org/#organization"},
+                "publisher": {"@id": "https://runmat.org/#organization"},
 
                 "about": {
                     "@type": "DefinedTerm",

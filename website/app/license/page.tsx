@@ -9,49 +9,69 @@ export const metadata: Metadata = {
   description: "RunMat is licensed under the MIT License with Attribution Requirements and Commercial Scientific Software Company Copyleft Provisions. Free for everyone with clear terms.",
 };
 
-const faqSchema = {
+const jsonLd = {
   "@context": "https://schema.org",
-  "@type": "FAQPage",
-  mainEntity: [
+  "@graph": [
     {
-      "@type": "Question",
-      name: "Can I use RunMat for free?",
-      acceptedAnswer: {
-        "@type": "Answer",
-        text: "Yes! RunMat is completely free for individual researchers and scientists, academic institutions and educational organizations, students for learning and coursework, most commercial companies and startups, open source projects, and government agencies and non-profits.",
-      },
+      "@type": "WebPage",
+      "@id": "https://runmat.org/license#webpage",
+      url: "https://runmat.org/license",
+      name: "RunMat License",
+      description:
+        "RunMat is licensed under the MIT License with Attribution Requirements and Commercial Scientific Software Company Copyleft Provisions. Free for everyone with clear terms.",
+      inLanguage: "en",
+      isPartOf: { "@id": "https://runmat.org/#website" },
+      author: { "@id": "https://runmat.org/#organization" },
+      publisher: { "@id": "https://runmat.org/#organization" },
+      mainEntity: { "@id": "https://runmat.org/license#faq" },
     },
     {
-      "@type": "Question",
-      name: "What does attribution required mean?",
-      acceptedAnswer: {
-        "@type": "Answer",
-        text: "Any distribution or modification of RunMat must credit 'RunMat by Dystr'. This includes startup messages or about dialogs, documentation and README files, package names or project titles, and web interfaces showing 'Powered by RunMat by Dystr'.",
-      },
-    },
-    {
-      "@type": "Question",
-      name: "What are the special rules for scientific software companies?",
-      acceptedAnswer: {
-        "@type": "Answer",
-        text: "Companies whose primary business involves developing, licensing, or selling scientific computing software (like MathWorks, Ansys, COMSOL, etc.) must distribute any RunMat modifications as open source under the same license. This does NOT apply to companies using RunMat without modification, companies whose primary business is not scientific computing software, internal modifications not distributed to third parties, or academic institutions.",
-      },
-    },
-    {
-      "@type": "Question",
-      name: "Can I create proprietary software that uses RunMat?",
-      acceptedAnswer: {
-        "@type": "Answer",
-        text: "Yes! Most users can create proprietary software that uses or embeds RunMat. The license only requires that if you distribute or modify RunMat itself, you provide attribution to 'RunMat by Dystr', include the license notice, and share any modifications to RunMat itself if you're a scientific software company. Your own code that calls RunMat functions remains proprietary.",
-      },
-    },
-    {
-      "@type": "Question",
-      name: "How does this compare to other open source licenses?",
-      acceptedAnswer: {
-        "@type": "Answer",
-        text: "RunMat's license is based on the MIT License with two additional requirements: Attribution (similar to BSD licenses, ensures credit is maintained) and Targeted copyleft (only applies to large scientific software companies, ensuring community contributions). For most users, it's as permissive as MIT.",
-      },
+      "@type": "FAQPage",
+      "@id": "https://runmat.org/license#faq",
+      mainEntityOfPage: { "@id": "https://runmat.org/license#webpage" },
+      publisher: { "@id": "https://runmat.org/#organization" },
+      mainEntity: [
+        {
+          "@type": "Question",
+          name: "Can I use RunMat for free?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "Yes! RunMat is completely free for individual researchers and scientists, academic institutions and educational organizations, students for learning and coursework, most commercial companies and startups, open source projects, and government agencies and non-profits.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "What does attribution required mean?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "Any distribution or modification of RunMat must credit 'RunMat by Dystr'. This includes startup messages or about dialogs, documentation and README files, package names or project titles, and web interfaces showing 'Powered by RunMat by Dystr'.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "What are the special rules for scientific software companies?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "Companies whose primary business involves developing, licensing, or selling scientific computing software (like MathWorks, Ansys, COMSOL, etc.) must distribute any RunMat modifications as open source under the same license. This does NOT apply to companies using RunMat without modification, companies whose primary business is not scientific computing software, internal modifications not distributed to third parties, or academic institutions.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "Can I create proprietary software that uses RunMat?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "Yes! Most users can create proprietary software that uses or embeds RunMat. The license only requires that if you distribute or modify RunMat itself, you provide attribution to 'RunMat by Dystr', include the license notice, and share any modifications to RunMat itself if you're a scientific software company. Your own code that calls RunMat functions remains proprietary.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "How does this compare to other open source licenses?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "RunMat's license is based on the MIT License with two additional requirements: Attribution (similar to BSD licenses, ensures credit is maintained) and Targeted copyleft (only applies to large scientific software companies, ensuring community contributions). For most users, it's as permissive as MIT.",
+          },
+        },
+      ],
     },
   ],
 };
@@ -61,7 +81,7 @@ export default function LicensePage() {
     <div className="min-h-screen bg-background">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }}
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
       <div className="container mx-auto max-w-4xl px-4 md:px-6 py-16 md:py-24">
         
