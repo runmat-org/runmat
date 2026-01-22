@@ -166,8 +166,7 @@ export function builtinJsonLD(slug: string): string {
                     "RunMat CLI"
                 ],
 
-
-                "url": `https://github.com/runmat-org/runmat/blob/main/${builtin?.title}`
+                "url": builtin?.source?.url
             },
 
             {
