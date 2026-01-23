@@ -18,7 +18,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 1,
     },
     {
-      url: `${baseUrl}/matlab-online`,
+      url: `${baseUrl}/run-matlab-online`,
       lastModified: currentDate,
       changeFrequency: 'daily',
       priority: 0.9,

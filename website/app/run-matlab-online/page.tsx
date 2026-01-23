@@ -22,7 +22,7 @@ export const metadata: Metadata = {
   title: "Free Online MATLAB Alternative with GPU Acceleration",
   description:
     "Run MATLAB-style code online with RunMat. Browser-native execution, GPU acceleration, and no license required. Try the sandbox in seconds.",
-  alternates: { canonical: "https://runmat.org/matlab-online" },
+  alternates: { canonical: "https://runmat.org/run-matlab-online" },
 };
 
 const faqItems = [
@@ -115,38 +115,38 @@ const jsonLd = {
     },
     {
       "@type": "WebPage",
-      "@id": "https://runmat.org/matlab-online#webpage",
-      url: "https://runmat.org/matlab-online",
+      "@id": "https://runmat.org/run-matlab-online#webpage",
+      url: "https://runmat.org/run-matlab-online",
       name: "Free Online MATLAB Alternative with GPU Acceleration",
       description:
         "Run MATLAB-style code online with RunMat. Browser-native execution, GPU acceleration, and no license required. Try the sandbox in seconds.",
       inLanguage: "en",
       isPartOf: { "@id": "https://runmat.org/#website" },
-      breadcrumb: { "@id": "https://runmat.org/matlab-online#breadcrumb" },
+      breadcrumb: { "@id": "https://runmat.org/run-matlab-online#breadcrumb" },
       author: { "@id": "https://runmat.org/#organization" },
       publisher: { "@id": "https://runmat.org/#organization" },
       mainEntity: [
-        { "@id": "https://runmat.org/matlab-online#faq" },
-        { "@id": "https://runmat.org/matlab-online#howto" },
-        { "@id": "https://runmat.org/matlab-online#software" },
+        { "@id": "https://runmat.org/run-matlab-online#faq" },
+        { "@id": "https://runmat.org/run-matlab-online#howto" },
+        { "@id": "https://runmat.org/run-matlab-online#software" },
       ],
     },
     {
       "@type": "BreadcrumbList",
-      "@id": "https://runmat.org/matlab-online#breadcrumb",
+      "@id": "https://runmat.org/run-matlab-online#breadcrumb",
       itemListElement: [
         { "@type": "ListItem", position: 1, name: "Home", item: "https://runmat.org" },
         {
           "@type": "ListItem",
           position: 2,
           name: "MATLAB Online",
-          item: "https://runmat.org/matlab-online",
+          item: "https://runmat.org/run-matlab-online",
         },
       ],
     },
     {
       "@type": "SoftwareApplication",
-      "@id": "https://runmat.org/matlab-online#software",
+      "@id": "https://runmat.org/run-matlab-online#software",
       name: "RunMat",
       description:
         "RunMat is a high-performance, open-source runtime for math that runs MATLAB-syntax code in the browser with GPU acceleration and no license required.",
@@ -157,12 +157,12 @@ const jsonLd = {
       url: "https://runmat.org/sandbox",
       author: { "@id": "https://runmat.org/#organization" },
       publisher: { "@id": "https://runmat.org/#organization" },
-      mainEntityOfPage: { "@id": "https://runmat.org/matlab-online#webpage" },
+      mainEntityOfPage: { "@id": "https://runmat.org/run-matlab-online#webpage" },
     },
     {
       "@type": "FAQPage",
-      "@id": "https://runmat.org/matlab-online#faq",
-      mainEntityOfPage: { "@id": "https://runmat.org/matlab-online#webpage" },
+      "@id": "https://runmat.org/run-matlab-online#faq",
+      mainEntityOfPage: { "@id": "https://runmat.org/run-matlab-online#webpage" },
       mainEntity: faqItems.map(item => ({
         "@type": "Question",
         name: item.question,
@@ -174,9 +174,9 @@ const jsonLd = {
     },
     {
       "@type": "HowTo",
-      "@id": "https://runmat.org/matlab-online#howto",
+      "@id": "https://runmat.org/run-matlab-online#howto",
       name: "Run MATLAB-style code in your browser",
-      mainEntityOfPage: { "@id": "https://runmat.org/matlab-online#webpage" },
+      mainEntityOfPage: { "@id": "https://runmat.org/run-matlab-online#webpage" },
       step: [
         {
           "@type": "HowToStep",
