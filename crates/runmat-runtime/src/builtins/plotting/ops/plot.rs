@@ -21,7 +21,8 @@ use super::state::{
 };
 use super::style::{
     looks_like_option_name, marker_metadata_from_appearance, parse_line_style_args,
-    value_as_string, LineAppearance, LineStyleParseOptions, DEFAULT_LINE_MARKER_SIZE,
+    value_as_string, LineAppearance, LineStyleParseOptions, MarkerAppearance, MarkerColor,
+    MarkerKind, DEFAULT_LINE_MARKER_SIZE,
 };
 use std::collections::VecDeque;
 use std::convert::TryFrom;
@@ -188,7 +189,7 @@ pub async fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Builti
         let (x_tensor, y_tensor) = data.into_tensors_async("plot").await?;
         let (x_vals, y_vals) = numeric_pair(x_tensor, y_tensor, "plot")?;
         plots.push(build_line_plot(x_vals, y_vals, &label, &appearance)?);
-    }
+        }
 
     let mut plots_opt = Some(plots);
     let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes_index| {
@@ -209,6 +210,7 @@ fn build_line_plot(
     label: &str,
     appearance: &LineAppearance,
 ) -> BuiltinResult<LinePlot> {
+    let point_count = x.len();
     let mut plot = LinePlot::new(x, y)
         .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot: {e}")))?
         .with_label(label)
@@ -217,7 +219,7 @@ fn build_line_plot(
             appearance.line_width,
             appearance.line_style,
         );
-    apply_marker_metadata(&mut plot, appearance);
+    apply_marker_metadata(&mut plot, appearance, point_count);
     Ok(plot)
 }
 
@@ -341,8 +343,24 @@ fn apply_line_style_order(plans: &mut [SeriesRenderPlan], order: &[LineStyle]) {
     }
 }
 
-fn apply_marker_metadata(plot: &mut LinePlot, appearance: &LineAppearance) {
-    if let Some(marker) = marker_metadata_from_appearance(appearance) {
+fn apply_marker_metadata(plot: &mut LinePlot, appearance: &LineAppearance, point_count: usize) {
+    let marker = marker_metadata_from_appearance(appearance).or_else(|| {
+        if point_count == 1 {
+            // MATLAB renders a lone point for plot(x, y) when x/y have length 1. If the user
+            // didn't specify a marker, default to a small point marker so the plot isn't blank.
+            let mut temp = appearance.clone();
+            temp.marker = Some(MarkerAppearance {
+                kind: MarkerKind::Point,
+                size: Some(DEFAULT_LINE_MARKER_SIZE),
+                edge_color: MarkerColor::Auto,
+                face_color: MarkerColor::Auto,
+            });
+            marker_metadata_from_appearance(&temp)
+        } else {
+            None
+        }
+    });
+    if let Some(marker) = marker {
         plot.set_marker(Some(marker));
     }
 }

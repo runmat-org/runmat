@@ -13,7 +13,44 @@ use crate::plots::Figure;
 use log::{debug, warn};
 use std::sync::Arc;
 use thiserror::Error;
-use web_sys::HtmlCanvasElement;
+use web_sys::{HtmlCanvasElement, OffscreenCanvas};
+
+/// Canvas handle accepted by the web renderer.
+#[derive(Clone)]
+pub enum WebCanvas {
+    Html(HtmlCanvasElement),
+    Offscreen(OffscreenCanvas),
+}
+
+impl WebCanvas {
+    fn width(&self) -> u32 {
+        match self {
+            WebCanvas::Html(canvas) => canvas.width(),
+            WebCanvas::Offscreen(canvas) => canvas.width(),
+        }
+    }
+
+    fn height(&self) -> u32 {
+        match self {
+            WebCanvas::Html(canvas) => canvas.height(),
+            WebCanvas::Offscreen(canvas) => canvas.height(),
+        }
+    }
+
+    fn set_width(&self, width: u32) {
+        match self {
+            WebCanvas::Html(canvas) => canvas.set_width(width),
+            WebCanvas::Offscreen(canvas) => canvas.set_width(width),
+        }
+    }
+
+    fn set_height(&self, height: u32) {
+        match self {
+            WebCanvas::Html(canvas) => canvas.set_height(height),
+            WebCanvas::Offscreen(canvas) => canvas.set_height(height),
+        }
+    }
+}
 
 /// Configuration for the WebGPU renderer.
 #[derive(Debug, Clone)]
@@ -64,7 +101,7 @@ pub enum WebRendererError {
 /// Owns the WGPU instance/surface backing a `<canvas>` so wasm callers can
 /// render figures directly from Rust.
 pub struct WebRenderer {
-    canvas: HtmlCanvasElement,
+    canvas: WebCanvas,
     surface: wgpu::Surface<'static>,
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
@@ -79,7 +116,7 @@ pub struct WebRenderer {
 impl WebRenderer {
     /// Initialize the renderer for the provided canvas element.
     pub async fn new(
-        canvas: HtmlCanvasElement,
+        canvas: WebCanvas,
         options: WebRendererOptions,
     ) -> Result<Self, WebRendererError> {
         Self::init(canvas, options, None).await
@@ -87,7 +124,7 @@ impl WebRenderer {
 
     /// Initialize the renderer using a shared GPU context supplied by the host runtime.
     pub async fn with_shared_context(
-        canvas: HtmlCanvasElement,
+        canvas: WebCanvas,
         options: WebRendererOptions,
         context: SharedWgpuContext,
     ) -> Result<Self, WebRendererError> {
@@ -95,7 +132,7 @@ impl WebRenderer {
     }
 
     async fn init(
-        canvas: HtmlCanvasElement,
+        canvas: WebCanvas,
         options: WebRendererOptions,
         shared: Option<SharedWgpuContext>,
     ) -> Result<Self, WebRendererError> {
@@ -111,7 +148,14 @@ impl WebRenderer {
                 None,
             )
         };
-        let surface = instance.create_surface(wgpu::SurfaceTarget::Canvas(canvas.clone()))?;
+        let surface = match &canvas {
+            WebCanvas::Html(element) => {
+                instance.create_surface(wgpu::SurfaceTarget::Canvas(element.clone()))?
+            }
+            WebCanvas::Offscreen(element) => {
+                instance.create_surface(wgpu::SurfaceTarget::OffscreenCanvas(element.clone()))?
+            }
+        };
 
         let (device, queue, adapter) = if let Some(ctx) = shared_ctx {
             (ctx.device, ctx.queue, ctx.adapter)
@@ -310,6 +354,7 @@ impl WebRenderer {
 
     fn sync_renderer_config(&mut self) {
         self.plot_renderer.wgpu_renderer.surface_config = self.surface_config.clone();
+        self.plot_renderer.on_surface_config_updated();
         self.msaa_texture = None;
         let _ = self.ensure_msaa_texture();
     }
@@ -350,22 +395,28 @@ impl WebRenderer {
 }
 
 fn desired_canvas_size(
-    canvas: &HtmlCanvasElement,
+    canvas: &WebCanvas,
     override_width: Option<u32>,
     override_height: Option<u32>,
 ) -> Result<(u32, u32), WebRendererError> {
     let width = override_width.unwrap_or_else(|| canvas.width());
     let height = override_height.unwrap_or_else(|| canvas.height());
-    if width == 0 || height == 0 {
-        let rect = canvas.get_bounding_client_rect();
-        let w = rect.width().round() as u32;
-        let h = rect.height().round() as u32;
-        if w > 0 && h > 0 {
-            return Ok((w, h));
-        }
-        return Err(WebRendererError::CanvasZeroArea);
+    if width > 0 && height > 0 {
+        return Ok((width, height));
     }
-    Ok((width, height))
+    match canvas {
+        WebCanvas::Html(element) => {
+            let rect = element.get_bounding_client_rect();
+            let w = rect.width().round() as u32;
+            let h = rect.height().round() as u32;
+            if w > 0 && h > 0 {
+                Ok((w, h))
+            } else {
+                Err(WebRendererError::CanvasZeroArea)
+            }
+        }
+        WebCanvas::Offscreen(_) => Err(WebRendererError::CanvasZeroArea),
+    }
 }
 
 fn pick_surface_format(capabilities: &wgpu::SurfaceCapabilities) -> wgpu::TextureFormat {

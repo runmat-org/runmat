@@ -45,7 +45,7 @@ use runmat_plot::{
     event::{
         FigureEvent as PlotFigureEvent, FigureEventKind as PlotFigureEventKind, FigureSnapshot,
     },
-    web::{WebRenderer, WebRendererOptions},
+    web::{WebCanvas, WebRenderer, WebRendererOptions},
     SharedWgpuContext,
 };
 #[cfg(target_arch = "wasm32")]
@@ -522,7 +522,8 @@ pub fn register_fs_provider(bindings: JsValue) -> Result<(), JsValue> {
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = registerPlotCanvas)]
-pub async fn register_plot_canvas(canvas: web_sys::HtmlCanvasElement) -> Result<(), JsValue> {
+pub async fn register_plot_canvas(canvas: JsValue) -> Result<(), JsValue> {
+    let canvas = parse_web_canvas(canvas)?;
     install_canvas_renderer(None, canvas).await.map_err(|err| {
         init_error_with_details(
             InitErrorCode::PlotCanvas,
@@ -536,8 +537,9 @@ pub async fn register_plot_canvas(canvas: web_sys::HtmlCanvasElement) -> Result<
 #[wasm_bindgen(js_name = registerFigureCanvas)]
 pub async fn register_figure_canvas(
     handle: u32,
-    canvas: web_sys::HtmlCanvasElement,
+    canvas: JsValue,
 ) -> Result<(), JsValue> {
+    let canvas = parse_web_canvas(canvas)?;
     install_canvas_renderer(Some(handle), canvas)
         .await
         .map_err(|err| {
@@ -1044,10 +1046,19 @@ fn js_input_bridge(request: &InputRequest) -> InputHandlerAction {
 #[cfg(target_arch = "wasm32")]
 async fn install_canvas_renderer(
     handle: Option<u32>,
-    canvas: web_sys::HtmlCanvasElement,
+    canvas: WebCanvas,
 ) -> Result<(), JsValue> {
     init_logging_once();
     let options = WebRendererOptions::default();
+    let canvas_kind = match &canvas {
+        WebCanvas::Html(_) => "html",
+        WebCanvas::Offscreen(_) => "offscreen",
+    };
+    log::debug!(
+        "plot-web: install_canvas_renderer(handle={:?}, canvas_kind={})",
+        handle,
+        canvas_kind
+    );
     let mut renderer = match shared_webgpu_context() {
         Some(shared) => {
             WebRenderer::with_shared_context(canvas.clone(), options.clone(), shared).await
@@ -1057,18 +1068,38 @@ async fn install_canvas_renderer(
     .map_err(|err| js_error(&format!("Failed to initialize plot renderer: {err}")))?;
     match handle {
         Some(id) => {
+            log::debug!("plot-web: registering per-figure renderer for handle={id}");
             prime_renderer_with_existing_figure(id, &mut renderer);
-            runtime_detach_web_renderer(id);
+            // `install_web_renderer_for_handle` overwrites any existing renderer for this handle,
+            // which drops the previous WebRenderer (and its surface) automatically. Explicitly
+            // detaching here causes renderer flapping in the host logs and can race with
+            // follow-up render calls during registration.
             runtime_install_web_renderer_for_handle(id, renderer)
         }
         .map_err(|err| js_error(&format!("Failed to register plot renderer: {err}")))?,
         None => {
-            runtime_detach_default_renderer();
+            log::debug!("plot-web: registering default renderer");
+            // Installing a new default renderer replaces the previous one (dropping it). Avoid
+            // explicit detach to prevent transient "detached" states during init.
             runtime_install_web_renderer(renderer)
         }
         .map_err(|err| js_error(&format!("Failed to register plot renderer: {err}")))?,
     };
     Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn parse_web_canvas(canvas: JsValue) -> Result<WebCanvas, JsValue> {
+    if canvas.is_null() || canvas.is_undefined() {
+        return Err(js_error("Canvas is required"));
+    }
+    if let Ok(html) = canvas.clone().dyn_into::<web_sys::HtmlCanvasElement>() {
+        return Ok(WebCanvas::Html(html));
+    }
+    if let Ok(offscreen) = canvas.clone().dyn_into::<web_sys::OffscreenCanvas>() {
+        return Ok(WebCanvas::Offscreen(offscreen));
+    }
+    Err(js_error("Expected an HTMLCanvasElement or OffscreenCanvas"))
 }
 
 #[cfg(target_arch = "wasm32")]

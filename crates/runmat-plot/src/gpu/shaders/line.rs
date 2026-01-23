@@ -269,6 +269,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let px = buf_x[idx];
     let py = buf_y[idx];
 
+    let base = idx * 6u;
+    let corners = array<vec2<f32>, 6u>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0,  1.0)
+    );
+    for (var i: u32 = 0u; i < 6u; i = i + 1u) {
     var vertex: VertexRaw;
     vertex.data[0u] = px;
     vertex.data[1u] = py;
@@ -280,10 +290,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     vertex.data[7u] = 0.0;
     vertex.data[8u] = 0.0;
     vertex.data[9u] = params.size;
-    vertex.data[10u] = 0.0;
-    vertex.data[11u] = 0.0;
-
-    out_vertices[idx] = vertex;
+        vertex.data[10u] = corners[i].x;
+        vertex.data[11u] = corners[i].y;
+        out_vertices[base + i] = vertex;
+    }
 }
 "#;
 
@@ -322,6 +332,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let px = f32(buf_x[idx]);
     let py = f32(buf_y[idx]);
 
+    let base = idx * 6u;
+    let corners = array<vec2<f32>, 6u>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0,  1.0)
+    );
+    for (var i: u32 = 0u; i < 6u; i = i + 1u) {
     var vertex: VertexRaw;
     vertex.data[0u] = px;
     vertex.data[1u] = py;
@@ -333,9 +353,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     vertex.data[7u] = 0.0;
     vertex.data[8u] = 0.0;
     vertex.data[9u] = params.size;
-    vertex.data[10u] = 0.0;
-    vertex.data[11u] = 0.0;
-
-    out_vertices[idx] = vertex;
+        vertex.data[10u] = corners[i].x;
+        vertex.data[11u] = corners[i].y;
+        out_vertices[base + i] = vertex;
+    }
 }
 "#;

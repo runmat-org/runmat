@@ -241,8 +241,8 @@ pub fn pack_marker_vertices_from_xy(
     inputs: &LineGpuInputs,
     params: &LineGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
-    if inputs.len < 2 {
-        return Err("plot: line inputs must contain at least two points".to_string());
+    if inputs.len < 1 {
+        return Err("plot: marker inputs must contain at least one point".to_string());
     }
 
     let workgroup_size = tuning::effective_workgroup_size();
@@ -307,7 +307,9 @@ pub fn pack_marker_vertices_from_xy(
         entry_point: "main",
     });
 
-    let output_size = inputs.len as u64 * std::mem::size_of::<Vertex>() as u64;
+    // Direct point rendering expands each point into a quad (2 triangles = 6 vertices).
+    let expanded_vertices = inputs.len as u64 * 6;
+    let output_size = expanded_vertices * std::mem::size_of::<Vertex>() as u64;
     let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("line-marker-gpu-vertices"),
         size: output_size,
@@ -367,7 +369,7 @@ pub fn pack_marker_vertices_from_xy(
     }
     queue.submit(Some(encoder.finish()));
 
-    Ok(GpuVertexBuffer::new(output_buffer, inputs.len as usize))
+    Ok(GpuVertexBuffer::new(output_buffer, (inputs.len as usize) * 6))
 }
 
 fn compile_marker_shader(

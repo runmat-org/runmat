@@ -481,9 +481,10 @@ pub fn current_figure_handle() -> FigureHandle {
 }
 
 pub fn current_axes_state() -> FigureAxesState {
-    let reg = registry();
+    let mut reg = registry();
     let handle = reg.current;
-    let state = reg.figures.get(&handle).expect("current figure must exist");
+    // Ensure a default figure exists even if nothing has rendered yet (common on wasm/web).
+    let state = get_state_mut(&mut reg, handle);
     FigureAxesState {
         handle,
         rows: state.figure.axes_rows.max(1),
@@ -493,9 +494,10 @@ pub fn current_axes_state() -> FigureAxesState {
 }
 
 pub fn current_hold_enabled() -> bool {
-    let reg = registry();
+    let mut reg = registry();
     let handle = reg.current;
-    let state = reg.figures.get(&handle).expect("current figure must exist");
+    // Ensure a default figure exists even if nothing has rendered yet (common on wasm/web).
+    let state = get_state_mut(&mut reg, handle);
     *state.hold_per_axes.get(&state.active_axes).unwrap_or(&false)
 }
 

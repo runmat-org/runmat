@@ -31,6 +31,7 @@ pub(crate) mod wasm {
     }
 
     pub fn install_web_renderer(renderer: WebRenderer) -> BuiltinResult<()> {
+        debug!("plot-web: installing default renderer");
         DEFAULT_RENDERER.with(|slot| {
             *slot.borrow_mut() = Some(renderer);
         });
@@ -44,6 +45,12 @@ pub(crate) mod wasm {
         WEB_RENDERERS.with(|slot| {
             slot.borrow_mut().insert(handle, renderer);
         });
+        WEB_RENDERERS.with(|slot| {
+            let keys: Vec<u32> = slot.borrow().keys().copied().collect();
+            debug!(
+                "plot-web: installed per-figure renderer for handle={handle} (active_handles={keys:?})"
+            );
+        });
         Ok(())
     }
 
@@ -51,12 +58,17 @@ pub(crate) mod wasm {
         WEB_RENDERERS.with(|slot| {
             slot.borrow_mut().remove(&handle);
         });
+        WEB_RENDERERS.with(|slot| {
+            let keys: Vec<u32> = slot.borrow().keys().copied().collect();
+            debug!("plot-web: detached per-figure renderer for handle={handle} (active_handles={keys:?})");
+        });
     }
 
     pub fn detach_default_renderer() {
         DEFAULT_RENDERER.with(|slot| {
             slot.borrow_mut().take();
         });
+        debug!("plot-web: detached default renderer");
     }
 
     pub fn web_renderer_ready() -> bool {

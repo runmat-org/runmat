@@ -285,67 +285,67 @@ fn try_gpu_ind2sub(
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        #[cfg(all(test, feature = "wgpu"))]
-        {
-            if let Value::GpuTensor(h) = indices {
-                if h.device_id != 0 {
-                    let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-                    );
-                }
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if let Value::GpuTensor(h) = indices {
+            if h.device_id != 0 {
+                let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                    runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+                );
             }
         }
-        let provider = match runmat_accelerate_api::provider() {
-            Some(p) => p,
-            None => return Ok(None),
-        };
-        if !provider.supports_ind2sub() {
-            return Ok(None);
-        }
-        let handle = match indices {
-            Value::GpuTensor(handle) => handle,
-            _ => return Ok(None),
-        };
-        if dims.len() != strides.len() {
-            return Err(ind2sub_error("Size vector must have at least one element."));
-        }
-        if dims.iter().any(|&d| d > u32::MAX as usize)
-            || strides.iter().any(|&s| s > u32::MAX as usize)
-            || total > u32::MAX as usize
-        {
-            return Ok(None);
-        }
-        let len = if handle.shape.is_empty() {
-            1usize
-        } else {
-            handle.shape.iter().copied().product()
-        };
-        if total == 0 && len > 0 {
-            return Err(ind2sub_error(
-                "Index exceeds number of array elements. Index must not exceed 0.",
-            ));
-        }
-        if len > u32::MAX as usize {
-            return Ok(None);
-        }
-        let output_shape = if handle.shape.is_empty() {
-            vec![len, 1]
-        } else {
-            handle.shape.clone()
-        };
-        match provider.ind2sub(dims, strides, handle, total, len, &output_shape) {
-            Ok(handles) => {
-                if handles.len() != dims.len() {
-                    return Err(ind2sub_error(
-                        "ind2sub: provider returned an unexpected number of outputs.",
-                    ));
-                }
-                let values: Vec<Value> = handles.into_iter().map(Value::GpuTensor).collect();
-                make_cell(values, 1, dims.len())
-                    .map(Some)
-                    .map_err(|message| ind2sub_error(message))
+    }
+    let provider = match runmat_accelerate_api::provider() {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+    if !provider.supports_ind2sub() {
+        return Ok(None);
+    }
+    let handle = match indices {
+        Value::GpuTensor(handle) => handle,
+        _ => return Ok(None),
+    };
+    if dims.len() != strides.len() {
+        return Err(ind2sub_error("Size vector must have at least one element."));
+    }
+    if dims.iter().any(|&d| d > u32::MAX as usize)
+        || strides.iter().any(|&s| s > u32::MAX as usize)
+        || total > u32::MAX as usize
+    {
+        return Ok(None);
+    }
+    let len = if handle.shape.is_empty() {
+        1usize
+    } else {
+        handle.shape.iter().copied().product()
+    };
+    if total == 0 && len > 0 {
+        return Err(ind2sub_error(
+            "Index exceeds number of array elements. Index must not exceed 0.",
+        ));
+    }
+    if len > u32::MAX as usize {
+        return Ok(None);
+    }
+    let output_shape = if handle.shape.is_empty() {
+        vec![len, 1]
+    } else {
+        handle.shape.clone()
+    };
+    match provider.ind2sub(dims, strides, handle, total, len, &output_shape) {
+        Ok(handles) => {
+            if handles.len() != dims.len() {
+                return Err(ind2sub_error(
+                    "ind2sub: provider returned an unexpected number of outputs.",
+                ));
             }
-            Err(err) => Err(ind2sub_error(err.to_string())),
+            let values: Vec<Value> = handles.into_iter().map(Value::GpuTensor).collect();
+            make_cell(values, 1, dims.len())
+                .map(Some)
+                .map_err(|message| ind2sub_error(message))
+        }
+        Err(err) => Err(ind2sub_error(err.to_string())),
         }
     }
 }

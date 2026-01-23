@@ -498,6 +498,15 @@ impl Figure {
 
     /// Generate all render data for all visible plots
     pub fn render_data(&mut self) -> Vec<RenderData> {
+        self.render_data_with_viewport(None)
+    }
+
+    /// Generate all render data for all visible plots, optionally providing the
+    /// pixel size of the target viewport (width, height).
+    ///
+    /// Some plot types (notably thick 2D lines) need a viewport hint to convert
+    /// pixel-based style parameters (e.g. `LineWidth`) into data-space geometry.
+    pub fn render_data_with_viewport(&mut self, viewport_px: Option<(u32, u32)>) -> Vec<RenderData> {
         let mut out = Vec::new();
         for p in self.plots.iter_mut() {
             if !p.is_visible() {
@@ -512,7 +521,7 @@ impl Figure {
 
             match p {
                 PlotElement::Line(plot) => {
-                    out.push(plot.render_data());
+                    out.push(plot.render_data_with_viewport(viewport_px));
                     if let Some(marker_data) = plot.marker_render_data() {
                         out.push(marker_data);
                     }

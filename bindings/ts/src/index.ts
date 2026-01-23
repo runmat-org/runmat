@@ -512,10 +512,13 @@ interface RunMatNativeModule {
   default: (module?: WasmInitInput | Promise<WasmInitInput>) => Promise<unknown>;
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
   registerFsProvider?: (provider: RunMatFilesystemProvider) => void;
-  registerPlotCanvas?: (canvas: HTMLCanvasElement) => Promise<void>;
+  registerPlotCanvas?: (canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<void>;
   deregisterPlotCanvas?: () => void;
   plotRendererReady?: () => boolean;
-  registerFigureCanvas?: (handle: number, canvas: HTMLCanvasElement) => Promise<void>;
+  registerFigureCanvas?: (
+    handle: number,
+    canvas: HTMLCanvasElement | OffscreenCanvas
+  ) => Promise<void>;
   resizeFigureCanvas?: (handle: number, width: number, height: number) => void;
   renderCurrentFigureScene?: (handle: number) => void;
   deregisterFigureCanvas?: (handle: number) => void;
@@ -639,7 +642,10 @@ export async function plotRendererReady(): Promise<boolean> {
   return native.plotRendererReady();
 }
 
-export async function registerFigureCanvas(handle: number, canvas: HTMLCanvasElement): Promise<void> {
+export async function registerFigureCanvas(
+  handle: number,
+  canvas: HTMLCanvasElement | OffscreenCanvas
+): Promise<void> {
   const native = await loadNativeModule();
   if (typeof native.registerFigureCanvas !== "function") {
     throw new Error("The loaded runmat-wasm module does not support figure-specific canvases yet.");
