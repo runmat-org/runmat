@@ -88,10 +88,6 @@
     {
       "label": "timeit",
       "url": "./timeit"
-    },
-    {
-      "label": "profile",
-      "url": "./profile"
     }
   ],
   "source": {

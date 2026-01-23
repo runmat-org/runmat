@@ -117,10 +117,6 @@
       "url": "./string"
     },
     {
-      "label": "convertStringsToChars",
-      "url": "./convertStringsToChars"
-    },
-    {
       "label": "gpuArray",
       "url": "./gpuarray"
     }

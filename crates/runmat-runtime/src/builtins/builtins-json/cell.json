@@ -103,10 +103,6 @@
   ],
   "links": [
     {
-      "label": "num2cell",
-      "url": "./num2cell"
-    },
-    {
       "label": "cellfun",
       "url": "./cellfun"
     },

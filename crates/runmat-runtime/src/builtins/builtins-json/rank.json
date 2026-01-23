@@ -135,10 +135,6 @@
       "url": "./det"
     },
     {
-      "label": "null",
-      "url": "./null"
-    },
-    {
       "label": "gpuArray",
       "url": "./gpuarray"
     },

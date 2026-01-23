@@ -109,10 +109,6 @@
   ],
   "links": [
     {
-      "label": "strsplit",
-      "url": "./strsplit"
-    },
-    {
       "label": "replace",
       "url": "./replace"
     },

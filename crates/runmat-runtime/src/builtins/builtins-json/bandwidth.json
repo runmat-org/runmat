@@ -129,10 +129,6 @@
       "url": "./triu"
     },
     {
-      "label": "spdiags",
-      "url": "./spdiags"
-    },
-    {
       "label": "issymmetric",
       "url": "./issymmetric"
     },

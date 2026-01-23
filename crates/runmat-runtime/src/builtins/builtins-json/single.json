@@ -126,10 +126,6 @@
       "url": "./gather"
     },
     {
-      "label": "logical",
-      "url": "./ops"
-    },
-    {
       "label": "single (MathWorks)",
       "url": "https://www.mathworks.com/help/matlab/ref/single.html"
     }

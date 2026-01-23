@@ -103,10 +103,6 @@
       "url": "./struct"
     },
     {
-      "label": "isprop",
-      "url": "./isprop"
-    },
-    {
       "label": "getfield",
       "url": "./getfield"
     },

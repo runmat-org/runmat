@@ -125,10 +125,6 @@
     {
       "label": "cd",
       "url": "./cd"
-    },
-    {
-      "label": "fullfile",
-      "url": "./fullfile"
     }
   ],
   "source": {

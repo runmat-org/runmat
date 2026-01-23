@@ -112,10 +112,6 @@
       "url": "./string"
     },
     {
-      "label": "mat2str",
-      "url": "./mat2str"
-    },
-    {
       "label": "str2double",
       "url": "./str2double"
     }

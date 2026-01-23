@@ -101,10 +101,6 @@
       "url": "./cell2mat"
     },
     {
-      "label": "num2cell",
-      "url": "./num2cell"
-    },
-    {
       "label": "gpuArray",
       "url": "./gpuarray"
     },

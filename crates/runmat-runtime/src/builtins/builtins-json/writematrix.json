@@ -112,10 +112,6 @@
       "url": "./readmatrix"
     },
     {
-      "label": "writecell",
-      "url": "./writecell"
-    },
-    {
       "label": "fprintf",
       "url": "./fprintf"
     },

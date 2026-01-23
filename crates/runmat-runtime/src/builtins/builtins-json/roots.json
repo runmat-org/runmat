@@ -103,10 +103,6 @@
       "url": "./polyfit"
     },
     {
-      "label": "residue",
-      "url": "./residue"
-    },
-    {
       "label": "roots documentation (MathWorks)",
       "url": "https://www.mathworks.com/help/matlab/ref/roots.html"
     }

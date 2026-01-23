@@ -107,10 +107,6 @@
       "url": "./histcounts"
     },
     {
-      "label": "accumarray",
-      "url": "./accumarray"
-    },
-    {
       "label": "sum",
       "url": "./sum"
     },
