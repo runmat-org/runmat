@@ -14,7 +14,11 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{
+    gpu_helpers,
+    shape::{is_scalar_shape, normalize_scalar_shape},
+    tensor,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_macros::runtime_builtin;
 
@@ -540,8 +544,10 @@ fn map_dims_error(message: String) -> RuntimeError {
 }
 
 fn is_vector_shape(shape: &[usize]) -> bool {
+    if is_scalar_shape(shape) {
+        return true;
+    }
     match shape.len() {
-        0 => true,
         1 => true,
         2 => shape[0] == 1 || shape[1] == 1,
         _ => shape.iter().filter(|&&d| d > 1).count() <= 1,
@@ -589,7 +595,7 @@ async fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinRe
         return Ok(Value::GpuTensor(handle));
     }
 
-    if resolved.dims_in_bounds.len() == handle.shape.len() && !handle.shape.is_empty() {
+    if resolved.dims_in_bounds.len() == handle.shape.len() && !is_scalar_shape(&handle.shape) {
         if let Ok(reduced) = provider.reduce_sum(&handle).await {
             return Ok(Value::GpuTensor(reduced));
         }
@@ -749,8 +755,8 @@ fn build_omitnan_shader(scalar_ty: &str, axis_is_row: bool) -> String {
 
 #[allow(dead_code)]
 fn reduced_shape(shape: &[usize], dims: &[usize]) -> Vec<usize> {
-    if shape.is_empty() {
-        return Vec::new();
+    if is_scalar_shape(shape) {
+        return normalize_scalar_shape(shape);
     }
     let mut out = shape.to_vec();
     for &dim in dims {
@@ -783,7 +789,7 @@ fn resolve_dims(shape: &[usize], selection: &DimSelection) -> BuiltinResult<Reso
             }
         }
         DimSelection::All => {
-            let ndims = if shape.is_empty() { 1 } else { shape.len() };
+            let ndims = if is_scalar_shape(shape) { 1 } else { shape.len() };
             (1..=ndims).collect()
         }
     };
@@ -811,7 +817,7 @@ fn resolve_dims(shape: &[usize], selection: &DimSelection) -> BuiltinResult<Reso
 }
 
 fn default_dimension_from_shape(shape: &[usize]) -> usize {
-    if shape.is_empty() {
+    if is_scalar_shape(shape) {
         return 1;
     }
     shape
@@ -826,10 +832,11 @@ fn sum_tensor(
     dims: &ResolvedDims,
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<Tensor> {
-    let mut shape = tensor.shape.clone();
-    if shape.is_empty() {
-        shape = vec![tensor.rows, tensor.cols];
-    }
+    let shape = if is_scalar_shape(&tensor.shape) {
+        normalize_scalar_shape(&tensor.shape)
+    } else {
+        tensor.shape.clone()
+    };
 
     if dims.dims_in_bounds.is_empty() {
         return Ok(tensor.clone());
@@ -910,10 +917,11 @@ fn sum_complex_tensor(
     dims: &ResolvedDims,
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<ComplexTensor> {
-    let mut shape = tensor.shape.clone();
-    if shape.is_empty() {
-        shape = vec![tensor.rows, tensor.cols];
-    }
+    let shape = if is_scalar_shape(&tensor.shape) {
+        normalize_scalar_shape(&tensor.shape)
+    } else {
+        tensor.shape.clone()
+    };
 
     if dims.dims_in_bounds.is_empty() {
         return Ok(tensor.clone());

@@ -382,16 +382,14 @@ impl PlotRenderer {
                     *bottom = b;
                     *top = t;
                 }
-                // Center camera at data center
-                let cx = (l + r) * 0.5;
-                let cy = (b + t) * 0.5;
-                self.camera.position.x = cx;
-                self.camera.position.y = cy;
-                // Keep the camera close enough to the z=0 plot plane so orthographic near/far
-                // (typically small for 2D) does not clip geometry on web backends.
+                // Important: for 2D plotting we treat the orthographic projection bounds as
+                // world/data coordinates. That means the view transform must not translate in X/Y,
+                // otherwise we'd effectively offset the view twice (once via view_matrix and once
+                // via projection bounds), causing the plot to appear shifted / partially clipped.
+                //
+                // Keep the camera looking down at the z=0 plane; only adjust Z so the view matrix
+                // stays stable across resizes.
                 self.camera.position.z = 1.0;
-                self.camera.target.x = cx;
-                self.camera.target.y = cy;
                 self.camera.target.z = 0.0;
                 self.camera.mark_dirty();
             }

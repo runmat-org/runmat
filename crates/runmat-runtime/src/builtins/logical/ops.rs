@@ -7,6 +7,7 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::{
     gpu_helpers,
+    shape::{canonical_scalar_shape, normalize_scalar_shape},
     spec::{
         BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
         ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -424,8 +425,8 @@ impl LogicalBuffer {
 }
 
 fn canonical_shape(shape: &[usize], len: usize) -> Vec<usize> {
-    if !shape.is_empty() && tensor::element_count(shape) == len {
-        return shape.to_vec();
+    if tensor::element_count(shape) == len {
+        return normalize_scalar_shape(shape);
     }
     if len == 0 {
         if shape.len() > 1 {
@@ -434,7 +435,7 @@ fn canonical_shape(shape: &[usize], len: usize) -> Vec<usize> {
         return vec![0];
     }
     if len == 1 {
-        vec![1, 1]
+        canonical_scalar_shape()
     } else {
         vec![len, 1]
     }

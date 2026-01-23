@@ -11,6 +11,7 @@ use runmat_accelerate_api::{
     ImageNormalizeDescriptor, PowerStepEpilogue, ProviderPrecision, ReductionFlavor,
 };
 use runmat_builtins::{NumericDType, Value};
+use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use runmat_runtime::gather_if_needed;
 use runmat_time::Instant;
 use std::sync::OnceLock;
@@ -253,12 +254,9 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
             return Err(anyhow!("fusion: zero-length execution not supported"));
         }
     }
+    output_shape = normalize_scalar_shape(&output_shape);
     let mut timer = FusionStageTimer::new("elementwise", request.plan.index, len);
-    let scalar_shape: Vec<usize> = if output_shape.is_empty() {
-        vec![1]
-    } else {
-        vec![1; output_shape.len()]
-    };
+    let scalar_shape = normalize_scalar_shape(&vec![1; output_shape.len()]);
     let mut prepared = Vec::with_capacity(request.inputs.len());
     let mut temp_scalars: Vec<Vec<f64>> = Vec::new();
     let scalar_dtype = scalar_upload_dtype(provider);
@@ -390,13 +388,9 @@ pub fn execute_reduction(
     if len == 0 {
         return Err(anyhow!("fusion: zero-length execution not supported"));
     }
-    let scalar_shape: Vec<usize> = {
+    let scalar_shape = {
         let constant_shape = request.plan.constant_shape(len);
-        if constant_shape.is_empty() {
-            vec![1]
-        } else {
-            vec![1; constant_shape.len()]
-        }
+        normalize_scalar_shape(&vec![1; constant_shape.len()])
     };
     let mut timer = FusionStageTimer::new("reduction", request.plan.index, len);
     let mut prepared = Vec::with_capacity(request.inputs.len());

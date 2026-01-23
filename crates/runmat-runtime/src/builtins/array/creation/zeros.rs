@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
     ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{shape::normalize_scalar_shape, tensor};
 use runmat_builtins::NumericDType;
 
 #[cfg_attr(
@@ -577,7 +577,7 @@ fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
         Value::Tensor(t) => Ok(t.shape.clone()),
         Value::ComplexTensor(t) => Ok(t.shape.clone()),
         Value::LogicalArray(l) => Ok(l.shape.clone()),
-        Value::GpuTensor(h) => Ok(h.shape.clone()),
+        Value::GpuTensor(h) => Ok(normalize_scalar_shape(&h.shape)),
         Value::CharArray(ca) => Ok(vec![ca.rows, ca.cols]),
         Value::Cell(cell) => Ok(vec![cell.rows, cell.cols]),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(vec![1, 1]),

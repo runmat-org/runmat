@@ -18,7 +18,11 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{
+    gpu_helpers,
+    shape::{is_scalar_shape, normalize_scalar_shape},
+    tensor,
+};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -907,8 +911,8 @@ fn resolve_output_shape(
     selection: &DimSelection,
     reduced_dims: &[usize],
 ) -> BuiltinResult<Vec<usize>> {
-    if shape.is_empty() {
-        return Ok(Vec::new());
+    if is_scalar_shape(shape) {
+        return Ok(normalize_scalar_shape(shape));
     }
     let mut output = shape.to_vec();
     match selection {
@@ -938,9 +942,9 @@ fn resolve_reduction_dims(
     shape: &[usize],
     selection: &DimSelection,
 ) -> BuiltinResult<ResolvedDims> {
-    if shape.is_empty() {
+    if is_scalar_shape(shape) {
         return Ok(ResolvedDims {
-            output_shape: Vec::new(),
+            output_shape: normalize_scalar_shape(shape),
             reduced_dims: Vec::new(),
             reduce_all: true,
             dims_mask: Vec::new(),
@@ -1275,7 +1279,7 @@ fn magnitude_squared(z: (f64, f64)) -> f64 {
 }
 
 fn default_dimension_from_shape(shape: &[usize]) -> usize {
-    if shape.is_empty() {
+    if is_scalar_shape(shape) {
         return 1;
     }
     for (i, &len) in shape.iter().enumerate() {

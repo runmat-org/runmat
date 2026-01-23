@@ -32,6 +32,7 @@ use runmat_runtime::builtins::image::filters::fspecial::{
 use runmat_runtime::builtins::image::filters::imfilter::{
     apply_imfilter_tensor as runtime_apply_imfilter_tensor, build_imfilter_plan,
 };
+use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use runmat_runtime::builtins::math::linalg::ops::{
     mldivide_host_real_for_provider, mrdivide_host_real_for_provider,
 };
@@ -1355,24 +1356,24 @@ struct PolyintParamsF32 {
 
 fn normalize_eye_shape(shape: &[usize]) -> Vec<usize> {
     match shape.len() {
-        0 => vec![1, 1],
+        0 => normalize_scalar_shape(shape),
         1 => {
             let n = shape[0];
-            vec![n, n]
+            normalize_scalar_shape(&[n, n])
         }
-        _ => shape.to_vec(),
+        _ => normalize_scalar_shape(shape),
     }
 }
 
 fn normalize_concat_shape(mut shape: Vec<usize>, dim_zero: usize) -> Vec<usize> {
     if shape.is_empty() {
-        return shape;
+        return normalize_scalar_shape(&shape);
     }
     let min_len = ((dim_zero + 1).max(2)).min(shape.len());
     while shape.len() > min_len && shape.last() == Some(&1) {
         shape.pop();
     }
-    shape
+    normalize_scalar_shape(&shape)
 }
 
 fn conv1d_output_shape(len: usize, orientation: ProviderConvOrientation) -> Vec<usize> {
@@ -1729,9 +1730,7 @@ fn fft_trim_trailing_ones(shape: &mut Vec<usize>, minimum_rank: usize) {
     while shape.len() > minimum_rank && shape.last() == Some(&1) {
         shape.pop();
     }
-    if shape.is_empty() {
-        shape.push(1);
-    }
+    *shape = normalize_scalar_shape(shape);
 }
 
 fn stride_before_for(shape: &[usize], dim: usize) -> usize {

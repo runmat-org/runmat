@@ -13,7 +13,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{
+    gpu_helpers,
+    shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
+    tensor,
+};
 use crate::dispatcher;
 #[cfg_attr(
     feature = "doc_export",
@@ -575,7 +579,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
         Value::Tensor(t) => t.data.len() == 1,
         Value::LogicalArray(logical) => logical.data.len() == 1,
         Value::GpuTensor(handle) => {
-            handle.shape.is_empty() || tensor::element_count(&handle.shape) == 1
+            is_scalar_shape(&handle.shape) || tensor::element_count(&handle.shape) == 1
         }
         _ => false,
     };
@@ -697,7 +701,7 @@ async fn mean_gpu_try(
 ) -> Option<GpuTensorHandle> {
     match axes {
         MeanAxes::Default => {
-            if handle.shape.is_empty() {
+            if is_scalar_shape(&handle.shape) {
                 return Some(handle.clone());
             }
             let dim = default_dimension_from_shape(&handle.shape);
@@ -727,7 +731,7 @@ async fn mean_gpu_try(
             dims_sorted.sort_unstable();
             dims_sorted.dedup();
             for dim in dims_sorted {
-                if result.shape.is_empty() {
+                if is_scalar_shape(&result.shape) {
                     break;
                 }
                 result = reduce_mean_dim_gpu(provider, result, dim).await?;
@@ -735,7 +739,7 @@ async fn mean_gpu_try(
             Some(result)
         }
         MeanAxes::All => {
-            if handle.shape.is_empty() {
+            if is_scalar_shape(&handle.shape) {
                 return Some(handle.clone());
             }
             match provider.reduce_mean(handle).await {
@@ -743,7 +747,7 @@ async fn mean_gpu_try(
                 Err(err) => {
                     log::trace!("mean: provider reduce_mean fallback triggered: {err}");
                     let rank = handle.shape.len();
-                    if rank == 0 {
+                    if is_scalar_shape(&handle.shape) || rank == 0 {
                         Some(handle.clone())
                     } else {
                         let dims: Vec<usize> = (1..=rank).collect();
@@ -879,7 +883,7 @@ async fn mean_gpu_omitnan(
     // Early return for empty dim selection
     let dims_in_bounds: Vec<usize> = match axes {
         MeanAxes::Default => {
-            if handle.shape.is_empty() {
+            if is_scalar_shape(&handle.shape) {
                 return Some(handle.clone());
             }
             vec![default_dimension_from_shape(&handle.shape) - 1]
@@ -906,7 +910,7 @@ async fn mean_gpu_omitnan(
             dims
         }
         MeanAxes::All => {
-            if handle.shape.is_empty() {
+            if is_scalar_shape(&handle.shape) {
                 return Some(handle.clone());
             }
             (0..handle.shape.len()).collect()
@@ -963,7 +967,7 @@ fn mean_tensor(tensor: Tensor, axes: MeanAxes, nan_mode: ReductionNaN) -> Builti
 }
 
 fn mean_tensor_all(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<Tensor> {
-    if tensor.shape.is_empty() {
+    if is_scalar_shape(&tensor.shape) {
         return Ok(tensor.clone());
     }
     let total_elems = tensor
@@ -1022,7 +1026,7 @@ fn reduce_tensor_mean_dim(
         return Err(mean_error("mean: dimension must be >= 1"));
     }
 
-    if tensor.shape.is_empty() {
+    if is_scalar_shape(&tensor.shape) {
         let value = tensor.data.first().copied().unwrap_or(f64::NAN);
         let result = match nan_mode {
             ReductionNaN::Include => value,
@@ -1124,7 +1128,7 @@ fn mean_complex_tensor(
             Ok(current)
         }
         MeanAxes::All => {
-            if tensor.shape.is_empty() {
+            if is_scalar_shape(&tensor.shape) {
                 Ok(tensor)
             } else {
                 let mut current = tensor;
@@ -1147,13 +1151,13 @@ fn reduce_complex_tensor_mean_dim(
         return Err(mean_error("mean: dimension must be >= 1"));
     }
 
-    let shape = if tensor.shape.is_empty() {
-        vec![tensor.rows, tensor.cols]
+    let shape = if is_scalar_shape(&tensor.shape) {
+        normalize_scalar_shape(&tensor.shape)
     } else {
         tensor.shape.clone()
     };
 
-    if shape.is_empty() {
+    if is_scalar_shape(&shape) {
         let (re, im) = tensor.data.first().copied().unwrap_or((f64::NAN, f64::NAN));
         let result = match nan_mode {
             ReductionNaN::Include => (re, im),
@@ -1165,7 +1169,7 @@ fn reduce_complex_tensor_mean_dim(
                 }
             }
         };
-        return ComplexTensor::new(vec![result], vec![1, 1])
+        return ComplexTensor::new(vec![result], canonical_scalar_shape())
             .map_err(|e| mean_error(format!("mean: {e}")));
     }
 
@@ -1248,9 +1252,9 @@ fn reduction_shape(shape: &[usize], dim: usize) -> Option<Vec<usize>> {
     if dim == 0 {
         return None;
     }
-    if shape.is_empty() {
+    if is_scalar_shape(shape) {
         if dim == 1 {
-            return Some(vec![1, 1]);
+            return Some(canonical_scalar_shape());
         }
         return None;
     }
@@ -1273,7 +1277,7 @@ fn default_dimension(tensor: &Tensor) -> usize {
 }
 
 fn default_dimension_from_shape(shape: &[usize]) -> usize {
-    if shape.is_empty() {
+    if is_scalar_shape(shape) {
         return 1;
     }
     shape

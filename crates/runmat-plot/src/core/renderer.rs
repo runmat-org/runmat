@@ -1112,7 +1112,10 @@ pub mod vertex_utils {
         if points.len() < 2 {
             return out;
         }
-        let half_w = (width.max(1.0)) * 0.5;
+        // `width` is expected to already be in data-space units. Do NOT clamp to 1.0 here:
+        // plot axes ranges are often small (e.g. y in [-1,1]), and clamping would explode
+        // thick line geometry into a huge filled shape.
+        let half_w = width.max(0.0) * 0.5;
         for i in 0..points.len() - 1 {
             let p0 = points[i];
             let p1 = points[i + 1];
@@ -1157,7 +1160,8 @@ pub mod vertex_utils {
         if points.len() < 2 {
             return out;
         }
-        let half_w = (width.max(1.0)) * 0.5;
+        // See `extrude_polyline` for rationale: keep width in data-space units.
+        let half_w = width.max(0.0) * 0.5;
         // Base quads
         out.extend(extrude_polyline(points, color, width));
 

@@ -2,6 +2,7 @@
 //!
 //! Implements language-style tensor indexing and access patterns.
 
+use crate::builtins::common::shape::normalize_scalar_shape;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{Tensor, Value};
 
@@ -154,21 +155,24 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 // Row-column indexing (1-based)
                 let row = indices[0] as usize;
                 let col = indices[1] as usize;
+                let shape = normalize_scalar_shape(&tensor.shape);
+                let rows = shape.first().copied().unwrap_or(1);
+                let cols = shape.get(1).copied().unwrap_or(1);
 
-                if row < 1 || row > tensor.rows {
+                if row < 1 || row > rows {
                     return Err(indexing_error_with_identifier(
-                        format!("Row index {} out of bounds (1 to {})", row, tensor.rows),
+                        format!("Row index {} out of bounds (1 to {})", row, rows),
                         "MATLAB:IndexOutOfBounds",
                     ));
                 }
-                if col < 1 || col > tensor.cols {
+                if col < 1 || col > cols {
                     return Err(indexing_error_with_identifier(
-                        format!("Column index {} out of bounds (1 to {})", col, tensor.cols),
+                        format!("Column index {} out of bounds (1 to {})", col, cols),
                         "MATLAB:IndexOutOfBounds",
                     ));
                 }
 
-                let linear_idx = (row - 1) + (col - 1) * tensor.rows; // Convert to 0-based, column-major
+                let linear_idx = (row - 1) + (col - 1) * rows; // Convert to 0-based, column-major
                 Ok(Value::Num(tensor.data[linear_idx]))
             } else {
                 Err(indexing_error(format!(
@@ -194,13 +198,16 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
             } else if indices.len() == 2 {
                 let row = indices[0] as usize;
                 let col = indices[1] as usize;
-                if row < 1 || row > sa.rows || col < 1 || col > sa.cols {
+                let shape = normalize_scalar_shape(&sa.shape);
+                let rows = shape.first().copied().unwrap_or(1);
+                let cols = shape.get(1).copied().unwrap_or(1);
+                if row < 1 || row > rows || col < 1 || col > cols {
                     return Err(indexing_error_with_identifier(
                         "StringArray subscript out of bounds",
                         "MATLAB:IndexOutOfBounds",
                     ));
                 }
-                let idx = (row - 1) + (col - 1) * sa.rows;
+                let idx = (row - 1) + (col - 1) * rows;
                 Ok(Value::String(sa.data[idx].clone()))
             } else {
                 Err(indexing_error(format!(

@@ -21,6 +21,7 @@ use runmat_accelerate::{
 use runmat_builtins::{Type, Value};
 use runmat_runtime::{
     build_runtime_error,
+    builtins::common::shape::is_scalar_shape,
     builtins::common::tensor,
     builtins::stats::random::stochastic_evolution::stochastic_evolution_host,
     gather_if_needed,
@@ -519,7 +520,7 @@ fn cartesian_positions<F: FnMut(&[usize])>(lengths: &[usize], mut f: F) {
 }
 
 fn total_len_from_shape(shape: &[usize]) -> usize {
-    if shape.is_empty() {
+    if is_scalar_shape(shape) {
         1
     } else {
         shape.iter().copied().product()
@@ -531,8 +532,10 @@ fn index_scalar_from_host_value(value: &Value) -> Option<i64> {
         Value::Num(n) => Some(*n as i64),
         Value::Int(int_val) => Some(int_val.to_i64()),
         Value::Bool(b) => Some(if *b { 1 } else { 0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Some(t.data[0] as i64),
-        Value::LogicalArray(la) if la.data.len() == 1 => {
+        Value::Tensor(t) if t.data.len() == 1 && is_scalar_shape(&t.shape) => {
+            Some(t.data[0] as i64)
+        }
+        Value::LogicalArray(la) if la.data.len() == 1 && is_scalar_shape(&la.shape) => {
             Some(if la.data[0] != 0 { 1 } else { 0 })
         }
         _ => None,
@@ -541,7 +544,7 @@ fn index_scalar_from_host_value(value: &Value) -> Option<i64> {
 
 async fn index_scalar_from_value(value: &Value) -> VmResult<Option<i64>> {
     if let Value::GpuTensor(handle) = value {
-        let total = handle.shape.iter().copied().product::<usize>();
+        let total = total_len_from_shape(&handle.shape);
         if total != 1 {
             return Ok(None);
         }

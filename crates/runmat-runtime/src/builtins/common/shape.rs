@@ -3,13 +3,36 @@ use runmat_builtins::{Tensor, Value};
 use crate::dispatcher::gather_if_needed_async;
 use crate::RuntimeError;
 
+/// Return true if a shape should be treated as a scalar.
+pub fn is_scalar_shape(shape: &[usize]) -> bool {
+    shape.is_empty()
+        || (shape.len() == 1 && shape[0] == 1)
+        || (shape.len() == 2 && shape[0] == 1 && shape[1] == 1)
+}
+
+/// Return the canonical scalar shape.
+pub fn canonical_scalar_shape() -> Vec<usize> {
+    vec![1, 1]
+}
+
+/// Normalize scalar-like shapes to the canonical scalar shape.
+pub fn normalize_scalar_shape(shape: &[usize]) -> Vec<usize> {
+    if is_scalar_shape(shape) {
+        canonical_scalar_shape()
+    } else {
+        shape.to_vec()
+    }
+}
+
 /// Normalize a raw shape vector into MATLAB-compatible dimension metadata.
 fn normalize_shape(shape: &[usize]) -> Vec<usize> {
-    match shape.len() {
-        0 => vec![1, 1],
-        1 => vec![1, shape[0]],
-        _ => shape.to_vec(),
+    if shape.len() == 1 && shape[0] != 1 {
+        return vec![1, shape[0]];
     }
+    if is_scalar_shape(shape) {
+        return canonical_scalar_shape();
+    }
+    shape.to_vec()
 }
 
 /// Return the MATLAB-visible dimension vector for a runtime value.

@@ -15,7 +15,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{
+    gpu_helpers,
+    shape::{is_scalar_shape, normalize_scalar_shape},
+    tensor,
+};
 use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
@@ -245,16 +249,10 @@ async fn ifft_gpu(
     dimension: Option<usize>,
     symmetric: bool,
 ) -> BuiltinResult<Value> {
-    let mut logical_shape = if handle.shape.is_empty() {
-        vec![1]
-    } else {
-        handle.shape.clone()
-    };
+    let mut logical_shape = normalize_scalar_shape(&handle.shape);
     if logical_shape.last() == Some(&2) {
         logical_shape.pop();
-        if logical_shape.is_empty() {
-            logical_shape.push(1);
-        }
+        logical_shape = normalize_scalar_shape(&logical_shape);
     }
 
     let dim_one_based = match dimension {
@@ -301,8 +299,8 @@ pub(super) fn ifft_complex_tensor(
     length: Option<usize>,
     dimension: Option<usize>,
 ) -> BuiltinResult<ComplexTensor> {
-    if tensor.shape.is_empty() {
-        tensor.shape = vec![tensor.data.len()];
+    if is_scalar_shape(&tensor.shape) {
+        tensor.shape = normalize_scalar_shape(&tensor.shape);
         tensor.rows = tensor.shape.first().copied().unwrap_or(1);
         tensor.cols = tensor.shape.get(1).copied().unwrap_or(1);
     }

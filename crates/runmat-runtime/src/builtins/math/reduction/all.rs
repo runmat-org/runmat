@@ -5,7 +5,11 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ReductionNaN, ResidencyPolicy, ScalarType,
     ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{
+    gpu_helpers,
+    shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
+    tensor,
+};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -381,7 +385,9 @@ fn logical_from_host(host: HostTensorOwned) -> BuiltinResult<Value> {
     if host.data.len() == 1 {
         return Ok(Value::Bool(host.data[0] != 0.0));
     }
-    let shape = if host.shape.is_empty() {
+    let shape = if tensor::element_count(&host.shape) == host.data.len() {
+        normalize_scalar_shape(&host.shape)
+    } else if is_scalar_shape(&host.shape) {
         if host.data.is_empty() {
             Vec::new()
         } else {
@@ -411,7 +417,7 @@ fn dims_from_spec(spec: &ReductionSpec, shape: &[usize]) -> Vec<usize> {
             sorted
         }
         ReductionSpec::All => {
-            if shape.is_empty() {
+            if is_scalar_shape(shape) {
                 vec![1]
             } else {
                 (1..=shape.len()).collect()
@@ -421,7 +427,7 @@ fn dims_from_spec(spec: &ReductionSpec, shape: &[usize]) -> Vec<usize> {
 }
 
 fn default_dimension_from_shape(shape: &[usize]) -> usize {
-    if shape.is_empty() {
+    if is_scalar_shape(shape) {
         return 1;
     }
     shape
@@ -505,7 +511,9 @@ impl TruthTensor {
     }
 
     fn from_tensor(tensor: Tensor) -> Self {
-        let shape = if tensor.shape.is_empty() {
+        let shape = if tensor::element_count(&tensor.shape) == tensor.data.len() {
+            normalize_scalar_shape(&tensor.shape)
+        } else if is_scalar_shape(&tensor.shape) {
             if tensor.data.is_empty() {
                 Vec::new()
             } else {
@@ -578,7 +586,7 @@ impl TruthTensor {
         if dim == 0 {
             return Err(all_error("all: dimension must be >= 1"));
         }
-        if self.shape.is_empty() {
+        if is_scalar_shape(&self.shape) {
             let truth = self.data.first().copied().unwrap_or(TruthValue {
                 truthy: true,
                 has_nan: false,
@@ -594,7 +602,7 @@ impl TruthTensor {
                 }
             };
             return Ok(TruthTensor {
-                shape: vec![1, 1],
+                shape: canonical_scalar_shape(),
                 data: vec![TruthValue::from_bool(truthy)],
             });
         }
@@ -664,7 +672,9 @@ impl TruthTensor {
         if self.data.len() == 1 {
             return Ok(Value::Bool(self.data[0].truthy));
         }
-        let shape = if self.shape.is_empty() {
+        let shape = if tensor::element_count(&self.shape) == self.data.len() {
+            normalize_scalar_shape(&self.shape)
+        } else if is_scalar_shape(&self.shape) {
             if self.data.is_empty() {
                 Vec::new()
             } else {
@@ -705,7 +715,7 @@ fn apply_reduction(
         }
         ReductionSpec::All => {
             let mut current = tensor;
-            if current.shape.is_empty() {
+            if is_scalar_shape(&current.shape) {
                 current = current.reduce_dim(1, nan_mode)?;
             } else {
                 for dim in 1..=current.shape.len() {

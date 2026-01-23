@@ -10,7 +10,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{
+    gpu_helpers,
+    shape::{is_scalar_shape, normalize_scalar_shape},
+    tensor,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "var";
@@ -556,7 +560,7 @@ fn var_tensor_reduce(
 fn resolve_axes(shape: &[usize], axes: &VarAxes) -> BuiltinResult<(Vec<usize>, bool)> {
     match axes {
         VarAxes::Default => {
-            if shape.is_empty() {
+            if is_scalar_shape(shape) {
                 Ok((Vec::new(), true))
             } else {
                 let dim = default_dimension_from_shape(shape);
@@ -598,7 +602,7 @@ fn resolve_axes(shape: &[usize], axes: &VarAxes) -> BuiltinResult<(Vec<usize>, b
             Ok((out, true))
         }
         VarAxes::All => {
-            if shape.is_empty() {
+            if is_scalar_shape(shape) {
                 Ok((Vec::new(), true))
             } else {
                 Ok(((0..shape.len()).collect(), true))
@@ -608,8 +612,8 @@ fn resolve_axes(shape: &[usize], axes: &VarAxes) -> BuiltinResult<(Vec<usize>, b
 }
 
 fn reduced_shape(shape: &[usize], dims: &[usize]) -> Vec<usize> {
-    if shape.is_empty() {
-        return Vec::new();
+    if is_scalar_shape(shape) {
+        return normalize_scalar_shape(shape);
     }
     let mut out = shape.to_vec();
     for &dim in dims {
@@ -686,7 +690,7 @@ async fn var_gpu_reduce(
     };
 
     let std_handle = if dims.len() == handle.shape.len() {
-        if handle.shape.is_empty() {
+        if is_scalar_shape(&handle.shape) {
             return Some(handle.clone());
         }
         provider
@@ -747,7 +751,7 @@ async fn var_gpu_fallback(
 }
 
 fn default_dimension_from_shape(shape: &[usize]) -> usize {
-    if shape.is_empty() {
+    if is_scalar_shape(shape) {
         return 1;
     }
     shape

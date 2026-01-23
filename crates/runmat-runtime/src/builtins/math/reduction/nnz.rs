@@ -5,7 +5,11 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{
+    gpu_helpers,
+    shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
+    tensor,
+};
 use crate::dispatcher::download_handle_async;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
@@ -461,16 +465,17 @@ fn reduce_mask_dim(mask: &Mask, dim: usize) -> BuiltinResult<Tensor> {
     }
     if mask.bits.is_empty() {
         let mut out_shape = canonical_shape(&mask.shape, 0);
-        if dim <= out_shape.len() && !out_shape.is_empty() {
+        if dim <= out_shape.len() && !is_scalar_shape(&out_shape) {
             out_shape[dim - 1] = 1;
         }
         let out_len = out_shape.iter().copied().product::<usize>();
         let zeros = vec![0.0; out_len];
         return Tensor::new(zeros, out_shape).map_err(|e| nnz_error(format!("nnz: {e}")));
     }
-    if mask.shape.is_empty() {
+    if is_scalar_shape(&mask.shape) {
         let data = vec![mask.bits[0] as f64];
-        return Tensor::new(data, vec![1, 1]).map_err(|e| nnz_error(format!("nnz: {e}")));
+        return Tensor::new(data, canonical_scalar_shape())
+            .map_err(|e| nnz_error(format!("nnz: {e}")));
     }
     if dim > mask.shape.len() {
         return mask_to_tensor(mask);
@@ -521,15 +526,16 @@ fn mask_to_tensor(mask: &Mask) -> BuiltinResult<Tensor> {
 }
 
 fn canonical_shape(shape: &[usize], len: usize) -> Vec<usize> {
-    if shape.is_empty() {
+    if is_scalar_shape(shape) {
         if len <= 1 {
-            vec![1, 1]
-        } else {
-            vec![len, 1]
+            return canonical_scalar_shape();
         }
-    } else {
-        shape.to_vec()
+        return vec![len, 1];
     }
+    if tensor::element_count(shape) == len {
+        return normalize_scalar_shape(shape);
+    }
+    shape.to_vec()
 }
 
 fn describe_value_kind(value: &Value) -> String {

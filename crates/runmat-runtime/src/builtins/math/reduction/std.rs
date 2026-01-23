@@ -13,7 +13,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{
+    gpu_helpers,
+    shape::{is_scalar_shape, normalize_scalar_shape},
+    tensor,
+};
 use crate::dispatcher;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg_attr(
@@ -588,7 +592,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<StdAxes>> {
         Value::LogicalArray(logical) => (logical.data.len() == 1, logical.data.is_empty()),
         Value::GpuTensor(handle) => {
             let count = tensor::element_count(&handle.shape);
-            (handle.shape.is_empty() || count == 1, count == 0)
+            (is_scalar_shape(&handle.shape) || count == 1, count == 0)
         }
         _ => (false, false),
     };
@@ -779,7 +783,7 @@ fn std_tensor_reduce(
 fn resolve_axes(shape: &[usize], axes: &StdAxes) -> BuiltinResult<(Vec<usize>, bool)> {
     match axes {
         StdAxes::Default => {
-            if shape.is_empty() {
+            if is_scalar_shape(shape) {
                 Ok((Vec::new(), true))
             } else {
                 let dim = default_dimension_from_shape(shape);
@@ -821,7 +825,7 @@ fn resolve_axes(shape: &[usize], axes: &StdAxes) -> BuiltinResult<(Vec<usize>, b
             Ok((out, true))
         }
         StdAxes::All => {
-            if shape.is_empty() {
+            if is_scalar_shape(shape) {
                 Ok((Vec::new(), true))
             } else {
                 Ok(((0..shape.len()).collect(), true))
@@ -831,8 +835,8 @@ fn resolve_axes(shape: &[usize], axes: &StdAxes) -> BuiltinResult<(Vec<usize>, b
 }
 
 fn reduced_shape(shape: &[usize], dims: &[usize]) -> Vec<usize> {
-    if shape.is_empty() {
-        return Vec::new();
+    if is_scalar_shape(shape) {
+        return normalize_scalar_shape(shape);
     }
     let mut out = shape.to_vec();
     for &dim in dims {
@@ -905,7 +909,7 @@ async fn std_gpu_reduce(
     }
 
     if dims.len() == handle.shape.len() {
-        if handle.shape.is_empty() {
+        if is_scalar_shape(&handle.shape) {
             return Some(handle.clone());
         }
         return provider
@@ -959,7 +963,7 @@ async fn std_gpu_fallback(
 }
 
 fn default_dimension_from_shape(shape: &[usize]) -> usize {
-    if shape.is_empty() {
+    if is_scalar_shape(shape) {
         return 1;
     }
     shape
