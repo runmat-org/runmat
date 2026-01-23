@@ -156,7 +156,9 @@ export default function HomePage() {
     <div className="flex flex-col min-h-screen home-page">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(jsonLd).replace(/<\//g, "<\\/"),
+        }}
       />
       {/* SEO-optimized opening content */}
       <div className="sr-only">

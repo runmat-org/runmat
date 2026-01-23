@@ -6,7 +6,7 @@ import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "RunMat License",
-  description: "RunMat is licensed under the MIT License with Attribution Requirements and Commercial Scientific Software Company Copyleft Provisions. Free for everyone with clear terms.",
+  description: "RunMat is licensed under the MIT License with Attribution Requirements and Commercial Scientific Software Company Copyleft Provisions. See runmat.com/license for the full license text.",
 };
 
 const jsonLd = {
@@ -81,7 +81,9 @@ export default function LicensePage() {
     <div className="min-h-screen bg-background">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(jsonLd).replace(/<\//g, "<\\/"),
+        }}
       />
       <div className="container mx-auto max-w-4xl px-4 md:px-6 py-16 md:py-24">
         

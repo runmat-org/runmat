@@ -106,7 +106,7 @@ MATLAB is powerful but expensive, with licenses costing over $2,000 per seat. Fo
 - **Python (NumPy/SciPy)** → Huge ecosystem and ML integration, but requires rewriting code. Browser options exist (Colab, Pyodide) with trade-offs.
 - **Julia** → Built for performance and large simulations, but requires learning a new language. No browser-native runtime yet.
 
-Ready to try RunMat? Follow the [Getting Started guide](/docs/getting-started) to install and run your first script.
+Ready to try RunMat? Follow the [Getting Started guide](/docs/getting-started) to install and run your first script. If you want a focused breakdown of RunMat vs MATLAB Online in the browser, see [MATLAB Online](/matlab-online).
 
 ⚠️ **Note:** None of these replicate Simulink’s graphical block-diagram modeling. All rely on script-based workflows.
 
@@ -254,6 +254,7 @@ For engineers who need to run computations without installing software (on locke
 - **RunMat** runs entirely in the browser via WebAssembly, with no server required. Your code executes on your own device, meaning no time limits or usage quotas. WebGPU acceleration is available in supported browsers (Chrome, Edge) for GPU-accelerated graphics and computation. File persistence requires signing in or using the desktop app (same UI, full local storage). Startup is instant (~5 ms) and works offline once loaded.
 
 - **MATLAB Online** runs on MathWorks' cloud servers, where your browser is just a thin client. This requires a MathWorks account and internet connection. The free tier limits usage to 20 hours/month with 15-minute execution caps and idle timeouts. No GPU acceleration is available in standard cloud sessions. For licensed users, it provides full MATLAB functionality without local installation.
+- For a side-by-side of RunMat vs MATLAB Online (including browser limitations and GPU access), read [MATLAB Online](/matlab-online).
 
 - **GNU Octave** is available via Octave Online, a free hosted service. Like MATLAB Online, it runs on remote servers. Execution time is strictly limited (~10 seconds per command by default, extendable manually). No GPU support is available. It's suitable for quick calculations and teaching, but not for serious computation.
 

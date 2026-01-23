@@ -38,7 +38,7 @@ The below tracks the progress of the project towards the 1.0 release to date.
 
 ### Milestone P3 - User Experience
 
-- [x] Full language coverage (`docs/LANGUAGE_COVERAGE.md`).
+- [x] Full language coverage (`/docs/language-coverage`).
 - [x] v0.2 release.
 - [x] Full standard library pass for canonical built-ins ((arrays, linalg, FFT/signal, stats, strings, I/O, ...).
 - [x] Implement LSP server.

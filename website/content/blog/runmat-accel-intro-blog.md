@@ -372,7 +372,7 @@ An open-source MATLAB-compatible runtime focused on fast, portable numerical com
 macOS (Apple Silicon and supported AMD/NVIDIA cards), Windows, and Linux via the native GPU APIs above. If no compatible GPU is present, RunMat runs on CPU.
 
 **Do I need MATLAB installed or a MATLAB license?**  
-No. RunMat is a standalone runtime. It adheres to MATLAB core language grammar and semantics. It is not associated or affiliated with MathWorks MATLAB in any way, shape or form. [Learn more in the grammar/semantics doc.](https://github.com/runmat-org/runmat/blob/main/docs/LANGUAGE_COVERAGE.md)
+No. RunMat is a standalone runtime. It adheres to MATLAB core language grammar and semantics. It is not associated or affiliated with MathWorks MATLAB in any way, shape or form. [Learn more in the grammar/semantics doc.](/docs/language-coverage)
 
 **How compatible is it with MATLAB?**  
 Core array operations, elementwise math, reductions, common linear-algebra, FFT/signal/image, and statistics functions are covered. Check the function index for exact status. 

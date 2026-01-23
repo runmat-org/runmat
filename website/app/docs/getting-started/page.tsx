@@ -366,7 +366,7 @@ export default function GettingStartedPage() {
                   How RunMat turns MATLAB scripts into GPU-accelerated workloads
                 </p>
                 <Button variant="outline" className="w-full" asChild>
-                  <Link href="/docs/accelerate/gpu-residency" className="flex items-center justify-center">
+                  <Link href="/docs/accelerate/fusion-intro" className="flex items-center justify-center">
                     RunMat Accelerate
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Link>

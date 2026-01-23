@@ -305,7 +305,7 @@ so DX12/Metal/Vulkan backends never see invalid workgroup sizes.
 ## Precedence model
 
 CLI flags > environment variables > configuration files > built-in defaults.
-See `docs/CONFIG.md` for file formats and discovery.
+See `/docs/configuration` for file formats and discovery.
 
 ## Operating environments
 

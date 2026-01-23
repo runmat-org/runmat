@@ -4,11 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack --port 1001",
-    "prebuild": "cp -r ../crates/runmat-runtime/src/builtins/builtins-json ./content && echo 'Copied builtins-json' || echo 'Failed to copy builtins-json. Skipping.'",
+    "prebuild": "bash ./scripts/ensure-builtins-json.sh",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "check:matlab-online": "node scripts/check-matlab-online-jsonld.js"
+    "lint": "next lint"
   },
   "dependencies": {
     "@mdx-js/loader": "^3.1.0",

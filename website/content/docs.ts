@@ -53,6 +53,7 @@ export const docsTree: DocsNode[] = [
     title: "Using RunMat",
     children: [
       { title: "Builtin Function Reference", externalHref: "/docs/matlab-function-reference" },
+      { title: "Library Reference", slug: ["library"], file: "docs/LIBRARY.md", seo: { description: "How RunMat's built-in MATLAB functions are implemented and organized.", keywords: ["standard library", "builtins", "MATLAB functions"] } },
       {
         title: "Package Manager",
         slug: ["package-manager"],
@@ -71,6 +72,7 @@ export const docsTree: DocsNode[] = [
   {
     title: "Language",
     children: [
+      { title: "Language Reference", slug: ["language"], file: "docs/LANGUAGE.md", seo: { description: "RunMat language compatibility modes and MATLAB syntax support.", keywords: ["language reference", "MATLAB syntax", "compatibility"] } },
       { title: "Language Coverage", slug: ["language-coverage"], file: "docs/LANGUAGE_COVERAGE.md", seo: { description: "MATLAB language feature compatibility in RunMat with an Octave comparison.", keywords: ["MATLAB compatibility", "Octave compatibility", "language coverage", "MATLAB alternative", "Octave alternative"] } },
     ],
   },

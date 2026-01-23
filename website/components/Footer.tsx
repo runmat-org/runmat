@@ -49,7 +49,7 @@ export default function Footer() {
             <ul className="space-y-1">
               <li><Link href="/license" className="hover:underline">License</Link></li>
               <li><Link href="/docs/telemetry" className="hover:underline">Telemetry</Link></li>
-              <li><Link href="/run-matlab-online" className="hover:underline">Run Matlab Online</Link></li>
+              <li><Link href="/matlab-online" className="hover:underline">MATLAB Online</Link></li>
             </ul>
           </div>
           <div>
