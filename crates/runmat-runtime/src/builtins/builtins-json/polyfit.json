@@ -101,10 +101,6 @@
       "url": "./polyval"
     },
     {
-      "label": "poly",
-      "url": "./poly"
-    },
-    {
       "label": "roots",
       "url": "./roots"
     },

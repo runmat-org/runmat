@@ -120,7 +120,7 @@
     },
     {
       "label": "`endsWith`",
-      "url": "./endsWith"
+      "url": "./endswith"
     },
     {
       "label": "`regexp`",

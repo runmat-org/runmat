@@ -110,22 +110,6 @@
   ],
   "links": [
     {
-      "label": "keys",
-      "url": "./containers.Map.keys"
-    },
-    {
-      "label": "values",
-      "url": "./containers.Map.values"
-    },
-    {
-      "label": "isKey",
-      "url": "./containers.Map.isKey"
-    },
-    {
-      "label": "remove",
-      "url": "./containers.Map.remove"
-    },
-    {
       "label": "length",
       "url": "./length"
     }

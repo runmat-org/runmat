@@ -112,10 +112,6 @@
   ],
   "links": [
     {
-      "label": "strjoin",
-      "url": "./strjoin"
-    },
-    {
       "label": "split",
       "url": "./split"
     },

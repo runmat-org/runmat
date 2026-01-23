@@ -129,10 +129,6 @@
       "url": "./qr"
     },
     {
-      "label": "solve",
-      "url": "./backslash"
-    },
-    {
       "label": "gpuArray",
       "url": "./gpuarray"
     }

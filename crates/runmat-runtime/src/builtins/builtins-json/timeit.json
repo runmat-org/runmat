@@ -111,10 +111,6 @@
     {
       "label": "toc",
       "url": "./toc"
-    },
-    {
-      "label": "feval",
-      "url": "./feval"
     }
   ],
   "source": {

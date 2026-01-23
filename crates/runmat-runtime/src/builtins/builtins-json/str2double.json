@@ -117,20 +117,12 @@
   ],
   "links": [
     {
-      "label": "str2num",
-      "url": "./str2num"
-    },
-    {
       "label": "double",
       "url": "./double"
     },
     {
       "label": "string",
       "url": "./string"
-    },
-    {
-      "label": "str2int",
-      "url": "./str2int"
     }
   ],
   "source": {

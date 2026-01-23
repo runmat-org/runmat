@@ -125,10 +125,6 @@
       "url": "./deconv"
     },
     {
-      "label": "poly",
-      "url": "./poly"
-    },
-    {
       "label": "polyder",
       "url": "./polyder"
     },

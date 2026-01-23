@@ -111,10 +111,6 @@
       "url": "./isnumeric"
     },
     {
-      "label": "classref",
-      "url": "./classref"
-    },
-    {
       "label": "gpuArray",
       "url": "./gpuarray"
     },

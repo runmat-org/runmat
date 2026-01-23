@@ -118,10 +118,6 @@
       "url": "./sum"
     },
     {
-      "label": "matmul",
-      "url": "./matmul"
-    },
-    {
       "label": "gpuArray",
       "url": "./gpuarray"
     },
