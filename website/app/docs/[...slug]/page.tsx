@@ -129,6 +129,24 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
   const { body, data } = parsed;
   const jsonLdObj = isJsonLdObject(data.jsonLd);
   const jsonLdString = jsonLdObj ? JSON.stringify(jsonLdObj).replace(/<\//g, "<\\/") : undefined;
+  const baseUrl = "https://runmat.org";
+  const path = `/docs${slug.length ? `/${slug.join("/")}` : ""}`;
+  const pageUrl = `${baseUrl}${path}`;
+  const pageTitle = (node as DocsNode).title ?? "Docs";
+  const pageDescription = data.description || (node as DocsNode).seo?.description;
+  const pageJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "@id": `${pageUrl}#webpage`,
+    url: pageUrl,
+    name: pageTitle,
+    ...(pageDescription ? { description: pageDescription } : {}),
+    inLanguage: "en",
+    isPartOf: { "@id": "https://runmat.org/#website" },
+    author: { "@id": "https://runmat.org/#organization" },
+    publisher: { "@id": "https://runmat.org/#organization" },
+  };
+  const pageJsonLdString = JSON.stringify(pageJsonLd).replace(/<\//g, "<\\/");
   const crumbs = findPathBySlug(slug) ?? [];
   return (
     <div className="grid lg:grid-cols-[minmax(0,1fr)_260px] gap-8">
@@ -154,6 +172,10 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
             ))}
         </nav>
         {/* Title is already conveyed by breadcrumbs and in-page H1 within markdown, avoid duplication */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: pageJsonLdString }}
+        />
         {jsonLdString && (
           <script
             type="application/ld+json"

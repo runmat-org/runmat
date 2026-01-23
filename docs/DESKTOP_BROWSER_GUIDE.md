@@ -227,8 +227,8 @@ Visit [runmat.org/download](https://runmat.org/download) for installation option
 
 Now that you've run your first script:
 
-- **Explore the built-in functions** — See the [Library Reference](LIBRARY.md)
-- **Learn about GPU acceleration** — Read [Introduction to RunMat GPU](INTRODUCTION_TO_RUNMAT_GPU.md)
+- **Explore the built-in functions** — See the [Library Reference](/docs/library)
+- **Learn about GPU acceleration** — Read [Introduction to RunMat GPU](/docs/accelerate/fusion-intro)
 - **Install the CLI** — For local file access and scripting: [CLI Guide](CLI.md)
 - **Try the benchmarks** — Compare RunMat performance against NumPy and PyTorch
 

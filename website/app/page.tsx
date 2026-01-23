@@ -13,10 +13,96 @@ import BenchmarkSweepCarousel from "@/components/benchmarks/BenchmarkSweepCarous
 
 import { FusionGraphic } from "../content/svgs/fusion-graphic";
 
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://runmat.org/#organization",
+      "name": "RunMat",
+      "alternateName": ["RunMat by Dystr", "Dystr"],
+      "legalName": "Dystr Inc.",
+      "url": "https://runmat.org",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://runmat.org/runmat-logo.svg",
+        "caption": "RunMat"
+      },
+      "description": "RunMat is a high-performance, open-source runtime for math that lets you run MATLAB-syntax code in the browser, on the desktop, or from the CLI, while getting GPU-speed execution.",
+      "sameAs": [
+        "https://github.com/runmat-org/runmat",
+        "https://x.com/runmat_org",
+        "https://dystr.com"
+      ],
+      "knowsAbout": [
+        "Scientific Computing",
+        "High Performance Computing",
+        "MATLAB",
+        "WebGPU",
+        "Compiler Design"
+      ],
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "contactType": "customer support",
+        "email": "team@runmat.com"
+      }
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://runmat.org/#website",
+      "url": "https://runmat.org",
+      "name": "RunMat",
+      "description": "The Fastest Runtime for Your Math. RunMat fuses back-to-back ops into fewer GPU steps and intelligently manages memory.",
+      "publisher": { "@id": "https://runmat.org/#organization" },
+      "image": "https://web.runmatstatic.com/runmat-sandbox-dark.png",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": {
+          "@type": "EntryPoint",
+          "urlTemplate": "https://runmat.org/search?q={search_term_string}"
+        },
+        "query-input": "required name=search_term_string"
+      }
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://runmat.org/#software",
+      "name": "RunMat",
+      "description": "RunMat is a high-performance, open-source runtime for math that lets you run MATLAB-syntax code in the browser, on the desktop, or from the CLI, while getting GPU-speed execution.",
+      "license": "https://opensource.org/licenses/MIT",
+      "applicationCategory": "ScientificApplication",
+      "applicationSubCategory": "Numerical Analysis & Simulation",
+      "operatingSystem": ["Windows", "macOS", "Linux", "Browser"],
+      "softwareVersion": "Beta",
+      "featureList": [
+        "JIT-accelerated MATLAB-style syntax",
+        "RunMat Desktop: Full IDE experience with code editor, file explorer, and live plotting in-browser",
+        "Automatic GPU Fusion & Memory Management",
+        "Cross-platform binary (Metal, Vulkan, DX12) and CLI support"
+      ],
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD",
+        "availability": "https://schema.org/InStock"
+      },
+      "author": { "@id": "https://runmat.org/#organization" },
+      "publisher": { "@id": "https://runmat.org/#organization" },
+      "downloadUrl": "https://runmat.org/download",
+      "mainEntityOfPage": { "@id": "https://runmat.org/#website" },
+      "screenshot": {
+        "@type": "ImageObject",
+        "url": "https://web.runmatstatic.com/runmat-sandbox-dark.png",
+        "caption": "RunMat Desktop and Browser Sandbox"
+      }
+    }
+  ]
+};
+
 export const metadata: Metadata = {
-  title: "RunMat - The Fastest Runtime for Your Math",
+  title: "RunMat: Free Runtime for MATLAB Code (Browser & Desktop)",
   description:
-    "RunMat fuses back-to-back ops into fewer GPU steps and intelligently manages memory. MATLAB-syntax; 200+ built-ins. No kernel code, no rewrites.",
+    "Execute .m files instantly with automatic GPU acceleration. An open-source runtime compatible with standard MATLAB code. No license or installation required.",
   keywords: [
     "run matlab online",
     "free matlab runtime",
@@ -50,32 +136,35 @@ export const metadata: Metadata = {
     },
   },
   openGraph: {
-    title: "RunMat - The Fastest Runtime for Your Math",
+    title: "RunMat: Free Runtime for MATLAB Code (Browser & Desktop)",
     description:
-      "RunMat fuses back-to-back ops into fewer GPU steps and keeps arrays on device. MATLAB syntax. No kernel code, no rewrites.",
+      "Execute .m files instantly with automatic GPU acceleration. An open-source runtime compatible with standard MATLAB code. No license or installation required.",
     url: "/",
     siteName: "RunMat",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "RunMat - The Blazing-Fast Runtime for Math",
+    title: "RunMat: Free Runtime for MATLAB Code (Browser & Desktop)",
     description:
-      "RunMat fuses back-to-back ops into fewer GPU steps and keeps arrays on device.MATLAB syntax. No kernel code, no rewrites.",
+      "Execute .m files instantly with automatic GPU acceleration. An open-source runtime compatible with standard MATLAB code. No license or installation required.",
   },
 };
 
 export default function HomePage() {
   return (
     <div className="flex flex-col min-h-screen home-page">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(jsonLd).replace(/<\//g, "<\\/"),
+        }}
+      />
       {/* SEO-optimized opening content */}
       <div className="sr-only">
-        <h1>RunMat - The Fastest Runtime for Your Math</h1>
-       
-       
+        <h1>RunMat: Free Runtime for MATLAB Code (Browser & Desktop)</h1>
         <p>
-        RunMat fuses back-to-back ops into fewer GPU steps and keeps arrays on device.
-          MATLAB syntax. No kernel code, no rewrites.
+          Execute .m files instantly with automatic GPU acceleration. An open-source runtime compatible with standard MATLAB code. No license or installation required.
         </p>
       </div>
 

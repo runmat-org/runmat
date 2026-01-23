@@ -189,7 +189,7 @@ RunMat’s strategy (by design) is:
 - Treat “toolbox breadth” as **packages** (rather than baking everything into the core).
 - Focus on **performance and portability**, especially for array-heavy numeric workloads.
 
-As an open source project, RunMat’s framing is discussed explicitly in [Design Philosophy](../DESIGN_PHILOSOPHY.md).
+As an open source project, RunMat’s framing is discussed explicitly in [Design Philosophy](/docs/design-philosophy).
 
 ---
 
@@ -203,7 +203,7 @@ What’s already strongly covered:
 - MATLAB-style indexing and slicing: including `end` arithmetic and logical masks.
 - Many “hard” language features: `classdef` OOP, operator overloading, imports/name resolution.
 
-For a detailed feature-by-feature status, see [Language Coverage](../LANGUAGE_COVERAGE.md).
+For a detailed feature-by-feature status, see [Language Coverage](/docs/language-coverage).
 
 What to expect in practice:
 
