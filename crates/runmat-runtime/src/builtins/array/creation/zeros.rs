@@ -335,6 +335,10 @@ impl ParsedZeros {
             }
 
             if let Some(parsed_dims) = extract_dims(&arg).await? {
+                tracing::trace!(
+                    "zeros: parsed dimension arguments {:?}",
+                    parsed_dims
+                );
                 saw_dims_arg = true;
                 if dims.is_empty() {
                     dims = parsed_dims;
@@ -344,6 +348,11 @@ impl ParsedZeros {
                 idx += 1;
                 continue;
             }
+
+            tracing::debug!(
+                arg_type = value_tag(&arg),
+                "zeros: argument did not parse as dimensions"
+            );
 
             if shape_source.is_none() {
                 shape_source = Some(shape_from_value(&arg)?);
@@ -363,10 +372,20 @@ impl ParsedZeros {
                 dims
             }
         } else if let Some(shape) = shape_source {
+            tracing::warn!(
+                shape = ?shape,
+                "zeros: falling back to shape source; no dimension arguments parsed"
+            );
             shape
         } else {
             vec![1, 1]
         };
+
+        tracing::trace!(
+            "zeros: resolved output shape {:?} (saw_dims_arg={})",
+            shape,
+            saw_dims_arg
+        );
 
         let template = if let Some(proto) = like_proto {
             OutputTemplate::Like(proto)
@@ -388,6 +407,31 @@ async fn build_output(parsed: ParsedZeros) -> crate::BuiltinResult<Value> {
         OutputTemplate::Single => zeros_single(&parsed.shape),
         OutputTemplate::Logical => zeros_logical(&parsed.shape),
         OutputTemplate::Like(proto) => zeros_like(&proto, &parsed.shape).await,
+    }
+}
+
+fn value_tag(value: &Value) -> &'static str {
+    match value {
+        Value::Num(_) => "Num",
+        Value::Int(_) => "Int",
+        Value::Bool(_) => "Bool",
+        Value::Tensor(_) => "Tensor",
+        Value::LogicalArray(_) => "LogicalArray",
+        Value::GpuTensor(_) => "GpuTensor",
+        Value::Complex(_, _) => "Complex",
+        Value::ComplexTensor(_) => "ComplexTensor",
+        Value::String(_) => "String",
+        Value::StringArray(_) => "StringArray",
+        Value::CharArray(_) => "CharArray",
+        Value::Cell(_) => "Cell",
+        Value::Struct(_) => "Struct",
+        Value::Object(_) => "Object",
+        Value::HandleObject(_) => "HandleObject",
+        Value::Listener(_) => "Listener",
+        Value::FunctionHandle(_) => "FunctionHandle",
+        Value::Closure(_) => "Closure",
+        Value::ClassRef(_) => "ClassRef",
+        Value::MException(_) => "MException",
     }
 }
 

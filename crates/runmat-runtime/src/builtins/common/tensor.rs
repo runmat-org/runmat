@@ -217,11 +217,41 @@ pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, 
                 .await
                 .map_err(|e| format!("dimensions: {e}"))?;
             match gathered {
-                Value::Tensor(t) => dims_from_tensor_values(&t.data, &t.shape),
+                Value::Tensor(t) => {
+                    if t.data.is_empty() {
+                        tracing::warn!(
+                            gpu_shape = ?handle.shape,
+                            "dims_from_value_async: gathered GPU tensor has no data"
+                        );
+                    }
+                    tracing::trace!(
+                        "dims_from_value_async: GPU tensor values gpu_shape={:?} host_shape={:?} values={:?}",
+                        handle.shape,
+                        t.shape,
+                        t.data
+                    );
+                    let dims = dims_from_tensor_values(&t.data, &t.shape)?;
+                    if dims.is_none() {
+                        tracing::debug!(
+                            gpu_shape = ?handle.shape,
+                            host_shape = ?t.shape,
+                            "dims_from_value_async: GPU tensor not interpretable as dims"
+                        );
+                    }
+                    Ok(dims)
+                }
                 Value::LogicalArray(la) => {
                     let values: Vec<f64> =
                         la.data.iter().map(|&b| if b != 0 { 1.0 } else { 0.0 }).collect();
-                    dims_from_tensor_values(&values, &la.shape)
+                    let dims = dims_from_tensor_values(&values, &la.shape)?;
+                    if dims.is_none() {
+                        tracing::debug!(
+                            gpu_shape = ?handle.shape,
+                            host_shape = ?la.shape,
+                            "dims_from_value_async: GPU logical not interpretable as dims"
+                        );
+                    }
+                    Ok(dims)
                 }
                 Value::Num(n) => parse_numeric_dimension(n).map(|dim| Some(vec![dim])),
                 Value::Int(i) => parse_numeric_dimension(i.to_f64()).map(|dim| Some(vec![dim])),

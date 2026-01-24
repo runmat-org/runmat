@@ -49,23 +49,23 @@ use runmat_plot::{
     SharedWgpuContext,
 };
 #[cfg(target_arch = "wasm32")]
-use runmat_runtime::builtins::plotting::web::{
-    detach_default_web_renderer as runtime_detach_default_renderer,
-    detach_web_renderer as runtime_detach_web_renderer,
-};
-#[cfg(target_arch = "wasm32")]
 use runmat_runtime::builtins::plotting::{
-    clear_figure as runtime_clear_figure, clone_figure as runtime_clone_figure,
+    bind_surface_to_figure as runtime_bind_surface_to_figure,
+    clear_figure as runtime_clear_figure,
     close_figure as runtime_close_figure, configure_subplot as runtime_configure_subplot,
     context as plotting_context, current_axes_state as runtime_current_axes_state,
     current_figure_handle as runtime_current_figure_handle,
+    figure_handles as runtime_figure_handles,
     install_figure_observer as runtime_install_figure_observer,
-    install_web_renderer as runtime_install_web_renderer,
-    install_web_renderer_for_handle as runtime_install_web_renderer_for_handle,
+    install_surface as runtime_install_surface,
     new_figure_handle as runtime_new_figure_handle,
     render_current_scene as runtime_render_current_scene,
     render_figure_snapshot as runtime_render_figure_snapshot,
-    resize_web_renderer as runtime_resize_web_renderer, select_figure as runtime_select_figure,
+    resize_surface as runtime_resize_surface,
+    detach_surface as runtime_detach_surface,
+    present_surface as runtime_present_surface,
+    present_figure_on_surface as runtime_present_figure_on_surface,
+    select_figure as runtime_select_figure,
     set_hold as runtime_set_hold, web_renderer_ready as runtime_plot_renderer_ready,
     FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
@@ -183,6 +183,14 @@ static TRACE_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 static LOGGING_GUARD: OnceLock<LoggingGuard> = OnceLock::new();
 static LOG_FILTER_OVERRIDE: OnceLock<String> = OnceLock::new();
 
+// Plot surface registry for web backends.
+static PLOT_SURFACE_NEXT_ID: AtomicU32 = AtomicU32::new(1);
+runmat_thread_local! {
+    // Back-compat helpers: old API keyed by handle/plot canvas, implemented on top of surface ids.
+    static LEGACY_PLOT_SURFACE_ID: RefCell<Option<u32>> = RefCell::new(None);
+    static LEGACY_FIGURE_SURFACES: RefCell<HashMap<u32, u32>> = RefCell::new(HashMap::new());
+}
+
 #[derive(Clone)]
 struct SessionConfig {
     enable_jit: bool,
@@ -268,17 +276,33 @@ impl RunMatWasm {
         );
         let _enter = exec_span.enter();
         info!(target = "runmat.runtime", "Execution started");
+        // Capture figure handles before execution so we can close stale figures after a successful run.
+        let figures_before: Vec<u32> = runtime_figure_handles()
+            .into_iter()
+            .map(|handle| handle.as_u32())
+            .collect();
         // We must not hold a RefCell borrow across `.await`, so temporarily move the session out.
         let mut slot = self.session.borrow_mut();
         let mut session = std::mem::take(&mut *slot);
         drop(slot);
 
-        let result = session
-            .execute(&source)
-            .await
-            .map_err(|err| run_error_to_js(&err, &source))?;
-
+        let exec_result = session.execute(&source).await;
+        // Always restore the session, even if execution fails (e.g. parse/compile error).
         *self.session.borrow_mut() = session;
+        let result = exec_result.map_err(|err| run_error_to_js(&err, &source))?;
+
+        // When a run succeeds, close figures that existed before the run but were
+        // not touched during it. This avoids stale plots lingering across runs while preserving
+        // GPU surfaces for the figures that remain active.
+        if result.error.is_none() {
+            let touched: std::collections::HashSet<u32> =
+                result.figures_touched.iter().copied().collect();
+            for handle in figures_before {
+                if !touched.contains(&handle) {
+                    let _ = runtime_close_figure(Some(FigureHandle::from(handle)));
+                }
+            }
+        }
         info!(
             target = "runmat.runtime",
             workspace_entries = result.workspace.values.len(),
@@ -524,13 +548,20 @@ pub fn register_fs_provider(bindings: JsValue) -> Result<(), JsValue> {
 #[wasm_bindgen(js_name = registerPlotCanvas)]
 pub async fn register_plot_canvas(canvas: JsValue) -> Result<(), JsValue> {
     let canvas = parse_web_canvas(canvas)?;
-    install_canvas_renderer(None, canvas).await.map_err(|err| {
-        init_error_with_details(
-            InitErrorCode::PlotCanvas,
-            "Failed to register plot canvas",
-            Some(err),
-        )
-    })
+    let surface_id = PLOT_SURFACE_NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    install_surface_renderer(surface_id, canvas)
+        .await
+        .map_err(|err| {
+            init_error_with_details(
+                InitErrorCode::PlotCanvas,
+                "Failed to register plot canvas",
+                Some(err),
+            )
+        })?;
+    LEGACY_PLOT_SURFACE_ID.with(|slot| {
+        slot.borrow_mut().replace(surface_id);
+    });
+    Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -540,7 +571,8 @@ pub async fn register_figure_canvas(
     canvas: JsValue,
 ) -> Result<(), JsValue> {
     let canvas = parse_web_canvas(canvas)?;
-    install_canvas_renderer(Some(handle), canvas)
+    let surface_id = PLOT_SURFACE_NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    install_surface_renderer(surface_id, canvas)
         .await
         .map_err(|err| {
             init_error_with_details(
@@ -548,32 +580,88 @@ pub async fn register_figure_canvas(
                 "Failed to register figure canvas",
                 Some(err),
             )
-        })
+        })?;
+    runtime_bind_surface_to_figure(surface_id, handle).map_err(|err| js_error(err.message()))?;
+    LEGACY_FIGURE_SURFACES.with(|slot| {
+        slot.borrow_mut().insert(handle, surface_id);
+    });
+    // Prime immediately if the figure already exists.
+    let _ = runtime_render_current_scene(handle);
+    Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = deregisterPlotCanvas)]
 pub fn deregister_plot_canvas() {
-    runtime_detach_default_renderer();
+    let surface_id = LEGACY_PLOT_SURFACE_ID.with(|slot| slot.borrow_mut().take());
+    if let Some(id) = surface_id {
+        runtime_detach_surface(id);
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = deregisterFigureCanvas)]
 pub fn deregister_figure_canvas(handle: u32) {
-    runtime_detach_web_renderer(handle);
+    let surface_id = LEGACY_FIGURE_SURFACES.with(|slot| slot.borrow_mut().remove(&handle));
+    if let Some(id) = surface_id {
+        runtime_detach_surface(id);
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = resizeFigureCanvas)]
 pub fn resize_figure_canvas(handle: u32, width: u32, height: u32) -> Result<(), JsValue> {
-    runtime_resize_web_renderer(handle, width.max(1), height.max(1))
-        .map_err(|err| js_error(err.message()))
+    let surface_id = LEGACY_FIGURE_SURFACES.with(|slot| slot.borrow().get(&handle).copied());
+    let Some(surface_id) = surface_id else {
+        return Err(js_error("Figure canvas not registered"));
+    };
+    runtime_resize_surface(surface_id, width.max(1), height.max(1)).map_err(|err| js_error(err.message()))
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = renderCurrentFigureScene)]
 pub fn render_current_figure_scene(handle: u32) -> Result<(), JsValue> {
     runtime_render_current_scene(handle).map_err(|err| js_error(err.message()))
+}
+
+// New surface-id based API.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = createPlotSurface)]
+pub async fn create_plot_surface(canvas: JsValue) -> Result<u32, JsValue> {
+    let canvas = parse_web_canvas(canvas)?;
+    let surface_id = PLOT_SURFACE_NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    install_surface_renderer(surface_id, canvas).await?;
+    Ok(surface_id)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = destroyPlotSurface)]
+pub fn destroy_plot_surface(surface_id: u32) {
+    runtime_detach_surface(surface_id);
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = resizePlotSurface)]
+pub fn resize_plot_surface(surface_id: u32, width: u32, height: u32) -> Result<(), JsValue> {
+    runtime_resize_surface(surface_id, width.max(1), height.max(1)).map_err(|err| js_error(err.message()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = bindSurfaceToFigure)]
+pub fn bind_surface_to_figure(surface_id: u32, handle: u32) -> Result<(), JsValue> {
+    runtime_bind_surface_to_figure(surface_id, handle).map_err(|err| js_error(err.message()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = presentSurface)]
+pub fn present_surface(surface_id: u32) -> Result<(), JsValue> {
+    runtime_present_surface(surface_id).map_err(|err| js_error(err.message()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = presentFigureOnSurface)]
+pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> Result<(), JsValue> {
+    runtime_present_figure_on_surface(surface_id, handle).map_err(|err| js_error(err.message()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1044,10 +1132,7 @@ fn js_input_bridge(request: &InputRequest) -> InputHandlerAction {
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn install_canvas_renderer(
-    handle: Option<u32>,
-    canvas: WebCanvas,
-) -> Result<(), JsValue> {
+async fn install_surface_renderer(surface_id: u32, canvas: WebCanvas) -> Result<(), JsValue> {
     init_logging_once();
     let options = WebRendererOptions::default();
     let canvas_kind = match &canvas {
@@ -1055,36 +1140,18 @@ async fn install_canvas_renderer(
         WebCanvas::Offscreen(_) => "offscreen",
     };
     log::debug!(
-        "plot-web: install_canvas_renderer(handle={:?}, canvas_kind={})",
-        handle,
+        "plot-web: install_surface_renderer(surface_id={surface_id}, canvas_kind={})",
         canvas_kind
     );
-    let mut renderer = match shared_webgpu_context() {
+    let renderer = match shared_webgpu_context() {
         Some(shared) => {
             WebRenderer::with_shared_context(canvas.clone(), options.clone(), shared).await
         }
         None => WebRenderer::new(canvas, options).await,
     }
     .map_err(|err| js_error(&format!("Failed to initialize plot renderer: {err}")))?;
-    match handle {
-        Some(id) => {
-            log::debug!("plot-web: registering per-figure renderer for handle={id}");
-            prime_renderer_with_existing_figure(id, &mut renderer);
-            // `install_web_renderer_for_handle` overwrites any existing renderer for this handle,
-            // which drops the previous WebRenderer (and its surface) automatically. Explicitly
-            // detaching here causes renderer flapping in the host logs and can race with
-            // follow-up render calls during registration.
-            runtime_install_web_renderer_for_handle(id, renderer)
-        }
-        .map_err(|err| js_error(&format!("Failed to register plot renderer: {err}")))?,
-        None => {
-            log::debug!("plot-web: registering default renderer");
-            // Installing a new default renderer replaces the previous one (dropping it). Avoid
-            // explicit detach to prevent transient "detached" states during init.
-            runtime_install_web_renderer(renderer)
-        }
-        .map_err(|err| js_error(&format!("Failed to register plot renderer: {err}")))?,
-    };
+    runtime_install_surface(surface_id, renderer)
+        .map_err(|err| js_error(&format!("Failed to register plot surface: {err}")))?;
     Ok(())
 }
 
@@ -1102,15 +1169,8 @@ fn parse_web_canvas(canvas: JsValue) -> Result<WebCanvas, JsValue> {
     Err(js_error("Expected an HTMLCanvasElement or OffscreenCanvas"))
 }
 
-#[cfg(target_arch = "wasm32")]
-fn prime_renderer_with_existing_figure(handle: u32, renderer: &mut WebRenderer) {
-    let figure_handle = FigureHandle::from(handle);
-    if let Some(figure) = runtime_clone_figure(figure_handle) {
-        if let Err(err) = renderer.render_figure(figure) {
-            warn!("RunMat wasm: failed to prime WebGPU renderer for figure {handle}: {err}");
-        }
-    }
-}
+// Figure priming is handled by `presentFigureOnSurface` / `renderCurrentFigureScene` which
+// load the current figure snapshot based on the bound handle.
 
 #[wasm_bindgen(js_name = initRunMat)]
 pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
@@ -1466,7 +1526,13 @@ fn axes_state_to_js(state: FigureAxesState) -> JsValue {
 #[cfg(target_arch = "wasm32")]
 fn emit_js_figure_event(event: FigureEventView<'_>) {
     if let FigureEventKind::Closed = event.kind {
-        runtime_detach_web_renderer(event.handle.as_u32());
+        let handle = event.handle.as_u32();
+        // Legacy API cleanup: if a figure-specific canvas was registered via the old handle-based
+        // API, detach its surface when the figure is closed.
+        let surface_id = LEGACY_FIGURE_SURFACES.with(|slot| slot.borrow_mut().remove(&handle));
+        if let Some(id) = surface_id {
+            runtime_detach_surface(id);
+        }
     }
     FIGURE_EVENT_CALLBACK.with(|slot| {
         if let Some(cb) = slot.borrow().as_ref() {

@@ -95,6 +95,7 @@ struct FigureState {
     active_axes: usize,
     hold_per_axes: HashMap<usize, bool>,
     line_style_cycles: HashMap<usize, LineStyleCycle>,
+    revision: u64,
 }
 
 impl FigureState {
@@ -106,6 +107,7 @@ impl FigureState {
             active_axes: 0,
             hold_per_axes: HashMap::new(),
             line_style_cycles: HashMap::new(),
+            revision: 0,
         }
     }
 
@@ -649,6 +651,9 @@ where
         apply(&mut state.figure, axes_index)
             .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
 
+        // Increment revision after a successful mutation so surfaces can avoid
+        // re-rendering unchanged figures when "presenting" an already-loaded handle.
+        state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone())
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
@@ -660,6 +665,15 @@ where
     let rendered = render_figure(handle, figure_clone)
         .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
     Ok(format!("Figure {} updated: {rendered}", handle.as_u32()))
+}
+
+/// Monotonic revision counter that increments on each successful mutation of the figure.
+/// Used by web surface presentation logic to avoid redundant `render_figure` calls when
+/// a surface is already up-to-date for a handle.
+#[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+pub fn current_figure_revision(handle: FigureHandle) -> Option<u64> {
+    let reg = registry();
+    reg.figures.get(&handle).map(|state| state.revision)
 }
 
 fn interactive_rendering_disabled() -> bool {

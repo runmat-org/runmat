@@ -24,95 +24,211 @@ pub(crate) mod wasm {
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::HashMap;
+    use crate::builtins::plotting::state::{clone_figure, current_figure_revision, FigureHandle};
 
     runmat_thread_local! {
-        static WEB_RENDERERS: RefCell<HashMap<u32, WebRenderer>> = RefCell::new(HashMap::new());
-        static DEFAULT_RENDERER: RefCell<Option<WebRenderer>> = RefCell::new(None);
+        static SURFACES: RefCell<HashMap<u32, SurfaceEntry>> = RefCell::new(HashMap::new());
     }
 
-    pub fn install_web_renderer(renderer: WebRenderer) -> BuiltinResult<()> {
-        debug!("plot-web: installing default renderer");
-        DEFAULT_RENDERER.with(|slot| {
-            *slot.borrow_mut() = Some(renderer);
-        });
-        Ok(())
-    }
-
-    pub fn install_web_renderer_for_handle(
-        handle: u32,
+    struct SurfaceEntry {
         renderer: WebRenderer,
-    ) -> BuiltinResult<()> {
-        WEB_RENDERERS.with(|slot| {
-            slot.borrow_mut().insert(handle, renderer);
-        });
-        WEB_RENDERERS.with(|slot| {
-            let keys: Vec<u32> = slot.borrow().keys().copied().collect();
-            debug!(
-                "plot-web: installed per-figure renderer for handle={handle} (active_handles={keys:?})"
+        bound_handle: Option<u32>,
+        last_revision: Option<u64>,
+    }
+
+    pub(super) fn install_surface_impl(surface_id: u32, renderer: WebRenderer) -> BuiltinResult<()> {
+        SURFACES.with(|slot| {
+            slot.borrow_mut().insert(
+                surface_id,
+                SurfaceEntry {
+                    renderer,
+                    bound_handle: None,
+                    last_revision: None,
+                },
             );
         });
+        SURFACES.with(|slot| {
+            let keys: Vec<u32> = slot.borrow().keys().copied().collect();
+            debug!("plot-web: installed surface surface_id={surface_id} (active_surfaces={keys:?})");
+        });
         Ok(())
     }
 
-    pub fn detach_web_renderer(handle: u32) {
-        WEB_RENDERERS.with(|slot| {
-            slot.borrow_mut().remove(&handle);
+    pub(super) fn detach_surface_impl(surface_id: u32) {
+        SURFACES.with(|slot| {
+            slot.borrow_mut().remove(&surface_id);
         });
-        WEB_RENDERERS.with(|slot| {
+        SURFACES.with(|slot| {
             let keys: Vec<u32> = slot.borrow().keys().copied().collect();
-            debug!("plot-web: detached per-figure renderer for handle={handle} (active_handles={keys:?})");
+            debug!("plot-web: detached surface surface_id={surface_id} (active_surfaces={keys:?})");
         });
-    }
-
-    pub fn detach_default_renderer() {
-        DEFAULT_RENDERER.with(|slot| {
-            slot.borrow_mut().take();
-        });
-        debug!("plot-web: detached default renderer");
     }
 
     pub fn web_renderer_ready() -> bool {
-        WEB_RENDERERS.with(|slot| !slot.borrow().is_empty())
-            || DEFAULT_RENDERER.with(|slot| slot.borrow().is_some())
+        SURFACES.with(|slot| !slot.borrow().is_empty())
     }
 
     pub fn render_web_canvas(handle: u32, figure: Figure) -> BuiltinResult<String> {
-        with_renderer(handle, |renderer| renderer.render_figure(figure))
-            .map(|_| "Plot rendered to canvas".to_string())
+        // If nothing is currently bound to this handle, try to claim the lowest-id unbound surface.
+        let needs_autobind = SURFACES.with(|slot| {
+            let map = slot.borrow();
+            !map.values().any(|entry| entry.bound_handle == Some(handle))
+        });
+        if needs_autobind {
+            let maybe_unbound_surface = SURFACES.with(|slot| {
+                let map = slot.borrow();
+                map.iter()
+                    .filter_map(|(surface_id, entry)| {
+                        if entry.bound_handle.is_none() {
+                            Some(*surface_id)
+                        } else {
+                            None
+                        }
+                    })
+                    .min()
+            });
+            if let Some(surface_id) = maybe_unbound_surface {
+                // Bind without forcing a full re-prime here; the render below will set last_revision.
+                let _ = bind_surface_to_figure_impl(surface_id, handle);
+            }
+        }
+
+        let mut rendered_any = false;
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            for (_surface_id, entry) in map.iter_mut() {
+                if entry.bound_handle != Some(handle) {
+                    continue;
+                }
+                rendered_any = true;
+                // Figure was just mutated; always (re)load render data for this surface.
+                entry
+                    .renderer
+                    .render_figure(figure.clone())
+                    .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+                let rev = current_figure_revision(FigureHandle::from(handle));
+                entry.last_revision = rev;
+                entry
+                    .renderer
+                    .render_current_scene()
+                    .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+            }
+            Ok::<(), RuntimeError>(())
+        })
+        .map_err(|err| err)?;
+        if !rendered_any {
+            // It's valid to update a figure when no surfaces are bound to it yet (or no surfaces
+            // exist at all). The figure state is still updated + emitted via figure events, and
+            // hosts can present it later by binding a surface to this handle.
+            return Ok("Plot updated (no bound surfaces)".to_string());
+        }
+        Ok("Plot rendered to surface".to_string())
     }
 
-    pub fn resize_web_renderer(handle: u32, width: u32, height: u32) -> BuiltinResult<()> {
-        with_renderer(handle, |renderer| renderer.resize_surface(width, height)).map(|_| ())
+    pub(super) fn resize_surface_impl(surface_id: u32, width: u32, height: u32) -> BuiltinResult<()> {
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            let entry = map.get_mut(&surface_id).ok_or_else(|| {
+                web_error(format!(
+                    "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
+                ))
+            })?;
+            entry
+                .renderer
+                .resize_surface(width, height)
+                .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+            Ok(())
+        })
+    }
+
+    pub(super) fn bind_surface_to_figure_impl(surface_id: u32, handle: u32) -> BuiltinResult<()> {
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            let entry = map.get_mut(&surface_id).ok_or_else(|| {
+                web_error(format!(
+                    "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
+                ))
+            })?;
+            entry.bound_handle = Some(handle);
+            // Force a re-prime on next present.
+            entry.last_revision = None;
+            Ok(())
+        })
+    }
+
+    pub(super) fn present_figure_on_surface_impl(surface_id: u32, handle: u32) -> BuiltinResult<()> {
+        // "Better" path: only invalidate cached render data if the handle actually changes.
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            let entry = map.get_mut(&surface_id).ok_or_else(|| {
+                web_error(format!(
+                    "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
+                ))
+            })?;
+            if entry.bound_handle != Some(handle) {
+                entry.bound_handle = Some(handle);
+                entry.last_revision = None;
+            }
+            Ok::<(), RuntimeError>(())
+        })?;
+        present_surface_impl(surface_id)
+    }
+
+    pub(super) fn present_surface_impl(surface_id: u32) -> BuiltinResult<()> {
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            let entry = map.get_mut(&surface_id).ok_or_else(|| {
+                web_error(format!(
+                    "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
+                ))
+            })?;
+            let handle = entry.bound_handle.ok_or_else(|| {
+                web_error("Plotting surface is not bound to a figure handle. Call bindSurfaceToFigure().")
+            })?;
+            // "Better" path: only re-prime render data when the figure revision changed.
+            let current_rev = current_figure_revision(FigureHandle::from(handle));
+            if entry.last_revision != current_rev {
+                let figure = clone_figure(FigureHandle::from(handle)).ok_or_else(|| {
+                    web_error(format!("figure handle {handle} does not exist"))
+                })?;
+                entry
+                    .renderer
+                    .render_figure(figure)
+                    .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+                entry.last_revision = current_rev;
+            }
+            entry
+                .renderer
+                .render_current_scene()
+                .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+            Ok(())
+        })
     }
 
     pub fn render_current_scene(handle: u32) -> BuiltinResult<()> {
         debug!("plot-web: render_current_scene(handle={handle})");
-        with_renderer(handle, |renderer| renderer.render_current_scene()).map(|_| ())
-    }
-
-    fn with_renderer<F, R>(handle: u32, f: F) -> BuiltinResult<R>
-    where
-        F: FnOnce(&mut WebRenderer) -> Result<R, runmat_plot::web::WebRendererError>,
-    {
-        WEB_RENDERERS.with(|map_cell| {
-            let mut map = map_cell.borrow_mut();
-            if let Some(renderer) = map.get_mut(&handle) {
-                debug!("plot-web: using per-figure renderer for handle={handle}");
-                return f(renderer)
-                    .map_err(|err| web_error(format!("Plotting failed: {err}")));
-            }
-            drop(map);
-            DEFAULT_RENDERER.with(|default_cell| {
-                let mut default = default_cell.borrow_mut();
-                let renderer = default.as_mut().ok_or_else(|| {
-                    web_error(
-                        "RunMat plotting canvas not registered. Call registerPlotCanvas() before plotting.",
-                    )
-                })?;
-                debug!("plot-web: using default renderer fallback for handle={handle}");
-                f(renderer).map_err(|err| web_error(format!("Plotting failed: {err}")))
-            })
-        })
+        // Render any surfaces that are currently bound to this handle.
+        let surface_ids: Vec<u32> = SURFACES.with(|slot| {
+            slot.borrow()
+                .iter()
+                .filter_map(|(surface_id, entry)| {
+                    if entry.bound_handle == Some(handle) {
+                        Some(*surface_id)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        });
+        if surface_ids.is_empty() {
+            // No bound surfaces; nothing to do.
+            return Ok(());
+        }
+        for surface_id in surface_ids {
+            // Use caching logic in present_surface so we avoid re-priming unless revision changed.
+            present_surface_impl(surface_id)?;
+        }
+        Ok(())
     }
 
     // expose type to outer module
@@ -125,20 +241,14 @@ pub(crate) mod wasm {
 
     pub struct RendererPlaceholder;
 
-    pub fn install_web_renderer(_renderer: RendererPlaceholder) -> BuiltinResult<()> {
-        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
-    }
-
-    pub fn install_web_renderer_for_handle(
-        _handle: u32,
+    pub(super) fn install_surface_impl(
+        _surface_id: u32,
         _renderer: RendererPlaceholder,
     ) -> BuiltinResult<()> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
 
-    pub fn detach_web_renderer(_handle: u32) {}
-
-    pub fn detach_default_renderer() {}
+    pub(super) fn detach_surface_impl(_surface_id: u32) {}
 
     pub fn web_renderer_ready() -> bool {
         false
@@ -151,36 +261,52 @@ pub(crate) mod wasm {
 
     pub(super) use RendererPlaceholder as RendererType;
 
-    pub fn resize_web_renderer(_handle: u32, _width: u32, _height: u32) -> BuiltinResult<()> {
+    pub(super) fn resize_surface_impl(_surface_id: u32, _width: u32, _height: u32) -> BuiltinResult<()> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
 
     pub fn render_current_scene(_handle: u32) -> BuiltinResult<()> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
+
+    pub(super) fn bind_surface_to_figure_impl(_surface_id: u32, _handle: u32) -> BuiltinResult<()> {
+        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
+    }
+
+    pub(super) fn present_surface_impl(_surface_id: u32) -> BuiltinResult<()> {
+        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
+    }
+
+    pub(super) fn present_figure_on_surface_impl(_surface_id: u32, _handle: u32) -> BuiltinResult<()> {
+        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
+    }
 }
 
 pub use wasm::render_current_scene;
-pub use wasm::resize_web_renderer;
 pub use wasm::web_renderer_ready;
 
-pub fn install_web_renderer(renderer: wasm::RendererType) -> BuiltinResult<()> {
-    wasm::install_web_renderer(renderer)
+pub fn install_surface(surface_id: u32, renderer: wasm::RendererType) -> BuiltinResult<()> {
+    wasm::install_surface_impl(surface_id, renderer)
 }
 
-pub fn install_web_renderer_for_handle(
-    handle: u32,
-    renderer: wasm::RendererType,
-) -> BuiltinResult<()> {
-    wasm::install_web_renderer_for_handle(handle, renderer)
+pub fn detach_surface(surface_id: u32) {
+    wasm::detach_surface_impl(surface_id)
 }
 
-pub fn detach_web_renderer(handle: u32) {
-    wasm::detach_web_renderer(handle)
+pub fn resize_surface(surface_id: u32, width: u32, height: u32) -> BuiltinResult<()> {
+    wasm::resize_surface_impl(surface_id, width, height)
 }
 
-pub fn detach_default_web_renderer() {
-    wasm::detach_default_renderer()
+pub fn bind_surface_to_figure(surface_id: u32, handle: u32) -> BuiltinResult<()> {
+    wasm::bind_surface_to_figure_impl(surface_id, handle)
+}
+
+pub fn present_surface(surface_id: u32) -> BuiltinResult<()> {
+    wasm::present_surface_impl(surface_id)
+}
+
+pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> BuiltinResult<()> {
+    wasm::present_figure_on_surface_impl(surface_id, handle)
 }
 
 #[cfg_attr(

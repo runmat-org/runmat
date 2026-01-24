@@ -102,3 +102,62 @@ fn slice_assignment_3d_entire_slice() {
         assert_eq!(gathered, second_slice_vals);
     }
 }
+
+#[test]
+fn gpu_slice_assignment_and_range_indexing() {
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+    let ast = parse("A = gpuArray([1 2 3; 4 5 6]); A(:,2) = [8; 9]; B = gather(A(1:2, 2));")
+        .expect("parse");
+    let hir = lower(&ast).expect("lower");
+    let vars = execute(&hir).expect("execute");
+
+    let b_tensor = vars
+        .into_iter()
+        .filter_map(|value| match value {
+            runmat_builtins::Value::Tensor(tensor) => Some(tensor),
+            _ => None,
+        })
+        .find(|tensor| tensor.data == vec![8.0, 9.0])
+        .expect("B tensor");
+
+    assert_eq!(b_tensor.data, vec![8.0, 9.0]);
+}
+
+#[test]
+fn gpu_range_end_indexing() {
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+    let ast =
+        parse("A = gpuArray([1 2 3; 4 5 6; 7 8 9]); B = gather(A(1:end-1, 2));").expect("parse");
+    let hir = lower(&ast).expect("lower");
+    let vars = execute(&hir).expect("execute");
+
+    let b_tensor = vars
+        .into_iter()
+        .filter_map(|value| match value {
+            runmat_builtins::Value::Tensor(tensor) => Some(tensor),
+            _ => None,
+        })
+        .find(|tensor| tensor.data == vec![2.0, 5.0])
+        .expect("B tensor");
+
+    assert_eq!(b_tensor.data, vec![2.0, 5.0]);
+}
+
+#[test]
+fn gpu_range_end_assignment() {
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+    let ast = parse("A = gpuArray([1 2 3 4]); A(1:end-1) = 9; B = gather(A);").expect("parse");
+    let hir = lower(&ast).expect("lower");
+    let vars = execute(&hir).expect("execute");
+
+    let b_tensor = vars
+        .into_iter()
+        .filter_map(|value| match value {
+            runmat_builtins::Value::Tensor(tensor) => Some(tensor),
+            _ => None,
+        })
+        .find(|tensor| tensor.data == vec![9.0, 9.0, 9.0, 4.0])
+        .expect("B tensor");
+
+    assert_eq!(b_tensor.data, vec![9.0, 9.0, 9.0, 4.0]);
+}

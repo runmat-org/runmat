@@ -41,7 +41,7 @@ use std::sync::Arc;
 use std::sync::Once;
 #[cfg(feature = "native-accel")]
 use std::sync::OnceLock;
-use tracing::{debug, info_span};
+use tracing::{debug, info_span, warn};
 
 runmat_thread_local! {
     static CURRENT_PC: Cell<usize> = const { Cell::new(0) };
@@ -985,8 +985,8 @@ fn apply_end_offsets_to_numeric(
     adjusted
 }
 
-fn materialize_rhs_linear(rhs: &Value, count: usize) -> VmResult<Vec<f64>> {
-    let host_rhs = runmat_runtime::gather_if_needed(rhs)?;
+async fn materialize_rhs_linear(rhs: &Value, count: usize) -> VmResult<Vec<f64>> {
+    let host_rhs = runmat_runtime::dispatcher::gather_if_needed_async(rhs).await?;
 
     match host_rhs {
         Value::Num(n) => Ok(vec![n; count]),
@@ -1020,8 +1020,8 @@ fn materialize_rhs_linear(rhs: &Value, count: usize) -> VmResult<Vec<f64>> {
     }
 }
 
-fn materialize_rhs_nd(rhs: &Value, selection_lengths: &[usize]) -> VmResult<Vec<f64>> {
-    let rhs_host = runmat_runtime::gather_if_needed(rhs)?;
+async fn materialize_rhs_nd(rhs: &Value, selection_lengths: &[usize]) -> VmResult<Vec<f64>> {
+    let rhs_host = runmat_runtime::dispatcher::gather_if_needed_async(rhs).await?;
 
     enum RhsView {
         Scalar(f64),
@@ -6643,11 +6643,223 @@ async fn run_interpreter(
                     range_params.push((start, step));
                 }
                 range_params.reverse();
-                let base = stack
+                let mut base = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 #[cfg(feature = "native-accel")]
                 clear_residency(&base);
+                if let Value::GpuTensor(handle) = &base {
+                    if let Some(provider) = runmat_accelerate_api::provider() {
+                        let attempt = (|| -> VmResult<(Vec<u32>, Vec<usize>)> {
+                            let rank = handle.shape.len();
+                            #[derive(Clone)]
+                            enum Sel {
+                                Colon,
+                                Scalar(usize),
+                                Indices(Vec<usize>),
+                                Range { start: i64, step: i64, end_off: i64 },
+                            }
+                            let full_shape: Vec<usize> = if rank < dims {
+                                let mut s = handle.shape.clone();
+                                s.resize(dims, 1);
+                                s
+                            } else {
+                                handle.shape.clone()
+                            };
+                            let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
+                            let mut num_iter = 0usize;
+                            let mut rp_iter = 0usize;
+                            for d in 0..dims {
+                                let is_colon = (colon_mask & (1u32 << d)) != 0;
+                                let is_end = (end_mask & (1u32 << d)) != 0;
+                                if is_colon {
+                                    selectors.push(Sel::Colon);
+                                } else if is_end {
+                                    selectors.push(Sel::Scalar(*full_shape.get(d).unwrap_or(&1)));
+                                } else if let Some(pos) = range_dims.iter().position(|&rd| rd == d)
+                                {
+                                    let (st, sp) = range_params[rp_iter];
+                                    rp_iter += 1;
+                                    let off = end_offsets[pos];
+                                    selectors.push(Sel::Range {
+                                        start: st as i64,
+                                        step: if sp >= 0.0 {
+                                            sp as i64
+                                        } else {
+                                            -(sp.abs() as i64)
+                                        },
+                                        end_off: off,
+                                    });
+                                } else {
+                                    let v = numeric
+                                        .get(num_iter)
+                                        .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
+                                    num_iter += 1;
+                                    match v {
+                                        Value::Num(n) => {
+                                            let idx = *n as isize;
+                                            if idx < 1 {
+                                                return Err(mex(
+                                                    "IndexOutOfBounds",
+                                                    "Index out of bounds",
+                                                ));
+                                            }
+                                            selectors.push(Sel::Scalar(idx as usize));
+                                        }
+                                        Value::Tensor(idx_t) => {
+                                            let dim_len = *full_shape.get(d).unwrap_or(&1);
+                                            let len = idx_t.shape.iter().product::<usize>();
+                                            if len == dim_len {
+                                                let mut v = Vec::new();
+                                                for (i, &val) in idx_t.data.iter().enumerate() {
+                                                    if val != 0.0 {
+                                                        v.push(i + 1);
+                                                    }
+                                                }
+                                                selectors.push(Sel::Indices(v));
+                                            } else {
+                                                let mut v = Vec::with_capacity(len);
+                                                for &val in &idx_t.data {
+                                                    let idx = val as isize;
+                                                    if idx < 1 {
+                                                        return Err(mex(
+                                                            "IndexOutOfBounds",
+                                                            "Index out of bounds",
+                                                        ));
+                                                    }
+                                                    v.push(idx as usize);
+                                                }
+                                                selectors.push(Sel::Indices(v));
+                                            }
+                                        }
+                                        _ => {
+                                            return Err(mex(
+                                                "UnsupportedIndexType",
+                                                "Unsupported index type",
+                                            ))
+                                        }
+                                    }
+                                }
+                            }
+                            let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
+                            for (d, sel) in selectors.iter().enumerate().take(dims) {
+                                let dim_len = *full_shape.get(d).unwrap_or(&1) as i64;
+                                let idxs: Vec<usize> = match sel {
+                                    Sel::Colon => (1..=dim_len as usize).collect(),
+                                    Sel::Scalar(i) => vec![*i],
+                                    Sel::Indices(v) => v.clone(),
+                                    Sel::Range {
+                                        start,
+                                        step,
+                                        end_off,
+                                    } => {
+                                        let mut v = Vec::new();
+                                        let mut cur = *start;
+                                        let end_i = dim_len - *end_off;
+                                        if *step == 0 {
+                                            return Err(mex(
+                                                "IndexStepZero",
+                                                "Index step cannot be zero",
+                                            ));
+                                        }
+                                        if *step > 0 {
+                                            while cur <= end_i {
+                                                if cur < 1 || cur > dim_len {
+                                                    break;
+                                                }
+                                                v.push(cur as usize);
+                                                cur += *step;
+                                            }
+                                        } else {
+                                            while cur >= end_i {
+                                                if cur < 1 || cur > dim_len {
+                                                    break;
+                                                }
+                                                v.push(cur as usize);
+                                                cur += *step;
+                                            }
+                                        }
+                                        v
+                                    }
+                                };
+                                if idxs.iter().any(|&i| i == 0 || i > dim_len as usize) {
+                                    return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+                                }
+                                per_dim_indices.push(idxs);
+                            }
+                            let total_out: usize =
+                                per_dim_indices.iter().map(|v| v.len()).product();
+                            if total_out == 0 {
+                                return Ok((Vec::new(), vec![0, 0]));
+                            }
+                            let mut strides: Vec<usize> = vec![0; dims];
+                            let mut acc = 1usize;
+                            for (d, stride) in strides.iter_mut().enumerate().take(dims) {
+                                *stride = acc;
+                                acc *= full_shape[d];
+                            }
+                            let mut indices: Vec<u32> = Vec::with_capacity(total_out);
+                            let mut idx = vec![0usize; dims];
+                            loop {
+                                let mut lin = 0usize;
+                                for d in 0..dims {
+                                    let i0 = per_dim_indices[d][idx[d]] - 1;
+                                    lin += i0 * strides[d];
+                                }
+                                indices.push(lin as u32);
+                                let mut d = 0usize;
+                                while d < dims {
+                                    idx[d] += 1;
+                                    if idx[d] < per_dim_indices[d].len() {
+                                        break;
+                                    }
+                                    idx[d] = 0;
+                                    d += 1;
+                                }
+                                if d == dims {
+                                    break;
+                                }
+                            }
+                            let output_shape = if dims == 1 {
+                                if total_out <= 1 {
+                                    vec![1, 1]
+                                } else {
+                                    vec![total_out, 1]
+                                }
+                            } else {
+                                per_dim_indices
+                                    .iter()
+                                    .map(|v| v.len().max(1))
+                                    .collect()
+                            };
+                            Ok((indices, output_shape))
+                        })();
+                        if let Ok((indices, output_shape)) = attempt {
+                            if indices.is_empty() {
+                                if let Ok(zeros) = provider.zeros(&output_shape) {
+                                    stack.push(Value::GpuTensor(zeros));
+                                    pc += 1;
+                                    continue;
+                                }
+                            } else if let Ok(result) =
+                                provider.gather_linear(handle, &indices, &output_shape)
+                            {
+                                stack.push(Value::GpuTensor(result));
+                                pc += 1;
+                                continue;
+                            }
+                        }
+                        let host = provider
+                            .download(handle)
+                            .await
+                            .map_err(|e| format!("slice: {e}"))?;
+                        let tensor = runmat_builtins::Tensor::new(host.data, host.shape)
+                            .map_err(|e| format!("slice: {e}"))?;
+                        base = Value::Tensor(tensor);
+                    } else {
+                        return Err("No acceleration provider registered".to_string().into());
+                    }
+                }
                 match base {
                     Value::Tensor(t) => {
                         let rank = t.shape.len();
@@ -7243,9 +7455,77 @@ async fn run_interpreter(
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?)
                     .try_into()?;
-                let base = stack
+                let mut base = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                if let Value::GpuTensor(handle) = &base {
+                    if let Some(provider) = runmat_accelerate_api::provider() {
+                        let attempt = (|| -> VmResult<(Vec<u32>, Vec<usize>)> {
+                            let total = total_len_from_shape(&handle.shape) as i64;
+                            let end_idx = total - offset;
+                            let mut cur = start_val as i64;
+                            let step_i = if step_val >= 0.0 {
+                                step_val as i64
+                            } else {
+                                -(step_val.abs() as i64)
+                            };
+                            if step_i == 0 {
+                                return Err(mex("IndexStepZero", "Index step cannot be zero"));
+                            }
+                            let mut indices: Vec<u32> = Vec::new();
+                            if step_i > 0 {
+                                while cur <= end_idx {
+                                    if cur < 1 || cur > total {
+                                        break;
+                                    }
+                                    indices.push((cur - 1) as u32);
+                                    cur += step_i;
+                                }
+                            } else {
+                                while cur >= end_idx {
+                                    if cur < 1 || cur > total {
+                                        break;
+                                    }
+                                    indices.push((cur - 1) as u32);
+                                    cur += step_i;
+                                }
+                            }
+                            let count = indices.len();
+                            let output_shape = if count == 0 {
+                                vec![0, 1]
+                            } else if count == 1 {
+                                vec![1, 1]
+                            } else {
+                                vec![count, 1]
+                            };
+                            Ok((indices, output_shape))
+                        })();
+                        if let Ok((indices, output_shape)) = attempt {
+                            if indices.is_empty() {
+                                if let Ok(zeros) = provider.zeros(&output_shape) {
+                                    stack.push(Value::GpuTensor(zeros));
+                                    pc += 1;
+                                    continue;
+                                }
+                            } else if let Ok(result) =
+                                provider.gather_linear(handle, &indices, &output_shape)
+                            {
+                                stack.push(Value::GpuTensor(result));
+                                pc += 1;
+                                continue;
+                            }
+                        }
+                        let host = provider
+                            .download(handle)
+                            .await
+                            .map_err(|e| format!("range slice: {e}"))?;
+                        let tensor = runmat_builtins::Tensor::new(host.data, host.shape)
+                            .map_err(|e| format!("range slice: {e}"))?;
+                        base = Value::Tensor(tensor);
+                    } else {
+                        return Err("No acceleration provider registered".to_string().into());
+                    }
+                }
                 match base {
                     Value::Tensor(t) => {
                         let total = t.data.len();
@@ -7665,6 +7945,59 @@ async fn run_interpreter(
                             )
                             .await
                             {
+                                if dims == 2 {
+                                    if let (Some(sel0), Some(sel1)) =
+                                        (selectors.get(0), selectors.get(1))
+                                    {
+                                        let rows = base_shape.first().copied().unwrap_or(1);
+                                        let cols = base_shape.get(1).copied().unwrap_or(1);
+                                        if let Value::GpuTensor(vh) = &rhs {
+                                            if let (SliceSelector::Colon, SliceSelector::Scalar(j)) =
+                                                (sel0, sel1)
+                                            {
+                                                let j0 = *j - 1;
+                                                if j0 < cols {
+                                                    let v_rows = match vh.shape.len() {
+                                                        1 | 2 => vh.shape[0],
+                                                        _ => 0,
+                                                    };
+                                                    if v_rows == rows {
+                                                        if let Ok(new_h) =
+                                                            provider.scatter_column(&handle, j0, vh)
+                                                        {
+                                                            stack.push(Value::GpuTensor(new_h));
+                                                            bench_end("StoreSlice2D.fast_col", __b);
+                                                            pc += 1;
+                                                            continue;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            if let (SliceSelector::Scalar(i), SliceSelector::Colon) =
+                                                (sel0, sel1)
+                                            {
+                                                let i0 = *i - 1;
+                                                if i0 < rows {
+                                                    let v_cols = match vh.shape.len() {
+                                                        1 => vh.shape[0],
+                                                        2 => vh.shape[1],
+                                                        _ => 0,
+                                                    };
+                                                    if v_cols == cols {
+                                                        if let Ok(new_h) =
+                                                            provider.scatter_row(&handle, i0, vh)
+                                                        {
+                                                            stack.push(Value::GpuTensor(new_h));
+                                                            bench_end("StoreSlice2D.fast_row", __b);
+                                                            pc += 1;
+                                                            continue;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                                 if let Ok(plan) = build_slice_plan(&selectors, dims, &base_shape) {
                                     if plan.indices.is_empty() {
                                         stack.push(Value::GpuTensor(handle));
@@ -7675,9 +8008,9 @@ async fn run_interpreter(
                                     let values_result = if plan.dims == 1 {
                                         let count =
                                             plan.selection_lengths.first().copied().unwrap_or(0);
-                                        materialize_rhs_linear(&rhs, count)
+                                        materialize_rhs_linear(&rhs, count).await
                                     } else {
-                                        materialize_rhs_nd(&rhs, &plan.selection_lengths)
+                                        materialize_rhs_nd(&rhs, &plan.selection_lengths).await
                                     };
                                     if let Ok(values) = values_result {
                                         if values.len() == plan.indices.len() {
@@ -7712,115 +8045,15 @@ async fn run_interpreter(
                                 }
                             }
                         }
-                        let h = handle;
-                        // Attempt provider fast-paths for contiguous 2D row/col writes with GPU RHS
-                        if dims == 2 {
-                            let rows = h.shape.first().copied().unwrap_or(1);
-                            let cols = h.shape.get(1).copied().unwrap_or(1);
-                            // Build minimal selectors using handle shape for 'end'
-                            #[derive(Clone)]
-                            enum Sel {
-                                Colon,
-                                Scalar(usize),
-                            }
-                            #[allow(unused_assignments)]
-                            let mut num_iter_fast = 0usize;
-                            let sel0;
-                            let sel1;
-                            // d=0
-                            let is_colon0 = (colon_mask & (1u32 << 0)) != 0;
-                            let is_end0 = (end_mask & (1u32 << 0)) != 0;
-                            if is_colon0 {
-                                sel0 = Sel::Colon;
-                            } else if is_end0 {
-                                sel0 = Sel::Scalar(rows);
-                            } else {
-                                let v = numeric
-                                    .get(num_iter_fast)
-                                    .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
-                                num_iter_fast += 1;
-                                let n: f64 = v.try_into()?;
-                                if n < 1.0 {
-                                    return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-                                }
-                                sel0 = Sel::Scalar(n as usize);
-                            }
-                            // d=1
-                            let is_colon1 = (colon_mask & (1u32 << 1)) != 0;
-                            let is_end1 = (end_mask & (1u32 << 1)) != 0;
-                            if is_colon1 {
-                                sel1 = Sel::Colon;
-                            } else if is_end1 {
-                                sel1 = Sel::Scalar(cols);
-                            } else {
-                                let v = numeric
-                                    .get(num_iter_fast)
-                                    .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
-                                let n: f64 = v.try_into()?;
-                                if n < 1.0 {
-                                    return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-                                }
-                                sel1 = Sel::Scalar(n as usize);
-                            }
-                            // silence unused-assignment lint in builds with two scalar indices
-                            let _ = num_iter_fast;
-                            // Column write A(:, j) = rhs (gpu)
-                            if let (Sel::Colon, Sel::Scalar(j)) = (&sel0, &sel1) {
-                                let j0 = *j - 1;
-                                if j0 < cols {
-                                    if let Value::GpuTensor(vh) = &rhs {
-                                        let v_rows = match vh.shape.len() {
-                                            1 | 2 => vh.shape[0],
-                                            _ => 0,
-                                        };
-                                        if v_rows == rows {
-                                            if let Some(p) = runmat_accelerate_api::provider() {
-                                                match p.scatter_column(&h, j0, vh) {
-                                                    Ok(new_h) => {
-                                                        stack.push(Value::GpuTensor(new_h));
-                                                        bench_end("StoreSlice2D.fast_col", __b);
-                                                        pc += 1;
-                                                        continue;
-                                                    }
-                                                    Err(_) => { /* fall through to gather path */ }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            // Row write A(i, :) = rhs (gpu)
-                            if let (Sel::Scalar(i), Sel::Colon) = (&sel0, &sel1) {
-                                let i0 = *i - 1;
-                                if i0 < rows {
-                                    if let Value::GpuTensor(vh) = &rhs {
-                                        let v_cols = match vh.shape.len() {
-                                            1 => vh.shape[0],
-                                            2 => vh.shape[1],
-                                            _ => 0,
-                                        };
-                                        if v_cols == cols {
-                                            if let Some(p) = runmat_accelerate_api::provider() {
-                                                match p.scatter_row(&h, i0, vh) {
-                                                    Ok(new_h) => {
-                                                        stack.push(Value::GpuTensor(new_h));
-                                                        bench_end("StoreSlice2D.fast_row", __b);
-                                                        pc += 1;
-                                                        continue;
-                                                    }
-                                                    Err(_) => { /* fall through */ }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
                         // Gather–mutate–reupload fallback for slice assignment on GPU bases
                         let provider = runmat_accelerate_api::provider()
                             .ok_or_else(|| "No acceleration provider registered".to_string())?;
+                        debug!(
+                            "StoreSlice: falling back to host tensor path base_shape={:?}",
+                            handle.shape
+                        );
                         let host = provider
-                            .download(&h)
+                            .download(&handle)
                             .await
                             .map_err(|e| format!("gather for slice assign: {e}"))?;
                         let mut t = runmat_builtins::Tensor::new(host.data, host.shape)
@@ -8267,9 +8500,19 @@ async fn run_interpreter(
                         continue;
                         // legacy path removed in favor of scatter_string_with_plan
                     }
-                    _ => vm_bail!(
-                        "Slicing assignment only supported on tensors or string arrays".to_string()
-                    ),
+                    other => {
+                        warn!(
+                            "StoreSlice: unsupported base {:?} dims={} numeric={:?} rhs={:?}",
+                            other,
+                            dims,
+                            numeric,
+                            rhs
+                        );
+                        vm_bail!(
+                            "Slicing assignment only supported on tensors or string arrays"
+                                .to_string()
+                        )
+                    }
                 }
                 bench_end("StoreSlice", __b);
             }
@@ -8286,6 +8529,12 @@ async fn run_interpreter(
                     );
                 }
                 numeric.reverse();
+                debug!(
+                    "StoreSlice: numeric_count={} numeric={:?} rhs={:?}",
+                    numeric_count,
+                    numeric,
+                    rhs
+                );
                 let mut base = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
@@ -8312,9 +8561,9 @@ async fn run_interpreter(
                                 let values = if plan.dims == 1 {
                                     let count =
                                         plan.selection_lengths.first().copied().unwrap_or(0);
-                                    materialize_rhs_linear(&rhs, count)
+                                    materialize_rhs_linear(&rhs, count).await
                                 } else {
-                                    materialize_rhs_nd(&rhs, &plan.selection_lengths)
+                                    materialize_rhs_nd(&rhs, &plan.selection_lengths).await
                                 }
                                 .map_err(|e| format!("slice assign: {e}"))?;
                                 if values.len() == plan.indices.len() {
@@ -9340,6 +9589,125 @@ async fn run_interpreter(
                             }
                         }
                         stack.push(Value::Tensor(t));
+                    }
+                    Value::GpuTensor(handle) => {
+                        let provider = runmat_accelerate_api::provider()
+                            .ok_or_else(|| "No acceleration provider registered".to_string())?;
+                        let attempt = (|| -> VmResult<Vec<u32>> {
+                            let total = total_len_from_shape(&handle.shape) as i64;
+                            let end_idx = total - offset;
+                            let mut cur = start_val as i64;
+                            let step_i = if step_val >= 0.0 {
+                                step_val as i64
+                            } else {
+                                -(step_val.abs() as i64)
+                            };
+                            if step_i == 0 {
+                                return Err(mex("IndexStepZero", "Index step cannot be zero"));
+                            }
+                            let mut indices: Vec<u32> = Vec::new();
+                            if step_i > 0 {
+                                while cur <= end_idx {
+                                    if cur < 1 || cur > total {
+                                        break;
+                                    }
+                                    indices.push((cur - 1) as u32);
+                                    cur += step_i;
+                                }
+                            } else {
+                                while cur >= end_idx {
+                                    if cur < 1 || cur > total {
+                                        break;
+                                    }
+                                    indices.push((cur - 1) as u32);
+                                    cur += step_i;
+                                }
+                            }
+                            Ok(indices)
+                        })();
+                        if let Ok(indices) = attempt {
+                            let values = materialize_rhs_linear(&rhs, indices.len()).await
+                                .map_err(|e| format!("range assign: {e}"))?;
+                            let value_shape = vec![values.len().max(1), 1];
+                            let upload_result = if values.is_empty() {
+                                provider.zeros(&[0, 1])
+                            } else {
+                                provider.upload(&runmat_accelerate_api::HostTensorView {
+                                    data: &values,
+                                    shape: &value_shape,
+                                })
+                            };
+                            if let Ok(values_handle) = upload_result {
+                                if provider
+                                    .scatter_linear(&handle, &indices, &values_handle)
+                                    .is_ok()
+                                {
+                                    stack.push(Value::GpuTensor(handle));
+                                    pc += 1;
+                                    continue;
+                                }
+                            }
+                        }
+                        let host = provider
+                            .download(&handle)
+                            .await
+                            .map_err(|e| format!("range assign: {e}"))?;
+                        let mut t = runmat_builtins::Tensor::new(host.data, host.shape)
+                            .map_err(|e| format!("range assign: {e}"))?;
+                        let total = t.data.len();
+                        let end_idx = (total as i64) - offset;
+                        let mut cur = start_val as i64;
+                        let step_i = if step_val >= 0.0 {
+                            step_val as i64
+                        } else {
+                            -(step_val.abs() as i64)
+                        };
+                        if step_i == 0 {
+                            return Err(mex("IndexStepZero", "Index step cannot be zero"));
+                        }
+                        let rhs_vals: Vec<f64> = match rhs {
+                            Value::Num(n) => vec![n],
+                            Value::Tensor(rt) => rt.data.clone(),
+                            _ => vec![0.0],
+                        };
+                        let mut rpos = 0usize;
+                        if step_i > 0 {
+                            while cur as i64 <= end_idx {
+                                let idx0 = cur as usize;
+                                if idx0 == 0 || idx0 > total {
+                                    break;
+                                }
+                                let v = rhs_vals
+                                    .get(rpos)
+                                    .cloned()
+                                    .unwrap_or(*rhs_vals.last().unwrap_or(&0.0));
+                                t.data[idx0 - 1] = v;
+                                rpos += 1;
+                                cur += step_i;
+                            }
+                        } else {
+                            while (cur as i64) >= end_idx {
+                                let idx0 = cur as usize;
+                                if idx0 == 0 || idx0 > total {
+                                    break;
+                                }
+                                let v = rhs_vals
+                                    .get(rpos)
+                                    .cloned()
+                                    .unwrap_or(*rhs_vals.last().unwrap_or(&0.0));
+                                t.data[idx0 - 1] = v;
+                                rpos += 1;
+                                cur += step_i;
+                            }
+                        }
+                        let view = runmat_accelerate_api::HostTensorView {
+                            data: &t.data,
+                            shape: &t.shape,
+                        };
+                        let new_h = provider
+                            .upload(&view)
+                            .map_err(|e| format!("reupload after range assign: {e}"))?;
+                        stack.push(Value::GpuTensor(new_h));
                     }
                     _ => vm_bail!("Store range with end only supported on tensors".to_string()),
                 }

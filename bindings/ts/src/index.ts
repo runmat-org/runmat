@@ -512,16 +512,14 @@ interface RunMatNativeModule {
   default: (module?: WasmInitInput | Promise<WasmInitInput>) => Promise<unknown>;
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
   registerFsProvider?: (provider: RunMatFilesystemProvider) => void;
-  registerPlotCanvas?: (canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<void>;
-  deregisterPlotCanvas?: () => void;
   plotRendererReady?: () => boolean;
-  registerFigureCanvas?: (
-    handle: number,
-    canvas: HTMLCanvasElement | OffscreenCanvas
-  ) => Promise<void>;
-  resizeFigureCanvas?: (handle: number, width: number, height: number) => void;
   renderCurrentFigureScene?: (handle: number) => void;
-  deregisterFigureCanvas?: (handle: number) => void;
+  createPlotSurface?: (canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<number>;
+  destroyPlotSurface?: (surfaceId: number) => void;
+  resizePlotSurface?: (surfaceId: number, width: number, height: number) => void;
+  bindSurfaceToFigure?: (surfaceId: number, handle: number) => void;
+  presentSurface?: (surfaceId: number) => void;
+  presentFigureOnSurface?: (surfaceId: number, handle: number) => void;
   onFigureEvent?: (callback: ((event: FigureEvent) => void) | null) => void;
   newFigureHandle?: () => number;
   selectFigure?: (handle: number) => void;
@@ -579,10 +577,11 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     native.registerFsProvider(fsProvider);
   }
   if (options.plotCanvas) {
-    if (typeof native.registerPlotCanvas !== "function") {
-      throw new Error("The loaded runmat-wasm module does not support WebGPU plotting yet.");
+    if (typeof native.createPlotSurface !== "function") {
+      throw new Error("The loaded runmat-wasm module does not support WebGPU plotting surfaces yet.");
     }
-    await native.registerPlotCanvas(options.plotCanvas);
+    // Create a surface for the provided canvas. The caller is responsible for binding/presenting.
+    await native.createPlotSurface(options.plotCanvas);
   }
   const supportsWebGpu = typeof navigator !== "undefined" && typeof (navigator as any).gpu !== "undefined";
   const hasExplicitEnableFlag = Object.prototype.hasOwnProperty.call(options, "enableGpu");
@@ -626,14 +625,6 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
   return new WebRunMatSession(session);
 }
 
-export async function attachPlotCanvas(canvas: HTMLCanvasElement): Promise<void> {
-  const native = await loadNativeModule();
-  if (typeof native.registerPlotCanvas !== "function") {
-    throw new Error("The loaded runmat-wasm module does not support WebGPU plotting yet.");
-  }
-  await native.registerPlotCanvas(canvas);
-}
-
 export async function plotRendererReady(): Promise<boolean> {
   const native = await loadNativeModule();
   if (typeof native.plotRendererReady !== "function") {
@@ -642,39 +633,46 @@ export async function plotRendererReady(): Promise<boolean> {
   return native.plotRendererReady();
 }
 
-export async function registerFigureCanvas(
-  handle: number,
-  canvas: HTMLCanvasElement | OffscreenCanvas
-): Promise<void> {
+export async function createPlotSurface(canvas: HTMLCanvasElement | OffscreenCanvas): Promise<number> {
   const native = await loadNativeModule();
-  if (typeof native.registerFigureCanvas !== "function") {
-    throw new Error("The loaded runmat-wasm module does not support figure-specific canvases yet.");
-  }
-  await native.registerFigureCanvas(handle, canvas);
+  requireNativeFunction(native, "createPlotSurface");
+  return native.createPlotSurface(canvas);
 }
 
-export async function resizeFigureCanvas(handle: number, widthPx: number, heightPx: number): Promise<void> {
+export async function destroyPlotSurface(surfaceId: number): Promise<void> {
   const native = await loadNativeModule();
-  requireNativeFunction(native, "resizeFigureCanvas");
-  native.resizeFigureCanvas(handle, widthPx, heightPx);
+  requireNativeFunction(native, "destroyPlotSurface");
+  native.destroyPlotSurface(surfaceId);
+}
+
+export async function resizePlotSurface(surfaceId: number, widthPx: number, heightPx: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "resizePlotSurface");
+  native.resizePlotSurface(surfaceId, widthPx, heightPx);
+}
+
+export async function bindSurfaceToFigure(surfaceId: number, handle: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "bindSurfaceToFigure");
+  native.bindSurfaceToFigure(surfaceId, handle);
+}
+
+export async function presentSurface(surfaceId: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "presentSurface");
+  native.presentSurface(surfaceId);
+}
+
+export async function presentFigureOnSurface(surfaceId: number, handle: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "presentFigureOnSurface");
+  native.presentFigureOnSurface(surfaceId, handle);
 }
 
 export async function renderCurrentFigureScene(handle: number): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "renderCurrentFigureScene");
   native.renderCurrentFigureScene(handle);
-}
-
-export async function deregisterPlotCanvas(): Promise<void> {
-  const native = await loadNativeModule();
-  requireNativeFunction(native, "deregisterPlotCanvas");
-  native.deregisterPlotCanvas();
-}
-
-export async function deregisterFigureCanvas(handle: number): Promise<void> {
-  const native = await loadNativeModule();
-  requireNativeFunction(native, "deregisterFigureCanvas");
-  native.deregisterFigureCanvas(handle);
 }
 
 export async function onFigureEvent(listener: FigureEventListener | null): Promise<void> {
