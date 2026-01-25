@@ -1161,12 +1161,17 @@ impl Compiler {
                                                     {
                                                         // Emit StoreSlice1DRangeEnd: base is already on stack
                                                         self.compile_expr(start)?;
+                                                        let rhs_temp = self.alloc_temp();
                                                         if let Some(st) = step {
                                                             self.compile_expr(st)?;
                                                             self.compile_expr(rhs)?;
+                                                            self.emit(Instr::StoreVar(rhs_temp));
+                                                            self.emit(Instr::LoadVar(rhs_temp));
                                                             self.emit(Instr::StoreSlice1DRangeEnd { has_step: true, offset: match right.kind { runmat_hir::HirExprKind::Number(ref s) => s.parse::<i64>().unwrap_or(0), _ => 0 } });
                                                         } else {
                                                             self.compile_expr(rhs)?;
+                                                            self.emit(Instr::StoreVar(rhs_temp));
+                                                            self.emit(Instr::LoadVar(rhs_temp));
                                                             self.emit(Instr::StoreSlice1DRangeEnd { has_step: false, offset: match right.kind { runmat_hir::HirExprKind::Number(ref s) => s.parse::<i64>().unwrap_or(0), _ => 0 } });
                                                         }
                                                         lowered_range_end = true;
@@ -1248,6 +1253,9 @@ impl Compiler {
                                             }
                                         }
                                         self.compile_expr(rhs)?;
+                                        let rhs_temp = self.alloc_temp();
+                                        self.emit(Instr::StoreVar(rhs_temp));
+                                        self.emit(Instr::LoadVar(rhs_temp));
                                         self.emit(Instr::StoreRangeEnd {
                                             dims: indices.len(),
                                             numeric_count,
@@ -1393,6 +1401,9 @@ impl Compiler {
                                         if !packed {
                                             self.compile_expr(rhs)?;
                                         }
+                                        let rhs_temp = self.alloc_temp();
+                                        self.emit(Instr::StoreVar(rhs_temp));
+                                        self.emit(Instr::LoadVar(rhs_temp));
                                         if end_offsets.is_empty() {
                                             self.emit(Instr::StoreSlice(
                                                 indices.len(),
@@ -1479,6 +1490,9 @@ impl Compiler {
                                     }
                                 }
                                 self.compile_expr(rhs)?;
+                                let rhs_temp = self.alloc_temp();
+                                self.emit(Instr::StoreVar(rhs_temp));
+                                self.emit(Instr::LoadVar(rhs_temp));
                                 self.emit(Instr::StoreSlice(
                                     indices.len(),
                                     numeric_count,

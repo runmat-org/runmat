@@ -1,6 +1,6 @@
 {
   "name": "runmat",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "description": "Blazing fast runtime for math. Run MATLAB code on CPU or GPU.",
   "type": "module",
   "license": "SEE LICENSE IN ../../LICENSE.md",

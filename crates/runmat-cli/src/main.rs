@@ -18,6 +18,7 @@ use runmat_core::{ExecutionStreamEntry, ExecutionStreamKind, RunError, RunMatSes
 use runmat_gc::{
     gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats, GcConfig,
 };
+use runmat_hir::LoweringContext;
 use runmat_kernel::{ConnectionInfo, KernelConfig, KernelServer};
 use runmat_runtime::build_runtime_error;
 use runmat_snapshot::presets::SnapshotPreset;
@@ -31,6 +32,10 @@ use telemetry::{
     capture_provider_snapshot, emit_runtime_value, emit_session_start, telemetry_client_id,
     RuntimeExecutionCounters, RuntimeTelemetryRecord, TelemetryRunKind, TelemetrySessionEvent,
 };
+use runmat_ignition::instr::Instr;
+use runmat_parser::ParserOptions;
+use std::collections::HashMap;
+use std::fmt::Write as FmtWrite;
 
 fn parser_compat(mode: config::LanguageCompatMode) -> runmat_parser::CompatMode {
     match mode {
@@ -147,6 +152,7 @@ Examples:
   runmat --no-jit                          # Start REPL with interpreter only
   runmat --gc-preset low-latency           # Optimize GC for low latency
   runmat script.m                          # Execute MATLAB/Octave script
+  runmat --emit-bytecode script.m           # Emit bytecode disassembly
   runmat --install-kernel                  # Install as Jupyter kernel
   runmat kernel                            # Start Jupyter kernel
   runmat kernel-connection connection.json # Start with connection file
@@ -194,6 +200,10 @@ struct Cli {
     /// Maximum number of call stack frames to record
     #[arg(long, env = "RUNMAT_CALLSTACK_LIMIT", default_value = "200")]
     callstack_limit: usize,
+
+    /// Emit bytecode disassembly for a script (stdout if omitted path)
+    #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "-")]
+    emit_bytecode: Option<PathBuf>,
 
     /// Error identifier namespace prefix
     #[arg(long, env = "RUNMAT_ERROR_NAMESPACE", default_value = "RunMat")]
@@ -725,10 +735,24 @@ async fn main() -> Result<()> {
 
     // Handle command or script execution
     let command = cli.command.clone();
-    let script = cli.script.clone();
+    let mut script = cli.script.clone();
+    let mut emit_bytecode = cli.emit_bytecode.clone();
+    if command.is_none() && script.is_none() {
+        if let Some(path) = emit_bytecode.clone() {
+            let is_matlab = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("m"))
+                .unwrap_or(false);
+            if is_matlab || path.exists() {
+                script = Some(path);
+                emit_bytecode = Some(PathBuf::from("-"));
+            }
+        }
+    }
     match (command, script) {
         (Some(command), None) => execute_command(command, &cli, &config).await,
-        (None, Some(script)) => execute_script(script, &cli, &config).await,
+        (None, Some(script)) => execute_script(script, emit_bytecode, &cli, &config).await,
         (None, None) => {
             // Default to REPL
             execute_repl(&config).await
@@ -990,7 +1014,9 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) ->
         Commands::KernelConnection { connection_file } => {
             execute_kernel_with_connection(connection_file, cli.timeout).await
         }
-        Commands::Run { file, args } => execute_script_with_args(file, args, cli, config).await,
+        Commands::Run { file, args } => {
+            execute_script_with_args(file, args, cli.emit_bytecode.clone(), cli, config).await
+        }
         Commands::Version { detailed } => {
             show_version(detailed);
             Ok(())
@@ -1363,13 +1389,19 @@ async fn execute_kernel_with_connection(connection_file: PathBuf, timeout: u64) 
     Ok(())
 }
 
-async fn execute_script(script: PathBuf, cli: &Cli, config: &RunMatConfig) -> Result<()> {
-    execute_script_with_args(script, vec![], cli, config).await
+async fn execute_script(
+    script: PathBuf,
+    emit_bytecode_path: Option<PathBuf>,
+    cli: &Cli,
+    config: &RunMatConfig,
+) -> Result<()> {
+    execute_script_with_args(script, vec![], emit_bytecode_path, cli, config).await
 }
 
 async fn execute_script_with_args(
     script: PathBuf,
     _args: Vec<String>,
+    emit_bytecode_path: Option<PathBuf>,
     _cli: &Cli,
     config: &RunMatConfig,
 ) -> Result<()> {
@@ -1383,6 +1415,13 @@ async fn execute_script_with_args(
 
     let content = fs::read_to_string(&script)
         .with_context(|| format!("Failed to read script file: {script:?}"))?;
+
+    if let Some(path) = &emit_bytecode_path {
+        let output = emit_bytecode(&content, config)
+            .with_context(|| format!("Failed to emit bytecode for {script:?}"))?;
+        write_bytecode_output(path, &output)?;
+        return Ok(());
+    }
 
     let enable_jit = config.jit.enabled;
     let mut engine = RunMatSession::with_snapshot(
@@ -1458,6 +1497,73 @@ async fn execute_script_with_args(
     dump_provider_telemetry_if_requested();
 
     Ok(())
+}
+
+fn emit_bytecode(source: &str, config: &RunMatConfig) -> Result<String> {
+    let options = ParserOptions::new(parser_compat(config.language.compat));
+    let ast = runmat_parser::parse_with_options(source, options)
+        .map_err(|err| anyhow::anyhow!(format!("Parse error: {err:?}")))?;
+    let lowering = runmat_hir::lower(&ast, &LoweringContext::empty())
+        .map_err(|err| anyhow::anyhow!(format!("Lowering error: {err:?}")))?;
+    let mut bytecode = runmat_ignition::compile(&lowering.hir, &HashMap::new())
+        .map_err(|err| anyhow::anyhow!(format!("Compile error: {err:?}")))?;
+    bytecode.var_names = lowering
+        .var_names
+        .iter()
+        .map(|(id, name)| (id.0, name.clone()))
+        .collect();
+    Ok(disassemble_bytecode(&bytecode))
+}
+
+fn write_bytecode_output(path: &PathBuf, output: &str) -> Result<()> {
+    if path.as_os_str() == "-" {
+        println!("{output}");
+        return Ok(());
+    }
+    let mut file = fs::File::create(path)
+        .with_context(|| format!("Failed to create bytecode output file {}", path.display()))?;
+    file.write_all(output.as_bytes())
+        .with_context(|| format!("Failed to write bytecode output file {}", path.display()))?;
+    Ok(())
+}
+
+fn disassemble_bytecode(bytecode: &runmat_ignition::Bytecode) -> String {
+    let mut out = String::new();
+    if !bytecode.var_names.is_empty() {
+        let mut entries: Vec<_> = bytecode.var_names.iter().collect();
+        entries.sort_by_key(|(idx, _)| *idx);
+        let _ = writeln!(&mut out, "# Variables");
+        for (idx, name) in entries {
+            let _ = writeln!(&mut out, "v{} = {}", idx, name);
+        }
+        let _ = writeln!(&mut out);
+    }
+    let _ = writeln!(&mut out, "# Bytecode");
+    for (idx, instr) in bytecode.instructions.iter().enumerate() {
+        let mut line = format!("{:04}: {}", idx, format_instr(instr, &bytecode.var_names));
+        if let Some(span) = bytecode.instr_spans.get(idx) {
+            if span.start != 0 || span.end != 0 {
+                let _ = write!(line, "  ; span {}..{}", span.start, span.end);
+            }
+        }
+        let _ = writeln!(&mut out, "{line}");
+    }
+    out
+}
+
+fn format_instr(instr: &Instr, var_names: &HashMap<usize, String>) -> String {
+    let label = |idx: usize| var_names.get(&idx).map(|n| n.as_str()).unwrap_or("?");
+    match instr {
+        Instr::LoadVar(idx) => format!("LoadVar {} ({})", idx, label(*idx)),
+        Instr::StoreVar(idx) => format!("StoreVar {} ({})", idx, label(*idx)),
+        Instr::LoadLocal(idx) => format!("LoadLocal {}", idx),
+        Instr::StoreLocal(idx) => format!("StoreLocal {}", idx),
+        Instr::EmitVar { var_index, label: emit } => {
+            format!("EmitVar {} ({}) {:?}", var_index, label(*var_index), emit)
+        }
+        Instr::EmitStackTop { label: emit } => format!("EmitStackTop {:?}", emit),
+        other => format!("{other:?}"),
+    }
 }
 
 #[cfg(feature = "wgpu")]
