@@ -47,7 +47,7 @@ export default function GettingStartedPage() {
         </div>
 
         {/* Getting Started Tabs: Browser | CLI | Jupyter */}
-        <section id="jupyter-notebook-integration" className="mb-12">
+        <section id="getting-started-tabs" className="mb-12">
           <h2 className="text-3xl font-bold mb-6 text-foreground">
             Choose your path
           </h2>

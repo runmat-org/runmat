@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Globe, Terminal, BookOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BrowserTabContent } from "./BrowserTab";
@@ -20,6 +20,29 @@ export function GettingStartedTabs() {
 
   const tabId = (tab: TabOption) => `getting-started-tab-${tab}`;
   const panelId = (tab: TabOption) => `getting-started-panel-${tab}`;
+
+  useEffect(() => {
+    const hashToTab: Record<string, TabOption> = {
+      "jupyter-notebook-integration": "jupyter",
+    };
+
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace("#", "");
+      const nextTab = hashToTab[hash];
+
+      if (nextTab) {
+        setActiveTab(nextTab);
+        const anchor = document.getElementById(hash);
+        if (anchor) {
+          anchor.scrollIntoView({ behavior: "auto", block: "start" });
+        }
+      }
+    };
+
+    handleHashChange();
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
 
   return (
     <div className="w-full">

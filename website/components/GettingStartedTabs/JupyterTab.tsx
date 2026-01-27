@@ -6,6 +6,7 @@ import { CheckCircle } from "lucide-react";
 export function JupyterTabContent() {
   return (
     <div className="space-y-6">
+      <div id="jupyter-notebook-integration" className="scroll-mt-24" />
       <p className="text-muted-foreground">
         Use RunMat as a Jupyter kernel for interactive notebooks with full MATLAB syntax and automatic GPU acceleration. Requires RunMat CLI installed first.
       </p>
