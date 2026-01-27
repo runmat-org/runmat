@@ -143,6 +143,8 @@ When looking at alternatives, the same themes come up:
 - **Syntax familiarity**:  How much retraining is needed for someone used to MATLAB's style?
 - **Ecosystem depth**: Are advanced packages (e.g., filter design, optimization libraries) readily available, or will engineers need to stitch together community code?
 
+See how your workflows map to RunMat? [Try the sandbox](/sandbox) and run MATLAB-style code in your browser with no install.
+
 ---
 
 ## Performance
@@ -187,7 +189,7 @@ For workloads where GPU acceleration matters, RunMat's automatic cross-vendor ap
 To illustrate how familiar MATLAB code translates into other environments, let’s look at a single example: plotting a sine wave. This highlights where your MATLAB knowledge is directly applicable and where new syntax or libraries are required.
 
 ### RunMat / Octave (MATLAB syntax)
-```matlab
+```matlab:runnable
 x = 0:0.1:2*pi;
 y = sin(x);
 plot(x, y);
@@ -251,7 +253,7 @@ One of MATLAB's most significant drawbacks is its heavy installation and license
 
 For engineers who need to run computations without installing software (on locked-down corporate machines, Chromebooks, or while traveling), browser-based platforms offer immediate access.
 
-- **RunMat** runs entirely in the browser via WebAssembly, with no server required. Your code executes on your own device, meaning no time limits or usage quotas. WebGPU acceleration is available in supported browsers (Chrome, Edge) for GPU-accelerated graphics and computation. File persistence requires signing in or using the desktop app (same UI, full local storage). Startup is instant (~5 ms) and works offline once loaded.
+- **RunMat** runs entirely in the browser via WebAssembly, with no server required. Your code executes on your own device, meaning no time limits or usage quotas. WebGPU acceleration is available in supported browsers (Chrome, Edge) for GPU-accelerated graphics and computation. File persistence requires signing in or using the desktop app (same UI, full local storage). Startup is instant (~5 ms) and works offline once loaded. [Open the RunMat sandbox](/sandbox) in any supported browser — no signup, no quotas, WebGPU when available.
 
 - **MATLAB Online** runs on MathWorks' cloud servers, where your browser is just a thin client. This requires a MathWorks account and internet connection. The free tier limits usage to 20 hours/month with 15-minute execution caps and idle timeouts. No GPU acceleration is available in standard cloud sessions. For licensed users, it provides full MATLAB functionality without local installation.
 - For a side-by-side of RunMat vs MATLAB Online (including browser limitations and GPU access), read [MATLAB Online](/matlab-online).
@@ -311,4 +313,4 @@ These tools aren't mutually exclusive; use Python for breadth, Julia for perform
 
 And with options like RunMat emerging, it's possible to get the best attributes (high performance, nearly 100% MATLAB compatibility, cross-vendor GPU acceleration, and open-source freedom) all in one package. 
 
-*Try RunMat free today at [runmat.org](https://runmat.org). RunMat is a free, open source community project developed by [Dystr](https://dystr.com).*
+*Try RunMat free in your browser at [runmat.org/sandbox](/sandbox), or visit [runmat.org](https://runmat.org) for downloads and docs. RunMat is a free, open source community project developed by [Dystr](https://dystr.com).*

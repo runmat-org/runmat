@@ -119,7 +119,7 @@ Click **Run** again. A new **Figure** tab appears in the Runtime Panel showing y
 
 The editor supports standard MATLAB syntax:
 
-```matlab
+```matlab:runnable
 % Element-wise operations (automatically GPU-accelerated for large arrays)
 x = rand(1000000, 1);
 y = sin(x) .* exp(-x);

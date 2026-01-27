@@ -123,14 +123,26 @@ graph TD
     -   Wrappers for the plotting library.
     -   **BLAS/LAPACK Integration**: Through the optional `blas-lapack` feature, this crate provides high-performance linear algebra operations by linking against native libraries like Apple's Accelerate framework or OpenBLAS.
 
+## GPU Acceleration: `runmat-accelerate`
+
+Numerical hot paths are accelerated by the `runmat-accelerate` crate, which provides automatic GPU offload and kernel fusion.
+
+-   **Fusion**: Sequences of elementwise and reduction operations (e.g. `sin(x) .* exp(x)`, `mean(y,'all')`) are fused into minimal GPU kernels, reducing memory traffic and launch overhead.
+-   **Backends**: The primary backend is **WGPU**, giving cross-platform GPU support (NVIDIA, AMD, Intel, Apple). The runtime chooses CPU vs GPU transparently based on data size and op support.
+-   **Integration**: `runmat-ignition` and `runmat-runtime` call into `runmat-accelerate-api`; the actual implementations live in `runmat-accelerate`. Plotting uses `runmat-plot` and its own wgpu pipelines; computation-side acceleration is handled here.
+
+For more on fusion and tuning, see [Introduction to RunMat GPU](/docs/accelerate/fusion-intro).
+
 ## Host-Agnostic Execution (`runmat-core`)
 
-To make the CLI, tests, and upcoming WebAssembly host share the same interpreter stack, the project routes all frontend + execution orchestration through the `runmat-core` crate.
+To make the CLI, tests, LSP, and browser/WASM host share the same interpreter stack, the project routes all frontend + execution orchestration through the `runmat-core` crate.
 
 -   **Purpose**: `runmat-core` packages the lexer, parser, HIR lowering, Ignition interpreter, optional Turbine JIT, GC configuration, snapshot loading, and builtin dispatch into a single embeddable `RunMatSession`.
 -   **Feature gating**: The crate exposes a `jit` feature (on by default). Desktop builds keep Turbine enabled, while wasm targets or lightweight embeds can disable it and run interpreter-only without dragging in Cranelift.
 -   **Embedding surface**: `RunMatSession` provides ergonomic helpers (`execute`, `reset_stats`, `show_system_info`, etc.) so consumers can drive the runtime without depending on CLI plumbing or OS-specific services (filesystems, sockets, threads).
--   **Reuse across binaries**: The `runmat` CLI (including REPL mode), the Jupyter kernel, integration tests, and future browser bindings all depend on `runmat-core`, ensuring that fixes to execution semantics immediately benefit every host environment.
+-   **Reuse across binaries**: The `runmat` CLI (including REPL mode), the **LSP** (`runmat-lsp`, used by the VS Code/Cursor extension), the Jupyter kernel, integration tests, and **browser/WASM** bindings (`runmat-wasm`) all depend on `runmat-core`, ensuring that fixes to execution semantics immediately benefit every host environment.
+-   **Configuration**: The `runmat-config` crate provides file/env/CLI precedence and is used by the CLI and LSP. See [Configuration](/docs/configuration) for details. The browser sandbox uses built-in defaults and does not read `.runmat` or env vars.
+-   **Filesystem**: The `runmat-filesystem` crate provides pluggable storage backends (native, sandbox, WASM bridge, remote) so the same I/O builtins work across CLI, browser, and desktop. See [FILESYSTEM.md](FILESYSTEM.md) for the design.
 
 ---
 

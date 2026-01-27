@@ -328,8 +328,7 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-center">
-                  Same code, everywhere: static binaries with consistent performance on macOS/Windows/Linux and headless servers. GPU portability via Metal, DirectX 12, and Vulkan—no CUDA lock-in. Great for laptops, clusters, and CI.
-
+                  Try instantly in the browser with no install, or download the CLI for local scripts. Same code runs on macOS, Windows, Linux, and headless servers. GPU portability via Metal, DirectX 12, and Vulkan—no CUDA lock-in.
                 </CardDescription>
               </CardContent>
             </Card>

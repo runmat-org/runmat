@@ -7,6 +7,8 @@ up from legacy largely process-flag driven approach.
 
 This document is the definitive reference for all configuration options.
 
+**Applicability:** Configuration files, environment variables, and the `runmat config` subcommands apply to the **CLI** and to tools that use the config loader (e.g. the LSP). The **browser sandbox** does not read `.runmat` or env vars; it uses built-in defaults. Use the CLI or desktop app for file-based and environment-based configuration.
+
 ## Overview
 
 Configuration sources (highest to lowest precedence):
@@ -15,7 +17,7 @@ Configuration sources (highest to lowest precedence):
 3. Configuration files (`.runmat`, `.runmat.yaml`, `runmat.config.json`, …)
 4. Built-in defaults
 
-Loading follows `runmat::config::ConfigLoader::load()` which:
+Loading follows `runmat_config::ConfigLoader::load()` (in the `runmat-config` crate) which:
 - Searches for a config file (see discovery paths below)
 - Loads and parses it (YAML/JSON/TOML)
 - Applies environment variable overrides
@@ -260,7 +262,7 @@ texture_compression = true
 
 ## Configuration schema (by module)
 
-Below reflects the Rust types in `crates/runmat-cli/src/config.rs`. Defaults shown in
+Below reflects the Rust types in `crates/runmat-config/src/lib.rs`. Defaults shown in
 parentheses.
 
 ### runtime

@@ -28,7 +28,7 @@ export function TabButton({ label, icon, isActive, onClick, className, id, "aria
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
         isActive
           ? "text-foreground font-semibold"
-          : "text-gray-600 dark:text-gray-700 font-normal hover:text-gray-500 dark:hover:text-gray-600",
+          : "text-gray-500 dark:text-gray-400 font-normal hover:text-gray-600 dark:hover:text-gray-300",
         className
       )}
     >
@@ -36,7 +36,7 @@ export function TabButton({ label, icon, isActive, onClick, className, id, "aria
         <span
           className={cn(
             "flex-shrink-0 transition-colors",
-            isActive ? "text-foreground" : "text-gray-600 dark:text-gray-700"
+            isActive ? "text-foreground" : "text-gray-500 dark:text-gray-400"
           )}
           aria-hidden="true"
         >

@@ -4,18 +4,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
   Download, 
   Terminal, 
-  Play, 
   FileText,
-  CheckCircle,
   ArrowRight,
   Zap,
+  ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
-import { OSInstallCommand } from "@/components/OSInstallCommand";
+import { GettingStartedTabs } from "@/components/GettingStartedTabs";
 
 export const metadata: Metadata = {
   title: "Getting Started | Docs",
-  description: "Learn how to install and use RunMat, the modern MATLAB/Octave runtime. Complete guide for researchers, engineers, and students.",
+  description: "Learn how to install and use RunMat, the modern MATLAB/Octave runtime. Try in the browser, install the CLI, or use Jupyter. Complete guide for researchers, engineers, and students.",
 };
 
 export default function GettingStartedPage() {
@@ -24,287 +23,35 @@ export default function GettingStartedPage() {
       <div className="container mx-auto px-4 md:px-0 py-16 md:py-4">
         
         {/* Header */}
-        <div className="mb-12">
+        <div className="mb-8">
           <h1 className="text-4xl lg:text-5xl font-bold mb-6">
             Getting Started with RunMat
           </h1>
-          <p className="text-xl text-muted-foreground leading-relaxed">
-            Get up and running with RunMat in minutes. This guide will walk you through installation, 
-            basic usage, and your first interactive session.
+          <p className="text-xl text-muted-foreground leading-relaxed mb-6">
+            Get up and running in minutes. Try RunMat in your browser with no installation, or install the CLI for the terminal and local scripts.
+          </p>
+          {/* Try RunMat Now — primary CTA */}
+          <Button
+            asChild
+            size="lg"
+            className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200 hover:from-blue-600 hover:to-purple-700"
+          >
+            <Link href="/sandbox" target="_blank" rel="noopener noreferrer" className="inline-flex items-center">
+              Launch Browser App
+              <ExternalLink className="ml-2 h-4 w-4" aria-hidden="true" />
+            </Link>
+          </Button>
+          <p className="text-sm text-muted-foreground mt-2">
+            No installation required. Works in Chrome, Edge, Firefox, and Safari.
           </p>
         </div>
 
-        {/* Installation Section */}
-        <section id="installation" className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">
-            Installation
-          </h2>
-          
-          <div className="space-y-6">
-            {/* Quick Install */}
-            <OSInstallCommand className="mb-6" />
-            <Button asChild>
-                    <Link href="/download">
-                      <Download className="mr-2 h-4 w-4" />
-                More Installation Options
-                    </Link>
-            </Button>
-          </div>
-        </section>
-
-        {/* First Steps */}
-        <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">
-            Your First RunMat Session
-          </h2>
-          
-          <div className="space-y-6">
-            {/* Start REPL */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <span className="bg-blue-100 dark:bg-blue-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-blue-600 mr-3">1</span>
-                  Start the Interactive REPL
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground mb-4">
-                  Open your terminal and start RunMat:
-                </p>
-                <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
-                  <div className="text-gray-400">$ runmat</div>
-                  <div className="text-green-400 mt-1">RunMat v0.0.1 by Dystr (https://dystr.com)</div>
-                  <div className="text-green-400">High-performance MATLAB/Octave runtime with JIT compilation and GC</div>
-                  <div className="text-green-400 mt-1">JIT compiler: enabled (Cranelift optimization level: Speed)</div>
-                  <div className="text-green-400">Garbage collector: &quot;default&quot;</div>
-                  <div className="text-green-400">No snapshot loaded - standard library will be compiled on demand</div>
-                  <div className="text-green-400">Type &apos;help&apos; for help, &apos;exit&apos; to quit, &apos;.info&apos; for system information</div>
-                  <div className="mt-2 text-white">runmat&gt;</div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Basic Calculations */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <span className="bg-orange-100 dark:bg-orange-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-orange-600 mr-3">2</span>
-                  Try Basic Calculations
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground mb-4">
-                  Start with simple arithmetic and variables:
-                </p>
-                <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
-                  <div className="text-blue-400">runmat&gt;</div> <span>x = 5</span>
-                  <div className="text-gray-400">ans = 5</div>
-                  <div className="text-blue-400 mt-2">runmat&gt;</div> <span>y = 3.14</span>
-                  <div className="text-gray-400">ans = 3.14</div>
-                  <div className="text-blue-400 mt-2">runmat&gt;</div> <span>result = x * y + 2</span>
-                  <div className="text-gray-400">ans = 17.7</div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Matrices */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <span className="bg-green-100 dark:bg-green-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-green-600 mr-3">3</span>
-                  Work with Matrices
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground mb-4">
-                  Create and manipulate matrices using familiar MATLAB syntax:
-                </p>
-                <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
-                  <div className="text-blue-400">runmat&gt;</div> <span>A = [1, 2, 3; 4, 5, 6]</span>
-                  <div className="text-gray-400">ans = [1 2 3; 4 5 6]</div>
-                  <div className="text-blue-400 mt-2">runmat&gt;</div> <span>B = A * 2</span>
-                  <div className="text-gray-400">ans = [2 4 6; 8 10 12]</div>
-                  <div className="text-blue-400 mt-2">runmat&gt;</div> <span>C = A + B</span>
-                  <div className="text-gray-400">ans = [3 6 9; 12 15 18]</div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* GPU Acceleration */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <span className="bg-orange-100 dark:bg-orange-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-orange-600 mr-3">4</span>
-                  Experience Automatic GPU Acceleration
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground mb-4">
-                  RunMat keeps data on the GPU and fuses operations automatically—no device flags required.
-                </p>
-                <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
-                  <div className="text-blue-400">runmat&gt;</div>{" "}
-                  <span>x = rand(1000, 1000);</span>
-                  <span className="text-gray-400">  % Million elements</span>
-                  <div className="text-blue-400 mt-2">runmat&gt;</div>{" "}
-                  <span>y = sin(x) .* exp(x);</span>
-                  <span className="text-gray-400">  % Fused on GPU automatically</span>
-                  <div className="text-blue-400 mt-2">runmat&gt;</div>{" "}
-                  <span>m = mean(y, &apos;all&apos;);</span>
-                  <span className="text-gray-400">  % Stays on GPU</span>
-                  <div className="text-gray-400 mt-3">[GPU] Fused 2 operations, 1M elements in 0.8ms</div>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Want the full GPU story? Read the{" "}
-                  <Link href="/blog/runmat-accelerate-fastest-runtime-for-your-math" className="underline">
-                    RunMat Accelerate deep dive
-                  </Link>
-                  .
-                </p>
-              </CardContent>
-            </Card>
-
-            {/* Plotting */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <span className="bg-purple-100 dark:bg-purple-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-purple-600 mr-3">5</span>
-                  Create Your First Plot (Pre-release)
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground mb-4">
-                  Generate simple 2D line or scatter plots. Advanced plot types are still in progress, so expect rough edges while we expand coverage.
-                </p>
-                <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
-                  <div className="text-blue-400">runmat&gt;</div> <span>x = [0, 1, 2, 3, 4, 5]</span>
-                  <div className="text-gray-400">ans = [0 1 2 3 4 5]</div>
-                  <div className="text-blue-400 mt-1">runmat&gt;</div> <span>y = [0, 1, 4, 9, 16, 25]</span>
-                  <div className="text-gray-400">ans = [0 1 4 9 16 25]</div>
-                  <div className="text-blue-400 mt-1">runmat&gt;</div> <span>plot(x, y)</span>
-                  <div className="text-green-400 mt-1">[Pre-release plot window opens for 2D line/scatter]</div>
-                </div>
-                <div className="flex items-center space-x-2 text-sm text-green-600 dark:text-green-400">
-                  <CheckCircle className="h-4 w-4" />
-                  <span>Basic zoom/pan controls ship today; rotate and richer tooling arrive with future plotting milestones.</span>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </section>
-
-        {/* Running Scripts */}
-        <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">
-            Running MATLAB Scripts
-          </h2>
-          
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Play className="h-5 w-5 mr-2 text-green-600" />
-                Execute .m Files
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground mb-4">
-                Run existing MATLAB/Octave scripts directly with automatic GPU acceleration:
-              </p>
-              <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
-                <div className="text-gray-400"># Run a script file</div>
-                <div>runmat script.m</div>
-                <div className="mt-2 text-gray-400"># Run with specific options</div>
-                <div>runmat run --jit-threshold 100 simulation.m</div>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Most MATLAB and GNU Octave scripts will run without modification. Check our 
-                <Link href="/docs/language-coverage" className="text-blue-600 dark:text-blue-400 underline"> compatibility guide</Link> for details.
-              </p>
-            </CardContent>
-          </Card>
-        </section>
-
-        {/* Jupyter Integration */}
+        {/* Getting Started Tabs: Browser | CLI | Jupyter */}
         <section id="jupyter-notebook-integration" className="mb-12">
           <h2 className="text-3xl font-bold mb-6 text-foreground">
-            Jupyter Notebook Integration
+            Choose your path
           </h2>
-          
-          <div className="space-y-6">
-            {/* Install Kernel */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <span className="bg-blue-100 dark:bg-blue-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-blue-600 mr-3">1</span>
-                  Install RunMat as a Jupyter Kernel
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground mb-4">
-                  Make RunMat available as a kernel in Jupyter notebooks:
-                </p>
-                <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
-                  <div>runmat --install-kernel</div>
-                  <div className="text-green-400 mt-1">RunMat Jupyter kernel installed successfully!</div>
-                  <div className="text-green-400">Kernel directory: ~/.local/share/jupyter/kernels/runmat</div>
-                </div>
-                <div className="flex items-center space-x-2 text-sm text-green-600 dark:text-green-400">
-                  <CheckCircle className="h-4 w-4" />
-                  <span>One-time setup that works with existing Jupyter installations</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Use in Jupyter */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <span className="bg-orange-100 dark:bg-orange-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-orange-600 mr-3">2</span>
-                  Start Jupyter and Select RunMat
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground mb-4">
-                  Launch Jupyter and create notebooks with the RunMat kernel:
-                </p>
-                <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
-                  <div className="text-gray-400"># Start Jupyter Notebook</div>
-                  <div>jupyter notebook</div>
-                  <div className="mt-2 text-gray-400"># Or Jupyter Lab</div>
-                  <div>jupyter lab</div>
-                  <div className="mt-2 text-gray-400"># Then select &quot;RunMat&quot; when creating a new notebook</div>
-                </div>
-                <div className="flex items-center space-x-2 text-sm text-blue-600 dark:text-blue-400">
-                  <CheckCircle className="h-4 w-4" />
-                  <span>Full MATLAB syntax support with automatic GPU acceleration</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Verify Installation */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <span className="bg-green-100 dark:bg-green-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-green-600 mr-3">3</span>
-                  Verify Installation
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground mb-4">
-                  Check that the RunMat kernel is properly installed:
-                </p>
-                <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
-                  <div>jupyter kernelspec list</div>
-                  <div className="text-gray-400 mt-1">Available kernels:</div>
-                  <div className="text-gray-400">  python3    /usr/local/share/jupyter/kernels/python3</div>
-                  <div className="text-green-400">  runmat    ~/.local/share/jupyter/kernels/runmat</div>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  If you don&apos;t see RunMat listed, ensure Jupyter is installed and try running the install command again.
-                </p>
-              </CardContent>
-            </Card>
-          </div>
+          <GettingStartedTabs />
         </section>
 
         {/* Next Steps */}
@@ -314,6 +61,26 @@ export default function GettingStartedPage() {
           </h2>
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <Card className="hover:shadow-lg transition-shadow">
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Download className="h-5 w-5 mr-2 text-foreground" />
+                  Want local file access?
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground mb-4">
+                  Install the CLI to run scripts from your terminal and use local files. Need native GPU performance? Download RunMat for full-speed execution.
+                </p>
+                <Button variant="outline" className="w-full" asChild>
+                  <Link href="/download" className="flex items-center justify-center">
+                    Install RunMat / Download
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+
             <Card className="hover:shadow-lg transition-shadow">
               <CardHeader>
                 <CardTitle className="flex items-center">
