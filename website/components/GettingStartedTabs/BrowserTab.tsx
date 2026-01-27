@@ -7,14 +7,8 @@ import Link from "next/link";
 
 const DEMO_CODE = `a = 0:pi/100:2*pi;
 b = sin(a);
-c = cos(a);
-g = b.^2 + c.^2;
-sum_g = sum(g);
-max_g = max(g);
-disp([ ...
-   'Sum of g: ', num2str(sum_g), ' | ', ...
-   'Max of g: ', num2str(max_g) ...
-]);`;
+
+plot(a, b);`;
 
 export function BrowserTabContent() {
   return (
@@ -68,7 +62,7 @@ export function BrowserTabContent() {
             </div>
           </div>
           <p className="text-muted-foreground text-sm">
-            Click the purple <strong>▶ Run demo.m</strong> button in the Runtime Panel. The Console shows output; the Variables tab shows workspace variables with types, shapes, and CPU/GPU residency.
+            Click the purple <strong>▶ Run demo.m</strong> button in the Runtime Panel. A Figure tab appears with the sine wave; the Variables tab shows workspace variables with types, shapes, and CPU/GPU residency.
           </p>
         </CardContent>
       </Card>
@@ -77,18 +71,18 @@ export function BrowserTabContent() {
         <CardHeader>
           <CardTitle className="flex items-center text-base">
             <span className="bg-orange-100 dark:bg-orange-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-orange-600 mr-3">2</span>
-            Edit and add a plot
+            Edit and experiment
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-muted-foreground text-sm">
-            Add these lines to <code className="rounded bg-muted px-1 py-0.5">demo.m</code> and run again:
+            Try adding a title to the plot in <code className="rounded bg-muted px-1 py-0.5">demo.m</code>:
           </p>
           <div className="rounded-md overflow-hidden">
-            <MatlabInlineCodeBlock code={'plot(a, b);\ntitle("Sine Wave");'} preClassName="rounded-md p-4 !my-0 language-matlab" />
+            <MatlabInlineCodeBlock code={'title("Sine Wave");'} preClassName="rounded-md p-4 !my-0 language-matlab" />
           </div>
           <p className="text-muted-foreground text-sm">
-            A new Figure tab appears in the Runtime Panel. Use <strong>Ctrl+Enter</strong> (Windows/Linux) or <strong>Cmd+Enter</strong> (macOS) to run without clicking the button.
+            Use <strong>Ctrl+Enter</strong> (Windows/Linux) or <strong>Cmd+Enter</strong> (macOS) to run without clicking the button.
           </p>
         </CardContent>
       </Card>

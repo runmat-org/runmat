@@ -310,7 +310,7 @@ fprintf('m=%.6f\n', double(m));  % Single download at sink
 
 RunMat detects the elementwise chain (`sin`, `.*`, `+`), fuses them into one GPU dispatch, keeps `y` resident on GPU, and only downloads `m` when needed for output.
 
-For more details, see [Introduction to RunMat GPU](docs/INTRODUCTION_TO_RUNMAT_GPU.md).
+For more details, see [Introduction to RunMat GPU](https://runmat.org/docs/accelerate/fusion-intro).
 
 ## 🎨 Modern Developer Experience
 
@@ -372,7 +372,7 @@ runmat gc major
 runmat info
 ```
 
-See [CLI Documentation](docs/CLI.md) for the complete command reference.
+See [CLI Documentation](https://runmat.org/docs/cli) for the complete command reference.
 
 ## 📦 Package System
 
@@ -413,7 +413,7 @@ Both package types appear identically to users—functions show up in the namesp
 
 ### Package Management
 
-The RunMat package manager is still in active design—no CLI commands ship in the current toolchain yet. The [Package Manager Documentation](docs/PACKAGE_MANAGER.md) captures the proposed workflow (dependency manifests, registry + git sources, publishing flow) and will be updated once the implementation begins.
+The RunMat package manager is still in active design—no CLI commands ship in the current toolchain yet. The [Package Manager Documentation](https://runmat.org/docs/package-manager) captures the proposed workflow (dependency manifests, registry + git sources, publishing flow) and will be updated once the implementation begins.
 
 ## 💡 Design Philosophy
 
@@ -447,7 +447,7 @@ RunMat keeps the core small and uncompromisingly high-quality; everything else i
 - A smaller trusted compute base, easier auditing
 - Community-driven package ecosystem
 
-See [Design Philosophy](docs/DESIGN_PHILOSOPHY.md) for the complete design rationale.
+See [Design Philosophy](https://runmat.org/docs/design-philosophy) for the complete design rationale.
 
 ## 🌍 Who Uses RunMat?
 

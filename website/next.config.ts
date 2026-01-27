@@ -24,36 +24,6 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       {
-        source: '/docs/CLI.md',
-        destination: '/docs/cli',
-        permanent: true,
-      },
-      {
-        source: '/docs/LANGUAGE_COVERAGE.md',
-        destination: '/docs/language-coverage',
-        permanent: true,
-      },
-      {
-        source: '/docs/LIBRARY.md',
-        destination: '/docs/library',
-        permanent: true,
-      },
-      {
-        source: '/docs/INTRODUCTION_TO_RUNMAT.PDF',
-        destination: '/docs/accelerate/fusion-intro',
-        permanent: true,
-      },
-      {
-        source: '/docs/accelerate/gpu-residency',
-        destination: '/docs/accelerate/fusion-intro',
-        permanent: true,
-      },
-      {
-        source: '/docs/reference/builtins/containers.Map.isKey',
-        destination: '/docs/reference/builtins/containers.map',
-        permanent: true,
-      },
-      {
         source: '/blog/matlab-alternatives-runmat-vs-octave-julia-python',
         destination: '/blog/free-matlab-alternatives',
         permanent: true,

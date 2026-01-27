@@ -383,7 +383,7 @@ Install RunMat and run your script with the CLI or the Jupyter kernel.
 Yes. The planner chooses CPU JIT/BLAS or GPU per step. Fusion keeps GPU regions device-resident when beneficial.
 
 **Does it work offline? Any telemetry?**  
- It runs locally and does not require internet access for execution. See the repository for any optional diagnostics and how to disable them. [Privacy/Telemetry](https://github.com/runmat-org/runmat/blob/main/docs/TELEMETRY.md)
+ It runs locally and does not require internet access for execution. See the repository for any optional diagnostics and how to disable them. [Privacy/Telemetry](/docs/telemetry)
 
 **How do I report an issue or contribute?**  
  Open an issue or PR in the repository. Include OS, GPU/CPU info, a minimal script, and steps to reproduce. [GitHub](https://github.com/runmat-org/runmat)

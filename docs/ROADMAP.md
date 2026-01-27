@@ -4,7 +4,7 @@ This document serves as the evolving roadmap for **RunMat** to track the progres
 
 ## Vision
 
-RunMat is a fast, local-first MATLAB-compatible runtime. Same syntax engineers have used for decades, with a modern stack underneath: Rust, a JIT compiler, and automatic GPU acceleration. We're building the foundation first—a runtime engineers can adopt without workflow changes or procurement headaches—so that RunMat earns trust before layering on richer tooling and assistance for math and physics work.
+RunMat is a fast, local-first MATLAB-compatible runtime. Same syntax engineers have used for decades, with a modern stack underneath: Rust, a JIT compiler, and automatic GPU acceleration. We're building the foundation first—a runtime engineers can adopt without workflow changes or procurement headaches—with richer tooling and assistance for math and physics work to follow.
 
 ## Current Shape
 
