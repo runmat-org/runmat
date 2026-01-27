@@ -333,6 +333,9 @@ export default function HomePage() {
                     className="underline"
                     target="_blank"
                     rel="noreferrer"
+                    data-ph-capture-attribute-destination="sandbox"
+                    data-ph-capture-attribute-source="home-portable-card"
+                    data-ph-capture-attribute-cta="try-in-browser"
                   >
                     Try instantly in the browser with no install,
                   </Link>{" "}

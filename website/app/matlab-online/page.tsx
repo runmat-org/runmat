@@ -232,7 +232,14 @@ export default function MatlabOnlinePage() {
                   asChild
                   className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200"
                 >
-                  <Link href="/sandbox">Try RunMat in Your Browser →</Link>
+                  <Link
+                    href="/sandbox"
+                    data-ph-capture-attribute-destination="sandbox"
+                    data-ph-capture-attribute-source="matlab-online-hero"
+                    data-ph-capture-attribute-cta="try-runmat-browser"
+                  >
+                    Try RunMat in Your Browser →
+                  </Link>
                 </Button>
                 <Button
                   variant="outline"
@@ -423,7 +430,14 @@ export default function MatlabOnlinePage() {
                   asChild
                   className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200"
                 >
-                  <Link href="/sandbox">Try RunMat in Your Browser →</Link>
+                  <Link
+                    href="/sandbox"
+                    data-ph-capture-attribute-destination="sandbox"
+                    data-ph-capture-attribute-source="matlab-online-features"
+                    data-ph-capture-attribute-cta="try-runmat-browser"
+                  >
+                    Try RunMat in Your Browser →
+                  </Link>
                 </Button>
               </div>
             </div>
@@ -529,6 +543,9 @@ export default function MatlabOnlinePage() {
                   target="_blank"
                   rel="noreferrer"
                   className="rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-100 px-3 py-2 text-base flex items-center gap-2 transition hover:border-purple-400/60 hover:text-purple-50"
+                  data-ph-capture-attribute-destination="sandbox"
+                  data-ph-capture-attribute-source="matlab-online-how-it-works"
+                  data-ph-capture-attribute-cta="runmat-org-sandbox"
                 >
                   <span className="h-2 w-2 rounded-full bg-red-400"></span>
                   <span className="h-2 w-2 rounded-full bg-yellow-400"></span>
@@ -881,7 +898,14 @@ export default function MatlabOnlinePage() {
                   asChild
                   className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200"
                 >
-                  <Link href="/sandbox">Launch the Sandbox</Link>
+                  <Link
+                    href="/sandbox"
+                    data-ph-capture-attribute-destination="sandbox"
+                    data-ph-capture-attribute-source="matlab-online-bottom-cta"
+                    data-ph-capture-attribute-cta="launch-sandbox"
+                  >
+                    Launch the Sandbox
+                  </Link>
                 </Button>
               </div>
             </CardContent>

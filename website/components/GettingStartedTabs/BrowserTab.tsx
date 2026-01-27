@@ -21,7 +21,15 @@ export function BrowserTabContent() {
     <div className="space-y-6">
       <p className="text-muted-foreground">
         RunMat in the browser gives you a full IDE—editor, file explorer, console, and live plots—all running locally. No installation. Visit{" "}
-        <Link href="/sandbox" className="text-primary underline underline-offset-4" target="_blank" rel="noopener noreferrer">
+        <Link
+          href="/sandbox"
+          className="text-primary underline underline-offset-4"
+          target="_blank"
+          rel="noopener noreferrer"
+          data-ph-capture-attribute-destination="sandbox"
+          data-ph-capture-attribute-source="getting-started-browser-tab"
+          data-ph-capture-attribute-cta="runmat-org-sandbox"
+        >
           runmat.org/sandbox
         </Link>{" "}
         to start. Works in Chrome, Edge, Firefox, and Safari. For GPU acceleration, use a browser with WebGPU (Chrome 113+, Edge 113+, Safari 18+, Firefox 139+).
@@ -51,6 +59,8 @@ export function BrowserTabContent() {
                 code={DEMO_CODE}
                 size="sm"
                 className="bg-code-surface/80 backdrop-blur-sm"
+                source="getting-started-browser-tab"
+                exampleId="demo-m"
               />
             </div>
             <div className="rounded-md overflow-hidden">

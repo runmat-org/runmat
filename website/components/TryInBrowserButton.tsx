@@ -6,20 +6,40 @@ import { cn } from "@/lib/utils";
 
 interface TryInBrowserButtonProps extends React.ComponentProps<typeof Button> {
   code?: string;
+  source?: string;
+  exampleId?: string;
 }
 
-export function TryInBrowserButton({ 
-  variant = "outline", 
-  size = "lg", 
+const normalizeExampleId = (value?: string) => value?.trim() || undefined;
+
+const hashCode = (value: string) => {
+  let hash = 5381;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 33) ^ value.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(36);
+};
+
+export function TryInBrowserButton({
+  variant = "outline",
+  size = "lg",
   code,
+  source = "try-in-browser",
+  exampleId,
   className,
-  ...props 
+  ...props
 }: TryInBrowserButtonProps) {
+  const resolvedExampleId = normalizeExampleId(exampleId) ?? (code ? `code-${hashCode(code)}` : undefined);
+
   return (
       <Button
           variant={variant}
           size={size}
           className={cn("inline-flex items-center gap-2 font-medium transition-all duration-200 text-sm px-3.5 py-2 rounded-md border border-[#8b5cf6]/50 text-[#a78bfa] hover:bg-[#8b5cf6]/10 hover:border-[#8b5cf6]/80 hover:text-[#c4b5fd]", className)}
+          data-ph-capture-attribute-destination="sandbox"
+          data-ph-capture-attribute-source={source}
+          data-ph-capture-attribute-cta="run-in-browser"
+          data-ph-capture-attribute-example-id={resolvedExampleId}
           onClick={() =>
               openWorkspace(
                   [{path: "/example.m", content: code || "disp('hello from docs');"}],

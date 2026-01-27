@@ -190,6 +190,9 @@ export default function Navigation() {
               href="https://runmat.org/sandbox"
               className="inline-flex items-center justify-center h-10 px-6 text-sm font-semibold flex-shrink-0 whitespace-nowrap rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow hover:from-blue-600 hover:to-purple-700 transition-colors"
               onClick={handleTryInBrowserClick}
+              data-ph-capture-attribute-destination="sandbox"
+              data-ph-capture-attribute-source="nav-desktop"
+              data-ph-capture-attribute-cta="try-in-browser"
             >
               Try in Browser
             </Link>

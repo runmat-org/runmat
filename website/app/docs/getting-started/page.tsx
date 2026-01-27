@@ -36,7 +36,15 @@ export default function GettingStartedPage() {
             size="lg"
             className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200 hover:from-blue-600 hover:to-purple-700"
           >
-            <Link href="/sandbox" target="_blank" rel="noopener noreferrer" className="inline-flex items-center">
+            <Link
+              href="/sandbox"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center"
+              data-ph-capture-attribute-destination="sandbox"
+              data-ph-capture-attribute-source="docs-getting-started-hero"
+              data-ph-capture-attribute-cta="launch-browser-app"
+            >
               Launch Browser App
               <ExternalLink className="ml-2 h-4 w-4" aria-hidden="true" />
             </Link>

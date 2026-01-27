@@ -34,6 +34,7 @@ export function MatlabCodeCard({ code = sampleCode, className }: MatlabCodeCardP
             code={code}
             size="sm"
             className="bg-[#0d1422]/80 backdrop-blur-sm"
+            source="matlab-code-card"
           />
         </div>
         <pre

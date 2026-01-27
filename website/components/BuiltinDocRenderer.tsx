@@ -156,6 +156,7 @@ function renderCodeBlock(block: Extract<BuiltinDocBlock, { type: 'code' }>) {
             code={code}
             size="sm"
             className="bg-code-surface/80 backdrop-blur-sm"
+            source="builtin-doc-code-block"
           />
         </div>
       )}
