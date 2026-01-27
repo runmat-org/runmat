@@ -328,7 +328,15 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-center">
-                  Try instantly in the browser with no install, or download the CLI for local scripts. Same code runs on macOS, Windows, Linux, and headless servers. GPU portability via Metal, DirectX 12, and Vulkan—no CUDA lock-in.
+                  <Link
+                    href="https://runmat.org/sandbox"
+                    className="underline"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Try instantly in the browser with no install,
+                  </Link>{" "}
+                  or download the CLI for local scripts. Same code runs on macOS, Windows, Linux, and headless servers. GPU portability via Metal, DirectX 12, and Vulkan—no CUDA lock-in.
                 </CardDescription>
               </CardContent>
             </Card>
