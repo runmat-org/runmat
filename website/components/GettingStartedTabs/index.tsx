@@ -17,6 +17,7 @@ const tabs: { id: TabOption; label: string; icon: React.ReactNode }[] = [
 
 export function GettingStartedTabs() {
   const [activeTab, setActiveTab] = useState<TabOption>("browser");
+  const [pendingHash, setPendingHash] = useState<string | null>(null);
 
   const tabId = (tab: TabOption) => `getting-started-tab-${tab}`;
   const panelId = (tab: TabOption) => `getting-started-panel-${tab}`;
@@ -32,10 +33,7 @@ export function GettingStartedTabs() {
 
       if (nextTab) {
         setActiveTab(nextTab);
-        const anchor = document.getElementById(hash);
-        if (anchor) {
-          anchor.scrollIntoView({ behavior: "auto", block: "start" });
-        }
+        setPendingHash(hash);
       }
     };
 
@@ -43,6 +41,16 @@ export function GettingStartedTabs() {
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
+
+  useEffect(() => {
+    if (!pendingHash) return;
+
+    const anchor = document.getElementById(pendingHash);
+    if (anchor) {
+      anchor.scrollIntoView({ behavior: "auto", block: "start" });
+      setPendingHash(null);
+    }
+  }, [activeTab, pendingHash]);
 
   return (
     <div className="w-full">
