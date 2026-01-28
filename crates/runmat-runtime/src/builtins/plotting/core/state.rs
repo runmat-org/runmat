@@ -501,7 +501,10 @@ pub fn current_hold_enabled() -> bool {
     let handle = reg.current;
     // Ensure a default figure exists even if nothing has rendered yet (common on wasm/web).
     let state = get_state_mut(&mut reg, handle);
-    *state.hold_per_axes.get(&state.active_axes).unwrap_or(&false)
+    *state
+        .hold_per_axes
+        .get(&state.active_axes)
+        .unwrap_or(&false)
 }
 
 /// Reset hold state for all figures/axes.

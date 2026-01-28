@@ -1,8 +1,8 @@
 //! MATLAB-compatible `sub2ind` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::HostTensorView;
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_accelerate_api::GpuTensorHandle;
+use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -111,92 +111,92 @@ fn try_gpu_sub2ind(dims: &[usize], subs: &[Value]) -> crate::BuiltinResult<Optio
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if subs
-            .iter()
-            .any(|v| matches!(v, Value::GpuTensor(h) if h.device_id != 0))
+        #[cfg(all(test, feature = "wgpu"))]
         {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
-    let provider = match runmat_accelerate_api::provider() {
-        Some(p) => p,
-        None => return Ok(None),
-    };
-    if !subs
-        .iter()
-        .all(|value| matches!(value, Value::GpuTensor(_)))
-    {
-        return Ok(None);
-    }
-    if dims.is_empty() {
-        return Ok(None);
-    }
-
-    let mut handles: Vec<&GpuTensorHandle> = Vec::with_capacity(subs.len());
-    for value in subs {
-        if let Value::GpuTensor(handle) = value {
-            handles.push(handle);
-        }
-    }
-
-    if handles.len() != dims.len() {
-        return Err(sub2ind_error(
-            "The number of subscripts supplied must equal the number of dimensions in the size vector.",
-        ));
-    }
-
-    let mut scalar_mask: Vec<bool> = Vec::with_capacity(handles.len());
-    let mut target_shape: Option<Vec<usize>> = None;
-    let mut result_len: usize = 1;
-    let mut saw_non_scalar = false;
-
-    for handle in &handles {
-        let len = tensor::element_count(&handle.shape);
-        let is_scalar = len == 1;
-        scalar_mask.push(is_scalar);
-        if !is_scalar {
-            saw_non_scalar = true;
-            if let Some(existing) = &target_shape {
-                if existing != &handle.shape {
-                    return Err(sub2ind_error("Subscript inputs must have the same size."));
-                }
-            } else {
-                target_shape = Some(handle.shape.clone());
-                result_len = len;
+            if subs
+                .iter()
+                .any(|v| matches!(v, Value::GpuTensor(h) if h.device_id != 0))
+            {
+                let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                    runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+                );
             }
         }
-    }
+        let provider = match runmat_accelerate_api::provider() {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+        if !subs
+            .iter()
+            .all(|value| matches!(value, Value::GpuTensor(_)))
+        {
+            return Ok(None);
+        }
+        if dims.is_empty() {
+            return Ok(None);
+        }
 
-    if !saw_non_scalar {
-        target_shape = Some(vec![1, 1]);
-        result_len = 1;
-    } else if let Some(shape) = &target_shape {
-        result_len = tensor::element_count(shape);
-    }
+        let mut handles: Vec<&GpuTensorHandle> = Vec::with_capacity(subs.len());
+        for value in subs {
+            if let Value::GpuTensor(handle) = value {
+                handles.push(handle);
+            }
+        }
 
-    let strides = build_strides(dims, "sub2ind")?;
-    if dims.iter().any(|&d| d > u32::MAX as usize)
-        || strides.iter().any(|&s| s > u32::MAX as usize)
-        || result_len > u32::MAX as usize
-    {
-        return Ok(None);
-    }
+        if handles.len() != dims.len() {
+            return Err(sub2ind_error(
+            "The number of subscripts supplied must equal the number of dimensions in the size vector.",
+        ));
+        }
 
-    let output_shape = target_shape.clone().unwrap_or_else(|| vec![1, 1]);
-    match provider.sub2ind(
-        dims,
-        &strides,
-        &handles,
-        &scalar_mask,
-        result_len,
-        &output_shape,
-    ) {
-        Ok(handle) => Ok(Some(Value::GpuTensor(handle))),
-        Err(err) => Err(sub2ind_error(err.to_string())),
+        let mut scalar_mask: Vec<bool> = Vec::with_capacity(handles.len());
+        let mut target_shape: Option<Vec<usize>> = None;
+        let mut result_len: usize = 1;
+        let mut saw_non_scalar = false;
+
+        for handle in &handles {
+            let len = tensor::element_count(&handle.shape);
+            let is_scalar = len == 1;
+            scalar_mask.push(is_scalar);
+            if !is_scalar {
+                saw_non_scalar = true;
+                if let Some(existing) = &target_shape {
+                    if existing != &handle.shape {
+                        return Err(sub2ind_error("Subscript inputs must have the same size."));
+                    }
+                } else {
+                    target_shape = Some(handle.shape.clone());
+                    result_len = len;
+                }
+            }
+        }
+
+        if !saw_non_scalar {
+            target_shape = Some(vec![1, 1]);
+            result_len = 1;
+        } else if let Some(shape) = &target_shape {
+            result_len = tensor::element_count(shape);
+        }
+
+        let strides = build_strides(dims, "sub2ind")?;
+        if dims.iter().any(|&d| d > u32::MAX as usize)
+            || strides.iter().any(|&s| s > u32::MAX as usize)
+            || result_len > u32::MAX as usize
+        {
+            return Ok(None);
+        }
+
+        let output_shape = target_shape.clone().unwrap_or_else(|| vec![1, 1]);
+        match provider.sub2ind(
+            dims,
+            &strides,
+            &handles,
+            &scalar_mask,
+            result_len,
+            &output_shape,
+        ) {
+            Ok(handle) => Ok(Some(Value::GpuTensor(handle))),
+            Err(err) => Err(sub2ind_error(err.to_string())),
         }
     }
 }

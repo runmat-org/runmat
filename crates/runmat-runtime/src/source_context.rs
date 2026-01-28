@@ -32,4 +32,3 @@ pub fn replace_current_source(source: Option<&str>) -> SourceContextGuard {
 pub fn current_source() -> Option<Arc<str>> {
     CURRENT_SOURCE.with(|slot| slot.borrow().clone())
 }
-

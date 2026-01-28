@@ -15,8 +15,8 @@ use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::build_surface_gpu_plot;
-use std::sync::Arc;
 use crate::BuiltinResult;
+use std::sync::Arc;
 
 const BUILTIN_NAME: &str = "mesh";
 

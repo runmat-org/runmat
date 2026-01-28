@@ -20,10 +20,10 @@ pub mod window;
 #[cfg(feature = "gui")]
 pub mod window_impl; // Cross-platform native window management
 
-#[cfg(feature = "gui")]
-pub use controls::PlotControls;
 #[cfg(feature = "egui-overlay")]
 pub use crate::overlay::plot_overlay::PlotOverlay;
+#[cfg(feature = "gui")]
+pub use controls::PlotControls;
 #[cfg(feature = "gui")]
 pub use window::*;
 

@@ -254,10 +254,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<VarAxes>> {
         return Ok(None);
     }
 
-    let Some(dims) = extract_dims(value, "var")
-        .await
-        .map_err(var_error)?
-    else {
+    let Some(dims) = extract_dims(value, "var").await.map_err(var_error)? else {
         return Ok(None);
     };
     if dims.is_empty() {

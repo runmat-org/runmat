@@ -161,7 +161,6 @@ pub(crate) mod tests {
     };
     use std::collections::HashMap;
 
-
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
     }

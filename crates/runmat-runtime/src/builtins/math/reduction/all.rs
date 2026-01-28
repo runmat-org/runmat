@@ -10,10 +10,10 @@ use crate::builtins::common::{
     shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
-use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "all";
 

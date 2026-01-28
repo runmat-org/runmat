@@ -19,8 +19,8 @@ use runmat_core::{
     matlab_class_name, value_shape, CompatMode, ExecutionProfiling, ExecutionResult,
     ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision, FusionPlanEdge, FusionPlanNode,
     FusionPlanShader, FusionPlanSnapshot, InputRequest, InputRequestKind, InputResponse,
-    MaterializedVariable, RunError, RunMatSession, StdinEvent, StdinEventKind,
-    WorkspaceEntry, WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview,
+    MaterializedVariable, RunError, RunMatSession, StdinEvent, StdinEventKind, WorkspaceEntry,
+    WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview,
     WorkspaceSliceOptions, WorkspaceSnapshot,
 };
 use runmat_logging::{
@@ -49,23 +49,19 @@ use runmat_plot::{
 };
 #[cfg(target_arch = "wasm32")]
 use runmat_runtime::builtins::plotting::{
-    bind_surface_to_figure as runtime_bind_surface_to_figure,
-    clear_figure as runtime_clear_figure,
+    bind_surface_to_figure as runtime_bind_surface_to_figure, clear_figure as runtime_clear_figure,
     close_figure as runtime_close_figure, configure_subplot as runtime_configure_subplot,
     context as plotting_context, current_axes_state as runtime_current_axes_state,
     current_figure_handle as runtime_current_figure_handle,
-    figure_handles as runtime_figure_handles,
+    detach_surface as runtime_detach_surface, figure_handles as runtime_figure_handles,
     install_figure_observer as runtime_install_figure_observer,
-    install_surface as runtime_install_surface,
-    new_figure_handle as runtime_new_figure_handle,
-    reset_hold_state_for_run as runtime_reset_hold_state_for_run,
+    install_surface as runtime_install_surface, new_figure_handle as runtime_new_figure_handle,
+    present_figure_on_surface as runtime_present_figure_on_surface,
+    present_surface as runtime_present_surface,
     render_current_scene as runtime_render_current_scene,
     render_figure_snapshot as runtime_render_figure_snapshot,
-    resize_surface as runtime_resize_surface,
-    detach_surface as runtime_detach_surface,
-    present_surface as runtime_present_surface,
-    present_figure_on_surface as runtime_present_figure_on_surface,
-    select_figure as runtime_select_figure,
+    reset_hold_state_for_run as runtime_reset_hold_state_for_run,
+    resize_surface as runtime_resize_surface, select_figure as runtime_select_figure,
     set_hold as runtime_set_hold, web_renderer_ready as runtime_plot_renderer_ready,
     FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
@@ -158,8 +154,7 @@ runmat_thread_local! {
     static STDOUT_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
         RefCell::new(HashMap::new());
 }
-type StdoutForwarder =
-    Arc<dyn Fn(&runmat_runtime::console::ConsoleEntry) + Send + Sync + 'static>;
+type StdoutForwarder = Arc<dyn Fn(&runmat_runtime::console::ConsoleEntry) + Send + Sync + 'static>;
 type RuntimeLogForwarder = Arc<dyn Fn(&runmat_logging::RuntimeLogRecord) + Send + Sync + 'static>;
 type TraceForwarder = Arc<dyn Fn(&[runmat_logging::TraceEvent]) + Send + Sync + 'static>;
 
@@ -617,10 +612,7 @@ pub async fn register_plot_canvas(canvas: JsValue) -> Result<(), JsValue> {
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = registerFigureCanvas)]
-pub async fn register_figure_canvas(
-    handle: u32,
-    canvas: JsValue,
-) -> Result<(), JsValue> {
+pub async fn register_figure_canvas(handle: u32, canvas: JsValue) -> Result<(), JsValue> {
     let canvas = parse_web_canvas(canvas)?;
     let surface_id = PLOT_SURFACE_NEXT_ID.fetch_add(1, Ordering::Relaxed);
     install_surface_renderer(surface_id, canvas)
@@ -1308,13 +1300,13 @@ fn ensure_trace_forwarder_installed() {
 
     TRACE_FORWARDER.get_or_init(|| {
         let forwarder: TraceForwarder = Arc::new(|events: &[TraceEvent]| {
-                let js_value = serde_wasm_bindgen::to_value(events).unwrap_or(JsValue::NULL);
-                TRACE_SUBSCRIBERS.with(|cell| {
-                    for cb in cell.borrow().values() {
-                        let _ = cb.call1(&JsValue::NULL, &js_value);
-                    }
-                });
+            let js_value = serde_wasm_bindgen::to_value(events).unwrap_or(JsValue::NULL);
+            TRACE_SUBSCRIBERS.with(|cell| {
+                for cb in cell.borrow().values() {
+                    let _ = cb.call1(&JsValue::NULL, &js_value);
+                }
             });
+        });
         let hook = forwarder.clone();
         set_trace_hook(move |events| {
             (hook)(events);

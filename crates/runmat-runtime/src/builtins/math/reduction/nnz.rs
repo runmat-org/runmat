@@ -11,10 +11,10 @@ use crate::builtins::common::{
     tensor,
 };
 use crate::dispatcher::download_handle_async;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "nnz";
 

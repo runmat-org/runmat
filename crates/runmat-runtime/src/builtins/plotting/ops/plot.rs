@@ -139,13 +139,11 @@ pub async fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Builti
         let (x_tensor, y_tensor) = data.into_tensors_async("plot").await?;
         let (x_vals, y_vals) = numeric_pair(x_tensor, y_tensor, "plot")?;
         plots.push(build_line_plot(x_vals, y_vals, &label, &appearance)?);
-        }
+    }
 
     let mut plots_opt = Some(plots);
     let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes_index| {
-        let plots = plots_opt
-            .take()
-            .expect("plot series consumed exactly once");
+        let plots = plots_opt.take().expect("plot series consumed exactly once");
         for plot in plots {
             figure.add_line_plot_on_axes(plot, axes_index);
         }
@@ -197,7 +195,6 @@ impl LineInput {
             Self::Host(_) => None,
         }
     }
-
 }
 
 fn parse_series_specs(

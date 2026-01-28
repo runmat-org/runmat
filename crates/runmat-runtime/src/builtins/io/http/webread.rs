@@ -596,7 +596,6 @@ pub(crate) mod tests {
     use std::sync::mpsc;
     use std::thread;
 
-
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
     }

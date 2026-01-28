@@ -7,6 +7,7 @@ use tracing::{debug, info, info_span, warn};
 
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_accelerate_api::provider as accel_provider;
+use runmat_accelerate_api::{provider_for_handle, ProviderPrecision};
 use runmat_hir::{LoweringContext, LoweringResult, SemanticError, SourceId};
 use runmat_ignition::CompileError;
 use runmat_lexer::{tokenize_detailed, Token as LexToken};
@@ -30,7 +31,6 @@ use std::sync::{
     Arc, Mutex,
 };
 use uuid::Uuid;
-use runmat_accelerate_api::{provider_for_handle, ProviderPrecision};
 
 #[cfg(all(test, target_arch = "wasm32"))]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
@@ -469,7 +469,10 @@ fn gpu_size_bytes(handle: &runmat_accelerate_api::GpuTensorHandle) -> Option<u64
         ProviderPrecision::F32 => 4u64,
         ProviderPrecision::F64 => 8u64,
     };
-    let elements: u64 = handle.shape.iter().try_fold(1u64, |acc, &d| acc.checked_mul(d as u64))?;
+    let elements: u64 = handle
+        .shape
+        .iter()
+        .try_fold(1u64, |acc, &d| acc.checked_mul(d as u64))?;
     elements.checked_mul(element_size)
 }
 
@@ -1071,73 +1074,82 @@ impl RunMatSession {
         let host_async_handler = self.async_input_handler.clone();
         let stdin_events_async = Arc::clone(&stdin_events);
         let runtime_async_handler: Arc<runmat_runtime::interaction::AsyncInteractionHandler> =
-            Arc::new(move |prompt: runmat_runtime::interaction::InteractionPromptOwned| {
-                let request_kind = match prompt.kind {
-                    runmat_runtime::interaction::InteractionKind::Line { echo } => {
-                        InputRequestKind::Line { echo }
-                    }
-                    runmat_runtime::interaction::InteractionKind::KeyPress => InputRequestKind::KeyPress,
-                };
-                let request = InputRequest {
-                    prompt: prompt.prompt,
-                    kind: request_kind,
-                };
-                let (event_kind, echo_flag) = match &request.kind {
-                    InputRequestKind::Line { echo } => (StdinEventKind::Line, *echo),
-                    InputRequestKind::KeyPress => (StdinEventKind::KeyPress, false),
-                };
-                let mut event = StdinEvent {
-                    prompt: request.prompt.clone(),
-                    kind: event_kind,
-                    echo: echo_flag,
-                    value: None,
-                    error: None,
-                };
-
-                let stdin_events_async = Arc::clone(&stdin_events_async);
-                let host_async_handler = host_async_handler.clone();
-                Box::pin(async move {
-                    let resp: Result<InputResponse, String> = if let Some(handler) = host_async_handler
-                    {
-                        handler(request).await
-                    } else {
-                        match &request.kind {
-                            InputRequestKind::Line { echo } => {
-                                runmat_runtime::interaction::default_read_line(&request.prompt, *echo)
-                                    .map(InputResponse::Line)
-                            }
-                            InputRequestKind::KeyPress => {
-                                runmat_runtime::interaction::default_wait_for_key(&request.prompt)
-                                    .map(|_| InputResponse::KeyPress)
-                            }
+            Arc::new(
+                move |prompt: runmat_runtime::interaction::InteractionPromptOwned| {
+                    let request_kind = match prompt.kind {
+                        runmat_runtime::interaction::InteractionKind::Line { echo } => {
+                            InputRequestKind::Line { echo }
+                        }
+                        runmat_runtime::interaction::InteractionKind::KeyPress => {
+                            InputRequestKind::KeyPress
                         }
                     };
-
-                    let resp = resp.inspect_err(|err| {
-                        event.error = Some(err.clone());
-                        if let Ok(mut guard) = stdin_events_async.lock() {
-                            guard.push(event.clone());
-                        }
-                    })?;
-
-                    let interaction_resp = match resp {
-                        InputResponse::Line(value) => {
-                            event.value = Some(value.clone());
-                            if let Ok(mut guard) = stdin_events_async.lock() {
-                                guard.push(event);
-                            }
-                            runmat_runtime::interaction::InteractionResponse::Line(value)
-                        }
-                        InputResponse::KeyPress => {
-                            if let Ok(mut guard) = stdin_events_async.lock() {
-                                guard.push(event);
-                            }
-                            runmat_runtime::interaction::InteractionResponse::KeyPress
-                        }
+                    let request = InputRequest {
+                        prompt: prompt.prompt,
+                        kind: request_kind,
                     };
-                    Ok(interaction_resp)
-                })
-            });
+                    let (event_kind, echo_flag) = match &request.kind {
+                        InputRequestKind::Line { echo } => (StdinEventKind::Line, *echo),
+                        InputRequestKind::KeyPress => (StdinEventKind::KeyPress, false),
+                    };
+                    let mut event = StdinEvent {
+                        prompt: request.prompt.clone(),
+                        kind: event_kind,
+                        echo: echo_flag,
+                        value: None,
+                        error: None,
+                    };
+
+                    let stdin_events_async = Arc::clone(&stdin_events_async);
+                    let host_async_handler = host_async_handler.clone();
+                    Box::pin(async move {
+                        let resp: Result<InputResponse, String> =
+                            if let Some(handler) = host_async_handler {
+                                handler(request).await
+                            } else {
+                                match &request.kind {
+                                    InputRequestKind::Line { echo } => {
+                                        runmat_runtime::interaction::default_read_line(
+                                            &request.prompt,
+                                            *echo,
+                                        )
+                                        .map(InputResponse::Line)
+                                    }
+                                    InputRequestKind::KeyPress => {
+                                        runmat_runtime::interaction::default_wait_for_key(
+                                            &request.prompt,
+                                        )
+                                        .map(|_| InputResponse::KeyPress)
+                                    }
+                                }
+                            };
+
+                        let resp = resp.inspect_err(|err| {
+                            event.error = Some(err.clone());
+                            if let Ok(mut guard) = stdin_events_async.lock() {
+                                guard.push(event.clone());
+                            }
+                        })?;
+
+                        let interaction_resp = match resp {
+                            InputResponse::Line(value) => {
+                                event.value = Some(value.clone());
+                                if let Ok(mut guard) = stdin_events_async.lock() {
+                                    guard.push(event);
+                                }
+                                runmat_runtime::interaction::InteractionResponse::Line(value)
+                            }
+                            InputResponse::KeyPress => {
+                                if let Ok(mut guard) = stdin_events_async.lock() {
+                                    guard.push(event);
+                                }
+                                runmat_runtime::interaction::InteractionResponse::KeyPress
+                            }
+                        };
+                        Ok(interaction_resp)
+                    })
+                },
+            );
         let _async_input_guard =
             runmat_runtime::interaction::replace_async_handler(Some(runtime_async_handler));
 

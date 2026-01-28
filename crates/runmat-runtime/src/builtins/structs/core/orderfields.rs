@@ -153,9 +153,7 @@ pub fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<OrderFieldsEvalua
         }
         other => Err(orderfields_flow(
             MESSAGE_ID_INVALID_INPUT,
-            format!(
-                "orderfields: first argument must be a struct or struct array (got {other:?})"
-            ),
+            format!("orderfields: first argument must be a struct or struct array (got {other:?})"),
         )),
     }
 }
@@ -443,9 +441,7 @@ fn extract_struct_from_cell(cell: &CellArray, index: usize) -> BuiltinResult<Str
         Value::Struct(st) => Ok(st.clone()),
         other => Err(orderfields_flow(
             MESSAGE_ID_INVALID_STRUCT_CONTENTS,
-            format!(
-                "orderfields: expected struct array contents to be structs (found {other:?})"
-            ),
+            format!("orderfields: expected struct array contents to be structs (found {other:?})"),
         )),
     }
 }
@@ -477,7 +473,6 @@ pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_builtins::{CellArray, CharArray, StringArray, Tensor};
-
 
     fn run_orderfields(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::orderfields_builtin(value, rest))
@@ -786,8 +781,7 @@ pub(crate) mod tests {
             .fields
             .insert("field".to_string(), Value::Num(1.0));
 
-        let err =
-            run_orderfields(Value::Cell(empty), vec![Value::Struct(reference)]).unwrap_err();
+        let err = run_orderfields(Value::Cell(empty), vec![Value::Struct(reference)]).unwrap_err();
         assert_error_identifier(err, MESSAGE_ID_EMPTY_STRUCT_ARRAY);
     }
 }

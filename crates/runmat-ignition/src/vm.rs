@@ -47,7 +47,6 @@ runmat_thread_local! {
     static CURRENT_PC: Cell<usize> = const { Cell::new(0) };
 }
 
-
 #[inline]
 fn set_vm_pc(pc: usize) {
     CURRENT_PC.with(|cell| cell.set(pc));
@@ -1573,10 +1572,7 @@ async fn run_interpreter(
         #[cfg(feature = "native-accel")]
         set_current_pc(pc);
         if runmat_runtime::interrupt::is_cancelled() {
-            return Err(mex(
-                "ExecutionCancelled",
-                "Execution cancelled by user",
-            ));
+            return Err(mex("ExecutionCancelled", "Execution cancelled by user"));
         }
         #[cfg(feature = "native-accel")]
         if let (Some(plan), Some(graph)) =
@@ -1623,7 +1619,10 @@ async fn run_interpreter(
                         }
                     }
                 }
-                if !has_barrier && !stored_vars.is_empty() && span.end + 1 < bytecode.instructions.len() {
+                if !has_barrier
+                    && !stored_vars.is_empty()
+                    && span.end + 1 < bytecode.instructions.len()
+                {
                     for instr in &bytecode.instructions[span.end + 1..] {
                         match instr {
                             Instr::LoadVar(idx) => {
@@ -5531,15 +5530,16 @@ async fn run_interpreter(
                 #[cfg(feature = "plot-core")]
                 {
                     if name == "hist" && !args.is_empty() {
-                        let eval = match runmat_runtime::builtins::plotting::ops::hist::evaluate_async(
-                            args[0].clone(),
-                            &args[1..],
-                        )
-                        .await
-                        {
-                            Ok(eval) => eval,
-                            Err(err) => vm_bail!(err.to_string()),
-                        };
+                        let eval =
+                            match runmat_runtime::builtins::plotting::ops::hist::evaluate_async(
+                                args[0].clone(),
+                                &args[1..],
+                            )
+                            .await
+                            {
+                                Ok(eval) => eval,
+                                Err(err) => vm_bail!(err.to_string()),
+                            };
                         if let Err(err) = eval.render_plot() {
                             vm_bail!(err.to_string());
                         }
@@ -5854,7 +5854,8 @@ async fn run_interpreter(
                     let original_value = index_value.clone();
                     if matches!(index_value, Value::GpuTensor(_)) {
                         index_value =
-                            runmat_runtime::dispatcher::gather_if_needed_async(&index_value).await?;
+                            runmat_runtime::dispatcher::gather_if_needed_async(&index_value)
+                                .await?;
                     }
                     let index_val = match index_scalar_from_value(&index_value).await? {
                         Some(val) => val as f64,
@@ -5892,7 +5893,8 @@ async fn run_interpreter(
                         }
                     }
                     other => {
-                        let result = match runmat_runtime::perform_indexing(&other, &indices).await {
+                        let result = match runmat_runtime::perform_indexing(&other, &indices).await
+                        {
                             Ok(v) => v,
                             Err(e) => vm_bail!(e),
                         };
@@ -6629,7 +6631,8 @@ async fn run_interpreter(
                                     _ => 1.0,
                                 }
                             };
-                            let v = match runmat_runtime::perform_indexing(&other, &[idx_val]).await {
+                            let v = match runmat_runtime::perform_indexing(&other, &[idx_val]).await
+                            {
                                 Ok(v) => v,
                                 Err(_e) => vm_bail!(mex(
                                     "SliceNonTensor",
@@ -6768,9 +6771,10 @@ async fn run_interpreter(
                                         end_off: off,
                                     });
                                 } else {
-                                    let v = numeric
-                                        .get(num_iter)
-                                        .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
+                                    let v = numeric.get(num_iter).ok_or(mex(
+                                        "MissingNumericIndex",
+                                        "missing numeric index",
+                                    ))?;
                                     num_iter += 1;
                                     match v {
                                         Value::Num(n) => {
@@ -6904,10 +6908,7 @@ async fn run_interpreter(
                                     vec![total_out, 1]
                                 }
                             } else {
-                                per_dim_indices
-                                    .iter()
-                                    .map(|v| v.len().max(1))
-                                    .collect()
+                                per_dim_indices.iter().map(|v| v.len().max(1)).collect()
                             };
                             Ok((indices, output_shape))
                         })();
@@ -7127,15 +7128,10 @@ async fn run_interpreter(
                         }
                     }
                     Value::StringArray(sa) => {
-                        let selectors = build_slice_selectors(
-                            dims,
-                            colon_mask,
-                            end_mask,
-                            &numeric,
-                            &sa.shape,
-                        )
-                        .await
-                        .map_err(|e| format!("slice: {e}"))?;
+                        let selectors =
+                            build_slice_selectors(dims, colon_mask, end_mask, &numeric, &sa.shape)
+                                .await
+                                .map_err(|e| format!("slice: {e}"))?;
                         let plan = build_slice_plan(&selectors, dims, &sa.shape)
                             .map_err(|e| map_slice_plan_error("slice", e))?;
                         let result =
@@ -7762,9 +7758,8 @@ async fn run_interpreter(
                                 if is_colon {
                                     selectors.push(SliceSelector::Colon);
                                 } else if is_end {
-                                    selectors.push(SliceSelector::Scalar(
-                                        *t.shape.get(d).unwrap_or(&1),
-                                    ));
+                                    selectors
+                                        .push(SliceSelector::Scalar(*t.shape.get(d).unwrap_or(&1)));
                                 } else {
                                     let v = numeric.get(num_iter).ok_or(mex(
                                         "MissingNumericIndex",
@@ -8033,8 +8028,10 @@ async fn run_interpreter(
                                         let rows = base_shape.first().copied().unwrap_or(1);
                                         let cols = base_shape.get(1).copied().unwrap_or(1);
                                         if let Value::GpuTensor(vh) = &rhs {
-                                            if let (SliceSelector::Colon, SliceSelector::Scalar(j)) =
-                                                (sel0, sel1)
+                                            if let (
+                                                SliceSelector::Colon,
+                                                SliceSelector::Scalar(j),
+                                            ) = (sel0, sel1)
                                             {
                                                 let j0 = *j - 1;
                                                 if j0 < cols {
@@ -8054,8 +8051,10 @@ async fn run_interpreter(
                                                     }
                                                 }
                                             }
-                                            if let (SliceSelector::Scalar(i), SliceSelector::Colon) =
-                                                (sel0, sel1)
+                                            if let (
+                                                SliceSelector::Scalar(i),
+                                                SliceSelector::Colon,
+                                            ) = (sel0, sel1)
                                             {
                                                 let i0 = *i - 1;
                                                 if i0 < rows {
@@ -8554,15 +8553,10 @@ async fn run_interpreter(
                         }
                     }
                     Value::StringArray(mut sa) => {
-                        let selectors = build_slice_selectors(
-                            dims,
-                            colon_mask,
-                            end_mask,
-                            &numeric,
-                            &sa.shape,
-                        )
-                        .await
-                        .map_err(|e| format!("slice assign: {e}"))?;
+                        let selectors =
+                            build_slice_selectors(dims, colon_mask, end_mask, &numeric, &sa.shape)
+                                .await
+                                .map_err(|e| format!("slice assign: {e}"))?;
                         let plan = build_slice_plan(&selectors, dims, &sa.shape)
                             .map_err(|e| map_slice_plan_error("slice assign", e))?;
                         if plan.indices.is_empty() {
@@ -8584,10 +8578,7 @@ async fn run_interpreter(
                     other => {
                         warn!(
                             "StoreSlice: unsupported base {:?} dims={} numeric={:?} rhs={:?}",
-                            other,
-                            dims,
-                            numeric,
-                            rhs
+                            other, dims, numeric, rhs
                         );
                         vm_bail!(
                             "Slicing assignment only supported on tensors or string arrays"
@@ -8612,9 +8603,7 @@ async fn run_interpreter(
                 numeric.reverse();
                 debug!(
                     "StoreSlice: numeric_count={} numeric={:?} rhs={:?}",
-                    numeric_count,
-                    numeric,
-                    rhs
+                    numeric_count, numeric, rhs
                 );
                 let mut base = stack
                     .pop()
@@ -8749,11 +8738,11 @@ async fn run_interpreter(
                                         ))?;
                                         num_iter += 1;
                                         let dim_len = *t.shape.get(d).unwrap_or(&1);
-                                        let selector = match selector_from_value_dim(v, dim_len).await
-                                        {
-                                            Ok(selector) => selector,
-                                            Err(err) => vm_bail!(err),
-                                        };
+                                        let selector =
+                                            match selector_from_value_dim(v, dim_len).await {
+                                                Ok(selector) => selector,
+                                                Err(err) => vm_bail!(err),
+                                            };
                                         selectors.push(selector);
                                     }
                                 }
@@ -8762,7 +8751,9 @@ async fn run_interpreter(
                                 for (d, sel) in selectors.iter().enumerate().take(dims) {
                                     let dim_len = *t.shape.get(d).unwrap_or(&1);
                                     let idxs = match sel {
-                                        SliceSelector::Colon => (1..=dim_len).collect::<Vec<usize>>(),
+                                        SliceSelector::Colon => {
+                                            (1..=dim_len).collect::<Vec<usize>>()
+                                        }
                                         SliceSelector::Scalar(i) => vec![*i],
                                         SliceSelector::Indices(v) => v.clone(),
                                     };
@@ -8886,11 +8877,7 @@ async fn run_interpreter(
                             }
                             Value::StringArray(mut sa) => {
                                 let selectors = build_slice_selectors(
-                                    dims,
-                                    colon_mask,
-                                    end_mask,
-                                    &numeric,
-                                    &sa.shape,
+                                    dims, colon_mask, end_mask, &numeric, &sa.shape,
                                 )
                                 .await
                                 .map_err(|e| format!("slice assign: {e}"))?;
@@ -9034,7 +9021,10 @@ async fn run_interpreter(
                                     for &val in &idx_t.data {
                                         let idx = val as isize;
                                         if idx < 1 || (idx as usize) > dim_len {
-                                            vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
+                                            vm_bail!(mex(
+                                                "IndexOutOfBounds",
+                                                "Index out of bounds"
+                                            ));
                                         }
                                         vi.push(idx as usize);
                                     }
@@ -9694,7 +9684,8 @@ async fn run_interpreter(
                             Ok(indices)
                         })();
                         if let Ok(indices) = attempt {
-                            let values = materialize_rhs_linear(&rhs, indices.len()).await
+                            let values = materialize_rhs_linear(&rhs, indices.len())
+                                .await
                                 .map_err(|e| format!("range assign: {e}"))?;
                             let value_shape = vec![values.len().max(1), 1];
                             let upload_result = if values.is_empty() {

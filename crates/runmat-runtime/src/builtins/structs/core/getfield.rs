@@ -806,7 +806,6 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
 
-
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
     }

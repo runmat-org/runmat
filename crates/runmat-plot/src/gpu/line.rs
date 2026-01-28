@@ -369,7 +369,10 @@ pub fn pack_marker_vertices_from_xy(
     }
     queue.submit(Some(encoder.finish()));
 
-    Ok(GpuVertexBuffer::new(output_buffer, (inputs.len as usize) * 6))
+    Ok(GpuVertexBuffer::new(
+        output_buffer,
+        (inputs.len as usize) * 6,
+    ))
 }
 
 fn compile_marker_shader(

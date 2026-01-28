@@ -34,9 +34,10 @@ pub fn push_callsite(source_id: Option<SourceId>, arg_spans: Option<Vec<Span>>) 
         return CallsiteGuard { did_push: false };
     };
     CALLSITE_STACK.with(|stack| {
-        stack
-            .borrow_mut()
-            .push(CallsiteInfo { source_id, arg_spans });
+        stack.borrow_mut().push(CallsiteInfo {
+            source_id,
+            arg_spans,
+        });
     });
     CallsiteGuard { did_push: true }
 }
@@ -88,4 +89,3 @@ pub fn arg_text(arg_index: usize) -> Option<String> {
         Some(text)
     }
 }
-

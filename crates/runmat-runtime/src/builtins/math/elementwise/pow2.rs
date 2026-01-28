@@ -273,10 +273,10 @@ fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
 }
 
 fn scalar_pow2_value(mantissa: &Value, exponent: &Value) -> Option<Value> {
-    let base = scalar_complex_value(mantissa)
-        .or_else(|| scalar_real_value(mantissa).map(|v| (v, 0.0)))?;
-    let exp = scalar_complex_value(exponent)
-        .or_else(|| scalar_real_value(exponent).map(|v| (v, 0.0)))?;
+    let base =
+        scalar_complex_value(mantissa).or_else(|| scalar_real_value(mantissa).map(|v| (v, 0.0)))?;
+    let exp =
+        scalar_complex_value(exponent).or_else(|| scalar_real_value(exponent).map(|v| (v, 0.0)))?;
     let (mr, mi) = base;
     let (er, ei) = exp;
     if mi != 0.0 || ei != 0.0 {

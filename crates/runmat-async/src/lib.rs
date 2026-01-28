@@ -6,8 +6,6 @@ pub use runtime_error::{
 /// Narrow set of interaction kinds used for host I/O hooks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InteractionKind {
-    Line {
-        echo: bool,
-    },
+    Line { echo: bool },
     KeyPress,
 }

@@ -139,14 +139,16 @@ pub(super) async fn fft_download_gpu_result(
 
 async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     match value {
-        Value::Int(_) | Value::Num(_) => tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
-            .await
-            .map_err(fft_error)?
-            .ok_or_else(|| {
-                fft_error(format!(
-                    "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
-                ))
-            }),
+        Value::Int(_) | Value::Num(_) => {
+            tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
+                .await
+                .map_err(fft_error)?
+                .ok_or_else(|| {
+                    fft_error(format!(
+                        "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
+                    ))
+                })
+        }
         _ => Err(fft_error(format!(
             "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
         ))),
@@ -542,8 +544,11 @@ pub(crate) mod tests {
     #[test]
     fn fft_rejects_dimension_zero() {
         let err = error_message(
-            block_on(parse_arguments(&[Value::Num(4.0), Value::Int(IntValue::I32(0))]))
-                .unwrap_err(),
+            block_on(parse_arguments(&[
+                Value::Num(4.0),
+                Value::Int(IntValue::I32(0)),
+            ]))
+            .unwrap_err(),
         );
         assert!(err.contains("dimension must be >= 1"));
     }
@@ -558,8 +563,7 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let gpu =
-                fft_builtin_sync(Value::GpuTensor(handle.clone()), Vec::new()).expect("fft");
+            let gpu = fft_builtin_sync(Value::GpuTensor(handle.clone()), Vec::new()).expect("fft");
             let cpu = fft_builtin_sync(Value::Tensor(tensor), Vec::new()).expect("fft");
             let gpu_host = value_as_complex_tensor(gpu);
             let cpu_host = value_as_complex_tensor(cpu);
@@ -585,10 +589,9 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let gpu = fft_builtin_sync(Value::GpuTensor(handle.clone()), Vec::new())
-                .expect("gpu fft");
-            let cpu =
-                fft_builtin_sync(Value::Tensor(tensor_cpu), Vec::new()).expect("cpu fft");
+            let gpu =
+                fft_builtin_sync(Value::GpuTensor(handle.clone()), Vec::new()).expect("gpu fft");
+            let cpu = fft_builtin_sync(Value::Tensor(tensor_cpu), Vec::new()).expect("cpu fft");
             let gpu_ct = value_as_complex_tensor(gpu);
             let cpu_ct = value_as_complex_tensor(cpu);
             assert_eq!(gpu_ct.shape, cpu_ct.shape);

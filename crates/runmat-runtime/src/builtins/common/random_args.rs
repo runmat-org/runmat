@@ -18,10 +18,7 @@ pub(crate) fn keyword_of(value: &Value) -> Option<String> {
 /// Attempt to parse a dimension argument. Returns `Ok(Some(Vec))` when the
 /// value encodes dimensions, `Ok(None)` when the value is not a dimension
 /// argument, and `Err` when the value is dimension-like but invalid.
-pub(crate) async fn extract_dims(
-    value: &Value,
-    label: &str,
-) -> Result<Option<Vec<usize>>, String> {
+pub(crate) async fn extract_dims(value: &Value, label: &str) -> Result<Option<Vec<usize>>, String> {
     if matches!(value, Value::LogicalArray(_)) {
         return Ok(None);
     }

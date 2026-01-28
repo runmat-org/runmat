@@ -4,9 +4,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
-use crate::{build_runtime_error, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::vertcat")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

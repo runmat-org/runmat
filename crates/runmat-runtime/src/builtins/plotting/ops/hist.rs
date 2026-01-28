@@ -24,8 +24,8 @@ use super::common::{numeric_vector, value_as_f64};
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarStyle, BarStyleDefaults};
-use crate::{BuiltinResult, RuntimeError};
 use crate::builtins::plotting::gpu_helpers::{axis_bounds_async, gather_tensor_from_gpu_async};
+use crate::{BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::hist")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -1301,7 +1301,6 @@ impl HistInput {
             Self::Gpu(handle) => handle.shape.iter().product(),
         }
     }
-
 }
 
 #[cfg(test)]

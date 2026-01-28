@@ -135,9 +135,7 @@ pub async fn scalar_f64_from_value_async(value: &Value) -> Result<Option<f64>, S
             if !handle.shape.is_empty() {
                 let len = element_count(&handle.shape);
                 if len != 1 {
-                    return Err(format!(
-                        "expected scalar gpuArray, got array of size {len}"
-                    ));
+                    return Err(format!("expected scalar gpuArray, got array of size {len}"));
                 }
             }
             let gathered = gather_if_needed_async(&Value::GpuTensor(handle.clone()))
@@ -209,7 +207,11 @@ pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, 
         Value::Int(i) => parse_numeric_dimension(i.to_f64()).map(|dim| Some(vec![dim])),
         Value::Tensor(t) => dims_from_tensor_values(&t.data, &t.shape),
         Value::LogicalArray(la) => {
-            let values: Vec<f64> = la.data.iter().map(|&b| if b != 0 { 1.0 } else { 0.0 }).collect();
+            let values: Vec<f64> = la
+                .data
+                .iter()
+                .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+                .collect();
             dims_from_tensor_values(&values, &la.shape)
         }
         Value::GpuTensor(handle) => {
@@ -241,8 +243,11 @@ pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, 
                     Ok(dims)
                 }
                 Value::LogicalArray(la) => {
-                    let values: Vec<f64> =
-                        la.data.iter().map(|&b| if b != 0 { 1.0 } else { 0.0 }).collect();
+                    let values: Vec<f64> = la
+                        .data
+                        .iter()
+                        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+                        .collect();
                     let dims = dims_from_tensor_values(&values, &la.shape)?;
                     if dims.is_none() {
                         tracing::debug!(

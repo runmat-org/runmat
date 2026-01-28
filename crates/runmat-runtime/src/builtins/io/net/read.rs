@@ -733,5 +733,4 @@ pub(crate) mod tests {
 
         remove_client_for_test(client_id(&client));
     }
-
 }

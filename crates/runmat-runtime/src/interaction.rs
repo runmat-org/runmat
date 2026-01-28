@@ -88,14 +88,17 @@ pub async fn request_line_async(prompt: &str, echo: bool) -> Result<String, Runt
     if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
         return match response.map_err(|err| build_runtime_error(err).build())? {
             InteractionResponse::Line(value) => Ok(value),
-            InteractionResponse::KeyPress => Err(build_runtime_error(
-                "queued keypress response used for line request",
-            )
-            .build()),
+            InteractionResponse::KeyPress => {
+                Err(build_runtime_error("queued keypress response used for line request").build())
+            }
         };
     }
 
-    if let Some(handler) = async_handler_slot().read().ok().and_then(|slot| slot.clone()) {
+    if let Some(handler) = async_handler_slot()
+        .read()
+        .ok()
+        .and_then(|slot| slot.clone())
+    {
         let owned = InteractionPromptOwned {
             prompt: prompt.to_string(),
             kind: InteractionKind::Line { echo },
@@ -118,15 +121,18 @@ pub async fn request_line_async(prompt: &str, echo: bool) -> Result<String, Runt
 pub async fn wait_for_key_async(prompt: &str) -> Result<(), RuntimeError> {
     if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
         return match response.map_err(|err| build_runtime_error(err).build())? {
-            InteractionResponse::Line(_) => Err(build_runtime_error(
-                "queued line response used for keypress request",
-            )
-            .build()),
+            InteractionResponse::Line(_) => {
+                Err(build_runtime_error("queued line response used for keypress request").build())
+            }
             InteractionResponse::KeyPress => Ok(()),
         };
     }
 
-    if let Some(handler) = async_handler_slot().read().ok().and_then(|slot| slot.clone()) {
+    if let Some(handler) = async_handler_slot()
+        .read()
+        .ok()
+        .and_then(|slot| slot.clone())
+    {
         let owned = InteractionPromptOwned {
             prompt: prompt.to_string(),
             kind: InteractionKind::KeyPress,

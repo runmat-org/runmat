@@ -62,7 +62,10 @@ async fn parse_scalar_dims(value: &Value, builtin: &str) -> BuiltinResult<Vec<us
         .await
         .map_err(|_| indexing_error(builtin, "Size arguments must be positive integers."))?
     else {
-        return Err(indexing_error(builtin, "Size vector must be a numeric vector."));
+        return Err(indexing_error(
+            builtin,
+            "Size vector must be a numeric vector.",
+        ));
     };
     Ok(vec![dim])
 }

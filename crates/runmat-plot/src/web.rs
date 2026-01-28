@@ -523,13 +523,16 @@ impl WebRenderer {
                             ),
                         )
                     });
-                    let rects = overlay
-                        .plot_overlay
-                        .compute_subplot_rects(rect_points, rows, cols, 8.0, 8.0);
+                    let rects = overlay.plot_overlay.compute_subplot_rects(
+                        rect_points,
+                        rows,
+                        cols,
+                        8.0,
+                        8.0,
+                    );
                     let sw = self.surface_config.width as f32;
                     let sh = self.surface_config.height as f32;
-                    let mut viewports: Vec<(u32, u32, u32, u32)> =
-                        Vec::with_capacity(rects.len());
+                    let mut viewports: Vec<(u32, u32, u32, u32)> = Vec::with_capacity(rects.len());
                     for r in rects {
                         let rx = (r.min.x * ppp).round().max(0.0);
                         let ry = (r.min.y * ppp).round().max(0.0);
@@ -560,7 +563,12 @@ impl WebRenderer {
                     };
                     let _ = self
                         .plot_renderer
-                        .render_camera_to_viewport(&mut encoder, &frame_view, (vx, vy, vw, vh), &cfg)
+                        .render_camera_to_viewport(
+                            &mut encoder,
+                            &frame_view,
+                            (vx, vy, vw, vh),
+                            &cfg,
+                        )
                         .map_err(|err| WebRendererError::Render(err.to_string()))?;
                 }
 

@@ -44,10 +44,10 @@ fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
 }
 
 fn scalar_power_value(base: &Value, exponent: &Value) -> Option<Value> {
-    let base_val = scalar_complex_value(base)
-        .or_else(|| scalar_real_value(base).map(|v| (v, 0.0)))?;
-    let exp_val = scalar_complex_value(exponent)
-        .or_else(|| scalar_real_value(exponent).map(|v| (v, 0.0)))?;
+    let base_val =
+        scalar_complex_value(base).or_else(|| scalar_real_value(base).map(|v| (v, 0.0)))?;
+    let exp_val =
+        scalar_complex_value(exponent).or_else(|| scalar_real_value(exponent).map(|v| (v, 0.0)))?;
     let (br, bi) = base_val;
     let (er, ei) = exp_val;
     if bi != 0.0 || ei != 0.0 {

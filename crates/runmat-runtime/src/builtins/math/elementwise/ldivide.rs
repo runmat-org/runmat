@@ -462,8 +462,8 @@ fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
 fn scalar_ldivide_value(divisor: &Value, numerator: &Value) -> Option<Value> {
     let num = scalar_complex_value(numerator)
         .or_else(|| scalar_real_value(numerator).map(|v| (v, 0.0)))?;
-    let div = scalar_complex_value(divisor)
-        .or_else(|| scalar_real_value(divisor).map(|v| (v, 0.0)))?;
+    let div =
+        scalar_complex_value(divisor).or_else(|| scalar_real_value(divisor).map(|v| (v, 0.0)))?;
     let (nr, ni) = num;
     let (dr, di) = div;
     if ni != 0.0 || di != 0.0 {

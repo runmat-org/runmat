@@ -1,6 +1,6 @@
+use crate::build_runtime_error;
 use futures::executor::block_on;
 use runmat_builtins::{LogicalArray, Tensor, Value};
-use crate::build_runtime_error;
 
 /// Ensure an in-process acceleration provider is registered for tests,
 /// invoking the supplied closure with the provider trait object.
