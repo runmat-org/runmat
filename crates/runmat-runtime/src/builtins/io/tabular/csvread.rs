@@ -639,7 +639,6 @@ pub(crate) mod tests {
 
     use runmat_builtins::{CharArray, IntValue, Tensor as BuiltinTensor};
 
-    use crate::builtins::common::test_support;
 
     fn csvread_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::csvread_builtin(path, rest))

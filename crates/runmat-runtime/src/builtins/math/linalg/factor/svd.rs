@@ -976,13 +976,6 @@ pub(crate) mod tests {
         }
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
-    }
-
     fn svd_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::svd_builtin(value, rest))
     }

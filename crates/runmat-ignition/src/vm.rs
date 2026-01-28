@@ -7990,7 +7990,7 @@ async fn run_interpreter(
                             {
                                 if dims == 2 {
                                     if let (Some(sel0), Some(sel1)) =
-                                        (selectors.get(0), selectors.get(1))
+                                        (selectors.first(), selectors.get(1))
                                     {
                                         let rows = base_shape.first().copied().unwrap_or(1);
                                         let cols = base_shape.get(1).copied().unwrap_or(1);

@@ -478,7 +478,7 @@ async fn gather_gpu_preview_values(
     full_shape: &[usize],
     options: &WorkspaceMaterializeOptions,
 ) -> Result<Option<(Vec<f64>, bool)>> {
-    if full_shape.is_empty() || full_shape.iter().any(|&d| d == 0) {
+    if full_shape.is_empty() || full_shape.contains(&0) {
         return Ok(None);
     }
     let total_elements = full_shape.iter().product::<usize>();

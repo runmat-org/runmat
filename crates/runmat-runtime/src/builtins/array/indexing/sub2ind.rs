@@ -1,6 +1,8 @@
 //! MATLAB-compatible `sub2ind` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::HostTensorView;
+#[cfg(not(target_arch = "wasm32"))]
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 

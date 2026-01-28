@@ -78,7 +78,7 @@ async fn parse_vector_dims(value: &Value, builtin: &str) -> BuiltinResult<Vec<us
             "Size vector must have at least one element.",
         ));
     }
-    if dims.iter().any(|&dim| dim == 0) {
+    if dims.contains(&0) {
         return Err(indexing_error(
             builtin,
             "Size arguments must be positive integers.",

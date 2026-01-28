@@ -115,7 +115,6 @@ pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{CellArray, StringArray};
 
-    use crate::builtins::common::test_support;
 
     fn evaluate(subject: Value, pattern: Value, rest: &[Value]) -> BuiltinResult<RegexpEvaluation> {
         futures::executor::block_on(super::evaluate(subject, pattern, rest))

@@ -447,7 +447,6 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor};
 
-    use crate::builtins::common::test_support;
     use crate::RuntimeError;
 
     fn char_row(text: &str) -> Value {

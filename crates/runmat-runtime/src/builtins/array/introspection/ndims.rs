@@ -52,7 +52,6 @@ async fn ndims_builtin(value: Value) -> crate::BuiltinResult<Value> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
 

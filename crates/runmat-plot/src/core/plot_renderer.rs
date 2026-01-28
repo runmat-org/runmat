@@ -155,9 +155,9 @@ impl PlotRenderer {
         Some((vertex_buffer, index_buffer))
     }
 
-    fn gpu_indirect_args<'a>(
-        render_data: &'a crate::core::RenderData,
-    ) -> Option<(&'a wgpu::Buffer, u64)> {
+    fn gpu_indirect_args(
+        render_data: &crate::core::RenderData,
+    ) -> Option<(&wgpu::Buffer, u64)> {
         render_data
             .gpu_vertices
             .as_ref()

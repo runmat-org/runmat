@@ -409,7 +409,6 @@ fn build_tcpclient_struct(
 pub(crate) mod tests {
     use super::super::accept::remove_client_for_test;
     use super::*;
-    use crate::builtins::common::test_support;
     use runmat_builtins::Value;
     use std::net::TcpListener;
     use std::thread;

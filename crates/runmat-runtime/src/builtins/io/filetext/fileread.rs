@@ -290,7 +290,6 @@ pub(crate) mod tests {
     use runmat_time::unix_timestamp_ms;
     use std::io::Write;
 
-    use crate::builtins::common::test_support;
 
     fn unwrap_error_message(err: RuntimeError) -> String {
         err.message().to_string()

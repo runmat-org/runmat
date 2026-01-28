@@ -244,7 +244,6 @@ fn ind2sub_error(message: impl Into<String>) -> RuntimeError {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;

@@ -300,6 +300,10 @@ pub(crate) mod tests {
         }
     }
 
+    fn fft_builtin_sync(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::fft_builtin(value, rest))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_real_vector() {
@@ -367,9 +371,9 @@ pub(crate) mod tests {
     fn fft_empty_length_argument_defaults_to_input_length() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4]).unwrap();
         let baseline =
-            fft_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("baseline fft");
+            fft_builtin_sync(Value::Tensor(tensor.clone()), Vec::new()).expect("baseline fft");
         let empty = Tensor::new(Vec::<f64>::new(), vec![0]).unwrap();
-        let result = fft_builtin(
+        let result = fft_builtin_sync(
             Value::Tensor(tensor),
             vec![Value::Tensor(empty), Value::Int(IntValue::I32(1))],
         )
@@ -554,8 +558,9 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let gpu = fft_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("fft");
-            let cpu = fft_builtin(Value::Tensor(tensor), Vec::new()).expect("fft");
+            let gpu =
+                fft_builtin_sync(Value::GpuTensor(handle.clone()), Vec::new()).expect("fft");
+            let cpu = fft_builtin_sync(Value::Tensor(tensor), Vec::new()).expect("fft");
             let gpu_host = value_as_complex_tensor(gpu);
             let cpu_host = value_as_complex_tensor(cpu);
             assert_eq!(gpu_host.shape, cpu_host.shape);
@@ -580,8 +585,10 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let gpu = fft_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("gpu fft");
-            let cpu = fft_builtin(Value::Tensor(tensor_cpu), Vec::new()).expect("cpu fft");
+            let gpu = fft_builtin_sync(Value::GpuTensor(handle.clone()), Vec::new())
+                .expect("gpu fft");
+            let cpu =
+                fft_builtin_sync(Value::Tensor(tensor_cpu), Vec::new()).expect("cpu fft");
             let gpu_ct = value_as_complex_tensor(gpu);
             let cpu_ct = value_as_complex_tensor(cpu);
             assert_eq!(gpu_ct.shape, cpu_ct.shape);

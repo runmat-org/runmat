@@ -10,7 +10,7 @@ pub mod controls;
 pub mod lifecycle;
 pub mod native_window;
 #[cfg(feature = "egui-overlay")]
-pub mod plot_overlay;
+pub use crate::overlay::plot_overlay;
 pub mod single_window_manager; // V8-caliber single window management
 pub mod thread_manager; // Robust thread management
 #[cfg(feature = "gui")]
@@ -23,7 +23,7 @@ pub mod window_impl; // Cross-platform native window management
 #[cfg(feature = "gui")]
 pub use controls::PlotControls;
 #[cfg(feature = "egui-overlay")]
-pub use plot_overlay::PlotOverlay;
+pub use crate::overlay::plot_overlay::PlotOverlay;
 #[cfg(feature = "gui")]
 pub use window::*;
 

@@ -803,6 +803,10 @@ pub(crate) mod tests {
         }
     }
 
+    fn cov_builtin_sync(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::cov_builtin(value, rest))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_matrix_basic() {
@@ -1014,7 +1018,7 @@ pub(crate) mod tests {
         };
         let handle = provider.upload(&view).expect("upload");
 
-        let gpu_value = cov_builtin(Value::GpuTensor(handle), Vec::new()).expect("cov");
+        let gpu_value = cov_builtin_sync(Value::GpuTensor(handle), Vec::new()).expect("cov");
         let gathered = test_support::gather(gpu_value).expect("gather");
 
         assert_tensor_close(&gathered, &cpu_tensor.data, 1.0e-6);

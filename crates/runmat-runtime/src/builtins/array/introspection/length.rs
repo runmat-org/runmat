@@ -62,7 +62,6 @@ async fn max_dimension(value: &Value) -> Result<usize, RuntimeError> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
 

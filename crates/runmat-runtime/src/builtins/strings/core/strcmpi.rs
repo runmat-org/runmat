@@ -101,7 +101,6 @@ fn evaluate_strcmpi(left: &TextCollection, right: &TextCollection) -> BuiltinRes
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
     use crate::RuntimeError;
     use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray};
 

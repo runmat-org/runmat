@@ -656,8 +656,6 @@ pub(crate) mod tests {
         }
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
     fn ifft_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::ifft_builtin(value, rest))
     }
