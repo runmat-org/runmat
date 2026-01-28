@@ -1,6 +1,5 @@
 #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
 use super::common::ERR_PLOTTING_UNAVAILABLE;
-use runmat_plot::plots::Figure;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -71,62 +70,6 @@ pub(crate) mod wasm {
 
     pub fn web_renderer_ready() -> bool {
         SURFACES.with(|slot| !slot.borrow().is_empty())
-    }
-
-    pub fn render_web_canvas(handle: u32, figure: Figure) -> BuiltinResult<String> {
-        // If nothing is currently bound to this handle, try to claim the lowest-id unbound surface.
-        let needs_autobind = SURFACES.with(|slot| {
-            let map = slot.borrow();
-            !map.values().any(|entry| entry.bound_handle == Some(handle))
-        });
-        if needs_autobind {
-            let maybe_unbound_surface = SURFACES.with(|slot| {
-                let map = slot.borrow();
-                map.iter()
-                    .filter_map(|(surface_id, entry)| {
-                        if entry.bound_handle.is_none() {
-                            Some(*surface_id)
-                        } else {
-                            None
-                        }
-                    })
-                    .min()
-            });
-            if let Some(surface_id) = maybe_unbound_surface {
-                // Bind without forcing a full re-prime here; the render below will set last_revision.
-                let _ = bind_surface_to_figure_impl(surface_id, handle);
-            }
-        }
-
-        let mut rendered_any = false;
-        SURFACES.with(|slot| {
-            let mut map = slot.borrow_mut();
-            for (_surface_id, entry) in map.iter_mut() {
-                if entry.bound_handle != Some(handle) {
-                    continue;
-                }
-                rendered_any = true;
-                // Figure was just mutated; always (re)load render data for this surface.
-                entry
-                    .renderer
-                    .render_figure(figure.clone())
-                    .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
-                let rev = current_figure_revision(FigureHandle::from(handle));
-                entry.last_revision = rev;
-                entry
-                    .renderer
-                    .render_current_scene()
-                    .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
-            }
-            Ok::<(), RuntimeError>(())
-        })?;
-        if !rendered_any {
-            // It's valid to update a figure when no surfaces are bound to it yet (or no surfaces
-            // exist at all). The figure state is still updated + emitted via figure events, and
-            // hosts can present it later by binding a surface to this handle.
-            return Ok("Plot updated (no bound surfaces)".to_string());
-        }
-        Ok("Plot rendered to surface".to_string())
     }
 
     pub(super) fn resize_surface_impl(
@@ -221,6 +164,32 @@ pub(crate) mod wasm {
 
     pub fn render_current_scene(handle: u32) -> BuiltinResult<()> {
         debug!("plot-web: render_current_scene(handle={handle})");
+        // If nothing is currently bound to this handle, try to claim the lowest-id unbound
+        // surface. This ensures `drawnow()` / `pause()` can present even if the host hasn't
+        // explicitly bound a surface yet.
+        let needs_autobind = SURFACES.with(|slot| {
+            let map = slot.borrow();
+            !map.values().any(|entry| entry.bound_handle == Some(handle))
+        });
+        if needs_autobind {
+            let maybe_unbound_surface = SURFACES.with(|slot| {
+                let map = slot.borrow();
+                map.iter()
+                    .filter_map(|(surface_id, entry)| {
+                        if entry.bound_handle.is_none() {
+                            Some(*surface_id)
+                        } else {
+                            None
+                        }
+                    })
+                    .min()
+            });
+            if let Some(surface_id) = maybe_unbound_surface {
+                // Bind without forcing a full re-prime here; present_surface will set last_revision.
+                let _ = bind_surface_to_figure_impl(surface_id, handle);
+            }
+        }
+
         // Render any surfaces that are currently bound to this handle.
         let surface_ids: Vec<u32> = SURFACES.with(|slot| {
             slot.borrow()
@@ -266,11 +235,6 @@ pub(crate) mod wasm {
 
     pub fn web_renderer_ready() -> bool {
         false
-    }
-
-    #[allow(dead_code)]
-    pub fn render_web_canvas(_handle: u32, _figure: Figure) -> BuiltinResult<String> {
-        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
 
     pub(super) use RendererPlaceholder as RendererType;
@@ -336,10 +300,4 @@ pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> BuiltinResult<
     wasm::present_figure_on_surface_impl(surface_id, handle)
 }
 
-#[cfg_attr(
-    not(all(target_arch = "wasm32", feature = "plot-web")),
-    allow(dead_code)
-)]
-pub(crate) fn render_web_canvas(handle: u32, figure: Figure) -> BuiltinResult<String> {
-    wasm::render_web_canvas(handle, figure)
-}
+// No render_web_canvas wrapper; web presentation is surface-driven.

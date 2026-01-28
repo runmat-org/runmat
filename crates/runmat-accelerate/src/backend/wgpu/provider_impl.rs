@@ -3351,9 +3351,13 @@ impl WgpuProvider {
             submission_id,
             submission_index
         );
+        // On Web/WASM, blocking `Maintain::Wait` can starve the worker event loop, preventing
+        // plot presentation and other cooperative tasks from running. Prefer non-blocking polls.
         #[cfg(target_arch = "wasm32")]
         let poll_start = Instant::now();
-        self.device.poll(wgpu::Maintain::Wait);
+        #[cfg(target_arch = "wasm32")]
+        self.device.poll(wgpu::Maintain::Poll);
+        #[cfg(target_arch = "wasm32")]
         log::trace!("wgpu submit {}: poll complete", submission_id);
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -3366,10 +3370,7 @@ impl WgpuProvider {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            log::debug!(
-                "wgpu submit {}: on_submitted_work_done not supported on wasm targets",
-                submission_id
-            );
+            log::trace!("wgpu submit {}: on_submitted_work_done unavailable on wasm", submission_id);
         }
         #[cfg(target_arch = "wasm32")]
         {

@@ -10,6 +10,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+#[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+use crate::builtins::plotting;
 #[cfg(not(test))]
 use crate::interaction;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -134,11 +136,27 @@ async fn perform_wait(wait: PauseWait) -> Result<(), RuntimeError> {
         return Ok(());
     }
 
+    #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+    {
+        // MATLAB semantics: `pause` gives the UI a chance to update.
+        // In RunMat Web/WASM this is an explicit flush boundary for plotting.
+        let handle = plotting::current_figure_handle();
+        let _ = plotting::render_current_scene(handle.as_u32());
+    }
+
     match wait {
         PauseWait::Default => wait_for_key_press().await,
         PauseWait::Seconds(seconds) => {
             if seconds == 0.0 {
-                return Ok(());
+                // `pause(0)` is a useful yield point in simulation loops.
+                #[cfg(target_arch = "wasm32")]
+                {
+                    return wasm_sleep_seconds(0.0).await;
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    return Ok(());
+                }
             }
             sleep_seconds(seconds).await
         }

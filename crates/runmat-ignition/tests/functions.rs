@@ -779,7 +779,7 @@ fn broadcasting_roundtrip_property_like() {
 #[test]
 fn logical_mask_write_scalar_and_vector() {
     // Scalar write via linear logical mask
-    let program = "A = [1 2 3 4 5 6]; m = [1 0 1 0 1 0]; A(m) = 9; s1 = sum(A);\nB = [1 2 3 4 5 6]; idx = [1 3 5]; B(idx) = [7 8 9]; s2 = sum(B);";
+    let program = "A = [1 2 3 4 5 6]; m = [true false true false true false]; A(m) = 9; s1 = sum(A);\nB = [1 2 3 4 5 6]; idx = [1 3 5]; B(idx) = [7 8 9]; s2 = sum(B);";
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
     let vars = execute(&hir).unwrap();
     // After A(m)=9, A becomes [9 2 9 4 9 6] => sum 39

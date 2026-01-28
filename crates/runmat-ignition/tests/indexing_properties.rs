@@ -1,6 +1,8 @@
 mod test_helpers;
 
+use runmat_hir::LoweringContext;
 use runmat_parser::parse;
+use std::collections::HashMap;
 use test_helpers::execute;
 use test_helpers::lower;
 
@@ -17,13 +19,33 @@ fn find_last_tensor(vars: &[runmat_builtins::Value]) -> runmat_builtins::Tensor 
         .expect("no tensor found")
 }
 
+fn lower_with_vars(src: &str) -> (runmat_hir::HirProgram, HashMap<String, usize>) {
+    let program = parse(src).unwrap();
+    let result = runmat_hir::lower(&program, &LoweringContext::empty()).unwrap();
+    (result.hir, result.variables)
+}
+
+fn get_var_tensor(
+    vars: &[runmat_builtins::Value],
+    vars_map: &HashMap<String, usize>,
+    name: &str,
+) -> runmat_builtins::Tensor {
+    let index = *vars_map
+        .get(name)
+        .unwrap_or_else(|| panic!("missing var {name}"));
+    match &vars[index] {
+        runmat_builtins::Value::Tensor(t) => t.clone(),
+        other => panic!("var {name} not tensor: {other:?}"),
+    }
+}
+
 #[test]
 fn logical_mask_write_rows_scalar_broadcast() {
     // Select rows by logical mask, assign scalar across all selected rows/cols
-    let src = "A=[1 2; 3 4; 5 6]; A([1 0 1], :) = 7;";
-    let hir = lower(&parse(src).unwrap()).unwrap();
+    let src = "A=[1 2; 3 4; 5 6]; A([true false true], :) = 7;";
+    let (hir, vars_map) = lower_with_vars(src);
     let vars = execute(&hir).unwrap();
-    let a = find_last_tensor(&vars);
+    let a = get_var_tensor(&vars, &vars_map, "A");
     // Rows 1 and 3 all set to 7
     // Final A = [7 7; 3 4; 7 7] → column-major data [7 3 7 7 4 7]
     assert_eq!(a.shape, vec![3, 2]);
@@ -34,10 +56,10 @@ fn logical_mask_write_rows_scalar_broadcast() {
 fn logical_mask_write_cols_vector_broadcast() {
     // Select columns 2 and 4 by mask, assign a column vector broadcast across selected columns
     // Use explicit literal to avoid range parsing differences in reshape
-    let src = "A=reshape([1 2 3 4 5 6 7 8],2,4); A(:, [0 1 0 1]) = [8;9];"; // A is 2x4: columns are [1 2],[3 4],[5 6],[7 8]
-    let hir = lower(&parse(src).unwrap()).unwrap();
+    let src = "A=reshape([1 2 3 4 5 6 7 8],2,4); A(:, [false true false true]) = [8;9];"; // A is 2x4: columns are [1 2],[3 4],[5 6],[7 8]
+    let (hir, vars_map) = lower_with_vars(src);
     let vars = execute(&hir).unwrap();
-    let a = find_last_tensor(&vars);
+    let a = get_var_tensor(&vars, &vars_map, "A");
     // Columns 2 and 4 replaced by [8;9]
     // Expected columns: [1 2], [8 9], [5 6], [8 9] → data col-major [1,2,8,9,5,6,8,9]
     assert_eq!(a.shape, vec![2, 4]);
@@ -47,10 +69,10 @@ fn logical_mask_write_cols_vector_broadcast() {
 #[test]
 fn mixed_mask_and_range_write_matrix_no_broadcast() {
     // Row mask with column range; rhs matches selection shape exactly
-    let src = "A=[1 2 3; 4 5 6; 7 8 9]; A([1 0 1], 2:3) = [10 11; 12 13];";
-    let hir = lower(&parse(src).unwrap()).unwrap();
+    let src = "A=[1 2 3; 4 5 6; 7 8 9]; A([true false true], 2:3) = [10 11; 12 13];";
+    let (hir, vars_map) = lower_with_vars(src);
     let vars = execute(&hir).unwrap();
-    let a = find_last_tensor(&vars);
+    let a = get_var_tensor(&vars, &vars_map, "A");
     // After assignment: rows 1 and 3, cols 2..3 set to [[10,11];[12,13]] respecting column-major write
     // Final A row-major for intuition:
     // [1 10 11; 4 5 6; 7 12 13] → column-major data [1,4,7,10,5,12,11,6,13]
@@ -65,9 +87,9 @@ fn mixed_mask_and_range_write_matrix_no_broadcast() {
 fn broadcast_invariants_scalar_to_submatrix() {
     // Scalar broadcasts across N-D selection
     let src = "A=reshape([1 2 3 4 5 6 7 8 9 10 11 12],3,4); A(1:2, 2:3) = 5;";
-    let hir = lower(&parse(src).unwrap()).unwrap();
+    let (hir, vars_map) = lower_with_vars(src);
     let vars = execute(&hir).unwrap();
-    let a = find_last_tensor(&vars);
+    let a = get_var_tensor(&vars, &vars_map, "A");
     // A initially col-major of 3x4: columns [1 2 3],[4 5 6],[7 8 9],[10 11 12]
     // After setting rows 1..2, cols 2..3 to 5:
     // Columns become: [1 5 3], [4 5 6]-> actually col2 [5 5 6]? Wait rows 1..2 become 5, row3 stays same.
@@ -83,9 +105,9 @@ fn broadcast_invariants_scalar_to_submatrix() {
 fn end_arithmetic_range_store_linear_and_subscripted() {
     // Linear: vector with end arithmetic step
     let src = "A = 1:10; A(2:2:end-1) = [99 98 97 96];";
-    let hir = lower(&parse(src).unwrap()).unwrap();
+    let (hir, vars_map) = lower_with_vars(src);
     let vars = execute(&hir).unwrap();
-    let a = find_last_tensor(&vars);
+    let a = get_var_tensor(&vars, &vars_map, "A");
     // A indices 2,4,6,8 replaced → [1,99,3,98,5,97,7,96,9,10]
     // MATLAB 1:10 yields a row vector (1 x 10)
     assert_eq!(a.shape, vec![1, 10]);
@@ -96,9 +118,9 @@ fn end_arithmetic_range_store_linear_and_subscripted() {
 
     // 2D subscripted with end arithmetic on a range dim
     let src2 = "A = reshape([1 2 3 4 5 6 7 8 9 10 11 12], 3,4); A(1:end-1, 3) = [42; 43];";
-    let hir2 = lower(&parse(src2).unwrap()).unwrap();
+    let (hir2, vars_map2) = lower_with_vars(src2);
     let vars2 = execute(&hir2).unwrap();
-    let a2 = find_last_tensor(&vars2);
+    let a2 = get_var_tensor(&vars2, &vars_map2, "A");
     // Column 3 becomes [42,43,9]
     assert_eq!(a2.shape, vec![3, 4]);
     assert_eq!(
@@ -167,8 +189,8 @@ fn negative_step_2d_subscript_index() {
     let vars = execute(&hir).unwrap();
     let b = find_last_tensor(&vars);
     assert_eq!(b.shape, vec![3, 2]);
-    // Column-major order: columns [4,5,6] and [10,11,12] -> data [10,11,12,4,5,6]
-    assert_eq!(b.data, vec![10.0, 11.0, 12.0, 4.0, 5.0, 6.0]);
+    // Column-major order preserves index order: rows [3,2,1] for cols [4,2]
+    assert_eq!(b.data, vec![12.0, 11.0, 10.0, 6.0, 5.0, 4.0]);
 }
 
 #[test]
@@ -275,9 +297,9 @@ fn mixed_logical_mask_and_range_across_3d() {
     // Rows logical mask, columns range, third-dim logical mask
     let src = r#"
 		A = reshape([1:24],3,4,2);
-		rows = [1 0 1]; % rows 1 and 3
+		rows = [true false true]; % rows 1 and 3
 		cols = 2:3;     % columns 2 and 3
-		planes = [0 1]; % pick plane 2 only
+		planes = [false true]; % pick plane 2 only
 		S = A(rows, cols, planes);
 	"#;
     let hir = lower(&parse(src).unwrap()).unwrap();

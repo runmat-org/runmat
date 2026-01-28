@@ -36,12 +36,15 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    // Plotting is a sink: it does not participate in fusion, but it *can* consume GPU-resident
+    // tensors directly (zero-copy) when the web renderer shares the provider WGPU context.
+    // Do not force implicit gathers here; that defeats GPU-resident workloads.
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Plots are rendered on the host; gpuArray inputs are gathered before rendering.",
+    notes: "Plots are rendered by the host renderer; GPU inputs may be consumed zero-copy when a shared WGPU context is installed.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::plot")]

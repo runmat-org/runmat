@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 use super::common::{default_figure, ERR_PLOTTING_UNAVAILABLE};
+#[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
 use super::engine::render_figure;
 use super::{plotting_error, plotting_error_with_source};
 
@@ -674,9 +675,21 @@ where
         return Err(plotting_error(builtin, ERR_PLOTTING_UNAVAILABLE));
     }
 
-    let rendered = render_figure(handle, figure_clone)
-        .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
-    Ok(format!("Figure {} updated: {rendered}", handle.as_u32()))
+    // On Web/WASM we deliberately decouple "mutate figure state" from "present pixels".
+    // The host coalesces figure events and presents on a frame cadence, and `drawnow()` /
+    // `pause()` provide explicit "flush" boundaries for scripts.
+    #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+    {
+        let _ = figure_clone;
+        Ok(format!("Figure {} updated", handle.as_u32()))
+    }
+
+    #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
+    {
+        let rendered = render_figure(handle, figure_clone)
+            .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
+        Ok(format!("Figure {} updated: {rendered}", handle.as_u32()))
+    }
 }
 
 /// Monotonic revision counter that increments on each successful mutation of the figure.

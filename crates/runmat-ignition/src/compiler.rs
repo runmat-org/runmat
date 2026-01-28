@@ -1090,7 +1090,12 @@ impl Compiler {
                                 matches!(
                                     e.kind,
                                     HirExprKind::Range(_, _, _) | HirExprKind::Tensor(_)
-                                ) || matches!(e.ty, runmat_hir::Type::Tensor { .. })
+                                ) || matches!(
+                                    e.ty,
+                                    runmat_hir::Type::Tensor { .. }
+                                        | runmat_hir::Type::Bool
+                                        | runmat_hir::Type::Logical
+                                )
                             });
                             if has_colon || has_end || has_vector || indices.len() > 2 {
                                 let mut colon_mask: u32 = 0;
@@ -2524,7 +2529,12 @@ impl Compiler {
                 let has_end = indices.iter().any(|e| matches!(e.kind, HirExprKind::End));
                 let has_vector = indices.iter().any(|e| {
                     matches!(e.kind, HirExprKind::Range(_, _, _) | HirExprKind::Tensor(_))
-                        || matches!(e.ty, runmat_hir::Type::Tensor { .. })
+                        || matches!(
+                            e.ty,
+                            runmat_hir::Type::Tensor { .. }
+                                | runmat_hir::Type::Bool
+                                | runmat_hir::Type::Logical
+                        )
                 });
                 // General case: any-dimension ranges with end arithmetic (e.g., A(:,2:2:end-1,...))
                 // We lower into IndexRangeEnd: push base, then per-range start[, step] in increasing dimension order,

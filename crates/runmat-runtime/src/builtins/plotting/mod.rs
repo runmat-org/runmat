@@ -31,6 +31,8 @@ pub(crate) mod compat_cmds;
 pub(crate) mod contour;
 #[path = "ops/contourf.rs"]
 pub(crate) mod contourf;
+#[path = "ops/drawnow.rs"]
+pub(crate) mod drawnow;
 #[path = "ops/figure.rs"]
 pub(crate) mod figure;
 #[path = "ops/gca.rs"]

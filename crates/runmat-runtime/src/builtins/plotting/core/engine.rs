@@ -35,18 +35,14 @@ fn engine_error_with_source(
     build_runtime_error(message).with_source(source).build()
 }
 
+#[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
 pub fn render_figure(handle: FigureHandle, figure: Figure) -> BuiltinResult<String> {
     #[cfg(feature = "gui")]
     {
         native::render(handle, figure)
     }
 
-    #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
-    {
-        super::web::render_web_canvas(handle.as_u32(), figure)
-    }
-
-    #[cfg(not(any(feature = "gui", all(target_arch = "wasm32", feature = "plot-web"))))]
+    #[cfg(not(feature = "gui"))]
     {
         let _ = handle;
         let _ = figure;
