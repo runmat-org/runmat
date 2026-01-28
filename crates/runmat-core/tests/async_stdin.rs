@@ -3,9 +3,7 @@
 use anyhow::Result;
 use futures::executor::block_on;
 use runmat_builtins::Value;
-use runmat_core::{
-    InputHandlerAction, InputRequest, InputRequestKind, InputResponse, RunMatSession,
-};
+use runmat_core::{InputRequest, InputRequestKind, InputResponse, RunMatSession};
 use runmat_runtime::interaction::force_interactive_stdin_for_tests;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -53,9 +51,12 @@ fn input_prompts_return_value() -> Result<()> {
     let mut session = RunMatSession::with_options(false, false)?;
     let prompts = Arc::new(Mutex::new(Vec::new()));
     let prompts_clone = Arc::clone(&prompts);
-    session.install_input_handler(move |request: &InputRequest| {
-        prompts_clone.lock().unwrap().push(request.prompt.clone());
-        InputHandlerAction::Respond(Ok(InputResponse::Line("41".into())))
+    session.install_async_input_handler(move |request: InputRequest| {
+        let prompts_clone = Arc::clone(&prompts_clone);
+        async move {
+            prompts_clone.lock().unwrap().push(request.prompt.clone());
+            Ok(InputResponse::Line("41".into()))
+        }
     });
 
     let result =
@@ -79,13 +80,16 @@ fn multiple_inputs_call_handler_in_order() -> Result<()> {
         InputResponse::Line("code-42".into()),
     ])));
     let responses_clone = Arc::clone(&responses);
-    session.install_input_handler(move |_| {
-        let response = responses_clone
-            .lock()
-            .unwrap()
-            .pop_front()
-            .expect("missing queued response");
-        InputHandlerAction::Respond(Ok(response))
+    session.install_async_input_handler(move |_request: InputRequest| {
+        let responses_clone = Arc::clone(&responses_clone);
+        async move {
+            let response = responses_clone
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("missing queued response");
+            Ok(response)
+        }
     });
 
     let result = block_on(
@@ -120,9 +124,12 @@ fn pause_uses_keypress_handler() -> Result<()> {
     let mut session = RunMatSession::with_options(false, false)?;
     let kinds = Arc::new(Mutex::new(Vec::new()));
     let kinds_clone = Arc::clone(&kinds);
-    session.install_input_handler(move |request: &InputRequest| {
-        kinds_clone.lock().unwrap().push(request.kind.clone());
-        InputHandlerAction::Respond(Ok(InputResponse::KeyPress))
+    session.install_async_input_handler(move |request: InputRequest| {
+        let kinds_clone = Arc::clone(&kinds_clone);
+        async move {
+            kinds_clone.lock().unwrap().push(request.kind.clone());
+            Ok(InputResponse::KeyPress)
+        }
     });
 
     let result =
@@ -143,8 +150,8 @@ fn pending_handler_returns_error() -> Result<()> {
     let _test_guard = test_mutex().lock().unwrap();
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
-    session.install_input_handler(|_| {
-        InputHandlerAction::Respond(Err("input handler is unavailable".to_string()))
+    session.install_async_input_handler(|_request: InputRequest| async move {
+        Err("input handler is unavailable".to_string())
     });
 
     let result = block_on(session.execute("pause; value = 1; value"));

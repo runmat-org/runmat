@@ -260,7 +260,7 @@ async fn sleep_seconds(seconds: f64) -> Result<(), RuntimeError> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         // from_secs_f64 rejects NaN/±Inf; classify_argument filters those earlier.
-        let duration = Duration::from_secs_f64(seconds);
+        let duration = std::time::Duration::from_secs_f64(seconds);
         std::thread::sleep(duration);
         Ok(())
     }
@@ -268,11 +268,18 @@ async fn sleep_seconds(seconds: f64) -> Result<(), RuntimeError> {
 
 #[cfg(target_arch = "wasm32")]
 async fn wasm_sleep_seconds(seconds: f64) -> Result<(), RuntimeError> {
-    use js_sys::{Function, Promise};
+    use js_sys::{Function, Promise, Reflect};
     use wasm_bindgen::JsCast;
     use wasm_bindgen_futures::JsFuture;
 
-    let window = web_sys::window().ok_or_else(|| build_runtime_error("pause: window unavailable").build())?;
+    // `pause` runs in both Window and WebWorker contexts; workers do not have `window`.
+    // Use the global `setTimeout` function instead.
+    let global = js_sys::global();
+    let set_timeout = Reflect::get(&global, &wasm_bindgen::JsValue::from_str("setTimeout"))
+        .map_err(|_| build_runtime_error("pause: setTimeout unavailable").build())?
+        .dyn_into::<Function>()
+        .map_err(|_| build_runtime_error("pause: setTimeout unavailable").build())?;
+
     let millis = (seconds * 1000.0).max(0.0).round();
     let millis_i32 = if millis > i32::MAX as f64 {
         i32::MAX
@@ -282,7 +289,11 @@ async fn wasm_sleep_seconds(seconds: f64) -> Result<(), RuntimeError> {
 
     let promise = Promise::new(&mut |resolve, _reject| {
         let resolve: Function = resolve.unchecked_into();
-        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, millis_i32);
+        let _ = set_timeout.call2(
+            &global,
+            &resolve.into(),
+            &wasm_bindgen::JsValue::from_f64(millis_i32 as f64),
+        );
     });
 
     let _ = JsFuture::from(promise)

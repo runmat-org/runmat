@@ -618,7 +618,43 @@ async fn plus_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult<
     plus_host(lhs, Value::Tensor(host_rhs))
 }
 
+fn scalar_real_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(n) => Some(*n),
+        Value::Int(i) => Some(i.to_f64()),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
+        Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
+            Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
+        }
+        _ => None,
+    }
+}
+
+fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
+    match value {
+        Value::Complex(re, im) => Some((*re, *im)),
+        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
+        _ => None,
+    }
+}
+
+fn scalar_plus_value(lhs: &Value, rhs: &Value) -> Option<Value> {
+    let left = scalar_complex_value(lhs).or_else(|| scalar_real_value(lhs).map(|v| (v, 0.0)))?;
+    let right = scalar_complex_value(rhs).or_else(|| scalar_real_value(rhs).map(|v| (v, 0.0)))?;
+    let (ar, ai) = left;
+    let (br, bi) = right;
+    if ai != 0.0 || bi != 0.0 {
+        return Some(Value::Complex(ar + br, ai + bi));
+    }
+    Some(Value::Num(ar + br))
+}
+
 fn plus_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if let Some(result) = scalar_plus_value(&lhs, &rhs) {
+        return Ok(result);
+    }
     match (classify_operand(lhs)?, classify_operand(rhs)?) {
         (PlusOperand::Real(a), PlusOperand::Real(b)) => plus_real_real(&a, &b),
         (PlusOperand::Complex(a), PlusOperand::Complex(b)) => plus_complex_complex(&a, &b),

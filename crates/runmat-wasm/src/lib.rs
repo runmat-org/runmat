@@ -18,8 +18,8 @@ use runmat_builtins::{NumericDType, ObjectInstance, StructValue, Value};
 use runmat_core::{
     matlab_class_name, value_shape, CompatMode, ExecutionProfiling, ExecutionResult,
     ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision, FusionPlanEdge, FusionPlanNode,
-    FusionPlanShader, FusionPlanSnapshot, InputHandlerAction, InputRequest, InputRequestKind,
-    InputResponse, MaterializedVariable, RunError, RunMatSession, StdinEvent, StdinEventKind,
+    FusionPlanShader, FusionPlanSnapshot, InputRequest, InputRequestKind, InputResponse,
+    MaterializedVariable, RunError, RunMatSession, StdinEvent, StdinEventKind,
     WorkspaceEntry, WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview,
     WorkspaceSliceOptions, WorkspaceSnapshot,
 };
@@ -263,6 +263,7 @@ pub struct RunMatWasm {
     config: RefCell<SessionConfig>,
     gpu_status: GpuStatus,
     disposed: Cell<bool>,
+    active_interrupt: RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>,
 }
 
 #[wasm_bindgen]
@@ -284,6 +285,25 @@ impl RunMatWasm {
             .collect();
         // Reset hold state so a previous `hold on` doesn't cause subsequent runs to keep appending.
         runtime_reset_hold_state_for_run();
+
+        // Ensure `cancelExecution()` can interrupt the *active* session even while we temporarily
+        // move it out of `self.session` to avoid holding a RefCell borrow across `.await`.
+        let interrupt_handle = self.session.borrow().interrupt_handle();
+        self.active_interrupt
+            .borrow_mut()
+            .replace(Arc::clone(&interrupt_handle));
+        struct ActiveInterruptGuard<'a> {
+            slot: &'a RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>,
+        }
+        impl Drop for ActiveInterruptGuard<'_> {
+            fn drop(&mut self) {
+                self.slot.borrow_mut().take();
+            }
+        }
+        let _active_interrupt_guard = ActiveInterruptGuard {
+            slot: &self.active_interrupt,
+        };
+
         // We must not hold a RefCell borrow across `.await`, so temporarily move the session out.
         let mut slot = self.session.borrow_mut();
         let mut session = std::mem::take(&mut *slot);
@@ -337,7 +357,6 @@ impl RunMatWasm {
             self.snapshot_seed.as_deref(),
         )
         .map_err(|err| js_error(&format!("Failed to reset session: {err}")))?;
-        configure_session_input_handler(&mut session);
         session.set_telemetry_consent(consent);
         if let Some(cid) = config.telemetry_client_id.clone() {
             session.set_telemetry_client_id(Some(cid));
@@ -356,6 +375,10 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = cancelExecution)]
     pub fn cancel_execution(&self) {
+        if let Some(flag) = self.active_interrupt.borrow().as_ref() {
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            return;
+        }
         self.session.borrow().cancel_execution();
     }
 
@@ -388,7 +411,6 @@ impl RunMatWasm {
             if handler.is_null() || handler.is_undefined() {
                 set_js_stdin_handler(None);
                 let mut session = self.session.borrow_mut();
-                session.clear_input_handler();
                 session.clear_async_input_handler();
                 return Ok(());
             }
@@ -398,9 +420,6 @@ impl RunMatWasm {
             set_js_stdin_handler(Some(func));
             {
                 let mut session = self.session.borrow_mut();
-                // Keep the legacy synchronous bridge (used by some builtins), but prefer the
-                // async handler for `ExecuteFuture`.
-                configure_session_input_handler(&mut session);
                 session
                     .install_async_input_handler(|req| async move { js_input_request(req).await });
             }
@@ -930,88 +949,6 @@ fn set_js_stdin_handler(handler: Option<js_sys::Function>) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn invoke_js_stdin_handler(request: &InputRequest) -> InputHandlerAction {
-    let handler = match JS_STDIN_HANDLER.with(|slot| slot.borrow().clone()) {
-        Some(func) => func,
-        None => {
-            return InputHandlerAction::Respond(Err(
-                "stdin requested but no input handler is installed".to_string(),
-            ))
-        }
-    };
-    let js_request = js_sys::Object::new();
-    if let Err(err) = Reflect::set(
-        &js_request,
-        &JsValue::from_str("prompt"),
-        &JsValue::from_str(&request.prompt),
-    ) {
-        log::warn!(
-            "stdin handler: failed to serialize prompt: {}",
-            js_value_to_string(err)
-        );
-    }
-    match request.kind {
-        InputRequestKind::Line { echo } => {
-            Reflect::set(
-                &js_request,
-                &JsValue::from_str("kind"),
-                &JsValue::from_str("line"),
-            )
-            .unwrap_or_default();
-            Reflect::set(
-                &js_request,
-                &JsValue::from_str("echo"),
-                &JsValue::from_bool(echo),
-            )
-            .unwrap_or_default();
-            let value = match handler.call1(&JsValue::NULL, &js_request) {
-                Ok(v) => v,
-                Err(err) => {
-                    return InputHandlerAction::Respond(Err(js_value_to_string(err)));
-                }
-            };
-            if value_should_pending(&value) {
-                return InputHandlerAction::Respond(Err(
-                    "stdin handler returned pending without a value".to_string(),
-                ));
-            }
-            if let Some(err) = extract_error_message(&value) {
-                return InputHandlerAction::Respond(Err(err));
-            }
-            if let Some(text) = extract_line_value(&value) {
-                return InputHandlerAction::Respond(Ok(InputResponse::Line(text)));
-            }
-            InputHandlerAction::Respond(Err(
-                "stdin handler must return a string for line input".to_string()
-            ))
-        }
-        InputRequestKind::KeyPress => {
-            Reflect::set(
-                &js_request,
-                &JsValue::from_str("kind"),
-                &JsValue::from_str("keyPress"),
-            )
-            .unwrap_or_default();
-            let value = match handler.call1(&JsValue::NULL, &js_request) {
-                Ok(v) => v,
-                Err(err) => {
-                    return InputHandlerAction::Respond(Err(js_value_to_string(err)));
-                }
-            };
-            if value_should_pending(&value) {
-                return InputHandlerAction::Respond(Err(
-                    "stdin handler returned pending without a value".to_string(),
-                ));
-            }
-            if let Some(err) = extract_error_message(&value) {
-                return InputHandlerAction::Respond(Err(err));
-            }
-            InputHandlerAction::Respond(Ok(InputResponse::KeyPress))
-        }
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
 async fn js_input_request(request: InputRequest) -> Result<InputResponse, String> {
     let handler = JS_STDIN_HANDLER.with(|slot| slot.borrow().clone());
     let Some(handler) = handler else {
@@ -1084,25 +1021,6 @@ async fn js_input_request(request: InputRequest) -> Result<InputResponse, String
 }
 
 #[cfg(target_arch = "wasm32")]
-fn value_should_pending(value: &JsValue) -> bool {
-    if value.is_null() || value.is_undefined() {
-        return true;
-    }
-    if value.is_instance_of::<js_sys::Promise>() {
-        return true;
-    }
-    if value.is_object() {
-        let obj = js_sys::Object::from(value.clone());
-        if let Ok(flag) = Reflect::get(&obj, &JsValue::from_str("pending")) {
-            if flag.as_bool().unwrap_or(false) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-#[cfg(target_arch = "wasm32")]
 fn extract_error_message(value: &JsValue) -> Option<String> {
     if !value.is_object() {
         return None;
@@ -1133,19 +1051,6 @@ fn extract_line_value(value: &JsValue) -> Option<String> {
         }
     }
     None
-}
-
-#[cfg(target_arch = "wasm32")]
-fn configure_session_input_handler(session: &mut RunMatSession) {
-    session.install_input_handler(js_input_bridge);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn configure_session_input_handler(_session: &mut RunMatSession) {}
-
-#[cfg(target_arch = "wasm32")]
-fn js_input_bridge(request: &InputRequest) -> InputHandlerAction {
-    invoke_js_stdin_handler(request)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1254,7 +1159,6 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
             format!("Failed to initialize RunMat session: {err}"),
         )
     })?;
-    configure_session_input_handler(&mut session);
     session.set_telemetry_consent(config.telemetry_consent);
     if let Some(cid) = config.telemetry_client_id.clone() {
         session.set_telemetry_client_id(Some(cid));
@@ -1303,6 +1207,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         config: RefCell::new(config),
         gpu_status,
         disposed: Cell::new(false),
+        active_interrupt: RefCell::new(None),
     })
 }
 

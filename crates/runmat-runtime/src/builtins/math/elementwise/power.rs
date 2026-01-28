@@ -312,7 +312,44 @@ async fn apply_output_template(value: Value, template: &OutputTemplate) -> Built
     }
 }
 
+fn scalar_real_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(n) => Some(*n),
+        Value::Int(i) => Some(i.to_f64()),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
+        Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
+            Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
+        }
+        _ => None,
+    }
+}
+
+fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
+    match value {
+        Value::Complex(re, im) => Some((*re, *im)),
+        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
+        _ => None,
+    }
+}
+
+fn scalar_power_value(lhs: &Value, rhs: &Value) -> Option<Value> {
+    let base = scalar_complex_value(lhs).or_else(|| scalar_real_value(lhs).map(|v| (v, 0.0)))?;
+    let exp = scalar_complex_value(rhs).or_else(|| scalar_real_value(rhs).map(|v| (v, 0.0)))?;
+    let (br, bi) = base;
+    let (er, ei) = exp;
+    if bi != 0.0 || ei != 0.0 {
+        let (re, im) = complex_pow_scalar(br, bi, er, ei);
+        return Some(Value::Complex(re, im));
+    }
+    Some(Value::Num(br.powf(er)))
+}
+
 fn power_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if let Some(result) = scalar_power_value(&lhs, &rhs) {
+        return Ok(result);
+    }
     match (classify_operand(lhs)?, classify_operand(rhs)?) {
         (PowerOperand::Real(a), PowerOperand::Real(b)) => power_real_real(&a, &b),
         (PowerOperand::Complex(a), PowerOperand::Complex(b)) => power_complex_complex(&a, &b),

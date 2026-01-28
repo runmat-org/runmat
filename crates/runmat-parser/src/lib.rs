@@ -1660,16 +1660,19 @@ impl Parser {
             };
             let is_semicolon_terminated = self.consume(&Token::Semicolon);
 
-            // Only expression statements are display-suppressed by semicolon.
             let final_stmt = match stmt {
                 Stmt::ExprStmt(expr, _, span) => {
                     Stmt::ExprStmt(expr, is_semicolon_terminated, span)
                 }
-                Stmt::Assign(name, expr, _, span) => Stmt::Assign(name, expr, false, span),
-                Stmt::MultiAssign(names, expr, _, span) => {
-                    Stmt::MultiAssign(names, expr, false, span)
+                Stmt::Assign(name, expr, _, span) => {
+                    Stmt::Assign(name, expr, is_semicolon_terminated, span)
                 }
-                Stmt::AssignLValue(lv, expr, _, span) => Stmt::AssignLValue(lv, expr, false, span),
+                Stmt::MultiAssign(names, expr, _, span) => {
+                    Stmt::MultiAssign(names, expr, is_semicolon_terminated, span)
+                }
+                Stmt::AssignLValue(lv, expr, _, span) => {
+                    Stmt::AssignLValue(lv, expr, is_semicolon_terminated, span)
+                }
                 other => other,
             };
             body.push(final_stmt);
