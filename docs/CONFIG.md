@@ -98,7 +98,7 @@ compat = "matlab" # default
 # compat = "strict"
 ```
 
-- `matlab`: allows the curated set of command-style verbs documented in `docs/LANGUAGE.md`, rewriting them into explicit calls before parsing.
+- `matlab`: allows the curated set of command-style verbs documented in `/docs/language`, rewriting them into explicit calls before parsing.
 - `strict`: disables command syntax entirely; scripts must call functions explicitly (e.g., `hold("on")`). Recommended for new codebases.
 
 The CLI (`runmat`), native runtime, WASM runtime, and both LSP implementations read this setting automatically. Hosts can still override it via environment variables or LSP initialization options, but `.runmat` is treated as the source of truth.

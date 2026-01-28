@@ -1,0 +1,135 @@
+{
+  "title": "writematrix",
+  "category": "io/tabular",
+  "keywords": [
+    "writematrix",
+    "csv",
+    "delimited text",
+    "write",
+    "append",
+    "quote strings",
+    "decimal separator"
+  ],
+  "summary": "Write numeric or string matrices to delimited text files with MATLAB-compatible defaults.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/writematrix.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the CPU. gpuArray inputs are gathered automatically before serialisation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::tabular::writematrix::tests",
+    "integration": [
+      "builtins::io::tabular::writematrix::tests::writematrix_writes_space_delimited_txt",
+      "builtins::io::tabular::writematrix::tests::writematrix_defaults_to_comma_for_csv",
+      "builtins::io::tabular::writematrix::tests::writematrix_honours_write_mode_append",
+      "builtins::io::tabular::writematrix::tests::writematrix_quotes_strings_by_default",
+      "builtins::io::tabular::writematrix::tests::writematrix_accepts_gpu_tensor_inputs"
+    ]
+  },
+  "description": "`writematrix(A, filename)` serialises numeric or string matrices to a text file using MATLAB-compatible defaults. Column-major ordering is preserved, delimiters adjust to the filename extension, and optional name/value pairs customise quoting, decimal separators, line endings, and write mode. The builtin mirrors MATLAB behaviour for the supported options, raising descriptive errors for unsupported combinations like spreadsheet output.",
+  "behaviors": [
+    "Accepts real numeric, logical, or string arrays with up to two dimensions (trailing singleton dimensions are ignored). Heterogeneous data requires `writecell` instead.",
+    "Default delimiters follow MATLAB: comma for `.csv`, tab for `.tsv`, whitespace for `.txt` and `.dat`, and comma for other extensions. Specify `'Delimiter', value` to override.",
+    "`'WriteMode'` supports `'overwrite'` (default) and `'append'`. Overwrite truncates existing files; append writes new rows to the end without inserting extra delimiters.",
+    "`'QuoteStrings'` controls whether text fields are wrapped in double quotes. When enabled (the default) embedded quotes are doubled (`\"Alice\"` becomes `\"\"Alice\"\"`).",
+    "`'DecimalSeparator'` swaps the decimal point for locales that require `','` or other characters. Thousands separators are not inserted automatically, matching MATLAB.",
+    "`'LineEnding'` supports `'auto'` (normalized `\\n` for cross-platform portability), `'unix'`, `'pc'`/`'windows'`, and `'mac'`.",
+    "`'FileType'` accepts `'delimitedtext'` or `'text'`. Spreadsheet output (`'spreadsheet'`) is not yet available and triggers a descriptive error consistent with MATLAB's messaging.",
+    "Unsupported options are ignored for forward compatibility. Errors indicate which argument was invalid when the value cannot be interpreted."
+  ],
+  "examples": [
+    {
+      "description": "Save a numeric matrix to a CSV file",
+      "input": "A = [1 2 3; 4 5 6];\nwritematrix(A, \"results.csv\");"
+    },
+    {
+      "description": "Export data with a custom semicolon delimiter",
+      "input": "writematrix(A, \"results.dat\", 'Delimiter', ';');"
+    },
+    {
+      "description": "Append additional rows to an existing report",
+      "input": "writematrix([7 8 9], \"report.txt\");\nwritematrix([10 11 12], \"report.txt\", 'WriteMode', 'append');"
+    },
+    {
+      "description": "Write string data with quoting disabled",
+      "input": "names = [\"Alice\" \"Bob\" \"Charlie\"];\nwritematrix(names, \"names.csv\", 'QuoteStrings', false);"
+    },
+    {
+      "description": "Use a European decimal separator and explicit line ending",
+      "input": "vals = [12.34; 56.78];\nwritematrix(vals, \"eu.csv\", 'DecimalSeparator', ',', 'LineEnding', 'unix');"
+    },
+    {
+      "description": "Write GPU-resident data transparently",
+      "input": "G = gpuArray(rand(2, 3));\nwritematrix(G, \"gpu_output.csv\");",
+      "output": "% Data is gathered from the GPU automatically and written to disk as CSV."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which data types does `writematrix` support?",
+      "answer": "Real numeric, logical, and string arrays up to two dimensions. For heterogenous content (mixed numbers and text) use `writecell` or `writetable`."
+    },
+    {
+      "question": "How are empty matrices handled?",
+      "answer": "Zero-row or zero-column inputs produce either an empty file or blank line endings per MATLAB's behaviour. The file is still created or truncated according to `'WriteMode'`."
+    },
+    {
+      "question": "Can I write OTA spreadsheet formats like `.xlsx`?",
+      "answer": "Not yet. Passing `'FileType','spreadsheet'` raises a descriptive error. Use MATLAB's table-based workflows or export delimited text instead."
+    },
+    {
+      "question": "How are embedded quotes in text fields escaped?",
+      "answer": "When `'QuoteStrings'` is `true`, embedded double quotes are doubled (`\"She said \"\"hi\"\"\"`), conforming to RFC 4180 and MATLAB's implementation. With quoting disabled, the characters are written verbatim."
+    },
+    {
+      "question": "What happens if I choose `','` as both delimiter and decimal separator?",
+      "answer": "RunMat mirrors MATLAB by honouring your request without modification, even though the output may be ambiguous. Choose a different delimiter when writing locale-specific decimals."
+    },
+    {
+      "question": "Does `writematrix` change the working directory?",
+      "answer": "No. Relative paths are resolved against the current MATLAB working directory, and only the target file is touched."
+    },
+    {
+      "question": "How do I include header rows or variable names?",
+      "answer": "`writematrix` focuses on numeric/string matrices. For labelled data use `writetable` (planned) or prepend header lines manually with `fprintf` before calling `writematrix` in `'append'` mode."
+    }
+  ],
+  "links": [
+    {
+      "label": "readmatrix",
+      "url": "./readmatrix"
+    },
+    {
+      "label": "fprintf",
+      "url": "./fprintf"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/tabular/writematrix.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/writematrix.rs"
+  },
+  "gpu_residency": "No additional steps are required. `writematrix` treats GPU arrays as residency sinks: the data is gathered before formatting, ensuring the file on disk reflects host memory. This mirrors MATLAB, where `writematrix` operates on numeric values regardless of their original residency.",
+  "gpu_behavior": [
+    "`writematrix` always executes on the host. When the input matrix resides on a GPU, RunMat gathers the array via the active acceleration provider before formatting. No provider-specific hooks or GPU kernels are required, and the result of the write remains a host-side side effect (file on disk). If no provider is registered, the builtin emits the same gather error reported by other residency sinks."
+  ]
+}

@@ -1,0 +1,125 @@
+{
+  "title": "upper",
+  "category": "strings/transform",
+  "keywords": [
+    "upper",
+    "uppercase",
+    "convert to uppercase",
+    "string case",
+    "character arrays"
+  ],
+  "summary": "Convert strings, character arrays, and cell arrays of character vectors to uppercase.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/upper.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs on the CPU; GPU-resident inputs are gathered before conversion to keep MATLAB parity."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::transform::upper::tests",
+    "integration": "builtins::strings::transform::upper::tests::upper_cell_array_mixed_content"
+  },
+  "description": "`upper(text)` converts every alphabetic character in `text` to uppercase. It accepts string scalars, string arrays, character arrays, and cell arrays of character vectors, mirroring MATLAB behaviour. Non-alphabetic characters are returned unchanged.",
+  "behaviors": [
+    "String inputs stay as strings. String arrays preserve their size, orientation, and missing values.",
+    "Character arrays are processed row by row. The result remains a rectangular char array; if any row grows after uppercasing (for example `'\u00df' \u2192 \"SS\"`), the array widens and shorter rows are padded with spaces.",
+    "Cell arrays must contain string scalars or character vectors. The result is a cell array of the same size with each element converted to uppercase; other types raise MATLAB-compatible errors.",
+    "Missing string scalars (`string(missing)`) remain `<missing>` so downstream code behaves like MATLAB.",
+    "Inputs that are numeric, logical, structs, or GPU tensors raise MATLAB-compatible type errors."
+  ],
+  "examples": [
+    {
+      "description": "Convert a string scalar to uppercase",
+      "input": "txt = \"RunMat\";\nresult = upper(txt);",
+      "output": "result = \"RUNMAT\""
+    },
+    {
+      "description": "Uppercase each element of a string array",
+      "input": "labels = [\"north\" \"South\"; \"East\" \"west\"];\nuppered = upper(labels);",
+      "output": "uppered = 2\u00d72 string\n    \"NORTH\"    \"SOUTH\"\n    \"EAST\"     \"WEST\""
+    },
+    {
+      "description": "Uppercase character array rows while preserving shape",
+      "input": "animals = char(\"cat\", \"doge\");\nresult = upper(animals);",
+      "output": "result =\n\n  2\u00d74 char array\n\n    'CAT '\n    'DOGE'"
+    },
+    {
+      "description": "Uppercase a cell array of character vectors",
+      "input": "C = {'hello', 'World'};\nout = upper(C);",
+      "output": "out = 1\u00d72 cell array\n    {'HELLO'}    {'WORLD'}"
+    },
+    {
+      "description": "Keep missing strings as missing",
+      "input": "vals = [\"data\", string(missing), \"gpu\"];\nconverted = upper(vals);",
+      "output": "converted = 1\u00d73 string\n    \"DATA\"    <missing>    \"GPU\""
+    },
+    {
+      "description": "Handle text stored on a GPU input",
+      "input": "codes = gpuArray(uint16('runmat'));\ntxt = char(gather(codes));\nresult = upper(txt);",
+      "output": "result = 'RUNMAT'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `upper` change non-alphabetic characters?",
+      "answer": "No. Digits, punctuation, whitespace, and symbols remain untouched. Only alphabetic code points that have distinct uppercase forms are converted."
+    },
+    {
+      "question": "What happens to character array dimensions?",
+      "answer": "RunMat uppercases each row independently and pads with spaces when an uppercase mapping increases the row length. This mirrors MATLAB\u2019s behaviour so the result always has rectangular dimensions."
+    },
+    {
+      "question": "Can I pass numeric arrays to `upper`?",
+      "answer": "No. Passing numeric, logical, or struct inputs raises a MATLAB-compatible error. Convert the data to a string or character array first (for example with `string` or `char`)."
+    },
+    {
+      "question": "How are missing strings handled?",
+      "answer": "Missing string scalars remain `<missing>` and are returned unchanged. This matches MATLAB\u2019s handling of missing values in text processing functions."
+    },
+    {
+      "question": "Will `upper` ever execute on the GPU?",
+      "answer": "Not today. The builtin gathers GPU-resident data automatically and performs the conversion on the CPU so the results match MATLAB exactly. Providers may add device-side kernels in the future, but behaviour will remain compatible."
+    }
+  ],
+  "links": [
+    {
+      "label": "lower",
+      "url": "./lower"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    },
+    {
+      "label": "regexprep",
+      "url": "./regexprep"
+    },
+    {
+      "label": "strcmpi",
+      "url": "./strcmpi"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/upper.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/upper.rs"
+  },
+  "gpu_residency": "RunMat keeps text data in host memory, so you typically work with ordinary string and character arrays. When text originates from GPU computations (for example, numeric code points produced by kernels), gather those values to the host and convert them to text before calling `upper`.",
+  "gpu_behavior": [
+    "`upper` executes on the CPU. Text values currently reside in host memory, so providers do not offer device kernels for this builtin. When you pass a container that still holds GPU handles (for example, a struct whose string fields were gathered lazily), RunMat gathers those handles before performing the conversion. If you store characters as numeric code points on the GPU, gather and convert them to text before calling `upper`."
+  ]
+}

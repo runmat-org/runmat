@@ -1,0 +1,127 @@
+{
+  "title": "polyfit",
+  "category": "math/poly",
+  "keywords": [
+    "polyfit",
+    "polynomial fitting",
+    "least squares",
+    "prediction intervals",
+    "gpu"
+  ],
+  "summary": "Fit an n-th degree polynomial to data points using least squares with MATLAB-compatible outputs.",
+  "references": [
+    "title: \"MATLAB polyfit documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Providers gather inputs to the host today; the shared Householder QR solver runs on CPU while preserving GPU residency semantics."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "uniform"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::poly::polyfit::tests",
+    "gpu": "builtins::math::poly::polyfit::tests::polyfit_wgpu_matches_cpu"
+  },
+  "description": "`polyfit(x, y, n)` returns the coefficients of an `n`-th degree polynomial that fits the samples `(x, y)` in a least-squares sense. The coefficients are ordered from the highest power of `x` (or `t` when centering is applied) down to the constant term, matching MATLAB's convention.",
+  "behaviors": [
+    "`x` and `y` must contain the same number of finite numeric elements. They can be row vectors, column vectors, or N-D arrays; RunMat flattens them column-major (MATLAB order).",
+    "The optional fourth argument provides weights: `polyfit(x, y, n, w)` minimises `||sqrt(w) .* (y - polyval(p, x))||_2`. All weights must be real, non-negative, and match the shape of `x`.",
+    "`polyfit` applies centring and scaling to the independent variable for numerical stability. It returns the vector `mu = [mean(x), std(x)]`, and the polynomial fits `(x - mu(1)) / mu(2)`. Use `polyval(p, x, [], mu)` to evaluate with the same scaling.",
+    "`[p, S, mu] = polyfit(...)` also returns `S`, a structure with fields `R`, `df`, and `normr`. These match MATLAB and are accepted directly by `polyval` for computing prediction intervals. `S.R` is the upper-triangular factor from the QR decomposition of the scaled Vandermonde matrix, `S.df` is the degrees of freedom (max(`numel(x) - (n + 1)`, 0)), and `S.normr` is the 2-norm of the weighted residuals.",
+    "RunMat mirrors MATLAB error messages for inconsistent dimensions, non-integer degrees, singular scaling, and invalid weights."
+  ],
+  "examples": [
+    {
+      "description": "Fitting a straight line through noisy samples",
+      "input": "x = 0:5;\ny = 2.5 * x + 1 + 0.05 * randn(size(x));\np = polyfit(x, y, 1);",
+      "output": "p ≈ [2.5 1.0];   % slope and intercept recovered from noisy data"
+    },
+    {
+      "description": "Computing a quadratic fit and reusing `mu`",
+      "input": "x = -3:3;\ny = x.^2 - 2 * x + 4;\n[p, S, mu] = polyfit(x, y, 2);\nsmoothed = polyval(p, x, [], mu);",
+      "output": "smoothed matches y exactly because the quadratic model fits perfectly."
+    },
+    {
+      "description": "Retrieving the structure `S` for prediction intervals",
+      "input": "t = linspace(0, 2*pi, 25);\ny = sin(t) + 0.1 * randn(size(t));\n[p, S, mu] = polyfit(t, y, 3);\n[fitted, delta] = polyval(p, t, S, mu);",
+      "output": "delta contains the one-standard-deviation prediction interval for each fitted sample."
+    },
+    {
+      "description": "Weighted polynomial fit",
+      "input": "x = linspace(-1, 1, 7);\ny = [1.1 0.4 0.2 0.0 0.1 0.5 1.4];\nw = [1 2 2 4 2 2 1];\np = polyfit(x, y, 2, w);",
+      "output": "Central samples influence the fit more heavily, matching MATLAB's weighting semantics."
+    },
+    {
+      "description": "Using `polyfit` with `gpuArray` inputs",
+      "input": "x = gpuArray.linspace(-2, 2, 50);\ny = gpuArray((x - 0.5).^3);\np = polyfit(x, y, 3);",
+      "output": "p is returned on the host today; convert it back to gpuArray if desired."
+    },
+    {
+      "description": "Complex-valued data with `polyfit`",
+      "input": "x = 0:4;\ny = exp(1i * x);\np = polyfit(x, y, 2);",
+      "output": "p is complex-valued and matches MATLAB's complex least-squares solution."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What degree polynomial should I choose?",
+      "answer": "You must specify the degree `n` explicitly. A degree of `numel(x) - 1` interpolates the data exactly, but higher degrees amplify noise dramatically. Use validation, cross-validation, or domain knowledge to select a sensible degree."
+    },
+    {
+      "question": "What do the outputs `S` and `mu` represent?",
+      "answer": "`S` packages the QR factors (`R`), degrees of freedom (`df`), and residual norm (`normr`) so you can call `polyval(p, x, S, mu)` to obtain prediction intervals. `mu = [mean(x), std(x)]` records the centering and scaling applied during the fit."
+    },
+    {
+      "question": "How are weights interpreted?",
+      "answer": "Weights act multiplicatively on the residual norm. RunMat minimises `||sqrt(w) .* (y - polyval(p, x))||_2`. Zero weights ignore corresponding samples; negative weights are not allowed and trigger MATLAB-style errors."
+    },
+    {
+      "question": "Can I keep the outputs on the GPU?",
+      "answer": "Today the solver runs on the CPU even when inputs live on the GPU. The returned coefficients, `S`, and `mu` are CPU values. You can convert them back to `gpuArray` manually if needed. Future provider updates may keep everything on the device automatically."
+    },
+    {
+      "question": "Why does `mu(2)` need to be non-zero?",
+      "answer": "`mu(2)` is the scaling factor (standard deviation) applied to `x`. If all `x` values are identical, the polynomial is ill-conditioned. RunMat mirrors MATLAB by treating this as a singular scaling and raising an error unless the degree is zero."
+    }
+  ],
+  "links": [
+    {
+      "label": "polyval",
+      "url": "./polyval"
+    },
+    {
+      "label": "roots",
+      "url": "./roots"
+    },
+    {
+      "label": "mldivide",
+      "url": "./mldivide"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "Open a RunMat issue",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  },
+  "gpu_behavior": [
+    "RunMat’s acceleration layer exposes a dedicated `polyfit` provider hook. The WGPU provider routes requests through this hook, gathers inputs to the host, executes the shared Householder QR solver, and returns MATLAB-compatible outputs while preserving residency metadata. Providers that have not implemented the hook yet fall back to the same host code path automatically, so results stay correct even when the inputs originated on the GPU."
+  ]
+}

@@ -1,0 +1,147 @@
+{
+  "title": "isa",
+  "category": "introspection",
+  "keywords": [
+    "isa",
+    "type checking",
+    "class comparison",
+    "numeric category",
+    "gpuArray"
+  ],
+  "summary": "Test whether a value belongs to a specified MATLAB class or abstract category.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/isa.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Returns host logical scalars and inspects gpuArray metadata without launching kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::isa::tests",
+    "integration": "builtins::introspection::isa::tests::isa_gpu_arrays_treat_metadata_correctly"
+  },
+  "description": "`isa(x, T)` returns logical `true` when the value `x` is a member of the MATLAB class or abstract category identified by `T`. Use it to branch on numeric vs integer data, handle objects, GPU arrays, function handles, and user-defined classes.",
+  "behaviors": [
+    "Exact class names (such as `\"double\"`, `\"cell\"`, `\"struct\"`, `\"event.listener\"`) match the value’s dynamic class. Comparisons are case-insensitive.",
+    "Abstract categories (`\"numeric\"`, `\"float\"`, `\"integer\"`, `\"handle\"`, `\"function_handle\"`, `\"gpuArray\"`, `\"listener\"`) mirror MATLAB’s grouping rules.",
+    "Logical scalars, logical arrays, and logical gpuArray masks satisfy `\"logical\"` and do not register as `\"numeric\"`. RunMat consults handle metadata rather than downloading device buffers.",
+    "Handle inheritance is respected: if a class derives from `handle`, `isa(obj, \"handle\")` returns `true` even when `class(obj)` reports a subclass name.",
+    "`isa` accepts either a string scalar or a character row vector as the class designator.",
+    "gpuArray inputs never need to be gathered; RunMat checks residency metadata to answer the query."
+  ],
+  "examples": [
+    {
+      "description": "Checking whether a scalar is double precision",
+      "input": "tf = isa(42, \"double\");",
+      "output": "tf = logical(1)"
+    },
+    {
+      "description": "Testing numeric arrays against the numeric category",
+      "input": "A = rand(3, 4);\nis_numeric = isa(A, \"numeric\");\nis_integer = isa(A, \"integer\");",
+      "output": "is_numeric = logical(1)\nis_integer = logical(0)"
+    },
+    {
+      "description": "Confirming that gpuArray data counts as numeric",
+      "input": "G = gpuArray(rand(1024, 1024));\ntf_numeric = isa(G, \"numeric\");\ntf_double = isa(G, \"double\");   % false — the class reports gpuArray",
+      "output": "tf_numeric = logical(1)\ntf_double = logical(0)"
+    },
+    {
+      "description": "Determining whether a GPU mask is logical",
+      "input": "G = gpuArray(rand(5) > 0.5);\nis_mask = isa(G, \"logical\");\nis_numeric = isa(G, \"numeric\");",
+      "output": "is_mask = logical(1)\nis_numeric = logical(0)"
+    },
+    {
+      "description": "Validating handle subclasses",
+      "input": "pt = pkg.TestHandle();          % derives from handle\ntf_handle = isa(pt, \"handle\");\ntf_exact = isa(pt, \"pkg.TestHandle\");",
+      "output": "tf_handle = logical(1)\ntf_exact = logical(1)"
+    },
+    {
+      "description": "Comparing string scalars and character vectors",
+      "input": "s = \"RunMat\";\nc = 'RunMat';\ntf_string = isa(s, \"string\");\ntf_char = isa(c, \"char\");",
+      "output": "tf_string = logical(1)\ntf_char = logical(1)"
+    },
+    {
+      "description": "Detecting function handles and listeners",
+      "input": "fh = @sin;\ntf_handle = isa(fh, \"function_handle\");\nlst = addlistener(TestSource, \"Changed\", @disp);\ntf_listener = isa(lst, \"listener\");",
+      "output": "tf_handle = logical(1)\ntf_listener = logical(1)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `isa` treat gpuArray values as numeric?",
+      "answer": "Yes for numeric device arrays. `isa(gpuArray(rand(4)), \"numeric\")` and `isa(..., \"float\")` return `true`, even though the concrete class is `\"gpuArray\"`. Logical gpuArray masks skip the numeric categories and only satisfy `\"logical\"`. Use `isa(..., \"double\")` when you specifically need host doubles."
+    },
+    {
+      "question": "How do I check for integer types?",
+      "answer": "Use the `\"integer\"` category. It matches MATLAB’s native integer classes (`int8`, `uint16`, and so on). For example `isa(int32(5), \"integer\")` returns `true` while `isa(5, \"integer\")` returns `false`."
+    },
+    {
+      "question": "Does `isa` understand handle inheritance?",
+      "answer": "Yes. If a class derives from `handle`, then the object passes the `\"handle\"` category check. The builtin walks parent classes registered with RunMat to mirror MATLAB semantics."
+    },
+    {
+      "question": "What kinds of strings can I pass as the type name?",
+      "answer": "Provide either a string scalar (double quotes) or a character row vector (single quotes). Multi-row character arrays and string arrays with more than one element throw a descriptive error."
+    },
+    {
+      "question": "How do I detect function handles or anonymous functions?",
+      "answer": "Both named function handles and closures pass `isa(value, \"function_handle\")`."
+    },
+    {
+      "question": "Will `isa` gather gpuArray inputs or launch kernels?",
+      "answer": "No. The builtin is metadata-only and returns a host logical scalar without copying device buffers."
+    },
+    {
+      "question": "How are listeners treated?",
+      "answer": "Event listeners pass both `isa(listener, \"event.listener\")` and the compatibility alias `isa(listener, \"listener\")`. They also satisfy the `\"handle\"` category."
+    },
+    {
+      "question": "Does `isa` differentiate between string and char arrays?",
+      "answer": "Yes. String scalars pass `\"string\"` while character arrays pass `\"char\"`. They are not interchangeable."
+    },
+    {
+      "question": "Can I use `isa` to test meta-class values?",
+      "answer": "Yes. Meta-class references created with `classref` return `true` for `\"meta.class\"`."
+    }
+  ],
+  "links": [
+    {
+      "label": "`class`",
+      "url": "./class"
+    },
+    {
+      "label": "`isnumeric`",
+      "url": "./isnumeric"
+    },
+    {
+      "label": "`islogical`",
+      "url": "./islogical"
+    },
+    {
+      "label": "`gpuArray`",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "`gather`",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/isa.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/isa.rs"
+  },
+  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nIn RunMat, the fusion planner keeps residency on GPU in branches of fused expressions. As such, when you call `isa` on a gpuArray result, the planner preserves the device buffer and `isa` answers the query using metadata only.\n\nTo preserve backwards compatibility with MathWorks MATLAB, and for when you want to explicitly bootstrap GPU residency, you can call `gpuArray` explicitly to move data to the GPU if you want to be explicit about the residency.\n\nSince MathWorks MATLAB does not have a fusion planner, and they kept their parallel execution toolbox separate from the core language, as their toolbox is a separate commercial product, MathWorks MATLAB users need to call `gpuArray` to move data to the GPU manually whereas RunMat users can rely on the fusion planner to keep data on the GPU automatically.",
+  "gpu_behavior": [
+    "`isa` never launches GPU kernels. For gpuArray inputs RunMat inspects the `GpuTensorHandle` metadata to identify the device array and satisfy category checks such as `\"numeric\"` and `\"gpuArray\"`. Because the builtin only returns a host logical scalar it does not participate in fusion, and providers do not need to expose additional hooks."
+  ]
+}

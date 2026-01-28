@@ -1,0 +1,134 @@
+{
+  "title": "fieldnames",
+  "category": "structs/core",
+  "keywords": [
+    "fieldnames",
+    "struct",
+    "introspection",
+    "struct array",
+    "object",
+    "handle",
+    "properties"
+  ],
+  "summary": "List the field names of structs, struct arrays, or objects.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host. GPU-resident values or handles remain on the device; no kernels are dispatched."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::structs::core::fieldnames::tests",
+    "integration": "builtins::structs::core::fieldnames::tests::fieldnames_struct_array_collects_union"
+  },
+  "description": "`fieldnames(S)` returns a column cell array of character vectors containing the field names defined on `S`. RunMat mirrors MATLAB by supporting scalar structs, struct arrays, and MATLAB-style objects (including handle objects). The output is always deterministic and case-sensitive.",
+  "behaviors": [
+    "Works with scalar structs as well as struct arrays created by `struct`, `load`, or other builtins.",
+    "Returns a column cell array (`n \u00d7 1`) whose elements are character vectors (1 \u00d7 N char arrays).",
+    "Objects (value or handle) report the union of their public, non-static class properties together with any dynamic properties stored on the instance.",
+    "For struct arrays, the union of field names across all elements is reported.",
+    "Field names are sorted alphabetically and remain case-sensitive (`name` and `Name` are distinct).",
+    "Empty structs yield an empty `0 \u00d7 1` cell array. GPU-resident field values stay on the device\u2014 `fieldnames` only inspects metadata."
+  ],
+  "examples": [
+    {
+      "description": "Listing the fields of a scalar structure",
+      "input": "s = struct(\"name\", \"Ada\", \"score\", 42);\nfields = fieldnames(s);",
+      "output": "fields =\n    {'name'}\n    {'score'}"
+    },
+    {
+      "description": "Inspecting field names before accessing values",
+      "input": "stats = struct(\"min\", 1.2, \"max\", 9.8);\nif any(strcmp(fieldnames(stats), \"median\"))\n    disp(stats.median);\nelse\n    disp(\"median not available\");\nend",
+      "output": "median not available"
+    },
+    {
+      "description": "Gathering field names from a struct array",
+      "input": "people = struct(\"name\", {\"Ada\", \"Grace\"}, \"id\", {101, 102});\nfields = fieldnames(people);",
+      "output": "fields =\n    {'id'}\n    {'name'}"
+    },
+    {
+      "description": "Listing the properties of an object",
+      "input": "% Save this class in Counter.m before running the example:\n% classdef Counter\n%     properties\n%         Value = 0\n%         Step  = 1\n%     end\n% end\nc = Counter;\nprops = fieldnames(c);",
+      "output": "props =\n    {'Step'}\n    {'Value'}"
+    },
+    {
+      "description": "Discovering fields inside nested structs",
+      "input": "config.database = struct(\"host\", \"db.local\", \"port\", 5432);\nnames = fieldnames(config.database);",
+      "output": "names =\n    {'host'}\n    {'port'}"
+    },
+    {
+      "description": "Handling empty structs safely",
+      "input": "emptyScalar = struct();\nemptyArray = struct(\"id\", {});\nfs = fieldnames(emptyScalar);\nfa = fieldnames(emptyArray);",
+      "output": "fs =\n  0x1 empty cell array\n\nfa =\n  0x1 empty cell array"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does `fieldnames` return?",
+      "answer": "It returns a column cell array of character vectors for every field or property defined on the input struct, struct array, or object instance."
+    },
+    {
+      "question": "Are the field names sorted?",
+      "answer": "Yes. RunMat stores fields and properties in hash maps, so `fieldnames` sorts them alphabetically to produce a stable, deterministic result."
+    },
+    {
+      "question": "Does `fieldnames` gather GPU data back to the CPU?",
+      "answer": "No. The builtin only inspects host-side metadata; GPU-resident tensors or handles remain untouched."
+    },
+    {
+      "question": "How do struct arrays affect the result?",
+      "answer": "All struct elements are examined and the union of their field names is returned. Duplicate names are collapsed automatically."
+    },
+    {
+      "question": "Does `fieldnames` work with objects and handle objects?",
+      "answer": "Yes. The builtin merges public, non-static class properties with any dynamic properties stored on the instance. Handle objects reuse the same logic even when their payloads are shared across references."
+    },
+    {
+      "question": "What happens with empty structs or empty struct arrays?",
+      "answer": "The result is an empty column cell array (`0 \u00d7 1`). This matches MATLAB behaviour for empty scalars and for struct arrays that contain no elements."
+    },
+    {
+      "question": "Can I use `fieldnames` on unsupported inputs?",
+      "answer": "No. Passing anything other than a struct, struct array, or object raises `fieldnames: expected struct, struct array, or object`."
+    }
+  ],
+  "links": [
+    {
+      "label": "struct",
+      "url": "./struct"
+    },
+    {
+      "label": "isfield",
+      "url": "./isfield"
+    },
+    {
+      "label": "getfield",
+      "url": "./getfield"
+    },
+    {
+      "label": "setfield",
+      "url": "./setfield"
+    },
+    {
+      "label": "class",
+      "url": "./class"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/structs/core/fieldnames.rs",
+    "url": "crates/runmat-runtime/src/builtins/structs/core/fieldnames.rs"
+  },
+  "gpu_residency": "You do not need to call `gpuArray` when using `fieldnames`. RunMat leaves each value\u2014CPU or GPU\u2014where it already resides. When structs or objects contain GPU handles, those handles remain valid and stay resident on the device throughout the introspection call.",
+  "gpu_behavior": [
+    "`fieldnames` is metadata-only. It does not launch kernels or gather data. GPU tensors or handles that live inside structs or objects remain device-resident, and the builtin simply walks the host-side descriptors that remember their names."
+  ]
+}

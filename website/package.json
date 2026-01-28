@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack --port 1001",
-    "prebuild": "bash ./scripts/export-builtins.sh",
+    "prebuild": "bash ./scripts/ensure-builtins-json.sh",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"

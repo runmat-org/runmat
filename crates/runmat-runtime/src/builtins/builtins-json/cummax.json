@@ -1,0 +1,128 @@
+{
+  "title": "cummax",
+  "category": "math/reduction",
+  "keywords": [
+    "cummax",
+    "cumulative maximum",
+    "running maximum",
+    "reverse",
+    "omitnan",
+    "indices",
+    "gpu"
+  ],
+  "summary": "Running maximum and index tracking for scalars, vectors, matrices, or N-D tensors.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Uses provider cummax_scan when available; otherwise gathers to host and computes MATLAB-compatible results."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::reduction::cummax::tests",
+    "integration": "builtins::math::reduction::cummax::tests::cummax_gpu_provider_roundtrip"
+  },
+  "description": "`cummax(X)` computes the cumulative maximum of the elements in `X` along a chosen dimension. It also tracks where each running maximum occurs, mirroring MATLAB's two-output behaviour.",
+  "behaviors": [
+    "By default the running maximum follows the first non-singleton dimension. Use `cummax(X, dim)` to choose a dimension explicitly; if `dim > ndims(X)`, the input is returned unchanged and the indices are ones.",
+    "`[Y, I] = cummax(X, ...)` returns both the running maxima (`Y`) and the indices of where those maxima were observed (`I`). Indices are one-based and match MATLAB exactly.",
+    "Add `\"reverse\"` (or `\"forward\"`) to control the scan direction. Reverse mode walks from the end of the chosen dimension back to the beginning.",
+    "`\"omitnan\"` skips `NaN` values when choosing the running maximum, returning `NaN` only when every value seen so far is `NaN`. `\"includenan\"` (default) propagates `NaN` once one is encountered.",
+    "Synonyms such as `\"omitmissing\"` / `\"includemissing\"` are accepted for MATLAB compatibility.",
+    "Real and complex inputs are supported. Complex numbers are ordered using MATLAB's magnitude-and-angle rules."
+  ],
+  "examples": [
+    {
+      "description": "Tracking column-wise running maxima",
+      "input": "A = [4 2 7; 3 5 1];\n[Y, I] = cummax(A);",
+      "output": "Y =\n     4     2     7\n     4     5     7\nI =\n     1     1     1\n     1     2     1"
+    },
+    {
+      "description": "Requesting running maxima across rows",
+      "input": "A = [4 2 7; 3 5 1];\n[Y, I] = cummax(A, 2);",
+      "output": "Y =\n     4     4     7\n     3     5     5\nI =\n     1     1     3\n     1     2     2"
+    },
+    {
+      "description": "Getting cumulative maxima in reverse order",
+      "input": "v = [8 3 6 2];\n[Y, I] = cummax(v, \"reverse\");",
+      "output": "Y = [8 6 6 2]\nI = [1 3 3 4]"
+    },
+    {
+      "description": "Ignoring NaN values in running maxima",
+      "input": "v = [NaN 5 NaN 3];\n[Y, I] = cummax(v, \"omitnan\");",
+      "output": "Y = [NaN 5 5 5]\nI = [NaN 2 2 2]"
+    },
+    {
+      "description": "Capturing running maxima and indices on the GPU",
+      "input": "G = gpuArray([3 1 4 1 5]);\n[Y, I] = cummax(G);\nhostY = gather(Y);\nhostI = gather(I);",
+      "output": "hostY = [3 3 4 4 5];\nhostI = [1 1 3 3 5];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `cummax` always return indices?",
+      "answer": "Yes. The builtin produces MATLAB-compatible indices internally. When a call requests two outputs (`[Y, I] = cummax(...)`), `I` is surfaced directly. For single-output calls the indices remain available to the runtime for later retrieval."
+    },
+    {
+      "question": "How are complex numbers ordered?",
+      "answer": "Complex maxima follow MATLAB's rules: values compare by magnitude, and ties break by phase angle. `\"omitnan\"` treats elements with `NaN` real or imaginary parts as missing."
+    },
+    {
+      "question": "What happens when all elements seen so far are `NaN` with `\"omitnan\"`?",
+      "answer": "The running maximum stays `NaN` and the corresponding index is `NaN` until a finite value is encountered. Once a finite value appears, subsequent `NaN`s leave the maximum and index unchanged."
+    },
+    {
+      "question": "Does the `\"reverse\"` option change the reported indices?",
+      "answer": "Indices are still reported using 1-based positions along the chosen dimension. `\"reverse\"` simply walks the dimension from end to start before writing the outputs."
+    },
+    {
+      "question": "What if the requested dimension exceeds `ndims(X)`?",
+      "answer": "The input is returned unchanged. Every index is `1`, matching MATLAB's treatment of singleton trailing dimensions."
+    }
+  ],
+  "links": [
+    {
+      "label": "max",
+      "url": "./max"
+    },
+    {
+      "label": "cummin",
+      "url": "./cummin"
+    },
+    {
+      "label": "cumsum",
+      "url": "./cumsum"
+    },
+    {
+      "label": "cumprod",
+      "url": "./cumprod"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/cummax.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/cummax.rs"
+  },
+  "gpu_residency": "Manual `gpuArray` calls are optional. The planner keeps tensors on the GPU when profitable, and the cummax builtin preserves residency whenever the provider implements `cummax_scan`. If the hook is unavailable, RunMat gathers to the host transparently and still returns MATLAB-compatible maxima and indices. You can still use `gpuArray` to match MATLAB scripts or force residency ahead of a tight GPU loop.",
+  "gpu_behavior": [
+    "When the input already resides on the GPU, RunMat calls the acceleration provider's `cummax_scan` hook. Providers that implement this hook return GPU handles for both the running maxima and their indices. If the hook is missing\u2014or if it rejects the requested options (such as `\"omitnan\"` or `\"reverse\"`)\u2014RunMat gathers the data to the host, computes the MATLAB-compatible result, and returns dense tensors on the CPU. Residency metadata is cleared so downstream kernels can re-promote values when profitable."
+  ]
+}

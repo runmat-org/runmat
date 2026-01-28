@@ -1,0 +1,144 @@
+{
+  "title": "regexp",
+  "category": "strings/regex",
+  "keywords": [
+    "regexp",
+    "regular expression",
+    "pattern",
+    "match",
+    "split",
+    "tokens"
+  ],
+  "summary": "Search text using regular expressions, returning match positions, substrings, tokens, or splits with MATLAB-compatible semantics.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/regexp.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the CPU. When inputs or outputs reside on the GPU, RunMat gathers data before matching and re-uploads cell contents after evaluation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::regex::regexp::tests",
+    "integration": "builtins::strings::regex::regexp::tests::regexp_multi_output_default"
+  },
+  "description": "`regexp(text, pattern)` locates regular expression matches inside character vectors, string scalars, string arrays, and cell arrays of character vectors. It can return starting indices, ending indices, matched substrings, capture tokens, token extents, named-token structures, or the text split around matches. The optional `'once'` flag restricts the search to the first match, while `'emptymatch','allow'` keeps zero-length matches that otherwise get filtered out.",
+  "behaviors": [
+    "Single character vectors and string scalars return a numeric row vector of 1-based match start indices by default.",
+    "String arrays and cell arrays always produce cell outputs that mirror the input shape, with each cell holding the result for the corresponding element.",
+    "`'match'` returns matched substrings, `'tokens'` returns nested cells of capture-group substrings, `'tokenExtents'` returns `n \u00d7 2` double matrices with start/end indices for each token, `'names'` returns scalar struct values keyed by named tokens, and `'split'` yields the text segments between matches.",
+    "`'once'` stops after the first match (per element), and every requested output honours that limit.",
+    "`'emptymatch','remove'` (default) filters zero-length matches; `'emptymatch','allow'` keeps them so callers can observe optional patterns.",
+    "`'forceCellOutput'` forces cell-array containers even for scalar inputs so downstream code can rely on uniform dimensions. MATLAB-compatible `'warnings','on'/'off'` flags are accepted but currently informational only.",
+    "`'matchcase'` and `'ignorecase'` toggle case sensitivity, while `'lineanchors'` (`^`/`$`) and `'dotall'`/`'dotExceptNewline'` control how `.` interacts with newlines, mirroring MATLAB flags."
+  ],
+  "examples": [
+    {
+      "description": "Find all 1-based match positions in a character vector",
+      "input": "idx = regexp('abracadabra', 'a');",
+      "output": "idx =\n     1     4     6     8    11"
+    },
+    {
+      "description": "Return matched substrings using `'match'`",
+      "input": "matches = regexp('abc123xyz', '\\d+', 'match');",
+      "output": "matches =\n  1\u00d71 cell array\n    {'123'}"
+    },
+    {
+      "description": "Extract capture tokens",
+      "input": "tokens = regexp('2024-03-14', '(\\d{4})-(\\d{2})-(\\d{2})', 'tokens');\nyear = tokens{1}{1};\nmonth = tokens{1}{2};\nday = tokens{1}{3};",
+      "output": "year =\n    '2024'\nmonth =\n    '03'\nday =\n    '14'"
+    },
+    {
+      "description": "Split a string array around commas",
+      "input": "parts = regexp([\"a,b,c\"; \"1,2,3\"], ',', 'split');",
+      "output": "parts =\n  2\u00d71 cell array\n    {1\u00d73 cell}\n    {1\u00d73 cell}"
+    },
+    {
+      "description": "Return only the first match with `'once'`",
+      "input": "first_idx = regexp('abababa', 'ba', 'once');",
+      "output": "first_idx =\n     2"
+    },
+    {
+      "description": "Work with named tokens",
+      "input": "matches = regexp('X=42; Y=7;', '(?<name>[A-Z])=(?<value>\\d+)', 'names');\nvalues = cellfun(@(s) str2double(s.value), matches);",
+      "output": "values =\n     42     7"
+    },
+    {
+      "description": "Keep zero-length matches with `'emptymatch','allow'`",
+      "input": "idx = regexp('aba', 'b*', 'emptymatch', 'allow');",
+      "output": "idx =\n     1     2     3     4"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What outputs does `regexp` return by default?",
+      "answer": "With a single output argument, `regexp` returns a numeric row vector of 1-based match starts. When the call site asks for multiple outputs (e.g. `[startIdx, endIdx, matchStr] = regexp(...)`), RunMat returns match starts, match ends, and matched substrings in that order, just like MATLAB."
+    },
+    {
+      "question": "How can I request tokens or splits instead of indices?",
+      "answer": "Specify the desired output types as string flags, for example `regexp(str, pat, 'match')`, `regexp(str, pat, 'tokens')`, or `regexp(str, pat, 'split')`. Multiple flags combine, so `regexp(str, pat, 'match', 'tokens')` returns both outputs."
+    },
+    {
+      "question": "Does `regexp` support case-insensitive matching?",
+      "answer": "Yes. Use `'ignorecase'` (or call `regexpi`) to enable case-insensitive matching, and `'matchcase'` to revert to the default case-sensitive behaviour."
+    },
+    {
+      "question": "How are string arrays and cell arrays handled?",
+      "answer": "For string arrays and cell arrays of char vectors, every output is a cell array whose shape matches the input. Each cell contains the result for the corresponding element, which mirrors MATLAB's container semantics."
+    },
+    {
+      "question": "How do zero-length matches behave?",
+      "answer": "By default (`'emptymatch','remove'`), zero-length matches are filtered out so loops do not stall. Specify `'emptymatch','allow'` to keep them, matching MATLAB's `'emptymatch'` flag."
+    },
+    {
+      "question": "Can I force cell output even for character vectors?",
+      "answer": "Yes. Pass `'forceCellOutput'` to force the outputs into cell arrays, which is useful when writing code that handles both scalar and array inputs uniformly."
+    },
+    {
+      "question": "Does `regexp` run on the GPU?",
+      "answer": "No. RunMat executes `regexp` on the CPU. If inputs reside on the GPU, it gathers them first and then re-uploads any numeric outputs when beneficial, preserving residency for downstream kernels."
+    },
+    {
+      "question": "What happens when I ask for more outputs than I requested via flags?",
+      "answer": "RunMat follows MATLAB's rules: if you do not supply explicit output flags, the default multi-output order is start indices, end indices, and matched substrings. Extra requested outputs beyond what you specified become numeric zeros."
+    }
+  ],
+  "links": [
+    {
+      "label": "regexpi",
+      "url": "./regexpi"
+    },
+    {
+      "label": "regexprep",
+      "url": "./regexprep"
+    },
+    {
+      "label": "contains",
+      "url": "./contains"
+    },
+    {
+      "label": "split",
+      "url": "./split"
+    },
+    {
+      "label": "strfind",
+      "url": "./strfind"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/regex/regexp.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/regex/regexp.rs"
+  },
+  "gpu_behavior": [
+    "`regexp` executes entirely on the CPU and is registered as an acceleration sink. If any argument resides on the GPU, the runtime gathers it before evaluation, computes all requested outputs on the host, and returns host-side containers. Providers do not implement custom hooks for this builtin, so no GPU kernels are required or invoked."
+  ]
+}

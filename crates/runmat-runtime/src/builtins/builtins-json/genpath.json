@@ -1,0 +1,129 @@
+{
+  "title": "genpath",
+  "category": "io/repl_fs",
+  "keywords": [
+    "genpath",
+    "recursive path",
+    "search path",
+    "addpath"
+  ],
+  "summary": "Generate a MATLAB-style search path string for a folder tree.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/genpath.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the CPU. gpuArray text inputs are gathered automatically before processing."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::genpath::tests",
+    "integration": "builtins::io::repl_fs::genpath::tests::genpath_excludes_specified_directories"
+  },
+  "description": "`genpath` walks a folder tree and returns a character vector that lists the folder and every subfolder in depth-first order. Each entry is separated by the platform `pathsep` character (`:` on Linux/macOS, `;` on Windows), making the result a drop-in argument for `addpath`, `rmpath`, and other path-editing utilities.",
+  "behaviors": [
+    "`genpath()` with no inputs uses the current working directory (`pwd`) as the root folder. `genpath(folder)` accepts either an absolute or relative path.",
+    "MATLAB-reserved directories named `private` or `resources`, as well as class folders (`@MyClass`) and namespace folders (`+pkg`), are skipped automatically along with all of their descendants. The root folder is still included even if it matches one of these reserved names.",
+    "All returned entries are absolute, canonicalised paths beginning with the root directory, followed by each descendant directory in lexical order. The walking order matches MATLAB's depth-first behaviour.",
+    "Duplicate directories are removed automatically. Symlinked folders that resolve to the same physical location only appear once in the output.",
+    "`genpath(folder, excludes)` omits any folder listed in `excludes` together with its descendants. The `excludes` argument is a character vector of absolute or relative paths separated by `pathsep`. Relative entries are resolved against the supplied root folder before canonicalisation.",
+    "If a folder in the tree cannot be read (for example due to permissions), RunMat silently skips that branch while keeping the rest of the result intact.",
+    "If the requested root folder does not exist, RunMat raises `genpath: folder '<name>' not found`, matching MATLAB error semantics."
+  ],
+  "examples": [
+    {
+      "description": "Generate a recursive path for the current working folder",
+      "input": "p = genpath();\naddpath(p);   % Add the current folder and all subfolders to the MATLAB path"
+    },
+    {
+      "description": "Build a search path for a project toolbox",
+      "input": "toolboxRoot = \"toolbox/signal\";\ntoolboxPath = genpath(toolboxRoot);\naddpath(toolboxPath, \"-end\");"
+    },
+    {
+      "description": "Exclude build output directories from the generated path",
+      "input": "root = \"projects/solver\";\nexcludes = strjoin([\n    fullfile(root, \"build\"),\n    fullfile(root, \"dist\")\n], pathsep);\np = genpath(root, excludes);"
+    },
+    {
+      "description": "Skip a private utilities folder while including the rest of the tree",
+      "input": "root = \"analysis\";\np = genpath(root, fullfile(root, \"private\"));"
+    },
+    {
+      "description": "Automatically skip MATLAB-reserved folders",
+      "input": "root = \"toolbox\";\nmkdir(root, \"private\");\nmkdir(root, \"+package\");\np = genpath(root);",
+      "output": "% `p` only includes `toolbox` and subfolders that are not named `private` or\n% `resources`, and that do not begin with `@` or `+`."
+    },
+    {
+      "description": "Combine `genpath` with `savepath` for persistent tooling setup",
+      "input": "p = genpath(\"third_party/toolchain\");\naddpath(p);\nsavepath();"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `genpath` include package (`+pkg`) and class (`@Class`) folders?",
+      "answer": "No. These directories are excluded automatically, along with folders named `private` or `resources`. Use the `excludes` argument for additional rules."
+    },
+    {
+      "question": "How do I exclude multiple folders?",
+      "answer": "Build a character vector or string using `pathsep` (for example, `strjoin({path1, path2}, pathsep)`) and pass it as the second argument. Relative entries are interpreted relative to the root folder."
+    },
+    {
+      "question": "Why are some folders missing from the result?",
+      "answer": "RunMat only omits folders that you explicitly exclude or that cannot be read due to filesystem permissions."
+    },
+    {
+      "question": "What happens if the root folder does not exist?",
+      "answer": "`genpath` raises `genpath: folder '<name>' not found`, matching MATLAB. Create the folder first or adjust the argument."
+    },
+    {
+      "question": "Can I call `genpath` on a GPU array?",
+      "answer": "Yes\u2014the input is gathered to the CPU before processing, and the result is returned as a standard character vector."
+    },
+    {
+      "question": "Is the result always absolute paths?",
+      "answer": "Yes. RunMat resolves the root and all discovered folders to their absolute, canonical locations to avoid duplicates."
+    },
+    {
+      "question": "Will symbolic links be traversed?",
+      "answer": "Yes, but the target directory only appears once in the output. Directory cycles are prevented by tracking canonical paths."
+    },
+    {
+      "question": "Can I feed `genpath` output directly into `addpath` or `rmpath`?",
+      "answer": "Absolutely. The output string is `pathsep`-delimited specifically for that purpose."
+    }
+  ],
+  "links": [
+    {
+      "label": "addpath",
+      "url": "./addpath"
+    },
+    {
+      "label": "rmpath",
+      "url": "./rmpath"
+    },
+    {
+      "label": "path",
+      "url": "./path"
+    },
+    {
+      "label": "which",
+      "url": "./which"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/genpath.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/genpath.rs"
+  },
+  "gpu_residency": "No. `genpath` manipulates host-side strings and filesystem metadata. Supplying `gpuArray` values provides no benefit\u2014RunMat gathers the data automatically.",
+  "gpu_behavior": [
+    "`genpath` operates entirely on the host filesystem. Any string inputs that reside on the GPU are gathered back to the CPU before processing. No acceleration provider hooks are invoked and no device kernels are launched."
+  ]
+}

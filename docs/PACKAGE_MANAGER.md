@@ -26,7 +26,7 @@ This mirrors what works for modern ecosystems (crates.io, npm, PyPI, Julia Pkg) 
 
 ## Concepts and artifacts
 
-- `.runmat` — project config (TOML). Declares dependencies and registries. See `docs/CONFIG.md`.
+- `.runmat` — project config (TOML). Declares dependencies and registries. See `/docs/configuration`.
 - `runmat.lock` — lockfile with resolved versions and sources.
 - Registries — default `https://packages.runmat.org` plus user registries.
 - Packages — either native (Rust) or source (MATLAB). Both carry metadata and docs.
@@ -140,7 +140,7 @@ awesome_signals/
 
 ### Example `hann.m`
 
-```matlab
+```matlab:runnable
 function w = hann(n)
   if nargin < 1
     error('MATLAB:narginchk','hann requires n');

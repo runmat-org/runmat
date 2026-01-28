@@ -1,0 +1,131 @@
+{
+  "title": "round",
+  "category": "math/rounding",
+  "keywords": [
+    "round",
+    "rounding",
+    "significant digits",
+    "decimals",
+    "gpu"
+  ],
+  "summary": "Round scalars, vectors, matrices, or N-D tensors to the nearest integers, decimal digits, or significant digits.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Falls back to the host implementation when rounding to digits or significant figures if the active provider lacks unary_round."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::rounding::round::tests",
+    "integration": "builtins::math::rounding::round::tests::round_gpu_provider_roundtrip"
+  },
+  "description": "`round(X)` rounds numeric values to the nearest integers using MATLAB-compatible half-away-from-zero semantics. Additional arguments allow rounding to a specified number of decimal digits or significant digits.",
+  "behaviors": [
+    "`round(X)` rounds each element of `X` to the nearest integer; ties (e.g., `\u00b10.5`) round away from zero.",
+    "`round(X, N)` rounds to `N` decimal digits when `N` is positive and to powers of ten when `N` is negative.",
+    "`round(X, N, 'significant')` rounds to `N` significant digits. `N` must be a positive integer.",
+    "Logical inputs are promoted to double before rounding; `round(true)` returns `1`.",
+    "Complex inputs are rounded component-wise (`round(a + bi) = round(a) + i\u00b7round(b)`), matching MATLAB.",
+    "Non-finite values (`NaN`, `Inf`, `-Inf`) propagate unchanged regardless of precision arguments.",
+    "Character arrays are treated as their numeric code points and return double tensors of the same size."
+  ],
+  "examples": [
+    {
+      "description": "Rounding values to the nearest integers",
+      "input": "X = [-3.5 -2.2 -0.5 0 0.5 1.7];\nY = round(X);",
+      "output": "Y = [-4 -2 -1 0 1 2];"
+    },
+    {
+      "description": "Rounding to a fixed number of decimal places",
+      "input": "temps = [21.456 19.995 22.501];\nrounded = round(temps, 2);",
+      "output": "rounded = [21.46 20.00 22.50];"
+    },
+    {
+      "description": "Rounding to negative powers of ten",
+      "input": "counts = [1234 5678 91011];\nrounded = round(counts, -2);",
+      "output": "rounded = [1200 5700 91000];"
+    },
+    {
+      "description": "Rounding to significant digits",
+      "input": "measurements = [0.001234 12.3456 98765];\nsig3 = round(measurements, 3, 'significant');",
+      "output": "sig3 = [0.00123 12.3 98800];"
+    },
+    {
+      "description": "Rounding GPU tensors and gathering the results",
+      "input": "G = gpuArray(linspace(-2.5, 2.5, 6));\nrounded = round(G);\nhostValues = gather(rounded);",
+      "output": "hostValues = [-3 -2 -1 1 2 3];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `round` always round half values away from zero?",
+      "answer": "Yes. MATLAB and RunMat both use half-away-from-zero semantics, so `round(0.5)` returns `1` and `round(-0.5)` returns `-1`."
+    },
+    {
+      "question": "Can I round to decimal places and significant digits?",
+      "answer": "Yes. Use `round(X, N)` for decimal places and `round(X, N, 'significant')` for significant digits. Negative `N` values round to tens, hundreds, and so on."
+    },
+    {
+      "question": "What happens if I pass a non-integer `N`?",
+      "answer": "`N` must be an integer scalar. RunMat raises a MATLAB-compatible error when `N` is not an integer or is non-finite."
+    },
+    {
+      "question": "How are complex numbers handled?",
+      "answer": "RunMat rounds the real and imaginary components independently, matching MATLAB's component-wise behaviour."
+    },
+    {
+      "question": "Do NaN or Inf values change when rounded?",
+      "answer": "No. Non-finite values propagate unchanged for every rounding mode, just like MATLAB."
+    },
+    {
+      "question": "Will rounding stay on the GPU?",
+      "answer": "`round(X)` stays on the GPU when the provider implements `unary_round`. Rounding with digit arguments currently gathers to the host; providers can override this by adding specialised kernels."
+    },
+    {
+      "question": "Can I round logical or character arrays?",
+      "answer": "Yes. Logical values are converted to doubles (`0` or `1`) and characters are rounded as their numeric code points, returning dense double tensors."
+    }
+  ],
+  "links": [
+    {
+      "label": "floor",
+      "url": "./floor"
+    },
+    {
+      "label": "ceil",
+      "url": "./ceil"
+    },
+    {
+      "label": "fix",
+      "url": "./fix"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/rounding/round.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/rounding/round.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` manually. RunMat's planner keeps tensors on the GPU when the provider exposes the required kernels and it is profitable to do so. `round` takes advantage of this mechanism for the plain `round(X)` form. When you specify digits or the `'significant'` option, RunMat currently gathers data to the host to match MATLAB exactly. Future providers can extend `unary_round` or add digit-aware kernels to keep those workloads on the device.",
+  "gpu_behavior": [
+    "When a tensor already resides on the GPU, RunMat checks whether the active acceleration provider implements a specialised `unary_round` kernel. If available, `round(X)` executes entirely on the device. Advanced modes (`round(X, N)` and `round(X, N, 'significant')`) currently gather tensors to the host before rounding to keep semantics aligned with MATLAB. Providers that add digit-aware kernels can extend this path in the future."
+  ]
+}

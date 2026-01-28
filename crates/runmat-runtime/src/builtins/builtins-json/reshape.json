@@ -1,0 +1,104 @@
+{
+  "title": "reshape",
+  "category": "array/shape",
+  "keywords": [
+    "reshape",
+    "resize",
+    "dimensions",
+    "gpu",
+    "auto dimension"
+  ],
+  "summary": "Rearrange the dimensions of an array without changing its data.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Providers update GPU tensor shape metadata in place; no kernels are dispatched."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::reshape::tests",
+    "integration": "builtins::array::shape::reshape::tests::reshape_gpu_preserves_handle_shape"
+  },
+  "description": "`reshape(A, newSize)` returns the elements of `A` with a different dimensional layout while preserving column-major ordering. The total number of elements must remain unchanged.",
+  "behaviors": [
+    "Accepts either a size vector `reshape(A, [m n \u2026])` or individual dimensions `reshape(A, m, n, \u2026)`.",
+    "Exactly one dimension may be specified as `[]`; RunMat infers its value from `numel(A)`.",
+    "Dimensions must be nonnegative integers. Zero-sized dimensions are allowed when `numel(A) == 0`.",
+    "Works on numeric, logical, complex, string, char, GPU, and cell arrays (cell/char currently support up to 2-D).",
+    "Reshaping never copies data; it only reinterprets layout metadata.",
+    "Scalar inputs follow MATLAB semantics: `reshape(5, 1, 1)` yields the scalar `5`, while larger shapes return dense arrays."
+  ],
+  "examples": [
+    {
+      "description": "Reshaping a row vector into a matrix",
+      "input": "A = 1:12;\nB = reshape(A, [3, 4]);",
+      "output": "B =\n    1     4     7    10\n    2     5     8    11\n    3     6     9    12"
+    },
+    {
+      "description": "Using an automatically inferred dimension",
+      "input": "A = 1:18;\nB = reshape(A, 3, []);",
+      "output": "size(B)  % => [3 6]"
+    },
+    {
+      "description": "Reshaping into three dimensions",
+      "input": "A = 1:24;\nC = reshape(A, [2, 3, 4]);",
+      "output": "size(C)  % => [2 3 4]"
+    },
+    {
+      "description": "Reshaping logical arrays preserves type",
+      "input": "mask = logical([1 0 1 0 1 0]);\ngrid = reshape(mask, 2, 3);",
+      "output": "grid =\n     1     1     1\n     0     0     0"
+    },
+    {
+      "description": "Reshaping GPU data without gathering",
+      "input": "G = gpuArray(1:1000);\nH = reshape(G, 10, 100);"
+    },
+    {
+      "description": "Handling zero-sized dimensions",
+      "input": "E = reshape([], 0, 3);",
+      "output": "size(E)  % => [0 3]"
+    }
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "`size`",
+      "url": "./size"
+    },
+    {
+      "label": "`ndims`",
+      "url": "./ndims"
+    },
+    {
+      "label": "`numel`",
+      "url": "./numel"
+    },
+    {
+      "label": "`gpuArray`",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "`gather`",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/array/shape/reshape.rs",
+    "url": "crates/runmat-runtime/src/builtins/array/shape/reshape.rs"
+  },
+  "gpu_behavior": [
+    "When the input lives on the GPU, RunMat asks the active acceleration provider to apply the `reshape` hook so the backend can update its residency metadata. No data transfers or kernel launches are needed, so `gpuArray` inputs stay on the device. Providers that do not override the hook fall back to updating the tensor handle directly, which is sufficient for the in-process reference backend."
+  ]
+}

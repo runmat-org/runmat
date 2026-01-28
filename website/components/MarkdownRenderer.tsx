@@ -5,6 +5,7 @@ import rehypePrism from 'rehype-prism-plus';
 import { MermaidDiagram } from '@/components/MermaidDiagram';
 import { slugifyHeading } from '@/lib/utils';
 import { HeadingAnchor } from '@/components/HeadingAnchor';
+import { TryInBrowserButton } from './TryInBrowserButton';
 
 type MDXComponent = (props: { children?: React.ReactNode } & Record<string, unknown>) => React.ReactElement | null;
 type MarkdownRendererComponents = Record<string, MDXComponent | ((props: { children: React.ReactNode } & Record<string, unknown>) => React.ReactElement | null)>;
@@ -19,7 +20,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
   function toPlainText(node: React.ReactNode): string {
     if (node == null) return "";
     if (typeof node === 'string' || typeof node === 'number') return String(node);
-    if (Array.isArray(node)) return node.map(toPlainText).join(' ');
+    if (Array.isArray(node)) return node.map(toPlainText).join('');
     if (React.isValidElement(node)) {
       // recursively extract from element children (handles <code> etc.)
       // Fix: TypeScript error if node.props is not guaranteed to have 'children'
@@ -30,8 +31,67 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
     return "";
   }
 
+  // A simple rehype plugin to normalize matlab:runnable to matlab for highlighting
+  // while preserving the runnable state in a data attribute.
+  const rehypeRunnable = () => (tree: { children?: unknown[] }) => {
+    function visit(node: unknown) {
+      if (!node || typeof node !== 'object') return;
+      const n = node as Record<string, unknown>;
+
+      if (n.type === 'element' && (n.tagName === 'pre' || n.tagName === 'code')) {
+        const props = n.properties as Record<string, unknown> | undefined;
+        const classNames = props?.className;
+        const classes = Array.isArray(classNames) ? classNames : typeof classNames === 'string' ? [classNames] : [];
+        
+        let foundRunnable = false;
+        const newClasses = classes.map((cls: unknown) => {
+          if (typeof cls === 'string' && cls.startsWith('language-matlab')) {
+            const spec = cls.replace(/^language-/, '');
+            const parts = spec.split(':');
+            if (parts.includes('runnable')) {
+              foundRunnable = true;
+              return 'language-matlab';
+            }
+          }
+          return cls;
+        });
+
+        if (foundRunnable && props) {
+          props.className = newClasses;
+          props['data-runnable'] = 'true';
+        }
+      }
+      if (Array.isArray(n.children)) {
+        n.children.forEach(visit);
+      }
+    }
+    visit(tree);
+  };
+
   const mergeClassNames = (...classes: Array<string | null | undefined | false>) =>
     classes.filter(Boolean).join(' ');
+
+  const hasRunnableMarker = (props: Record<string, unknown> & { className?: string; 'data-runnable'?: string }): boolean => {
+    if (props['data-runnable'] === 'true') return true;
+    const className = props.className ?? '';
+    if (className.includes('language-matlab:runnable')) return true;
+    if (className.includes('language-matlab') && className.includes('runnable')) return true;
+    const dataLanguage = props['data-language'] ?? props['data-lang'];
+    if (typeof dataLanguage === 'string' && dataLanguage.includes('matlab') && dataLanguage.includes('runnable')) return true;
+    const dataMeta = props['data-meta'];
+    if (typeof dataMeta === 'string' && dataMeta.split(/\s+/).includes('runnable')) return true;
+    return false;
+  };
+
+  const hasRunnableChild = (node: React.ReactNode): boolean => {
+    if (!React.isValidElement(node)) return false;
+    const nodeProps = node.props as Record<string, unknown> & { className?: string; children?: React.ReactNode; 'data-runnable'?: string };
+    if (hasRunnableMarker(nodeProps)) return true;
+    if (nodeProps.children) {
+      return React.Children.toArray(nodeProps.children).some(hasRunnableChild);
+    }
+    return false;
+  };
 
   const defaultComponents: MarkdownRendererComponents = {
     h1: ({ children, ...props }: { children: React.ReactNode }) => (
@@ -161,26 +221,63 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
         return <>{children}</>;
       }
 
-      // Check if this is a code block (has code child with hljs or language- class, or any code child)
-      const hasCodeBlock = React.Children.toArray(children).some(child => {
+      // Different plugins/configurations place the language class on the 'pre' or the 'code' child.
+      const childrenArray = React.Children.toArray(children);
+
+      // We rely on the rehypeRunnable plugin to have tagged runnable blocks with data-runnable.
+      const preProps = props as Record<string, unknown> & { className?: string; 'data-runnable'?: string };
+      let isRunnable = hasRunnableMarker(preProps);
+      if (!isRunnable) {
+        isRunnable = React.Children.toArray(children).some(hasRunnableChild);
+      }
+
+      const hasCodeBlock = childrenArray.some((child) => {
         if (React.isValidElement(child)) {
           const childType = typeof child.type === 'string' ? child.type : null;
+          const childProps = child.props as { className?: string; children?: React.ReactNode; 'data-runnable'?: string };
+          
+          if (childProps['data-runnable'] === 'true') {
+            isRunnable = true;
+          }
+
           if (childType === 'code') {
-            const childProps = child.props as { className?: string };
-            return childProps?.className?.includes('hljs') || 
-                   childProps?.className?.includes('language-') ||
-                   true; // Any code element inside pre should be styled
+            return true; 
+          }
+          
+          const childClassName = childProps?.className || '';
+          // Check for wrappers added by rehype-prism-plus or other plugins
+          if (childClassName.includes('code-highlight') || 
+              childClassName.includes('rehype-code-wrapper')) {
+            return true;
+          }
+
+          // If child has a language class, it's likely a code block
+          if (childClassName.includes('language-') || childClassName.includes('hljs')) {
+            return true;
           }
         }
         return false;
-      });
+      }) || (props as { className?: string })?.className?.includes('language-');
       
       if (hasCodeBlock) {
         const { className, ...rest } = props as { className?: string };
+        const code = toPlainText(children).trim();
+
         return (
-          <pre className={mergeClassNames("markdown-pre my-6 mx-0 max-w-full overflow-x-auto", className)} {...rest}>
-            {children}
-          </pre>
+          <div className="my-8 relative group">
+            {isRunnable && (
+              <div className="absolute top-3 right-3 z-10">
+                <TryInBrowserButton 
+                  code={code} 
+                  size="sm" 
+                  className="bg-code-surface/80 backdrop-blur-sm"
+                />
+              </div>
+            )}
+            <pre className={mergeClassNames("markdown-pre m-0 max-w-full overflow-x-auto", className)} {...rest}>
+              {children}
+            </pre>
+          </div>
         );
       }
       return <pre className="overflow-x-auto max-w-full break-words" {...props}>{children}</pre>;
@@ -192,17 +289,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const isMermaid = classList.some(cls => cls.includes('language-mermaid') || cls === 'mermaid');
       if (isMermaid) {
         // Extract the actual mermaid content - children might be wrapped in additional elements
-        const toPlain = (node: React.ReactNode): string => {
-          if (node == null) return '';
-          if (typeof node === 'string' || typeof node === 'number') return String(node);
-          if (Array.isArray(node)) return node.map(toPlain).join('');
-          if (React.isValidElement(node)) {
-            const props = node.props as { children?: React.ReactNode };
-            return toPlain(props?.children);
-          }
-          return '';
-        };
-        const mermaidContent = toPlain(children);
+        const mermaidContent = toPlainText(children);
         
         return (
           <div className="my-8 w-full">
@@ -281,15 +368,17 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       options={{
         mdxOptions: {
           remarkPlugins: [remarkGfm],
-          rehypePlugins: [[rehypePrism, { 
-            ignoreMissing: true,
-            defaultLanguage: 'plaintext',
-          }]],
+          rehypePlugins: [
+            rehypeRunnable,
+            [rehypePrism, { 
+              ignoreMissing: true,
+              defaultLanguage: 'plaintext',
+            }]
+          ],
           development: process.env.NODE_ENV !== 'production',
         },
       }}
     />
   );
 }
-
 

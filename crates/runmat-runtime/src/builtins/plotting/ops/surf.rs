@@ -24,61 +24,7 @@ use std::sync::Arc;
 
 use crate::BuiltinResult;
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "surf",
-        builtin_path = "crate::builtins::plotting::surf"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 const BUILTIN_NAME: &str = "surf";
-
-#[allow(dead_code)]
-pub const DOC_MD: &str = r#"---
-title: "surf"
-category: "plotting"
-keywords: ["surf", "surface plot", "3-D plotting", "gpuArray"]
-summary: "Render MATLAB-compatible 3-D surface plots."
-references:
-  - https://www.mathworks.com/help/matlab/ref/surf.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Single-precision gpuArray height maps render zero-copy via the shared WebGPU context; other inputs are gathered before plotting."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 3
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::plotting::surf::tests"
----
-
-# What does `surf` do?
-`surf(X, Y, Z)` draws a shaded surface where `X` and `Y` provide axis coordinates and `Z` provides
-heights. RunMat expects `X` and `Y` to be vectors defining the grid axes (rows × columns), and `Z`
-to contain `numel(X) * numel(Y)` elements stored in column-major order, matching MATLAB tensors.
-When `Z` is a single-precision gpuArray and the shared WebGPU renderer is active, the surface
-geometry stays on the device and feeds a compute shader that emits renderer-ready vertices.
-
-## Behaviour highlights
-- Axis vectors must be non-empty and `Z` must contain exactly `length(X) * length(Y)` elements.
-- Single-precision gpuArray height maps stream directly into the renderer; other precisions gather
-  to host memory before plotting.
-- Surfaces default to the Parula colormap with smooth shading and lighting enabled.
-
-## Examples
-```matlab
-x = linspace(-2, 2, 50);
-y = linspace(-2, 2, 50);
-z = meshgrid(x, y);
-surf(x, y, sin(x)' * cos(y));
-```
-"#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::surf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

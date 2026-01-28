@@ -15,149 +15,6 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const FN_NAME: &str = "strncmp";
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "strncmp",
-        builtin_path = "crate::builtins::strings::core::strncmp"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "strncmp"
-category: "strings/core"
-keywords: ["strncmp", "string compare", "prefix", "text equality", "case-sensitive"]
-summary: "Compare text inputs for equality up to N leading characters with MATLAB-compatible broadcasting."
-references:
-  - https://www.mathworks.com/help/matlab/ref/strncmp.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "matlab"
-  notes: "Executes on the CPU. GPU-resident inputs are gathered automatically so prefix comparisons match MATLAB exactly."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 3
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::strings::core::strncmp::tests"
-  integration: "builtins::strings::core::strncmp::tests::strncmp_char_array_rows"
----
-
-# What does the `strncmp` function do in MATLAB / RunMat?
-`strncmp(A, B, N)` compares text values element-wise and returns logical `true` when the first `N`
-characters of the corresponding elements are identical. Comparisons are case-sensitive and respect
-MATLAB's implicit expansion rules across strings, character arrays, and cell arrays of character vectors.
-
-## How does the `strncmp` function behave in MATLAB / RunMat?
-- **Accepted text types**: String scalars/arrays, character vectors or character arrays, and cell arrays of character vectors.
-- **Scalar `N` requirement**: The third argument must evaluate to a finite, nonnegative integer scalar. Numeric, logical, and scalar tensor/logical-array values are accepted when they convert cleanly.
-- **Implicit expansion**: Scalars expand to match the size of the other operand before comparison.
-- **Character arrays**: Rows are treated as independent character vectors. Each row is compared against the other operand and the result is returned as a column vector.
-- **Unicode-aware comparisons**: Prefixes are counted in MATLAB characters (Unicode scalar values), so multi-byte UTF-8 sequences are handled transparently.
-- **Prefix length semantics**: If `N` is `0`, every comparison evaluates to `true`. If either text element is shorter than `N`, it must match exactly up to the end of the shorter value and the longer value must also end within `N` characters to be considered equal.
-- **Missing strings**: Any comparison involving a missing string returns `false` unless `N == 0`.
-- **Result type**: Scalar comparisons return logical scalars. Array comparisons return logical arrays that follow MATLAB's column-major ordering.
-
-## `strncmp` Function GPU Execution Behaviour
-`strncmp` is registered as an acceleration **sink**. When any operand resides on the GPU, RunMat gathers
-all inputs back to host memory before performing the comparison so that the behaviour matches MATLAB
-exactly. The logical result is always returned on the host. Providers do not need to supply specialised kernels.
-
-## Examples of using the `strncmp` function in MATLAB / RunMat
-
-### Checking whether two strings share a prefix
-```matlab
-tf = strncmp("RunMat", "Runway", 3);
-```
-Expected output:
-```matlab
-tf = logical
-   1
-```
-
-### Comparing string arrays with implicit expansion
-```matlab
-names = ["north" "south" "east"];
-tf = strncmp(names, "no", 2);
-```
-Expected output:
-```matlab
-tf = 1×3 logical array
-   1   0   0
-```
-
-### Comparing rows of a character array
-```matlab
-animals = char("cat", "camel", "cow");
-tf = strncmp(animals, "ca", 2);
-```
-Expected output:
-```matlab
-tf = 3×1 logical array
-   1
-   1
-   0
-```
-
-### Comparing cell arrays element-wise
-```matlab
-C1 = {'red', 'green', 'blue'};
-C2 = {'rose', 'grey', 'black'};
-tf = strncmp(C1, C2, 2);
-```
-Expected output:
-```matlab
-tf = 1×3 logical array
-   1   0   0
-```
-
-### Handling zero-length comparisons
-```matlab
-tf = strncmp("alpha", "omega", 0);
-```
-Expected output:
-```matlab
-tf = logical
-   1
-```
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-No. If you pass GPU-resident data, RunMat automatically gathers it to host memory before running `strncmp`.
-The builtin is an acceleration sink and always returns host logical outputs. Explicit `gpuArray` / `gather`
-calls are only required for compatibility with legacy MATLAB workflows.
-
-## FAQ
-
-### What argument types does `strncmp` accept?
-String arrays, character vectors/arrays, and cell arrays of character vectors. Mixed combinations are converted automatically. The third argument `N` must be a nonnegative integer scalar.
-
-### Is the comparison case-sensitive?
-Yes. Use `strncmpi` if you need a case-insensitive prefix comparison.
-
-### What happens when `N` is zero?
-The builtin returns `true` for every element because zero leading characters are compared.
-
-### How are shorter strings handled when `N` is larger than their length?
-The shorter value must match the longer value exactly for its entire length, and the longer value must not have additional characters within the first `N` positions. Otherwise the comparison returns `false`.
-
-### How are missing string values treated?
-Any comparison that involves a missing string returns `false`, except when `N` is zero (because no characters are compared).
-
-### Does `strncmp` produce logical results?
-Yes. Scalar comparisons yield logical scalars; array inputs produce logical arrays that follow MATLAB’s column-major ordering.
-
-## See Also
-[strcmp](./strcmp), [strcmpi](./strcmpi), [contains](./contains), [startswith](./startswith), [strlength](./strlength)
-
-## Source & Feedback
-- Implementation: [`crates/runmat-runtime/src/builtins/strings/core/strncmp.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/strncmp.rs)
-- Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strncmp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strncmp",
@@ -343,7 +200,6 @@ fn parse_prefix_length_from_float(value: f64) -> BuiltinResult<usize> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::{CellArray, CharArray, IntValue, LogicalArray, StringArray, Tensor};
@@ -625,12 +481,5 @@ pub(crate) mod tests {
         .expect("strncmp");
         assert_eq!(result, Value::Bool(true));
         let _ = provider.free(&handle);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

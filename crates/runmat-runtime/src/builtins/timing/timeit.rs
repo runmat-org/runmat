@@ -27,119 +27,6 @@ fn timeit_error(message: impl Into<String>) -> crate::RuntimeError {
         .build()
 }
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "timeit",
-        builtin_path = "crate::builtins::timing::timeit"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "timeit"
-category: "timing"
-keywords: ["timeit", "benchmark", "timing", "performance", "gpu"]
-summary: "Measure the execution time of a zero-argument function handle."
-references: []
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Runs purely on the host CPU; GPU work inside the timed function executes through the active provider."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 0
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::timing::timeit::tests"
-  integration: "builtins::timing::timeit::tests::timeit_measures_time"
----
-
-# Measure execution time of a function handle
-`t = timeit(f)` evaluates the zero-argument function handle `f` repeatedly and returns the median runtime (in seconds).
-RunMat accepts the optional `numOutputs` argument for MATLAB compatibility; today the handle executes with its default output arity (or none when you pass `0`) and all returned values are discarded.
-
-## Syntax
-```matlab
-t = timeit(f)
-t = timeit(f, numOutputs)
-```
-
-- `f` is a zero-argument function handle (for example, `@() myOp(A)`).
-- `numOutputs` is an optional nonnegative integer kept for MATLAB compatibility. Passing `0` suppresses outputs entirely; any other value currently executes the handle with its default output arity while discarding the result.
-
-## How `timeit` works
-- Executes `f` repeatedly, adjusting the inner loop count until a single batch takes at least a few milliseconds or the function is slow enough.
-- Collects multiple samples (at least seven batches) and returns the median per-invocation time, which is robust against outliers.
-- Drops the outputs produced by `f`; you should perform any validation that depends on those outputs inside the handle. Multi-output dispatch will route through this helper once the runtime exposes multi-return `feval`.
-- Leaves GPU residency untouched—if `f` launches GPU kernels, they execute on the active provider. Insert `wait(gpuDevice)` inside the handle if you need explicit synchronisation.
-
-## Examples
-
-### Timing a simple anonymous function
-```matlab
-f = @() sin(rand(1000, 1));
-t = timeit(f);
-```
-
-### Comparing two implementations
-```matlab
-A = rand(1e5, 1);
-slow = @() sum(A .* A);
-fast = @() sumsq(A);
-
-slowTime = timeit(slow);
-fastTime = timeit(fast);
-```
-
-### Timing a function that returns no outputs
-```matlab
-logMessage = @() fprintf("Iteration complete\n");
-t = timeit(logMessage, 0);
-```
-
-### Timing a multiple-output function
-```matlab
-svdTime = timeit(@() svd(rand(256)), 3);
-```
-This records the runtime while discarding any outputs produced by `svd`.
-
-### Measuring GPU-bound work
-```matlab
-gfun = @() gather(sin(gpuArray.rand(4096, 1)));
-tgpu = timeit(gfun);
-```
-
-### Timing a preallocation helper
-```matlab
-makeMatrix = @() zeros(2048, 2048);
-t = timeit(makeMatrix);
-```
-
-## FAQ
-
-1. **What does `timeit` return?** — A scalar double containing the median runtime per invocation in seconds.
-2. **How many runs does `timeit` perform?** — It automatically selects a loop count so each batch lasts a few milliseconds, collecting at least seven batches.
-3. **Does `timeit` synchronise GPU kernels?** — No. Insert `wait(gpuDevice)` inside the handle when you need explicit synchronisation.
-4. **Can I time functions that require inputs?** — Yes. Capture them in the handle, for example `timeit(@() myfun(A, B))`.
-5. **How do I time a function with multiple outputs?** — Pass `timeit(@() svd(A), 3)` to mirror MATLAB’s call signature. RunMat currently ignores values greater than zero until multi-output dispatch lands, but the handle still executes.
-6. **Why do successive runs differ slightly?** — Normal system jitter, cache effects, and GPU scheduling can change runtimes slightly; the median mitigates outliers.
-7. **Can `timeit` time scripts?** — Wrap the script body in a function handle so it becomes zero-argument, then call `timeit` on that handle.
-8. **Does `timeit` participate in fusion or JIT tiers?** — It simply executes the provided handle; any tiering or fusion happens inside the timed function.
-9. **What happens if the function errors?** — The error is propagated immediately and timing stops, matching MATLAB behaviour.
-10. **Is there a limit on runs?** — Yes. `timeit` caps the inner loop at about one million iterations to avoid runaway measurements.
-
-## See Also
-[tic](./tic), [toc](./toc), [feval](./feval)
-
-## Source & Feedback
-- Implementation: [`crates/runmat-runtime/src/builtins/timing/timeit.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/timing/timeit.rs)
-- Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::timing::timeit")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "timeit",
@@ -394,8 +281,6 @@ pub(crate) mod tests {
     use runmat_builtins::IntValue;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use crate::builtins::common::test_support;
-
     static COUNTER_DEFAULT: AtomicUsize = AtomicUsize::new(0);
     static COUNTER_NUM_OUTPUTS: AtomicUsize = AtomicUsize::new(0);
     static COUNTER_INVALID: AtomicUsize = AtomicUsize::new(0);
@@ -544,12 +429,5 @@ pub(crate) mod tests {
         ))
         .unwrap_err();
         assert_timeit_error_contains(err, "too many");
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

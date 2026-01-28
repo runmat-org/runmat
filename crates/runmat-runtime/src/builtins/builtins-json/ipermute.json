@@ -1,0 +1,155 @@
+{
+  "title": "ipermute",
+  "category": "array/shape",
+  "keywords": [
+    "ipermute",
+    "inverse permute",
+    "dimension reorder",
+    "gpu"
+  ],
+  "summary": "Reorder array dimensions using the inverse of a permutation vector.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64",
+      "i32",
+      "bool"
+    ],
+    "broadcasting": "none",
+    "notes": "Reuses the GPU permute hook; when unavailable the runtime gathers, applies the inverse permutation on the host, and re-uploads."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::ipermute::tests",
+    "integration": "builtins::array::shape::ipermute::tests::ipermute_gpu_roundtrip"
+  },
+  "description": "`ipermute(A, order)` reverses the dimension reordering performed by `permute(A, order)`. It is equivalent to `permute(A, invOrder)`, where `invOrder(order(i)) = i`.",
+  "behaviors": [
+    "`order` must be a permutation of `1:n`, where `n = numel(order)`.",
+    "The length of `order` must be at least `ndims(A)`; missing axes are treated as trailing singleton dimensions.",
+    "Duplicate, zero, or negative indices raise an error.",
+    "Works with numeric tensors, logical masks, complex tensors, string arrays, character arrays, and gpuArray values.",
+    "Character arrays stay 2-D; only `[1 2]` (identity) and `[2 1]` (transpose) are valid orders.",
+    "If the active acceleration provider lacks a dedicated permute kernel, RunMat gathers the data, applies the inverse permutation on the host, and re-uploads so the result remains a gpuArray."
+  ],
+  "examples": [
+    {
+      "description": "Reversing a previous permute call",
+      "input": "A = reshape(1:24, [2 3 4]);\nB = permute(A, [2 1 3]);\nC = ipermute(B, [2 1 3]);\nisequal(A, C)",
+      "output": "ans = logical 1"
+    },
+    {
+      "description": "Restoring matrix orientation after swapping dimensions",
+      "input": "M = magic(3);\nP = permute(M, [2 1]);\nR = ipermute(P, [2 1]);\nsize(R)",
+      "output": "ans = [3 3]"
+    },
+    {
+      "description": "Undoing a permutation with extra singleton dimensions",
+      "input": "row = 1:5;\nP = permute(row, [2 1 3]);\nR = ipermute(P, [2 1 3]);\nsize(R)",
+      "output": "ans = [1 5 1]"
+    },
+    {
+      "description": "Recovering logical masks after reordering axes",
+      "input": "mask = false(2, 1, 3);\nmask(1, 1, 2) = true;\nrot = permute(mask, [3 1 2]);\norig = ipermute(rot, [3 1 2]);\norig(1,1,2)",
+      "output": "ans = logical 1"
+    },
+    {
+      "description": "Working with character arrays",
+      "input": "chars = ['r','u','n'; 'm','a','t'];\nT = permute(chars, [2 1]);\nR = ipermute(T, [2 1]);\nR",
+      "output": "R =\n    'run'\n    'mat'"
+    },
+    {
+      "description": "Restoring gpuArray tensors to host layout",
+      "input": "G = gpuArray(rand(4, 2, 3));\nH = permute(G, [3 1 2]);\nR = ipermute(H, [3 1 2]);\nisequal(gather(G), gather(R))",
+      "output": "ans = logical 1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Do I have to compute the inverse permutation myself?",
+      "answer": "No. Pass the same `order` vector you used with `permute`; `ipermute` computes the inverse for you."
+    },
+    {
+      "question": "What happens if I pass an invalid permutation?",
+      "answer": "RunMat raises an error when indices repeat, fall outside `1:n`, or when the order vector is not a row or column vector."
+    },
+    {
+      "question": "Can `ipermute` introduce new singleton dimensions?",
+      "answer": "Yes. If `order` is longer than `ndims(A)`, trailing singleton dimensions are added just like MATLAB."
+    },
+    {
+      "question": "Does `ipermute` modify the input array in-place?",
+      "answer": "No. It returns a new array with reordered metadata while leaving the original untouched."
+    },
+    {
+      "question": "How does `ipermute` behave for character arrays?",
+      "answer": "Character arrays remain 2-D. Only `[1 2]` and `[2 1]` orders are accepted; other permutations raise an error."
+    },
+    {
+      "question": "Is gpuArray behaviour identical to MATLAB?",
+      "answer": "Yes. Results remain gpuArray values. When providers lack a device kernel, RunMat gathers, permutes on the host, and uploads the result before returning."
+    },
+    {
+      "question": "Does `ipermute` preserve data ordering?",
+      "answer": "Yes. Column-major ordering is preserved. Applying `permute` followed by `ipermute` returns the original array exactly."
+    },
+    {
+      "question": "Can I use `ipermute` on scalar inputs?",
+      "answer": "Absolutely. Scalars are treated as 0-D/1-D tensors so the result is the same scalar."
+    },
+    {
+      "question": "What if the order vector is a gpuArray?",
+      "answer": "MATLAB requires host numeric vectors for order specifications. RunMat enforces the same rule and raises an error."
+    },
+    {
+      "question": "Is there a performance benefit on the GPU?",
+      "answer": "Yes when the provider implements the permute hook. Otherwise the fallback path behaves like MATLAB's gather/permut/gpuArray workflow."
+    }
+  ],
+  "links": [
+    {
+      "label": "`permute`",
+      "url": "./permute"
+    },
+    {
+      "label": "`reshape`",
+      "url": "./reshape"
+    },
+    {
+      "label": "`squeeze`",
+      "url": "./squeeze"
+    },
+    {
+      "label": "`size`",
+      "url": "./size"
+    },
+    {
+      "label": "`ndims`",
+      "url": "./ndims"
+    },
+    {
+      "label": "`gpuArray`",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "`gather`",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/shape/ipermute.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/ipermute.rs"
+  },
+  "gpu_behavior": [
+    "RunMat calls the provider's `permute` hook with the inverse order vector. Providers that support the hook perform the reorder entirely on the device. Otherwise RunMat gathers to the host, permutes, and uploads the result back to the GPU, matching MATLAB's gpuArray behaviour."
+  ]
+}

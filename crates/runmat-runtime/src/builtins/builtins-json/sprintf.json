@@ -1,0 +1,153 @@
+{
+  "title": "sprintf",
+  "category": "strings/core",
+  "keywords": [
+    "sprintf",
+    "format",
+    "printf",
+    "text",
+    "gpu"
+  ],
+  "summary": "Format data into a MATLAB-compatible character vector using printf-style placeholders.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/sprintf.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Formatting executes on the CPU. GPU tensors are gathered via the active provider before substitution."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::core::sprintf::tests",
+    "integration": "builtins::strings::core::sprintf::tests::sprintf_gpu_numeric"
+  },
+  "description": "`sprintf(formatSpec, A1, ..., An)` formats data into a character row vector. It honours MATLAB's printf-style placeholders, including flags (`-`, `+`, space, `0`, `#`), field width, precision, and star (`*`) width/precision arguments. Arrays are processed column-major and the format string repeats automatically until every element has been consumed.",
+  "behaviors": [
+    "`formatSpec` must be text: a character row vector or string scalar. Cell arrays and multi-row character arrays are rejected.",
+    "Arguments can be numeric, logical, strings, character arrays, or cell arrays containing supported scalar types. Numeric inputs accept scalar, vector, or matrix shapes; elements are flattened in column-major order.",
+    "Escape sequences such as `\\n`, `\\t`, `\\r`, `\\f`, `\\b`, `\\a`, `\\v`, octal (`\\123`), and hexadecimal (`\\x7F`) are interpreted before formatting so that `sprintf` can build multi-line text easily.",
+    "Width and precision may be literal digits or drawn from the input list using `*` or `.*`. Star arguments must be scalar numerics and are consumed in order.",
+    "Flags match MATLAB behaviour: `-` left-aligns, `+` forces a sign, space reserves a leading space for positive numbers, `0` enables zero padding, and `#` produces alternate forms for octal, hexadecimal, and binary outputs or preserves the decimal point in fixed-point conversions.",
+    "`%%` emits a literal percent character without consuming arguments.",
+    "Complex inputs are formatted as scalar text (`a+bi`) when used with `%s`; numeric conversions expect real scalars.",
+    "Additional arguments beyond those required by the repeating format string raise an error to match MATLAB diagnostics."
+  ],
+  "examples": [
+    {
+      "description": "Formatting A Scalar Value",
+      "input": "txt = sprintf('Value: %d', 42);",
+      "output": "txt =\n    'Value: 42'"
+    },
+    {
+      "description": "Formatting With Precision And Width",
+      "input": "txt = sprintf('pi ~= %8.4f', pi);",
+      "output": "txt =\n    'pi ~=   3.1416'"
+    },
+    {
+      "description": "Combining Strings And Numbers",
+      "input": "label = sprintf('Trial %02d: %.1f%% complete', 7, 84.95);",
+      "output": "label =\n    'Trial 07: 85.0% complete'"
+    },
+    {
+      "description": "Formatting Vector Inputs",
+      "input": "data = [10 20 30];\ntxt = sprintf('%d ', data);",
+      "output": "txt =\n    '10 20 30 '"
+    },
+    {
+      "description": "Using Star Width/Precision Arguments",
+      "input": "txt = sprintf('%*.*f %*.*f', 4, 2, 15.2, 6, 4, 0.001);",
+      "output": "txt =\n    '15.20  0.0010'"
+    },
+    {
+      "description": "Quoting Text With `%s`",
+      "input": "names = [\"Ada\", \"Grace\"];\ntxt = sprintf('Hello, %s! ', names);",
+      "output": "txt =\n    'Hello, Ada! Hello, Grace! '"
+    },
+    {
+      "description": "Formatting GPU-Resident Data",
+      "input": "G = gpuArray([1.5 2.5 3.5]);\ntxt = sprintf('%.1f;', G);",
+      "output": "txt =\n    '1.5;2.5;3.5;'"
+    },
+    {
+      "description": "Creating Multi-line Text",
+      "input": "message = sprintf('First line\\\\nSecond line\\\\t(indented)');",
+      "output": "message =\n    'First line\nSecond line\t(indented)'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What happens if there are not enough input values for the format specifiers?",
+      "answer": "RunMat raises `sprintf: not enough input arguments for format specifier` as soon as a placeholder cannot be satisfied. This matches MATLAB's error message."
+    },
+    {
+      "question": "How are additional values treated when the format string contains fewer specifiers?",
+      "answer": "The format string repeats until all array elements are consumed. If the format string consumes no arguments (for example, it contains only literal text) and extra values remain, RunMat raises an error because MATLAB would also treat this as a mismatch."
+    },
+    {
+      "question": "Can I use star (`*`) width or precision arguments with arrays?",
+      "answer": "Yes. Each `*` consumes the next scalar value from the input stream. When you provide arrays for width or precision, elements are read in column-major order the same way data arguments are."
+    },
+    {
+      "question": "Does `sprintf` support complex numbers?",
+      "answer": "Complex values can be formatted with `%s`, which renders MATLAB's canonical `a+bi` text. Numeric conversions require real-valued inputs and raise an error for complex scalars."
+    },
+    {
+      "question": "Are logical values supported?",
+      "answer": "Yes. Logical inputs are promoted to numeric (`1` or `0`) before formatting, so you can combine them with integer or floating-point conversions."
+    },
+    {
+      "question": "Does `sprintf` allocate string scalars?",
+      "answer": "No. `sprintf` always returns a character row vector for MATLAB compatibility. Use `string` or `compose` if you need string scalars or string arrays."
+    },
+    {
+      "question": "Does GPU hardware change formatting behaviour?",
+      "answer": "No. Formatting occurs on the CPU. When GPU tensors appear in the input list, RunMat gathers them to host memory before substitution so the results match MATLAB exactly."
+    },
+    {
+      "question": "How do I emit a literal percent sign?",
+      "answer": "Use `%%` inside the format specification. The formatter converts `%%` into a single `%` without consuming an argument."
+    },
+    {
+      "question": "How are empty inputs handled?",
+      "answer": "If all argument arrays are empty, `sprintf` returns an empty character array (`1×0`). If the format string itself is empty, the result is also empty."
+    },
+    {
+      "question": "What happens with multi-row character arrays?",
+      "answer": "MATLAB requires `formatSpec` to be a row vector. RunMat follows the same rule: multi-row character arrays raise `sprintf: formatSpec must be a character row vector or string scalar`."
+    }
+  ],
+  "links": [
+    {
+      "label": "compose",
+      "url": "./compose"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "num2str",
+      "url": "./num2str"
+    },
+    {
+      "label": "strlength",
+      "url": "./strlength"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/sprintf.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/sprintf.rs"
+  },
+  "gpu_behavior": [
+    "`sprintf` is a residency sink. When inputs include GPU tensors, RunMat gathers them back to host memory via the active acceleration provider before executing the formatter. Formatting itself runs entirely on the CPU, ensuring consistent behaviour regardless of device availability."
+  ]
+}

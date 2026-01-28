@@ -1,0 +1,156 @@
+{
+  "title": "bandwidth",
+  "category": "math/linalg/structure",
+  "keywords": [
+    "bandwidth",
+    "lower bandwidth",
+    "upper bandwidth",
+    "banded matrix",
+    "structure",
+    "gpu"
+  ],
+  "summary": "Compute the lower and upper bandwidth of a matrix, optionally returning a single side.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Runs a device-side reduction when the acceleration provider implements the `bandwidth` hook; falls back to gathering on providers without support."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::structure::bandwidth::tests",
+    "integration": "builtins::math::linalg::structure::bandwidth::tests::bandwidth_gpu_roundtrip"
+  },
+  "description": "`bandwidth(A)` inspects the nonzero pattern of a matrix and reports two numbers: the lower bandwidth (how many subdiagonals contain nonzeros) and the upper bandwidth (how many superdiagonals contain nonzeros). These metrics help determine whether a matrix is banded, which is essential for selecting the most efficient solver or factorisation.",
+  "behaviors": [
+    "`bandwidth(A)` returns a row vector `[lower upper]`. A diagonal matrix has `[0 0]`, a strictly upper-triangular matrix has `[0 k]`, and a strictly lower-triangular matrix has `[k 0]`, where `k` counts the furthest nonzero from the main diagonal.",
+    "`bandwidth(A, 'lower')` returns only the lower bandwidth, while `bandwidth(A, 'upper')` returns only the upper bandwidth.",
+    "Nonzero detection treats any value that is not numerically equal to zero (including `NaN` or `Inf`) as nonzero, matching MATLAB semantics.",
+    "Empty matrices and all-zero matrices report `[0 0]`.",
+    "Inputs must be numeric or logical and two-dimensional. Higher-dimensional arrays (with any dimension beyond the second larger than one) raise an error.",
+    "Complex matrices are supported. A complex entry counts as nonzero if either the real or imaginary part is nonzero."
+  ],
+  "examples": [
+    {
+      "description": "Checking the bandwidth of a diagonal matrix",
+      "input": "A = eye(4);\nbw = bandwidth(A);",
+      "output": "bw = [0 0];"
+    },
+    {
+      "description": "Requesting only the lower bandwidth",
+      "input": "A = [-1 0 0; 2 3 0; 4 5 6];\nlower_bw = bandwidth(A, 'lower');",
+      "output": "lower_bw = 2;"
+    },
+    {
+      "description": "Requesting only the upper bandwidth",
+      "input": "B = [1 2 0 0; 0 3 4 0; 0 0 5 6];\nupper_bw = bandwidth(B, 'upper');",
+      "output": "upper_bw = 1;"
+    },
+    {
+      "description": "Analysing a rectangular matrix",
+      "input": "C = [0 0 7; 8 0 0; 0 9 0; 0 0 10];\nbw = bandwidth(C);",
+      "output": "bw = [1 2];"
+    },
+    {
+      "description": "Working with complex-valued matrices",
+      "input": "Z = [1+2i 0; 0 3-4i; 5i 0];\nbw = bandwidth(Z);",
+      "output": "bw = [2 0];"
+    },
+    {
+      "description": "Inspecting a GPU-resident matrix",
+      "input": "G = gpuArray([0 1 0; 2 0 3; 0 0 0]);\nbw = bandwidth(G);",
+      "output": "bw = [1 1];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does a bandwidth of `[0 0]` mean?",
+      "answer": "It indicates the matrix is diagonal: all nonzero elements are on the main diagonal."
+    },
+    {
+      "question": "How are rows or columns full of zeros handled?",
+      "answer": "Zero rows or columns do not increase the bandwidth; only nonzero entries affect the result."
+    },
+    {
+      "question": "Does `bandwidth` treat `NaN` values as nonzero?",
+      "answer": "Yes. Any value that is not exactly zero\u2014including `NaN` or `Inf`\u2014counts as nonzero."
+    },
+    {
+      "question": "Can I request only the lower or upper bandwidth?",
+      "answer": "Yes. Pass `'lower'` or `'upper'` as the second argument to obtain a scalar result."
+    },
+    {
+      "question": "Why does `bandwidth` error on higher-dimensional arrays?",
+      "answer": "The builtin matches MATLAB and only operates on two-dimensional matrices. Use `reshape` to collapse trailing singleton dimensions before calling `bandwidth`."
+    },
+    {
+      "question": "Does `bandwidth` work with sparse matrices?",
+      "answer": "RunMat currently stores inputs as dense tensors but mirrors MATLAB's numerical semantics. Future releases will preserve sparsity metadata while returning the same bandwidth values."
+    },
+    {
+      "question": "What precision does the result use?",
+      "answer": "The result is always returned as double precision (`double`), matching MATLAB."
+    },
+    {
+      "question": "Will this function keep my data on the GPU?",
+      "answer": "Yes, when the provider implements the hook: the matrix stays resident on the GPU and only the two bandwidth values are copied back. If the provider lacks support, RunMat gathers the tensor and computes the bandwidth on the CPU instead."
+    },
+    {
+      "question": "Can I call `bandwidth` inside fused expressions?",
+      "answer": "Yes. The builtin returns a small host tensor, so it behaves like any other metadata query."
+    },
+    {
+      "question": "What happens if I pass logical matrices?",
+      "answer": "Logical values are promoted to doubles (0 or 1) internally. `true` entries count as nonzero and contribute to the bandwidth calculation."
+    }
+  ],
+  "links": [
+    {
+      "label": "diag",
+      "url": "./diag"
+    },
+    {
+      "label": "tril",
+      "url": "./tril"
+    },
+    {
+      "label": "triu",
+      "url": "./triu"
+    },
+    {
+      "label": "issymmetric",
+      "url": "./issymmetric"
+    },
+    {
+      "label": "find",
+      "url": "./find"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/linalg/structure/bandwidth.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/structure/bandwidth.rs"
+  },
+  "gpu_residency": "You usually do NOT need to move data manually. When the active provider exposes the `bandwidth` hook (the WGPU backend does), RunMat launches a device-side kernel and only reads back the two bandwidth values. Providers without support seamlessly gather the tensor and reuse the CPU implementation, so explicit `gpuArray` / `gather` calls remain optional.",
+  "gpu_behavior": [
+    "`bandwidth` leverages the active acceleration provider when available. The WGPU backend launches a lightweight compute kernel that scans the matrix on-device and returns the lower and upper bandwidths without transferring the entire tensor. Providers that do not implement the `bandwidth` hook trigger a graceful fallback that gathers the matrix and executes the CPU implementation instead. Either way, the result is returned as a small host-side double tensor."
+  ]
+}

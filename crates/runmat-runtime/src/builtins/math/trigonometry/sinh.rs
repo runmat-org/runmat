@@ -14,157 +14,6 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sinh";
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "sinh",
-        builtin_path = "crate::builtins::math::trigonometry::sinh"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "sinh"
-category: "math/trigonometry"
-keywords: ["sinh", "hyperbolic", "trigonometry", "gpu"]
-summary: "Hyperbolic sine of scalars, vectors, matrices, or N-D tensors (element-wise)."
-references: []
-gpu_support:
-  elementwise: true
-  reduction: false
-  precisions: ["f32", "f64"]
-  broadcasting: "matlab"
-  notes: "Prefers provider unary_sinh hooks; falls back to the host path when the active provider cannot service the request."
-fusion:
-  elementwise: true
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::math::trigonometry::sinh::tests"
-  integration: "builtins::math::trigonometry::sinh::tests::sinh_gpu_provider_roundtrip"
----
-
-# What does the `sinh` function do in MATLAB / RunMat?
-`Y = sinh(X)` computes the hyperbolic sine of every element in `X`, treating angles as real numbers and extending naturally to complex values.
-
-## How does the `sinh` function behave in MATLAB / RunMat?
-- Works on scalars, vectors, matrices, and N-D tensors with MATLAB broadcasting semantics.
-- Logical inputs are converted to double precision (`true → 1.0`, `false → 0.0`) before evaluation.
-- Complex inputs follow the analytic definition `sinh(a + bi) = sinh(a)cos(b) + i·cosh(a)sin(b)`, propagating `NaN`/`Inf` components independently.
-- Character arrays are converted to their numeric code points prior to evaluation, returning double arrays of the same size.
-- Empty arrays return empty results that respect MATLAB’s shape semantics.
-
-## `sinh` Function GPU Execution Behaviour
-When RunMat Accelerate is active, tensors that already reside on the GPU stay there. Providers that implement `unary_sinh` execute the operation entirely on the device (and fused elementwise kernels can inline `sinh` as part of a larger expression). If the active provider lacks this hook, RunMat gathers the data back to the host, computes the result, and re-uploads only when later operations require GPU residency.
-
-## Examples of using the `sinh` function in MATLAB / RunMat
-
-### Compute the hyperbolic sine of a scalar value
-
-```matlab
-y = sinh(1);
-```
-
-Expected output:
-
-```matlab
-y = 1.1752;
-```
-
-### Apply `sinh` to each element of a vector
-
-```matlab
-x = linspace(-1, 1, 5);
-y = sinh(x);
-```
-
-Expected output:
-
-```matlab
-y = [-1.1752 -0.5211 0 0.5211 1.1752];
-```
-
-### Evaluate `sinh` on a matrix
-
-```matlab
-A = [0 1; 2 3];
-B = sinh(A);
-```
-
-Expected output:
-
-```matlab
-B = [0 1.1752; 3.6269 10.0179];
-```
-
-### Compute the hyperbolic sine on the GPU
-
-```matlab
-G = gpuArray([0.25 0.5; 0.75 1.0]);
-result_gpu = sinh(G);
-result = gather(result_gpu);
-```
-
-Expected output:
-
-```matlab
-result = [0.2526 0.5211; 0.8223 1.1752];
-```
-
-### Work with complex inputs
-
-```matlab
-z = 1 + 2i;
-w = sinh(z);
-```
-
-Expected output:
-
-```matlab
-w = -0.4891 + 1.4031i;
-```
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-You usually do **not** need to call `gpuArray` explicitly. The fusion planner keeps tensors on the GPU whenever the active provider exposes the necessary kernels (such as `unary_sinh`). Manual `gpuArray` / `gather` calls remain supported for MATLAB compatibility or when you need to pin residency before interacting with external code.
-
-## FAQ
-
-### When should I use `sinh`?
-Use `sinh` for hyperbolic sine transformations, signal-processing workflows, and analytic continuations where the hyperbolic trigonometric family is required.
-
-### Does `sinh` work with complex numbers?
-Yes. The real and imaginary parts are evaluated using the analytic definition `sinh(a + bi) = sinh(a)cos(b) + i·cosh(a)sin(b)`.
-
-### What happens if the provider does not implement `unary_sinh`?
-RunMat gathers the GPU tensor to host memory, performs the computation on the CPU, and leaves the result on the host unless later operations require GPU residency.
-
-### Can `sinh` participate in fusion?
-Yes. The fusion planner can inline `sinh` inside elementwise groups, generating WGSL kernels that execute directly on the GPU.
-
-### Does `sinh` respect MATLAB broadcasting rules?
-It operates elementwise and therefore respects the same scalar-expansion (broadcasting) semantics as other MATLAB math functions in RunMat.
-
-### Are integers preserved?
-Inputs are promoted to double precision before evaluation. To keep data in integer form, perform downstream casting explicitly.
-
-### How does `sinh` handle NaN or Inf values?
-Hyperbolic functions propagate `NaN` and `Inf` components consistently with MATLAB. For complex inputs, each component is treated independently.
-
-### Can I combine `sinh` with other hyperbolic functions?
-Yes. `sinh`, `cosh`, and `tanh` will share the same residency rules. Fused expressions can include any combination of elementwise builtins.
-
-### Is there a GPU warmup penalty?
-Providers may warm up pipelines during initialization. If `unary_sinh` is unavailable, the CPU fallback ensures correctness without warmup.
-
-## See Also
-[sin](./sin), [cos](./cos), [tan](./tan), [gpuArray](./gpuarray), [gather](./gather)
-
-## Source & Feedback
-- The full source code for the implementation of the `sinh` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/sinh.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/sinh.rs)
-- Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::sinh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sinh",
@@ -288,6 +137,7 @@ pub(crate) mod tests {
     use runmat_builtins::{IntValue, Tensor};
 
     use crate::builtins::common::test_support;
+    use runmat_builtins::{IntValue, Tensor};
 
     fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::sinh_builtin(value))
@@ -378,13 +228,6 @@ pub(crate) mod tests {
             assert_eq!(gathered.shape, vec![4, 1]);
             assert_eq!(gathered.data, expected);
         });
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

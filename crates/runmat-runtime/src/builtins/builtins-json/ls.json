@@ -1,0 +1,148 @@
+{
+  "title": "ls",
+  "category": "io/repl_fs",
+  "keywords": [
+    "ls",
+    "list files",
+    "folder contents",
+    "wildcard listing",
+    "dir"
+  ],
+  "summary": "List files and folders in the current directory or matching a wildcard pattern.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/ls.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Executes entirely on the host CPU. When the input argument resides on the GPU, RunMat gathers it to the host before expanding any patterns."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::ls::tests",
+    "integration": "builtins::io::repl_fs::ls::tests::ls_handles_wildcard_patterns"
+  },
+  "description": "`ls` lists the contents of a directory. Without inputs, it shows the files and folders in the current working directory. With an argument, it lists the items that match a path or wildcard pattern. The return value is a character array whose rows contain the matching names padded with spaces, mirroring MATLAB behaviour.",
+  "behaviors": [
+    "`ls` without outputs displays the directory listing in the REPL. When you assign the result to a variable, you receive a character array with one row per item, padded with spaces to a fixed width.",
+    "`ls(name)` accepts character vectors or string scalars. The argument may be an absolute path, a relative path, or a wildcard such as `*.m` or `build/*`.",
+    "Paths beginning with `~` or `~/` expand to the current user's home directory, matching MATLAB desktop behaviour on every supported platform.",
+    "Wildcards follow MATLAB rules: `*` matches any sequence of characters and `?` matches exactly one character. The pattern is evaluated relative to the current folder unless it contains a leading path.",
+    "Directory results include the platform-specific file separator (`/` on Unix, `\\` on Windows) so you can quickly distinguish folders from files, and duplicate matches are removed automatically.",
+    "Empty matches return a `0\u00d70` character array rather than raising an error, enabling idioms such as `isempty(ls(\"*.tmp\"))`.",
+    "Only scalar inputs are supported. Multi-row character arrays, multi-element string arrays, numeric values, or logical arguments raise `ls: name must be a character vector or string scalar`, mirroring MATLAB's diagnostics."
+  ],
+  "examples": [
+    {
+      "description": "List Files In The Current Folder",
+      "input": "ls",
+      "output": "README.md\nsrc/\ntests/"
+    },
+    {
+      "description": "List Only MATLAB Files Using Wildcards",
+      "input": "ls(\"*.m\")",
+      "output": "script.m\nsolver.m\ntest_helper.m"
+    },
+    {
+      "description": "Capture A Directory Listing In A Variable",
+      "input": "listing = ls;\ndisp(listing(1, :));  % Display the first entry",
+      "output": "README.md"
+    },
+    {
+      "description": "List The Contents Of A Specific Folder",
+      "input": "tempDir = fullfile(pwd, \"tmp\");\nls(tempDir);",
+      "output": "tmpfile.txt\nsubdir/"
+    },
+    {
+      "description": "Use Wildcards With Nested Paths",
+      "input": "ls(\"src/**/*.rs\")",
+      "output": "src/main.rs\nsrc/utils/helpers.rs"
+    },
+    {
+      "description": "Handle Missing Matches Gracefully",
+      "input": "if isempty(ls(\"*.tmp\"))\n    disp(\"No temporary files found.\");\nend",
+      "output": "No temporary files found."
+    },
+    {
+      "description": "Combine `ls` With `cd` For Temporary Directory Changes",
+      "input": "start = cd(\"examples\");\ncleanup = onCleanup(@() cd(start));\nfiles = ls(\"*.m\");",
+      "output": "animation.m\nplot_surface.m"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What types can I pass to `ls`?",
+      "answer": "Use character vectors or string scalars. Other types \u2013 including numeric values, logical arrays, or string arrays with multiple elements \u2013 produce an error."
+    },
+    {
+      "question": "Does `ls` support wildcard patterns?",
+      "answer": "Yes. Use `*` to match any sequence and `?` for a single character. Patterns are resolved relative to the current folder unless you provide an absolute path."
+    },
+    {
+      "question": "How are directories indicated in the output?",
+      "answer": "Directory entries end with the platform-specific file separator (`/` or `\\`) so you can distinguish them from files."
+    },
+    {
+      "question": "What happens if there are no matches?",
+      "answer": "The function returns a `0\u00d70` character array. You can test for this with `isempty` or by checking `size`."
+    },
+    {
+      "question": "Can I list the contents of another drive or mounted volume?",
+      "answer": "Yes. Provide the absolute path, e.g., `ls(\"D:\\Projects\")` on Windows or `ls(\"/Volumes/Data\")` on macOS."
+    },
+    {
+      "question": "Does `ls` follow symbolic links?",
+      "answer": "The function reports the link itself; if the link points to a directory, it receives the directory suffix but the listing does not recursively expand the target."
+    },
+    {
+      "question": "Will `ls` respect the current working directory set by `cd`?",
+      "answer": "Absolutely. `ls` always evaluates relative paths against whatever `pwd` reports."
+    },
+    {
+      "question": "Is the output sorted?",
+      "answer": "Yes. RunMat sorts case-insensitively on Windows and case-sensitively on Unix-like systems to match MATLAB conventions."
+    },
+    {
+      "question": "How do I list hidden files?",
+      "answer": "Hidden files are included when they match the pattern you specify. On Unix-like systems, prepend a dot: `ls(\".*\")`."
+    },
+    {
+      "question": "Can I send the output directly to another builtin?",
+      "answer": "Yes. Because the result is a character array, you can convert it to a string array with `string(ls)` or operate on individual rows using indexing."
+    }
+  ],
+  "links": [
+    {
+      "label": "pwd",
+      "url": "./pwd"
+    },
+    {
+      "label": "cd",
+      "url": "./cd"
+    },
+    {
+      "label": "fopen",
+      "url": "./fopen"
+    },
+    {
+      "label": "fclose",
+      "url": "./fclose"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/ls.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/ls.rs"
+  },
+  "gpu_residency": "No. Directory listings are always computed on the CPU. Passing `gpuArray(\"*.m\")` offers no benefit: RunMat will gather the value automatically before enumerating files, and results are materialised as host-resident character arrays.",
+  "gpu_behavior": [
+    "`ls` is an I/O-centric builtin with no GPU execution path. When the argument is a GPU-resident scalar (for example, the output of `gather` that remained on the device), RunMat gathers it to the host before expanding wildcards. No device kernels run, and acceleration providers do not need to implement hooks for this builtin."
+  ]
+}

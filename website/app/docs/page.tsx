@@ -11,7 +11,9 @@ export const metadata: Metadata = {
     title: "RunMat Documentation - Complete Guides and API Reference",
     description: "Complete guides and API reference to get you started with RunMat.",
     type: "website",
+    url: "https://runmat.org/docs",
   },
+  alternates: { canonical: "https://runmat.org/docs" },
 };
 
 export default function DocsPage() {
@@ -218,6 +220,9 @@ export default function DocsPage() {
             </Button>
             <Button variant="outline" size="default" asChild>
               <Link href="/blog/introducing-runmat">Read Introduction</Link>
+            </Button>
+            <Button variant="outline" size="default" asChild>
+              <Link href="/blog/what-is-matlab">What is MATLAB?</Link>
             </Button>
             <Button variant="outline" size="default" asChild>
               <Link href="https://github.com/runmat-org/runmat" target="_blank">

@@ -1,0 +1,139 @@
+{
+  "title": "regexpi",
+  "category": "strings/regex",
+  "keywords": [
+    "regexpi",
+    "regular expression",
+    "ignore case",
+    "pattern",
+    "match"
+  ],
+  "summary": "Perform case-insensitive regular expression matching with MATLAB-compatible outputs.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/regexpi.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs on the CPU. When inputs reside on the GPU, RunMat gathers them before matching and returns host-side containers."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::regex::regexpi::tests",
+    "integration": "builtins::strings::regex::regexpi::tests::regexpi_builtin_match_output"
+  },
+  "description": "`regexpi(text, pattern)` evaluates regular expression matches while ignoring case by default. Outputs mirror MATLAB: you can retrieve 1-based match indices, substrings, capture tokens, token extents, named tokens, or the text split around matches. Flags such as `'once'`, `'tokens'`, `'match'`, `'split'`, `'tokenExtents'`, `'names'`, `'emptymatch'`, and `'forceCellOutput'` are supported, together with case toggles (`'ignorecase'`, `'matchcase'`) and newline behaviour (`'dotall'`, `'dotExceptNewline'`, `'lineanchors'`).",
+  "behaviors": [
+    "Case-insensitive matching is the default; include `'matchcase'` when you need case-sensitive behaviour.",
+    "With one output, `regexpi` returns a numeric row vector of 1-based match start indices.",
+    "With multiple outputs, the default order is match starts, match ends, matched substrings.",
+    "When the input is a string array or cell array of character vectors, outputs are cell arrays whose shape matches the input container.",
+    "`'forceCellOutput'` forces cell outputs even for scalar inputs, matching MATLAB semantics.",
+    "`'once'` limits each element to its first match, influencing every requested output.",
+    "`'emptymatch','allow'` keeps zero-length matches; `'emptymatch','remove'` is the default filter.",
+    "Named tokens (using `(?<name>...)`) return scalar struct values per match when `'names'` is requested. Unmatched names resolve to empty strings for MATLAB compatibility."
+  ],
+  "examples": [
+    {
+      "description": "Finding indices regardless of case",
+      "input": "idx = regexpi('Abracadabra', 'a');",
+      "output": "idx =\n     1     4     6     8    11"
+    },
+    {
+      "description": "Returning matched substrings ignoring case",
+      "input": "matches = regexpi('abcXYZ123', '[a-z]{3}', 'match');",
+      "output": "matches =\n  1\u00d72 cell array\n    {'abc'}    {'XYZ'}"
+    },
+    {
+      "description": "Extracting capture tokens case-insensitively",
+      "input": "tokens = regexpi('ID:AB12', '(?<prefix>[a-z]+)(?<digits>\\d+)', 'tokens');\nfirst = tokens{1}{1};\nsecond = tokens{1}{2};",
+      "output": "first =\n    'AB'\nsecond =\n    '12'"
+    },
+    {
+      "description": "Limiting `regexpi` to the first match",
+      "input": "firstMatch = regexpi('aXaXaX', 'ax', 'match', 'once');",
+      "output": "firstMatch =\n    'aX'"
+    },
+    {
+      "description": "Splitting a string array without worrying about letter case",
+      "input": "parts = regexpi([\"Color:Red\"; \"COLOR:Blue\"], 'color:', 'split');",
+      "output": "parts =\n  2\u00d71 cell array\n    {1\u00d72 cell}\n    {1\u00d72 cell}\n\nparts{2}{2}\nans =\n    'Blue'"
+    },
+    {
+      "description": "Enforcing case-sensitive matches with `'matchcase'`",
+      "input": "idx = regexpi('CaseTest', 'case', 'matchcase');",
+      "output": "idx =\n     []"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How are the outputs ordered when I request several?",
+      "answer": "If you do not specify explicit output flags, the default order is match starts, match ends, and matched substrings\u2014identical to MATLAB. Providing flags such as `'match'` or `'tokens'` returns only the requested outputs."
+    },
+    {
+      "question": "Can I make `regexpi` behave like `regexp` with case sensitivity?",
+      "answer": "Yes. Include the `'matchcase'` flag to disable the default case-insensitive mode. You can also pass `'ignorecase'` explicitly to emphasise the default."
+    },
+    {
+      "question": "Does `regexpi` support string arrays and cell arrays?",
+      "answer": "Yes. Outputs mirror the input container shape, and each element stores results for the corresponding string or character vector."
+    },
+    {
+      "question": "How do zero-length matches behave?",
+      "answer": "By default (`'emptymatch','remove'`), zero-length matches are omitted. Use `'emptymatch','allow'` to keep them, which is helpful when inspecting optional pattern components."
+    },
+    {
+      "question": "Does `regexpi` run on the GPU?",
+      "answer": "No. All matching occurs on the CPU. RunMat gathers GPU-resident inputs before processing and leaves outputs on the host. Explicit `gpuArray` calls are required if you want to move the results back to the GPU."
+    },
+    {
+      "question": "Are named tokens supported?",
+      "answer": "Yes. Use the `(?<name>...)` syntax and request the `'names'` output flag. Each match produces a scalar struct with fields for every named group."
+    },
+    {
+      "question": "What happens with `'once'`?",
+      "answer": "`'once'` restricts each input element to the first match. All requested outputs honour that limit, returning scalars instead of per-match cells."
+    },
+    {
+      "question": "Can I keep scalar outputs in cells?",
+      "answer": "Yes. Pass `'forceCellOutput'` to wrap even scalar results in cells, which is useful when writing code that must treat scalar and array inputs uniformly."
+    }
+  ],
+  "links": [
+    {
+      "label": "regexp",
+      "url": "./regexp"
+    },
+    {
+      "label": "regexprep",
+      "url": "./regexprep"
+    },
+    {
+      "label": "contains",
+      "url": "./contains"
+    },
+    {
+      "label": "split",
+      "url": "./split"
+    },
+    {
+      "label": "strfind",
+      "url": "./strfind"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/regex/regexpi.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/regex/regexpi.rs"
+  },
+  "gpu_behavior": [
+    "`regexpi` executes entirely on the CPU. If inputs or previously computed intermediates are resident on the GPU, RunMat gathers the necessary data before evaluation and returns host-side outputs. Acceleration providers do not offer specialised hooks today; computed tensors remain on the host unless explicit GPU transfers are requested later."
+  ]
+}

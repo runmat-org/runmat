@@ -1,0 +1,135 @@
+{
+  "title": "csvwrite",
+  "category": "io/tabular",
+  "keywords": [
+    "csvwrite",
+    "csv",
+    "write",
+    "comma-separated values",
+    "numeric export",
+    "row offset",
+    "column offset"
+  ],
+  "summary": "Write numeric matrices to comma-separated text files using MATLAB-compatible offsets.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/csvwrite.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the CPU. gpuArray inputs are gathered before serialisation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::tabular::csvwrite::tests",
+    "integration": [
+      "builtins::io::tabular::csvwrite::tests::csvwrite_writes_basic_matrix",
+      "builtins::io::tabular::csvwrite::tests::csvwrite_honours_offsets",
+      "builtins::io::tabular::csvwrite::tests::csvwrite_handles_gpu_tensors",
+      "builtins::io::tabular::csvwrite::tests::csvwrite_expands_home_directory",
+      "builtins::io::tabular::csvwrite::tests::csvwrite_formats_with_short_g_precision",
+      "builtins::io::tabular::csvwrite::tests::csvwrite_handles_wgpu_provider_gather",
+      "builtins::io::tabular::csvwrite::tests::csvwrite_rejects_negative_offsets"
+    ]
+  },
+  "description": "`csvwrite(filename, M)` writes a numeric matrix to a comma-separated text file. The builtin honours MATLAB's historical zero-based row/column offset arguments so that existing scripts continue to behave identically in RunMat.",
+  "behaviors": [
+    "Only real numeric or logical inputs are accepted. Logical values are converted to `0` and `1` before writing. Complex and textual inputs raise descriptive errors.",
+    "`csvwrite(filename, M, row, col)` starts writing at zero-based row `row` and column `col`, leaving earlier rows blank and earlier columns empty within each row. Offsets must be non-negative integers.",
+    "Matrices must be 2-D (trailing singleton dimensions are ignored). Column-major ordering is respected when serialising to text.",
+    "Numbers are emitted using MATLAB-compatible short `g` formatting (`%.5g`). `NaN`, `Inf`, and `-Inf` tokens are written verbatim.",
+    "Existing files are overwritten. `csvwrite` does not support appending; switch to `writematrix` with `'WriteMode','append'` when the behaviour is required.",
+    "Paths that begin with `~` expand to the user's home directory before writing."
+  ],
+  "examples": [
+    {
+      "description": "Writing a numeric matrix to CSV",
+      "input": "A = [1 2 3; 4 5 6];\ncsvwrite(\"scores.csv\", A);"
+    },
+    {
+      "description": "Starting output after a header row",
+      "input": "fid = fopen(\"with_header.csv\", \"w\");\nfprintf(fid, \"Name,Jan,Feb\\nalpha,1,2\\nbeta,3,4\\n\");\nfclose(fid);\n\ncsvwrite(\"with_header.csv\", [10 20; 30 40], 1, 0);"
+    },
+    {
+      "description": "Skipping leading columns before data",
+      "input": "B = magic(3);\ncsvwrite(\"offset_columns.csv\", B, 0, 2);"
+    },
+    {
+      "description": "Exporting logical masks as numeric zeros and ones",
+      "input": "mask = [true false true; false true false];\ncsvwrite(\"mask.csv\", mask);"
+    },
+    {
+      "description": "Writing GPU-resident data without manual gather",
+      "input": "G = gpuArray(single([0.1 0.2 0.3]));\ncsvwrite(\"gpu_values.csv\", G);",
+      "output": "% Data is gathered automatically from the GPU and written to disk."
+    },
+    {
+      "description": "Persisting a scalar value for downstream tools",
+      "input": "total = sum(rand(5));\ncsvwrite(\"scalar.csv\", total);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why must the input be numeric or logical?",
+      "answer": "`csvwrite` predates MATLAB's table and string support and only serialises numeric values. Provide numeric matrices or logical masks, or switch to `writematrix` when you need to mix text and numbers."
+    },
+    {
+      "question": "Are row and column offsets zero-based?",
+      "answer": "Yes. `row = 1` skips one full line before writing, and `col = 2` inserts two empty comma-separated fields at the start of each written row."
+    },
+    {
+      "question": "Can I append to an existing CSV with `csvwrite`?",
+      "answer": "No. `csvwrite` always overwrites the destination file. Use `writematrix` with `'WriteMode','append'` or manipulate the file with lower-level I/O functions."
+    },
+    {
+      "question": "How are `NaN` and `Inf` values written?",
+      "answer": "They are emitted verbatim as `NaN`, `Inf`, or `-Inf`, matching MATLAB's text representation so that downstream tools can parse them consistently."
+    },
+    {
+      "question": "What line ending does `csvwrite` use?",
+      "answer": "The builtin uses the platform default (`\\r\\n` on Windows, `\\n` elsewhere). Most CSV consumers handle either convention transparently."
+    }
+  ],
+  "links": [
+    {
+      "label": "csvread",
+      "url": "./csvread"
+    },
+    {
+      "label": "readmatrix",
+      "url": "./readmatrix"
+    },
+    {
+      "label": "writematrix",
+      "url": "./writematrix"
+    },
+    {
+      "label": "fprintf",
+      "url": "./fprintf"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/tabular/csvwrite.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/csvwrite.rs"
+  },
+  "gpu_residency": "No additional steps are necessary. `csvwrite` treats GPU arrays as residency sinks: data is gathered back to host memory prior to writing. This matches MATLAB's behaviour, where file I/O always operates on host-resident values.",
+  "gpu_behavior": [
+    "`csvwrite` always executes on the host CPU. When the matrix resides on the GPU, RunMat gathers the data through the active acceleration provider before serialisation. No provider hooks are required, and the return value reports the number of bytes written after the gather completes."
+  ]
+}

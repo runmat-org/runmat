@@ -69,6 +69,13 @@ export default function FusionGuidePage() {
                 RunMat&apos;s acceleration layer recognises multiple flavours of fusible graphs and hands them to your GPU
                 provider as single kernels.
               </p>
+              <p className="text-sm text-muted-foreground">
+                New to Accelerate? Start with the{" "}
+                <Link href="/blog/runmat-accelerate-fastest-runtime-for-your-math" className="underline">
+                  RunMat Accelerate overview
+                </Link>
+                .
+              </p>
             </header>
 
 

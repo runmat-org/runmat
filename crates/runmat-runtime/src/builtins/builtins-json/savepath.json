@@ -1,0 +1,150 @@
+{
+  "title": "savepath",
+  "category": "io/repl_fs",
+  "keywords": [
+    "savepath",
+    "pathdef",
+    "search path",
+    "runmat path",
+    "persist path"
+  ],
+  "summary": "Persist the current MATLAB search path to pathdef.m with status and diagnostic outputs.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/savepath.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the CPU. gpuArray inputs are gathered before resolving the target file."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::savepath::tests",
+    "integration": "builtins::io::repl_fs::savepath::tests::savepath_returns_failure_when_write_fails"
+  },
+  "description": "`savepath` writes the current MATLAB search path to a `pathdef.m` file so that future sessions can restore the same ordering. The file is a MATLAB function that returns the `path` character vector, matching MathWorks MATLAB semantics.",
+  "behaviors": [
+    "`savepath()` with no inputs writes to the default RunMat location (`$HOME/.runmat/pathdef.m` on Linux/macOS, `%USERPROFILE%\\.runmat\\pathdef.m` on Windows). The directory is created automatically when required.",
+    "`savepath(file)` writes to the specified file. Relative paths are resolved against the current working directory, `~` expands to the user's home folder, and supplying a directory (with or without a trailing separator) appends the standard `pathdef.m` filename automatically.",
+    "The function does not modify the in-memory search path - it only writes the current state to disk. Callers can therefore continue editing the path after saving without interference.",
+    "`status = savepath(...)` returns `0` on success and `1` when the file cannot be written. `[status, message, messageID] = savepath(...)` returns MATLAB-style diagnostics describing the failure. Both message outputs are empty on success.",
+    "Invalid argument types raise `savepath: filename must be a character vector or string scalar`. Empty filenames raise `savepath: filename must not be empty`.",
+    "When the `RUNMAT_PATHDEF` environment variable is set, the zero-argument form uses that override instead of the default location."
+  ],
+  "examples": [
+    {
+      "description": "Save The Current Search Path To The Default Location",
+      "input": "status = savepath();",
+      "output": "status =\n     0"
+    },
+    {
+      "description": "Persist A Project-Specific Pathdef File",
+      "input": "status = savepath(\"config/project_pathdef.m\");",
+      "output": "status =\n     0"
+    },
+    {
+      "description": "Capture Status, Message, And Message ID",
+      "input": "[status, message, messageID] = savepath(\"config/pathdef.m\");\nif status ~= 0\n    warning(\"Failed to save the path: %s (%s)\", message, messageID);\nend"
+    },
+    {
+      "description": "Append Genpath Output And Persist The Result",
+      "input": "tooling = genpath(\"third_party/toolchain\");\naddpath(tooling, \"-end\");\nsavepath();"
+    },
+    {
+      "description": "Save A Pathdef Using A Directory Argument",
+      "input": "mkdir(\"~/.runmat/projectA\");\nsavepath(\"~/.runmat/projectA/\");",
+      "output": "% Creates ~/.runmat/projectA/pathdef.m with the current search path."
+    },
+    {
+      "description": "Override The Target File With RUNMAT_PATHDEF",
+      "input": "setenv(\"RUNMAT_PATHDEF\", fullfile(tempdir, \"pathdef-dev.m\"));\nsavepath();",
+      "output": "% The file tempdir/pathdef-dev.m now contains the MATLAB path definition."
+    },
+    {
+      "description": "Use gpuArray Inputs Transparently",
+      "input": "status = savepath(gpuArray(\"pathdefs/pathdef_gpu.m\"));",
+      "output": "status =\n     0"
+    },
+    {
+      "description": "Inspect The Generated pathdef.m File",
+      "input": "savepath(\"toolbox/pathdef.m\");\ntype toolbox/pathdef.m;",
+      "output": "% Displays the MATLAB function that reproduces the saved search path."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Where does `savepath` write by default?",
+      "answer": "RunMat uses `$HOME/.runmat/pathdef.m` (Linux/macOS) or `%USERPROFILE%\\.runmat\\pathdef.m` (Windows). Set `RUNMAT_PATHDEF` to override this location."
+    },
+    {
+      "question": "Does `savepath` create missing folders?",
+      "answer": "Yes. When the parent directory does not exist, RunMat creates it automatically before writing the file."
+    },
+    {
+      "question": "What happens if the file is read-only?",
+      "answer": "`savepath` returns `status = 1` together with the diagnostic message and message ID `MATLAB:savepath:cannotWriteFile`. The existing file is left untouched."
+    },
+    {
+      "question": "Does `savepath` modify the current path?",
+      "answer": "No. It only writes out the path. Use `addpath`, `rmpath`, or `path` to change the in-memory value."
+    },
+    {
+      "question": "Are argument types validated?",
+      "answer": "Yes. Inputs must be character vectors or string scalars. String arrays with multiple elements and numeric arrays raise an error."
+    },
+    {
+      "question": "Is the generated file MATLAB-compatible?",
+      "answer": "Yes. RunMat writes a MATLAB function named `pathdef` that returns the exact character vector stored by the `path` builtin, so MathWorks MATLAB and RunMat can both execute it."
+    },
+    {
+      "question": "How do I restore the path later?",
+      "answer": "Evaluate the generated `pathdef.m` (for example by calling `run('~/pathdef.m')`) and pass the returned value to `path()`. Future RunMat releases will load the default file automatically."
+    },
+    {
+      "question": "Can I store multiple path definitions?",
+      "answer": "Absolutely. Call `savepath` with different filenames for each profile, then run the desired file to switch."
+    },
+    {
+      "question": "Is `savepath` safe to call concurrently?",
+      "answer": "The builtin serializes through the filesystem. When multiple sessions write to the same path at once, the last write wins - this matches MATLAB's behavior."
+    },
+    {
+      "question": "Does `savepath` include the current folder (`pwd`)?",
+      "answer": "The file mirrors the output of the `path` builtin, which omits the implicit current folder exactly as MATLAB does."
+    }
+  ],
+  "links": [
+    {
+      "label": "path",
+      "url": "./path"
+    },
+    {
+      "label": "addpath",
+      "url": "./addpath"
+    },
+    {
+      "label": "rmpath",
+      "url": "./rmpath"
+    },
+    {
+      "label": "genpath",
+      "url": "./genpath"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/savepath.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/savepath.rs"
+  },
+  "gpu_residency": "No. Because `savepath` interacts with the filesystem, GPU residency provides no benefit. The builtin automatically gathers GPU text inputs so existing scripts continue to work even if they accidentally construct filenames on the device.",
+  "gpu_behavior": [
+    "`savepath` runs entirely on the host. If callers supply a GPU-resident string, RunMat gathers it back to CPU memory before resolving the target path. No acceleration provider hooks or kernels are required."
+  ]
+}

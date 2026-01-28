@@ -1,0 +1,150 @@
+{
+  "title": "ldivide",
+  "category": "math/elementwise",
+  "keywords": [
+    "ldivide",
+    "element-wise left division",
+    ".\\",
+    "gpu",
+    "implicit expansion"
+  ],
+  "summary": "Element-wise left division A .\\ B (computes B ./ A) with MATLAB-compatible broadcasting, complex support, and GPU fallbacks.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/ldivide.html"
+  ],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Prefers provider elem_div/scalar_div/scalar_rdiv hooks; gathers to host when shapes require implicit expansion or operands are unsupported."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::ldivide::tests::ldivide_scalar_numbers",
+    "integration": "builtins::math::elementwise::ldivide::tests::ldivide_row_column_broadcast",
+    "gpu": "builtins::math::elementwise::ldivide::tests::ldivide_gpu_pair_roundtrip",
+    "wgpu": "builtins::math::elementwise::ldivide::tests::ldivide_wgpu_matches_cpu_elementwise",
+    "like_gpu": "builtins::math::elementwise::ldivide::tests::ldivide_like_gpu_prototype_keeps_residency",
+    "like_host": "builtins::math::elementwise::ldivide::tests::ldivide_like_host_gathers_gpu_value",
+    "like_complex": "builtins::math::elementwise::ldivide::tests::ldivide_like_complex_prototype_yields_complex"
+  },
+  "description": "`ldivide(A, B)` (operator form `A .\\ B`) divides each element of `B` by the corresponding element of `A`, delivering MATLAB-compatible left-division semantics. It is equivalent to `B ./ A` but keeps argument order consistent with MATLAB source code and operator precedence.",
+  "behaviors": [
+    "Supports real, complex, logical, and character inputs; logical and character data are promoted to double precision before division.",
+    "Implicit expansion follows MATLAB rules: singleton dimensions expand automatically, while mismatched non-singleton extents raise MATLAB-compatible size errors.",
+    "Complex operands use the analytic continuation `B ./ A`, propagating `NaN` and `Inf` exactly as MATLAB does.",
+    "Empty shapes propagate cleanly—if the broadcasted output has a zero dimension, the result is empty with the expected shape.",
+    "Integer inputs promote to double precision, mirroring MATLAB’s numeric tower.",
+    "The optional `'like'` prototype makes the result adopt the residency (host or GPU) and numeric flavour of the prototype. Complex prototypes are honoured on the host today; real gpuArray prototypes keep the result on the device."
+  ],
+  "examples": [
+    {
+      "description": "Left-dividing a vector by a scalar",
+      "input": "A = 2;\nB = [4 6 8];\nQ = ldivide(A, B);",
+      "output": "Q = [2 3 4]"
+    },
+    {
+      "description": "Broadcasting between column divisors and row numerators",
+      "input": "A = (1:3)';         % column of divisors\nB = [10 20 40];     % row of numerators\nM = ldivide(A, B);  % implicit expansion",
+      "output": "M =\n   10.0000   20.0000   40.0000\n    5.0000   10.0000   20.0000\n    3.3333    6.6667   13.3333"
+    },
+    {
+      "description": "Element-wise left division of complex values",
+      "input": "A = [1+2i, 3-4i];\nB = [2-1i, -1+1i];\nZ = ldivide(A, B);",
+      "output": "Z =\n   0.0000 - 1.0000i   -0.2800 - 0.0400i"
+    },
+    {
+      "description": "Dividing character codes by a scalar",
+      "input": "A = 'ABC';\nB = 2;\ncodes = ldivide(A, B);",
+      "output": "codes = [0.0308 0.0303 0.0301]"
+    },
+    {
+      "description": "Computing reciprocals with `ldivide`",
+      "input": "A = [1 2 4 8];\nB = 1;\nR = ldivide(A, B);   % equivalent to 1 ./ A",
+      "output": "R = [1 0.5 0.25 0.125]"
+    },
+    {
+      "description": "Keeping results on the GPU with `'like'`",
+      "input": "proto = gpuArray.zeros(1, 1);\nA = gpuArray([2 4 8 16]);\nB = gpuArray([4 8 16 32]);\ndeviceResult = ldivide(A, B, 'like', proto);\nhostCheck = gather(deviceResult);",
+      "output": "deviceResult =\n  1x4 gpuArray\n    2  2  2  2\nhostCheck = [2 2 2 2]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `ldivide` support MATLAB implicit expansion?",
+      "answer": "Yes. Singleton dimensions expand automatically; otherwise incompatible shapes raise MATLAB-style errors."
+    },
+    {
+      "question": "What numeric type does `ldivide` return?",
+      "answer": "Real inputs return doubles; mixed or complex inputs return complex doubles. Logical and character inputs promote to double before division."
+    },
+    {
+      "question": "How does `ldivide` handle division by zero?",
+      "answer": "`finite ./ 0` yields signed infinities, and `0 ./ 0` becomes `NaN`, matching MATLAB and IEEE-754 behaviour."
+    },
+    {
+      "question": "Can I divide gpuArrays by host scalars?",
+      "answer": "Yes. Numeric scalars stay on device through `scalar_div`/`scalar_rdiv`. Non-numeric host scalars trigger a gather-then-divide fallback."
+    },
+    {
+      "question": "Does `ldivide` preserve gpuArray residency after a fallback?",
+      "answer": "If the runtime gathers to host (for example, due to implicit expansion), the intermediate stays on the host. Later computations may move it back when auto-offload deems it profitable, or you can request GPU residency explicitly with `'like'`."
+    },
+    {
+      "question": "How do I keep the result on the GPU?",
+      "answer": "Provide a real gpuArray prototype: `ldivide(A, B, 'like', gpuArray.zeros(1,1))`. The runtime re-uploads the host result when necessary."
+    },
+    {
+      "question": "How are empty arrays handled?",
+      "answer": "Empty operands propagate cleanly—the output shape is the broadcasted shape, and the data vector is empty."
+    },
+    {
+      "question": "Are integers and logicals supported?",
+      "answer": "Yes. Both promote to double precision before division so you get MATLAB-compatible numeric results (including `Inf` when dividing by zero)."
+    },
+    {
+      "question": "Can I mix real and complex operands?",
+      "answer": "Absolutely. Mixed cases return complex doubles with full MATLAB semantics."
+    }
+  ],
+  "links": [
+    {
+      "label": "times",
+      "url": "./times"
+    },
+    {
+      "label": "rdivide",
+      "url": "./rdivide"
+    },
+    {
+      "label": "mldivide",
+      "url": "./mldivide"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/ldivide.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/ldivide.rs"
+  },
+  "gpu_residency": "You usually do not need to call `gpuArray` manually. RunMat’s auto-offload planner keeps tensors on the GPU whenever provider kernels cover the operation. Explicit `gpuArray` / `gather` calls remain available for MATLAB compatibility; when a provider fallback happens, the runtime gathers to host, computes the MATLAB-accurate answer, and reapplies `'like'` residency requests automatically.",
+  "gpu_behavior": [
+    "When a gpuArray provider is active:\n\n1. If both operands are gpuArrays with identical shapes, RunMat calls the provider’s `elem_div` hook with `(B, A)` so the division runs entirely on the GPU. 2. If the divisor `A` is scalar (host or device) and the numerator `B` is a gpuArray, the runtime uses `scalar_div` to evaluate `B ./ a` on device memory. 3. If the numerator `B` is scalar and the divisor `A` is a gpuArray, `scalar_rdiv` performs `b ./ A` without leaving the GPU. 4. When shapes require implicit expansion—or the provider lacks the necessary kernels—RunMat gathers to the host, computes the MATLAB-accurate result, then reapplies `'like'` residency rules (including re-uploading to a gpuArray when requested). 5. The fusion planner treats `ldivide` as a fusible elementwise node, so adjacent elementwise producers and consumers can execute inside a single GPU pipeline or WGSL kernel, minimising redundant host↔device transfers."
+  ]
+}

@@ -1,0 +1,149 @@
+{
+  "title": "circshift",
+  "category": "array/shape",
+  "keywords": [
+    "circshift",
+    "circular shift",
+    "rotate array",
+    "gpu",
+    "cyclic shift"
+  ],
+  "summary": "Rotate arrays circularly along one or more dimensions.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64",
+      "i32",
+      "bool"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses the provider circshift hook when available; otherwise gathers once, rotates on the host, and re-uploads."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::circshift::tests",
+    "integration": "builtins::array::shape::circshift::tests::circshift_gpu_roundtrip"
+  },
+  "description": "`circshift(A, K)` rotates the elements of `A` circularly. Positive shifts move elements toward higher indices, wrapping values that fall off the end back to the beginning. Shifts can be specified per-dimension using vectors or paired with explicit dimension lists.",
+  "behaviors": [
+    "`circshift(A, k)` shifts by `k` positions along the first non-singleton dimension. Negative values shift in the opposite direction.",
+    "`circshift(A, shiftVec)` accepts a numeric vector that supplies a shift per dimension. Missing dimensions default to zero. Extra dimensions are treated as size-one axes, so they have no effect unless an explicit reshape added those dimensions previously.",
+    "`circshift(A, K, dims)` lets you target specific dimensions. `K` and `dims` must have the same length; each entry in `dims` is 1-based.",
+    "Works for numeric tensors, logical masks, complex arrays, string arrays, and character matrices. Character arrays only support dimensions one and two, mirroring MATLAB limitations.",
+    "Empty dimensions remain empty; shifting them is a no-op. Scalars are returned unchanged.",
+    "Shifts that are integer multiples of a dimension\u2019s extent leave that axis unchanged. RunMat reduces each shift modulo the axis length, matching MATLAB."
+  ],
+  "examples": [
+    {
+      "description": "Shifting matrix rows downward by one location",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nB = circshift(A, 1);",
+      "output": "B =\n     7     8     9\n     1     2     3\n     4     5     6"
+    },
+    {
+      "description": "Shifting columns left by two positions",
+      "input": "A = reshape(1:12, [3 4]);\nC = circshift(A, [0 -2]);",
+      "output": "C =\n     7    10     1     4\n     8    11     2     5\n     9    12     3     6"
+    },
+    {
+      "description": "Rotating a 3-D tensor along multiple dimensions",
+      "input": "T = reshape(1:8, [2 2 2]);\nU = circshift(T, [1 0 -1]);\nU(:, :, 1)\nU(:, :, 2)",
+      "output": "ans(:,:,1) =\n     6     8\n     5     7\n\nans(:,:,2) =\n     2     4\n     1     3"
+    },
+    {
+      "description": "Shifting along specific dimensions using the `dims` argument",
+      "input": "A = reshape(1:12, [3 4]);\nV = circshift(A, [2 -1], [1 2]);",
+      "output": "V =\n     6     7     8     5\n     9    10    11    12\n     3     4     1     2"
+    },
+    {
+      "description": "Rotating a character matrix to cycle through rows and columns",
+      "input": "C = ['r','u','n'; 'm','a','t'];\nR = circshift(C, [0 1]);",
+      "output": "R =\n    'nru'\n    'tma'"
+    },
+    {
+      "description": "Applying `circshift` to a gpuArray and keeping the result on the device",
+      "input": "G = gpuArray(reshape(1:12, [3 4]));\nH = circshift(G, [1 -2]);\nisgpuarray(H)",
+      "output": "ans = logical 1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Do `K` and `dims` need the same length?",
+      "answer": "Yes. When you supply the `dims` argument, the shift vector must have the same number of entries. Each shift is paired with the corresponding dimension."
+    },
+    {
+      "question": "Can I shift along dimensions that are currently size one?",
+      "answer": "You can, and the result matches MATLAB: the axis length is one so the shift has no visible effect."
+    },
+    {
+      "question": "How are negative shifts handled?",
+      "answer": "They rotate values toward lower indices. Internally RunMat reduces each shift modulo the axis length, so `-1` on a length-4 dimension is equivalent to `3`."
+    },
+    {
+      "question": "What happens with empty tensors?",
+      "answer": "The result remains empty with identical shape metadata. `circshift` never introduces new elements."
+    },
+    {
+      "question": "Are logical and string arrays supported?",
+      "answer": "Yes. Logical arrays stay logical, and string arrays preserve their individual strings while rotating their positions."
+    },
+    {
+      "question": "Can character arrays be shifted along the third dimension?",
+      "answer": "No. MATLAB character arrays are strictly two-dimensional; RunMat matches this restriction and raises an error if you request dimension three or higher."
+    },
+    {
+      "question": "Does `circshift` fuse with other GPU kernels?",
+      "answer": "When a provider supplies the hook, yes. Otherwise the rotation acts as a residency boundary in fused graphs."
+    },
+    {
+      "question": "How does `circshift` interact with complex numbers?",
+      "answer": "Real and imaginary parts move together. Scalars are unaffected, and arrays retain their complex entries without modification."
+    },
+    {
+      "question": "What if I pass non-integer shifts?",
+      "answer": "RunMat enforces MATLAB semantics: shifts must be finite integers. Fractional values raise an error."
+    },
+    {
+      "question": "Does the builtin allocate new GPU buffers?",
+      "answer": "Providers may reuse buffers internally, but from the user\u2019s perspective the result is a fresh gpuArray handle that preserves residency information."
+    }
+  ],
+  "links": [
+    {
+      "label": "`permute`",
+      "url": "./permute"
+    },
+    {
+      "label": "`rot90`",
+      "url": "./rot90"
+    },
+    {
+      "label": "`flip`",
+      "url": "./flip"
+    },
+    {
+      "label": "`gpuArray`",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "`gather`",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/shape/circshift.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/circshift.rs"
+  },
+  "gpu_residency": "No additional steps are required. RunMat\u2019s auto-offload planner keeps tensors on the GPU whenever the provider exposes native support. If a provider falls back to the host implementation, the runtime gathers and re-uploads the data transparently so subsequent operations can continue on the GPU. Explicit calls to `gpuArray` remain available for MATLAB compatibility but are not mandatory.",
+  "gpu_behavior": [
+    "When RunMat Accelerate is active, the runtime first asks the selected provider for a native `circshift` implementation. Providers that implement the hook perform the rotation entirely on the device, preserving residency metadata and enabling fusion with subsequent GPU kernels. If the hook is missing, RunMat downloads the tensor once, rotates it on the host using the same semantics, and uploads the result back to the GPU so downstream work continues without manual intervention."
+  ]
+}

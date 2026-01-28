@@ -1,0 +1,101 @@
+{
+  "title": "toc",
+  "category": "timing",
+  "keywords": [
+    "toc",
+    "timer",
+    "elapsed time",
+    "profiling",
+    "benchmark"
+  ],
+  "summary": "Read the elapsed time since the most recent tic or an explicit handle.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "toc always runs on the host CPU. GPU providers are not consulted."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::timing::toc::tests",
+    "integration": "builtins::timing::toc::tests"
+  },
+  "description": "`toc` returns the elapsed wall-clock time in seconds since the last matching `tic`, or since the `tic` handle you pass as an argument. It mirrors the stopwatch utilities that MATLAB users rely on for ad-hoc profiling and benchmarking.",
+  "behaviors": [
+    "`toc` without inputs pops the most recent `tic` from the stopwatch stack and returns the elapsed seconds.",
+    "`toc(t)` accepts a handle previously produced by `tic` and measures the time since that handle without altering the stack.",
+    "Calling `toc` before `tic` raises the MATLAB-compatible error identifier `MATLAB:toc:NoMatchingTic`.",
+    "Passing anything other than a finite, non-negative scalar handle raises `MATLAB:toc:InvalidTimerHandle`.",
+    "The stopwatch uses a monotonic host clock, so measurements are immune to wall-clock adjustments."
+  ],
+  "examples": [
+    {
+      "description": "Measuring elapsed time since the last tic",
+      "input": "tic;\npause(0.25);\nelapsed = toc;"
+    },
+    {
+      "description": "Using toc with an explicit tic handle",
+      "input": "token = tic;\nheavyComputation();\nelapsed = toc(token);"
+    },
+    {
+      "description": "Timing nested stages with toc",
+      "input": "tic;          % Outer stopwatch\nstage1();\ninner = tic;  % Nested stopwatch\nstage2();\nstage2Time = toc(inner);\ntotalTime = toc;"
+    },
+    {
+      "description": "Printing elapsed time without capturing output",
+      "input": "tic;\nlongRunningTask();\ntoc;   % Displays the elapsed seconds because the result is not assigned"
+    },
+    {
+      "description": "Measuring immediately with toc(tic)",
+      "input": "elapsed = toc(tic);  % Starts a timer and reads it right away"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What happens if I call `toc` before `tic`?",
+      "answer": "The builtin raises `MATLAB:toc:NoMatchingTic`, matching MATLAB's behaviour when no stopwatch start exists."
+    },
+    {
+      "question": "Does `toc` remove the matching `tic`?",
+      "answer": "Yes when called without arguments. The most-recent stopwatch entry is popped so nested timers unwind in order. When you pass a handle (`toc(t)`), the stack remains unchanged and you may reuse the handle multiple times."
+    },
+    {
+      "question": "Can I reuse a `tic` handle after calling `toc(t)`?",
+      "answer": "Yes. Handles are deterministic timestamps, so you can call `toc(handle)` multiple times or store the handle in structures for later inspection."
+    },
+    {
+      "question": "Does `toc` print output?",
+      "answer": "When you do not capture the result, the interpreter shows the elapsed seconds. Assigning the return value (or ending the statement with a semicolon) suppresses the display, just like in MATLAB."
+    },
+    {
+      "question": "Is `toc` affected by GPU execution or fusion?",
+      "answer": "No. The stopwatch uses the host's monotonic clock. GPU acceleration, fusion, and pipeline residency do not change the measured interval."
+    },
+    {
+      "question": "How accurate is the reported time?",
+      "answer": "`toc` relies on the same monotonic clock (`runmat_time::Instant`), typically offering microsecond precision on modern platforms. The actual resolution depends on your operating system."
+    }
+  ],
+  "links": [
+    {
+      "label": "tic",
+      "url": "./tic"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/timing/toc.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/timing/toc.rs"
+  },
+  "gpu_residency": "No. Timing utilities never touch GPU memory. You can freely combine `toc` with code that produces or consumes `gpuArray` values\u2014the stopwatch itself still executes on the CPU.",
+  "gpu_behavior": [
+    "The stopwatch lives entirely on the host. `toc` never transfers tensors or consults acceleration providers, so there are no GPU hooks to implement. Expressions that combine `toc` with GPU-resident data gather any numeric operands back to the CPU before evaluating the timer logic, and the builtin is excluded from fusion plans entirely."
+  ]
+}

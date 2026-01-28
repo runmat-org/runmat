@@ -1,0 +1,141 @@
+{
+  "title": "ifft2",
+  "category": "math/fft",
+  "keywords": [
+    "ifft2",
+    "inverse 2d fft",
+    "image reconstruction",
+    "symmetric",
+    "gpu"
+  ],
+  "summary": "Compute the two-dimensional inverse discrete Fourier transform (IDFT) of numeric or complex data.",
+  "references": [
+    "title: \"MATLAB ifft2 documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Runs two provider-backed ifft_dim passes when available; otherwise RunMat gathers to the host and performs the transform with rustfft."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::fft::ifft2::tests",
+    "integration": "builtins::math::fft::ifft2::tests::ifft2_gpu_roundtrip_matches_cpu"
+  },
+  "description": "`ifft2(X)` computes the two-dimensional inverse discrete Fourier transform (IDFT) of `X`. It undoes the effect of `fft2` by applying `ifft` along the first dimension and then along the second dimension, preserving MATLAB\u2019s column-major semantics.",
+  "behaviors": [
+    "`ifft2(X)` transforms along the first two dimensions whose sizes exceed one.",
+    "`ifft2(X, M, N)` zero-pads or truncates the spectrum to `M` rows and `N` columns before the inverse.",
+    "`ifft2(X, SIZE)` accepts a scalar or two-element vector describing the transform lengths.",
+    "`ifft2(..., 'symmetric')` discards tiny imaginary parts and returns a real matrix when the spectrum is conjugate-symmetric. `'nonsymmetric'` keeps the complex result.",
+    "Higher-dimensional inputs are processed slice-by-slice across trailing dimensions.",
+    "Empty sizes and zero padding mirror MATLAB behaviour, producing empty outputs when any requested length is zero."
+  ],
+  "examples": [
+    {
+      "description": "Reconstructing an image patch from its 2-D spectrum",
+      "input": "F = [10  -2  0  -2;\n     -4   0  0   0];\nx = ifft2(F);",
+      "output": "x =\n    1.0000    2.0000\n    3.0000    4.0000"
+    },
+    {
+      "description": "Zero-padding before the inverse transform",
+      "input": "F = fft2([1 0; 0 1], 4, 4);\nspatial = ifft2(F, 4, 4);"
+    },
+    {
+      "description": "Supplying transform lengths with a size vector",
+      "input": "Y = fft2(rand(3,4));\nX = ifft2(Y, [5 2]);   % pad rows to 5, truncate columns to 2"
+    },
+    {
+      "description": "Forcing a real-valued result with `'symmetric'`",
+      "input": "F = fft2([1 2; 3 4]);\nrealImage = ifft2(F, 'symmetric');"
+    },
+    {
+      "description": "Running `ifft2` on `gpuArray` inputs",
+      "input": "G = gpuArray(fft2(peaks(64)));\nspatial = ifft2(G);\nresult = gather(spatial);"
+    },
+    {
+      "description": "Recovering each slice of a volume",
+      "input": "spectra = fft2(rand(16, 16, 10));\nvolume = ifft2(spectra);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Is `ifft2(X)` equivalent to `ifft(ifft(X, [], 1), [], 2)`?",
+      "answer": "Yes. RunMat literally performs two sequential 1-D inverse transforms so the behaviour matches MATLAB exactly."
+    },
+    {
+      "question": "How do zero-length sizes behave?",
+      "answer": "Passing `0` for either transform length produces an output with zero elements along that dimension, just like MATLAB."
+    },
+    {
+      "question": "Can I mix `[]` with explicit sizes (e.g., `ifft2(X, [], 64)`)?",
+      "answer": "Yes. `[]` leaves that dimension unchanged while the other argument controls padding or truncation."
+    },
+    {
+      "question": "What does the `'symmetric'` flag do?",
+      "answer": "It tells RunMat to coerce the result to real values, assuming the spectrum is conjugate-symmetric. Imaginary parts are dropped."
+    },
+    {
+      "question": "What happens when the input is real-valued?",
+      "answer": "RunMat promotes the data to complex with zero imaginary parts before applying the inverse. The output can still be coerced to real with `'symmetric'`."
+    },
+    {
+      "question": "Will `ifft2` run on the GPU automatically?",
+      "answer": "Yes when the active provider exposes `ifft_dim`. Otherwise the runtime gathers to the host and evaluates the inverse using `rustfft`."
+    },
+    {
+      "question": "Does `ifft2` normalise the result?",
+      "answer": "Yes. The builtin divides by the product of the transform lengths so that `ifft2(fft2(X))` reproduces `X`."
+    },
+    {
+      "question": "Can I pass `gpuArray` size vectors or symmetry flags?",
+      "answer": "No. Length arguments must be host scalars or vectors, and the symmetry flag must be a host string, mirroring MATLAB\u2019s restrictions."
+    },
+    {
+      "question": "How are higher-dimensional arrays handled?",
+      "answer": "Transformations are applied to every 2-D slice defined by the first two dimensions; trailing dimensions are preserved unchanged."
+    },
+    {
+      "question": "Does `'nonsymmetric'` change the result?",
+      "answer": "It simply states the default behaviour (return complex outputs) but is accepted for MATLAB compatibility."
+    }
+  ],
+  "links": [
+    {
+      "label": "fft2",
+      "url": "./fft2"
+    },
+    {
+      "label": "ifft",
+      "url": "./ifft"
+    },
+    {
+      "label": "fft",
+      "url": "./fft"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "Open a ticket",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` manually. RunMat\u2019s native acceleration layer keeps intermediate tensors on the GPU whenever the provider implements `ifft_dim`. If the provider lacks that hook (or detects an unsupported length), RunMat gathers the input once, executes the inverse transform on the CPU with `rustfft`, and returns a MATLAB-compatible result automatically."
+}

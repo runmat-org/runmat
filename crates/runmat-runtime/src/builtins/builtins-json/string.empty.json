@@ -1,0 +1,156 @@
+{
+  "title": "string.empty",
+  "category": "strings/core",
+  "keywords": [
+    "string.empty",
+    "empty string array",
+    "preallocate text",
+    "size vector",
+    "0-by-N",
+    "'like'"
+  ],
+  "summary": "Construct empty string arrays with MATLAB-compatible dimension semantics and 'like' prototypes.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/string.empty.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Creates host string arrays; GPU tensors are neither read nor written."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::core::string_empty::tests"
+  },
+  "description": "`string.empty` constructs an empty string array. By default it returns a `0×0` array, and when you specify additional dimensions they define the trailing extents while the leading dimension remains zero, ensuring the total element count is zero. This mirrors MATLAB's static `string.empty` method.",
+  "behaviors": [
+    "`string.empty` with no arguments yields a `0×0` string array.",
+    "`string.empty(n)` produces a `0×n` array. The leading dimension is fixed at `0`, so the result is still empty even if `n > 0`.",
+    "`string.empty(m, n, p, ...)` returns a `0×n×p×…` array. All trailing dimensions are honoured while the leading dimension remains zero.",
+    "You can provide a single size vector such as `string.empty([0 5 3])`; the first entry is ignored beyond confirming it is non-negative, and the remaining entries set the trailing dimensions.",
+    "`string.empty(___, 'like', prototype)` copies the trailing dimensions from `prototype` when you do not supply explicit sizes. Any dimensions you pass explicitly take precedence. GPU-resident prototypes are automatically gathered so their shape can be inspected.",
+    "Size inputs must be finite, real, non-negative integers. Fractional or negative values produce a MATLAB-compatible error.",
+    "The result always resides on the host; there is no GPU counterpart for string arrays."
+  ],
+  "examples": [
+    {
+      "description": "Creating a 0x0 string array",
+      "input": "S = string.empty;",
+      "output": "S =\n  0x0 string array"
+    },
+    {
+      "description": "Building a 0xN string row vector",
+      "input": "row = string.empty(5);",
+      "output": "row =\n  0x5 string array"
+    },
+    {
+      "description": "Creating a 0xN string array with extra dimensions",
+      "input": "cube = string.empty(0, 4, 3);",
+      "output": "cube =\n  0x4x3 string array"
+    },
+    {
+      "description": "Using a size vector with string.empty",
+      "input": "sz = [0 2 5];\ngrid = string.empty(sz);",
+      "output": "grid =\n  0x2x5 string array"
+    },
+    {
+      "description": "Resetting a preallocated string array to empty",
+      "input": "A = strings(3, 2);  % Some application-specific strings\nA = string.empty(size(A));",
+      "output": "A =\n  0x2 string array"
+    },
+    {
+      "description": "Preserving higher-dimensional layout while empty",
+      "input": "layout = string.empty([2 0 4 6]);",
+      "output": "layout =\n  0x0x4x6 string array"
+    },
+    {
+      "description": "Reusing the shape of an existing array with `'like'`",
+      "input": "proto = strings(3, 2);\nsameCols = string.empty('like', proto);",
+      "output": "sameCols =\n  0x2 string array"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why is the first dimension always zero?",
+      "answer": "MATLAB defines `classname.empty` so that the leading dimension is zero, guaranteeing the result contains no elements. RunMat mirrors this rule for perfect compatibility."
+    },
+    {
+      "question": "Can I request negative or fractional dimensions?",
+      "answer": "No. Dimensions must be finite, non-negative integers. Any other input raises a descriptive error."
+    },
+    {
+      "question": "Does `string.empty(n)` create space for `n` elements?",
+      "answer": "No. It returns a `0×n` array, which still has zero elements. Use `strings(n)` if you want an array of string scalars that you can fill later."
+    },
+    {
+      "question": "Can I combine scalars and size vectors?",
+      "answer": "Yes. Calls like `string.empty([0 3], 5)` flatten to `string.empty(0, 3, 5)` internally."
+    },
+    {
+      "question": "What does the `'like'` option do?",
+      "answer": "`'like', prototype` copies the trailing dimensions from `prototype` when you omit explicit sizes. The first dimension is still forced to `0`, so the result remains empty. The prototype is gathered automatically if it resides on the GPU."
+    },
+    {
+      "question": "Does the result share storage with existing arrays?",
+      "answer": "No. Every call returns a new handle. Because the array is empty, the data buffer is an empty vector and consumes negligible memory."
+    },
+    {
+      "question": "Is there a GPU-accelerated variant?",
+      "answer": "No. String arrays live on the host in RunMat, and this builtin never touches GPU memory."
+    },
+    {
+      "question": "How do I obtain a 0x0 string array quickly?",
+      "answer": "Call `string.empty` with no arguments. It is equivalent to `strings(0)` but makes the intention explicit."
+    },
+    {
+      "question": "Can I use `size` output directly?",
+      "answer": "Yes. Expressions like `string.empty(size(existingArray))` are supported. The first element of the size vector is ignored when constructing the new array so that the first dimension is zero."
+    },
+    {
+      "question": "What happens if I pass an empty array as the size vector?",
+      "answer": "`string.empty([])` returns the canonical `0×0` string array, just like calling `string.empty` with no arguments."
+    },
+    {
+      "question": "Does `string.empty` ever throw away extra arguments?",
+      "answer": "Only when they cannot be interpreted as dimensions. In that case RunMat throws an error rather than guessing."
+    }
+  ],
+  "links": [
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "strings",
+      "url": "./strings"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    },
+    {
+      "label": "zeros",
+      "url": "./zeros"
+    },
+    {
+      "label": "ones",
+      "url": "./ones"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/string.empty.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/string.empty.rs"
+  },
+  "gpu_residency": "No. `string.empty` allocates metadata for an empty string array entirely on the host. Because the result contains no elements and string scalars are host-only, there is nothing to transfer to or from the GPU. Using `gpuArray` with `string.empty` has no effect and is unnecessary.",
+  "gpu_behavior": [
+    "`string.empty` does not allocate or interact with GPU memory. It is a pure host constructor that instantly returns the requested shape metadata and an empty data buffer. When the runtime is executing under RunMat Accelerate, no provider hooks are invoked. `'like'` prototypes that happen to live on the GPU are gathered to the host before their shape is examined."
+  ]
+}

@@ -1,0 +1,143 @@
+{
+  "title": "ctranspose",
+  "category": "math/linalg/ops",
+  "keywords": [
+    "ctranspose",
+    "conjugate transpose",
+    "hermitian",
+    "gpu",
+    "matrix transpose"
+  ],
+  "summary": "Swap the first two dimensions of arrays and conjugate complex values.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/ctranspose.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Invokes provider transpose/permute plus unary_conj hooks when available; otherwise gathers to host, applies the conjugate transpose, and re-uploads."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::ops::ctranspose::tests",
+    "integration": "builtins::math::linalg::ops::ctranspose::tests::ctranspose_gpu_roundtrip",
+    "gpu": "builtins::math::linalg::ops::ctranspose::tests::ctranspose_wgpu_matches_cpu"
+  },
+  "description": "`B = ctranspose(A)` (or `B = A'`) flips the first two dimensions of `A` **and** conjugates complex values. Real-valued inputs therefore behave like `transpose`, while complex inputs receive Hermitian conjugation.",
+  "behaviors": [
+    "Works for scalars, vectors, matrices, and N-D arrays; only the first two axes are swapped.",
+    "Real numeric, logical, and character data are not changed by conjugation.",
+    "Complex values receive element-wise conjugation after the transpose (`(a + bi)' = a - bi`).",
+    "Character arrays and cell arrays preserve their types; `ctranspose` simply rearranges entries.",
+    "String scalars are passed through unchanged; string arrays transpose like MATLAB.",
+    "Empty arrays and singleton dimensions follow MATLAB's column-major semantics."
+  ],
+  "examples": [
+    {
+      "description": "Conjugate transpose of a complex matrix",
+      "input": "Z = [1+2i 3-4i; 5+0i 6-7i];\nH = ctranspose(Z);",
+      "output": "H =\n   1 - 2i   5 - 0i\n   3 + 4i   6 + 7i"
+    },
+    {
+      "description": "Conjugate transpose of a real matrix equals the plain transpose",
+      "input": "A = [1 2 3; 4 5 6];\nB = ctranspose(A);",
+      "output": "B =\n     1     4\n     2     5\n     3     6"
+    },
+    {
+      "description": "Conjugate transpose turns row vectors into column vectors",
+      "input": "row = [1-2i, 3+4i, 5];\ncol = ctranspose(row);\nsize(col)",
+      "output": "ans = [3 1]"
+    },
+    {
+      "description": "Conjugate transpose of a complex scalar",
+      "input": "z = 2 + 3i;\nresult = ctranspose(z);",
+      "output": "result = 2 - 3i;"
+    },
+    {
+      "description": "Conjugate transpose of text data preserves characters",
+      "input": "C = ['r' 'u' 'n'; 'm' 'a' 't'];\nCT = ctranspose(C);",
+      "output": "CT =\n    'rm'\n    'ua'\n    'nt'"
+    },
+    {
+      "description": "Conjugate transpose of a gpuArray without leaving the device",
+      "input": "G = gpuArray(rand(1024, 64) + 1i * rand(1024, 64));\nGT = ctranspose(G);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `ctranspose` different from `transpose`?",
+      "answer": "`transpose` (`A.'`) swaps dimensions without conjugation; `ctranspose` (`A'`) also conjugates complex values. For purely real data they are identical."
+    },
+    {
+      "question": "Does `ctranspose` change logical or character arrays?",
+      "answer": "Only their layout changes. Values remain logical or character, and conjugation has no effect."
+    },
+    {
+      "question": "What about higher-dimensional arrays?",
+      "answer": "Only the first two axes are swapped; trailing dimensions stay in-place, matching MATLAB."
+    },
+    {
+      "question": "Does the result share storage with the input?",
+      "answer": "No. `ctranspose` materialises a fresh array, although fusion may eliminate the copy in optimised pipelines."
+    },
+    {
+      "question": "How are complex tensors handled on the GPU today?",
+      "answer": "Complex gpuArray support is still in flight. When complex data appears, RunMat gathers to the host, applies the conjugate transpose, and re-uploads if needed."
+    },
+    {
+      "question": "Will `ctranspose` fuse with neighbouring kernels?",
+      "answer": "Conjugate transposes currently act as fusion boundaries so that shape changes are visible to downstream kernels."
+    },
+    {
+      "question": "Can I rely on `ctranspose` inside linear-algebra routines (e.g., Hermitian products)?",
+      "answer": "Yes. The builtin mirrors MATLAB semantics precisely and is safe to use inside idioms like `A' * A`."
+    },
+    {
+      "question": "What error do I get for unsupported types?",
+      "answer": "Non-numeric objects (e.g., structs) raise `ctranspose: unsupported input type ...`, matching MATLAB's strict type checks."
+    }
+  ],
+  "links": [
+    {
+      "label": "transpose",
+      "url": "./transpose"
+    },
+    {
+      "label": "conj",
+      "url": "./conj"
+    },
+    {
+      "label": "mtimes",
+      "url": "./mtimes"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/linalg/ops/ctranspose.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/ctranspose.rs"
+  },
+  "gpu_residency": "No additional residency management is required. If the planner keeps your data on the GPU, `ctranspose` honours that residency and either executes on the device (when hooks are present) or performs a gather/transpose/upload round-trip automatically.",
+  "gpu_behavior": [
+    "**Provider support:** If the backend exposes both `transpose` (or `permute`) and `unary_conj`, the entire operation happens on the device without a gather.",
+    "**Partial hooks:** If the transpose succeeds but conjugation fails, RunMat falls back to the host path while logging a warning so users know their backend is incomplete.",
+    "**No hooks:** RunMat gathers the tensor, applies the conjugate transpose on the CPU, and re-uploads the result when possible so downstream kernels can keep running on the GPU.\n\nCurrent providers operate on real double-precision tensors; complex GPU tensors will gather to the host until native complex layouts are implemented."
+  ]
+}

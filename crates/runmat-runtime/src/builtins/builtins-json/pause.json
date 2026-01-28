@@ -1,0 +1,112 @@
+{
+  "title": "pause",
+  "category": "timing",
+  "keywords": [
+    "pause",
+    "sleep",
+    "wait",
+    "delay",
+    "press any key",
+    "execution"
+  ],
+  "summary": "Suspend execution until the user presses a key or a specified time elapses.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "pause executes entirely on the host CPU. GPU providers are never consulted and no residency changes occur."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::timing::pause::tests",
+    "integration": "builtins::timing::pause::tests::pause_gpu_duration_gathered"
+  },
+  "description": "`pause` suspends execution and mirrors MATLAB's timing semantics:\n\n- `pause` with no inputs waits for keyboard input (press any key) while pause mode is `on`. - `pause(t)` delays execution for `t` seconds (non-negative numeric scalar). `t = Inf` behaves like `pause` with no arguments. - `pause('on')` and `pause('off')` enable or disable pausing globally, returning the previous state (`'on'` or `'off'`). - `pause('query')` reports the current state (`'on'` or `'off'`). - `pause([])` is treated as `pause` with no arguments. - When pause mode is `off`, delays and key waits complete immediately.\n\nInvalid usages (negative times, non-scalar numeric inputs, or unknown strings) raise `MATLAB:pause:InvalidInputArgument`, matching MATLAB diagnostics.",
+  "behaviors": [],
+  "examples": [
+    {
+      "description": "Pausing for a fixed duration",
+      "input": "tic;\npause(0.05);     % wait 50 milliseconds\nelapsed = toc;"
+    },
+    {
+      "description": "Waiting for user input mid-script",
+      "input": "disp(\"Press any key to continue the demo...\");\npause;           % waits until the user presses a key (while pause is 'on')"
+    },
+    {
+      "description": "Temporarily disabling pauses in automated runs",
+      "input": "state = pause('off');   % returns previous state so it can be restored\ncleanup = onCleanup(@() pause(state));  % ensure state is restored\npause(1.0);             % returns immediately because pause is disabled"
+    },
+    {
+      "description": "Querying the current pause mode",
+      "input": "current = pause('query');   % returns 'on' or 'off'"
+    },
+    {
+      "description": "Using empty input to rely on the default behaviour",
+      "input": "pause([]);   % equivalent to calling pause with no arguments"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `pause` block forever when standard input is not interactive?",
+      "answer": "No. When RunMat detects a non-interactive standard input (for example, during automated tests), `pause` completes immediately even in `'on'` mode."
+    },
+    {
+      "question": "What happens if I call `pause` with a negative duration?",
+      "answer": "RunMat raises `MATLAB:pause:InvalidInputArgument`, matching MATLAB."
+    },
+    {
+      "question": "Does `pause` accept logical or integer values?",
+      "answer": "Yes. Logical and integer inputs are converted to doubles before evaluating the delay."
+    },
+    {
+      "question": "Can I force pausing off globally?",
+      "answer": "Use `pause('off')` to disable pauses. Record the return value so you can restore the prior state with `pause(previousState)`."
+    },
+    {
+      "question": "Does `pause('query')` change the pause state?",
+      "answer": "No. It simply reports the current mode (`'on'` or `'off'`)."
+    },
+    {
+      "question": "Is `pause` affected by GPU fusion or auto-offload?",
+      "answer": "No. The builtin runs on the host regardless of fusion plans or acceleration providers."
+    },
+    {
+      "question": "What is the default pause state?",
+      "answer": "`'on'`. Every RunMat session starts with pausing enabled."
+    },
+    {
+      "question": "Can I pass a gpuArray as the duration?",
+      "answer": "Yes. RunMat gathers the scalar duration to the host before evaluating the delay."
+    }
+  ],
+  "links": [
+    {
+      "label": "tic",
+      "url": "./tic"
+    },
+    {
+      "label": "toc",
+      "url": "./toc"
+    },
+    {
+      "label": "timeit",
+      "url": "./timeit"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/timing/pause.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/timing/pause.rs"
+  },
+  "gpu_residency": "`pause` never runs on the GPU. When you pass GPU-resident values (for example, `pause(gpuArray(0.5))`), RunMat automatically gathers them to the host before evaluating the delay. No residency changes occur otherwise, and acceleration providers do not receive any callbacks.",
+  "gpu_behavior": [
+    "`pause` never runs on the GPU. When you pass GPU-resident values (for example, `pause(gpuArray(0.5))`), RunMat automatically gathers them to the host before evaluating the delay. No residency changes occur otherwise, and acceleration providers do not receive any callbacks."
+  ]
+}

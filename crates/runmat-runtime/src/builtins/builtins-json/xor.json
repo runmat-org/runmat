@@ -1,0 +1,118 @@
+{
+  "title": "xor",
+  "category": "logical/bit",
+  "keywords": [
+    "logical xor",
+    "exclusive or",
+    "boolean xor",
+    "MATLAB xor",
+    "gpuArray xor"
+  ],
+  "summary": "Element-wise logical XOR for scalars, arrays, and gpuArray values.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Runs entirely on the GPU when the active provider implements `logical_xor`; otherwise inputs gather back to the host automatically."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::bit::xor::tests",
+    "integration": "builtins::logical::bit::xor::tests::xor_gpu_roundtrip",
+    "gpu": "builtins::logical::bit::xor::tests::xor_wgpu_matches_host_path"
+  },
+  "description": "`xor(A, B)` returns the element-wise logical exclusive OR of its inputs. The result is `true` exactly when one, and only one, operand evaluates to non-zero (with `NaN` counting as non-zero). Outputs are logical scalars when the broadcasted shape has a single element, or logical arrays otherwise.",
+  "behaviors": [
+    "Accepts logical, numeric, complex, and character arrays; character code points of zero evaluate to `false`.",
+    "Supports MATLAB-style implicit expansion so scalars and singleton dimensions broadcast automatically.",
+    "Propagates empty dimensions: if a broadcasted axis has length `0`, the output is an empty logical array with the same shape.",
+    "Treats `NaN` values as `true`, matching MATLAB's element-wise logical semantics.",
+    "Keeps `gpuArray` inputs on device when the active provider exposes the `logical_xor` hook; otherwise the runtime gathers to host transparently."
+  ],
+  "examples": [
+    {
+      "description": "Checking if exactly one condition is true",
+      "input": "result = xor(true, false)",
+      "output": "result =\n  logical\n     1"
+    },
+    {
+      "description": "Performing XOR on numeric arrays element-wise",
+      "input": "A = [1 0 2 0];\nB = [3 4 0 0];\nC = xor(A, B)",
+      "output": "C =\n  1×4 logical array\n     0     1     1     0"
+    },
+    {
+      "description": "Applying XOR with implicit expansion against a scalar",
+      "input": "mask = [1; 0; 3; 0];\nflag = xor(mask, 1)",
+      "output": "flag =\n  4×1 logical array\n     0\n     1\n     0\n     1"
+    },
+    {
+      "description": "Comparing character arrays with XOR",
+      "input": "lhs = ['R' 'u' 0];\nrhs = ['R' 0 'n'];\ndiff = xor(lhs, rhs)",
+      "output": "diff =\n  1×3 logical array\n     0     1     1"
+    },
+    {
+      "description": "Running `xor` directly on `gpuArray` inputs",
+      "input": "G1 = gpuArray([0 2 0 4]);\nG2 = gpuArray([1 0 3 4]);\ndeviceResult = xor(G1, G2);\nhostResult = gather(deviceResult)",
+      "output": "deviceResult =\n  1×4 gpuArray logical array\n     1     1     1     0\nhostResult =\n  1×4 logical array\n     1     1     1     0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `xor` return logical values?",
+      "answer": "Yes. The result is a logical scalar (`true`/`false`) when the broadcasted shape contains exactly one element; otherwise the function returns a logical array. On the GPU the kernel writes `0.0`/`1.0` elements, and the runtime converts them back to logical values when you gather."
+    },
+    {
+      "question": "How are `NaN` values handled?",
+      "answer": "`NaN` counts as `true`. For example, `xor(NaN, 5)` returns `false` because both operands evaluate to non-zero, whereas `xor(NaN, 0)` returns `true`."
+    },
+    {
+      "question": "Is implicit expansion supported?",
+      "answer": "Yes. The inputs follow MATLAB-style implicit expansion rules: dimensions of length `1` broadcast across the other input. Fully incompatible shapes raise a size-mismatch error."
+    },
+    {
+      "question": "Can I use `xor` with complex numbers?",
+      "answer": "Yes. Real or complex inputs return `true` when exactly one operand has a non-zero real or imaginary component. For example, `xor(0 + 0i, 0 + 2i)` returns `true`, while `xor(1 + 0i, 0 + 2i)` returns `false`."
+    },
+    {
+      "question": "What happens when only one input is a `gpuArray`?",
+      "answer": "RunMat promotes the other input to the GPU before dispatch when the auto-offload planner decides it is profitable. If the provider lacks a device implementation, both operands gather to host automatically and the logical result executes on the CPU."
+    }
+  ],
+  "links": [
+    {
+      "label": "and",
+      "url": "./and"
+    },
+    {
+      "label": "or",
+      "url": "./or"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/logical/bit/xor.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/bit/xor.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's native auto-offload logic moves data to the GPU when a fused expression benefits from device execution, and results stay resident until you gather them or the planner needs host access. Call `gpuArray` only when you want to seed residency manually, or when you are porting MATLAB code that already uses explicit device transfers.",
+  "gpu_behavior": [
+    "When both operands reside on the GPU and the active provider implements the `logical_xor` hook, RunMat lowers the call into a device kernel that writes `0` or `1` for each element. The fusion planner treats `xor` as an element-wise operation, so fused expressions (for example, `xor(A > 0, B)`) stay on device without intermediate gathers. The native auto-offload planner also recognizes the builtin's `elementwise` tag, promoting mixed CPU/GPU operands to the active device when it is profitable. If the provider lacks the hook, the runtime gathers the inputs to host memory automatically and executes the CPU implementation instead of failing."
+  ]
+}

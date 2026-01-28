@@ -1,0 +1,147 @@
+{
+  "title": "tanh",
+  "category": "math/trigonometry",
+  "keywords": [
+    "tanh",
+    "hyperbolic tangent",
+    "trigonometry",
+    "gpu",
+    "elementwise"
+  ],
+  "summary": "Hyperbolic tangent of scalars, vectors, matrices, complex numbers, or character arrays with MATLAB broadcasting and GPU acceleration.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Prefers provider unary_tanh hooks; falls back to the host path when a provider is unavailable or cannot service the operand type."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::trigonometry::tanh::tests",
+    "integration": "builtins::math::trigonometry::tanh::tests::tanh_gpu_provider_roundtrip"
+  },
+  "description": "`y = tanh(x)` evaluates the hyperbolic tangent of each element in `x`, preserving MATLAB's column-major layout and broadcasting rules across scalars, arrays, and tensors.",
+  "behaviors": [
+    "Operates on scalars, vectors, matrices, and N-D tensors with MATLAB-compatible implicit expansion.",
+    "Logical and integer inputs are promoted to double precision before evaluation so downstream arithmetic keeps MATLAB's numeric semantics.",
+    "Complex values follow the analytic extension `tanh(a + bi) = sinh(a + bi) / cosh(a + bi)`, propagating `NaN`/`Inf` components component-wise.",
+    "Character arrays are interpreted through their Unicode code points and return dense double arrays that mirror MATLAB's behavior.",
+    "Inputs that already live on the GPU stay resident when the provider implements `unary_tanh`; otherwise RunMat gathers to the host, computes, and reapplies residency hints for later operations.",
+    "Empty inputs and singleton dimensions are preserved without introducing extraneous allocations.",
+    "String and string-array arguments raise descriptive errors to match MATLAB's numeric-only contract for the hyperbolic family."
+  ],
+  "examples": [
+    {
+      "description": "Hyperbolic tangent of a real scalar",
+      "input": "y = tanh(1);",
+      "output": "y = 0.7616"
+    },
+    {
+      "description": "Applying `tanh` to a symmetric vector",
+      "input": "x = linspace(-2, 2, 5);\ny = tanh(x);",
+      "output": "y = [-0.9640  -0.7616         0   0.7616   0.9640]"
+    },
+    {
+      "description": "Evaluating `tanh` on a matrix in GPU memory",
+      "input": "G = gpuArray([0    0.5; 1.0  1.5]);\nresult_gpu = tanh(G);\nresult = gather(result_gpu);",
+      "output": "result =\n         0    0.4621\n    0.7616    0.9051"
+    },
+    {
+      "description": "Computing `tanh` for complex angles",
+      "input": "z = 0.5 + 1.0i;\nw = tanh(z);",
+      "output": "w = 1.0428 + 0.8069i"
+    },
+    {
+      "description": "Converting character codes via `tanh`",
+      "input": "c = tanh('ABC');",
+      "output": "c = [1.0000  1.0000  1.0000]"
+    },
+    {
+      "description": "Preserving empty array shapes",
+      "input": "E = zeros(0, 3);\nout = tanh(E);",
+      "output": "out = zeros(0, 3)"
+    },
+    {
+      "description": "Stabilising activation functions",
+      "input": "inputs = [-3 -1 0 1 3];\nactivations = tanh(inputs / 2);",
+      "output": "activations = [-0.9051  -0.4621         0   0.4621   0.9051]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I reach for `tanh`?",
+      "answer": "Use `tanh` for hyperbolic tangent evaluations\u2014common in signal processing, numerical solvers, and neural-network activations thanks to its bounded output."
+    },
+    {
+      "question": "Does `tanh` support complex numbers?",
+      "answer": "Yes. RunMat mirrors MATLAB by evaluating `tanh(z) = sinh(z) / cosh(z)` for complex `z`, producing correct real and imaginary parts while propagating `NaN`/`Inf` values."
+    },
+    {
+      "question": "How does the GPU fallback work?",
+      "answer": "If the provider lacks `unary_tanh`, RunMat gathers the tensor to host memory, computes the result, and reapplies residency choices so downstream GPU consumers still see device-backed tensors when appropriate."
+    },
+    {
+      "question": "Can `tanh` appear in fused GPU kernels?",
+      "answer": "Absolutely. The fusion planner emits WGSL kernels that inline `tanh`, and providers can supply custom fused pipelines for even higher performance."
+    },
+    {
+      "question": "How does `tanh` treat logical arrays?",
+      "answer": "Logical arrays are promoted to `0.0` or `1.0` doubles before evaluation, matching MATLAB's behavior for the hyperbolic family."
+    },
+    {
+      "question": "What happens with empty or singleton dimensions?",
+      "answer": "Shapes are preserved. Empty inputs return empty outputs, and singleton dimensions remain intact so downstream broadcasting behaves as expected."
+    },
+    {
+      "question": "Do I need to worry about numerical overflow?",
+      "answer": "`tanh` saturates towards \u00b11 for large-magnitude real inputs, providing stable results. Complex poles can still yield infinities, mirroring MATLAB."
+    },
+    {
+      "question": "Can I differentiate `tanh` in RunMat?",
+      "answer": "Yes. The autograd infrastructure recognises `tanh` as a primitive and records it on the reverse-mode tape for native gradients once acceleration is enabled."
+    }
+  ],
+  "links": [
+    {
+      "label": "sinh",
+      "url": "./sinh"
+    },
+    {
+      "label": "cosh",
+      "url": "./cosh"
+    },
+    {
+      "label": "atanh",
+      "url": "./atanh"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/trigonometry/tanh.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/tanh.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. The fusion planner keeps tensors on the GPU whenever the active provider exposes the necessary kernels (such as `unary_tanh`). Manual `gpuArray` / `gather` calls remain supported for MATLAB compatibility or when you need to pin residency before interacting with external code.",
+  "gpu_behavior": [
+    "With RunMat Accelerate active, tensors remain on the device and execute through the provider's `unary_tanh` hook (or a fused elementwise kernel) without leaving GPU memory.",
+    "If the provider declines the operation\u2014for example, when it lacks the hook for the active precision\u2014RunMat transparently gathers to the host, computes the result, and reapplies the requested residency rules.",
+    "Fusion planning keeps neighbouring elementwise operators grouped, reducing host\u2194device transfers even when an intermediate fallback occurs."
+  ]
+}

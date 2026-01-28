@@ -1,0 +1,146 @@
+{
+  "title": "range",
+  "category": "array/creation",
+  "keywords": [
+    "range",
+    "max",
+    "min",
+    "spread",
+    "omitnan",
+    "gpu"
+  ],
+  "summary": "Compute the difference between the maximum and minimum values (max - min).",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": true,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Uses provider min/max reductions when available; falls back to the host when omitnan is requested or when multi-dimension reductions are unsupported."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::range::tests",
+    "integration": "builtins::array::creation::range::tests::range_gpu_provider_roundtrip",
+    "gpu": "builtins::array::creation::range::tests::range_wgpu_dim2_matches_cpu"
+  },
+  "description": "`range(X)` returns the span (maximum minus minimum) of the elements in `X`. For arrays, the calculation happens along the first non-singleton dimension unless you specify one. The output keeps MATLAB's column-major shape conventions.",
+  "behaviors": [
+    "Operates on scalars, vectors, matrices, and N-D tensors.",
+    "`range(X)` measures the spread along the first non-singleton dimension.",
+    "`range(X, dim)` targets a specific dimension.",
+    "`range(X, vecdim)` reduces across multiple dimensions at once.",
+    "`range(X, 'all')` collapses all elements to a single scalar result.",
+    "`range(___)` is equivalent to `max(___) - min(___)` over the requested slice.",
+    "`vecdim` accepts a row or column vector of positive integers; duplicate entries are ignored.",
+    "`range(___, 'omitnan')` ignores `NaN` values (resulting in `NaN` if a slice has no finite values).",
+    "`range(___, 'includenan')` (default) returns `NaN` for any slice containing `NaN`.",
+    "Works with `gpuArray` inputs; the runtime keeps residency on the GPU when provider hooks are available."
+  ],
+  "examples": [
+    {
+      "description": "Measuring column-wise range of a matrix",
+      "input": "A = [1 4 2; 3 7 5];\nspread = range(A);",
+      "output": "% Each column's maximum minus minimum\nspread = [2 3 3];"
+    },
+    {
+      "description": "Selecting a dimension explicitly",
+      "input": "A = [1 4 2; 3 7 5];\nrow_spread = range(A, 2);",
+      "output": "row_spread = [3; 4];"
+    },
+    {
+      "description": "Collapsing all elements with 'all'",
+      "input": "temperatures = [68 72 75; 70 74 78];\noverall = range(temperatures, 'all');",
+      "output": "overall = 10;"
+    },
+    {
+      "description": "Ignoring NaNs when computing range",
+      "input": "samples = [2 NaN 5; 4 6 NaN];\nspread = range(samples, 1, 'omitnan');",
+      "output": "spread = [2 0 0];"
+    },
+    {
+      "description": "Keeping gpuArray results on the device",
+      "input": "G = gpuArray([1 10 3; 2 8 4]);\ncolumn_spread = range(G);\ngather(column_spread);",
+      "output": "ans =\n     1     2     1"
+    },
+    {
+      "description": "Handling higher-dimensional inputs",
+      "input": "data = reshape(1:24, [3, 4, 2]);\nslice_spread = range(data, [1 2]);",
+      "output": "slice_spread(:,:,1) =\n    11\n\nslice_spread(:,:,2) =\n    11"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does `range(X)` return for scalars?",
+      "answer": "The range of a scalar is always `0`, because the maximum and minimum coincide."
+    },
+    {
+      "question": "How are NaN values treated by default?",
+      "answer": "By default (`'includenan'`), any slice containing `NaN` yields `NaN`. Use `'omitnan'` to ignore them."
+    },
+    {
+      "question": "Can I supply multiple dimensions?",
+      "answer": "Yes. Pass a vector such as `[1 3]` to reduce across both the first and third dimensions simultaneously."
+    },
+    {
+      "question": "What happens if I request a dimension larger than `ndims(X)`?",
+      "answer": "RunMat mirrors MATLAB: a size-1 dimension produces zeros (or `NaN` when the lone value is `NaN`)."
+    },
+    {
+      "question": "Does `range` support integer and logical inputs?",
+      "answer": "Yes. The inputs are promoted to double precision internally, matching MATLAB semantics."
+    },
+    {
+      "question": "How does `range` interact with `gpuArray`?",
+      "answer": "The runtime asks the active provider for min/max reductions. When unavailable, it gathers the data and computes on the CPU."
+    },
+    {
+      "question": "Why is the output sometimes a scalar and sometimes a vector?",
+      "answer": "The output collapses the selected dimensions to size `1`, leaving other dimensions unchanged. A single remaining element becomes a scalar."
+    },
+    {
+      "question": "How can I inspect the range across all elements quickly?",
+      "answer": "Use `range(X, 'all')` to flatten all dimensions into a single scalar spread."
+    }
+  ],
+  "links": [
+    {
+      "label": "max",
+      "url": "./max"
+    },
+    {
+      "label": "min",
+      "url": "./min"
+    },
+    {
+      "label": "sum",
+      "url": "./sum"
+    },
+    {
+      "label": "mean",
+      "url": "./mean"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/range.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/range.rs"
+  },
+  "gpu_residency": "You generally do **not** need to call `gpuArray` explicitly in RunMat. When the input is already on the GPU, the planner keeps the result on-device if the active provider exposes `reduce_min`, `reduce_max`, the corresponding `*_dim` reductions, and elementwise subtraction. Current providers specialise 2-D reductions; multi-axis reductions, tensors with more than two dimensions, or `'omitnan'` requests gather back to the host for correctness. When a required hook is missing, RunMat gathers the data automatically, computes on the CPU, and returns a standard tensor."
+}

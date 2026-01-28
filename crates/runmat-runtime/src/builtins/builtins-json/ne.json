@@ -1,0 +1,139 @@
+{
+  "title": "ne",
+  "category": "logical/rel",
+  "keywords": [
+    "ne",
+    "~=",
+    "not equal",
+    "logical comparison",
+    "gpuArray inequality"
+  ],
+  "summary": "Element-wise inequality comparison for scalars, arrays, strings, and gpuArray inputs.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Uses provider elem_ne kernels when available; otherwise inputs gather back to host memory transparently."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": "wgpu",
+  "tested": {
+    "unit": "builtins::logical::rel::ne::tests",
+    "integration": "builtins::logical::rel::ne::tests::ne_gpu_provider_roundtrip",
+    "gpu": "builtins::logical::rel::ne::tests::ne_wgpu_matches_host"
+  },
+  "description": "`ne(A, B)` (or the infix `A ~= B`) performs an element-wise inequality comparison. The result is a logical scalar when the broadcasted shape contains one element, or a logical array otherwise.",
+  "behaviors": [
+    "Numeric, logical, and character inputs are compared element-wise using MATLAB's implicit expansion rules.",
+    "Complex numbers are considered different when either their real **or** imaginary part differs.",
+    "Character arrays compare by Unicode code point; you can mix them with numeric arrays (`'A' ~= 65`) or strings.",
+    "String scalars and string arrays compare lexically; implicit expansion works across the string dimensions.",
+    "Handle objects compare by identity rather than by structural equality.",
+    "Mixed numeric/string inputs raise MATLAB-compatible type errors."
+  ],
+  "examples": [
+    {
+      "description": "Checking if two scalars differ",
+      "input": "flag = ne(42, 7);",
+      "output": "flag =\n     1"
+    },
+    {
+      "description": "Finding mismatched elements between vectors",
+      "input": "A = [1 2 3 4];\nB = [1 0 3 5];\nmask = ne(A, B);",
+      "output": "mask =\n  1×4 logical array\n     0     1     0     1"
+    },
+    {
+      "description": "Using implicit expansion for inequality",
+      "input": "M = [1 2 3; 4 5 6];\nsel = ne(M, 2);",
+      "output": "sel =\n  2×3 logical array\n     1     0     1\n     1     1     1"
+    },
+    {
+      "description": "Comparing text values to numeric codes",
+      "input": "letters = ['A' 'B' 'C'];\nnotA = ne(letters, 65);",
+      "output": "notA =\n  1×3 logical array\n     0     1     1"
+    },
+    {
+      "description": "Running `~=` directly on gpuArray inputs",
+      "input": "G1 = gpuArray([1 2 3]);\nG2 = gpuArray([0 2 4]);\ndeviceResult = ne(G1, G2);\nhostResult = gather(deviceResult);",
+      "output": "deviceResult =\n  1×3 gpuArray logical array\n     1     0     1\nhostResult =\n  1×3 logical array\n     1     0     1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `ne` return logical values?",
+      "answer": "Yes. Scalars return `true` or `false`. Arrays return logical arrays, and `gpuArray` inputs return `gpuArray` logical outputs."
+    },
+    {
+      "question": "How are NaN values treated?",
+      "answer": "`NaN ~= NaN` evaluates to `true`, matching MATLAB's behaviour because equality comparisons return `false`."
+    },
+    {
+      "question": "Can I compare complex numbers with `ne`?",
+      "answer": "Yes. Results are `true` when either the real or imaginary component differs."
+    },
+    {
+      "question": "Are character vectors treated as numbers or text?",
+      "answer": "Both: they compare numerically (character code) against numeric inputs, and textually when compared to strings or other character arrays."
+    },
+    {
+      "question": "What happens when I mix numeric and string inputs?",
+      "answer": "RunMat raises a MATLAB-compatible error describing the unsupported type combination."
+    },
+    {
+      "question": "Do handle objects compare by value?",
+      "answer": "No. Handles compare by identity: two handles are different unless they reference the same underlying object."
+    },
+    {
+      "question": "Does implicit expansion apply to string arrays?",
+      "answer": "Yes. String arrays support MATLAB-style implicit expansion, so you can compare against scalar strings without manual replication."
+    },
+    {
+      "question": "Can I chain `ne` inside fused GPU expressions?",
+      "answer": "Yes. The builtin registers element-wise fusion metadata so the planner can fuse inequality checks with surrounding GPU-friendly operations."
+    },
+    {
+      "question": "Is there a shorthand for calling `ne`?",
+      "answer": "Yes. You can use the operator form `A ~= B`, which maps directly to this builtin."
+    }
+  ],
+  "links": [
+    {
+      "label": "`eq`",
+      "url": "./eq"
+    },
+    {
+      "label": "`lt`",
+      "url": "./lt"
+    },
+    {
+      "label": "`gt`",
+      "url": "./gt"
+    },
+    {
+      "label": "`gpuArray`",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "`gather`",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/logical/rel/ne.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/rel/ne.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's native auto-offload planner keeps intermediate results on the GPU when fused expressions benefit from device execution. Explicit `gpuArray` and `gather` calls remain available for compatibility with MATLAB code that manages residency manually.",
+  "gpu_behavior": [
+    "When both operands are `gpuArray` values and the active acceleration provider implements the `elem_ne` hook, RunMat executes the comparison entirely on the device and returns a `gpuArray` logical result. If the provider does not expose this hook, the runtime gathers the inputs to host memory automatically and performs the CPU comparison instead of failing."
+  ]
+}

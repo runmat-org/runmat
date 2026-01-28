@@ -1,0 +1,46 @@
+{
+  "title": "meshc",
+  "category": "plotting",
+  "keywords": [
+    "meshc",
+    "mesh",
+    "contour",
+    "gpuArray"
+  ],
+  "summary": "Render a wireframe surface with contour lines projected onto the base plane.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/meshc.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single"
+    ],
+    "broadcasting": "none",
+    "notes": "Single-precision gpuArrays reuse the shared WebGPU context; other inputs gather."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::meshc::tests"
+  },
+  "description": "`meshc(X, Y, Z)` draws a wireframe mesh and overlays contour lines on the XY plane.",
+  "behaviors": [],
+  "examples": [],
+  "faqs": [],
+  "links": [],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/meshc.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/meshc.rs"
+  },
+  "gpu_behavior": [
+    "Single-precision gpuArrays stream directly into the shared WebGPU renderer.",
+    "Double precision falls back to host gathers until SHADER_F64 is available."
+  ]
+}

@@ -1,0 +1,127 @@
+{
+  "title": "triu",
+  "category": "array/shape",
+  "keywords": [
+    "triu",
+    "upper triangular",
+    "matrix",
+    "diagonal",
+    "gpu"
+  ],
+  "summary": "Keep the upper triangular portion of a matrix (optionally including sub-diagonals).",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses provider triu kernels when available; otherwise gathers once, masks on the host, and re-uploads so results remain gpu-resident."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::triu::tests",
+    "integration": "builtins::array::shape::triu::tests::triu_gpu_roundtrip"
+  },
+  "description": "`triu(A)` keeps the elements on and above a selected diagonal of `A` and sets everything below that diagonal to zero. The optional second argument `k` controls which diagonal is retained:\n\n- `k = 0` (default) keeps the main diagonal. - `k > 0` keeps the diagonal `k` steps above the main diagonal (the main diagonal and everything below it become zero). - `k < 0` includes additional sub-diagonals beneath the main diagonal.\n\nEvery matrix \"page\" in an N-D tensor is processed independently.",
+  "behaviors": [
+    "Works on numeric, logical, and complex arrays.",
+    "Operates on the first two dimensions; trailing dimensions act as independent pages.",
+    "Preserves logical types and complex-valued elements.",
+    "Scalars are treated as `1\u00d71` matrices and honour diagonal offsets (for example `triu(5, 1)` returns `0`).",
+    "gpuArray inputs stay on the device when an acceleration provider supplies a native `triu` hook; otherwise the runtime gathers, masks on the host, and uploads the result back to the GPU."
+  ],
+  "examples": [
+    {
+      "description": "Extracting the upper triangular part of a matrix",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nU = triu(A);",
+      "output": "U =\n     1     2     3\n     0     5     6\n     0     0     9"
+    },
+    {
+      "description": "Keeping one sub-diagonal beneath the main diagonal",
+      "input": "A = magic(4);\nU = triu(A, -1);",
+      "output": "U =\n    16     2     3     13\n     5    11    10     8\n     0     7     6    12\n     0     0    15     1"
+    },
+    {
+      "description": "Dropping the main diagonal with a positive offset",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nstrict = triu(A, 1);",
+      "output": "strict =\n     0     2     3\n     0     0     6\n     0     0     0"
+    },
+    {
+      "description": "Applying `triu` to every page of a 3-D array",
+      "input": "T = reshape(1:18, [3 3 2]);\nU = triu(T);",
+      "output": "U(:, :, 1) =\n     1     2     3\n     0     5     6\n     0     0     9\n\nU(:, :, 2) =\n    10    11    12\n     0    14    15\n     0     0    18"
+    },
+    {
+      "description": "Preserving gpuArray residency with `triu`",
+      "input": "G = gpuArray(rand(5));\nU = triu(G, -2);\nisa(U, 'gpuArray')",
+      "output": "ans =\n  logical\n   1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What happens when `k` is smaller than the matrix size (large negative)?",
+      "answer": "The entire matrix is preserved; `triu` never removes elements above the chosen diagonal."
+    },
+    {
+      "question": "Does `triu` work with logical arrays?",
+      "answer": "Yes. Elements below the retained diagonal become `false`, while the rest keep their logical values."
+    },
+    {
+      "question": "How are complex numbers handled?",
+      "answer": "Each element retains its real and imaginary parts. Only elements below the chosen diagonal become `0 + 0i`."
+    },
+    {
+      "question": "What about empty matrices or zero-sized dimensions?",
+      "answer": "`triu` returns an array of the same shape, leaving all entries at zero. Trailing dimensions with size zero are treated as empty batches."
+    },
+    {
+      "question": "Does `triu` change the class of character arrays?",
+      "answer": "Character arrays are converted to their numeric codes (double precision) before the triangular mask is applied, matching MATLAB behaviour."
+    }
+  ],
+  "links": [
+    {
+      "label": "`tril`",
+      "url": "./tril"
+    },
+    {
+      "label": "`diag`",
+      "url": "./diag"
+    },
+    {
+      "label": "`kron`",
+      "url": "./kron"
+    },
+    {
+      "label": "`reshape`",
+      "url": "./reshape"
+    },
+    {
+      "label": "`gpuArray`",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "`gather`",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/shape/triu.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/triu.rs"
+  },
+  "gpu_residency": "```matlab:runnable\nG = gpuArray(rand(5));\nU = triu(G, -2);\nisa(U, 'gpuArray')\n```\nExpected output:\n```matlab\nans =\n  logical\n   1\n```",
+  "gpu_behavior": [
+    "If the active acceleration provider implements a `triu` kernel the entire operation executes on the GPU.",
+    "Without a provider hook, RunMat gathers the tensor to host memory once, applies the mask, uploads the result, and returns a gpuArray so residency is preserved for downstream kernels.",
+    "Fallbacks never affect numerical results\u2014only where the computation runs."
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "title": "mesh",
+  "category": "plotting",
+  "keywords": [
+    "mesh",
+    "wireframe",
+    "3-D plotting",
+    "gpuArray"
+  ],
+  "summary": "Render MATLAB-compatible mesh (wireframe) plots.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/mesh.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single"
+    ],
+    "broadcasting": "none",
+    "notes": "Single-precision gpuArray height maps stream directly into the shared WebGPU renderer; other inputs gather before plotting."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::mesh::tests"
+  },
+  "description": "`mesh(X, Y, Z)` draws a wireframe surface. RunMat reuses the `SurfacePlot` renderer with wireframe mode enabled and no fill, matching MATLAB's default mesh aesthetics.",
+  "behaviors": [
+    "`X` and `Y` are axis vectors; `Z` must contain `length(X) * length(Y)` values in column-major order.",
+    "Surfaces default to a Turbo colormap with `wireframe = true` and faceted shading.",
+    "Single-precision gpuArray height maps stream directly into the shared WebGPU renderer; other inputs gather automatically."
+  ],
+  "examples": [],
+  "faqs": [],
+  "links": [],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/mesh.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/mesh.rs"
+  }
+}

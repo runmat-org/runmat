@@ -534,42 +534,6 @@ impl Parse for RegisterSpecAttrArgs {
     }
 }
 
-struct RegisterDocAttrArgs {
-    name: Expr,
-    text: Option<Expr>,
-    builtin_path: Option<LitStr>,
-}
-
-impl Parse for RegisterDocAttrArgs {
-    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        let mut name = None;
-        let mut text = None;
-        let mut builtin_path = None;
-        while !input.is_empty() {
-            let ident: syn::Ident = input.parse()?;
-            input.parse::<syn::Token![=]>()?;
-            if ident == "name" {
-                name = Some(input.parse()?);
-            } else if ident == "text" {
-                text = Some(input.parse()?);
-            } else if ident == "builtin_path" {
-                let lit: LitStr = input.parse()?;
-                builtin_path = Some(lit);
-            } else {
-                return Err(syn::Error::new(ident.span(), "unknown attribute argument"));
-            }
-            if input.peek(syn::Token![,]) {
-                input.parse::<syn::Token![,]>()?;
-            }
-        }
-        Ok(Self {
-            name: name.ok_or_else(|| input.error("missing `name` argument"))?,
-            text,
-            builtin_path,
-        })
-    }
-}
-
 #[proc_macro_attribute]
 pub fn register_gpu_spec(attr: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(attr as RegisterSpecAttrArgs);
@@ -653,57 +617,6 @@ pub fn register_fusion_spec(attr: TokenStream, item: TokenStream) -> TokenStream
         #[cfg(not(target_arch = "wasm32"))]
         inventory::submit! {
             crate::builtins::common::spec::FusionSpecInventory { spec: &#spec_for_native }
-        }
-    };
-    expanded.into()
-}
-
-#[proc_macro_attribute]
-pub fn register_doc_text(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(attr as RegisterDocAttrArgs);
-    let RegisterDocAttrArgs {
-        name,
-        text,
-        builtin_path,
-    } = args;
-    let item_const = parse_macro_input!(item as ItemConst);
-    let name_tokens = quote! { #name };
-    let text_tokens = text.map(|expr| quote! { #expr }).unwrap_or_else(|| {
-        let ident = &item_const.ident;
-        quote! { #ident }
-    });
-    let builtin_path_lit =
-        builtin_path.expect("register_doc_text requires `builtin_path = \"...\"` argument");
-    let builtin_path: syn::Path = syn::parse_str(&builtin_path_lit.value())
-        .expect("register_doc_text `builtin_path` must be a valid path");
-    let helper_ident = format_ident!(
-        "__runmat_wasm_register_doc_text_{}",
-        item_const.ident.to_string()
-    );
-    let wasm_name = name_tokens.clone();
-    let wasm_text = text_tokens.clone();
-    let wasm_helper = quote! {
-        #[cfg(target_arch = "wasm32")]
-        #[allow(non_snake_case)]
-        pub(crate) fn #helper_ident() {
-            const ENTRY: crate::builtins::common::spec::DocTextInventory =
-                crate::builtins::common::spec::DocTextInventory {
-                    name: #wasm_name,
-                    text: #wasm_text,
-                };
-            crate::builtins::common::spec::wasm_registry::submit_doc_text(&ENTRY);
-        }
-    };
-    append_wasm_block(quote! {
-        #builtin_path::#helper_ident();
-    });
-    let expanded = quote! {
-        #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-        #item_const
-        #wasm_helper
-        #[cfg(all(not(target_arch = "wasm32"), feature = "doc_export"))]
-        inventory::submit! {
-            crate::builtins::common::spec::DocTextInventory { name: #name_tokens, text: #text_tokens }
         }
     };
     expanded.into()

@@ -1,0 +1,120 @@
+{
+  "title": "vertcat",
+  "category": "array/shape",
+  "keywords": [
+    "vertcat",
+    "vertical concatenation",
+    "stack rows",
+    "square brackets",
+    "gpu"
+  ],
+  "summary": "Stack inputs top-to-bottom (dimension 1) exactly like MATLAB's semicolon syntax.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Delegates to cat with dim=1; providers that expose cat run entirely on the GPU, otherwise RunMat gathers to the host and re-uploads the result."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::vertcat::tests",
+    "integration": [
+      "builtins::array::shape::vertcat::tests::vertcat_gpu_roundtrip",
+      "builtins::array::shape::vertcat::tests::vertcat_like_gpu_from_host_inputs"
+    ]
+  },
+  "description": "`vertcat(A1, A2, \u2026)` vertically concatenates its inputs, matching the behavior of MATLAB's semicolon array construction `[A1; A2; \u2026]`. It is the standard way to stack matrices, vectors, or higher-dimensional slices on top of each other.",
+  "behaviors": [
+    "Hard-codes `dim = 1`. All inputs must agree on every dimension except the first.",
+    "Accepts numeric, logical, complex, character, string, and cell arrays with MATLAB-compatible type checking. Mixing classes is an error.",
+    "Scalars are treated as `1\u00d71`, enabling concise row-building such as `vertcat(1, 2, 3)`.",
+    "Empty inputs participate naturally. If any shared dimension is zero, the result is empty with the expected shape.",
+    "The optional trailing `'like', prototype` pair forces the output to match the prototype's data residency (CPU vs GPU) and numeric flavour.",
+    "Mixing `gpuArray` inputs with host inputs is disallowed. Convert explicitly via `gpuArray` or `gather` to control residency."
+  ],
+  "examples": [
+    {
+      "description": "Stacking matrices by adding rows",
+      "input": "A = [1 2; 3 4];\nB = [5 6; 7 8];\nC = vertcat(A, B);",
+      "output": "C =\n     1     2\n     3     4\n     5     6\n     7     8"
+    },
+    {
+      "description": "Building a column vector from scalars",
+      "input": "col = vertcat(1, 2, 3, 4);",
+      "output": "col =\n     1\n     2\n     3\n     4"
+    },
+    {
+      "description": "Combining character arrays into taller text blocks",
+      "input": "top = ['RunMat'];\nbottom = ['Rocks!'];\nbanner = vertcat(top, bottom);"
+    },
+    {
+      "description": "Joining string arrays into multi-row tables",
+      "input": "header = [\"Name\" \"Score\"];\nrows = [\"Alice\" \"98\"; \"Bob\" \"92\"];\ntable = vertcat(header, rows);"
+    },
+    {
+      "description": "Preserving logical masks when stacking",
+      "input": "mask1 = logical([1 0 1]);\nmask2 = logical([0 1 0]);\nstacked = vertcat(mask1, mask2);"
+    },
+    {
+      "description": "Extending cell arrays downwards",
+      "input": "row1 = {1, \"low\"};\nrow2 = {2, \"high\"};\ngrid = vertcat(row1, row2);"
+    },
+    {
+      "description": "Keeping gpuArray inputs resident on the device",
+      "input": "G1 = gpuArray(rand(128, 256));\nG2 = gpuArray(rand(64, 256));\nstacked = vertcat(G1, G2);"
+    },
+    {
+      "description": "Requesting GPU output with the `'like'` prototype",
+      "input": "proto = gpuArray.zeros(1, 3);\nresult = vertcat([1 2 3], [4 5 6], \"like\", proto);"
+    },
+    {
+      "description": "Working with empty rows without surprises",
+      "input": "empty = zeros(0, 3);\ncombo = vertcat(empty, empty);"
+    },
+    {
+      "description": "Stacking complex matrices preserves imaginary parts",
+      "input": "z1 = complex([1 2], [3 4]);\nz2 = complex([5 6], [7 8]);\njoined = vertcat(z1, z2);"
+    }
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "`cat`",
+      "url": "./cat"
+    },
+    {
+      "label": "`horzcat`",
+      "url": "./horzcat"
+    },
+    {
+      "label": "`reshape`",
+      "url": "./reshape"
+    },
+    {
+      "label": "`gpuArray`",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "`gather`",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/array/shape/vertcat.rs",
+    "url": "crates/runmat-runtime/src/builtins/array/shape/vertcat.rs"
+  },
+  "gpu_behavior": [
+    "`vertcat` delegates to `cat(dim = 1, \u2026)`. When the active acceleration provider implements the `cat` hook, concatenation happens entirely on the GPU, keeping `gpuArray` inputs resident and avoiding costly round-trips. Providers that lack this hook trigger a transparent fallback: RunMat gathers the operands to the host, concatenates them with MATLAB semantics, and uploads the result back to the originating device so downstream code still sees a `gpuArray`. This mirrors MATLAB's explicit GPU workflows while keeping RunMat's auto-offload planner informed."
+  ]
+}

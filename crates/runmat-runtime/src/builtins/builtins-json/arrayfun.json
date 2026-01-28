@@ -1,0 +1,116 @@
+{
+  "title": "arrayfun",
+  "category": "acceleration/gpu",
+  "keywords": [
+    "arrayfun",
+    "gpuArray",
+    "elementwise map",
+    "anonymous function",
+    "uniformoutput"
+  ],
+  "summary": "Apply a function to each element of array inputs, returning either a numeric array or a cell array.",
+  "references": [
+    "https://www.mathworks.com/help/parallel-computing/arrayfun.html"
+  ],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Executes directly on the GPU for supported builtin callbacks (sin, cos, abs, exp, log, sqrt, plus, minus, times, rdivide, ldivide) when all inputs are gpuArray values; falls back to host execution for closures, heterogeneous inputs, or unsupported callbacks. Uniform numeric/logical outputs are re-uploaded to the GPU otherwise; complex/character outputs stay on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::acceleration::gpu::arrayfun::tests",
+    "integration": "builtins::acceleration::gpu::arrayfun::tests::arrayfun_gpu_roundtrip"
+  },
+  "description": "`arrayfun(func, A1, A2, …)` evaluates `func` for every element (or element-wise combination) of the supplied arrays. The builtin mirrors MATLAB's behaviour:\n\n- Inputs must have the same size. Scalars participate by broadcasting their single value. - The optional `'UniformOutput'` name-value flag controls whether results are collected into a numeric/complex/logical/character array (`true`, the default) or returned as a cell array (`false`). - When `'ErrorHandler', handler` is supplied the handler receives the error struct and the arguments that triggered the failure, letting you supply a fallback result.",
+  "behaviors": [
+    "Accepts function handles, builtin names (character vectors or string scalars), and closures.",
+    "Supports additional scalar parameters: `arrayfun(@(x,c) x + c, A, 5)` passes `5` to every call.",
+    "Honors the `'UniformOutput'` and `'ErrorHandler'` name-value pairs for MATLAB-compatible control flow.",
+    "Handles numeric, logical, character, and complex arrays. Unsupported types raise a descriptive error instructing you to use `cellfun` when appropriate.",
+    "Empty inputs return empty outputs whose shape matches the first array argument.",
+    "When any input is a `gpuArray`, numeric or logical uniform outputs are uploaded back to the GPU so downstream code retains GPU residency. Complex or character uniform outputs remain on the host until providers add the appropriate buffer support. The current implementation computes on the host and therefore inherits the host's floating-point behaviour."
+  ],
+  "examples": [
+    {
+      "description": "Squaring every element of a matrix",
+      "input": "A = [1 2 3; 4 5 6];\nB = arrayfun(@(x) x.^2, A);",
+      "output": "B =\n     1     4     9\n    16    25    36"
+    },
+    {
+      "description": "Passing additional scalar parameters",
+      "input": "A = [1 2 3];\noffset = 10;\nresult = arrayfun(@(x, c) x + c, A, offset);",
+      "output": "result =\n    11    12    13"
+    },
+    {
+      "description": "Returning cells with non-uniform outputs",
+      "input": "strings = [\"Run\" \"Matlab\" \"GPU\"];\nchars = arrayfun(@(s) sprintf(\"%d\", strlength(s)), strings, 'UniformOutput', false);",
+      "output": "chars =\n  1×3 cell array\n    {'3'}    {'6'}    {'3'}"
+    },
+    {
+      "description": "Handling errors with a custom error handler",
+      "input": "vals = [-1 0 1];\nhandler = @(err, x) err.identifier;\nsafe = arrayfun(@(x) sqrt(x), vals, 'ErrorHandler', handler, 'UniformOutput', false);",
+      "output": "safe =\n  1×3 cell array\n    {'MATLAB:arrayfun:FunctionError'}    {[0]}    {[1]}"
+    },
+    {
+      "description": "Working with `gpuArray` inputs",
+      "input": "G = gpuArray(linspace(0, pi, 5));\nS = arrayfun(@sin, G);\nH = gather(S);",
+      "output": "S =\n  1×5 gpuArray\n         0    0.7071    1.0000    0.7071         0\nH =\n         0    0.7071    1.0000    0.7071         0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Do I have to call `gpuArray` before using `arrayfun`?",
+      "answer": "No. `arrayfun` participates in the same planner as other builtins, so the runtime migrates data to the GPU when it determines a benefit. Manual `gpuArray` calls remain useful for MATLAB compatibility or to force residency for custom workflows."
+    },
+    {
+      "question": "What happens when the callback returns mixed types?",
+      "answer": "Set `'UniformOutput', false` so the builtin returns a cell array. When `'UniformOutput'` is `true` every callback invocation must return a numeric, logical, or complex scalar."
+    },
+    {
+      "question": "Can `arrayfun` handle character inputs?",
+      "answer": "Yes. Each character element is passed to the callback as a single-character char array and the output follows the normal uniform/non-uniform rules."
+    },
+    {
+      "question": "Does `arrayfun` short-circuit on errors?",
+      "answer": "No. The builtin invokes the optional error handler when a callback fails. If no handler is provided the first error aborts the entire call with a MATLAB-compatible identifier/message pair."
+    },
+    {
+      "question": "How are logical outputs represented on the GPU?",
+      "answer": "Logical results use 0.0/1.0 buffers on the device. When you gather them RunMat converts the data back into a logical array automatically."
+    }
+  ],
+  "links": [
+    {
+      "label": "cellfun",
+      "url": "./cellfun"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun.rs"
+  },
+  "gpu_residency": "No. RunMat's auto-offload logic moves tensors to the GPU when profitable. If you do call `gpuArray`, `arrayfun` keeps the result on the GPU for uniform numeric or logical outputs so later operations can continue without gathering. Non-uniform or complex/character results stay on the host until GPU representations are available.",
+  "gpu_behavior": [
+    "When every input is a `gpuArray`, `'UniformOutput'` is `true`, and the callback resolves to one of the supported builtins (`sin`, `cos`, `abs`, `exp`, `log`, `sqrt`, `plus`, `minus`, `times`, `rdivide`, or `ldivide`), RunMat bypasses the host path and dispatches directly to the active provider through the corresponding hooks (`unary_*` or `elem_*`). The builtin acts as a fusion barrier—the fusion planner lowers upstream producers before invoking `arrayfun` because the callback can evaluate arbitrary MATLAB code.\n\nAll other combinations—including closures, callbacks with extra scalar parameters, mixed residency, or `'UniformOutput', false`—gather inputs to the host, execute the callback element-wise, and then upload numeric or logical uniform results back to the GPU so later code continues with device residency. Complex and character uniform outputs remain host-resident until device representations are available. Cell outputs are always host-resident."
+  ]
+}
