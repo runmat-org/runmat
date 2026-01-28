@@ -1580,7 +1580,7 @@ async fn run_interpreter(
         set_current_pc(pc);
         if runmat_runtime::interrupt::is_cancelled() {
             return Err(mex(
-                "MATLAB:runmat:ExecutionCancelled",
+                "ExecutionCancelled",
                 "Execution cancelled by user",
             ));
         }

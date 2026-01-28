@@ -1557,6 +1557,9 @@ fn elementwise_real_or_complex(
     rhs: Value,
     comparison: ComparisonMethod,
 ) -> BuiltinResult<MinEvaluation> {
+    if let Some(eval) = scalar_elementwise_min(&lhs, &rhs, comparison) {
+        return Ok(eval);
+    }
     match (
         materialize_for_min("min", lhs)?,
         materialize_for_min("min", rhs)?,
@@ -1572,6 +1575,37 @@ fn elementwise_real_or_complex(
         }
         (InputData::Real(a), InputData::Real(b)) => elementwise_real_min(a, b, comparison),
     }
+}
+
+fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
+    match value {
+        Value::Complex(re, im) => Some((*re, *im)),
+        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
+        _ => None,
+    }
+}
+
+fn scalar_elementwise_min(
+    lhs: &Value,
+    rhs: &Value,
+    comparison: ComparisonMethod,
+) -> Option<MinEvaluation> {
+    let left = scalar_complex_value(lhs).or_else(|| extract_scalar(lhs).map(|v| (v, 0.0)))?;
+    let right = scalar_complex_value(rhs).or_else(|| extract_scalar(rhs).map(|v| (v, 0.0)))?;
+    let (ar, ai) = left;
+    let (br, bi) = right;
+    if ai != 0.0 || bi != 0.0 {
+        let (value, origin) = choose_complex_elementwise((ar, ai), (br, bi), comparison);
+        return Some(MinEvaluation {
+            values: Value::Complex(value.0, value.1),
+            indices: Value::Num(origin),
+        });
+    }
+    let (value, origin) = choose_real_elementwise(ar, br, comparison);
+    Some(MinEvaluation {
+        values: Value::Num(value),
+        indices: Value::Num(origin),
+    })
 }
 
 fn elementwise_real_min(

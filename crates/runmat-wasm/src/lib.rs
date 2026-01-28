@@ -312,30 +312,55 @@ impl RunMatWasm {
         let exec_result = session.execute(&source).await;
         // Always restore the session, even if execution fails (e.g. parse/compile error).
         *self.session.borrow_mut() = session;
-        let result = exec_result.map_err(|err| run_error_to_js(&err, &source))?;
-
-        // When a run succeeds, close figures that existed before the run but were
-        // not touched during it. This avoids stale plots lingering across runs while preserving
-        // GPU surfaces for the figures that remain active.
-        if result.error.is_none() {
-            let touched: std::collections::HashSet<u32> =
-                result.figures_touched.iter().copied().collect();
-            for handle in figures_before {
-                if !touched.contains(&handle) {
-                    let _ = runtime_close_figure(Some(FigureHandle::from(handle)));
+        let payload = match exec_result {
+            Ok(result) => {
+                // When a run succeeds, close figures that existed before the run but were
+                // not touched during it. This avoids stale plots lingering across runs while preserving
+                // GPU surfaces for the figures that remain active.
+                if result.error.is_none() {
+                    let touched: std::collections::HashSet<u32> =
+                        result.figures_touched.iter().copied().collect();
+                    for handle in figures_before {
+                        if !touched.contains(&handle) {
+                            let _ = runtime_close_figure(Some(FigureHandle::from(handle)));
+                        }
+                    }
                 }
+                ExecutionPayload::from_result(result, &source)
             }
-        }
+            Err(err) => ExecutionPayload {
+                value_text: None,
+                value_json: None,
+                type_info: None,
+                execution_time_ms: 0,
+                used_jit: false,
+                error: Some(run_error_payload(&err, &source)),
+                stdout: Vec::new(),
+                workspace: WorkspacePayload {
+                    full: false,
+                    version: 0,
+                    values: Vec::new(),
+                },
+                figures_touched: Vec::new(),
+                warnings: Vec::new(),
+                stdin_events: Vec::new(),
+                profiling: None,
+                fusion_plan: None,
+            },
+        };
         info!(
             target = "runmat.runtime",
-            workspace_entries = result.workspace.values.len(),
-            stdout_entries = result.streams.len(),
-            figures_touched = result.figures_touched.len(),
-            used_jit = result.used_jit,
-            error = result.error.as_ref().map(|err| err.message()).unwrap_or(""),
+            workspace_entries = payload.workspace.values.len(),
+            stdout_entries = payload.stdout.len(),
+            figures_touched = payload.figures_touched.len(),
+            used_jit = payload.used_jit,
+            error = payload
+                .error
+                .as_ref()
+                .map(|err| err.message.as_str())
+                .unwrap_or(""),
             "Execution finished"
         );
-        let payload = ExecutionPayload::from_result(result, &source);
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize execution result: {err}")))
     }

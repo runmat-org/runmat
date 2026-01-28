@@ -304,6 +304,9 @@ async fn mod_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
 }
 
 fn mod_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if let Some(result) = scalar_mod_value(&lhs, &rhs) {
+        return Ok(result);
+    }
     let left = value_into_numeric_array(lhs, "mod")?;
     let right = value_into_numeric_array(rhs, "mod")?;
     match align_numeric_arrays(left, right)? {
@@ -399,6 +402,40 @@ fn mod_complex_scalar(ar: f64, ai: f64, br: f64, bi: f64) -> (f64, f64) {
     let (mulr, muli) = complex_mul(br, bi, fr, fi);
     let (rr, ri) = (ar - mulr, ai - muli);
     (normalize_zero(rr), normalize_zero(ri))
+}
+
+fn scalar_real_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(n) => Some(*n),
+        Value::Int(i) => Some(i.to_f64()),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
+        Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
+            Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
+        }
+        _ => None,
+    }
+}
+
+fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
+    match value {
+        Value::Complex(re, im) => Some((*re, *im)),
+        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
+        _ => None,
+    }
+}
+
+fn scalar_mod_value(lhs: &Value, rhs: &Value) -> Option<Value> {
+    let left = scalar_complex_value(lhs).or_else(|| scalar_real_value(lhs).map(|v| (v, 0.0)))?;
+    let right = scalar_complex_value(rhs).or_else(|| scalar_real_value(rhs).map(|v| (v, 0.0)))?;
+    let (ar, ai) = left;
+    let (br, bi) = right;
+    if ai != 0.0 || bi != 0.0 {
+        let (re, im) = mod_complex_scalar(ar, ai, br, bi);
+        return Some(Value::Complex(re, im));
+    }
+    Some(Value::Num(mod_real_scalar(ar, br)))
 }
 
 fn normalize_zero(value: f64) -> f64 {

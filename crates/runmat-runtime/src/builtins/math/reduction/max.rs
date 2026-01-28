@@ -1675,6 +1675,9 @@ fn elementwise_real_or_complex(
     rhs: Value,
     comparison: ComparisonMethod,
 ) -> BuiltinResult<MaxEvaluation> {
+    if let Some(eval) = scalar_elementwise_max(&lhs, &rhs, comparison) {
+        return Ok(eval);
+    }
     match (
         materialize_for_max("max", lhs)?,
         materialize_for_max("max", rhs)?,
@@ -1690,6 +1693,48 @@ fn elementwise_real_or_complex(
         }
         (InputData::Real(a), InputData::Real(b)) => elementwise_real_max(a, b, comparison),
     }
+}
+
+fn scalar_real_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(n) => Some(*n),
+        Value::Int(i) => Some(i.to_f64()),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
+        _ => None,
+    }
+}
+
+fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
+    match value {
+        Value::Complex(re, im) => Some((*re, *im)),
+        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
+        _ => None,
+    }
+}
+
+fn scalar_elementwise_max(
+    lhs: &Value,
+    rhs: &Value,
+    comparison: ComparisonMethod,
+) -> Option<MaxEvaluation> {
+    let left = scalar_complex_value(lhs).or_else(|| scalar_real_value(lhs).map(|v| (v, 0.0)))?;
+    let right = scalar_complex_value(rhs).or_else(|| scalar_real_value(rhs).map(|v| (v, 0.0)))?;
+    let (ar, ai) = left;
+    let (br, bi) = right;
+    if ai != 0.0 || bi != 0.0 {
+        let (value, origin) = choose_complex_elementwise((ar, ai), (br, bi), comparison);
+        return Some(MaxEvaluation {
+            values: Value::Complex(value.0, value.1),
+            indices: Value::Num(origin),
+        });
+    }
+    let (value, origin) = choose_real_elementwise(ar, br, comparison);
+    Some(MaxEvaluation {
+        values: Value::Num(value),
+        indices: Value::Num(origin),
+    })
 }
 
 fn elementwise_real_max(
