@@ -232,7 +232,7 @@ end
 
 This isn't "wrong," it just changes the performance profile: you're measuring device synchronization and transfers as much as compute.
 
-If you like MATLAB's syntax but don't want every script to turn into a residency/transfer exercise, there's another approach. Write the same array math and let the runtime decide CPU vs GPU and fuse the work automatically.
+If you like MATLAB's syntax but don't want every script to turn into a residency/transfer exercise, there's another approach. Write the same array math and let the runtime decide CPU vs GPU and fuse the work automatically. For benchmarks and how that fusion works, see [Introducing RunMat Accelerate](/blog/runmat-accelerate-fastest-runtime-for-your-math).
 
 ---
 
@@ -250,7 +250,7 @@ m = mean(y, 'all');
 fprintf("m = %.6f\n", double(m));
 ```
 
-Under the hood, RunMat uses *fusion*—combining multiple array operations into one GPU kernel—to reduce overhead and keep the GPU busy. This happens automatically when the computation is contiguous.
+Under the hood, RunMat uses *fusion*—combining multiple array operations into one GPU kernel—to reduce overhead and keep the GPU busy. This happens automatically when the computation is contiguous. For more detail, see the [RunMat Fusion guide](/docs/fusion-guide).
 
 ---
 
@@ -448,7 +448,7 @@ Fusion means combining multiple array operations (e.g., `sin`, then `.*`, then `
 
 **Can I use GPU without the Parallel Computing Toolbox?**
 
-In MATLAB, no—the toolbox is required for `gpuArray` and GPU-enabled functions, and it's a paid add-on. RunMat includes GPU acceleration by default: you write the same array math and the runtime decides CPU vs GPU and fuses operations without an extra license.
+In MATLAB, no—the toolbox is required for `gpuArray` and GPU-enabled functions, and it's a paid add-on. RunMat includes GPU acceleration by default: you write the same array math and the runtime decides CPU vs GPU and fuses operations without an extra license. For how RunMat compares to MATLAB and other runtimes, see [free MATLAB alternatives](/blog/free-matlab-alternatives).
 
 **Should I use single or double?**
 
@@ -464,7 +464,7 @@ Same idea as the GPU-shaped decision tree: large arrays, elementwise ops, minima
 
 **Where can I run RunMat with GPU?**
 
-In three ways: (1) **Browser** — open runmat.org/sandbox; GPU uses WebGPU (Chrome 113+, Edge 113+, Safari 18+, Firefox 139+). Same code, automatic fusion; browsers may limit resources. (2) **Desktop app (coming soon)** — packaged RunMat Desktop with full native GPU (Metal/DX12/Vulkan) and no browser caps; not yet released. (3) **CLI** — run scripts from the terminal with full native GPU access; same code as browser, best for max performance and CI.
+In three ways: (1) **Browser** — open [runmat.org/sandbox](https://runmat.org/sandbox); GPU uses WebGPU (Chrome 113+, Edge 113+, Safari 18+, Firefox 139+). Same code, automatic fusion; browsers may limit resources. (2) **Desktop app (coming soon)** — packaged RunMat Desktop with full native GPU (Metal/DX12/Vulkan) and no browser caps; not yet released. (3) **CLI** — run scripts from the terminal with full native GPU access; same code as browser, best for max performance and CI. For setup and options, see [getting started](/docs/getting-started).
 
 **What's the simplest rule to remember?**
 
