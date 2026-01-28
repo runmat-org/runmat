@@ -2,12 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use anyhow::{Context, Result};
-use serde_yaml::Value;
-use tracing::debug;
-
 use crate::app::config::AppConfig;
 use crate::context::types::AuthoringContext;
+use anyhow::{Context, Result};
 
 #[derive(Debug)]
 pub struct TestCommandReport {
@@ -40,14 +37,7 @@ pub fn run_builtin_tests(ctx: &AuthoringContext, config: &AppConfig) -> Result<T
     let log_dir = tests_log_dir(config, &ctx.builtin.name);
     fs::create_dir_all(&log_dir).with_context(|| format!("creating {}", log_dir.display()))?;
 
-    let required_features = extract_required_features(ctx.doc_markdown.as_deref());
-    let feature_flag = if required_features.is_empty() {
-        None
-    } else {
-        Some(required_features.join(","))
-    };
-
-    let plans = build_test_plan(ctx, feature_flag.as_deref());
+    let plans = build_test_plan(ctx, None);
 
     let mut reports = Vec::new();
     let mut overall_success = true;
@@ -236,72 +226,7 @@ fn write_log(
 }
 
 fn has_integration_tests(ctx: &AuthoringContext) -> bool {
-    if let Some(doc) = ctx.doc_markdown.as_deref() {
-        if frontmatter_has_integration(doc) {
-            return true;
-        }
-    }
-
     ctx.source_paths
         .iter()
         .any(|path| path.to_string_lossy().contains("tests"))
-}
-
-fn extract_required_features(doc_markdown: Option<&str>) -> Vec<String> {
-    doc_markdown
-        .and_then(parse_frontmatter)
-        .and_then(|front| front.get("requires_feature").cloned())
-        .map(|value| match value {
-            Value::String(s) => vec![s],
-            Value::Sequence(seq) => seq
-                .into_iter()
-                .filter_map(|item| match item {
-                    Value::String(s) => Some(s),
-                    _ => None,
-                })
-                .collect(),
-            _ => Vec::new(),
-        })
-        .unwrap_or_default()
-}
-
-fn frontmatter_has_integration(doc: &str) -> bool {
-    parse_frontmatter(doc)
-        .and_then(|front| front.get("tested").cloned())
-        .map(|value| match value {
-            Value::String(s) => !s.trim().is_empty(),
-            Value::Mapping(map) => map.iter().any(|(key, val)| {
-                matches!(key, Value::String(k) if k == "integration") && !matches!(val, Value::Null)
-            }),
-            _ => false,
-        })
-        .unwrap_or(false)
-}
-
-fn parse_frontmatter(doc: &str) -> Option<Value> {
-    let mut lines = doc.lines();
-    if !lines.next()?.trim().starts_with("---") {
-        return None;
-    }
-
-    let mut frontmatter = String::new();
-    for line in lines {
-        if line.trim().starts_with("---") {
-            break;
-        }
-        frontmatter.push_str(line);
-        frontmatter.push('\n');
-    }
-
-    if frontmatter.trim().is_empty() {
-        return None;
-    }
-
-    match serde_yaml::from_str::<Value>(&frontmatter) {
-        Ok(value) => Some(value),
-        Err(err) => {
-            debug!("failed to parse DOC_MD frontmatter: {}", err);
-            None
-        }
-    }
 }

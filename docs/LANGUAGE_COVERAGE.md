@@ -183,3 +183,5 @@ end
 - Uniform `MException` identifier/message model across indexing, arity, expansion, and OOP error paths.
 
 If you notice any discrepancy with MATLAB semantics, please open an issue with a minimal reproducer so we can add a conformance test.
+
+Looking for specific APIs? Browse the [MATLAB Function Reference](/docs/matlab-function-reference).

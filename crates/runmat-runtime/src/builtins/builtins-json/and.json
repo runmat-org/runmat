@@ -1,0 +1,114 @@
+{
+  "title": "and",
+  "category": "logical/bit",
+  "keywords": [
+    "logical and",
+    "elementwise and",
+    "boolean and",
+    "MATLAB and",
+    "gpuArray and"
+  ],
+  "summary": "Element-wise logical AND for scalars, arrays, and gpuArray values.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Runs entirely on the GPU when the active provider implements `logical_and`; otherwise inputs gather back to the host automatically."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::bit::and::tests",
+    "integration": "builtins::logical::bit::and::tests::and_gpu_roundtrip",
+    "gpu": "builtins::logical::bit::and::tests::and_wgpu_matches_host_path"
+  },
+  "description": "`and(A, B)` returns the element-wise logical AND of its inputs. Any non-zero value (including `NaN`) evaluates to `true`. The result is a logical scalar when the broadcasted shape has exactly one element, or a logical array otherwise.",
+  "behaviors": [
+    "Accepts logical, numeric, complex, and character arrays; character code points of zero evaluate to `false`.",
+    "Supports MATLAB-style implicit expansion so scalars and singleton dimensions broadcast automatically.",
+    "Propagates empty dimensions: if a broadcasted axis has length `0`, the output is an empty logical array with the same shape.",
+    "Treats `NaN` values as `true`, matching MATLAB's element-wise logical semantics.",
+    "Keeps `gpuArray` inputs on device when the active provider exposes the `logical_and` hook; otherwise the runtime gathers to host transparently."
+  ],
+  "examples": [
+    {
+      "description": "Check if two logical scalars are both true",
+      "input": "result = and(true, false)",
+      "output": "result =\n     0"
+    },
+    {
+      "description": "Combine numeric arrays element-wise with logical AND",
+      "input": "A = [1 0 2 0];\nB = [3 4 0 0];\nC = and(A, B)",
+      "output": "C =\n  1×4 logical array\n     1     0     0     0"
+    },
+    {
+      "description": "Apply logical AND with automatic scalar expansion",
+      "input": "mask = [1; 0; 3; 0];\nflag = and(mask, 5)",
+      "output": "flag =\n  4×1 logical array\n     1\n     0\n     1\n     0"
+    },
+    {
+      "description": "Use logical AND with character arrays",
+      "input": "lhs = ['R' 'u' 'n'];\nrhs = ['R' 'u' 0];\nmatch = and(lhs, rhs)",
+      "output": "match =\n  1×3 logical array\n     1     1     0"
+    },
+    {
+      "description": "Run logical AND directly on the GPU",
+      "input": "G1 = gpuArray([0 2 0 4]);\nG2 = gpuArray([1 0 3 4]);\ndeviceResult = and(G1, G2)\nhostResult = gather(deviceResult)",
+      "output": "deviceResult =\n  1×4 gpuArray logical array\n     0     0     0     1\nhostResult =\n  1×4 logical array\n     0     0     0     1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `and` return logical values?",
+      "answer": "Yes. The result is a logical scalar (`true`/`false`) when the broadcasted shape contains exactly one element; otherwise the function returns a logical array. On the GPU the kernel writes `0.0`/`1.0` elements, and the runtime converts them back to logical values when you gather."
+    },
+    {
+      "question": "How are `NaN` values handled?",
+      "answer": "`NaN` counts as `true`. For example, `and(NaN, 5)` returns `true` because both operands evaluate to non-zero."
+    },
+    {
+      "question": "Is implicit expansion supported?",
+      "answer": "Yes. The inputs follow MATLAB-style implicit expansion rules: dimensions of length `1` broadcast across the other input. Fully incompatible shapes raise a size-mismatch error."
+    },
+    {
+      "question": "Can I use `and` with complex numbers?",
+      "answer": "Yes. Real or complex inputs return `true` when either the real or imaginary component is non-zero. For example, `and(1 + 0i, 0 + 2i)` returns `true`."
+    },
+    {
+      "question": "How does `and` differ from the `&` operator?",
+      "answer": "They share the same element-wise semantics. The functional form is convenient for higher-order code (for example, `arrayfun(@and, ...)`) and for aligning with MATLAB documentation. Use `&&` or `||` for short-circuit scalar logic."
+    },
+    {
+      "question": "What happens when only one input is a `gpuArray`?",
+      "answer": "RunMat promotes the other input to the GPU before dispatch when the auto-offload planner decides it is profitable. If the provider lacks a device implementation, both operands gather to host automatically and the logical result executes on the CPU."
+    }
+  ],
+  "links": [
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/logical/bit/and.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/bit/and.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's native auto-offload logic moves data to the GPU when a fused expression benefits from device execution, and results stay resident until you gather them or the planner needs host access. Call `gpuArray` only when you want to seed residency manually, or when you are porting MATLAB code that already uses explicit device transfers.",
+  "gpu_behavior": [
+    "When both operands reside on the GPU and the active provider implements the `logical_and` hook, RunMat lowers the call into a device kernel that writes `0` or `1` for each element. The fusion planner treats `and` as an element-wise operation, so fused expressions (for example, `and(A > 0, B)`) stay on device without intermediate gathers. If the provider lacks the hook, the runtime gathers the inputs to host memory automatically and executes the CPU implementation instead of failing."
+  ]
+}

@@ -12,164 +12,6 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "regexprep",
-        builtin_path = "crate::builtins::strings::regex::regexprep"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "regexprep"
-category: "strings/regex"
-keywords: ["regexprep", "regular expression", "replace", "substitute", "regex"]
-summary: "Perform MATLAB-compatible regular expression replacements on character vectors, string arrays, or cell arrays."
-references:
-  - https://www.mathworks.com/help/matlab/ref/regexprep.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Runs on the CPU. Inputs resident on the GPU are gathered before evaluation, and results remain on the host."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 0
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::strings::regex::regexprep::tests"
-  integration: "builtins::strings::regex::regexprep::tests::regexprep_elementwise_arrays"
----
-
-# What does the `regexprep` function do in MATLAB / RunMat?
-`regexprep(str, pattern, replacement)` searches `str` for regular expression matches and replaces
-each match with the specified replacement text. Inputs can be character vectors, string scalars,
-string arrays, or cell arrays of text, and the results honour MATLAB's container semantics.
-
-## How does the `regexprep` function behave in MATLAB / RunMat?
-- With scalar text inputs, the result is a scalar of the same kind (`char` inputs stay `char`,
-  string scalars stay string scalars).
-- String arrays and cell arrays are processed element-wise and produce containers with matching
-  shapes. When patterns and replacements are provided as arrays of the same size, they are paired
-  element-by-element; otherwise, scalar patterns/replacements broadcast to every element.
-- Cell or string arrays of patterns apply sequentially: each `(pattern, replacement)` pair is
-  applied in order to every element.
-- The `'once'` flag limits each element to the first match. `'emptymatch','remove'` (default)
-  skips zero-length matches, while `'emptymatch','allow'` lets them participate.
-- `'ignorecase'` and `'matchcase'` control case sensitivity. `'lineanchors'`, `'dotall'`, and
-  `'dotExceptNewline'` toggle multiline and dot behaviours in the same way as `regexp`.
-- `'preservecase'` adjusts the replacement text so the case pattern of the first match (all upper,
-  all lower, or title case) is preserved.
-
-## `regexprep` Function GPU Execution Behaviour
-`regexprep` executes entirely on the CPU. When the subject, pattern, or replacement values originate
-from GPU-resident arrays, RunMat gathers them to host memory before performing the replacements.
-Results remain on the host; callers that need GPU residency should explicitly move the values back
-afterwards (e.g. with `gpuArray`).
-
-## Examples of using the `regexprep` function in MATLAB / RunMat
-
-### Replacing vowels in a character vector
-```matlab
-clean = regexprep('abracadabra', '[aeiou]', 'X');
-```
-Expected output:
-```matlab
-clean =
-    'XbrXcXdXbrX'
-```
-
-### Applying multiple pattern/replacement pairs sequentially
-```matlab
-result = regexprep("Color: red", {'Color', 'red'}, {'Shade', 'blue'});
-```
-Expected output:
-```matlab
-result = "Shade: blue"
-```
-
-### Performing case-insensitive replacements
-```matlab
-names = regexprep(["Alpha"; "beta"; "GaMmA"], 'a', '_', 'ignorecase');
-```
-Expected output:
-```matlab
-names =
-  3×1 string array
-    "_lph_"
-    "bet_"
-    "G__mM_"
-```
-
-### Preserving case of the original match
-```matlab
-words = regexprep('MATLAB and matlab', 'matlab', 'runmat', 'preservecase');
-```
-Expected output:
-```matlab
-words =
-    'RUNMAT and runmat'
-```
-
-### Limiting replacements to the first match with `'once'`
-```matlab
-out = regexprep("abababa", 'ba', 'XY', 'once');
-```
-Expected output:
-```matlab
-out = "aXYbaba"
-```
-
-### Using element-wise patterns for a string array
-```matlab
-expr = ["foo", "bar"];
-pat = ["f", "ar"];
-rep = ["F", "AR"];
-exact = regexprep(expr, pat, rep);
-```
-Expected output:
-```matlab
-exact = 1×2 string
-    "Foo"    "bAR"
-```
-
-## FAQ
-
-### How are container outputs shaped?
-Outputs mirror the input container. Character vectors return character vectors, string arrays
-return string arrays with the same size, and cell arrays return cell arrays with matching shape.
-
-### Can I supply multiple patterns at once?
-Yes. Provide `pattern` and `replacement` as equally-sized cell or string arrays. Each pair is applied
-sequentially to every element, mirroring MATLAB's behaviour.
-
-### What if my replacement needs capture-group text?
-Use `$1`, `$2`, … for numbered groups or `${name}` for named groups inside the replacement text.
-These tokens expand to the corresponding captured substrings.
-
-### Does `regexprep` support case-insensitive matching?
-Yes. Pass the `'ignorecase'` option (or `'matchcase'` to revert). You can also request multiline
-anchors or dot behaviour changes with `'lineanchors'`, `'dotall'`, or `'dotExceptNewline'`.
-
-### What does `'preservecase'` do?
-When enabled, `regexprep` inspects the alphabetic characters in the matched text. If they are all
-uppercase, lowercase, or title-cased, the replacement text is adjusted to match that style.
-
-### Does `regexprep` execute on the GPU?
-No. All matching and replacement runs on the CPU. GPU inputs are downloaded automatically, but the
-results remain in host memory.
-
-## See Also
-`regexp`, `regexpi`, `strrep`, `replace`, `contains`
-
-## Source & Feedback
-- Implementation: [`crates/runmat-runtime/src/builtins/strings/regex/regexprep.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/regex/regexprep.rs)
-- Found a behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::regex::regexprep")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "regexprep",
@@ -1089,7 +931,6 @@ fn parse_toggle(value: Option<&Value>) -> Option<bool> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
 
     fn run_regexprep(
         subject: Value,
@@ -1366,12 +1207,5 @@ pub(crate) mod tests {
             message.contains("replacement sequence is incompatible with element-wise patterns"),
             "unexpected error message: {message}"
         );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

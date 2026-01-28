@@ -28,62 +28,6 @@ use std::convert::TryFrom;
 
 use crate::{BuiltinResult, RuntimeError};
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "plot",
-        builtin_path = "crate::builtins::plotting::plot"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "plot"
-category: "plotting"
-keywords: ["plot", "line plot", "2D", "visualization", "gpuArray"]
-summary: "Draw 2-D line plots that mirror MATLAB's `plot(x, y)` semantics."
-references:
-  - https://www.mathworks.com/help/matlab/ref/plot.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Single-precision gpuArray inputs render zero-copy via the shared WebGPU context; other data is gathered to the host."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 2
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::plotting::plot::tests"
----
-
-# What does `plot` do?
-`plot(x, y)` creates a 2-D line plot with MATLAB-compatible styling. Inputs may be real row/column
-vectors or single-precision gpuArray vectors when a shared WebGPU context is available.
-
-## Behaviour highlights
-- Both `x` and `y` must contain the same number of elements; mismatched lengths raise errors.
-- Default styling mirrors MATLAB: blue solid line with circular markers disabled. Line width matches
-  MATLAB's default (approx. 1 pt) but can be adjusted once the interactive window is open.
-- Multiple calls to `plot` append to the current figure when users call `hold on` (future work).
-- Single-precision gpuArray vectors stay on the device and feed a zero-copy line packer. Double-precision
-  data or dashed/marker-heavy styles fall back to the CPU path automatically.
-
-## Examples
-
-```matlab
-plot(0:0.1:2*pi, sin(0:0.1:2*pi));
-plot(time, amplitude);
-```
-
-## GPU residency
-`plot` terminates fusion graphs. If the inputs are `single` gpuArrays and the shared plotter
-device is active, their buffers are consumed zero-copy by the renderer. Otherwise the tensors are
-gathered before plotting, matching MATLAB semantics.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::plot")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "plot",

@@ -5,7 +5,7 @@ use crate::builtin::metadata::BuiltinRecord;
 use crate::context::reference;
 
 const IMPLEMENTATION_NOTES: &[&str] = &[
-    "Create a dedicated builtin module (DOC_MD, GPU/Fusion specs, runtime registration, helper routines, tests).",
+    "Create a dedicated builtin module (GPU/Fusion specs, runtime registration, helper routines, tests).",
     "Mirror function semantics exactly to MATLAB, as this is a MATLAB compatible runtime; ",
     "raise MATLAB-compatible errors and keep GPU fallbacks in sync with host code.",
     "Share helpers via builtins/common rather than referencing legacy modules.",
@@ -16,7 +16,6 @@ const IMPLEMENTATION_NOTES: &[&str] = &[
 const TESTING_EXPECTATIONS: &[&str] = &[
     "cargo test -p runmat-runtime --lib -- <builtin>",
     "cargo test -p runmat-runtime --tests -- <builtin>",
-    "Include doc example smoke tests (test_support::doc_examples)",
 ];
 
 /// Build a textual prompt describing the builtin authoring task.
@@ -51,9 +50,7 @@ pub fn render_prompt(record: &BuiltinRecord, config: &AppConfig) -> String {
             record.name
         );
     }
-    prompt.push_str(
-        "- Use the references above to follow the RunMat builtin template (DOC_MD, GPU/Fusion specs, tests).\n",
-    );
+    prompt.push_str("- Use the references above to follow the RunMat builtin template.\n");
     prompt.push_str(
         "- Ensure MATLAB-compatible semantics and document GPU fallbacks when provider hooks are incomplete.\n\n",
     );

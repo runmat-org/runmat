@@ -219,6 +219,9 @@ export default function DocsPage() {
               <Link href="/blog/introducing-runmat">Read Introduction</Link>
             </Button>
             <Button variant="outline" size="default" asChild>
+              <Link href="/blog/what-is-matlab">What is MATLAB?</Link>
+            </Button>
+            <Button variant="outline" size="default" asChild>
               <Link href="https://github.com/runmat-org/runmat" target="_blank">
                 View On GitHub
               </Link>

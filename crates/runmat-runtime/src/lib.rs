@@ -60,7 +60,8 @@ pub use dispatcher::{
     value_contains_gpu,
 };
 
-pub use runmat_macros::{register_doc_text, register_fusion_spec, register_gpu_spec};
+pub use runmat_macros::{register_fusion_spec, register_gpu_spec};
+
 
 // Pruned legacy re-exports; prefer builtins::* and explicit shims only
 // Transitional root-level shims for widely used helpers

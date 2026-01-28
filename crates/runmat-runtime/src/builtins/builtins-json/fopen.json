@@ -1,0 +1,138 @@
+{
+  "title": "fopen",
+  "category": "io/filetext",
+  "keywords": [
+    "fopen",
+    "file",
+    "io",
+    "permission",
+    "encoding",
+    "machine format"
+  ],
+  "summary": "Open a file and obtain a MATLAB-compatible file identifier.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/fopen.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host CPU. Inputs residing on the GPU are gathered automatically; file handles always live on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::filetext::fopen::tests",
+    "integration": "builtins::io::filetext::fopen::tests::fopen_list_all_includes_handles"
+  },
+  "description": "`fopen` opens a file and returns a numeric file identifier (`fid`) that other I/O functions use. It mirrors MATLAB's permissions (`'r'`, `'w'`, `'a'`, `'+`, `'b'`, `'t'`), respects machine-format specifiers, and records the text encoding used for subsequent reads and writes.",
+  "behaviors": [
+    "`fid = fopen(filename)` opens an existing file for reading. The call fails (returning `fid = -1`) when the file cannot be opened.",
+    "`fid = fopen(filename, permission)` opens a file using the requested permission string (`'r'`, `'w'`, `'a'`, `'r+'`, `'w+'`, `'a+'`, plus optional `'b'`/`'t'`). Permissions map to the same semantics as MATLAB: `'w'` truncates, `'a'` appends, and `'+'` enables reading and writing.",
+    "`fid = fopen(filename, permission, machinefmt, encoding)` records the requested machine format (`'native'`, `'ieee-le'`, `'ieee-be'`) and text encoding (defaults to UTF-8 in text mode, `binary` otherwise) for later inspection.",
+    "`[fid, message] = fopen(...)` returns an empty character vector on success and the operating-system error message on failure.",
+    "`[filename, permission, machinefmt, encodingOut] = fopen(fid)` queries an existing file identifier.",
+    "`[fid_list, names, machinefmts, encodings] = fopen('all')` lists every open file (including standard input/output/error) and returns cell arrays containing metadata for each entry.",
+    "`[fid_list, names] = fopen('all', machinefmt)` filters the listing to files whose recorded machine format (for example `'ieee-be'` or `'native'`) matches the requested value.",
+    "RunMat gathers GPU-resident filename arguments before opening files; the resulting handles always live on the host. Providers do not implement GPU kernels for file I/O."
+  ],
+  "examples": [
+    {
+      "description": "Open a File for Reading",
+      "input": "[fid, message] = fopen('data/input.txt', 'r');\nif fid == -1\n    error('Failed to open file: %s', message);\nend"
+    },
+    {
+      "description": "Write Text to a New File",
+      "input": "[fid, message] = fopen('logs/session.log', 'w');\nif fid == -1\n    error('Failed to create log file: %s', message);\nend\nfprintf(fid, 'Session started\\n');\nfclose(fid);"
+    },
+    {
+      "description": "Append Binary Data",
+      "input": "[fid, message] = fopen('signals.bin', 'ab+');\nif fid == -1\n    error('Failed to open binary log: %s', message);\nend\nfwrite(fid, rand(1, 1024), 'double');\nfclose(fid);"
+    },
+    {
+      "description": "Query File Metadata",
+      "input": "fid = fopen('config.json');\n[filename, permission, machinefmt, encoding] = fopen(fid);\ndisp(filename);\ndisp(permission);\nfclose(fid);"
+    },
+    {
+      "description": "List All Open Files",
+      "input": "[fid_list, names] = fopen('all');\ndisp(fid_list);\ndisp(names);"
+    },
+    {
+      "description": "Handle Missing Files Gracefully",
+      "input": "[fid, message] = fopen('does_not_exist.txt', 'r');\nif fid == -1\n    fprintf('Failed to open file: %s\\n', message);\nend"
+    },
+    {
+      "description": "Specify Machine Format and Encoding",
+      "input": "[fid, message, machinefmt, encoding] = fopen('report.txt', 'w', 'ieee-le', 'latin1');\nif fid == -1\n    error('Failed to open report: %s', message);\nend\nfprintf(fid, 'ol\u00e1 mundo');\nfclose(fid);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What values can I use for the permission argument?",
+      "answer": "Use the same strings MATLAB accepts: `'r'`, `'w'`, `'a'`, optionally combined with `'+'` and `'b'`/`'t'`. For example, `'r+'` opens an existing file for reading and writing, `'wb'` opens a binary file for writing (truncating any existing content), and `'ab+'` appends to a binary file while permitting reads."
+    },
+    {
+      "question": "How do I close a file after opening it?",
+      "answer": "Call `fclose(fid)` with the file identifier returned by `fopen`. RunMat tracks open handles in a registry so that `fclose`, `fread`, and `fwrite` can reuse the same identifier."
+    },
+    {
+      "question": "What happens if `fopen` fails?",
+      "answer": "`fopen` returns `fid = -1` and the second output argument contains the OS error message. The third and fourth outputs are empty character vectors when opening fails."
+    },
+    {
+      "question": "Which encoding does RunMat use by default?",
+      "answer": "Text-mode files default to UTF-8 unless you specify the `encoding` argument. Binary permissions (`'...b'`) implicitly use the pseudo-encoding `binary`."
+    },
+    {
+      "question": "Does `fopen('all')` include standard input and output?",
+      "answer": "Yes. The returned identifier list always contains `0` (standard input), `1` (standard output), and `2` (standard error), followed by any user-opened files."
+    },
+    {
+      "question": "Are machine formats honoured during reads and writes?",
+      "answer": "RunMat records the requested machine format so that `fread`/`fwrite` can apply byte-order conversions. Hosts default to `'native'`, while passing `'ieee-le'` or `'ieee-be'` forces little or big-endian interpretation respectively."
+    },
+    {
+      "question": "Can I open the same file multiple times?",
+      "answer": "Yes. Each successful call to `fopen` registers a new handle with its own identifier, even if the path string matches an existing entry."
+    },
+    {
+      "question": "Does `fopen` support network paths or UNC shares?",
+      "answer": "RunMat relies on the operating system for path resolution, so UNC paths and mounted network shares are supported as long as the OS can open them."
+    }
+  ],
+  "links": [
+    {
+      "label": "fclose",
+      "url": "./fclose"
+    },
+    {
+      "label": "fread",
+      "url": "./fread"
+    },
+    {
+      "label": "fwrite",
+      "url": "./fwrite"
+    },
+    {
+      "label": "fileread",
+      "url": "./fileread"
+    },
+    {
+      "label": "filewrite",
+      "url": "./filewrite"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/io/filetext/fopen.rs",
+    "url": "crates/runmat-runtime/src/builtins/io/filetext/fopen.rs"
+  },
+  "gpu_behavior": [
+    "`fopen` always executes on the CPU. When a filename argument resides on a GPU array, RunMat gathers it to host memory before opening the file. File identifiers and their associated metadata are managed by a host-side registry that other builtins (such as `fclose`, `fread`, and `fwrite`) consult."
+  ]
+}

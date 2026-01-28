@@ -158,6 +158,13 @@ export default function GettingStartedPage() {
                   <span className="text-gray-400">  % Stays on GPU</span>
                   <div className="text-gray-400 mt-3">[GPU] Fused 2 operations, 1M elements in 0.8ms</div>
                 </div>
+                <p className="text-sm text-muted-foreground">
+                  Want the full GPU story? Read the{" "}
+                  <Link href="/blog/runmat-accelerate-fastest-runtime-for-your-math" className="underline">
+                    RunMat Accelerate deep dive
+                  </Link>
+                  .
+                </p>
               </CardContent>
             </Card>
 
@@ -363,8 +370,28 @@ export default function GettingStartedPage() {
                   How RunMat turns MATLAB scripts into GPU-accelerated workloads
                 </p>
                 <Button variant="outline" className="w-full" asChild>
-                  <Link href="/docs/accelerate/gpu-residency" className="flex items-center justify-center">
+                  <Link href="/docs/accelerate/fusion-intro" className="flex items-center justify-center">
                     RunMat Accelerate
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="hover:shadow-lg transition-shadow">
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Zap className="h-5 w-5 mr-2 text-purple-600" />
+                  Understand the Design
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground mb-4">
+                  Learn why RunMat keeps a slim core and package-first model.
+                </p>
+                <Button variant="outline" className="w-full" asChild>
+                  <Link href="/docs/design-philosophy" className="flex items-center justify-center">
+                    Design Philosophy
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Link>
                 </Button>

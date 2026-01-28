@@ -1,0 +1,134 @@
+{
+  "title": "min",
+  "category": "math/reduction",
+  "keywords": [
+    "min",
+    "minimum",
+    "reduction",
+    "comparisonmethod",
+    "omitnan",
+    "gpu"
+  ],
+  "summary": "Return the minimum elements of scalars, vectors, matrices, or N-D tensors with MATLAB-compatible options.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": true,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Uses provider reduce_min_dim / reduce_min when available. Fallback gathers data to the host for omitnan, custom comparison modes, or complex inputs."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": true,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::reduction::min::tests",
+    "integration": "builtins::math::reduction::min::tests::min_gpu_dim1_matches_cpu"
+  },
+  "description": "`min` finds the smallest values in its input while preserving MATLAB semantics for reductions, elementwise comparisons, NaN handling, complex magnitude comparisons, and linear indexing.",
+  "behaviors": [
+    "`min(X)` on an `m \u00d7 n` array reduces along the first non-singleton dimension, returning a row vector of column-wise minima and the corresponding indices (when requested).",
+    "`min(X, [], dim)` reduces along the specified dimension; `min(X, [], vecdim)` reduces along each dimension listed in `vecdim`.",
+    "`min(X, [], 'all')` collapses every element into a scalar and returns the linear index when two outputs are requested.",
+    "`min(X, [], 'linear')` is equivalent to `'all'` but guarantees that the matching index is linear over `X(:)`.",
+    "`min(X, [], ..., 'omitnan')` ignores `NaN` values inside each slice. If every element in a slice is `NaN`, the result for that slice is `NaN` and the index is `NaN`.",
+    "`min(X, [], ..., 'includenan')` (default) propagates `NaN` whenever a slice contains any `NaN` element, returning the index of the first `NaN`.",
+    "`min(A, B)` performs elementwise comparison using MATLAB's implicit expansion rules. The second output indicates whether the minimum came from `A` (index `1`) or `B` (index `2`).",
+    "Complex inputs follow MATLAB ordering: `'ComparisonMethod','auto'` (default) compares magnitudes and breaks ties using phase angles, while `'real'` compares real components first. `'abs'` is an explicit alias for magnitude ordering on real and complex inputs."
+  ],
+  "examples": [
+    {
+      "description": "Finding column-wise minima of a matrix",
+      "input": "A = [3 1 5; 4 2 6];\n[m, idx] = min(A);",
+      "output": "m   = [3 1 5];\nidx = [1 2 1];"
+    },
+    {
+      "description": "Reducing along the second dimension",
+      "input": "A = [3 1 5; 4 2 6];\n[m, idx] = min(A, [], 2);",
+      "output": "m   = [1; 2];\nidx = [2; 2];"
+    },
+    {
+      "description": "Collapsing all elements with linear indices",
+      "input": "A = reshape(1:12, [3 4]);\n[m, idx] = min(A, [], 'all');",
+      "output": "m   = 1;\nidx = 1;  % linear index into A(:)"
+    },
+    {
+      "description": "Ignoring NaN values during reduction",
+      "input": "values = [NaN 4 2; 3 NaN 1];\n[m, idx] = min(values, [], 1, 'omitnan');",
+      "output": "m   = [3 4 1];\nidx = [2 1 2];"
+    },
+    {
+      "description": "Elementwise minimum with broadcasting",
+      "input": "A = [1 4 7];\nB = [2; 3; 5];\n[C, origin] = min(A, B);",
+      "output": "C =\n     1     3     5\norigin =\n     1     2     2"
+    },
+    {
+      "description": "Comparing complex values by magnitude",
+      "input": "Z = [1+2i, 2+1i, -2+2i];\nM = min(Z);                         % magnitude ordering\nR = min(Z, [], 'ComparisonMethod', 'real');",
+      "output": "M = 2.0000 + 1.0000i\nR = 1.0000 + 2.0000i"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can I request the linear index of the global minimum?",
+      "answer": "Yes. Use either `min(X, [], 'all')` or `min(X, [], 'linear')`. Both return a scalar minimum and the linear index into `X(:)` when you request two outputs."
+    },
+    {
+      "question": "Does `min` support `'ComparisonMethod'` for real and complex arrays?",
+      "answer": "Absolutely. `'auto'` or `'abs'` compare magnitudes; `'real'` compares the real component first. The returned values always match MATLAB, including tie-breaking rules."
+    },
+    {
+      "question": "What happens when all elements are `NaN` and `'omitnan'` is requested?",
+      "answer": "The value result is `NaN` and the index is `NaN`, matching MATLAB's behavior for empty slices."
+    },
+    {
+      "question": "Can I mix elementwise comparisons with dimension reductions?",
+      "answer": "No. `min(A, B)` performs elementwise comparisons only. Use `min(A, [], dim)` when you want reductions along specific dimensions."
+    },
+    {
+      "question": "Do GPU reductions support `'omitnan'` or custom comparison methods?",
+      "answer": "Not yet. Those requests fall back to the host implementation, which still honors MATLAB semantics. The output remains a host tensor in that case."
+    },
+    {
+      "question": "Are logical and integer inputs supported?",
+      "answer": "Yes. Logical arrays are promoted to double precision, and integer inputs are converted to double before comparison, matching MATLAB's numeric tower."
+    }
+  ],
+  "links": [
+    {
+      "label": "max",
+      "url": "./max"
+    },
+    {
+      "label": "sum",
+      "url": "./sum"
+    },
+    {
+      "label": "mean",
+      "url": "./mean"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/min.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/min.rs"
+  },
+  "gpu_residency": "You typically do **not** need to call `gpuArray` manually. The fusion planner keeps tensors on the GPU between compatible kernels. When a reduction is supported by the active provider, the minimum values and indices stay on device. If a provider lacks the necessary hook, RunMat gathers data to the host, computes the result, and returns host tensors\u2014subsequent fused GPU kernels can re-upload data when profitable.",
+  "gpu_behavior": [
+    "When RunMat Accelerate is active, tensors that already reside on the GPU stay on the device whenever the provider exposes `reduce_min_dim` (for dimension reductions) or `reduce_min` (for whole-array reductions). Requests that require `omitnan`, custom comparison modes, `'linear'` indices, or complex arithmetic gather the data to the host, compute the MATLAB-compatible result, and return the output on the host. Elementwise `min(A, B)` currently executes on the host; the planner rematerializes tensors on the GPU when follow-on fused kernels make it profitable."
+  ]
+}

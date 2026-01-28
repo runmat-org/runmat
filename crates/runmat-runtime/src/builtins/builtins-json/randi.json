@@ -1,0 +1,137 @@
+{
+  "title": "randi",
+  "category": "array/creation",
+  "keywords": [
+    "randi",
+    "random",
+    "integer",
+    "gpu",
+    "like"
+  ],
+  "summary": "Uniform random integers with inclusive bounds.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses provider integer RNG hooks when available; otherwise generates samples on the host and uploads them to preserve GPU residency."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::randi::tests",
+    "integration": "builtins::array::creation::randi::tests::randi_gpu_like_roundtrip"
+  },
+  "description": "`randi` draws uniformly distributed random integers from an inclusive range. RunMat mirrors MATLAB calling forms, supporting scalar upper bounds, two-element range vectors, explicit dimension lists, size vectors, and `'like'` prototypes that keep type and residency consistent with an existing array.",
+  "behaviors": [
+    "`randi(imax)` returns a scalar double selected uniformly from `1:imax`.",
+    "`randi(imax, m, n, ...)` creates dense arrays whose entries are in `1:imax`.",
+    "`randi([imin imax], sz)` accepts a two-element range vector plus either a size vector or explicit dimensions.",
+    "`randi(___, 'like', A)` matches both the shape and device residency of `A`, including GPU tensors when acceleration is enabled.",
+    "Negative lower bounds are supported so long as `imin <= imax`.",
+    "`randi(___, 'double')` is accepted for MATLAB compatibility and keeps the default double output.",
+    "`randi(___, 'logical')` emits a logical array when the inclusive range stays within `[0, 1]`.",
+    "RunMat diagnoses unsupported class specifiers (e.g., `'single'`, `'uint8'`) with descriptive errors until native representations land."
+  ],
+  "examples": [
+    {
+      "description": "Drawing a single die roll",
+      "input": "rng(0);\nroll = randi(6);",
+      "output": "roll = 1"
+    },
+    {
+      "description": "Creating a matrix of random indices",
+      "input": "rng(0);\nidx = randi(10, 2, 3);",
+      "output": "idx =\n     1     9     7\n    10     2     1"
+    },
+    {
+      "description": "Generating bounded integers with a size vector",
+      "input": "rng(0);\nshape = [3 4 2];\ntiles = randi([5 20], shape);",
+      "output": "tiles(:, :, 1) =\n     6     7     5    15\n    19    14     9    16\n    18     5    10    13\n\ntiles(:, :, 2) =\n    20     5    17     8\n    20    14     5     9\n    10     9    18     5"
+    },
+    {
+      "description": "Matching an existing `gpuArray`",
+      "input": "rng(0);\nG = gpuArray.zeros(4, 4);\nlabels = randi([0 3], 'like', G);\npeek = gather(labels);",
+      "output": "peek =\n     0     2     1     3\n     3     0     2     3\n     3     0     2     1\n     0     1     2     0\n\nisa(labels, 'gpuArray')\nans =\n     logical\n     1"
+    },
+    {
+      "description": "Building a random logical mask",
+      "input": "rng(0);\nmask = randi([0 1], 4, 4, 'logical');",
+      "output": "mask =\n     0     1     0     1\n     1     0     1     1\n     1     0     1     0\n     0     0     1     0"
+    },
+    {
+      "description": "Reproducible integer tensors inside tests",
+      "input": "rng(0);\np = randi([1 4], 1, 5);",
+      "output": "p = [1 4 4 1 3]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What range does `randi(imax)` use?",
+      "answer": "The call `randi(imax)` produces integers in the inclusive range `1:imax`. Use the two-element form `randi([imin imax], ...)` when you need a custom minimum."
+    },
+    {
+      "question": "Can the lower bound be negative?",
+      "answer": "Yes. `randi([imin imax], ...)` accepts negative bounds as long as `imin <= imax` and both bounds are integers."
+    },
+    {
+      "question": "Does `randi` return doubles or integer arrays?",
+      "answer": "RunMat matches MATLAB by storing results in double-precision tensors whose values are integers. Future releases will add direct integer array classes."
+    },
+    {
+      "question": "Can I request a logical result directly?",
+      "answer": "Yes. Pass `'logical'` as the final argument, and ensure the inclusive range stays within `[0, 1]`. Any other range produces an error because logical arrays can only store 0/1 values."
+    },
+    {
+      "question": "How do I control the array shape?",
+      "answer": "Pass either explicit dimensions (`randi(9, 4, 2)`) or a size vector (`randi(9, [4 2])`). Providing a `'like'` prototype also copies the prototype's shape automatically."
+    },
+    {
+      "question": "How does `randi` interact with `rng`?",
+      "answer": "`randi` consumes RunMat's global RNG stream. Use the MATLAB-compatible `rng` builtin to seed or restore the generator for reproducible simulations."
+    },
+    {
+      "question": "What happens if the provider lacks integer RNG hooks?",
+      "answer": "RunMat falls back to host generation followed by a single upload. The resulting array still lives on the GPU; only the initial samples are produced on the CPU."
+    },
+    {
+      "question": "Does `randi` support `'single'` or integer output classes?",
+      "answer": "Not yet. The `randi` builtin currently supports doubles only. Supplying `'single'` or integer class names raises a descriptive error."
+    }
+  ],
+  "links": [
+    {
+      "label": "rand",
+      "url": "./rand"
+    },
+    {
+      "label": "randn",
+      "url": "./randn"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/randi.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/randi.rs"
+  },
+  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nIn RunMat, the fusion planner keeps residency on GPU in branches of fused expressions. As such, in the examples above, the result of `randi` remains on the GPU whenever the planner determines that downstream work benefits from staying on device.\n\nTo preserve backwards compatibility with MathWorks MATLAB\u2014and when you want to be explicit about residency\u2014you can call `gpuArray` yourself to seed GPU execution.\n\nBecause MathWorks MATLAB lacks a fusion planner and ships GPU support as a separate toolbox, MATLAB users must move data manually. RunMat automates residency to streamline accelerated workflows.",
+  "gpu_behavior": [
+    "When the target output or `'like'` prototype resides on the GPU, RunMat first asks the active acceleration provider for device-side generation via `random_integer_like` (shape reuse) or `random_integer_range` (explicit shape). Providers that do not expose these hooks fall back to host-side sampling followed by a single upload, ensuring correctness while still keeping the resulting tensor on the GPU."
+  ]
+}

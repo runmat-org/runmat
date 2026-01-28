@@ -1,0 +1,130 @@
+{
+  "title": "cos",
+  "category": "math/trigonometry",
+  "keywords": [
+    "cos",
+    "cosine",
+    "trigonometry",
+    "elementwise",
+    "gpu",
+    "like"
+  ],
+  "summary": "Cosine of scalars, vectors, matrices, complex numbers, or character arrays with MATLAB broadcasting and GPU acceleration.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Prefers provider unary_cos hooks; falls back to the host path when a provider is unavailable or cannot service the operand type."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::trigonometry::cos::tests",
+    "integration": "builtins::math::trigonometry::cos::tests::cos_gpu_provider_roundtrip"
+  },
+  "description": "`y = cos(x)` evaluates the cosine of each element in `x`, interpreting angles in radians while preserving MATLAB\u2019s column-major layout and broadcasting rules.",
+  "behaviors": [
+    "Operates on scalars, vectors, matrices, and N-D tensors with MATLAB-compatible implicit expansion.",
+    "Logical and integer inputs are promoted to double precision before evaluation so downstream arithmetic matches MATLAB\u2019s numeric tower.",
+    "Complex values use the analytic extension `cos(a + bi) = cos(a)cosh(b) - i\u00b7sin(a)sinh(b)` while propagating `NaN`/`Inf` components independently.",
+    "Character arrays are interpreted through their Unicode code points and return dense double arrays that mirror MATLAB\u2019s behaviour.",
+    "Appending `'like', prototype` mirrors the prototype\u2019s class and residency (host or GPU), re-uploading the result when a device prototype is supplied.",
+    "Empty inputs and singleton dimensions are preserved without introducing extraneous allocations."
+  ],
+  "examples": [
+    {
+      "description": "Cosine of zero",
+      "input": "y = cos(0);",
+      "output": "y = 1"
+    },
+    {
+      "description": "Cosine of evenly spaced angles",
+      "input": "theta = linspace(0, 2*pi, 5);\nvalues = cos(theta);",
+      "output": "values = [1 0.3090 -0.8090 -0.8090 0.3090]"
+    },
+    {
+      "description": "Cosine of complex data",
+      "input": "z = cos(1 + 2i);",
+      "output": "z = 2.0327 - 3.0519i"
+    },
+    {
+      "description": "Cosine on a GPU tensor without manual residency",
+      "input": "A = reshape(0:5, [3 2]);\nresult = cos(A);        % planner keeps the tensor on device when beneficial",
+      "output": "result =\n    1.0000   -0.9899\n    0.5403   -0.6536\n   -0.4161    0.2837"
+    },
+    {
+      "description": "Keeping results on the GPU with a `'like'` prototype",
+      "input": "proto = gpuArray.zeros(1, 1, 'single');\nangles = [0 pi/2 pi];\ndeviceResult = cos(angles, 'like', proto);",
+      "output": "deviceResult = single([1 0 -1])"
+    },
+    {
+      "description": "Matching a host prototype while inputs live on the GPU",
+      "input": "G = gpuArray([0 1 2]);\nhostLike = cos(G, 'like', zeros(1, 'double'));",
+      "output": "hostLike = [1 0.5403 -0.4161]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I use the `cos` function?",
+      "answer": "Use `cos` whenever you need the cosine of angles expressed in radians\u2014whether those angles are scalars, vectors, matrices, or higher-dimensional tensors."
+    },
+    {
+      "question": "Does `cos` promote inputs to double precision?",
+      "answer": "Yes. Unless you request otherwise with `'like'`, RunMat promotes numeric inputs to double precision, matching MATLAB\u2019s default behaviour."
+    },
+    {
+      "question": "How does `cos` handle complex inputs?",
+      "answer": "Complex numbers follow MATLAB\u2019s analytic definition `cos(a + bi) = cos(a)cosh(b) - i\u00b7sin(a)sinh(b)` so both the real and imaginary parts are handled correctly."
+    },
+    {
+      "question": "What happens if the GPU provider lacks `unary_cos`?",
+      "answer": "RunMat gathers the tensor to the host, evaluates cosine with the CPU reference path, and then reapplies residency rules. If a `'like'` prototype targets the GPU, the result is uploaded back before returning."
+    },
+    {
+      "question": "Can I rely on MATLAB broadcasting rules?",
+      "answer": "Yes. Scalar and singleton dimensions implicitly expand just as they do in MATLAB."
+    },
+    {
+      "question": "Does `cos` work with character arrays?",
+      "answer": "Yes. Character arrays are converted to their Unicode code points before cosine is evaluated, and the result is returned as a dense double array of the same size."
+    }
+  ],
+  "links": [
+    {
+      "label": "sin",
+      "url": "./sin"
+    },
+    {
+      "label": "tan",
+      "url": "./tan"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/trigonometry/cos.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/cos.rs"
+  },
+  "gpu_residency": "```matlab:runnable\nA = reshape(0:5, [3 2]);\nresult = cos(A);        % planner keeps the tensor on device when beneficial\n```\n\nExpected output (after `gather(result)`):\n\n```matlab\nresult =\n    1.0000   -0.9899\n    0.5403   -0.6536\n   -0.4161    0.2837\n```",
+  "gpu_behavior": [
+    "With RunMat Accelerate active, tensors remain on the device and execute through the provider\u2019s `unary_cos` hook (or fused elementwise kernels) without leaving GPU memory.",
+    "If the provider declines the operation\u2014for example, when only CPU precision is available or the operand type is unsupported\u2014RunMat transparently gathers to the host, computes the result, and reapplies the requested residency rules (including `'like'` prototypes).",
+    "Fusion planning keeps neighbouring elementwise operators grouped, reducing host\u2194device transfers even when an intermediate fallback occurs."
+  ]
+}

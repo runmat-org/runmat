@@ -1,0 +1,131 @@
+{
+  "title": "fspecial",
+  "category": "image/filters",
+  "keywords": [
+    "fspecial",
+    "filter",
+    "gaussian",
+    "sobel",
+    "motion",
+    "laplacian",
+    "disk"
+  ],
+  "summary": "Generate classical 2-D correlation kernels used in MATLAB image processing workflows.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Providers implement the optional 'fspecial' hook. When it is missing or a kernel is not yet accelerated (./motion), RunMat falls back to the host implementation transparently."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::image::filters::fspecial::tests",
+    "integration": "builtins::image::filters::fspecial::tests::fspecial_motion_sum_is_one",
+    "gpu": "builtins::image::filters::fspecial::tests::fspecial_gaussian_gpu_matches_cpu"
+  },
+  "description": "`fspecial(type, ...)` constructs well-known 2-D filter kernels such as averaging, Gaussian, Laplacian, Sobel, Prewitt, motion blur, Laplacian of Gaussian, unsharp masking, and disk (pillbox) filters. These kernels are intended for use with correlation and convolution routines like `imfilter` and `conv2`, and their outputs match MathWorks MATLAB behaviour for every supported option.",
+  "behaviors": [
+    "Uses MATLAB-compatible defaults for all optional parameters and validates scalar/vector inputs rigorously.",
+    "Produces double-precision column-major tensors that match MATLAB sample outputs to machine precision.",
+    "Normalises smoothing filters (average, disk, Gaussian, Laplacian of Gaussian, motion) to unit sum.",
+    "Emits derivative-style operators (Sobel, Prewitt, Laplacian, unsharp) using MATLAB's historical scaling.",
+    "Accepts scalar sizes or two-element vectors; zero/negative dimensions trigger MATLAB-style errors.\n\n### Supported filter types",
+    "`\"average\"`: rectangular mean filter with optional size argument.",
+    "`\"disk\"`: circular averaging filter parameterised by radius.",
+    "`\"gaussian\"`: Gaussian low-pass filter with optional size and standard deviation.",
+    "`\"laplacian\"`: 3×3 Laplacian operator controlled by `alpha` (0 ≤ alpha ≤ 1).",
+    "`\"log\"`: Laplacian of Gaussian with optional size and `sigma`.",
+    "`\"motion\"`: motion blur kernel with controllable length and angle (rounded to odd kernel width).",
+    "`\"prewitt\"`: 3×3 horizontal Prewitt edge detector.",
+    "`\"sobel\"`: 3×3 horizontal Sobel edge detector.",
+    "`\"unsharp\"`: 3×3 unsharp masking filter with optional `alpha`."
+  ],
+  "examples": [
+    {
+      "description": "Creating a box filter for local averaging",
+      "input": "H = fspecial(\"average\", 7);        % 7x7 box filter with unit sum"
+    },
+    {
+      "description": "Building a Gaussian smoothing kernel",
+      "input": "H = fspecial(\"gaussian\", [5 5], 1.0);"
+    },
+    {
+      "description": "Generating a disk filter for circular blur",
+      "input": "H = fspecial(\"disk\", 4);"
+    },
+    {
+      "description": "Constructing a Laplacian-of-Gaussian edge detector",
+      "input": "H = fspecial(\"log\", [9 9], 1.4);"
+    },
+    {
+      "description": "Synthesising a motion blur kernel at 30 degrees",
+      "input": "H = fspecial(\"motion\", 15, 30);"
+    },
+    {
+      "description": "Tuning an unsharp mask for edge enhancement",
+      "input": "H = fspecial(\"unsharp\", 0.6);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which filters does `fspecial` support?",
+      "answer": "All classic MATLAB filters are available: average, disk, Gaussian, Laplacian, Laplacian of Gaussian, motion, Prewitt, Sobel, and unsharp."
+    },
+    {
+      "question": "Does `fspecial` normalise the kernels?",
+      "answer": "All smoothing filters produce weights that sum to one. Derivative-style kernels follow MATLAB's scaling so that downstream edge detection behaves identically."
+    },
+    {
+      "question": "Can I generate a GPU-resident kernel directly?",
+      "answer": "Yes. Set `RUNMAT_ACCEL_FSPECIAL_DEVICE=1` and ensure the active provider exposes the `fspecial` hook. Unsupported filters or providers gather to host automatically, so results stay correct either way."
+    },
+    {
+      "question": "How do I specify the kernel size?",
+      "answer": "Most filters accept a scalar size or a two-element `[rows cols]` vector. When omitted, MATLAB-compatible defaults are used (for example, 3×3 for average/gaussian/laplacian/prewitt/sobel/unsharp)."
+    },
+    {
+      "question": "What happens if I provide invalid parameters?",
+      "answer": "`fspecial` raises MATLAB-compatible errors when arguments fall outside the documented range. Negative lengths, radii, or sigmas, as well as noninteger dimensions, produce descriptive error messages."
+    },
+    {
+      "question": "Are the filters symmetric with MATLAB outputs?",
+      "answer": "Yes. Each kernel matches MATLAB (R2023b) outputs within floating-point precision, including motion blur and disk filters that rely on geometric integration."
+    }
+  ],
+  "links": [
+    {
+      "label": "imfilter",
+      "url": "./imfilter"
+    },
+    {
+      "label": "conv2",
+      "url": "./conv2"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/image/filters/fspecial.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/fspecial.rs"
+  },
+  "gpu_behavior": [
+    "When an acceleration provider is active, `fspecial` can materialise supported kernels directly on the GPU. Opt-in by setting `RUNMAT_ACCEL_FSPECIAL_DEVICE=1`. If the provider exports the `fspecial` hook (the WGPU backend covers average, gaussian, laplacian, prewitt, sobel, and unsharp), the builtin returns a `gpuArray` handle that remains device-resident for downstream fusion. Kernels without acceleration support and providers lacking the hook automatically fall back to the host path with identical numerical results."
+  ]
+}

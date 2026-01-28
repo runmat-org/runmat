@@ -31,7 +31,7 @@ Capturing the graph costs almost nothing, but gives RunMat a full view of what y
 
 For example, the following script:
 
-```matlab
+```matlab:runnable
 x = rand(1024, 1, 'single');
 
 y = sin(x) .* x + 0.5;
@@ -225,6 +225,8 @@ RunMat’s GPU acceleration is best understood as a system that:
 4. **Updates** — residency state so future decisions are informed.
 
 By working at this higher level, RunMat gives you the throughput benefits of modern GPUs while preserving the simplicity of MATLAB-syntax array programming. You focus on the math; RunMat operates the accelerator.
+
+Next, see the [Fusion Guide](/docs/fusion-guide) for detailed fusion patterns and GPU residency rules.
 
 ---
  

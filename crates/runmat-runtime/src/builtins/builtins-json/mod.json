@@ -1,0 +1,137 @@
+{
+  "title": "mod",
+  "category": "math/rounding",
+  "keywords": [
+    "mod",
+    "modulus",
+    "remainder",
+    "rounding",
+    "gpu"
+  ],
+  "summary": "Compute the MATLAB-style modulus a - b .* floor(./b) for scalars, matrices, N-D tensors, and complex values.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/mod.html"
+  ],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Composed from elem_div \u2192 unary_floor \u2192 elem_mul \u2192 elem_sub when all GPU operands share a shape; otherwise RunMat gathers to the host."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::rounding::mod::tests",
+    "integration": "builtins::math::rounding::mod::tests::mod_gpu_pair_roundtrip"
+  },
+  "description": "`C = mod(A, B)` returns the modulus after division such that `C` has the same sign as `B` and satisfies `A = B.*Q + C` with `Q = floor(./B)`. The definition holds for scalars, vectors, matrices, higher-dimensional tensors, and complex numbers.",
+  "behaviors": [
+    "Works with MATLAB-style implicit expansion (broadcasting) between `A` and `B`.",
+    "Returns `NaN` for elements where `B` is zero or both arguments are non-finite in incompatible ways (`Inf` modulo finite, `NaN` inputs, etc.).",
+    "Logical and integer inputs are promoted to double precision; character arrays operate on their Unicode code points.",
+    "Complex inputs use the MATLAB definition `mod(a, b) = a - b.*floor(a./b)` with complex division and component-wise `floor`.",
+    "Empty arrays propagate emptiness while retaining their shapes."
+  ],
+  "examples": [
+    {
+      "description": "Computing the modulus of positive integers",
+      "input": "r = mod(17, 5);",
+      "output": "r = 2;"
+    },
+    {
+      "description": "Modulus with negative divisors keeps the divisor's sign",
+      "input": "values = [-7 -3 4 9];\nmods   = mod(values, -4);",
+      "output": "mods = [-3 -3 0 -3];"
+    },
+    {
+      "description": "Broadcasting a scalar divisor across a matrix",
+      "input": "A = [4.5  7.1; -2.3  0.4];\nresult = mod(A, 2);",
+      "output": "result =\n    [0.5  1.1;\n     1.7  0.4]"
+    },
+    {
+      "description": "MATLAB-compatible modulus for complex numbers",
+      "input": "z = [3 + 4i, -2 + 5i];\ndiv = 2 + 1i;\nres = mod(z, div);",
+      "output": "res =\n    [0.0 + 0.0i, 0.0 + 1.0i]"
+    },
+    {
+      "description": "Handling zeros in the divisor",
+      "input": "warn = mod([2, 0, -2], [0, 0, 0]);",
+      "output": "warn = [NaN NaN NaN];"
+    },
+    {
+      "description": "Using `mod` with character arrays",
+      "input": "letters = mod('ABC', 5);",
+      "output": "letters = [0 1 2];"
+    },
+    {
+      "description": "Staying on the GPU when hooks are available",
+      "input": "G = gpuArray(-5:5);\nH = mod(G, 4);\ncpuCopy = gather(H);",
+      "output": "cpuCopy = [3 0 1 2 3 0 1 2 3 0 1];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `mod` different from `rem`?",
+      "answer": "`mod` uses `floor` and keeps the sign of the divisor. `rem` uses `fix` and keeps the sign of the dividend."
+    },
+    {
+      "question": "What happens when the divisor is zero?",
+      "answer": "The result is `NaN` (or `NaN + NaNi` for complex inputs), matching MATLAB semantics."
+    },
+    {
+      "question": "Does `mod` support complex numbers?",
+      "answer": "Yes. Both operands can be complex; the runtime applies MATLAB's definition with complex division and component-wise `floor`."
+    },
+    {
+      "question": "Do GPU sources need identical shapes?",
+      "answer": "Yes. The device fast path currently requires both operands to share the same shape. Other cases fall back to the CPU implementation automatically."
+    },
+    {
+      "question": "Are empty arrays preserved?",
+      "answer": "Yes. Empty inputs return empty outputs with the same shape."
+    },
+    {
+      "question": "Will `mod` ever change integer classes?",
+      "answer": "Inputs promote to double precision internally; results are reported as double scalars or tensors, mirroring MATLAB's default numeric type."
+    }
+  ],
+  "links": [
+    {
+      "label": "rem",
+      "url": "./rem"
+    },
+    {
+      "label": "floor",
+      "url": "./floor"
+    },
+    {
+      "label": "fix",
+      "url": "./fix"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/rounding/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/rounding/mod.rs"
+  },
+  "gpu_residency": "Usually not. When the provider exposes the elementwise hooks noted above, `mod` executes entirely on the GPU. Otherwise RunMat gathers transparently, ensuring MATLAB-compatible behaviour without manual intervention. Explicit `gpuArray` / `gather` calls remain available for scripts that mirror MathWorks MATLAB workflows.",
+  "gpu_behavior": [
+    "When both operands are GPU tensors with the same shape, RunMat composes `mod` from the provider hooks `elem_div`, `unary_floor`, `elem_mul`, and `elem_sub`. This keeps the computation on the device when those hooks are implemented (the shipped WGPU backend and in-process provider expose them). For mixed residency, shape-mismatched operands, or providers that lack any of these hooks, RunMat gathers to the host, applies the CPU implementation, and returns a host-resident result."
+  ]
+}

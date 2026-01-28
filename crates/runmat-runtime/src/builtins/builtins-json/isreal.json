@@ -1,0 +1,130 @@
+{
+  "title": "isreal",
+  "category": "logical/tests",
+  "keywords": [
+    "isreal",
+    "complex storage",
+    "real array",
+    "gpuArray isreal",
+    "MATLAB isreal"
+  ],
+  "summary": "Return true when a value uses real storage without an imaginary component.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Queries provider metadata via `logical_isreal`; falls back to a host-side check when a backend does not expose the hook."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::tests::isreal::tests",
+    "integration": "builtins::logical::tests::isreal::tests::isreal_gpu_roundtrip"
+  },
+  "description": "`tf = isreal(x)` returns a logical scalar that is `true` when the value `x` is stored without an imaginary component, and `false` otherwise. It mirrors MATLAB's storage-centric definition: any complex storage (even with zero-valued imaginary parts) is reported as not real.",
+  "behaviors": [
+    "Real numeric scalars and dense tensors return `true`.",
+    "Logical arrays, `duration`, `calendarDuration`, and character arrays always return `true`.",
+    "Complex scalars and `ComplexTensor` values return `false`, even when every imaginary component equals zero, because the data uses complex storage.",
+    "`string`, `table`, `cell`, `struct`, `datetime`, `function_handle`, and object values always return `false`, matching MATLAB's documented rules.",
+    "The return value is always a logical scalar; `isreal` does **not** produce per-element masks."
+  ],
+  "examples": [
+    {
+      "description": "Checking if a real-valued matrix is stored as real",
+      "input": "A = [7 3 2; 2 1 12; 52 108 78];\ntf = isreal(A);",
+      "output": "tf =\n     1"
+    },
+    {
+      "description": "Detecting complex entries inside an array",
+      "input": "B = [1 3+4i 2; 2i 1 12];\ntf = isreal(B);",
+      "output": "tf =\n     0"
+    },
+    {
+      "description": "Complex storage with zero-valued imaginary parts still reports false",
+      "input": "C = complex(12);   % Stored as complex double with 0 imaginary part\ntf = isreal(C);",
+      "output": "tf =\n     0"
+    },
+    {
+      "description": "Logical and character data are considered real",
+      "input": "mask = logical([1 0 1]);\nchars = ['R' 'u' 'n'];\ntf_mask = isreal(mask);\ntf_chars = isreal(chars);",
+      "output": "tf_mask =\n     1\n\ntf_chars =\n     1"
+    },
+    {
+      "description": "Strings, cells, and structs are never real",
+      "input": "txt = \"RunMat\";\nvec = {1, 2};\nperson = struct(\"name\", \"Ada\");\ntf_txt = isreal(txt);\ntf_vec = isreal(vec);\ntf_person = isreal(person);",
+      "output": "tf_txt =\n     0\n\ntf_vec =\n     0\n\ntf_person =\n     0"
+    },
+    {
+      "description": "Querying `gpuArray` storage without gathering data",
+      "input": "G = gpuArray(rand(1024, 1024));\ntf_gpu = isreal(G);",
+      "output": "tf_gpu =\n     1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `isreal` inspect each element of the array?",
+      "answer": "No. It is a storage-level predicate. Use `imag(A) == 0` or `A == real(A)` if you need per-element checks."
+    },
+    {
+      "question": "Why does `isreal` return false for `complex(5)` or `1 + 0i`?",
+      "answer": "Those expressions allocate complex storage even though the imaginary part is zero. MATLAB and RunMat both treat that storage as complex, so `isreal` returns `false`."
+    },
+    {
+      "question": "What about logical arrays, durations, or character data?",
+      "answer": "They always return `true` because those types never allocate an imaginary component."
+    },
+    {
+      "question": "Why do strings, cells, structs, or objects return false?",
+      "answer": "MATLAB documents that `isreal` returns `false` for those container and object types. RunMat follows the same rules for compatibility."
+    },
+    {
+      "question": "Will `isreal` trigger GPU computation or kernel launches?",
+      "answer": "No. It is a metadata query. Providers can answer it without dispatching kernels, and the runtime falls back to a single host download only when necessary."
+    },
+    {
+      "question": "How can I check whether each element is real on the GPU?",
+      "answer": "Use elementwise predicates such as `imag`/`real` combined with comparison (`imag(A) == 0`) or express the logic with fused operations. `isreal` is intentionally scalar."
+    }
+  ],
+  "links": [
+    {
+      "label": "isfinite",
+      "url": "./isfinite"
+    },
+    {
+      "label": "isinf",
+      "url": "./isinf"
+    },
+    {
+      "label": "isnan",
+      "url": "./isnan"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/logical/tests/isreal.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/tests/isreal.rs"
+  },
+  "gpu_residency": "Normally you do **not** need to call `gpuArray` explicitly. RunMat's auto-offload planner tracks when tensors already reside on the GPU and keeps them there. `isreal` simply inspects storage metadata and returns a host logical scalar, gathering device data only as a fallback.",
+  "gpu_behavior": [
+    "When RunMat Accelerate is active, the runtime asks the registered provider for the `logical_isreal` hook. A provider can answer the query using device metadata without downloading the tensor. If the hook is unavailable, RunMat gathers the value once and performs the storage check on the host, so the builtin always returns a result."
+  ]
+}

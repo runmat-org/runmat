@@ -26,7 +26,7 @@ The math is deliberately simple and realistic: compute a per‑image mean and st
 
 We'll use a simple pipeline: compute a per‑image mean and standard deviation, normalize, apply a modest gain/bias and a gamma curve, then validate with a mean‑squared error.
 
-```matlab
+```matlab:runnable
 rng(0); B=16; H=2160; W=3840;
 gain=single(1.0123); bias=single(-0.02); gamma=single(1.8); eps0=single(1e-6);
 

@@ -1,0 +1,144 @@
+{
+  "title": "factorial",
+  "category": "math/elementwise",
+  "keywords": [
+    "factorial",
+    "combinatorics",
+    "n!",
+    "permutations",
+    "gpu",
+    "like"
+  ],
+  "summary": "Element-wise factorial for non-negative integers with MATLAB-compatible NaN/Inf behaviour.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Calls unary_factorial when the provider implements it; otherwise gathers to the host and re-uploads only when a 'like' prototype is provided."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::factorial::tests",
+    "integration": "builtins::math::elementwise::factorial::tests::factorial_gpu_provider_roundtrip"
+  },
+  "description": "`factorial(X)` computes `X!` (the product of the integers from `1` to `X`) for every element of `X`. Inputs must be non-negative integers; MATLAB semantics dictate that non-integers return `NaN`, and integers larger than `170` overflow to `Inf` in double precision.",
+  "behaviors": [
+    "Scalars, vectors, matrices, and N-D tensors are processed element-by-element with MATLAB\u2019s implicit expansion rules.",
+    "Logical inputs promote to double precision (`true \u2192 1`, `false \u2192 0`) before evaluation; integer classes are cast to double.",
+    "Non-integer or negative inputs yield `NaN`; large integers (`n \u2265 171`) overflow to `Inf`, matching MATLAB\u2019s overflow handling in double precision.",
+    "`factorial(0)` and `factorial(-0.0)` both return `1`, in accordance with the definition `0! = 1`.",
+    "Results are real doubles. Passing `'like', prototype` lets you retain host or GPU residency to integrate with existing pipelines.",
+    "GPU tensors remain on device when the active provider implements `unary_factorial`; otherwise RunMat gathers to the host, computes the result, and re-uploads only when you explicitly request GPU residency via `'like'`."
+  ],
+  "examples": [
+    {
+      "description": "Factorial of a single integer value",
+      "input": "y = factorial(5)",
+      "output": "y = 120"
+    },
+    {
+      "description": "Factorial of zero returns one",
+      "input": "factorial(0)",
+      "output": "ans = 1"
+    },
+    {
+      "description": "Factorial across a vector of non-negative integers",
+      "input": "vals = factorial([0 1 3 5]);",
+      "output": "vals = [1 1 6 120]"
+    },
+    {
+      "description": "Detecting invalid non-integer inputs",
+      "input": "result = factorial([2.5 -1 4]);",
+      "output": "result = [NaN NaN 24]"
+    },
+    {
+      "description": "Handling large inputs that overflow to infinity",
+      "input": "big = factorial(171);",
+      "output": "big = Inf"
+    },
+    {
+      "description": "Using factorial with `gpuArray` inputs",
+      "input": "G = gpuArray(uint16([3 4 5]));\nR = factorial(G);\nhost = gather(R);",
+      "output": "host = [6 24 120]"
+    },
+    {
+      "description": "Keeping results on the GPU with `'like'`",
+      "input": "proto = gpuArray.zeros(1, 1, 'single');\ndeviceResult = factorial([3 4], 'like', proto);\ngathered = gather(deviceResult);",
+      "output": "gathered =\n  1x2 single\n     6    24"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What inputs are valid for `factorial`?",
+      "answer": "Any non-negative integer (including zero). Logical and integer arrays are accepted; doubles must be exact integers within floating-point tolerance. Non-integer or negative values return `NaN`."
+    },
+    {
+      "question": "Why do large integers return `Inf`?",
+      "answer": "Double precision overflows at `171!`. MATLAB returns `Inf` for those values, and RunMat mirrors that behaviour."
+    },
+    {
+      "question": "Does `factorial` support complex numbers?",
+      "answer": "No. Use `gamma(z + 1)` if you need the analytic continuation for complex arguments."
+    },
+    {
+      "question": "How does `factorial` behave with `NaN` or `Inf` inputs?",
+      "answer": "`factorial(NaN)` returns `NaN`. `factorial(Inf)` returns `Inf`. Negative infinity propagates to `NaN`."
+    },
+    {
+      "question": "Can I keep the output on the GPU?",
+      "answer": "Yes, either when the provider implements `unary_factorial` or by passing `'like', gpuArray(...)`, which uploads the host-computed result back to the GPU after the fallback path."
+    },
+    {
+      "question": "Why does `factorial` return double precision even for integer inputs?",
+      "answer": "MATLAB defines `factorial` to return doubles so the result matches downstream functions that expect floating-point inputs, and RunMat follows the same convention."
+    },
+    {
+      "question": "How does `factorial` interact with fusion?",
+      "answer": "Factorial currently bypasses the fusion planner because it is not built from primitive arithmetic ops. Surrounding element-wise expressions still fuse; factorial runs as an isolated scalar op inside those kernels."
+    },
+    {
+      "question": "What error message should I expect for unsupported types?",
+      "answer": "Passing strings, structs, or complex numbers raises `factorial: unsupported input type ...` so you can correct the call site quickly."
+    }
+  ],
+  "links": [
+    {
+      "label": "gamma",
+      "url": "./gamma"
+    },
+    {
+      "label": "power",
+      "url": "./power"
+    },
+    {
+      "label": "prod",
+      "url": "./prod"
+    },
+    {
+      "label": "permute",
+      "url": "./permute"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/factorial.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/factorial.rs"
+  },
+  "gpu_residency": "You do **not** need to call `gpuArray` manually to get correct results. When the provider supports `unary_factorial`, tensors stay on the GPU automatically. If the provider does not, RunMat gathers to the host and computes the answer there. Provide `'like', gpuArray(...)` if you want the fallback path to re-upload the result automatically.",
+  "gpu_behavior": [
+    "RunMat Accelerate first tries the provider\u2019s `unary_factorial` hook. Simple in-process providers can satisfy this by mirroring the CPU calculation.",
+    "When the hook is unavailable (currently the WGPU backend), RunMat transparently gathers the tensor, evaluates `factorial` on the CPU, and returns the host result.",
+    "Provide `'like', gpuArray(...)` to force the fallback path to re-upload the result so downstream GPU code keeps working.",
+    "Fusion currently bypasses factorial because the operation is not polynomial; element-wise kernels fall back to the scalar implementation."
+  ]
+}

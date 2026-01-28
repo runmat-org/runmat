@@ -1,0 +1,133 @@
+{
+  "title": "fclose",
+  "category": "io/filetext",
+  "keywords": [
+    "fclose",
+    "file",
+    "close",
+    "io",
+    "identifier"
+  ],
+  "summary": "Close one file, multiple files, or all files opened with fopen.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/fclose.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the CPU. Arguments residing on the GPU are gathered automatically; file handles live on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::filetext::fclose::tests",
+    "integration": "builtins::io::filetext::fclose::tests::fclose_all_closes_everything"
+  },
+  "description": "`fclose` closes files that were previously opened with `fopen`. Pass a file identifier, an array of identifiers, or the keyword `'all'` to close the desired handles. The first output (`status`) is `0` when the close succeeds and `-1` otherwise. The optional second output (`message`) contains diagnostic text when an identifier is invalid.",
+  "behaviors": [
+    "`status = fclose(fid)` closes the file represented by the numeric identifier `fid`. The status is `0` on success and `-1` if the identifier is invalid.",
+    "`status = fclose([fid1 fid2 ...])` closes a vector of identifiers. If any identifier is invalid, status is `-1` and `message` explains the failure.",
+    "`status = fclose('all')` (or `fclose()` with no arguments) closes every open file except the standard streams (0, 1, 2).",
+    "`[status, message] = fclose(...)` returns the diagnostic message. On success, `message` is an empty character vector.",
+    "Identifiers 0, 1, and 2 refer to standard input, output, and error. `fclose` treats them as already-open handles and simply returns success.",
+    "RunMat keeps file metadata in a registry shared with `fopen`, ensuring MATLAB-compatible behaviour across subsequent I/O builtins."
+  ],
+  "examples": [
+    {
+      "description": "Close a file after writing data",
+      "input": "[fid, msg] = fopen('results.txt', 'w');\nif fid == -1\n    error('Failed to open file: %s', msg);\nend\nfprintf(fid, 'Simulation complete\\n');\nstatus = fclose(fid);",
+      "output": "status = 0;"
+    },
+    {
+      "description": "Close all open files at once",
+      "input": "% Close every file except stdin/stdout/stderr\nstatus = fclose('all');",
+      "output": "status = 0;"
+    },
+    {
+      "description": "Handle invalid file identifiers gracefully",
+      "input": "[status, message] = fclose(9999);\nif status == -1\n    fprintf('Close failed: %s\\n', message);\nend",
+      "output": "status = -1;\nmessage = 'Invalid file identifier. Use fopen to generate a valid file ID.';"
+    },
+    {
+      "description": "Close multiple file identifiers together",
+      "input": "fids = fopen('all');\nstatus = fclose(fids);",
+      "output": "status = 0;"
+    },
+    {
+      "description": "Detect failures with the second output",
+      "input": "[fid, msg] = fopen('data.bin', 'r');\nassert(fid ~= -1, msg);\nfclose(fid);\n[status, message] = fclose(fid);  % closes again, returns -1 and an error string",
+      "output": "status = -1;\nmessage = 'Invalid file identifier. Use fopen to generate a valid file ID.';"
+    },
+    {
+      "description": "Close files using the no-argument form",
+      "input": "% Equivalent to fclose('all')\nstatus = fclose();",
+      "output": "status = 0;"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What values can I pass to `fclose`?",
+      "answer": "Pass a numeric file identifier (scalar or array) returned by `fopen`, or the keyword `'all'`. Calling `fclose()` with no arguments is equivalent to `fclose('all')`."
+    },
+    {
+      "question": "What does the status code mean?",
+      "answer": "`0` indicates that every requested identifier was successfully processed. `-1` means that at least one identifier was invalid; the optional second output contains the diagnostic message."
+    },
+    {
+      "question": "Does `fclose` close standard input/output?",
+      "answer": "Identifiers 0, 1, and 2 always refer to the process standard streams. `fclose` accepts them but leaves the streams open, returning a success status."
+    },
+    {
+      "question": "Can I call `fclose` multiple times on the same identifier?",
+      "answer": "Yes. The first call closes the file and subsequent calls return status `-1` with the message `\"Invalid file identifier. Use fopen to generate a valid file ID.\"`"
+    },
+    {
+      "question": "Does `fclose` flush buffered writes?",
+      "answer": "Closing a file flushes buffered writes and releases the underlying operating system descriptor, matching MATLAB behaviour."
+    },
+    {
+      "question": "Do I need to close files explicitly when using GPU arrays?",
+      "answer": "Yes. GPU residency does not change the lifecycle of file handles. Use `fclose` to release identifiers created with `fopen` regardless of where the arguments reside."
+    },
+    {
+      "question": "Can `fclose` close files opened by other processes?",
+      "answer": "No. It only closes identifiers that the current RunMat process opened via `fopen`."
+    }
+  ],
+  "links": [
+    {
+      "label": "fopen",
+      "url": "./fopen"
+    },
+    {
+      "label": "fread",
+      "url": "./fread"
+    },
+    {
+      "label": "fwrite",
+      "url": "./fwrite"
+    },
+    {
+      "label": "fileread",
+      "url": "./fileread"
+    },
+    {
+      "label": "filewrite",
+      "url": "./filewrite"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/io/filetext/fclose.rs",
+    "url": "crates/runmat-runtime/src/builtins/io/filetext/fclose.rs"
+  },
+  "gpu_behavior": [
+    "`fclose` does not perform GPU computation. If the argument resides on a GPU array (for example, `'all'` stored in a `gpuArray`), RunMat gathers the value to host memory before dispatching the host-only close logic."
+  ]
+}

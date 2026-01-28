@@ -18,6 +18,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 1,
     },
     {
+      url: `${baseUrl}/run-matlab-online`,
+      lastModified: currentDate,
+      changeFrequency: 'daily',
+      priority: 0.9,
+    },
+    {
       url: `${baseUrl}/download`,
       lastModified: currentDate,
       changeFrequency: 'daily',
@@ -52,6 +58,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       lastModified: currentDate,
       changeFrequency: 'daily',
       priority: 0.6,
+    },
+    {
+      url: `${baseUrl}/sandbox`,
+      lastModified: currentDate,
+      changeFrequency: 'daily',
+      priority: 0.8,
     },
   ]
 

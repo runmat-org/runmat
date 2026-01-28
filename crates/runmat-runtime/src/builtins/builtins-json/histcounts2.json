@@ -1,0 +1,126 @@
+{
+  "title": "histcounts2",
+  "category": "stats/hist",
+  "keywords": [
+    "histcounts2",
+    "2d histogram",
+    "joint distribution",
+    "binning",
+    "probability",
+    "gpu"
+  ],
+  "summary": "Count paired observations into two-dimensional histogram bins.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/histcounts2.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": true,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Falls back to host execution today; providers can attach a `histcounts2` hook for device kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::hist::histcounts2::tests",
+    "integration": "builtins::stats::hist::histcounts2::tests::histcounts2_gpu_roundtrip",
+    "gpu": "builtins::stats::hist::histcounts2::tests::histcounts2_wgpu_roundtrip"
+  },
+  "description": "`histcounts2(X, Y)` bins paired observations from `X` and `Y` into a rectangular two-dimensional histogram. Each bin counts the number of pairs whose `X` component lies in a horizontal interval and whose `Y` component lies in a vertical interval, mirroring MathWorks MATLAB behaviour.",
+  "behaviors": [
+    "`histcounts2(X, Y)` flattens both inputs column-major, ensuring they contain the same number of elements, and fills a `numel(Xedges) - 1` by `numel(Yedges) - 1` matrix of bin counts.",
+    "Bins are half-open on the right except for the last column and row, which include their upper edges so the maximum finite values are counted.",
+    "Optional arguments let you specify bin counts, explicit edges, bin limits, bin widths, and automatic binning heuristics independently for the `X` and `Y` axes.",
+    "Name/value pairs such as `'NumBins'`, `'XBinEdges'`, `'YBinEdges'`, `'XBinWidth'`, `'YBinWidth'`, `'BinMethod'`, and `'Normalization'` follow MATLAB precedence and validation rules.",
+    "Pairs containing `NaN` in either coordinate are ignored. Infinite values participate when the chosen edges include them."
+  ],
+  "examples": [
+    {
+      "description": "Counting paired values with explicit edges",
+      "input": "X = [0.5 1.5 2.5 3.5];\nY = [0.2 0.9 1.4 2.8];\n[N, Xedges, Yedges] = histcounts2(X, Y, [0 1 2 3 4], [0 1 2 3]);",
+      "output": "N = [1 0 0; 1 0 0; 0 1 0; 0 0 1];\nXedges = [0 1 2 3 4];\nYedges = [0 1 2 3];"
+    },
+    {
+      "description": "Specifying separate bin counts for each axis",
+      "input": "X = [1 2 3 4];\nY = [1 2 3 4];\nN = histcounts2(X, Y, 2, 4);",
+      "output": "size(N) = [2 4];\nsum(N, \"all\") = 4;"
+    },
+    {
+      "description": "Using different bin widths for X and Y",
+      "input": "X = [1 1.5 2.4 3.7];\nY = [2 2.2 2.9 3.1];\n[N, Xedges, Yedges] = histcounts2(X, Y, 'XBinWidth', 1, 'YBinWidth', 0.5);",
+      "output": "diff(Xedges) = [1 1 1];\ndiff(Yedges(1:3)) = [0.5 0.5];\nsum(N, \"all\") = 4;"
+    },
+    {
+      "description": "Normalizing a 2-D histogram to probabilities",
+      "input": "X = [0.2 0.4 1.1 1.5];\nY = [0.1 0.8 1.2 1.9];\nN = histcounts2(X, Y, [0 1 2], [0 1 2], 'Normalization', 'probability');",
+      "output": "N = [0.5 0.0; 0.0 0.5];"
+    },
+    {
+      "description": "Ignoring NaN values in paired data",
+      "input": "X = [1 2 NaN 3];\nY = [2 2 2 NaN];\nN = histcounts2(X, Y, [0 1 2 3], [0 1 2 3]);",
+      "output": "sum(N, \"all\") = 2;"
+    },
+    {
+      "description": "Histogramming gpuArray inputs without manual gather",
+      "input": "Gx = gpuArray([0.5 1.5 2.5]);\nGy = gpuArray([1.0 1.1 2.9]);\n[counts, Xedges, Yedges] = histcounts2(Gx, Gy, [0 1 2 3], [0 2 3]);",
+      "output": "isa(counts, 'double')      % counts are returned on the CPU\ncounts = [1 0; 1 0; 0 1];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Do `X` and `Y` need the same size?",
+      "answer": "Yes. `histcounts2` requires both inputs to contain the same number of elements. RunMat mirrors MATLAB by raising an error when the sizes do not match."
+    },
+    {
+      "question": "How are the bin edges interpreted?",
+      "answer": "All interior bins are `[left, right)`, while the last row and column are `[left, right]`, so the largest finite values are counted."
+    },
+    {
+      "question": "What happens to `NaN`, `Inf`, or `-Inf` values?",
+      "answer": "Pairs containing `NaN` in either coordinate are ignored. Infinite values participate when the specified edges include them; otherwise, they are excluded just like MATLAB."
+    },
+    {
+      "question": "Can I mix explicit edges on one axis with automatic binning on the other?",
+      "answer": "Yes. You can supply `'XBinEdges'` while leaving the `Y` axis to be determined by `'NumBins'`, `'YBinWidth'`, or the default heuristics."
+    },
+    {
+      "question": "Which normalisation modes are supported?",
+      "answer": "`'count'`, `'probability'`, `'countdensity'`, `'pdf'`, `'cumcount'`, and `'cdf'` are implemented. `'cdf'` and `'cumcount'` operate in column-major order so the result matches MATLAB's cumulative behaviour."
+    },
+    {
+      "question": "How do I request integer-aligned bins?",
+      "answer": "Use `'BinMethod', 'integers'` or `'XBinMethod'/'YBinMethod'` with the value `'integers'`. RunMat ensures the resulting edges align with integer boundaries, respecting any supplied bin limits."
+    }
+  ],
+  "links": [
+    {
+      "label": "histcounts",
+      "url": "./histcounts"
+    },
+    {
+      "label": "sum",
+      "url": "./sum"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/stats/hist/histcounts2.rs",
+    "url": "crates/runmat-runtime/src/builtins/stats/hist/histcounts2.rs"
+  },
+  "gpu_residency": "As with other RunMat histogram routines, you do not need to call `gpuArray` explicitly just to obtain GPU execution. Once providers implement the `histcounts2` hook, the fusion planner will keep residency on the device automatically. Until then, the builtin gathers data to the host and returns CPU tensors even when inputs originate on the GPU, matching MATLAB semantics after an explicit `gather`.",
+  "gpu_behavior": [
+    "When either input is a `gpuArray`, RunMat gathers the samples back to host memory, performs the reference CPU implementation, and returns dense CPU tensors for the histogram and edges. The acceleration layer exposes a `histcounts2` provider hook; once kernels land, the runtime will automatically keep residency on the GPU and skip gathering. The builtin is registered as a sink, so fusion plans flush GPU residency before histogramming and the current implementation always yields host-resident outputs."
+  ]
+}

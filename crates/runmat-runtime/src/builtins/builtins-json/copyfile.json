@@ -1,0 +1,147 @@
+{
+  "title": "copyfile",
+  "category": "io/repl_fs",
+  "keywords": [
+    "copyfile",
+    "copy file",
+    "copy folder",
+    "filesystem",
+    "status",
+    "message",
+    "messageid",
+    "force",
+    "overwrite"
+  ],
+  "summary": "Copy files or folders with MATLAB-compatible status, diagnostic message, and message ID outputs.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/copyfile.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host CPU. When path arguments live on the GPU, RunMat gathers them to host memory before touching the filesystem."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::copyfile::tests",
+    "integration": "builtins::io::repl_fs::copyfile::tests::copyfile_copies_folder_tree"
+  },
+  "description": "`copyfile` duplicates files and folders. It mirrors MATLAB's behavior by returning a numeric status plus optional diagnostic text instead of throwing exceptions for filesystem failures. The builtin understands wildcards, directory trees, and the optional `'f'` flag that forces overwrites of existing targets.",
+  "behaviors": [
+    "`status = copyfile(source, destination)` copies a file or folder and returns `1` on success and `0` on failure.",
+    "`[status, message, messageID] = copyfile(...)` adds MATLAB-style diagnostics. Successful copies return empty `1x0` character arrays.",
+    "`copyfile(source, destination, 'f')` forces overwrites, matching MATLAB's `'f'` flag. Without the flag, existing destination files or folders prevent the copy.",
+    "Wildcards in `source` (for example, `*.m`) copy every match. When the pattern expands to multiple items, `destination` must be an existing folder; each match is copied into that folder.",
+    "Folder copies replicate the entire directory tree, including nested files and subfolders, honoring read-only attributes where possible.",
+    "Inputs accept character vectors or string scalars. Other types raise MATLAB-compatible errors before any filesystem work occurs.",
+    "Paths resolve relative to the current working directory (`pwd`), and a leading `~` expands to the user's home directory on supported platforms."
+  ],
+  "examples": [
+    {
+      "description": "Copy a file into a new name in the same folder",
+      "input": "fid = fopen(\"report.txt\", \"w\"); fclose(fid);\nstatus = copyfile(\"report.txt\", \"report_backup.txt\");",
+      "output": "status =\n     1"
+    },
+    {
+      "description": "Copy a file into an existing destination folder",
+      "input": "mkdir(\"archive\");\nfid = fopen(\"summary.txt\", \"w\"); fclose(fid);\nstatus = copyfile(\"summary.txt\", \"archive\");",
+      "output": "status =\n     1"
+    },
+    {
+      "description": "Force overwrite an existing destination file",
+      "input": "fid = fopen(\"draft.txt\", \"w\"); fclose(fid);\nfid = fopen(\"final.txt\", \"w\"); fclose(fid);\n[status, message, messageID] = copyfile(\"draft.txt\", \"final.txt\", \"f\");",
+      "output": "status =\n     1\nmessage =\n\nmessageID ="
+    },
+    {
+      "description": "Copy an entire folder tree",
+      "input": "mkdir(\"data/raw\");\nfid = fopen(fullfile(\"data\", \"raw\", \"sample.dat\"), \"w\"); fclose(fid);\nstatus = copyfile(\"data\", \"data_copy\");",
+      "output": "status =\n     1"
+    },
+    {
+      "description": "Copy multiple files with a wildcard pattern",
+      "input": "fid = fopen(\"a.log\", \"w\"); fclose(fid);\nfid = fopen(\"b.log\", \"w\"); fclose(fid);\nmkdir(\"logs\");\nstatus = copyfile(\"*.log\", \"logs\");",
+      "output": "status =\n     1"
+    },
+    {
+      "description": "Handle missing sources gracefully",
+      "input": "[status, message, messageID] = copyfile(\"missing.txt\", \"dest.txt\");",
+      "output": "status =\n     0\nmessage =\nSource \"missing.txt\" does not exist.\nmessageID =\nMATLAB:COPYFILE:FileDoesNotExist"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What status codes does `copyfile` return?",
+      "answer": "`1` on success, `0` on failure. The numeric output is a double scalar to match MATLAB."
+    },
+    {
+      "question": "Does `copyfile` throw exceptions?",
+      "answer": "Only invalid inputs raise immediate errors. Filesystem failures surface through `status`, `message`, and `messageID`."
+    },
+    {
+      "question": "How do I overwrite existing files?",
+      "answer": "Pass `'f'` as the third argument. Without it, existing destinations prevent the copy."
+    },
+    {
+      "question": "Can I copy folders recursively?",
+      "answer": "Yes. When `source` refers to a folder, `copyfile` copies its entire contents (including subfolders) into `destination`."
+    },
+    {
+      "question": "What happens when the source and destination are the same?",
+      "answer": "The builtin reports a failure with `messageID = MATLAB:COPYFILE:SourceEqualsDestination`, mirroring MATLAB's diagnostics."
+    },
+    {
+      "question": "Does `copyfile` preserve timestamps and permissions?",
+      "answer": "It delegates to the host operating system. RunMat attempts to preserve read-only attributes where possible, but platform differences may leave some metadata unchanged."
+    },
+    {
+      "question": "Can `copyfile` create intermediate destination folders?",
+      "answer": "`copyfile` does not invent new parent folders. Ensure the destination's parent path exists before calling the builtin."
+    },
+    {
+      "question": "Will GPU acceleration speed up `copyfile`?",
+      "answer": "No. The builtin operates entirely on the host CPU. GPU-resident strings are gathered automatically so existing scripts remain compatible."
+    },
+    {
+      "question": "Are wildcards supported on all platforms?",
+      "answer": "Yes. `copyfile(\"*.txt\", \"dest\")` expands using MATLAB-compatible glob semantics on every supported operating system."
+    }
+  ],
+  "links": [
+    {
+      "label": "movefile",
+      "url": "./movefile"
+    },
+    {
+      "label": "mkdir",
+      "url": "./mkdir"
+    },
+    {
+      "label": "rmdir",
+      "url": "./rmdir"
+    },
+    {
+      "label": "dir",
+      "url": "./dir"
+    },
+    {
+      "label": "pwd",
+      "url": "./pwd"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/copyfile.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/copyfile.rs"
+  },
+  "gpu_residency": "No. `copyfile` always runs on the CPU. If callers supply GPU-resident strings, RunMat automatically gathers them before touching the filesystem so existing code continues to work. Keeping paths on the GPU offers no performance benefit.",
+  "gpu_behavior": [
+    "`copyfile` performs host-side filesystem I/O. When acceleration providers are active, RunMat first gathers any GPU-resident path arguments (for example, `gpuArray(\"data\")`) back to CPU memory, executes the copy entirely on the host, and returns host-resident outputs. Providers do not implement dedicated hooks for this builtin, so no GPU kernels are dispatched."
+  ]
+}

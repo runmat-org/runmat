@@ -1,0 +1,155 @@
+{
+  "title": "permute",
+  "category": "array/shape",
+  "keywords": [
+    "permute",
+    "dimension reorder",
+    "swap axes",
+    "gpu"
+  ],
+  "summary": "Reorder the dimensions of arrays, tensors, logical masks, and gpuArray values.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64",
+      "i32",
+      "bool"
+    ],
+    "broadcasting": "none",
+    "notes": "Providers may implement a dedicated permute hook; when unavailable the runtime gathers, permutes on the host, and re-uploads to keep results on the GPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::permute::tests",
+    "integration": "builtins::array::shape::permute::tests::permute_gpu_roundtrip"
+  },
+  "description": "`permute(A, order)` rearranges the dimensions of `A` to match the order specified by the integer vector `order`. It works for numeric arrays, logical masks, complex arrays, string arrays, and gpuArray values. Dimensions not explicitly mentioned in the original array become size-one axes.",
+  "behaviors": [
+    "`order` must be a permutation of `1:n`, where `n = numel(order)`. Each dimension index appears exactly once.",
+    "The length of `order` must be at least `ndims(A)`. You can specify additional trailing dimensions; RunMat pads missing axes with size one.",
+    "Duplicate or zero dimension indices throw an error.",
+    "Works on empty arrays and arrays with zero-sized dimensions. The result preserves MATLAB's column-major ordering.",
+    "Logical, complex, and string arrays keep their types. Character arrays support 2-D permutations (transpose or identity).",
+    "gpuArray inputs stay on the GPU. If the provider lacks a native permute kernel, RunMat gathers once, permutes on the host, and uploads the result back to the device."
+  ],
+  "examples": [
+    {
+      "description": "Swapping the first two dimensions of a 3-D tensor",
+      "input": "A = reshape(1:24, [2 3 4]);\nB = permute(A, [2 1 3]);\nsize(B)",
+      "output": "ans = [3 2 4]"
+    },
+    {
+      "description": "Moving the last dimension to the front",
+      "input": "A = rand(4, 2, 5);\nC = permute(A, [3 1 2]);\nsize(C)",
+      "output": "ans = [5 4 2]"
+    },
+    {
+      "description": "Adding an explicit trailing singleton dimension",
+      "input": "row = 1:5;\nT = permute(row, [2 1 3]);\nsize(T)",
+      "output": "ans = [5 1 1]"
+    },
+    {
+      "description": "Permuting logical masks without losing type information",
+      "input": "mask = false(2, 1, 3);\nmask(1, 1, 2) = true;\nrotated = permute(mask, [3 1 2]);\nclass(rotated)",
+      "output": "ans = 'logical'"
+    },
+    {
+      "description": "Transposing character arrays",
+      "input": "C = ['r','u','n'; 'm','a','t'];\nCt = permute(C, [2 1]);",
+      "output": "Ct =\n    'rm'\n    'ua'\n    'nt'"
+    },
+    {
+      "description": "Permuting gpuArray data while staying on the device",
+      "input": "G = gpuArray(rand(4, 2, 3));\nH = permute(G, [3 1 2]);\nisgpuarray(H)",
+      "output": "ans = logical 1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `order` have to contain every dimension exactly once?",
+      "answer": "Yes. `order` must be a true permutation of `1:n`. RunMat raises an error when dimensions repeat or are missing."
+    },
+    {
+      "question": "Can I introduce new singleton dimensions?",
+      "answer": "Yes. Set `order` to include additional trailing indices (e.g., `[1 2 3 4]` for a matrix) and RunMat will append size-one axes."
+    },
+    {
+      "question": "What happens with empty arrays or zero-sized dimensions?",
+      "answer": "They are preserved. The permutation still follows column-major ordering even when some dimensions are zero."
+    },
+    {
+      "question": "Can I use `permute` on character arrays?",
+      "answer": "Yes, but only for 2-D permutations (identity or transpose) because MATLAB character arrays are stored as 2-D matrices."
+    },
+    {
+      "question": "How does `permute` interact with gpuArray values?",
+      "answer": "RunMat keeps the result on the GPU. Providers that lack a native kernel trigger a gather-and-reupload fallback, which is documented above."
+    },
+    {
+      "question": "Is the operation in-place?",
+      "answer": "No. `permute` returns a new array; the original input remains unchanged."
+    },
+    {
+      "question": "How do I invert a permutation?",
+      "answer": "Use `ipermute` with the same `order` vector."
+    },
+    {
+      "question": "Does `permute` change data layout or ordering?",
+      "answer": "Only the dimension metadata changes. Column-major linearisation is preserved, so reshaping back with the inverse order recovers the original array."
+    },
+    {
+      "question": "Can cell arrays be permuted?",
+      "answer": "Cell arrays above two dimensions are not yet supported in RunMat; the builtin will report an error."
+    },
+    {
+      "question": "What if I pass a gpuArray as the `order` argument?",
+      "answer": "MATLAB requires numeric vectors on the host. RunMat mirrors this and reports an error if the order vector is gpu-resident."
+    }
+  ],
+  "links": [
+    {
+      "label": "`ipermute`",
+      "url": "./ipermute"
+    },
+    {
+      "label": "`reshape`",
+      "url": "./reshape"
+    },
+    {
+      "label": "`squeeze`",
+      "url": "./squeeze"
+    },
+    {
+      "label": "`size`",
+      "url": "./size"
+    },
+    {
+      "label": "`ndims`",
+      "url": "./ndims"
+    },
+    {
+      "label": "`gpuArray`",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "`gather`",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/shape/permute.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/permute.rs"
+  },
+  "gpu_behavior": [
+    "The runtime first asks the active acceleration provider for the `permute` hook. When implemented (e.g., a fused copy kernel), the permutation occurs entirely on the device. Otherwise RunMat falls back to a gather/permute/upload path. Either way, the result is returned as a gpuArray to match MATLAB behaviour."
+  ]
+}

@@ -1,0 +1,130 @@
+{
+  "title": "cell",
+  "category": "cells/core",
+  "keywords": [
+    "cell",
+    "cell array",
+    "containers",
+    "empty",
+    "like",
+    "gpu fallback"
+  ],
+  "summary": "Create MATLAB cell arrays, including `'like'` prototypes, with RunMat's modern builtin pipeline.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Cell arrays are allocated on the host. Size inputs that reside on the GPU are gathered, and `'like'` prototypes backed by gpuArray currently fall back to host storage until device-side cells are implemented."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::cells::core::cell::tests",
+    "integration": "builtins::cells::core::cell::tests::cell_like_gpu_prototype_falls_back_to_host"
+  },
+  "description": "`cell` constructs cell arrays\u2014containers that can hold heterogeneous values in each element. Every cell starts out containing an empty value: by default the empty double array `[]`, or an empty value that matches a `'like'` prototype when the prototype lives on the host. GPU-backed prototypes currently fall back to empty double arrays on the host. RunMat mirrors MATLAB's behaviour for scalar and arbitrary size forms (`cell`, `cell(n)`, `cell(m, n, p, ...)`, `cell([m n p ...])`, `cell(size(A))`, and `cell(___, 'like', prototype)`).",
+  "behaviors": [
+    "`cell` (with no arguments) returns a `0\u00d70` empty cell array.",
+    "`cell(n)` returns an `n\u00d7n` cell array whose elements default to the empty value.",
+    "`cell(m, n, p, ...)` accepts any number of size scalars and returns an N-D cell array whose dimensions match the arguments.",
+    "`cell(sz)` or `cell(size(A))` accepts a numeric size vector of any length. A single-element vector produces an `m\u00d71` cell array; longer vectors create higher-dimensional cell arrays matching the provided extents.",
+    "`cell(___, 'like', prototype)` copies the prototype's size when no explicit dimensions are supplied and fills each element with the empty value that matches the prototype's class (for example logical empty arrays, complex empties, or empty strings). When the prototype is a `gpuArray`, RunMat keeps the host-empty double fallback until GPU-resident cell storage ships.",
+    "Size arguments must be finite, non-negative integers that are representable in double precision."
+  ],
+  "examples": [
+    {
+      "description": "Creating a square cell array of empty placeholders",
+      "input": "C = cell(3);\nsize(C)",
+      "output": "ans =\n     3     3"
+    },
+    {
+      "description": "Creating a rectangular 2-by-4 cell array",
+      "input": "C = cell(2, 4);\nclass(C)",
+      "output": "ans =\n    'cell'"
+    },
+    {
+      "description": "Creating a 3-D cell array",
+      "input": "C = cell(2, 3, 4);\nsize(C)",
+      "output": "ans =\n     2     3     4"
+    },
+    {
+      "description": "Matching the size of an existing matrix",
+      "input": "A = ones(5, 2);\nC = cell(size(A));\nsize(C)",
+      "output": "ans =\n     5     2"
+    },
+    {
+      "description": "Creating a cell array using a `'like'` prototype",
+      "input": "proto = logical.empty(0, 0);\nC = cell(2, 3, 'like', proto);\ncellfun(@isempty, C)",
+      "output": "ans =\n     1     1     1\n     1     1     1"
+    },
+    {
+      "description": "Using a column size vector",
+      "input": "sz = [4; 1];\nC = cell(sz);\nsize(C)",
+      "output": "ans =\n     4     1"
+    },
+    {
+      "description": "Verifying that every cell starts with `[]`",
+      "input": "C = cell(2, 2);\nisequal(C{1,1}, [], C{2,2}, [])",
+      "output": "ans = logical\n     1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What values do new cells contain?",
+      "answer": "Each cell starts with an empty value. By default that is the empty double array `[]`. When you supply a `'like'` prototype, RunMat chooses the matching empty logical, complex, string, character, or cell value instead. GPU-backed prototypes currently fall back to empty double arrays on the host until device-resident cell elements are supported."
+    },
+    {
+      "question": "Are negative or fractional sizes allowed?",
+      "answer": "No. Every size argument must be a finite, non-negative integer that can be represented exactly in double precision."
+    },
+    {
+      "question": "Can I create zero-sized cell arrays?",
+      "answer": "Yes. You can use `cell(0)`, `cell(0, n)`, or supply a size vector containing zeros. RunMat returns an empty cell array with the requested shape."
+    },
+    {
+      "question": "Do GPU prototypes change how `cell` behaves?",
+      "answer": "A `'like'` prototype that resides on the GPU is gathered automatically. Shape inference follows the prototype, and each cell receives an empty double array on the host while GPU cell storage is still under development."
+    },
+    {
+      "question": "What about N-dimensional cell arrays?",
+      "answer": "RunMat supports N-dimensional cell arrays. Supply as many scalar dimensions or size-vector entries as you need and the builtin constructs a cell array with that exact shape. Trailing singleton dimensions are preserved so downstream code can introspect the full size vector."
+    },
+    {
+      "question": "Does `cell` copy data from existing containers?",
+      "answer": "No. The builtin only allocates empty cells. Populate the elements afterwards with assignments such as `C{1,2} = magic(3);`."
+    }
+  ],
+  "links": [
+    {
+      "label": "cellfun",
+      "url": "./cellfun"
+    },
+    {
+      "label": "struct",
+      "url": "./struct"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/cells/core/cell.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/cells/core/cell.rs"
+  },
+  "gpu_residency": "No. Cell arrays are created on the host regardless of the residency of the size arguments. If the inputs happen to live on the GPU (for example, a `gpuArray` size vector), RunMat gathers those values before allocating the cell array. The result is always a host cell array; downstream code can still place tensors or gpuArrays inside individual cells as needed.",
+  "gpu_behavior": [
+    "Cell arrays live on the CPU heap because each element can contain arbitrarily typed values that may require garbage-collected storage. When `cell` is invoked inside a fused GPU expression RunMat terminates the fusion group, gathers any GPU-resident size inputs, and creates the cell array on the host. `'Like'` prototypes that refer to gpuArray inputs are honoured for shape inference. Each cell currently receives an empty double array even if the prototype itself is a `gpuArray`; this fallback will disappear once device-side cell residency lands. Once the acceleration layer adds true GPU cells, providers can register hooks without changing user code."
+  ]
+}

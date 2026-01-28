@@ -1,0 +1,155 @@
+{
+  "title": "conv",
+  "category": "math/signal",
+  "keywords": [
+    "conv",
+    "convolution",
+    "linear convolution",
+    "signal processing",
+    "polynomial multiplication",
+    "gpu"
+  ],
+  "summary": "One-dimensional linear convolution with MATLAB-compatible padding modes.",
+  "references": [
+    "title: \"MATLAB conv documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "The in-process provider and WGPU backend expose conv1d; other providers fall back to the host implementation when this hook is unavailable."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::conv::tests",
+    "integration": "builtins::math::signal::conv::tests::conv_gpu_roundtrip_matches_cpu"
+  },
+  "description": "`conv(a, b)` computes the one-dimensional linear convolution of the vectors `a` and `b`. The default padding mode returns the full convolution (`length(a) + length(b) - 1`). Optional shape arguments (`'same'`, `'valid'`) select MATLAB-compatible padding behaviour.",
+  "behaviors": [
+    "Accepts real or complex scalars, vectors, or tensors that can be flattened column-major into a vector.",
+    "Keeps the orientation of the first input when returning row or column vectors (`'same'` and `'valid'` honour this rule).",
+    "Supports the three MATLAB shape modes: `'full'` (default), `'same'`, and `'valid'`.",
+    "Returns empty outputs when either input is empty or when `'valid'` is requested with insufficient overlap.",
+    "Logical inputs are promoted to double precision before the convolution.",
+    "GPU inputs are gathered automatically when the active provider lacks a native 1-D convolution kernel."
+  ],
+  "examples": [
+    {
+      "description": "Computing the full convolution of two row vectors",
+      "input": "a = [1 2 3];\nb = [1 1 1];\nc = conv(a, b);",
+      "output": "c = [1 3 6 5 3];"
+    },
+    {
+      "description": "Keeping the same length as the first input",
+      "input": "kernel = [1 0 -1];\nsignal = [3 4 5 6 7];\nedge = conv(signal, kernel, 'same');",
+      "output": "edge = [4 2 2 2 -6];"
+    },
+    {
+      "description": "Valid convolution without zero padding",
+      "input": "weights = [1 2 3 4];\nwindow = [1 1 1];\nvalid = conv(weights, window, 'valid');",
+      "output": "valid = [6 9];"
+    },
+    {
+      "description": "Convolving column vectors",
+      "input": "a = (1:3)';\nb = [2; 0; -2];\nc = conv(a, b);",
+      "output": "c =\n     2\n     4\n     4\n     -4\n     -6"
+    },
+    {
+      "description": "Multiplying polynomials using convolution",
+      "input": "p = [1 3 3 1];    % (x + 1)^3 coefficients\nq = [1 -1];       % (x - 1)\ncoeff = conv(p, q);",
+      "output": "coeff = [1 2 0 -2 -1];"
+    },
+    {
+      "description": "Complex-valued convolution",
+      "input": "t = 0:3;\nsig = exp(1i * pi/4 * t);\nfilt = [1 2i];\nresp = conv(sig, filt);",
+      "output": "resp =\n   1.0000 + 1.0000i   1.4142 + 2.4142i   0.0000 + 3.4142i  -1.4142 + 2.4142i  -1.0000 + 1.0000i"
+    },
+    {
+      "description": "Scaling a signal by a scalar",
+      "input": "s = [4 5 6];\ny = conv(2, s);",
+      "output": "y = [8 10 12];"
+    },
+    {
+      "description": "Using gpuArray inputs with automatic host fallback",
+      "input": "g = gpuArray([1 2 3 4]);\nh = gpuArray([1 0 -1]);\nedge = conv(g, h, 'same');\nresult = gather(edge);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `conv` require row vectors?",
+      "answer": "No. `conv` accepts row vectors, column vectors, scalars, and tensors that can be flattened into a vector. The result preserves the orientation of the first input when that orientation is unambiguous."
+    },
+    {
+      "question": "What happens when one of the inputs is empty?",
+      "answer": "The result is an empty vector with an orientation derived from the non-empty input (or a `0\u00d71` column vector when both inputs are empty), matching MATLAB's behaviour."
+    },
+    {
+      "question": "How is `'same'` computed?",
+      "answer": "`'same'` returns the central portion of the full convolution whose length matches the first input. Internally RunMat performs a full convolution and slices the appropriate window."
+    },
+    {
+      "question": "When should I use `'valid'`?",
+      "answer": "Use `'valid'` when you only want results that do not rely on zero padding. This is common when sliding windows should fit completely inside the input without extending past the boundaries."
+    },
+    {
+      "question": "Does `conv` support single precision?",
+      "answer": "The host path computes in double precision. Provider implementations choose their native precision: the in-process provider mirrors double results, while the WGPU backend emits either `f32` or `f64` kernels depending on device support. Providers without a `conv1d` hook gather inputs back to the CPU to maintain MATLAB-compatible answers."
+    },
+    {
+      "question": "Will the result stay on the GPU?",
+      "answer": "Yes\u2014provided the active provider exposes the `conv1d` hook (the in-process provider and WGPU backend do). Without that hook, RunMat gathers inputs, computes on the host, and returns a CPU tensor with the correct orientation."
+    },
+    {
+      "question": "Can I convolve matrices or higher-dimensional arrays?",
+      "answer": "`conv` treats inputs as vectors using MATLAB column-major order. For multi-dimensional convolution use the dedicated `conv2` or `convn` builtins (planned)."
+    },
+    {
+      "question": "How do I convolve with an impulse (delta) kernel?",
+      "answer": "Include a `1` followed by zeros in your kernel. The input will be preserved (with appropriate padding) because convolution with a delta function is an identity operation."
+    },
+    {
+      "question": "What about circular convolution?",
+      "answer": "Use `cconv` for circular convolution, or compute the FFT manually and multiply in the frequency domain before performing an inverse FFT."
+    },
+    {
+      "question": "Are there GPU-specific tuning knobs?",
+      "answer": "Not yet. Current providers choose kernel launch parameters automatically; user-facing tuning switches will arrive alongside future backend updates."
+    }
+  ],
+  "links": [
+    {
+      "label": "fft",
+      "url": "./fft"
+    },
+    {
+      "label": "ifft",
+      "url": "./ifft"
+    },
+    {
+      "label": "fftshift",
+      "url": "./fftshift"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "Open a ticket",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  }
+}

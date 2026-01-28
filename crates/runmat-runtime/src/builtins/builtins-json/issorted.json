@@ -1,0 +1,153 @@
+{
+  "title": "issorted",
+  "category": "array/sorting_sets",
+  "keywords": [
+    "issorted",
+    "sorted",
+    "monotonic",
+    "strictascend",
+    "rows",
+    "comparisonmethod",
+    "missingplacement"
+  ],
+  "summary": "Determine whether an array is already sorted along a dimension or across rows.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/double.issorted.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to the host while providers gain native predicate support."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::sorting_sets::issorted::tests",
+    "integration": "builtins::array::sorting_sets::issorted::tests::issorted_gpu_roundtrip"
+  },
+  "description": "`issorted(A)` checks whether the elements of `A` already appear in sorted order. You can examine a specific dimension, enforce strict monotonicity, require descending order, and control how missing values are positioned. The function also supports row-wise checks that match `issorted(A,'rows')` from MATLAB.",
+  "behaviors": [
+    "`issorted(A)` examines the first non-singleton dimension and returns a logical scalar.",
+    "`issorted(A, dim)` selects the dimension explicitly (1-based).",
+    "Direction flags include `'ascend'`, `'descend'`, `'monotonic'`, `'strictascend'`, `'strictdescend'`, and `'strictmonotonic'`.",
+    "Name-value options mirror MATLAB:",
+    "`'MissingPlacement'` accepts `'auto'`, `'first'`, or `'last'`.",
+    "`'ComparisonMethod'` accepts `'auto'`, `'real'`, or `'abs'` for numeric and complex data.",
+    "`issorted(A,'rows', ...)` verifies lexicographic ordering of rows.",
+    "Logical and character arrays are promoted to double precision for comparison; string arrays are compared lexicographically, recognising the literal `<missing>` token as a missing element.",
+    "Empty arrays, scalars, and singleton dimensions are always reported as sorted."
+  ],
+  "examples": [
+    {
+      "description": "Checking an ascending vector",
+      "input": "A = [5 12 33 39 78 90 95 107];\ntf = issorted(A);",
+      "output": "tf =\n     1"
+    },
+    {
+      "description": "Verifying strict increase",
+      "input": "B = [1 1 2 3];\ntf = issorted(B, 'strictascend');",
+      "output": "tf =\n     0"
+    },
+    {
+      "description": "Using a specific dimension",
+      "input": "C = [1 4 2; 3 6 5];\ntf = issorted(C, 2, 'descend');",
+      "output": "tf =\n     0"
+    },
+    {
+      "description": "Allowing either ascending or descending order",
+      "input": "D = [10 8 8 5 1];\ntf = issorted(D, 'monotonic');",
+      "output": "tf =\n     1"
+    },
+    {
+      "description": "Controlling missing placements",
+      "input": "E = [NaN NaN 4 7];\ntf = issorted(E, 'MissingPlacement', 'first');",
+      "output": "tf =\n     0"
+    },
+    {
+      "description": "Comparing complex data by magnitude",
+      "input": "Z = [1+1i, 2+3i, 4+0i];\ntf = issorted(Z, 'ComparisonMethod', 'abs');",
+      "output": "tf =\n     1"
+    },
+    {
+      "description": "Checking row order",
+      "input": "R = [1 2 3; 1 2 4; 2 0 1];\ntf = issorted(R, 'rows');",
+      "output": "tf =\n     1"
+    },
+    {
+      "description": "Working with string arrays",
+      "input": "str = [ \"apple\" \"banana\"; \"apple\" \"carrot\" ];\ntf = issorted(str, 2);",
+      "output": "tf =\n     0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `issorted` modify its input?",
+      "answer": "No. The function inspects the data in-place and returns a logical scalar."
+    },
+    {
+      "question": "What is the difference between `'ascend'` and `'strictascend'`?",
+      "answer": "`'ascend'` allows consecutive equal values, while `'strictascend'` requires every element to be strictly greater than its predecessor and rejects missing values."
+    },
+    {
+      "question": "How does `'monotonic'` work?",
+      "answer": "`'monotonic'` succeeds when the data is entirely non-decreasing *or* non-increasing. Use `'strictmonotonic'` to forbid repeated or missing values."
+    },
+    {
+      "question": "Can I control where NaN values appear?",
+      "answer": "Yes. `'MissingPlacement','first'` requires missing values to precede finite ones, `'last'` requires them to trail, and `'auto'` follows MATLAB’s default (end for ascending checks, start for descending)."
+    },
+    {
+      "question": "Is `'ComparisonMethod'` relevant for real data?",
+      "answer": "For real data `'auto'` and `'real'` are identical. `'abs'` compares magnitudes first and breaks ties using the signed value, matching MATLAB."
+    },
+    {
+      "question": "Does the function support GPU arrays?",
+      "answer": "Yes. GPU inputs are gathered automatically and the result is computed on the host to guarantee correctness until dedicated provider hooks are available."
+    },
+    {
+      "question": "How are string arrays treated?",
+      "answer": "Strings are compared lexicographically using Unicode code-point order. The literal `<missing>` is treated as a missing value so `'MissingPlacement'` rules apply."
+    },
+    {
+      "question": "What about empty arrays or dimensions of length 0?",
+      "answer": "Empty slices are considered sorted. Passing a dimension larger than `ndims(A)` also returns `true`."
+    }
+  ],
+  "links": [
+    {
+      "label": "sort",
+      "url": "./sort"
+    },
+    {
+      "label": "sortrows",
+      "url": "./sortrows"
+    },
+    {
+      "label": "unique",
+      "url": "./unique"
+    },
+    {
+      "label": "issortedrows",
+      "url": "https://www.mathworks.com/help/matlab/ref/issortedrows.html"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/sorting_sets/issorted.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/sorting_sets/issorted.rs"
+  },
+  "gpu_behavior": [
+    "`issorted` is registered as a sink builtin. When the input tensor lives on the GPU the runtime gathers it to host memory and performs the check there, guaranteeing MATLAB-compatible semantics.",
+    "Future providers may implement a predicate hook so that simple monotonic checks can execute entirely on device. Until then the behaviour is identical for CPU and GPU arrays.",
+    "The result is a logical scalar (`true` or `false`) regardless of input residency."
+  ]
+}

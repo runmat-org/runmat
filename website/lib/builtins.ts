@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, realpathSync } from 'fs';
 import { join } from 'path';
 import type { BuiltinBadge } from './badge-utils';
 import { builtinHasGpuSupport, getBuiltinBadges } from './badge-utils';
@@ -23,101 +23,116 @@ export type Builtin = {
   examples?: { title?: string; code: string }[];
   keywords?: string[];
   internal?: boolean;
-  mdxPath?: string;
-  firstParagraph?: string; // First paragraph extracted from MDX file
+  firstParagraph?: string;
 };
 
-// Extract the first paragraph from MDX content (before first heading)
-function extractFirstParagraphFromMDX(mdxContent: string): string | null {
-  if (!mdxContent || typeof mdxContent !== 'string') {
-    return null;
+export type BuiltinDocExample = {
+  description: string;
+  input: string;
+  output?: string;
+};
+
+export type BuiltinDocFAQ = {
+  question: string;
+  answer: string;
+};
+
+export type BuiltinDocLink = {
+  label: string;
+  url: string;
+};
+
+export type BuiltinDocSyntax = {
+  example: BuiltinDocExample;
+  points: string[];
+};
+
+export type BuiltinDocJsonEncodeOption = {
+  name: string;
+  type: string;
+  default: string;
+  description: string;
+};
+
+export type BuiltinDoc = {
+  title: string;
+  category: string;
+  keywords: string[];
+  summary: string;
+  references: string[];
+  description?: string;
+  behaviors?: string[];
+  examples?: BuiltinDocExample[];
+  faqs?: BuiltinDocFAQ[];
+  links?: BuiltinDocLink[];
+  source?: BuiltinDocLink;
+  gpu_residency?: string;
+  gpu_behavior?: string[];
+  options?: string[];
+  syntax?: BuiltinDocSyntax;
+  jsonencode_options?: BuiltinDocJsonEncodeOption[];
+  gpu_support?: Record<string, unknown>;
+  fusion?: Record<string, unknown>;
+  requires_feature?: string | null;
+  tested?: Record<string, string | string[]>;
+};
+
+export type BuiltinDocEntry = BuiltinDoc & { slug: string };
+
+const BUILTINS_DOCS_DIR = realpathSync(join(process.cwd(), 'content', 'builtins-json'));
+let builtinDocsCache: BuiltinDocEntry[] | null = null;
+
+function slugFromTitle(title: string): string {
+  return title.toLowerCase();
+}
+
+function normalizeStringArray(values?: unknown): string[] | undefined {
+  if (Array.isArray(values)) {
+    const trimmed = values.map((value) => String(value).trim()).filter(Boolean);
+    return trimmed.length > 0 ? trimmed : undefined;
   }
-  
-  try {
-    const lines = mdxContent.split(/\r?\n/);
-    let inFence = false;
-    const paraLines: string[] = [];
-    
-    for (const line of lines) {
-      const trimmed = line.trim();
-      
-      // Skip code fences
-      if (trimmed.startsWith('```')) {
-        inFence = !inFence;
-        continue;
-      }
-      if (inFence) continue;
-      
-      // Stop at first heading
-      if (trimmed.startsWith('#')) {
-        break;
-      }
-      
-      // Skip empty lines (but allow paragraph to accumulate)
-      if (trimmed === '') {
-        if (paraLines.length > 0) {
-          break; // End of first paragraph
-        }
-        continue;
-      }
-      
-      // Skip blockquotes, lists, etc.
-      if (trimmed.startsWith('>') || trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-        continue;
-      }
-      
-      paraLines.push(trimmed);
-    }
-    
-    if (paraLines.length === 0) {
-      return null;
-    }
-    
-    // Join lines and clean up
-    let paragraph = paraLines.join(' ').trim();
-    if (!paragraph || paragraph.length === 0) {
-      return null;
-    }
-    
-    // Remove markdown code backticks but keep the content
-    paragraph = paragraph.replace(/`([^`]+)`/g, '$1');
-    // Remove markdown links but keep text
-    paragraph = paragraph.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
-    
-    return paragraph || null;
-  } catch (error) {
-    // If extraction fails, return null
-    return null;
+  if (typeof values === 'string') {
+    const trimmed = values.trim();
+    return trimmed ? [trimmed] : undefined;
   }
+  return undefined;
+}
+
+export function loadBuiltinDocs(): BuiltinDocEntry[] {
+  if (builtinDocsCache) return builtinDocsCache;
+  const entries = readdirSync(BUILTINS_DOCS_DIR, { withFileTypes: true });
+  const docs: BuiltinDocEntry[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+    const raw = readFileSync(join(BUILTINS_DOCS_DIR, entry.name), 'utf-8');
+    const parsed = JSON.parse(raw) as BuiltinDoc;
+    const title = typeof parsed.title === 'string' ? parsed.title : entry.name.replace(/\.json$/, '');
+    const normalized: BuiltinDoc = {
+      ...parsed,
+      title,
+      gpu_behavior: normalizeStringArray(parsed.gpu_behavior),
+    };
+    docs.push({ ...normalized, slug: slugFromTitle(title) });
+  }
+  builtinDocsCache = docs;
+  return docs;
+}
+
+export function getBuiltinDocBySlug(slug: string): BuiltinDocEntry | undefined {
+  return loadBuiltinDocs().find((doc) => doc.slug === slug);
 }
 
 export function loadBuiltins(): Builtin[] {
-  const p = join(process.cwd(), 'content', 'builtins.json');
-  const data = readFileSync(p, 'utf-8');
-  const arr = JSON.parse(data) as Builtin[];
-  
-  // Enhance builtins with first paragraph from MDX files, filter out builtins without MDX file
-  return arr.filter(builtin => builtin.mdxPath).map(builtin => {
-    try {
-      const mdxPath = join(process.cwd(), 'content', builtin.mdxPath!);
-      if (existsSync(mdxPath)) {
-        const mdxContent = readFileSync(mdxPath, 'utf-8');
-        const firstParagraph = extractFirstParagraphFromMDX(mdxContent);
-        if (firstParagraph && firstParagraph.length > 0) {
-          return { ...builtin, firstParagraph };
-        }
-      }
-    } catch (error) {
-      // If MDX file doesn't exist or can't be read, continue without it
-      // Silently fail to avoid breaking the build
-      // Only log in development to avoid cluttering production logs
-      if (process.env.NODE_ENV === 'development') {
-        console.warn(`Failed to load first paragraph for ${builtin.name}:`, error);
-      }
-    }
-    
-    return builtin;
-  });
+  return loadBuiltinDocs().map((doc) => ({
+    name: doc.title,
+    slug: doc.slug,
+    category: doc.category ? [doc.category] : [],
+    summary: doc.summary ?? '',
+    description: doc.description,
+    signatures: [],
+    keywords: doc.keywords ?? [],
+    internal: false,
+  }));
 }
 
 /**

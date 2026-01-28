@@ -1,0 +1,145 @@
+{
+  "title": "rmdir",
+  "category": "io/repl_fs",
+  "keywords": [
+    "rmdir",
+    "remove directory",
+    "delete folder",
+    "filesystem",
+    "status",
+    "message",
+    "messageid",
+    "recursive"
+  ],
+  "summary": "Remove folders with MATLAB-compatible status, message, and message ID outputs.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/rmdir.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the CPU. When path inputs or flags reside on the GPU, RunMat gathers them to host memory before removing directories."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::rmdir::tests",
+    "integration": "builtins::io::repl_fs::rmdir::tests::rmdir_recursive_removes_contents"
+  },
+  "description": "`rmdir` removes folders from the filesystem. Like MATLAB, it can optionally delete the folder's contents when you pass the `'s'` flag and returns diagnostic status information instead of throwing exceptions.",
+  "behaviors": [
+    "`status = rmdir(folder)` deletes `folder` only when it exists, is a directory, and is empty. Status outputs are `double` scalars (`1` for success, `0` for failure).",
+    "`[status, message, messageID] = rmdir(folder)` returns the diagnostic message and MATLAB-style message identifier. Successful deletions populate both outputs with empty character arrays (`1\u00d70`).",
+    "`rmdir(folder, 's')` removes the folder and all descendants recursively. The flag is case-insensitive and accepts either a char vector or a string scalar with the text `\"s\"`.",
+    "Passing a path that does not exist or that resolves to a file returns `status = 0` together with descriptive diagnostics. Paths are resolved relative to the current working directory and expand a leading `~` into the user's home directory.",
+    "Invalid inputs\u2014including numeric arrays, logical values, multi-element string arrays, or empty character vectors\u2014raise MATLAB-style errors before any filesystem work occurs.",
+    "`rmdir` automatically gathers GPU-resident path strings (for example, `gpuArray(\"logs\")`) to host memory before evaluating the filesystem operation. There is no device-side acceleration."
+  ],
+  "examples": [
+    {
+      "description": "Remove An Empty Folder",
+      "input": "mkdir(\"scratch\");\nstatus = rmdir(\"scratch\");",
+      "output": "status =\n     1"
+    },
+    {
+      "description": "Remove A Folder And Its Contents",
+      "input": "mkdir(\"data/project\");\nfid = fopen(fullfile(\"data/project\", \"notes.txt\"), \"w\");\nfprintf(fid, \"Draft notes\");\nfclose(fid);\nstatus = rmdir(\"data\", \"s\");",
+      "output": "status =\n     1"
+    },
+    {
+      "description": "Handle A Missing Folder Gracefully",
+      "input": "[status, message, messageID] = rmdir(\"not-here\");",
+      "output": "status =\n     0\nmessage =\nFolder \"not-here\" does not exist.\nmessageID =\nMATLAB:RMDIR:DirectoryNotFound"
+    },
+    {
+      "description": "Detect That A Folder Is Not Empty Without The 's' Flag",
+      "input": "mkdir(\"logs\");\nfid = fopen(fullfile(\"logs\", \"today.log\"), \"w\");\nfprintf(fid, \"Log entry\");\nfclose(fid);\n[status, message, messageID] = rmdir(\"logs\");",
+      "output": "status =\n     0\nmessage =\nCannot remove folder \"logs\": directory is not empty.\nmessageID =\nMATLAB:RMDIR:DirectoryNotEmpty"
+    },
+    {
+      "description": "Remove A Directory Specified As A String Scalar On The GPU",
+      "input": "mkdir(\"gpu-folder\");\nstatus = rmdir(gpuArray(\"gpu-folder\"));",
+      "output": "status =\n     1"
+    },
+    {
+      "description": "Capture Status And Message Outputs",
+      "input": "mkdir(\"reports\");\n[status, message, messageID] = rmdir(\"reports\");",
+      "output": "status =\n     1\nmessage =\n\nmessageID ="
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What status codes does `rmdir` return?",
+      "answer": "`1` means the folder was removed (or already absent after a recursive call), while `0` means the folder could not be removed."
+    },
+    {
+      "question": "Does `rmdir` throw exceptions?",
+      "answer": "Only invalid inputs raise errors. Filesystem failures surface through the status, message, and message ID outputs."
+    },
+    {
+      "question": "How do I remove non-empty folders?",
+      "answer": "Pass the `'s'` flag (for example, `rmdir(\"folder\", \"s\")`). Without it, `rmdir` refuses to delete directories that contain files or subfolders."
+    },
+    {
+      "question": "Is the `'s'` flag case-sensitive?",
+      "answer": "No. Use `'s'` or `'S'`, supplied as either a char vector or a string scalar with a single element."
+    },
+    {
+      "question": "Can I target files instead of folders?",
+      "answer": "No. Passing a file path returns `status = 0` with the message ID `MATLAB:RMDIR:NotADirectory`."
+    },
+    {
+      "question": "How are paths resolved?",
+      "answer": "Relative paths are resolved against the current working folder (`pwd`). Leading `~` segments expand to the user's home directory on each platform."
+    },
+    {
+      "question": "Does `rmdir` require GPU acceleration?",
+      "answer": "No. The builtin executes on the host. If an argument resides on the GPU, RunMat gathers it automatically before touching the filesystem."
+    },
+    {
+      "question": "What happens if the folder is already missing when I pass `'s'`?",
+      "answer": "The function reports `status = 0` and the message ID `MATLAB:RMDIR:DirectoryNotFound`; it never creates folders."
+    },
+    {
+      "question": "Can I remove folders using UNC paths or drive letters on Windows?",
+      "answer": "Yes. The builtin forwards the path to the operating system exactly as MATLAB does."
+    },
+    {
+      "question": "Why are the message outputs character arrays instead of strings?",
+      "answer": "MATLAB returns char arrays for compatibility. Wrap them with `string(message)` if you prefer string scalars."
+    }
+  ],
+  "links": [
+    {
+      "label": "mkdir",
+      "url": "./mkdir"
+    },
+    {
+      "label": "ls",
+      "url": "./ls"
+    },
+    {
+      "label": "dir",
+      "url": "./dir"
+    },
+    {
+      "label": "pwd",
+      "url": "./pwd"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/rmdir.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/rmdir.rs"
+  },
+  "gpu_residency": "No. `rmdir` always executes on the host CPU, therefore placing arguments on the GPU offers no benefit. If a path value is already wrapped in `gpuArray`, RunMat gathers it automatically before accessing the filesystem so existing scripts continue to work unchanged.",
+  "gpu_behavior": [
+    "`rmdir` performs host-side filesystem operations. When acceleration providers are active, RunMat first gathers any GPU-resident arguments, performs the removal on the CPU, and returns host-resident outputs. Providers do not expose special hooks for this builtin, so GPU execution is not applicable."
+  ]
+}

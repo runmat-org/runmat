@@ -1,0 +1,144 @@
+{
+  "title": "sign",
+  "category": "math/elementwise",
+  "keywords": [
+    "sign",
+    "signum",
+    "elementwise",
+    "complex",
+    "gpu"
+  ],
+  "summary": "Sign of scalars, vectors, matrices, or N-D tensors with real or complex values.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Falls back to the host when the active provider lacks unary_sign or when complex inputs require host-side normalisation."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::sign::tests",
+    "integration": "builtins::math::elementwise::sign::tests::sign_gpu_provider_roundtrip"
+  },
+  "description": "`y = sign(x)` returns the sign of each element of `x`. Real inputs become `-1`, `0`, or `1` depending on their value, while complex inputs are normalised to unit magnitude (`x ./ abs(x)`).",
+  "behaviors": [
+    "Real scalars, vectors, matrices, and higher-dimensional tensors produce `-1`, `0`, or `1` for each element.",
+    "Complex inputs return `x ./ abs(x)`; zero-valued elements remain exactly `0 + 0i`.",
+    "Logical inputs are promoted to doubles before applying the sign function.",
+    "Character arrays are treated as their numeric code points and return doubles of the same shape.",
+    "NaN inputs propagate (`sign(NaN)` is `NaN`), matching MATLAB semantics.",
+    "`Inf` and `-Inf` map to `1` and `-1` respectively; complex numbers with infinite parts normalise accordingly."
+  ],
+  "examples": [
+    {
+      "description": "Determining the sign of a scalar",
+      "input": "result = sign(-42);",
+      "output": "result = -1;"
+    },
+    {
+      "description": "Applying `sign` to a vector of mixed values",
+      "input": "v = [-3 -0.0 0 2 5];\ns = sign(v);",
+      "output": "s = [-1 0 0 1 1];"
+    },
+    {
+      "description": "Normalising complex numbers to unit magnitude",
+      "input": "z = [3+4i, -1+1i, 0+0i];\nu = sign(z);",
+      "output": "u = [0.6+0.8i, -0.7071+0.7071i, 0];"
+    },
+    {
+      "description": "Using `sign` with character data",
+      "input": "codes = sign('RunMat');",
+      "output": "codes = [1 1 1 1 1 1];"
+    },
+    {
+      "description": "Working with logical masks",
+      "input": "mask = [false true false; true false true];\nnumeric = sign(mask);",
+      "output": "numeric = [0 1 0; 1 0 1];"
+    },
+    {
+      "description": "Executing `sign` on a GPU-resident tensor",
+      "input": "G = randn(4096, 4096, 'gpuArray');\nS = sign(G);"
+    },
+    {
+      "description": "Handling infinities and NaNs",
+      "input": "values = [Inf, -Inf, NaN, 0];\nout = sign(values);",
+      "output": "out = [1 -1 NaN 0];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `sign` modify NaN values?",
+      "answer": "No. NaN inputs remain NaN, matching IEEE behaviour and MATLAB semantics."
+    },
+    {
+      "question": "How does `sign` handle complex zeros?",
+      "answer": "`0 + 0i` stays `0 + 0i`. Other complex values are scaled to lie on the unit circle (`x ./ abs(x)`)."
+    },
+    {
+      "question": "What happens for infinite complex components?",
+      "answer": "If either component is infinite, RunMat returns a direction vector with unit magnitude (e.g., `1 + 0i` or `\u00b11/\u221a2 \u00b1 1/\u221a2 i`), mirroring MATLAB."
+    },
+    {
+      "question": "Can I call `sign` on string arrays?",
+      "answer": "No. `sign` accepts numeric, logical, or character arrays. Use `double(string)` followed by `sign` if needed."
+    },
+    {
+      "question": "Does `sign` allocate a new array?",
+      "answer": "Yes. The builtin returns a fresh array; downstream fusion may combine operations to reduce allocations."
+    },
+    {
+      "question": "Is GPU execution numerically identical to CPU?",
+      "answer": "Results match within the provider's precision (`single` or `double`). NaN propagation and zero handling remain consistent between CPU and GPU paths."
+    },
+    {
+      "question": "Will `sign` participate in fusion?",
+      "answer": "Yes. The fusion planner can fold `sign` into neighbouring elementwise kernels, keeping data on the GPU when possible."
+    },
+    {
+      "question": "How do I keep results on the GPU?",
+      "answer": "Avoid `gather` unless host data is required. RunMat keeps the outputs of fused expressions device-resident when beneficial."
+    }
+  ],
+  "links": [
+    {
+      "label": "abs",
+      "url": "./abs"
+    },
+    {
+      "label": "sin",
+      "url": "./sin"
+    },
+    {
+      "label": "sum",
+      "url": "./sum"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/sign.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/sign.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` manually. RunMat's planner tracks residency and keeps tensors on the GPU whenever it is profitable. Explicit `gpuArray` / `gather` calls remain available for MATLAB compatibility or interoperability with external GPU code.",
+  "gpu_behavior": [
+    "**Hook available:** The sign is evaluated directly on the device with no host transfers.",
+    "**Hook missing or unsupported dtype:** RunMat gathers the tensor, applies the CPU logic (including complex handling), and continues execution transparently."
+  ]
+}

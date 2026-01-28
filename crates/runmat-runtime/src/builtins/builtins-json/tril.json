@@ -1,0 +1,128 @@
+{
+  "title": "tril",
+  "category": "array/shape",
+  "keywords": [
+    "tril",
+    "lower triangular",
+    "matrix",
+    "diagonal",
+    "gpu"
+  ],
+  "summary": "Extract the lower triangular portion of a matrix (optionally including super-diagonals).",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses provider tril kernels when available; otherwise gathers once, computes on the host, and re-uploads to keep results gpu-resident."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::tril::tests",
+    "integration": "builtins::array::shape::tril::tests::tril_gpu_roundtrip"
+  },
+  "description": "`tril(A)` keeps the elements on and below a selected diagonal of `A` and sets everything above that diagonal to zero. The optional second argument `k` controls which diagonal is retained:\n\n- `k = 0` (default) keeps the main diagonal. - `k > 0` includes super-diagonals above the main diagonal. - `k < 0` drops the main diagonal and starts below it.\n\nThe operation applies independently to every matrix \"page\" of N-D tensors.",
+  "behaviors": [
+    "Works on numeric, logical, and complex arrays.",
+    "Operates on the first two dimensions; trailing dimensions are handled as independent pages.",
+    "Accepts scalar, vector, matrix, or paged inputs of any size, including empty dimensions.",
+    "Logical inputs remain logical, and complex values keep their real/imaginary components.",
+    "Scalars are treated as `1\u00d71` matrices and honour negative offsets (`k < 0` yields zero).",
+    "gpuArray inputs stay on the device when the provider exposes a native `tril` hook; otherwise RunMat performs a gather \u2192 compute \u2192 upload cycle."
+  ],
+  "examples": [
+    {
+      "description": "Extracting the lower triangular part of a matrix",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nL = tril(A);",
+      "output": "L =\n     1     0     0\n     4     5     0\n     7     8     9"
+    },
+    {
+      "description": "Keeping one super-diagonal above the main diagonal",
+      "input": "A = magic(4);\nL = tril(A, 1);",
+      "output": "L =\n    16     2     0     0\n     5    11    10     0\n     9     7     6    12\n     4    14    15     1"
+    },
+    {
+      "description": "Dropping the main diagonal with a negative offset",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nstrict = tril(A, -1);",
+      "output": "strict =\n     0     0     0\n     4     0     0\n     7     8     0"
+    },
+    {
+      "description": "Applying `tril` to every page of a 3-D array",
+      "input": "T = reshape(1:18, [3 3 2]);\nL = tril(T);",
+      "output": "L(:, :, 1) =\n     1     0     0\n     4     5     0\n     7     8     9\n\nL(:, :, 2) =\n    10     0     0\n    13    14     0\n    16    17    18"
+    },
+    {
+      "description": "Preserving gpuArray residency with `tril`",
+      "input": "G = gpuArray(rand(5));\nL = tril(G, -2);\nisa(L, 'gpuArray')",
+      "output": "ans =\n  logical\n   1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What happens when `k` is larger than the matrix size?",
+      "answer": "The entire matrix is preserved; `tril` never removes elements below the chosen diagonal."
+    },
+    {
+      "question": "Does `tril` work with logical arrays?",
+      "answer": "Yes. Elements above the retained diagonal become `false`, while the rest keep their logical values."
+    },
+    {
+      "question": "How are complex numbers handled?",
+      "answer": "Each element keeps its real and imaginary parts intact. Only the elements above the chosen diagonal are zeroed out (`0 + 0i`)."
+    },
+    {
+      "question": "What about empty matrices or zero-sized dimensions?",
+      "answer": "`tril` returns an array of the same shape, leaving all entries at zero. Trailing dimensions with size zero are treated as empty batches."
+    },
+    {
+      "question": "Does `tril` change the class of character arrays?",
+      "answer": "Character arrays are converted to their numeric codes (double precision) before the triangular mask is applied, matching MATLAB's behaviour."
+    }
+  ],
+  "links": [
+    {
+      "label": "`triu`",
+      "url": "./triu"
+    },
+    {
+      "label": "`diag`",
+      "url": "./diag"
+    },
+    {
+      "label": "`kron`",
+      "url": "./kron"
+    },
+    {
+      "label": "`reshape`",
+      "url": "./reshape"
+    },
+    {
+      "label": "`gpuArray`",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "`gather`",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/shape/tril.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/tril.rs"
+  },
+  "gpu_residency": "```matlab:runnable\nG = gpuArray(rand(5));\nL = tril(G, -2);\nisa(L, 'gpuArray')\n```\nExpected output:\n```matlab\nans =\n  logical\n   1\n```",
+  "gpu_behavior": [
+    "If the active acceleration provider implements the custom `tril` hook the entire operation runs on the GPU.",
+    "When the hook is missing, RunMat gathers the data once, computes the result on the host, uploads the lower triangular tensor back to the device, and returns a gpuArray handle so residency is preserved for downstream kernels.",
+    "Falling back to the host never changes numerical results; it only affects where the computation is carried out."
+  ]
+}

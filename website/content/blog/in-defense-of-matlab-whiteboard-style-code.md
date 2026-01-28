@@ -127,7 +127,7 @@ Let’s look at a concrete example. Imagine you are sketching a simple linear al
 **In MATLAB:**
 The code is almost a direct transcription of the board:
 
-```matlab
+```matlab:runnable
 X = [1, 2, 3];
 Y = [1, 2, 3; ...
      4, 5, 6; ...
@@ -230,4 +230,6 @@ Technology trends come and go, but the laws of physics and mathematics don't cha
 Engineers working on the next generation of renewable energy grids, autonomous vehicles, and medical robotics need tools that respect the complexity of their math. They need code that can be written, read, and verified by experts who care more about differential equations than software dependencies.
 
 The future doesn't need to copy the business models of the past. But it should absolutely keep the best part of the legacy: code that looks like the math on the board.
+
+Want to see how close RunMat stays to MATLAB semantics? Check the [Language Coverage guide](/docs/language-coverage).
 

@@ -13,102 +13,6 @@ use crate::builtins::common::spec::{
 #[cfg(not(test))]
 use crate::interaction;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "pause",
-        builtin_path = "crate::builtins::timing::pause"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "pause"
-category: "timing"
-keywords: ["pause", "sleep", "wait", "delay", "press any key", "execution"]
-summary: "Suspend execution until the user presses a key or a specified time elapses."
-references: []
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "pause executes entirely on the host CPU. GPU providers are never consulted and no residency changes occur."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::timing::pause::tests"
-  integration: "builtins::timing::pause::tests::pause_gpu_duration_gathered"
----
-
-# What does the `pause` function do in MATLAB / RunMat?
-`pause` suspends execution and mirrors MATLAB's timing semantics:
-
-- `pause` with no inputs waits for keyboard input (press any key) while pause mode is `on`.
-- `pause(t)` delays execution for `t` seconds (non-negative numeric scalar). `t = Inf` behaves like `pause` with no arguments.
-- `pause('on')` and `pause('off')` enable or disable pausing globally, returning the previous state (`'on'` or `'off'`).
-- `pause('query')` reports the current state (`'on'` or `'off'`).
-- `pause([])` is treated as `pause` with no arguments.
-- When pause mode is `off`, delays and key waits complete immediately.
-
-Invalid usages (negative times, non-scalar numeric inputs, or unknown strings) raise `MATLAB:pause:InvalidInputArgument`, matching MATLAB diagnostics.
-
-## GPU Execution and Residency
-`pause` never runs on the GPU. When you pass GPU-resident values (for example, `pause(gpuArray(0.5))`), RunMat automatically gathers them to the host before evaluating the delay. No residency changes occur otherwise, and acceleration providers do not receive any callbacks.
-
-## Examples of using the `pause` function in MATLAB / RunMat
-
-### Pausing for a fixed duration
-```matlab
-tic;
-pause(0.05);     % wait 50 milliseconds
-elapsed = toc;
-```
-
-### Waiting for user input mid-script
-```matlab
-disp("Press any key to continue the demo...");
-pause;           % waits until the user presses a key (while pause is 'on')
-```
-
-### Temporarily disabling pauses in automated runs
-```matlab
-state = pause('off');   % returns previous state so it can be restored
-cleanup = onCleanup(@() pause(state));  % ensure state is restored
-pause(1.0);             % returns immediately because pause is disabled
-```
-
-### Querying the current pause mode
-```matlab
-current = pause('query');   % returns 'on' or 'off'
-```
-
-### Using empty input to rely on the default behaviour
-```matlab
-pause([]);   % equivalent to calling pause with no arguments
-```
-
-## FAQ
-
-1. **Does `pause` block forever when standard input is not interactive?** No. When RunMat detects a non-interactive standard input (for example, during automated tests), `pause` completes immediately even in `'on'` mode.
-2. **What happens if I call `pause` with a negative duration?** RunMat raises `MATLAB:pause:InvalidInputArgument`, matching MATLAB.
-3. **Does `pause` accept logical or integer values?** Yes. Logical and integer inputs are converted to doubles before evaluating the delay.
-4. **Can I force pausing off globally?** Use `pause('off')` to disable pauses. Record the return value so you can restore the prior state with `pause(previousState)`.
-5. **Does `pause('query')` change the pause state?** No. It simply reports the current mode (`'on'` or `'off'`).
-6. **Is `pause` affected by GPU fusion or auto-offload?** No. The builtin runs on the host regardless of fusion plans or acceleration providers.
-7. **What is the default pause state?** `'on'`. Every RunMat session starts with pausing enabled.
-8. **Can I pass a gpuArray as the duration?** Yes. RunMat gathers the scalar duration to the host before evaluating the delay.
-
-## See Also
-[tic](./tic), [toc](./toc), [timeit](./timeit)
-
-## Source & Feedback
-- Implementation: [`crates/runmat-runtime/src/builtins/timing/pause.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/timing/pause.rs)
-- Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
-"#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::timing::pause")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -669,13 +573,5 @@ pub(crate) mod tests {
         reset_state(true);
         let err = block_on(pause_builtin(vec![Value::from("invalid")])).unwrap_err();
         assert_pause_error_identifier(err, ERR_INVALID_ARG);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let _guard = TEST_GUARD.lock().unwrap();
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

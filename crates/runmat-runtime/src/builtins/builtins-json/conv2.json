@@ -1,0 +1,133 @@
+{
+  "title": "conv2",
+  "category": "math/signal",
+  "keywords": [
+    "conv2",
+    "2d convolution",
+    "image processing",
+    "filtering",
+    "gpu",
+    "same",
+    "valid"
+  ],
+  "summary": "Two-dimensional convolution with MATLAB-compatible padding modes.",
+  "references": [
+    "title: \"MATLAB conv2 documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "When the active provider lacks a conv2d hook RunMat gathers inputs to the host and executes the CPU path."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::conv2::tests",
+    "integration": [
+      "builtins::math::signal::conv2::tests::conv2_gpu_roundtrip_matches_cpu",
+      "builtins::math::signal::conv2::tests::conv2_wgpu_fallback_matches_cpu"
+    ]
+  },
+  "description": "`conv2` performs two-dimensional linear convolution. By default it returns the *full* convolution (`size(A) + size(B) - 1`), but it can also return the *same* or *valid* regions so results match MATLAB exactly. The builtin accepts real or complex inputs, logical arrays (promoted to double), and the separable form `conv2(hcol, hrow, A)` that is common in image processing pipelines.",
+  "behaviors": [
+    "`conv2(A, B)` returns the full 2-D convolution of `A` and `B`.",
+    "`conv2(A, B, 'same')` slices the central part of the full convolution so the output matches the shape of `A`.",
+    "`conv2(A, B, 'valid')` returns only those points where `B` overlaps `A` completely.",
+    "`conv2(hcol, hrow, A)` is syntactic sugar for `conv2(hcol(:) * hrow(:)', A)`.",
+    "Scalars are treated as `1\u00d71` matrices and preserve the orientation of the other input.",
+    "Empty inputs follow MATLAB\u2019s rules: `conv2([], X)` and `conv2(X, [])` return empty matrices (or zero-sized slices for `'same'`).",
+    "Logical inputs are promoted to double precision before computation; complex inputs preserve their imaginary part throughout the convolution."
+  ],
+  "examples": [
+    {
+      "description": "Smoothing an image patch with a 3\u00d73 averaging kernel",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nh = ones(3) / 9;\nsmoothed = conv2(A, h, 'same');",
+      "output": "smoothed =\n    1.3333    2.3333    1.7778\n    3.0000    5.0000    3.6667\n    2.6667    4.3333    3.1111"
+    },
+    {
+      "description": "Computing the full convolution of two small kernels",
+      "input": "K1 = [1 2; 3 4];\nK2 = [1 1; 1 1];\nC = conv2(K1, K2);",
+      "output": "C =\n     1     3     2\n     4    10     6\n     3     7     4"
+    },
+    {
+      "description": "Extracting the same-sized result to preserve dimensions",
+      "input": "edge = conv2([1 2 3; 4 5 6; 7 8 9], [1 0 -1; 1 0 -1; 1 0 -1], 'same');",
+      "output": "edge =\n    -7    -4     7\n   -15    -6    15\n   -13    -4    13"
+    },
+    {
+      "description": "Valid convolution for sliding-window statistics",
+      "input": "block = magic(4);\nkernel = ones(2);\nvalid = conv2(block, kernel, 'valid');",
+      "output": "valid =\n    34    26    34\n    32    34    36\n    34    42    34"
+    },
+    {
+      "description": "Using the separable form with column and row vectors",
+      "input": "hcol = [1; 2; 1];\nhrow = [1 0 -1];\nA = [3 4 5; 6 7 8; 9 10 11];\ngx = conv2(hcol, hrow, A, 'same');",
+      "output": "gx =\n   -15    -6    15\n   -28    -8    28\n   -27    -6    27"
+    },
+    {
+      "description": "Convolving gpuArray inputs with transparent fallbacks",
+      "input": "G = gpuArray(rand(128, 128));\nH = gpuArray([1 2 1; 0 0 0; -1 -2 -1]);\ngx = conv2(G, H, 'same');\nresult = gather(gx);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `conv2` support the three MATLAB shape modes?",
+      "answer": "Yes. Pass `'full'`, `'same'`, or `'valid'` as the final argument and RunMat will mirror MATLAB\u2019s output sizes and edge handling precisely."
+    },
+    {
+      "question": "How do I use the separable form?",
+      "answer": "Call `conv2(hcol, hrow, A)` (optionally with a shape argument). RunMat converts the vectors into an outer-product kernel internally so it behaves exactly like MATLAB."
+    },
+    {
+      "question": "What happens if one input is empty?",
+      "answer": "An empty input produces an empty output (or a zero-sized slice for `'same'`). This follows MATLAB\u2019s behaviour and avoids surprising dimension growth."
+    },
+    {
+      "question": "Do logical inputs work?",
+      "answer": "Yes. Logical arrays are promoted to double precision before convolution so the result is numeric."
+    },
+    {
+      "question": "Will the result stay on the GPU?",
+      "answer": "If the active provider exposes the `conv2d` hook the result stays device-resident. Otherwise RunMat falls back to the CPU path and returns a host tensor; this fallback is documented so providers can add native kernels without breaking compatibility."
+    }
+  ],
+  "links": [
+    {
+      "label": "conv",
+      "url": "./conv"
+    },
+    {
+      "label": "filter2",
+      "url": "https://www.mathworks.com/help/matlab/ref/filter2.html"
+    },
+    {
+      "label": "imfilter",
+      "url": "https://www.mathworks.com/help/images/ref/imfilter.html"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/conv2.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/conv2.rs"
+  },
+  "gpu_behavior": [
+    "RunMat Accelerate keeps tensors on the GPU when the active provider implements a `conv2d` hook (the in-process provider uses the host implementation and returns a GPU handle; the WGPU backend will adopt a native kernel). When the hook is unavailable, RunMat gathers GPU inputs to the host, performs the convolution on the CPU, and returns a host tensor. Documentation and the GPU metadata make this fallback explicit so providers can add native implementations without changing this builtin."
+  ]
+}

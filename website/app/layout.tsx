@@ -77,104 +77,89 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{
             __html: JSON.stringify({
               "@context": "https://schema.org",
-              "@type": "WebSite",
-              "name": "RunMat",
-              "description": "Pre-release MATLAB-style runtime with Jupyter kernel, BLAS/LAPACK, and JIT compilation; current plotting covers simple 2D line/scatter while richer charts are in progress",
-              "url": "https://runmat.org",
-              "potentialAction": {
-                "@type": "SearchAction",
-                "target": {
-                  "@type": "EntryPoint",
-                  "urlTemplate": "https://runmat.org/search?q={search_term_string}"
-                },
-                "query-input": "required name=search_term_string"
-              },
-              "mainEntityOfPage": {
-                "@type": "WebPage",
-                "@id": "https://runmat.org"
-              },
-              "publisher": {
-                "@type": "Organization",
-                "name": "Dystr Inc.",
-                "url": "https://dystr.com"
-              }
-            })
-          }}
-        />
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{
-            __html: JSON.stringify({
-              "@context": "https://schema.org",
-              "@type": "SoftwareApplication",
-              "name": "RunMat",
-              "description": "Pre-release MATLAB-style runtime with Jupyter kernel, BLAS/LAPACK, and JIT compilation; simple 2D line/scatter plotting works today and advanced charts are still coming",
-              "url": "https://runmat.org",
-              "downloadUrl": "https://runmat.org/download",
-              "operatingSystem": ["Windows", "macOS", "Linux"],
-              "applicationCategory": "Scientific Computing Software",
-              "offers": {
-                "@type": "Offer",
-                "price": "0",
-                "priceCurrency": "USD"
-              },
-              "author": {
-                "@type": "Organization",
-                "name": "Dystr Inc.",
-                "url": "https://dystr.com"
-              }
-            })
-          }}
-        />
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{
-            __html: JSON.stringify({
-              "@context": "https://schema.org",
-              "@type": "ItemList",
-              "name": "RunMat Navigation",
-              "itemListElement": [
+              "@graph": [
                 {
-                  "@type": "SiteNavigationElement",
-                  "position": 1,
-                  "name": "Download",
-                  "description": "Download RunMat for your platform",
-                  "url": "https://runmat.org/download"
+                  "@type": "Organization",
+                  "@id": "https://runmat.org/#organization",
+                  "name": "RunMat",
+                  "alternateName": ["RunMat by Dystr", "Dystr"],
+                  "legalName": "Dystr Inc.",
+                  "url": "https://runmat.org",
+                  "logo": {
+                    "@type": "ImageObject",
+                    "url": "https://runmat.org/runmat-logo.svg",
+                    "caption": "RunMat"
+                  },
+                  "description":
+                    "RunMat is a high-performance, open-source runtime for math that lets you run MATLAB-syntax code in the browser, on the desktop, or from the CLI, while getting GPU-speed execution.",
+                  "sameAs": [
+                    "https://github.com/runmat-org/runmat",
+                    "https://x.com/runmat_org",
+                    "https://dystr.com"
+                  ],
+                  "knowsAbout": [
+                    "Scientific Computing",
+                    "High Performance Computing",
+                    "MATLAB",
+                    "WebGPU",
+                    "Compiler Design"
+                  ],
+                  "contactPoint": {
+                    "@type": "ContactPoint",
+                    "contactType": "customer support",
+                    "email": "team@runmat.com"
+                  }
                 },
                 {
-                  "@type": "SiteNavigationElement",
-                  "position": 2,
-                  "name": "Documentation",
-                  "description": "Complete guides and reference for RunMat",
-                  "url": "https://runmat.org/docs"
+                  "@type": "WebSite",
+                  "@id": "https://runmat.org/#website",
+                  "url": "https://runmat.org",
+                  "name": "RunMat",
+                  "description":
+                    "The Fastest Runtime for Your Math. RunMat fuses back-to-back ops into fewer GPU steps and intelligently manages memory.",
+                  "publisher": { "@id": "https://runmat.org/#organization" },
+                  "image": "https://web.runmatstatic.com/runmat-sandbox-dark.png",
+                  "potentialAction": {
+                    "@type": "SearchAction",
+                    "target": {
+                      "@type": "EntryPoint",
+                      "urlTemplate": "https://runmat.org/search?q={search_term_string}"
+                    },
+                    "query-input": "required name=search_term_string"
+                  }
                 },
                 {
-                  "@type": "SiteNavigationElement",
-                  "position": 3,
-                  "name": "Getting Started",
-                  "description": "Quick start guide to using RunMat",
-                  "url": "https://runmat.org/docs/getting-started"
-                },
-                {
-                  "@type": "SiteNavigationElement",
-                  "position": 4,
-                  "name": "Architecture",
-                  "description": "Deep dive into RunMat's V8-inspired design",
-                  "url": "https://runmat.org/docs/architecture"
-                },
-                {
-                  "@type": "SiteNavigationElement",
-                  "position": 5,
-                  "name": "CLI Reference",
-                  "description": "Command-line interface guide",
-                  "url": "https://runmat.org/docs/cli"
-                },
-                {
-                  "@type": "SiteNavigationElement",
-                  "position": 6,
-                  "name": "Configuration",
-                  "description": "Configuration system guide",
-                  "url": "https://runmat.org/docs/configuration"
+                  "@type": "SoftwareApplication",
+                  "@id": "https://runmat.org/#software",
+                  "name": "RunMat",
+                  "description":
+                    "RunMat is a high-performance, open-source runtime for math that lets you run MATLAB-syntax code in the browser, on the desktop, or from the CLI, while getting GPU-speed execution.",
+                  "license": "https://opensource.org/licenses/MIT",
+                  "applicationCategory": "ScientificApplication",
+                  "applicationSubCategory": "Numerical Analysis & Simulation",
+                  "operatingSystem": ["Windows", "macOS", "Linux", "Browser"],
+                  "softwareVersion": "Beta",
+                  "featureList": [
+                    "JIT-accelerated MATLAB-style syntax",
+                    "RunMat Desktop: Full IDE experience with code editor, file explorer, and live plotting in-browser",
+                    "Automatic GPU Fusion & Memory Management",
+                    "Cross-platform binary (Metal, Vulkan, DX12) and CLI support"
+                  ],
+                  "offers": {
+                    "@type": "Offer",
+                    "price": "0",
+                    "priceCurrency": "USD",
+                    "availability": "https://schema.org/InStock"
+                  },
+                  "author": { "@id": "https://runmat.org/#organization" },
+                  "publisher": { "@id": "https://runmat.org/#organization" },
+                  "downloadUrl": "https://runmat.org/download",
+                  "mainEntityOfPage": { "@id": "https://runmat.org/#website" },
+                  "screenshot": {
+                    "@type": "ImageObject",
+                    "url": "https://web.runmatstatic.com/runmat-sandbox-dark.png",
+                    "caption": "RunMat Desktop and Browser Sandbox"
+                  }
                 }
               ]
             })

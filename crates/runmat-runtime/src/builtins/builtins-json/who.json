@@ -1,0 +1,133 @@
+{
+  "title": "who",
+  "category": "introspection",
+  "keywords": [
+    "who",
+    "workspace",
+    "variables",
+    "introspection",
+    "mat-file"
+  ],
+  "summary": "List the names of variables in the workspace or MAT-files (MATLAB-compatible).",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/who.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host. GPU arrays remain on the device; RunMat inspects metadata without gathering buffers."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::who::tests",
+    "integration": null
+  },
+  "description": "`who` returns the names of variables that are visible in the active workspace. You can filter the result using wildcard patterns, regular expressions, or by reading directly from MAT-files without loading the data.",
+  "behaviors": [
+    "`who` with no arguments lists every variable in the current workspace, sorted alphabetically.",
+    "`who pattern1 pattern2 ...` accepts character vectors or string scalars with MATLAB wildcard syntax (`*`, `?`, `[abc]`). Any variable name that matches at least one pattern is returned.",
+    "`who('-regexp', expr1, expr2, ...)` keeps names that match any of the supplied regular expressions.",
+    "`who('global')` lists only global variables in the active workspace.",
+    "`who('-file', filename, ...)` inspects the variables stored in a MAT-file. You can combine this option with explicit names or `-regexp` selectors.",
+    "The result is a column cell array of character vectors (consistent with MATLAB). Empty results return a `0\u00d71` cell array so that idioms like `isempty(who(...))` work as expected."
+  ],
+  "examples": [
+    {
+      "description": "List All Workspace Variables",
+      "input": "a = 42;\nb = rand(3, 2);\nnames = who;",
+      "output": "names =\n  2\u00d71 cell array\n    {\"a\"}\n    {\"b\"}"
+    },
+    {
+      "description": "Filter With Wildcard Patterns",
+      "input": "alpha = 1;\nbeta = 2;\nnames = who(\"a*\");",
+      "output": "names =\n  1\u00d71 cell array\n    {\"alpha\"}"
+    },
+    {
+      "description": "Use Regular Expressions",
+      "input": "x1 = rand;\nx2 = rand;\nmatches = who('-regexp', '^x\\d$');",
+      "output": "matches =\n  2\u00d71 cell array\n    {\"x1\"}\n    {\"x2\"}"
+    },
+    {
+      "description": "Inspect Variables Stored In A MAT-File",
+      "input": "save('snapshot.mat', 'alpha', 'beta')\nfile_names = who('-file', 'snapshot.mat');",
+      "output": "file_names =\n  2\u00d71 cell array\n    {\"alpha\"}\n    {\"beta\"}"
+    },
+    {
+      "description": "List Only Global Variables",
+      "input": "global shared;\nlocal = 1;\nglobals = who('global');",
+      "output": "globals =\n  1\u00d71 cell array\n    {\"shared\"}"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What type does `who` return?",
+      "answer": "A column cell array of character vectors, matching MATLAB behaviour."
+    },
+    {
+      "question": "Are the names sorted?",
+      "answer": "Yes. Results are sorted alphabetically so that diffs are deterministic."
+    },
+    {
+      "question": "Can I mix wildcard patterns and `-regexp`?",
+      "answer": "Yes. The final result includes any name matched by either the wildcard selectors or the regular expressions."
+    },
+    {
+      "question": "What happens if no variables match?",
+      "answer": "You receive a `0\u00d71` cell array. You can call `isempty` on it to check for an empty result."
+    },
+    {
+      "question": "Can I call `who('-file', ...)` on large MAT-files?",
+      "answer": "Yes. The builtin reads just enough metadata to enumerate variable names; it does not load the data into the workspace."
+    }
+  ],
+  "links": [
+    {
+      "label": "whos",
+      "url": "./whos"
+    },
+    {
+      "label": "which",
+      "url": "./which"
+    },
+    {
+      "label": "class",
+      "url": "./class"
+    },
+    {
+      "label": "size",
+      "url": "./size"
+    },
+    {
+      "label": "load",
+      "url": "./load"
+    },
+    {
+      "label": "save",
+      "url": "./save"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/who.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/who.rs"
+  },
+  "gpu_residency": "No. `who` never requires you to gather data or move arrays between the host and GPU. It simply reports variable names, regardless of residency. Use `gpuArray` or `gather` only when you explicitly need to control where data lives.",
+  "gpu_behavior": [
+    "`who` is a pure introspection builtin that runs on the CPU. When a variable is a `gpuArray`, RunMat leaves it resident on the device and reports its name without triggering any device-to-host copies. Only scalar selector arguments are gathered if they are stored on the GPU."
+  ]
+}

@@ -14,177 +14,6 @@ use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, comp
 
 use super::text_utils::{logical_result, parse_ignore_case, TextCollection, TextElement};
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "contains",
-        builtin_path = "crate::builtins::strings::search::contains"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "contains"
-category: "strings/search"
-keywords: ["contains", "substring", "text search", "ignorecase", "string array"]
-summary: "Determine whether text inputs contain specific patterns with MATLAB-compatible implicit expansion and case handling."
-references:
-  - https://www.mathworks.com/help/matlab/ref/contains.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "matlab"
-  notes: "Runs on the CPU; when inputs reside on the GPU RunMat gathers them automatically so behaviour matches MATLAB."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 2
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::strings::search::contains::tests"
-  integration: "builtins::strings::search::contains::tests::contains_cell_array_patterns"
----
-
-# What does the `contains` function do in MATLAB / RunMat?
-`contains(str, pattern)` returns a logical result indicating whether each element of `str` contains
-the corresponding text in `pattern`. The builtin supports string arrays, character vectors/arrays,
-and cell arrays of character vectors, honouring MATLAB's implicit expansion semantics.
-
-## How does the `contains` function behave in MATLAB / RunMat?
-- Accepts text inputs as string scalars/arrays, character scalars/arrays, or cell arrays of character vectors.
-- Accepts patterns in the same formats. Either input may be scalar; when sizes differ MATLAB-style implicit expansion applies.
-- Missing string scalars (`<missing>`) never match any pattern.
-- Empty pattern values (`""` or `''`) always match non-missing text elements.
-- The optional `'IgnoreCase', true|false` name-value pair controls case sensitivity (default is case-sensitive).
-- Returns a logical scalar when the broadcasted size is one element, otherwise returns a logical array with the broadcasted shape.
-
-## `contains` Function GPU Execution Behaviour
-`contains` performs host-side text comparisons. When invoked with data that currently resides on the GPU,
-RunMat gathers the inputs before executing the search so that results match MATLAB exactly. No provider hooks
-are required for this builtin.
-
-## Examples of using the `contains` function in MATLAB / RunMat
-
-### Check if a string contains a substring
-```matlab
-tf = contains("RunMat Accelerate", "Accelerate");
-```
-Expected output:
-```matlab
-tf = logical
-   1
-```
-
-### Perform a case-insensitive search
-```matlab
-tf = contains("RunMat", "run", 'IgnoreCase', true);
-```
-Expected output:
-```matlab
-tf = logical
-   1
-```
-
-### Apply a scalar pattern to every element of a string array
-```matlab
-labels = ["alpha" "beta" "gamma"];
-tf = contains(labels, "a");
-```
-Expected output:
-```matlab
-tf = 1×3 logical array
-   1   1   1
-```
-
-### Match element-wise patterns with implicit expansion
-```matlab
-names = ["hydrogen"; "helium"; "lithium"];
-patterns = ["gen"; "ium"; "iron"];
-tf = contains(names, patterns);
-```
-Expected output:
-```matlab
-tf = 3×1 logical array
-   1
-   1
-   0
-```
-
-### Search a cell array of character vectors
-```matlab
-C = {'Mercury', 'Venus', 'Mars'};
-tf = contains(C, 'us');
-```
-Expected output:
-```matlab
-tf = 1×3 logical array
-   0   1   0
-```
-
-### Provide multiple patterns as a column vector
-```matlab
-tf = contains("saturn", ['s'; 'n'; 'x']);
-```
-Expected output:
-```matlab
-tf = 3×1 logical array
-   1
-   1
-   0
-```
-
-### Handle empty and missing text values
-```matlab
-texts = ["", "<missing>"];
-tf = contains(texts, "");
-```
-Expected output:
-```matlab
-tf = 1×2 logical array
-   1   0
-```
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-
-You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).
-
-`contains` always executes on the host, but RunMat's runtime automatically gathers any GPU-resident inputs
-before evaluating the text search so behaviour is identical to MATLAB. You can still call `gpuArray` manually
-for compatibility with legacy MATLAB code; the runtime will gather those inputs just in time when `contains`
-runs.
-
-## FAQ
-
-### What types can I pass to `contains`?
-Use string scalars/arrays, character vectors/arrays, or cell arrays of character vectors for both the text and the pattern. Mixed combinations are accepted, and RunMat performs MATLAB-style implicit expansion when the array sizes differ.
-
-### How do I ignore letter case?
-Specify `'IgnoreCase', true` (or `'on'`) after the pattern argument. The option is case-insensitive, so `'ignorecase'` also works. The default is `false`, matching MATLAB.
-
-### What happens with empty patterns?
-Empty patterns (`""` or `''`) always match non-missing text elements. When the text element is missing (`<missing>`), the result is `false`.
-
-### Can I search for multiple patterns at once?
-Yes. Provide `pattern` as a string array, character array, or cell array of character vectors. RunMat applies implicit expansion so that scalar inputs expand across the other argument automatically.
-
-### How are missing strings treated?
-Missing string scalars (displayed as `<missing>`) never match any pattern and produce `false` in the result. Use `ismissing` if you need to separate missing values before calling `contains`.
-
-### Does `contains` run on the GPU?
-No. The builtin executes on the CPU. If inputs reside on the GPU (for example, after other accelerated operations), RunMat gathers them automatically so behaviour matches MATLAB.
-
-### Does `contains` preserve the input shape?
-Yes. The output is a logical array whose shape is the implicit-expansion result of the input shapes. When the broadcasted shape has exactly one element, the builtin returns a logical scalar.
-
-## See Also
-`startsWith`, `endsWith`, [`regexp`](../regex/regexp.rs), [`regexpi`](../regex/regexpi.rs)
-
-## Source & Feedback
-- Implementation: [`crates/runmat-runtime/src/builtins/strings/search/contains.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/search/contains.rs)
-- Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::search::contains")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "contains",
@@ -296,7 +125,6 @@ fn evaluate_contains(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, IntValue, LogicalArray, StringArray};
 
     fn run_contains(text: Value, pattern: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -574,12 +402,5 @@ pub(crate) mod tests {
         )
         .expect("contains");
         assert_eq!(result, Value::Bool(false));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

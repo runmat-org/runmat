@@ -27,58 +27,7 @@ use super::style::{
 use std::convert::TryFrom;
 
 use crate::BuiltinResult;
-
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "stairs",
-        builtin_path = "crate::builtins::plotting::stairs"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 const BUILTIN_NAME: &str = "stairs";
-
-#[allow(dead_code)]
-pub const DOC_MD: &str = r#"---
-title: "stairs"
-category: "plotting"
-keywords: ["stairs", "step plot", "2-D plotting", "gpuArray"]
-summary: "Render MATLAB-compatible stairs (step) plots."
-references:
-  - https://www.mathworks.com/help/matlab/ref/stairs.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: ["single"]
-  broadcasting: "none"
-  notes: "Single-precision gpuArray vectors stay on the device when a shared WebGPU renderer is available; other inputs gather first."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 2
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::plotting::stairs::tests"
----
-
-# What does `stairs` do?
-`stairs(x, y)` draws a stairstep graph of the data in `y` versus the points in `x`, matching MATLAB's
-default styling. Each successive pair of points generates a horizontal segment followed by a vertical
-jump.
-
-## Behaviour highlights
-- Inputs must be real vectors of matching, non-zero length.
-- With `single` precision gpuArrays and the shared WebGPU renderer active, RunMat packs the vertex
-  buffer directly on the GPU. Other data falls back to the CPU path automatically.
-- Like MATLAB, repeated calls append to the current axes when `hold on` is enabled.
-
-## Example
-```matlab
-t = 0:5;
-stairs(t, cumsum(rand(size(t))));
-```
-"#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::stairs")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

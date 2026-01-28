@@ -1,0 +1,144 @@
+{
+  "title": "det",
+  "category": "math/linalg/solve",
+  "keywords": [
+    "det",
+    "determinant",
+    "linear algebra",
+    "matrix",
+    "gpu"
+  ],
+  "summary": "Compute the determinant of a square matrix with MATLAB-compatible pivoting and GPU fallbacks.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/det.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses provider LU factorization when available; real matrices re-upload a scalar result, while complex inputs gather to the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::solve::det::tests",
+    "gpu": "builtins::math::linalg::solve::det::tests::det_gpu_roundtrip_matches_cpu",
+    "wgpu": "builtins::math::linalg::solve::det::tests::det_wgpu_matches_cpu"
+  },
+  "description": "`det(A)` returns the determinant of a real or complex square matrix `A`. Scalars behave like `det(1x1) = A(1,1)`, and the empty matrix (`[]`) has determinant `1`, matching MATLAB's convention.",
+  "behaviors": [
+    "Inputs must be 2-D square matrices. RunMat rejects non-square or higher-rank inputs with the MATLAB error `\"det: input must be a square matrix.\"`",
+    "Determinants are computed from an LU factorization with partial pivoting, ensuring numerical behavior that mirrors MATLAB. Singular matrices return `0` (within floating-point round-off).",
+    "Logical and integer inputs are promoted to double precision before evaluation.",
+    "Complex inputs are handled with full complex arithmetic. The result has complex type whenever the input is complex.",
+    "The determinant of the empty matrix (`[]`) is `1`."
+  ],
+  "examples": [
+    {
+      "description": "Determinant Of A 2x2 Matrix",
+      "input": "A = [4 -2; 1 3];\nd = det(A);",
+      "output": "d = 14"
+    },
+    {
+      "description": "Checking Zero Determinant For Singular Matrix",
+      "input": "B = [1 2; 2 4];\nd = det(B);",
+      "output": "d = 0"
+    },
+    {
+      "description": "Determinant Of A Complex Matrix",
+      "input": "C = [1+2i 0; 3i 4-1i];\nd = det(C);",
+      "output": "d = 6 + 7i"
+    },
+    {
+      "description": "Determinant Equals Product Of Diagonal For Triangular Matrix",
+      "input": "U = [3 2 1; 0 5 -1; 0 0 2];\nd = det(U);",
+      "output": "d = 30"
+    },
+    {
+      "description": "Determinant Of An Empty Matrix",
+      "input": "d = det([]);",
+      "output": "d = 1"
+    },
+    {
+      "description": "Using `det` With `gpuArray` Data",
+      "input": "G = gpuArray([2 0 0; 0 3 0; 1 0 4]);\nd_gpu = det(G);     % stays on the GPU when a provider is active\nd = gather(d_gpu);",
+      "output": "d = 24"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why does `det` require square matrices?",
+      "answer": "The determinant is only defined for square matrices. RunMat mirrors MATLAB by rejecting non-square inputs with `\"det: input must be a square matrix.\"`"
+    },
+    {
+      "question": "What is `det([])`?",
+      "answer": "The determinant of the empty matrix (`[]`) is `1`, matching MATLAB's convention for the product of an empty diagonal."
+    },
+    {
+      "question": "Does `det` warn for nearly singular matrices?",
+      "answer": "No. RunMat returns the floating-point result of the LU-based determinant. Very small magnitudes indicate near singularity, just as in MATLAB."
+    },
+    {
+      "question": "How does `det` handle complex matrices?",
+      "answer": "Complex matrices are factorized in complex arithmetic. The result is complex; if the imaginary part happens to be zero, it is still reported through the complex number interface."
+    },
+    {
+      "question": "Will the result stay on the GPU?",
+      "answer": "Yes, when a GPU provider is active RunMat re-uploads the scalar determinant so that subsequent GPU code continues to operate on device-resident data. Providers without LU support fall back to the CPU path and return a host scalar."
+    },
+    {
+      "question": "Can `det` overflow or underflow?",
+      "answer": "Large determinants can overflow or underflow double precision just as in MATLAB. RunMat does not rescale the matrix; if you require scaling, consider `log(det(A))` via `lu` or `chol`."
+    },
+    {
+      "question": "Do logical inputs work?",
+      "answer": "Yes. Logical arrays are promoted to doubles before computing the determinant."
+    },
+    {
+      "question": "Is the determinant computed exactly?",
+      "answer": "No. The LU factorization works in floating-point, so the result is subject to round-off. The behavior matches MATLAB's `det`."
+    }
+  ],
+  "links": [
+    {
+      "label": "inv",
+      "url": "./inv"
+    },
+    {
+      "label": "pinv",
+      "url": "./pinv"
+    },
+    {
+      "label": "lu",
+      "url": "./lu"
+    },
+    {
+      "label": "trace",
+      "url": "./trace"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/linalg/solve/det.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/solve/det.rs"
+  },
+  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB). The fusion planner keeps producers on the GPU, `det` invokes the provider's `lu` hook when available, and real determinants are re-uploaded as device scalars so subsequent kernels keep their residency. When the provider lacks `lu`, RunMat transparently gathers the matrix, computes the determinant with the host fallback, and re-uploads the scalar for real inputs. Complex determinants currently return host scalars until device complex scalars land. `gpuArray` and `gather` remain available for explicit residency control and MATLAB compatibility.",
+  "gpu_behavior": [
+    "When a GPU acceleration provider is active, RunMat first asks the provider for an LU factorization via the `lu` hook. Providers that implement it keep the factors on device, multiply the diagonal of `U`, and re-upload the scalar determinant for real inputs so downstream kernels keep running on the GPU. Complex matrices currently gather to the host for the final scalar. Providers that do not expose `lu` (including the current fallback backends) automatically route to the shared CPU implementation with no user intervention required."
+  ]
+}

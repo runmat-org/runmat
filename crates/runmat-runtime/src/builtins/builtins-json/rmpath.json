@@ -1,0 +1,141 @@
+{
+  "title": "rmpath",
+  "category": "io/repl_fs",
+  "keywords": [
+    "rmpath",
+    "search path",
+    "matlab path",
+    "remove folder",
+    "toolbox cleanup"
+  ],
+  "summary": "Remove folders from the MATLAB search path used by RunMat.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/rmpath.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the CPU. gpuArray text inputs are gathered automatically before processing."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 8,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::rmpath::tests",
+    "integration": "builtins::io::repl_fs::rmpath::tests::rmpath_accepts_string_containers"
+  },
+  "description": "`rmpath` removes folders from the MATLAB search path that RunMat consults when resolving functions, scripts, classes, and data files. The change is applied immediately and mirrors MATLAB semantics, including error reporting when a folder is missing or not currently on the path.",
+  "behaviors": [
+    "Folder arguments may be character vectors, string scalars, string arrays, or cell arrays of character vectors or strings. Multi-row char arrays contribute one folder per row (trailing padding is stripped).",
+    "Multiple folders can be passed inside a single argument using the platform path separator (`:` on Linux/macOS, `;` on Windows); this is compatible with `genpath` output.",
+    "RunMat accepts any ordering of arguments. Each requested folder is removed at most once even if it appears repeatedly.",
+    "Inputs are resolved to absolute, normalised paths. Relative inputs are interpreted relative to the current working directory, and `~` expands to the user\u2019s home directory.",
+    "Folders must exist and must currently be present on the MATLAB path. RunMat raises `rmpath: folder '<name>' not found` when a directory cannot be located, or `rmpath: folder '<name>' not on search path` when the directory exists locally but is absent from the current search path.",
+    "`rmpath` returns the previous path so callers can restore it later via `path(old)`, matching RunMat\u2019s `addpath` and `path` builtins."
+  ],
+  "examples": [
+    {
+      "description": "Removing a single folder from the MATLAB search path",
+      "input": "old = rmpath(\"util/toolbox\");\ndisp(old);\npath();",
+      "output": "old =\n    '/Users/you/runmat/toolbox:util/toolbox'\n% The folder util/toolbox no longer appears in the active search path."
+    },
+    {
+      "description": "Removing multiple folders at once",
+      "input": "rmpath(\"shared/filters\", \"shared/signal\");\npath();",
+      "output": "% shared/filters and shared/signal are both removed from the MATLAB path."
+    },
+    {
+      "description": "Removing folders produced by `genpath`",
+      "input": "tree = genpath(\"third_party/toolchain\");\nrmpath(tree);",
+      "output": "% Every directory returned by genpath is pruned from the search path."
+    },
+    {
+      "description": "Removing folders specified in a cell array",
+      "input": "folders = {'src/algorithms', 'src/visualization'};\nrmpath(folders{:});\npath();",
+      "output": "% Both folders are removed from the MATLAB search path."
+    },
+    {
+      "description": "Capturing and restoring the previous path after removal",
+      "input": "old = rmpath(\"analysis/utilities\");\n% ... run experiments ...\npath(old);   % Restore the previous path\npath();",
+      "output": "% The original search path is restored when you call path(old)."
+    },
+    {
+      "description": "Handling attempts to remove folders that are not on the path",
+      "input": "rmpath(\"nonexistent/toolbox\");"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `rmpath` insist on absolute paths?",
+      "answer": "No. Relative inputs are resolved against the current working directory and stored as absolute paths before matching against the path."
+    },
+    {
+      "question": "What happens with duplicate folders in the argument list?",
+      "answer": "Each folder is processed once per call. Duplicate input values are ignored after the first removal."
+    },
+    {
+      "question": "How do I confirm removal succeeded?",
+      "answer": "Call `path()` or `which` to confirm that the folder (or files within it) no longer appear on the MATLAB search path."
+    },
+    {
+      "question": "Does `rmpath` update the `RUNMAT_PATH` environment variable?",
+      "answer": "Yes. Changes are reflected immediately so other RunMat tooling observes the new path."
+    },
+    {
+      "question": "Can I remove folders that were added via `path(newPath)`?",
+      "answer": "Yes. `rmpath` matches entries exactly as they appear in the stored search path string, regardless of how they were inserted."
+    },
+    {
+      "question": "Will `rmpath` accept GPU strings?",
+      "answer": "Yes. Inputs are gathered automatically, then processed on the CPU."
+    },
+    {
+      "question": "What happens if the folder exists locally but is not on the search path?",
+      "answer": "RunMat raises `rmpath: folder '<name>' not on search path`, matching MATLAB\u2019s expectation that only active path entries are removed."
+    },
+    {
+      "question": "Does `rmpath` return the new or previous path?",
+      "answer": "It returns the previous path so you can restore it later with `path(old)`."
+    },
+    {
+      "question": "Is there a bulk reset option?",
+      "answer": "To clear the path entirely call `path(\"\")`. `rmpath` intentionally targets specific folders."
+    }
+  ],
+  "links": [
+    {
+      "label": "path",
+      "url": "./path"
+    },
+    {
+      "label": "addpath",
+      "url": "./addpath"
+    },
+    {
+      "label": "genpath",
+      "url": "https://www.mathworks.com/help/matlab/ref/genpath.html"
+    },
+    {
+      "label": "which",
+      "url": "./which"
+    },
+    {
+      "label": "exist",
+      "url": "./exist"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/rmpath.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/rmpath.rs"
+  },
+  "gpu_residency": "No. `rmpath` operates entirely on CPU-side strings. Supplying `gpuArray` text inputs offers no benefit\u2014RunMat gathers them automatically before processing.",
+  "gpu_behavior": [
+    "`rmpath` manipulates host-side configuration. If any input value resides on the GPU, RunMat gathers it back to the host before parsing. No acceleration provider hooks or kernels are involved."
+  ]
+}

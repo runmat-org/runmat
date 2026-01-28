@@ -1,0 +1,147 @@
+{
+  "title": "polyval",
+  "category": "math/poly",
+  "keywords": [
+    "polyval",
+    "polynomial evaluation",
+    "prediction interval",
+    "polyfit",
+    "gpu"
+  ],
+  "summary": "Evaluate a polynomial at given points and optionally compute prediction intervals using polyfit output.",
+  "references": [
+    "title: \"MATLAB polyval documentation\"",
+    "title: \"Numerical Recipes: Polynomial fitting and evaluation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Providers with Horner kernels keep real-valued workloads on the device; complex inputs and prediction intervals fall back to the CPU implementation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "uniform"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::poly::polyval::tests",
+    "integration": "builtins::math::poly::polyval::tests::polyval_gpu_roundtrip"
+  },
+  "description": "`polyval(p, x)` evaluates the polynomial defined by the coefficient vector `p` at every element of `x`. Coefficients follow MATLAB\u2019s convention: `p(1)` is the highest-order term, `p(end)` is the constant term. Both real and complex inputs are supported, and the output matches the shape of `x`.",
+  "behaviors": [
+    "Accepts scalar, vector, or N-D coefficient inputs that have at most one non-singleton dimension.",
+    "Logical and integer coefficients are promoted to double precision; complex coefficients are kept exactly.",
+    "When `p` and `x` are real-valued and a provider is registered, RunMat issues a Horner-series GPU kernel via RunMat Accelerate. Mixed or complex inputs fall back to the reference CPU implementation, with purely real outputs re-uploaded to the device when residency makes sense.",
+    "`polyval(p, x, [], mu)` applies centering and scaling parameters from `polyfit`, evaluating the polynomial at `(x - mu(1)) / mu(2)`.",
+    "`[y, delta] = polyval(p, x, S, mu)` computes prediction intervals using the structure `S` produced by `polyfit`. RunMat mirrors MATLAB rules: `S` must contain the fields `R`, `normr`, and `df`, and the interval collapses to zeros when `df <= 0` or `normr == 0`.",
+    "Empty inputs yield empty outputs; an empty coefficient vector represents the zero polynomial.",
+    "MATLAB-compatible errors are raised for non-numeric inputs, invalid `mu` vectors, or malformed `S` structures."
+  ],
+  "examples": [
+    {
+      "description": "Evaluating a polynomial at scalar points",
+      "input": "p = [2 -3 5];   % 2x^2 - 3x + 5\ny = polyval(p, 4);",
+      "output": "y = 21;"
+    },
+    {
+      "description": "Evaluating across a vector of inputs",
+      "input": "p = [1 0 -2 1];\nx = linspace(-2, 2, 5);\ny = polyval(p, x);",
+      "output": "y = [ -3   2   1   0   5 ];"
+    },
+    {
+      "description": "Evaluating a polynomial over a matrix grid",
+      "input": "[X, Y] = meshgrid(-1:1);\nZ = polyval([1 -3 2], X + Y);",
+      "output": "Z =\n    12     6     2\n     6     2     0\n     2     0     0"
+    },
+    {
+      "description": "Using centering and scaling parameters from `polyfit`",
+      "input": "x = -2:2;\nnoise = 0.05 * randn(size(x));\n[p, S, mu] = polyfit(x, sin(x) + noise, 3);\ny = polyval(p, x, [], mu);",
+      "output": "% y closely matches sin(x) + noise with polynomial smoothing"
+    },
+    {
+      "description": "Computing prediction intervals with polyfit output",
+      "input": "[p, S, mu] = polyfit((0:10)', exp((0:10)'/10), 3);\n[y, delta] = polyval(p, 5, S, mu);",
+      "output": "% y is the fitted value at x = 5\n% delta is the 1\u03c3 prediction interval (standard error)"
+    },
+    {
+      "description": "Handling complex coefficients and inputs",
+      "input": "p = [1+2i, -3, 4i];\nz = [-1+1i, 0, 1-2i];\ny = polyval(p, z);",
+      "output": "% Complex results that agree with MATLAB's polyval"
+    },
+    {
+      "description": "Evaluating on a gpuArray input",
+      "input": "x = gpuArray.linspace(-1, 1, 2048);\np = [1 0 1];\ny = polyval(p, x);    % Runs on the GPU for real-valued inputs",
+      "output": "y is a gpuArray because the result is real-valued."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Do coefficients need to be a row vector?",
+      "answer": "No. They can be row or column vectors (or any N-D shape with a single non-singleton dimension). The output always matches the shape of `x`."
+    },
+    {
+      "question": "What kinds of inputs are accepted?",
+      "answer": "Numeric scalars, vectors, matrices, N-D arrays, logical arrays, and complex data are all accepted. Logical and integer inputs are promoted to double precision automatically."
+    },
+    {
+      "question": "How do centering (`mu`) parameters work?",
+      "answer": "RunMat mirrors MATLAB: the polynomial is evaluated at `(x - mu(1)) / mu(2)`. The `mu` vector must contain at least two finite values, and the scale `mu(2)` must be non-zero."
+    },
+    {
+      "question": "Why does `[y, delta] = polyval(...)` require the structure `S`?",
+      "answer": "The prediction interval comes from the QR factorization stored in `S` by `polyfit`. The structure must include the fields `R`, `df`, and `normr`; without them the interval cannot be computed."
+    },
+    {
+      "question": "What happens when `df <= 0` or `normr == 0`?",
+      "answer": "The prediction interval collapses to zeros (RunMat matches MATLAB and Octave here). This typically occurs when the fit is exact or when there are insufficient degrees of freedom."
+    },
+    {
+      "question": "Can I keep results on the GPU?",
+      "answer": "Yes. RunMat re-uploads real-valued results to the active provider after the host evaluation. Complex outputs stay on the host until providers add complex buffer uploads."
+    },
+    {
+      "question": "Does `polyval` support sparse inputs?",
+      "answer": "Not yet. Dense inputs (including gpuArray tensors) are supported today. Sparse support will arrive once RunMat's sparse infrastructure stabilises."
+    }
+  ],
+  "links": [
+    {
+      "label": "polyfit",
+      "url": "./polyfit"
+    },
+    {
+      "label": "conv",
+      "url": "./conv"
+    },
+    {
+      "label": "deconv",
+      "url": "./deconv"
+    },
+    {
+      "label": "polyder",
+      "url": "./polyder"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "Open an issue",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  },
+  "gpu_behavior": [
+    "When a GPU provider is active, RunMat first attempts to evaluate the polynomial in device memory using a dedicated Horner kernel. Coefficients and inputs are uploaded automatically when required. If the call requests complex arithmetic, prediction intervals, or otherwise falls outside the GPU kernel\u2019s contract, RunMat gathers to the host, executes the CPU implementation, and (for real-valued results) pushes the output back to the GPU so downstream kernels retain residency."
+  ]
+}

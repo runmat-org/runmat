@@ -10,140 +10,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(name = "tic", builtin_path = "crate::builtins::timing::tic")
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "tic"
-category: "timing"
-keywords: ["tic", "timer", "profile", "benchmark", "performance"]
-summary: "Start a high-resolution stopwatch and optionally return a handle for toc."
-references: []
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Stopwatch helpers always run on the host CPU; GPU providers are not consulted."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 0
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::timing::tic::tests"
-  integration: "runmat_runtime::io::tests::test_tic_toc"
----
-
-# What does the `tic` function do in MATLAB / RunMat?
-`tic` starts a high-resolution stopwatch. Calls to `toc` report the elapsed time in seconds. When you assign
-the return value (for example, `t = tic;`), the resulting handle can be passed to `toc(t)` to measure a
-different code region while keeping the global stopwatch untouched.
-
-## How does the `tic` function behave in MATLAB / RunMat?
-- Uses the host's monotonic clock for nanosecond-resolution timing.
-- Supports nested timers: each call pushes a new start time on an internal stack. `toc` without inputs always
-  reads the most recent `tic` and removes it, leaving earlier timers intact so outer scopes continue measuring.
-- Returns an opaque scalar handle (a `double`) that encodes the monotonic timestamp. The handle can be stored
-  or passed explicitly to `toc`.
-- Executes entirely on the CPU. There are no GPU variants because `tic` interacts with wall-clock state.
-- Calling `toc` before `tic` raises the MATLAB-compatible error `MATLAB:toc:NoMatchingTic`.
-
-## How does `tic` behave with RunMat Accelerate?
-`tic` never leaves the CPU. When called while tensors reside on the GPU, the stopwatch state stays on the
-host. There are no acceleration-provider hooks for timers, so the runtime neither uploads nor gathers data.
-Fusion plans skip the builtin entirely because it has no numeric inputs.
-
-## Examples of using the `tic` function in MATLAB / RunMat
-
-### Measuring a simple loop
-
-```matlab
-tic;
-for k = 1:1e5
-    sqrt(k);
-end
-elapsed = toc;
-```
-
-`elapsed` reports the seconds since the matching `tic`.
-
-### Capturing and reusing the tic handle
-
-```matlab
-t = tic;
-heavyComputation();
-elapsed = toc(t);
-```
-
-Using the handle lets you insert additional timing regions without resetting the default stopwatch.
-
-### Nesting timers for staged profiling
-
-```matlab
-tic;              % Outer stopwatch
-stage1();         % Work you want to measure once
-inner = tic;      % Nested stopwatch
-stage2();
-innerT = toc(inner);  % Elapsed time for stage2 only
-outerT = toc;         % Elapsed time for everything since the first tic
-```
-
-`toc` without inputs reads the most recent `tic`, so nested regions work naturally.
-
-### Measuring asynchronous work
-
-```matlab
-token = tic;
-future = backgroundTask();
-wait(future);
-elapsed = toc(token);
-```
-
-Handles can be stored in structures or passed to callbacks while asynchronous work completes.
-
-### Resetting the stopwatch after a measurement
-
-```matlab
-elapsed1 = toc(tic);  % Equivalent to separate tic/toc calls
-pause(0.1);
-elapsed2 = toc(tic);  % Starts a new timer immediately
-```
-
-Calling `toc(tic)` starts a new stopwatch and immediately measures it, mirroring MATLAB idioms.
-
-## FAQ
-
-### Does `tic` print anything when called without a semicolon?
-No. `tic` is marked as a sink builtin, so scripts do not display the returned handle unless you assign it or
-explicitly request output.
-
-### Is the returned handle portable across sessions?
-No. The handle encodes a monotonic timestamp that is only meaningful within the current RunMat process. Passing
-it to another session or saving it to disk is undefined behaviour, matching MATLAB.
-
-### Can I run `tic` on a worker thread?
-Yes. Each thread shares the same stopwatch stack. Nested `tic`/`toc` pairs remain well-defined, but you should
-serialise access at the script level to avoid interleaving unrelated timings.
-
-### How accurate is the measurement?
-`tic` relies on a monotonic clock (via `runmat_time::Instant`), typically providing microsecond or better precision. The actual resolution
-depends on your operating system. There is no artificial jitter or throttling introduced by RunMat.
-
-### Does `tic` participate in GPU fusion?
-No. Timer builtins are tagged as CPU-only. Expressions containing `tic` are always executed on the host, and
-any GPU-resident tensors are gathered automatically by surrounding code when necessary.
-
-## See Also
-[toc](./toc), [timeit](./timeit), [profile](./profile)
-
-## Source & Feedback
-- Implementation: [`crates/runmat-runtime/src/builtins/timing/tic.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/timing/tic.rs)
-- Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
-"#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::timing::tic")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -259,8 +125,6 @@ pub(crate) mod tests {
     use std::thread;
     use std::time::Duration;
 
-    use crate::builtins::common::test_support;
-
     fn reset_stopwatch() {
         let mut guard = STOPWATCH.lock().unwrap();
         guard.stack.clear();
@@ -317,13 +181,5 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap();
         assert!(decode_handle(f64::NAN, "toc").is_err());
         assert!(decode_handle(-1.0, "toc").is_err());
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let _guard = TEST_GUARD.lock().unwrap();
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

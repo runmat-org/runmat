@@ -1,0 +1,135 @@
+{
+  "title": "str2double",
+  "category": "strings/core",
+  "keywords": [
+    "str2double",
+    "string to double",
+    "text conversion",
+    "numeric parsing",
+    "gpu"
+  ],
+  "summary": "Convert strings, character arrays, or cell arrays of text into double-precision numbers with MATLAB-compatible rules.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/str2double.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs on the CPU. When inputs reference GPU data, RunMat gathers them before parsing so results match MATLAB exactly."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::core::str2double::tests",
+    "integration": "builtins::strings::core::str2double::tests::str2double_cell_array_of_text"
+  },
+  "description": "`str2double` converts text representations of numbers into double-precision values. It accepts string scalars, string arrays, character vectors, character arrays, and cell arrays of character vectors. Each element is parsed independently; values that cannot be interpreted as real scalars become `NaN`.",
+  "behaviors": [
+    "Leading and trailing whitespace is ignored, as are padding spaces that MATLAB inserts in character arrays.",
+    "Text that contains a single finite real number returns that number. Text with additional characters, embedded operators, or multiple values results in `NaN`.",
+    "Scientific notation with `e`, `E`, `d`, or `D` exponents is supported (`\"1.2e3\"`, `\"4.5D-6\"`, etc.).",
+    "`\"Inf\"`, `\"Infinity\"`, and `\"NaN\"` (any letter case, with optional sign on `Inf`) map to IEEE special values.",
+    "Missing string scalars (displayed as `<missing>`) convert to `NaN`, matching MATLAB behaviour.",
+    "Character arrays return a column vector whose length equals the number of rows; cell arrays preserve their shape."
+  ],
+  "examples": [
+    {
+      "description": "Convert a string scalar into a double",
+      "input": "value = str2double(\"3.14159\");",
+      "output": "value = 3.14159"
+    },
+    {
+      "description": "Convert every element of a string array",
+      "input": "temps = [\"12.5\" \"19.8\" \"not-a-number\"];\ndata = str2double(temps);",
+      "output": "data = 1\u00d73\n   12.5000   19.8000       NaN"
+    },
+    {
+      "description": "Parse scientific notation text",
+      "input": "result = str2double(\"6.022e23\");",
+      "output": "result = 6.0220e+23"
+    },
+    {
+      "description": "Handle engineering exponents written with `D`",
+      "input": "cap = str2double(\"4.7D-9\");",
+      "output": "cap = 4.7000e-09"
+    },
+    {
+      "description": "Convert a character array one row at a time",
+      "input": "chars = ['42   '; '  100'];\nnumbers = str2double(chars);",
+      "output": "numbers = 2\u00d71\n    42\n   100"
+    },
+    {
+      "description": "Work with cell arrays of character vectors",
+      "input": "C = {'3.14', 'NaN', '-Inf'};\nvalues = str2double(C);",
+      "output": "values = 1\u00d73\n    3.1400      NaN      -Inf"
+    },
+    {
+      "description": "Detect invalid numeric text",
+      "input": "status = str2double(\"error42\");",
+      "output": "status = NaN"
+    },
+    {
+      "description": "Recognise special values `Inf` and `NaN`",
+      "input": "special = str2double([\"Inf\"; \"-Infinity\"; \"NaN\"]);",
+      "output": "special = 3\u00d71\n     Inf\n    -Inf\n     NaN"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What input types does `str2double` accept?",
+      "answer": "String scalars, string arrays, character vectors, character arrays, and cell arrays of character vectors or string scalars are supported. Other types raise an error so that mismatched inputs are caught early."
+    },
+    {
+      "question": "How are invalid or empty strings handled?",
+      "answer": "Invalid text\u2014including empty strings, whitespace-only rows, or strings with extra characters\u2014converts to `NaN`. This matches MATLAB, which uses `NaN` as a sentinel for failed conversions."
+    },
+    {
+      "question": "Does `str2double` evaluate arithmetic expressions?",
+      "answer": "No. Unlike `str2num`, `str2double` never calls the evaluator. Text such as `\"1+2\"` or `\"sqrt(2)\"` yields `NaN` instead of executing the expression, keeping the builtin safe for untrusted input."
+    },
+    {
+      "question": "Can `str2double` parse complex numbers?",
+      "answer": "No. Complex text like `\"3+4i\"` returns `NaN`. Use `str2num` when you need MATLAB to interpret complex literals."
+    },
+    {
+      "question": "Are engineering exponents with `D` supported?",
+      "answer": "Yes. Exponents that use `d` or `D` are rewritten to `e` automatically, so `\"1.0D3\"` converts to `1000`."
+    },
+    {
+      "question": "How does `str2double` treat missing strings?",
+      "answer": "Missing strings produced with `string(missing)` display as `<missing>` and convert to `NaN`. You can detect them with `ismissing` before conversion if you need special handling."
+    },
+    {
+      "question": "Does locale affect parsing?",
+      "answer": "`str2double` honours digits, decimal points, and exponent letters only. Locale-specific grouping separators such as commas are not accepted, mirroring MATLAB's behaviour."
+    },
+    {
+      "question": "Will the result stay on the GPU when I pass gpuArray inputs?",
+      "answer": "No. The builtin gathers GPU-backed inputs to the host, parses them, and keeps the numeric result in host memory. Wrap the result with `gpuArray(...)` if you need to move it back to the device."
+    }
+  ],
+  "links": [
+    {
+      "label": "double",
+      "url": "./double"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/str2double.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/str2double.rs"
+  },
+  "gpu_behavior": [
+    "`str2double` executes entirely on the CPU. If any argument is backed by a GPU buffer (for example, a cell array that still wraps GPU-resident character data), RunMat gathers the values first, parses the text on the host, and returns CPU-resident doubles. Providers do not need custom kernels for this builtin."
+  ]
+}

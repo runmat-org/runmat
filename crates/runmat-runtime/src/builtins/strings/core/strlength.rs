@@ -12,151 +12,6 @@ use crate::builtins::common::tensor;
 use crate::builtins::strings::common::is_missing_string;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "strlength",
-        builtin_path = "crate::builtins::strings::core::strlength"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "strlength"
-category: "strings/core"
-keywords: ["strlength", "string length", "character count", "text analytics", "cell array"]
-summary: "Return the number of characters in each element of a string array, character array, or cell array of character vectors."
-references:
-  - https://www.mathworks.com/help/matlab/ref/strlength.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Executes on the CPU; if any argument lives on the GPU, the runtime gathers it before computing lengths to keep semantics identical to MATLAB."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::strings::core::strlength::tests"
-  integration: "builtins::strings::core::strlength::tests::strlength_cell_array_of_char_vectors"
----
-
-# What does the `strlength` function do in MATLAB / RunMat?
-`strlength(str)` counts how many characters appear in each element of text inputs. It works with string
-arrays, character vectors, character arrays, and cell arrays of character vectors, returning a `double`
-array that mirrors the input shape.
-
-## How does the `strlength` function behave in MATLAB / RunMat?
-- String arrays return a numeric array of the same size; string scalars yield a scalar `double`.
-- Character arrays report the number of characters per row and ignore padding that MATLAB inserts to keep rows the same width.
-- Character vectors stored in cells contribute one scalar per cell element; the output array matches the cell array shape.
-- Missing string scalars (for example values created with `string(missing)`) yield `NaN`. RunMat displays these entries as `<missing>` in the console just like MATLAB.
-- Empty text inputs produce zeros-sized numeric outputs that match MATLAB's dimension rules.
-
-## `strlength` Function GPU Execution Behaviour
-`strlength` is a metadata query and always executes on the CPU. If a text container references data that
-originated on the GPU (for example, a cell array that still wraps GPU-resident numeric intermediates), RunMat
-gathers that data before measuring lengths. Providers do not require custom kernels for this builtin.
-
-## Examples of using the `strlength` function in MATLAB / RunMat
-
-### Measure Characters In A String Scalar
-```matlab
-len = strlength("RunMat");
-```
-Expected output:
-```matlab
-len = 6
-```
-
-### Count Characters Across A String Array
-```matlab
-labels = ["North" "South" "East" "West"];
-counts = strlength(labels);
-```
-Expected output:
-```matlab
-counts = 1×4
-    5    5    4    4
-```
-
-### Compute Lengths For Each Row Of A Character Array
-```matlab
-names = char("cat", "giraffe");
-row_counts = strlength(names);
-```
-Expected output:
-```matlab
-row_counts = 2×1
-     3
-     7
-```
-
-### Handle Empty And Blank Strings
-```matlab
-mixed = ["", "   "];
-len = strlength(mixed);
-```
-Expected output:
-```matlab
-len = 1×2
-     0     3
-```
-
-### Get Lengths From A Cell Array Of Character Vectors
-```matlab
-C = {'red', 'green', 'blue'};
-L = strlength(C);
-```
-Expected output:
-```matlab
-L = 1×3
-     3     5     4
-```
-
-### Treat Missing Strings As NaN
-```matlab
-values = string(["alpha" "beta" "gamma"]);
-values(2) = string(missing);  % Displays as <missing> when printed
-lengths = strlength(values);
-```
-Expected output:
-```matlab
-lengths = 1×3
-    5   NaN    5
-```
-
-## FAQ
-
-### What numeric type does `strlength` return?
-`strlength` always returns doubles, even when all lengths are whole numbers. MATLAB uses doubles for most numeric results, and RunMat follows the same rule.
-
-### Why are padded spaces in character arrays ignored?
-When MATLAB builds a character array from rows of different lengths, it pads shorter rows with spaces. Those padding characters are not part of the logical content, so `strlength` removes them before counting. Explicit trailing spaces that you type in a single character vector remain part of the count.
-
-### How are missing string values handled?
-Missing string scalars display as `<missing>` and produce `NaN` lengths. Use `ismissing` or `fillmissing` if you need to substitute a default length.
-
-### Can I call `strlength` with numeric data?
-No. `strlength` only accepts string arrays, character vectors/arrays, or cell arrays of character vectors. Numeric inputs raise an error—use `num2str` first if you need to convert numbers to text.
-
-### Does `strlength` support multibyte Unicode characters?
-Yes. Each Unicode scalar value counts as one character, so emoji or accented letters contribute a length of one. Surrogate pairs are treated as a single character, matching MATLAB's behaviour.
-
-### Will `strlength` ever execute on the GPU?
-No. The builtin inspects metadata and operates on host strings. If your data already lives on the GPU, RunMat gathers it automatically before computing lengths so results match MATLAB exactly.
-
-## See Also
-`string`, `char`, `strtrim`, `length`, `size`
-
-## Source & Feedback
-- Implementation: [`crates/runmat-runtime/src/builtins/strings/core/strlength.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/strlength.rs)
-- Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strlength")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strlength",
@@ -296,7 +151,6 @@ fn trimmed_row_length(array: &CharArray, row: usize) -> usize {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
 
     fn strlength_builtin(value: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strlength_builtin(value))
@@ -452,12 +306,5 @@ pub(crate) mod tests {
         .unwrap();
         let err = error_message(strlength_builtin(Value::Cell(cell)).unwrap_err());
         assert_eq!(err, CELL_ELEMENT_ERROR);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

@@ -1,0 +1,151 @@
+{
+  "title": "movefile",
+  "category": "io/repl_fs",
+  "keywords": [
+    "movefile",
+    "rename",
+    "move file",
+    "filesystem",
+    "status",
+    "message",
+    "messageid",
+    "force",
+    "overwrite"
+  ],
+  "summary": "Move or rename files and folders with MATLAB-compatible status, message, and message ID outputs.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/movefile.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the CPU. When path inputs or flags reside on the GPU, RunMat gathers them to host memory before moving files."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::movefile::tests",
+    "integration": "builtins::io::repl_fs::movefile::tests::movefile_force_overwrites_existing_file"
+  },
+  "description": "`movefile` renames files and folders or moves them to a new location. It mirrors MATLAB by returning status information instead of throwing errors for filesystem failures and by accepting the optional `'f'` flag to overwrite destinations.",
+  "behaviors": [
+    "`status = movefile(source, destination)` moves or renames `source`. `status` is a double scalar that is `1` on success and `0` on failure.",
+    "`[status, message, messageID] = movefile(...)` also returns MATLAB-style diagnostic text. Successful operations populate both strings with empty character arrays (`1\u00d70`).",
+    "`movefile(source, destination, 'f')` forces the move, overwriting an existing destination file or folder. Without the flag, `movefile` refuses to overwrite existing targets.",
+    "Wildcards in `source` (such as `*.m`) expand to matching filesystem entries. When the pattern resolves to multiple items, `destination` must be an existing folder and `movefile` moves each match into that folder.",
+    "Inputs accept character vectors or string scalars. Other types raise MATLAB-style errors before any filesystem work occurs.",
+    "Paths are resolved relative to the current working directory (`pwd`) and expand a leading `~` into the user's home directory.",
+    "Filesystem failures\u2014including missing files, permission errors, or read-only destinations\u2014return `status = 0` plus descriptive diagnostics; only invalid inputs raise immediate errors."
+  ],
+  "examples": [
+    {
+      "description": "Rename a file in the same folder",
+      "input": "fid = fopen(\"results.txt\", \"w\"); fclose(fid);\nstatus = movefile(\"results.txt\", \"archive.txt\");",
+      "output": "status =\n     1"
+    },
+    {
+      "description": "Move a file into an existing folder",
+      "input": "mkdir(\"reports\");\nfid = fopen(\"summary.txt\", \"w\"); fclose(fid);\nstatus = movefile(\"summary.txt\", \"reports\");",
+      "output": "status =\n     1"
+    },
+    {
+      "description": "Force overwrite an existing destination",
+      "input": "fid = fopen(\"draft.txt\", \"w\"); fclose(fid);\nfid = fopen(\"final.txt\", \"w\"); fclose(fid);\n[status, message, messageID] = movefile(\"draft.txt\", \"final.txt\", \"f\");",
+      "output": "status =\n     1\nmessage =\n\nmessageID ="
+    },
+    {
+      "description": "Move multiple files with a wildcard",
+      "input": "mkdir(\"data\");\nfid = fopen(\"a.log\", \"w\"); fclose(fid);\nfid = fopen(\"b.log\", \"w\"); fclose(fid);\nstatus = movefile(\"*.log\", \"data\");",
+      "output": "status =\n     1"
+    },
+    {
+      "description": "Handle missing sources gracefully",
+      "input": "[status, message, messageID] = movefile(\"missing.txt\", \"dest.txt\");",
+      "output": "status =\n     0\nmessage =\nSource \"missing.txt\" does not exist.\nmessageID =\nMATLAB:MOVEFILE:FileDoesNotExist"
+    },
+    {
+      "description": "Use gpuArray inputs for paths",
+      "input": "fid = fopen(\"draft.txt\", \"w\"); fclose(fid);\nstatus = movefile(gpuArray(\"draft.txt\"), gpuArray(\"final.txt\"));",
+      "output": "status =\n     1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What status codes does `movefile` return?",
+      "answer": "`1` indicates every requested move succeeded; `0` indicates that nothing was moved. Status values are doubles so existing MATLAB scripts continue to work."
+    },
+    {
+      "question": "Does `movefile` throw exceptions?",
+      "answer": "Only invalid inputs raise errors. Filesystem failures surface through the status, message, and message ID outputs."
+    },
+    {
+      "question": "How do I overwrite an existing file?",
+      "answer": "Pass the `'f'` flag as the third argument. Without it, `movefile` refuses to overwrite existing files or folders."
+    },
+    {
+      "question": "Can I move multiple files at once?",
+      "answer": "Yes. Include wildcards such as `*.txt` in `source`. The destination must be an existing folder in that case."
+    },
+    {
+      "question": "Does `movefile` work with folders?",
+      "answer": "Yes. It can move or rename entire folders. When moving into another folder and the target name already exists, pass `'f'` to overwrite it."
+    },
+    {
+      "question": "How are paths resolved?",
+      "answer": "Paths are resolved relative to `pwd`, and a leading `~` expands to the user's home directory."
+    },
+    {
+      "question": "Will GPU acceleration speed up `movefile`?",
+      "answer": "No. The builtin executes on the host CPU. GPU-resident strings are gathered automatically before performing the move."
+    },
+    {
+      "question": "What happens if no files match a wildcard?",
+      "answer": "The function returns `status = 0`, sets `message` to `\"Source \\\"pattern\\\" does not exist.\"`, and leaves the filesystem unchanged."
+    },
+    {
+      "question": "Does the function preserve timestamps or permissions?",
+      "answer": "Yes. `movefile` forwards the operation to the operating system, which preserves attributes when possible."
+    },
+    {
+      "question": "Can I move directories across volumes?",
+      "answer": "When the underlying operating system reports an error (for example, moving across volumes without rename support), `movefile` returns `status = 0` along with the system error text so you can handle it programmatically."
+    }
+  ],
+  "links": [
+    {
+      "label": "copyfile",
+      "url": "./copyfile"
+    },
+    {
+      "label": "mkdir",
+      "url": "./mkdir"
+    },
+    {
+      "label": "rmdir",
+      "url": "./rmdir"
+    },
+    {
+      "label": "dir",
+      "url": "./dir"
+    },
+    {
+      "label": "pwd",
+      "url": "./pwd"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/movefile.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/movefile.rs"
+  },
+  "gpu_residency": "No. `movefile` always runs on the host CPU, so storing paths on the GPU offers no benefit. If a string argument is already GPU-resident, RunMat gathers it automatically before touching the filesystem so existing scripts continue to work unchanged.",
+  "gpu_behavior": [
+    "`movefile` performs host-side filesystem operations. When acceleration providers are active, RunMat first gathers any GPU-resident arguments (for example, `gpuArray(\"logs\")`), executes the move on the CPU, and returns host-resident outputs. Providers do not expose special hooks for this builtin, so GPU execution is not applicable."
+  ]
+}

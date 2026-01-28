@@ -12,171 +12,6 @@ use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "erase",
-        builtin_path = "crate::builtins::strings::transform::erase"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "erase"
-category: "strings/transform"
-keywords: ["erase", "remove substring", "delete text", "string manipulation", "character array"]
-summary: "Remove substring occurrences from strings, character arrays, and cell arrays with MATLAB-compatible semantics."
-references:
-  - https://www.mathworks.com/help/matlab/ref/erase.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Runs on the CPU; RunMat gathers GPU-resident text before removing substrings."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 2
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::strings::transform::erase::tests::erase_string_array_shape_mismatch_applies_all_patterns"
-  integration: "builtins::strings::transform::erase::tests::erase_cell_array_mixed_content"
----
-
-# What does the `erase` function do in MATLAB / RunMat?
-`erase(text, pattern)` removes every occurrence of `pattern` from `text`. The builtin accepts string
-scalars, string arrays, character arrays, and cell arrays of character vectors or string scalars,
-mirroring MATLAB behaviour. When `pattern` is an array, `erase` removes every occurrence of each
-pattern entry; the `text` and `pattern` arguments do not need to be the same size.
-
-## How does the `erase` function behave in MATLAB / RunMat?
-- String inputs stay as strings. Missing string scalars (`<missing>`) propagate unchanged.
-- String arrays preserve their size and orientation. Each element has every supplied pattern removed.
-- Character arrays are processed row by row. Rows shrink as characters are removed and are padded with
-  spaces so the result remains a rectangular char array.
-- Cell arrays must contain string scalars or character vectors. The result is a cell array with the same
-  shape whose elements reflect the removed substrings.
-- The `pattern` input can be a string scalar, string array, character array, or cell array of character
-  vectors/string scalars. Provide either a scalar pattern or a list; an empty list leaves `text` unchanged.
-- Pattern values are treated literally—no regular expressions are used. Use [`replace`](./replace) or the
-  regex builtins for pattern-based removal.
-
-## `erase` Function GPU Execution Behaviour
-`erase` executes on the CPU. When any argument is GPU-resident, RunMat gathers it to host memory before
-removing substrings. Outputs are returned on the host as well. Providers do not need to implement device
-kernels for this builtin, and the fusion planner treats it as a sink to avoid keeping text on the GPU.
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-No. `erase` automatically gathers GPU inputs and produces host results. You never need to move text to or
-from the GPU manually for this builtin, and `gpuArray` inputs are handled transparently.
-
-## Examples of using the `erase` function in MATLAB / RunMat
-
-### Remove a single word from a string scalar
-```matlab
-txt = "RunMat accelerates MATLAB code";
-clean = erase(txt, "accelerates ");
-```
-Expected output:
-```matlab
-clean = "RunMat MATLAB code"
-```
-
-### Remove multiple substrings from each element of a string array
-```matlab
-labels = ["GPU pipeline"; "CPU pipeline"];
-result = erase(labels, ["GPU ", "CPU "]);
-```
-Expected output:
-```matlab
-result = 2×1 string
-    "pipeline"
-    "pipeline"
-```
-
-### Erase characters from a character array while preserving padding
-```matlab
-chars = char("workspace", "snapshots");
-trimmed = erase(chars, "s");
-```
-Expected output:
-```matlab
-trimmed =
-
-  2×8 char array
-
-    'workpace'
-    'napshot '
-```
-
-### Remove substrings from a cell array of text
-```matlab
-C = {'Kernel Planner', "GPU Fusion"};
-out = erase(C, ["Kernel ", "GPU "]);
-```
-Expected output:
-```matlab
-out = 1×2 cell array
-    {'Planner'}    {"Fusion"}
-```
-
-### Provide an empty pattern list to leave the text unchanged
-```matlab
-data = ["alpha", "beta"];
-unchanged = erase(data, string.empty);
-```
-Expected output:
-```matlab
-unchanged = 1×2 string
-    "alpha"    "beta"
-```
-
-### Remove delimiters before splitting text
-```matlab
-path = "runmat/bin:runmat/lib";
-clean = erase(path, ":");
-parts = split(clean, "runmat/");
-```
-Expected output:
-```matlab
-clean = "runmat/binrunmat/lib"
-parts = 1×3 string
-    ""    "bin"    "lib"
-```
-
-## FAQ
-
-### Can I remove multiple patterns at once?
-Yes. Supply `pattern` as a string array or cell array. Each pattern is removed in order from every element
-of the input text.
-
-### What happens if `pattern` is empty?
-An empty pattern list leaves the input unchanged. Empty string patterns are ignored because removing empty
-text would have no effect.
-
-### Does `erase` modify the original data?
-No. It returns a new value with substrings removed. The input variables remain unchanged.
-
-### How are missing string scalars handled?
-They propagate unchanged. Calling `erase` on `<missing>` returns `<missing>`, matching MATLAB.
-
-### Can `erase` operate on GPU-resident data?
-Indirectly. RunMat automatically gathers GPU values to the host, performs the removal, and returns a host
-result. No explicit `gpuArray` calls are required.
-
-### How do I remove substrings using patterns or regular expressions?
-Use `replace` for literal substitution or `regexprep` for regular expressions when you need pattern-based
-removal rather than literal substring erasure.
-
-## See Also
-[replace](./replace), [strrep](./strrep), [split](./split), [regexprep](./regexprep), [string](./string)
-
-## Source & Feedback
-- Implementation: [`crates/runmat-runtime/src/builtins/strings/transform/erase.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/erase.rs)
-- Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::erase")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "erase",
@@ -394,7 +229,6 @@ fn erase_cell_element(value: &Value, patterns: &PatternList) -> BuiltinResult<Va
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
 
     fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::erase_builtin(text, pattern))
@@ -622,12 +456,5 @@ pub(crate) mod tests {
     fn erase_errors_on_invalid_pattern_type() {
         let err = erase_builtin(Value::String("abc".into()), Value::Num(1.0)).unwrap_err();
         assert_eq!(err.to_string(), PATTERN_TYPE_ERROR);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

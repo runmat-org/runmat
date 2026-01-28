@@ -1,0 +1,134 @@
+{
+  "title": "cond",
+  "category": "math/linalg/solve",
+  "keywords": [
+    "cond",
+    "condition number",
+    "norm",
+    "linear algebra",
+    "gpu"
+  ],
+  "summary": "Compute the matrix condition number with MATLAB-compatible norm choices.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/cond.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "RunMat gathers GPU inputs to the host when a provider does not expose a native cond hook, then re-uploads the scalar result to preserve residency."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::solve::cond::tests",
+    "gpu": "builtins::math::linalg::solve::cond::tests::cond_gpu_round_trip_matches_cpu",
+    "wgpu": "builtins::math::linalg::solve::cond::tests::cond_wgpu_matches_cpu"
+  },
+  "description": "`k = cond(A)` returns the condition number of matrix `A`, measuring how sensitive solutions to linear systems are to small perturbations in `A` or in the right-hand side. By default, `cond` computes the 2-norm condition number using the ratio of the largest to smallest singular values.",
+  "behaviors": [
+    "`cond(A)` and `cond(A, 2)` use the singular values of `A`, so rectangular matrices are supported.",
+    "`cond(A, 1)`, `cond(A, Inf)`, and `cond(A, 'fro')` require a square, invertible matrix and use the definition `norm(A, p) * norm(inv(A), p)` with MATLAB's norm semantics.",
+    "Scalars behave like 1x1 matrices. Non-zero scalars have condition number `1`, while `cond(0) = Inf`.",
+    "Empty matrices return `0`, matching MATLAB's convention.",
+    "Singular or rank-deficient matrices return `Inf`.",
+    "Complex inputs are handled in full complex arithmetic."
+  ],
+  "examples": [
+    {
+      "description": "Condition number of the identity matrix",
+      "input": "A = eye(3);\nk = cond(A);",
+      "output": "k = 1"
+    },
+    {
+      "description": "Diagnosing an ill-conditioned diagonal matrix",
+      "input": "D = diag([1, 1e-8]);\nk = cond(D);",
+      "output": "k = 1.0e+8"
+    },
+    {
+      "description": "Condition number of a rectangular matrix (2-norm)",
+      "input": "A = [1 0; 0 1; 1 1];\nk = cond(A, 2);",
+      "output": "k = 1.7321"
+    },
+    {
+      "description": "Using a different norm specification",
+      "input": "A = [4 -1; 2 3];\nk1 = cond(A, 1);\nkInf = cond(A, Inf);",
+      "output": "k1   = 2.1429\nkInf = 2.1429"
+    },
+    {
+      "description": "Complex-valued matrices",
+      "input": "A = [1+2i 0; 3i 4-1i];\nk = cond(A);",
+      "output": "k = 3.0327"
+    },
+    {
+      "description": "Empty inputs and GPU residency",
+      "input": "G = gpuArray([]);      % Empty 0x0 matrix on the GPU\nk = cond(G);           % Returns 0 and keeps residency when possible\nresult = gather(k);",
+      "output": "result = 0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does a large condition number mean?",
+      "answer": "Large condition numbers (>> 1) indicate that small perturbations in the input can produce large changes in the solution of a linear system involving `A`. Values close to `1` indicate a well- conditioned matrix."
+    },
+    {
+      "question": "Why does `cond` return `Inf` for singular matrices?",
+      "answer": "Singular matrices have at least one zero singular value (or an undefined inverse), so the condition number is mathematically infinite. RunMat mirrors MATLAB and returns `Inf` in these cases."
+    },
+    {
+      "question": "Does `cond` support rectangular matrices?",
+      "answer": "Yes for the default 2-norm: `cond(A)` uses singular values and accepts any two-dimensional matrix. Norms `1`, `Inf`, and `'fro'` require a square, invertible matrix because they are defined using the matrix inverse."
+    },
+    {
+      "question": "How does `cond` handle empty matrices?",
+      "answer": "All norm choices return `0` for empty matrices (`0x0`), matching MATLAB's behaviour."
+    },
+    {
+      "question": "Will calling `cond` move my data off the GPU?",
+      "answer": "Only when the active provider lacks a dedicated implementation. In that case RunMat gathers the data, computes the scalar on the host, and uploads it back so subsequent GPU operations still see a device-resident value."
+    }
+  ],
+  "links": [
+    {
+      "label": "rcond",
+      "url": "./rcond"
+    },
+    {
+      "label": "inv",
+      "url": "./inv"
+    },
+    {
+      "label": "pinv",
+      "url": "./pinv"
+    },
+    {
+      "label": "linsolve",
+      "url": "./linsolve"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/math/linalg/solve/cond.rs",
+    "url": "crates/runmat-runtime/src/builtins/math/linalg/solve/cond.rs"
+  },
+  "gpu_residency": "```matlab:runnable\nG = gpuArray([]);      % Empty 0x0 matrix on the GPU\nk = cond(G);           % Returns 0 and keeps residency when possible\nresult = gather(k);\n```\nExpected output:\n```matlab\nresult = 0\n```",
+  "gpu_behavior": [
+    "When the input already lives on a GPU, RunMat first looks for an acceleration provider that exposes the custom `cond` hook registered below. Current providers gather the matrix to host memory, reuse the shared CPU implementation, and then re-upload the scalar so downstream GPU computations preserve residency. This mirrors MATLAB semantics while keeping the user-facing API uniform."
+  ]
+}
