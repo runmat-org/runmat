@@ -1,0 +1,136 @@
+{
+  "title": "norm",
+  "category": "math/linalg/solve",
+  "keywords": [
+    "norm",
+    "vector norm",
+    "matrix norm",
+    "frobenius",
+    "nuclear",
+    "gpu"
+  ],
+  "summary": "Compute vector and matrix norms with MATLAB-compatible semantics, including Frobenius and nuclear norms.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/norm.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": true,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "RunMat gathers to the host when specialized provider hooks are unavailable; providers may add custom norm kernels in the future."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::solve::norm::tests",
+    "gpu": "builtins::math::linalg::solve::norm::tests::norm_gpu_roundtrip_matches_cpu",
+    "wgpu": "builtins::math::linalg::solve::norm::tests::norm_wgpu_matches_cpu"
+  },
+  "description": "`norm(X)` returns the magnitude of vectors and matrices. For vectors it defaults to the Euclidean 2-norm. For matrices it defaults to the spectral norm (largest singular value). Alternate norms — such as the 1-norm, infinity norm, Frobenius norm, and nuclear norm — are selected with the second argument.\n\n- `norm(X)` and `norm(X, 2)` compute the Euclidean norm for vectors and the largest singular value for matrices. - `norm(X, 1)` is the maximum absolute column sum of `X`. - `norm(X, Inf)` is the maximum absolute row sum of `X`; `norm(x, -Inf)` returns the minimum absolute element for vectors. - `norm(X, 'fro')` is the Frobenius norm, equivalent to treating the matrix as a vector and applying the 2-norm. - `norm(X, 'nuc')` is the nuclear norm (sum of singular values) for matrices. - `norm(x, p)` accepts any real scalar `p ≥ 1` for vectors (plus the special cases `0`, `Inf`, `-Inf`), matching MATLAB’s behavior. - Inputs must be vectors or 2-D matrices. Higher-dimensional arrays raise an error. - Empty inputs (e.g., `[]` or matrices with a zero dimension) return `0`. - Logical and integer inputs are promoted to double precision before the norm is computed. - Complex values use the magnitude of each entry, and the final result is always a non-negative real scalar.",
+  "behaviors": [],
+  "examples": [
+    {
+      "description": "Computing the Euclidean norm of a vector",
+      "input": "x = [3 4];\nmag = norm(x);",
+      "output": "mag = 5"
+    },
+    {
+      "description": "Calculating the Frobenius norm of a matrix",
+      "input": "A = [1 -2 3; -4 5 -6];\nf = norm(A, 'fro');",
+      "output": "f = 9.5394"
+    },
+    {
+      "description": "Using the infinity norm for robust bounds",
+      "input": "x = [2 -7 4];\nbound = norm(x, Inf);",
+      "output": "bound = 7"
+    },
+    {
+      "description": "Summing singular values with the nuclear norm",
+      "input": "A = [2 0 0; 0 1 0];\ntau = norm(A, 'nuc');",
+      "output": "tau = 3"
+    },
+    {
+      "description": "Computing the norm of complex-valued data",
+      "input": "z = [1+2i 3-4i];\nmag = norm(z);",
+      "output": "mag = 5.4772"
+    },
+    {
+      "description": "Preserving GPU residency transparently",
+      "input": "G = gpuArray([3 4 12]);\nmag = norm(G);      % falls back to CPU today; future providers can stay on device",
+      "output": "mag = 13"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What is the difference between `norm(x)` and `norm(x, 2)`?",
+      "answer": "No difference. Both compute the Euclidean norm for vectors (or the spectral norm for matrices)."
+    },
+    {
+      "question": "Does `norm` support fractional powers?",
+      "answer": "Yes. For vectors you can pass any non-zero real scalar `p`, including fractional values. MATLAB’s special cases (`p = 0`, `Inf`, `-Inf`) are also supported."
+    },
+    {
+      "question": "Can I use `norm` on complex matrices?",
+      "answer": "Absolutely. RunMat mirrors MATLAB by computing singular values in complex arithmetic and always returning a non-negative real scalar."
+    },
+    {
+      "question": "When should I use `'fro'` versus `'nuc'`?",
+      "answer": "`'fro'` returns the square root of the sum of squares (robust and inexpensive). `'nuc'` sums singular values and is particularly useful in low-rank optimization problems."
+    },
+    {
+      "question": "Why does `norm` of an empty matrix return `0`?",
+      "answer": "That matches MATLAB’s convention: the sum over an empty set is zero, so every supported norm returns `0` for empty inputs."
+    },
+    {
+      "question": "Can the norm overflow or underflow?",
+      "answer": "Yes. The result obeys IEEE-754 double precision rules, just like MATLAB. Extremely large or tiny values may overflow to `Inf` or underflow toward zero."
+    },
+    {
+      "question": "Will the result stay on the GPU?",
+      "answer": "The current in-process provider gathers the tensor to host memory. Providers that implement custom norm kernels can keep the computation entirely on device without user-visible changes."
+    }
+  ],
+  "links": [
+    {
+      "label": "sum",
+      "url": "./sum"
+    },
+    {
+      "label": "svd",
+      "url": "./svd"
+    },
+    {
+      "label": "cond",
+      "url": "./cond"
+    },
+    {
+      "label": "pinv",
+      "url": "./pinv"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/linalg/solve/norm.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/solve/norm.rs"
+  },
+  "gpu_residency": "```matlab:runnable\nG = gpuArray([3 4 12]);\nmag = norm(G);      % falls back to CPU today; future providers can stay on device\n```\nExpected output:\n```matlab\nmag = 13\n```",
+  "gpu_behavior": [
+    "When an acceleration provider is active, RunMat keeps GPU inputs resident. If the provider exposes a dedicated norm hook in the future it can execute entirely on the device. Until then RunMat gathers the input tensor to the host, computes the norm with the shared CPU implementation, and returns the scalar result. This mirrors MATLAB semantics while guaranteeing correctness even in the absence of specialized kernels."
+  ]
+}

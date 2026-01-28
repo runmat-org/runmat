@@ -33,15 +33,33 @@ export default function Footer() {
             <Image
               src="/runmat-logo.svg"
               alt="RunMat"
-              width={160}
-              height={28}
-              className="h-7 w-auto"
+              width={136}
+              height={24}
+              className="h-6 w-auto"
               priority
             />
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed">
             The Fastest Runtime for Math
           </p>
+        </div>
+        <div className="grid w-full md:flex-1 gap-6 md:grid-cols-2 text-sm text-muted-foreground">
+          <div>
+            <h3 className="text-foreground font-semibold mb-2">Resources</h3>
+            <ul className="space-y-1">
+              <li><Link href="/license" className="hover:underline">License</Link></li>
+              <li><Link href="/docs/telemetry" className="hover:underline">Telemetry</Link></li>
+              <li><Link href="/matlab-online" className="hover:underline">MATLAB Online</Link></li>
+            </ul>
+          </div>
+          <div>
+            <h3 className="text-foreground font-semibold mb-2">Learn</h3>
+            <ul className="space-y-1">
+              <li><Link href="/blog" className="hover:underline">Blog</Link></li>
+              <li><Link href="/benchmarks" className="hover:underline">Benchmarks</Link></li>
+              <li><Link href="/docs/fusion-guide" className="hover:underline">Fusion Guide</Link></li>
+            </ul>
+          </div>
         </div>
         <div className="w-full md:w-auto md:flex-1 md:max-w-md">
           <NewsletterCta

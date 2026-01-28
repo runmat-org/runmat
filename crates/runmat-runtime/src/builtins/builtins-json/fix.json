@@ -1,0 +1,122 @@
+{
+  "title": "fix",
+  "category": "math/rounding",
+  "keywords": [
+    "fix",
+    "truncate",
+    "rounding",
+    "toward zero",
+    "gpu"
+  ],
+  "summary": "Round scalars, vectors, matrices, or N-D tensors toward zero.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Falls back to the host implementation when the active provider lacks unary_fix."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::rounding::fix::tests",
+    "integration": "builtins::math::rounding::fix::tests::fix_gpu_provider_roundtrip"
+  },
+  "description": "`fix(X)` removes the fractional part of each element in `X` by rounding toward zero. Positive numbers behave like `floor`, negatives behave like `ceil`, and zeros stay zero. The operation works element-wise on scalars, vectors, matrices, N-D tensors, and complex values.",
+  "behaviors": [
+    "`fix` rounds positive inputs down toward zero and negative inputs up toward zero.",
+    "Integer-valued elements are returned unchanged. Logical inputs are promoted to double before rounding.",
+    "Complex numbers are rounded component-wise (`fix(a + bi) = fix(a) + i\u00b7fix(b)`), matching MATLAB.",
+    "`NaN`, `Inf`, and `-Inf` propagate unchanged.",
+    "Character arrays are treated as their numeric code points and return dense double tensors.",
+    "Empty arrays return empty arrays with identical shape."
+  ],
+  "examples": [
+    {
+      "description": "Truncating positive and negative values toward zero",
+      "input": "values = [-3.7 -2.4 -0.6 0 0.6 2.4 3.7];\ntruncated = fix(values);",
+      "output": "truncated = [-3 -2 0 0 0 2 3];"
+    },
+    {
+      "description": "Removing fractional parts from a matrix",
+      "input": "A = [1.9  4.1; -2.8  0.5];\nB = fix(A);",
+      "output": "B = [1 4; -2 0];"
+    },
+    {
+      "description": "Keeping GPU residency when kernels are available",
+      "input": "G = gpuArray(linspace(-2.4, 2.4, 6));\ntruncGpu = fix(G);\nhostValues = gather(truncGpu);",
+      "output": "hostValues = [-2 -1 0 0 1 2];"
+    },
+    {
+      "description": "Dropping fractional parts of complex numbers",
+      "input": "z = [1.9 + 2.6i, -3.4 - 0.2i];\nfixed = fix(z);",
+      "output": "fixed = [1 + 2i, -3 + 0i];"
+    },
+    {
+      "description": "Converting character arrays to truncated numeric codes",
+      "input": "letters = ['A' 'B' 'C'];\ncodes = fix(letters);",
+      "output": "codes = [65 66 67];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `fix` different from `floor` and `ceil`?",
+      "answer": "`fix` always rounds toward zero. Positive numbers behave like `floor`, negatives behave like `ceil`. Use `floor` or `ceil` when you specifically want to round toward negative or positive infinity."
+    },
+    {
+      "question": "What happens to existing integers?",
+      "answer": "Integer-valued inputs (including logical values) are returned unchanged; the output is still reported as a double tensor, matching MATLAB's default numeric type."
+    },
+    {
+      "question": "Does `fix` change NaN or Inf values?",
+      "answer": "No. `NaN`, `Inf`, and `-Inf` propagate unchanged."
+    },
+    {
+      "question": "How are complex numbers handled?",
+      "answer": "`fix` rounds the real and imaginary components independently, exactly like MATLAB."
+    },
+    {
+      "question": "Will `fix` stay on the GPU?",
+      "answer": "Yes, when the active provider implements `unary_fix`. Otherwise, RunMat gathers to the host and applies the CPU implementation, guaranteeing MATLAB-compatible behaviour."
+    }
+  ],
+  "links": [
+    {
+      "label": "floor",
+      "url": "./floor"
+    },
+    {
+      "label": "ceil",
+      "url": "./ceil"
+    },
+    {
+      "label": "round",
+      "url": "./round"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/rounding/fix.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/rounding/fix.rs"
+  },
+  "gpu_residency": "```matlab:runnable\nG = gpuArray(linspace(-2.4, 2.4, 6));\ntruncGpu = fix(G);\nhostValues = gather(truncGpu);\n```\n\nExpected output:\n\n```matlab\nhostValues = [-2 -1 0 0 1 2];\n```",
+  "gpu_behavior": [
+    "When a tensor already resides on the GPU, RunMat Accelerate checks whether the active provider implements the optional `unary_fix` hook. If available, the truncation is executed directly on the device and the result stays on the GPU. If the hook is missing, RunMat gathers the values to the host, applies the CPU implementation, and returns a host-resident result\u2014ensuring MATLAB-compatible semantics everywhere."
+  ]
+}

@@ -1,0 +1,141 @@
+{
+  "title": "assert",
+  "category": "diagnostics",
+  "keywords": [
+    "assert",
+    "diagnostics",
+    "validation",
+    "error",
+    "gpu"
+  ],
+  "summary": "Throw a MATLAB-style error when a logical or numeric condition evaluates to false.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Conditions are evaluated on the host. GPU tensors are gathered before the logical test, and fall back to the default CPU implementation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::diagnostics::assert::tests",
+    "integration": "builtins::diagnostics::assert::tests::assert_gpu_tensor_passes"
+  },
+  "description": "`assert(cond, ...)` aborts execution with a MATLAB-compatible error when `cond` is false or contains any zero/NaN elements. When the condition is true (or an empty array), execution continues with no output. RunMat mirrors MATLAB\u2019s identifier normalisation, message formatting, and argument validation rules.",
+  "behaviors": [
+    "The first argument must be logical or numeric (real or complex). Scalars must evaluate to true; arrays must contain only nonzero, non-NaN elements (complex values fail when both real and imaginary parts are zero or contain NaNs). Empty inputs pass automatically.",
+    "`assert(cond)` raises `MATLAB:assertion:failed` with message `Assertion failed.` when `cond` is false.",
+    "`assert(cond, msg, args...)` formats `msg` with `sprintf`-compatible conversions using any additional arguments.",
+    "`assert(cond, id, msg, args...)` uses a custom message identifier (normalised to `MATLAB:*` when missing a namespace) and the formatted message text.",
+    "Arguments are validated strictly: identifiers and message templates must be string scalars or character vectors, and malformed format strings raise `MATLAB:assertion:invalidInput`.",
+    "Conditions supplied as gpuArray values are gathered to host memory prior to evaluation so that MATLAB semantics continue to apply."
+  ],
+  "examples": [
+    {
+      "description": "Checking that all elements are nonzero",
+      "input": "A = [1 2 3];\nassert(all(A));"
+    },
+    {
+      "description": "Verifying array bounds during development",
+      "input": "idx = 12;\nassert(idx >= 1 && idx <= numel(signal), ...\n       \"Index %d is outside [1, %d].\", idx, numel(signal));"
+    },
+    {
+      "description": "Attaching a custom identifier for tooling",
+      "input": "assert(det(M) ~= 0, \"runmat:demo:singularMatrix\", ...\n       \"Matrix must be nonsingular (determinant is zero).\");"
+    },
+    {
+      "description": "Guarding GPU computations without manual gathering",
+      "input": "G = gpuArray(rand(1024, 1));\nassert(all(G > 0), \"All entries must be positive.\");"
+    },
+    {
+      "description": "Converting NaN checks into assertion failures",
+      "input": "avg = mean(samples);\nassert(~isnan(avg), \"Average must be finite.\");"
+    },
+    {
+      "description": "Ensuring structure fields exist before use",
+      "input": "assert(isfield(cfg, \"rate\"), ...\n       \"runmat:config:missingField\", ...\n       \"Configuration missing required field '%s'.\", \"rate\");"
+    },
+    {
+      "description": "Detecting invalid enumeration values early",
+      "input": "valid = [\"nearest\", \"linear\", \"spline\"];\nassert(any(mode == valid), ...\n       \"Invalid interpolation mode '%s'.\", mode);"
+    },
+    {
+      "description": "Validating dimensions before expensive work",
+      "input": "assert(size(A, 2) == size(B, 1), ...\n       \"runmat:demo:dimensionMismatch\", ...\n       \"Inner dimensions must agree (size(A,2)=%d, size(B,1)=%d).\", ...\n       size(A, 2), size(B, 1));"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What types can I pass as the condition?",
+      "answer": "Logical scalars/arrays and numeric scalars/arrays are accepted. Character arrays, strings, cells, structs, and complex values raise `MATLAB:assertion:invalidCondition`."
+    },
+    {
+      "question": "How are NaN values treated?",
+      "answer": "Any `NaN` element causes the assertion to fail, matching MATLAB\u2019s requirement that all elements are non-NaN and nonzero."
+    },
+    {
+      "question": "Do empty arrays pass the assertion?",
+      "answer": "Yes. Empty logical or numeric arrays are treated as true."
+    },
+    {
+      "question": "Can I omit the namespace in the message identifier?",
+      "answer": "Yes. RunMat prefixes unqualified identifiers with `MATLAB:` to match MATLAB behaviour."
+    },
+    {
+      "question": "What happens if my format string is malformed?",
+      "answer": "The builtin raises `MATLAB:assertion:invalidInput` describing the formatting issue."
+    },
+    {
+      "question": "Does `assert` run on the GPU?",
+      "answer": "No. GPU tensors are gathered automatically and evaluated on the CPU to preserve MATLAB semantics."
+    },
+    {
+      "question": "Can I use strings for messages and identifiers?",
+      "answer": "Yes. Both character vectors and string scalars are accepted for identifiers and message templates."
+    },
+    {
+      "question": "What value does `assert` return when the condition is true?",
+      "answer": "Like MATLAB, `assert` has no meaningful return value. RunMat returns `0.0` internally to satisfy the runtime but nothing is produced in MATLAB code."
+    },
+    {
+      "question": "How do I disable assertions in production code?",
+      "answer": "Wrap the condition in an `if` statement controlled by your own flag; MATLAB (and RunMat) always evaluates `assert`."
+    },
+    {
+      "question": "How do I distinguish assertion failures from other errors?",
+      "answer": "Provide a custom identifier (for example `runmat:module:assertFailed`) and catch it in a `try`/`catch` block."
+    }
+  ],
+  "links": [
+    {
+      "label": "error",
+      "url": "./error"
+    },
+    {
+      "label": "warning",
+      "url": "./warning"
+    },
+    {
+      "label": "isnan",
+      "url": "./isnan"
+    },
+    {
+      "label": "sprintf",
+      "url": "./sprintf"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/diagnostics/assert.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/diagnostics/assert.rs"
+  },
+  "gpu_behavior": [
+    "`assert` is a control-flow builtin. RunMat gathers GPU-resident tensors (including logical gpuArrays) to host memory before evaluating the condition. No GPU kernels are launched, and the acceleration provider metadata is marked as a gather-immediately operation so execution always follows the MATLAB-compatible CPU path. Residency metadata is preserved so subsequent statements observe the same values they would have seen without the assertion."
+  ]
+}

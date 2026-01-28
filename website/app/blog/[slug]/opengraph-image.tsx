@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs';
-import { join } from 'path';
 import matter from 'gray-matter';
 import { createOgResponse, OG_SIZE } from '@/lib/og';
+import { resolveBlogFilePath } from '@/lib/blog';
 
 export const size = { width: OG_SIZE.width, height: OG_SIZE.height };
 export const contentType = 'image/png';
@@ -11,11 +11,12 @@ export const dynamic = 'force-static';
 type BlogFrontmatter = { title?: string; description?: string; image?: string };
 
 function getFrontmatter(slug: string): BlogFrontmatter | null {
+  const filePath = resolveBlogFilePath(slug);
+  if (!filePath) return null;
+
   try {
-    const filePath = join(process.cwd(), 'content/blog', `${slug}.md`);
     const fileContent = readFileSync(filePath, 'utf-8');
     const { data } = matter(fileContent);
-    // gray-matter returns `data` as an arbitrary object; we narrow the subset we use
     const fm = data as Partial<BlogFrontmatter>;
     return {
       title: typeof fm.title === 'string' ? fm.title : undefined,

@@ -16,52 +16,9 @@ use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::build_surface_gpu_plot;
 use std::sync::Arc;
-
 use crate::BuiltinResult;
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "mesh",
-        builtin_path = "crate::builtins::plotting::mesh"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 const BUILTIN_NAME: &str = "mesh";
-
-#[allow(dead_code)]
-pub const DOC_MD: &str = r#"---
-title: "mesh"
-category: "plotting"
-keywords: ["mesh", "wireframe", "3-D plotting", "gpuArray"]
-summary: "Render MATLAB-compatible mesh (wireframe) plots."
-references:
-  - https://www.mathworks.com/help/matlab/ref/mesh.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: ["single"]
-  broadcasting: "none"
-  notes: "Single-precision gpuArray height maps stream directly into the shared WebGPU renderer; other inputs gather before plotting."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 3
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::plotting::mesh::tests"
----
-
-# What does `mesh` do?
-`mesh(X, Y, Z)` draws a wireframe surface. RunMat reuses the `SurfacePlot` renderer with wireframe
-mode enabled and no fill, matching MATLAB's default mesh aesthetics.
-
-## Behaviour highlights
-- `X` and `Y` are axis vectors; `Z` must contain `length(X) * length(Y)` values in column-major order.
-- Surfaces default to a Turbo colormap with `wireframe = true` and faceted shading.
-- Single-precision gpuArray height maps stream directly into the shared WebGPU renderer; other inputs gather automatically.
-"#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::mesh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

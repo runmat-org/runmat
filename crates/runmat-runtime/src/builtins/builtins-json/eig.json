@@ -1,0 +1,156 @@
+{
+  "title": "eig",
+  "category": "math/linalg/factor",
+  "keywords": [
+    "eig",
+    "eigenvalues",
+    "eigenvectors",
+    "linalg",
+    "gpu"
+  ],
+  "summary": "Eigenvalue decomposition with MATLAB-compatible multi-output forms.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses the provider `eig` hook when available (the WGPU backend reuploads host-computed results for real spectra) and falls back to the CPU path when complex storage or unsupported options are required."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::factor::eig::tests",
+    "integration": "builtins::math::linalg::factor::eig::tests::eig_three_outputs_biorthogonality"
+  },
+  "description": "`eig(A)` computes the eigenvalues of a square matrix `A`. With additional outputs it also returns right and left eigenvectors, matching MATLAB\u2019s multi-output semantics (`A*V = V*D` and `W'*A = D*W'`).",
+  "behaviors": [
+    "Single output `d = eig(A)` returns the eigenvalues as an `n \u00d7 1` column vector (values may be complex even when `A` is real).",
+    "Two outputs `[V,D] = eig(A)` return the eigenvectors (columns of `V`) and the diagonal eigenvalue matrix `D`.",
+    "Three outputs `[V,D,W] = eig(A)` additionally return the left eigenvectors `W` satisfying `W' * A = D * W'`.",
+    "The selector `'vector'` may be supplied (`eig(A,'vector')`, `[V,d] = eig(A,'vector')`) to request the eigenvalues as a column vector even when two outputs are requested. `'matrix'` resets the second output to the diagonal-matrix form.",
+    "Logical and integer inputs are promoted to double precision. Complex inputs remain complex throughout the factorisation.",
+    "Empty and scalar matrices follow MATLAB\u2019s shape conventions (`eig([])` returns `[]`, `eig(5)` returns `5`).",
+    "Generalised problems `eig(A,B)` are not yet implemented; RunMat emits a clear error if you pass the second matrix argument.",
+    "Optional balancing keywords (`'balance'`, `'nobalance'`) are accepted. Balancing defaults to on; the current implementation leaves balancing as a no-op while retaining the option for forward compatibility."
+  ],
+  "examples": [
+    {
+      "description": "Computing Eigenvalues of a 2x2 Matrix",
+      "input": "A = [2 1; 0 3];\nd = eig(A);",
+      "output": "d = [2; 3];"
+    },
+    {
+      "description": "Diagonalizing a Matrix with Two Outputs",
+      "input": "A = [0 1; -2 -3];\n[V,D] = eig(A);\nrecon = V * D / V;"
+    },
+    {
+      "description": "Retrieving Left Eigenvectors with Three Outputs",
+      "input": "A = [4 2; 1 3];\n[V,D,W] = eig(A);\ncheck = W' * A - D * W';"
+    },
+    {
+      "description": "Eigenvalues of a Complex-Valued Matrix",
+      "input": "A = [1+2i, 2-1i; 0, -3i];\n[V,D] = eig(A);\ndiag(D)      % Complex eigenvalues"
+    },
+    {
+      "description": "Eigenvalues of a Diagonal Matrix",
+      "input": "A = diag([10, -2, 7]);\nd = eig(A);"
+    },
+    {
+      "description": "Handling Repeated Eigenvalues",
+      "input": "A = [3 1 0; 0 3 0; 0 0 5];\nd = eig(A);"
+    },
+    {
+      "description": "Using the 'nobalance' Option",
+      "input": "A = [1e6 1; 0 1e-6];\nd_balanced = eig(A);\nd_nobalance = eig(A, 'nobalance');"
+    },
+    {
+      "description": "Returning Eigenvalues as a Vector with Two Outputs",
+      "input": "A = [0 1; -2 -3];\n[V,d] = eig(A, 'vector');\nsize(d)    % 2 x 1 column vector"
+    },
+    {
+      "description": "Running eig on a gpuArray",
+      "input": "G = gpuArray(randn(128));\nd = eig(G);          % Real spectra stay on the GPU when the provider implements eig\nisa(d, 'gpuArray')   % logical 1 when the provider kept the result on device"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What shapes does `eig` support?",
+      "answer": "`eig` requires a square matrix. Scalars are treated as `1\u00d71` matrices, and empty inputs return empty outputs. Non-square inputs raise an error, matching MATLAB."
+    },
+    {
+      "question": "Do I always get complex outputs?",
+      "answer": "Eigenvalues and eigenvectors are returned as complex arrays when necessary. If all imaginary parts are numerically zero, RunMat returns real doubles for convenience, mirroring MATLAB behaviour."
+    },
+    {
+      "question": "How do I obtain the eigenvalues as a vector when requesting eigenvectors?",
+      "answer": "Pass the `'vector'` selector. For example, `[V,d] = eig(A,'vector')` returns a column vector `d` and the right eigenvectors in `V`. Use `'matrix'` (or omit the selector) when you prefer the diagonal-matrix form."
+    },
+    {
+      "question": "What about the optional balancing keywords?",
+      "answer": "`'balance'` (default) and `'nobalance'` are accepted. The current release treats balancing as a no-op; the option remains so future releases can introduce a true balancing implementation without breaking user code."
+    },
+    {
+      "question": "Are generalised eigenvalue problems supported?",
+      "answer": "Not yet. Calling `eig(A,B)` raises a descriptive error. This builtin focuses on the standard eigenvalue problem; the generalised form will be added in a future update."
+    },
+    {
+      "question": "How are left eigenvectors normalised?",
+      "answer": "RunMat scales left eigenvectors so that `W' * V = I` (bi-orthonormal columns), matching MATLAB\u2019s conventions. When a provider supplies the GPU implementation the same normalisation is expected."
+    },
+    {
+      "question": "Does `eig` participate in fusion or auto-offload?",
+      "answer": "No. Eigenvalue decomposition executes eagerly and acts as a residency sink. The fusion planner will gather any GPU-resident inputs before factorisation."
+    },
+    {
+      "question": "How can I continue on the GPU after calling `eig` today?",
+      "answer": "When the active provider implements the `eig` hook (the WGPU backend does for real spectra), the outputs remain on the GPU automatically. If the decomposition falls back to the CPU\u2014because the spectrum is complex or `'nobalance'` was requested\u2014call `gpuArray` on whichever results you need on the device."
+    },
+    {
+      "question": "What happens if the eigenvector matrix is singular?",
+      "answer": "When the right eigenvectors form a singular matrix, RunMat falls back to computing left eigenvectors from the conjugate-transposed problem. If that fails, requesting the third output raises an error, matching MATLAB\u2019s failure behaviour."
+    }
+  ],
+  "links": [
+    {
+      "label": "svd",
+      "url": "./svd"
+    },
+    {
+      "label": "qr",
+      "url": "./qr"
+    },
+    {
+      "label": "lu",
+      "url": "./lu"
+    },
+    {
+      "label": "chol",
+      "url": "./chol"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/math/linalg/factor/eig.rs",
+    "url": "crates/runmat-runtime/src/builtins/math/linalg/factor/eig.rs"
+  },
+  "gpu_behavior": [
+    "The WGPU provider implements the reserved `eig` hook by downloading the input, running the same CPU decomposition used by the host path, and immediately re-uploading the double-precision eigenvalues, eigenvectors, and diagonal matrix. When the spectrum is real, the outputs therefore remain on the GPU without any user intervention.",
+    "If any output requires complex storage or you pass `'nobalance'`, RunMat automatically falls back to the host implementation and returns CPU-resident arrays. The `'vector'` selector also triggers this transparent host fallback today. Reapply `gpuArray` if you want to continue on the device after such a fallback.",
+    "Because `eig` is a residency sink, the fusion planner treats it as a barrier and does not attempt to fuse surrounding elementwise work."
+  ]
+}

@@ -1,0 +1,143 @@
+{
+  "title": "webread",
+  "category": "io/http",
+  "keywords": [
+    "webread",
+    "http get",
+    "rest client",
+    "json",
+    "https",
+    "api"
+  ],
+  "summary": "Download web content (JSON, text, or binary) over HTTP/HTTPS.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/webread.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "webread always gathers gpuArray inputs and executes on the CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::http::webread::tests",
+    "integration": [
+      "builtins::io::http::webread::tests::webread_fetches_json_response",
+      "builtins::io::http::webread::tests::webread_fetches_text_response",
+      "builtins::io::http::webread::tests::webread_fetches_binary_payload",
+      "builtins::io::http::webread::tests::webread_appends_query_parameters",
+      "builtins::io::http::webread::tests::webread_struct_argument_supports_options_and_query",
+      "builtins::io::http::webread::tests::webread_headerfields_struct_applies_custom_headers",
+      "builtins::io::http::webread::tests::webread_queryparameters_option_struct"
+    ]
+  },
+  "description": "`webread` issues an HTTP or HTTPS request and returns the response body as a MATLAB-compatible value. Textual payloads become character vectors, JSON responses are decoded into structs, cells, and numeric arrays, while binary payloads return numeric vectors of bytes.",
+  "behaviors": [
+    "Accepts URLs supplied as character vectors or string scalars; the URL must be absolute.",
+    "Optional `weboptions`-style fields (either through a struct argument or name-value pairs) control content decoding (`ContentType`), request timeout (`Timeout`), headers (`HeaderFields`), and authentication (`Username`/`Password`). The builtin currently supports the default `GET` request method; use `webwrite` for POST/PUT uploads.",
+    "Additional name-value pairs that do not match an option are appended to the query string using percent-encoding. A leading struct or cell array argument can also supply query parameters.",
+    "`ContentType 'auto'` (default) inspects the `Content-Type` response header to choose between JSON, text, or binary decoding. Explicit `ContentType 'json'`, `'text'`, or `'binary'` override the detection logic.",
+    "JSON responses are parsed with the same rules as `jsondecode`, producing doubles, logicals, strings, structs, and cell arrays that match MATLAB semantics.",
+    "Text responses preserve the server-provided character encoding (UTF-8 with automatic decoding of exotic charsets exposed in the HTTP headers). Binary payloads return `1×N` double arrays whose entries store byte values in the range 0–255.",
+    "HTTP errors (non-2xx status codes), timeouts, TLS failures, and parsing problems raise descriptive MATLAB-style errors."
+  ],
+  "examples": [
+    {
+      "description": "Reading JSON data from a REST API",
+      "input": "opts = weboptions(\"ContentType\", \"json\", \"Timeout\", 15);\nweather = webread(\"https://api.example.com/weather\", opts, \"city\", \"Reykjavik\");\ndisp(weather.temperatureC);",
+      "output": "    2.3"
+    },
+    {
+      "description": "Downloading plain text as a character vector",
+      "input": "html = webread(\"https://example.com/index.txt\", \"Timeout\", 5);\nextract = html(1:200);"
+    },
+    {
+      "description": "Retrieving binary payloads such as images",
+      "input": "bytes = webread(\"https://example.com/logo.png\", \"ContentType\", \"binary\");\nfilewrite(\"logo.png\", uint8(bytes));"
+    },
+    {
+      "description": "Supplying custom headers and credentials",
+      "input": "headers = struct(\"Accept\", \"application/json\", \"X-Client\", \"RunMat\");\ndata = webread(\"https://api.example.com/me\", ...\n               \"Username\", \"ada\", \"Password\", \"secret\", ...\n               \"HeaderFields\", headers, ...\n               \"ContentType\", \"json\");"
+    },
+    {
+      "description": "Passing query parameters as a struct",
+      "input": "query = struct(\"limit\", 25, \"sort\", \"name\");\nresponse = webread(\"https://api.example.com/resources\", query, \"ContentType\", \"json\");"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can `webread` decode JSON automatically?",
+      "answer": "Yes. When the server reports a JSON `Content-Type` header (for example `application/json` or `application/vnd.api+json`) the builtin decodes it using the same rules as `jsondecode`. Override the behaviour with `\"ContentType\",\"text\"` or `\"ContentType\",\"binary\"` when needed."
+    },
+    {
+      "question": "How do I control request timeouts?",
+      "answer": "Supply `\"Timeout\", seconds` as a name-value pair or in an options struct. The default timeout is 60 seconds. Timeouts raise `webread: request to <url> timed out`."
+    },
+    {
+      "question": "What headers can I set?",
+      "answer": "Use `\"HeaderFields\", struct(...)` or a `cell` array of name/value pairs. Header names must be valid HTTP tokens. The builtin automatically sets a RunMat-specific `User-Agent` string unless you override it with `\"UserAgent\", \"...\"`"
+    },
+    {
+      "question": "Does `webread` follow redirects?",
+      "answer": "Yes. The underlying HTTP client follows redirects up to the platform default limit while preserving headers and authentication."
+    },
+    {
+      "question": "How do I provide credentials?",
+      "answer": "Use `\"Username\", \"user\", \"Password\", \"pass\"` for HTTP basic authentication. Supplying a password without a username raises an error."
+    },
+    {
+      "question": "Can I send POST or PUT requests?",
+      "answer": "`webread` is designed for read-only requests and currently supports the default `GET` method. Use `webwrite` (planned) for requests that include bodies or mutate server state."
+    },
+    {
+      "question": "How are binary responses represented?",
+      "answer": "Binary payloads return `1×N` double arrays whose elements are byte values. Convert them to the desired integer type (for example `uint8`) before further processing."
+    },
+    {
+      "question": "What happens when the server returns an error status?",
+      "answer": "Non-success HTTP status codes raise `webread: request to … failed with HTTP status XYZ`. Inspect the remote server logs or response headers for additional diagnostics."
+    },
+    {
+      "question": "Does `webread` support compressed responses?",
+      "answer": "Yes. The builtin enables gzip / deflate content decoding through the HTTP client automatically."
+    },
+    {
+      "question": "Can I pass query parameters as GPU arrays?",
+      "answer": "Yes. Inputs wrapped in `gpuArray` are gathered before assembling the query string."
+    }
+  ],
+  "links": [
+    {
+      "label": "webwrite",
+      "url": "./webwrite"
+    },
+    {
+      "label": "weboptions",
+      "url": "./weboptions"
+    },
+    {
+      "label": "jsondecode",
+      "url": "./jsondecode"
+    },
+    {
+      "label": "websave",
+      "url": "./filewrite"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/http/webread.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/http/webread.rs"
+  },
+  "gpu_residency": "No. `webread` gathers any GPU-resident values before contacting the network and produces host results. Keeping inputs on the GPU offers no benefit because HTTP/TLS stacks operate on the CPU.",
+  "gpu_behavior": [
+    "`webread` runs entirely on the CPU. Any `gpuArray` inputs (for example, query parameter values) are gathered to host memory before building the HTTP request. Results are produced on the host, and fusion graphs terminate at this builtin via `ResidencyPolicy::GatherImmediately`."
+  ]
+}

@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+content/builtins-json
 
 # debug
 npm-debug.log*

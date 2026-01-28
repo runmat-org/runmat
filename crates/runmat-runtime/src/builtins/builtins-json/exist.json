@@ -1,0 +1,131 @@
+{
+  "title": "exist",
+  "category": "io/repl_fs",
+  "keywords": [
+    "exist",
+    "file exists",
+    "variable exists",
+    "folder exists",
+    "builtin exists"
+  ],
+  "summary": "Determine whether a variable, file, folder, built-in function, or class exists and return MATLAB-compatible identifiers.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/exist.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the CPU. When arguments are gpuArray values RunMat gathers them to the host before evaluating the query."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::exist::tests",
+    "integration": "builtins::io::repl_fs::exist::tests::exist_detects_workspace_variables"
+  },
+  "description": "`exist(name)` returns an integer code that identifies which kind of item named `name` is currently available. The codes match MATLAB:\n\n| Code | Meaning                                   | | ---- | ----------------------------------------- | | 0    | Item not found                            | | 1    | Variable in the active workspace          | | 2    | File (including scripts and most data files) | | 3    | MEX-file                                  | | 4    | Simulink\u00ae model (`.slx` / `.mdl`)         | | 5    | Built-in MATLAB function                  | | 6    | P-code (`.p` / `.pp`)                     | | 7    | Folder                                    | | 8    | Class definition                          |\n\nPass a second argument to restrict the lookup (for example, `'file'`, `'dir'`, `'builtin'`, `'class'`, `'mex'`, `'pcode'`, `'method'`, or `'handle'`). The builtin mirrors MATLAB semantics for string handling, search order, and numeric return values.",
+  "behaviors": [
+    "Searches follow MATLAB's precedence: variables first, then built-ins, classes, compiled code (MEX/P-code), standard files, and finally folders.",
+    "When you omit the type, `exist` returns the first match respecting this precedence.",
+    "String handling matches MATLAB: `name` and the optional `type` must be character vectors or string scalars. String arrays must contain exactly one element.",
+    "Paths expand `~` to the user's home folder. Relative paths resolve against the current working directory, and RunMat honours `RUNMAT_PATH` / `MATLABPATH` entries when searching for scripts and classes.",
+    "Package-qualified names such as `pkg.func` and `pkg.Class` map to `+pkg` folders automatically. Class queries also recognise `@ClassName` folders and `.m` files that contain `classdef`.",
+    "GPU-resident arguments (for example, `gpuArray(\"script\")`) are gathered automatically, so callers never need to move text back to the CPU manually.",
+    "Unsupported second-argument types surface a MATLAB-compatible error listing the accepted keywords."
+  ],
+  "examples": [
+    {
+      "description": "How to check if a workspace variable exists",
+      "input": "alpha = 3.14;\nstatus = exist(\"alpha\", \"var\");",
+      "output": "status =\n     1"
+    },
+    {
+      "description": "How to determine if a built-in function is available",
+      "input": "code = exist(\"sin\");",
+      "output": "code =\n     5"
+    },
+    {
+      "description": "How to test whether an M-file is on the MATLAB path",
+      "input": "status = exist(\"utilities/process_data\", \"file\");",
+      "output": "status =\n     2"
+    },
+    {
+      "description": "How to verify a folder exists before creating logs",
+      "input": "mkdir(\"logs\");\nstatus = exist(\"logs\", \"dir\");",
+      "output": "status =\n     7"
+    },
+    {
+      "description": "How to detect class definitions in packages",
+      "input": "status = exist(\"pkg.Widget\", \"class\");",
+      "output": "status =\n     8"
+    },
+    {
+      "description": "How to inspect compiled MEX fallbacks",
+      "input": "if exist(\"fastfft\", \"mex\")\n    disp(\"Using compiled fastfft.\");\nelse\n    disp(\"Falling back to MATLAB implementation.\");\nend",
+      "output": "% Prints which implementation will be executed based on the presence of fastfft.mex*."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `exist` support wildcards?",
+      "answer": "No. Strings containing `*` or `?` return `0`, matching MATLAB behaviour."
+    },
+    {
+      "question": "What about Simulink models or Java classes?",
+      "answer": "RunMat reports `4` for `.slx` / `.mdl` files. Java class detection is not implemented yet and currently returns `0`, mirroring MATLAB when Java support is unavailable."
+    },
+    {
+      "question": "How are packages handled?",
+      "answer": "Names like `pkg.func` translate to `+pkg/func.m`. Class queries additionally search `+pkg/@Class` folders."
+    },
+    {
+      "question": "Is the search path configurable?",
+      "answer": "Yes. RunMat honours the current working directory plus any folders listed in `RUNMAT_PATH` or `MATLABPATH` (path separator aware)."
+    },
+    {
+      "question": "What's the search precedence when multiple items share a name?",
+      "answer": "Variables have highest priority, followed by built-ins, classes, compiled code (MEX/P-code), standard files, and folders last\u2014exactly like MATLAB."
+    },
+    {
+      "question": "What happens with unsupported type keywords?",
+      "answer": "The builtin raises `exist: invalid type...` describing the accepted tokens, matching MATLAB's diagnostic."
+    },
+    {
+      "question": "Do handle queries work?",
+      "answer": "When the first argument is a RunMat handle object, `exist(handle, \"handle\")` returns `1`. Numeric graphics handles are not yet supported and return `0`."
+    }
+  ],
+  "links": [
+    {
+      "label": "dir",
+      "url": "./dir"
+    },
+    {
+      "label": "ls",
+      "url": "./ls"
+    },
+    {
+      "label": "copyfile",
+      "url": "./copyfile"
+    },
+    {
+      "label": "pwd",
+      "url": "./pwd"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/exist.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/exist.rs"
+  },
+  "gpu_residency": "No. `exist` gathers any GPU-resident string inputs transparently. The lookup, file system checks, and return value are always host-side operations. Keeping text on the GPU offers no performance benefits, so you can pass regular character vectors or string scalars.",
+  "gpu_behavior": [
+    "The builtin runs entirely on the host CPU. If any argument lives on the GPU, RunMat gathers it to host memory before performing the lookup. Providers do not implement dedicated hooks for `exist`, and the result is always returned as a host-resident double scalar. Documented behaviour is identical regardless of whether acceleration is enabled."
+  ]
+}

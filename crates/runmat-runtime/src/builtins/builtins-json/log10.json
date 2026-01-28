@@ -1,0 +1,131 @@
+{
+  "title": "log10",
+  "category": "math/elementwise",
+  "keywords": [
+    "log10",
+    "base-10 logarithm",
+    "elementwise",
+    "magnitude",
+    "gpu"
+  ],
+  "summary": "Base-10 logarithm of scalars, vectors, matrices, or N-D tensors.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Falls back to the host implementation when the provider lacks unary_log10 or when the result requires complex values."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::log10::tests",
+    "integration": "builtins::math::elementwise::log10::tests::log10_gpu_provider_roundtrip",
+    "gpu": "builtins::math::elementwise::log10::tests::log10_wgpu_matches_cpu_elementwise"
+  },
+  "description": "`Y = log10(X)` computes the base-10 logarithm of every element in `X`, following MATLAB's numeric semantics for real, logical, character, and complex inputs. Negative real values promote to complex results so that you can analyze magnitudes without losing phase information.",
+  "behaviors": [
+    "`log10` operates element-wise with MATLAB broadcasting rules.",
+    "Logical inputs convert to doubles (`true \u2192 1.0`, `false \u2192 0.0`) before the logarithm is applied.",
+    "Character arrays are interpreted as their numeric code points and return dense double tensors.",
+    "`log10(0)` returns `-Inf`, matching MATLAB's handling of the logarithm singularity at zero.",
+    "Negative real values promote to complex results: `log10(-10)` returns `1 + i\u00b7\u03c0/ln(10)`.",
+    "Complex inputs follow MATLAB's definition: `log10(z) = log(z) / ln(10)`."
+  ],
+  "examples": [
+    {
+      "description": "Finding the order of magnitude of a number",
+      "input": "value = log10(1000);",
+      "output": "value = 3;"
+    },
+    {
+      "description": "Computing base-10 logarithms of a matrix",
+      "input": "A = [1 10 100; 0.1 0.01 0.001];\nB = log10(A);",
+      "output": "B = [0 1 2; -1 -2 -3];"
+    },
+    {
+      "description": "Understanding how `log10` handles zero",
+      "input": "z = log10(0);",
+      "output": "z = -Inf;"
+    },
+    {
+      "description": "Working with negative inputs using complex results",
+      "input": "neg = [-10 -100];\nout = log10(neg);",
+      "output": "out = [1.0000 + 1.3644i, 2.0000 + 1.3644i];"
+    },
+    {
+      "description": "Running `log10` on GPU-resident data",
+      "input": "G = gpuArray([1 10 1000]);\nresult = log10(G);\nhost = gather(result);",
+      "output": "host = [0 1 3];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I use `log10` instead of `log`?",
+      "answer": "Use `log10` when you want base-10 magnitudes, such as for decibel calculations or scientific notation. Use `log` (natural logarithm) for exponential growth/decay or calculus contexts."
+    },
+    {
+      "question": "What happens if an element is zero?",
+      "answer": "`log10(0)` returns negative infinity (`-Inf`), matching MATLAB behavior."
+    },
+    {
+      "question": "How does `log10` handle negative real numbers?",
+      "answer": "Negative values promote to complex numbers with an imaginary component of `\u03c0/ln(10)`. This preserves phase information instead of producing `NaN`."
+    },
+    {
+      "question": "Can I pass complex inputs to `log10`?",
+      "answer": "Yes. Complex scalars and tensors are handled as `log(z) / ln(10)`, matching MATLAB exactly."
+    },
+    {
+      "question": "Does the GPU implementation support complex outputs?",
+      "answer": "Current providers operate on real buffers. When complex outputs are required, RunMat gathers the tensor to the host while keeping fusion metadata consistent."
+    },
+    {
+      "question": "Is `log10` numerically stable for very small or large values?",
+      "answer": "Yes. The implementation promotes to 64-bit doubles throughout and clamps tiny imaginary parts to zero, mirroring MATLAB's behavior for well-conditioned inputs."
+    }
+  ],
+  "links": [
+    {
+      "label": "log",
+      "url": "./log"
+    },
+    {
+      "label": "log1p",
+      "url": "./log1p"
+    },
+    {
+      "label": "exp",
+      "url": "./exp"
+    },
+    {
+      "label": "sqrt",
+      "url": "./sqrt"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/log10.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/log10.rs"
+  },
+  "gpu_residency": "You typically do **not** need to call `gpuArray` yourself. The auto-offload planner keeps tensors on the GPU when profitable and the result stays real. When complex results are required, RunMat automatically gathers the data to the host to produce the precise MATLAB-compatible answer. Use `gpuArray`/`gather` only when you want to mirror MathWorks MATLAB workflows explicitly.",
+  "gpu_behavior": [
+    "RunMat Accelerate keeps tensors on the GPU when the active provider implements `unary_log10` and the data is known to stay in the real domain. If complex outputs are required (for example, negative inputs) or the provider lacks the hook, RunMat gathers the tensor to the host, computes the exact MATLAB-compatible result, updates residency metadata, and returns the host-resident value."
+  ]
+}

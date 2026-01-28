@@ -220,9 +220,6 @@ impl<'a> AttrCollector<'a> {
                 "register_fusion_spec" | "runmat_macros::register_fusion_spec" => {
                     self.inject_attr(attr, &module_path);
                 }
-                "register_doc_text" | "runmat_macros::register_doc_text" => {
-                    self.inject_attr(attr, &module_path);
-                }
                 "cfg_attr" => {
                     self.inject_cfg_attr(attr, &module_path);
                 }
@@ -379,8 +376,6 @@ fn needs_builtin_path(path: &str) -> bool {
             | "runmat_macros::register_gpu_spec"
             | "register_fusion_spec"
             | "runmat_macros::register_fusion_spec"
-            | "register_doc_text"
-            | "runmat_macros::register_doc_text"
     )
 }
 

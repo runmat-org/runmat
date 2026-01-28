@@ -1,0 +1,142 @@
+{
+  "title": "orderfields",
+  "category": "structs/core",
+  "keywords": [
+    "orderfields",
+    "struct",
+    "reorder fields",
+    "alphabetical",
+    "struct array",
+    "field order"
+  ],
+  "summary": "Reorder structure field definitions alphabetically or according to a custom order.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host. When structs contain GPU-resident values, those handles remain on the device."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::structs::core::orderfields::tests",
+    "integration": null
+  },
+  "description": "`orderfields(S)` reorders the field definitions of a scalar struct or struct array. By default the fields are sorted alphabetically. Optional arguments let you match the order of another struct, provide an explicit list of names, or supply a permutation vector.",
+  "behaviors": [
+    "Works with scalar structs and struct arrays (RunMat stores struct arrays internally as cell arrays of structs).",
+    "The default behaviour `orderfields(S)` sorts field names alphabetically using MATLAB's case-insensitive ordering.",
+    "`orderfields(S, referenceStruct)` matches the order of `referenceStruct`. Both structs must contain the same field names.",
+    "`orderfields(S, {'b','a','c'})` or `orderfields(S, string(['b','a','c']))` uses the supplied list of field names.",
+    "`orderfields(S, [2 1 3])` reorders fields using a permutation vector that references the current field order.",
+    "`[T, P] = orderfields(S, ___)` returns the reordered struct (or struct array) `T` and a permutation vector `P` whose elements are the original 1-based field positions. Reuse `P` to apply the same order to other structs that share the field set.",
+    "The function never copies field contents unnecessarily\u2014values (including GPU handles) are re-used and remain resident.",
+    "Errors are raised when requested field names do not match the struct, when indices are invalid, or when the input is not a struct."
+  ],
+  "examples": [
+    {
+      "description": "How to sort struct fields alphabetically",
+      "input": "s = struct(\"beta\", 2, \"alpha\", 1, \"gamma\", 3);\nt = orderfields(s);\nfieldnames(t)",
+      "output": "ans =\n    {'alpha'}\n    {'beta'}\n    {'gamma'}"
+    },
+    {
+      "description": "Match the field order of another struct",
+      "input": "source = struct(\"y\", 20, \"x\", 10);\ntemplate = struct(\"x\", 0, \"y\", 0);\n[aligned, order] = orderfields(source, template);"
+    },
+    {
+      "description": "Reorder fields with a cell array of names",
+      "input": "s = struct(\"a\", 1, \"b\", 2, \"c\", 3);\nu = orderfields(s, {\"c\", \"a\", \"b\"});\nfieldnames(u)",
+      "output": "ans =\n    {'c'}\n    {'a'}\n    {'b'}"
+    },
+    {
+      "description": "Reorder fields with an index vector",
+      "input": "s = struct(\"first\", 1, \"second\", 2, \"third\", 3);\npermuted = orderfields(s, [3 1 2]);\nfieldnames(permuted)",
+      "output": "ans =\n    {'third'}\n    {'first'}\n    {'second'}"
+    },
+    {
+      "description": "Apply a custom order to every element of a struct array",
+      "input": "records = struct(\"name\", {\"Ada\", \"Grace\"}, \"id\", {101, 102});\n[reordered, perm] = orderfields(records, {\"id\", \"name\"});\n{reordered.id}",
+      "output": "ans =\n    {[101]}    {[102]}"
+    },
+    {
+      "description": "Sort fields in descending alphabetical order",
+      "input": "s = struct(\"alpha\", 1, \"delta\", 4, \"beta\", 2);\nnames = string(fieldnames(s));\ndesc = orderfields(s, flip(names));\nfieldnames(desc)",
+      "output": "ans =\n    {'delta'}\n    {'beta'}\n    {'alpha'}"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What argument forms does `orderfields` accept?",
+      "answer": "You can pass a reference struct (scalar or struct array), a cell array or string array of field names, or a numeric permutation vector. Every variant must reference each existing field exactly once."
+    },
+    {
+      "question": "Does the reference struct have to contain the same fields?",
+      "answer": "Yes. RunMat mirrors MATLAB and requires that the reference struct contain exactly the same field names. Missing or extra fields raise an error."
+    },
+    {
+      "question": "Can I reorder struct arrays?",
+      "answer": "Yes. Every element in the struct array is reordered using the same field order. The array must contain structs only."
+    },
+    {
+      "question": "How are numeric vectors interpreted?",
+      "answer": "Numeric vectors are treated as permutations of the current field order. Values must be positive integers that reference each existing field exactly once."
+    },
+    {
+      "question": "What happens when I pass duplicate field names?",
+      "answer": "Duplicates are rejected with an error. Every field must appear exactly once in the requested order."
+    },
+    {
+      "question": "Does `orderfields` gather GPU data back to the CPU?",
+      "answer": "No. The builtin only reorders metadata in the struct. GPU handles remain on the device and are not touched."
+    },
+    {
+      "question": "Can I reorder an empty struct array?",
+      "answer": "Empty struct arrays are returned unchanged. Because RunMat stores field metadata per element, you must supply at least one element before an explicit order can be derived."
+    },
+    {
+      "question": "How do I maintain the existing order?",
+      "answer": "Capture the permutation output once: `[~, P] = orderfields(S);`. You can later call `orderfields(S, P)` (or apply the same `P` to another struct with identical fields) to reapply the original order."
+    },
+    {
+      "question": "Does `orderfields` affect nested structs?",
+      "answer": "Only the top-level struct passed to `orderfields` is reordered. Nested structs retain their current order."
+    }
+  ],
+  "links": [
+    {
+      "label": "struct",
+      "url": "./struct"
+    },
+    {
+      "label": "fieldnames",
+      "url": "./fieldnames"
+    },
+    {
+      "label": "getfield",
+      "url": "./getfield"
+    },
+    {
+      "label": "setfield",
+      "url": "./setfield"
+    },
+    {
+      "label": "rmfield",
+      "url": "./rmfield"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/structs/core/orderfields.rs",
+    "url": "crates/runmat-runtime/src/builtins/structs/core/orderfields.rs"
+  },
+  "gpu_residency": "No. Struct field reordering never moves or converts the values stored inside the struct. Existing GPU handles remain on the device. You can freely combine `orderfields` with `gpuArray`, `gather`, or auto-offload features without affecting residency.",
+  "gpu_behavior": [
+    "`orderfields` operates on host-side struct metadata only. When a struct contains GPU tensors or handles, the handles remain valid and resident on the device. No kernels are dispatched and no data is gathered or copied between host and device."
+  ]
+}

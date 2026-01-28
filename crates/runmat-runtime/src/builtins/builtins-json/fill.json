@@ -1,0 +1,169 @@
+{
+  "title": "fill",
+  "category": "array/creation",
+  "keywords": [
+    "fill",
+    "constant",
+    "array",
+    "gpu",
+    "like"
+  ],
+  "summary": "Create MATLAB arrays filled with a constant value.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses provider fill hooks for constant buffers; falls back to host upload when unavailable."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "uniform"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::fill::tests",
+    "integration": "builtins::array::creation::fill::tests::fill_gpu_like_alloc"
+  },
+  "description": "`fill(value, size, ...)` constructs dense MATLAB arrays whose entries are all the supplied `value`. It aligns with the MATLAB-compatible RunMat array creation suite (`zeros`, `ones`, `eye`, etc.) while supporting GPU residency, `'like'` prototypes, and logical/complex outputs.",
+  "behaviors": [
+    "`fill(v)` returns the scalar `v`.",
+    "`fill(v, n)` returns an `n \u00d7 n` matrix with every element equal to `v`.",
+    "`fill(v, m, n, ...)` supports arbitrary N-D dimensions.",
+    "`fill(v, sz)` accepts a size vector (row or column).",
+    "`fill(v, A)` uses the shape (and default type) of `A`.",
+    "`fill(v, ___, 'logical')` produces a logical array where each element is `v ~= 0`.",
+    "`fill(v, ___, 'like', prototype)` matches the type, device residency, and shape of `prototype`.",
+    "When a GPU prototype or `'like'` argument is provided, RunMat keeps the result on the device. When provider hooks are incomplete, it falls back to uploading a host tensor to guarantee correctness."
+  ],
+  "examples": [
+    {
+      "description": "Creating a 3x3 matrix of 2.5s",
+      "input": "A = fill(2.5, 3);",
+      "output": "A = [2.5 2.5 2.5; 2.5 2.5 2.5; 2.5 2.5 2.5];"
+    },
+    {
+      "description": "Filling a rectangular matrix with -4",
+      "input": "B = fill(-4, 2, 5);",
+      "output": "B = [-4 -4 -4 -4 -4; -4 -4 -4 -4 -4];"
+    },
+    {
+      "description": "Filling using a size vector",
+      "input": "sz = [2 3 4];\nC = fill(10, sz);",
+      "output": "size(C)  % 2-by-3-by-4"
+    },
+    {
+      "description": "Creating a logical mask with `fill`",
+      "input": "mask = fill(3, 4, 1, 'logical');",
+      "output": "mask = [1; 1; 1; 1];"
+    },
+    {
+      "description": "Matching an existing array with `'like'`",
+      "input": "prototype = rand(2, 3, 'like', gpuArray(1));\nD = fill(pi, 2, 3, 'like', prototype);",
+      "output": "D is gpuArray\ngather(D) = ones(2, 3) * pi;"
+    },
+    {
+      "description": "Filling a complex array",
+      "input": "E = fill(1 + 2i, 2, 2, 'complex');",
+      "output": "E = [1+2i 1+2i; 1+2i 1+2i];"
+    },
+    {
+      "description": "Using a prototype to infer shape automatically",
+      "input": "F = rand(4, 2);\nG = fill(7, F);",
+      "output": "isequal(size(G), [4 2])  % true"
+    },
+    {
+      "description": "Filling an empty matrix",
+      "input": "H = fill(0, 0, 5);",
+      "output": "size(H)  % 0-by-5"
+    },
+    {
+      "description": "Keeping GPU residency without explicit `gpuArray`",
+      "input": "A = rand(512, 512);\nJ = fill(0.5, size(A), 'like', gpuArray(A));",
+      "output": "isa(J, 'gpuArray')  % true"
+    },
+    {
+      "description": "Filling with boolean semantics",
+      "input": "K = fill(false, [2 2], 'logical');",
+      "output": "K = [0 0; 0 0];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which argument order does `fill` support?",
+      "answer": "The first argument is always the scalar value. Remaining arguments specify dimensions, size vectors, or options (`'logical'`, `'like'`, `'double'`, `'complex'`)."
+    },
+    {
+      "question": "Does `fill` accept non-scalar values?",
+      "answer": "No. The fill value must be numeric, logical, or complex scalar. Use `repmat` when you need to tile an array."
+    },
+    {
+      "question": "How does `fill` behave with complex values?",
+      "answer": "If you request complex output (explicitly or via `'like'`), the real and imaginary parts are copied verbatim. Otherwise the imaginary component must be zero."
+    },
+    {
+      "question": "How do logical arrays handle nonzero values?",
+      "answer": "Logical outputs treat any nonzero real or complex magnitude as `true`, matching MATLAB semantics."
+    },
+    {
+      "question": "Can I match GPU residency automatically?",
+      "answer": "Yes. Pass a GPU prototype via `'like'` and `fill` will allocate on the device. It falls back to host allocation and upload when the provider cannot construct the constant directly."
+    },
+    {
+      "question": "What happens when I omit dimensions?",
+      "answer": "If you only pass the value, `fill` returns a scalar. When you pass a prototype (e.g., `fill(v, A)`), the prototype shape is reused. Otherwise RunMat follows MATLAB's default of `1 \u00d7 1`."
+    },
+    {
+      "question": "Are string or char outputs supported?",
+      "answer": "Not yet. `fill` currently targets numeric, logical, and complex arrays. Use string-manipulation functions for text."
+    },
+    {
+      "question": "How do I create empty outputs?",
+      "answer": "Include a zero dimension (`fill(value, 0, n)` or `fill(value, [0 n])`). RunMat returns an empty array of the requested size and type."
+    },
+    {
+      "question": "Does `fill` honour `'single'` outputs?",
+      "answer": "Single precision outputs are not implemented yet. The function returns an error mirroring other array creation builtins."
+    },
+    {
+      "question": "Is the GPU path deterministic?",
+      "answer": "Yes. Providers either execute the constant fill entirely on the GPU or RunMat uploads a deterministic host tensor, ensuring identical results."
+    }
+  ],
+  "links": [
+    {
+      "label": "zeros",
+      "url": "./zeros"
+    },
+    {
+      "label": "ones",
+      "url": "./ones"
+    },
+    {
+      "label": "repmat",
+      "url": "./repmat"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/fill.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/fill.rs"
+  },
+  "gpu_residency": "```matlab:runnable\nA = rand(512, 512);\nJ = fill(0.5, size(A), 'like', gpuArray(A));\n```\n\nExpected output:\n\n```matlab\nisa(J, 'gpuArray')  % true\n```",
+  "gpu_behavior": [
+    "RunMat asks the active acceleration provider to materialise the constant directly via the dedicated `fill` hook. Providers that do not supply this capability fall back to a zero buffer plus scalar add or, as a last resort, upload the fully materialised host tensor. This guarantees MATLAB-compatible results while still benefiting from GPU residency whenever possible."
+  ]
+}

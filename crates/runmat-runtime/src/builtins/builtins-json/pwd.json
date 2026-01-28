@@ -1,0 +1,108 @@
+{
+  "title": "pwd",
+  "category": "io/repl_fs",
+  "keywords": [
+    "pwd",
+    "current directory",
+    "working folder",
+    "present working directory"
+  ],
+  "summary": "Return the absolute path to the folder where RunMat is currently executing.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/pwd.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host CPU. No GPU kernels are launched and no provider hooks are required."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::pwd::tests",
+    "integration": "builtins::io::repl_fs::pwd::tests::pwd_reflects_directory_changes"
+  },
+  "description": "`pwd` returns the absolute path of the folder where RunMat is executing. The result is a character row vector (`1\u00d7N`) so existing MATLAB code that expects traditional character output keeps working.",
+  "behaviors": [
+    "Always returns the current working folder of the RunMat process.",
+    "Output is a character vector using the platform-native path separators.",
+    "Does not accept any input arguments; if arguments are provided, MATLAB raises an error. RunMat follows the same rule by reporting `pwd: too many input arguments`.",
+    "Errors if RunMat is unable to query the current folder from the operating system.",
+    "Designed to cooperate with `cd` so workflows like `start = pwd; cd(\"subfolder\"); ...; cd(start);` behave exactly as they do in MATLAB."
+  ],
+  "examples": [
+    {
+      "description": "Show The Current Working Folder",
+      "input": "current = pwd;\ndisp(current);",
+      "output": "C:\\Users\\alex\\runmat-project"
+    },
+    {
+      "description": "Capture The Folder Before Changing Directories",
+      "input": "startDir = pwd;\nif ~exist(\"results\", \"dir\")\n    mkdir(\"results\");\nend\ncd(\"results\");\n% ... produce artifacts in results/ ...\ncd(startDir);",
+      "output": "% Restores the original folder after work completes"
+    },
+    {
+      "description": "Combine `pwd` With `cd` To Print Relative Paths",
+      "input": "old = cd(\"..\");\nfprintf(\"Now working in: %s\\n\", pwd);\ncd(old);",
+      "output": "% Prints the absolute path to the parent directory, then returns to the old folder\n% For example:\n%   Now working in: /Users/alex"
+    },
+    {
+      "description": "Confirm The Folder Inside Scripts",
+      "input": "fprintf(\"Script started in %s\\n\", pwd);",
+      "output": "% Example output:\n%   Script started in /Users/alex/runmat-project"
+    },
+    {
+      "description": "Log The Working Folder Together With Results",
+      "input": "logFile = \"run.log\";\nfid = fopen(logFile, \"w\");\nfprintf(fid, \"Working folder: %s\\n\", pwd);\nfclose(fid);",
+      "output": "% The log file contains a line such as:\n%   Working folder: /Users/alex/runmat-project"
+    },
+    {
+      "description": "Handle Errors When The Working Folder Is Unavailable",
+      "input": "try\n    location = pwd;\ncatch err\n    disp(err.message);\nend",
+      "output": "% Displays a descriptive error message if RunMat cannot query the folder,\n% for example:\n%   pwd: unable to determine current directory (Permission denied)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why does `pwd` return a character vector instead of a string?",
+      "answer": "MATLAB historically returns character vectors for `pwd`. RunMat mirrors that behavior so existing code keeps working. Use `string(pwd)` if you prefer string scalars."
+    },
+    {
+      "question": "Does `pwd` reflect changes made with `cd`?",
+      "answer": "Yes. Any successful `cd` call immediately affects what `pwd` returns, matching MATLAB's semantics."
+    },
+    {
+      "question": "Can `pwd` fail?",
+      "answer": "It is rare, but the operating system can prevent the process from querying the current folder. In that case RunMat raises an error that includes the OS reason."
+    },
+    {
+      "question": "Does `pwd` normalize the path?",
+      "answer": "RunMat returns the operating-system path exactly as reported, just like MATLAB."
+    },
+    {
+      "question": "Is `pwd` safe to call from GPU-heavy scripts?",
+      "answer": "Absolutely. The builtin does not allocate GPU memory or trigger device operations."
+    }
+  ],
+  "links": [
+    {
+      "label": "cd",
+      "url": "./cd"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/pwd.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/pwd.rs"
+  },
+  "gpu_residency": "No. `pwd` always operates on the CPU. Even in scripts that perform extensive GPU computation, you can call `pwd` at any time to confirm the working folder without affecting GPU residency or triggering device transfers.",
+  "gpu_behavior": [
+    "`pwd` never runs on the GPU. It performs a host-side query of the process working directory and returns the result as a character vector. The builtin registers a CPU-only GPU spec with `ResidencyPolicy::GatherImmediately`, ensuring fusion plans always surface the path on the host. Because there are no inputs, nothing is gathered from device memory and acceleration providers do not need to implement any hooks for this builtin."
+  ]
+}

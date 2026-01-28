@@ -1,0 +1,106 @@
+{
+  "title": "error",
+  "category": "diagnostics",
+  "keywords": [
+    "error",
+    "exception",
+    "throw",
+    "diagnostics",
+    "message"
+  ],
+  "summary": "Throw an exception with an identifier and a formatted diagnostic message.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Always executed on the host; GPU tensors are gathered only when they appear in formatted arguments."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::diagnostics::error::tests",
+    "integration": null
+  },
+  "description": "`error` throws an exception immediately, unwinding the current execution frame and transferring control to the nearest `catch` block (or aborting the program if none exists). RunMat mirrors MATLAB's behaviour, including support for message identifiers, formatted messages, `MException` objects, and legacy message structs.",
+  "behaviors": [
+    "`error(message)` throws using the default identifier `MATLAB:error`.",
+    "`error(id, message)` uses a custom identifier. Identifiers are normalised to `MATLAB:*` when they do not already contain a namespace.",
+    "`error(fmt, arg1, ...)` formats the message with MATLAB's `sprintf` rules before throwing.",
+    "`error(id, fmt, arg1, ...)` combines both a custom identifier and formatted message text.",
+    "`error(MException_obj)` rethrows an existing exception without altering its identifier or message.",
+    "`error(struct('identifier', id, 'message', msg))` honours the legacy structure form.",
+    "Invalid invocations (missing message, extra arguments after an `MException`, malformed structs, etc.) themselves raise `MATLAB:error` diagnostics so the caller can correct usage.\n\nThe thrown exception is observed in MATLAB-compatible `try`/`catch` constructs or by the embedding runtime, which converts the string back into an `MException` object."
+  ],
+  "examples": [
+    {
+      "description": "Throwing an error with a simple message",
+      "input": "try\n    error(\"Computation failed.\");\ncatch err\n    fprintf(\"%s -> %s\\n\", err.identifier, err.message);\nend"
+    },
+    {
+      "description": "Throwing an error with a custom identifier",
+      "input": "try\n    error(\"runmat:examples:invalidState\", \"State vector is empty.\");\ncatch err\n    fprintf(\"%s\\n\", err.identifier);\nend"
+    },
+    {
+      "description": "Formatting values inside the error message",
+      "input": "value = 42;\ntry\n    error(\"MATLAB:demo:badValue\", \"Value %d is outside [%d, %d].\", value, 0, 10);\ncatch err\n    disp(err.message);\nend"
+    },
+    {
+      "description": "Rethrowing an existing MException",
+      "input": "try\n    try\n        error(\"MATLAB:inner:failure\", \"Inner failure.\");\n    catch inner\n        error(inner); % propagate with original identifier/message\n    end\ncatch err\n    fprintf(\"%s\\n\", err.identifier);\nend"
+    },
+    {
+      "description": "Using a legacy message struct",
+      "input": "S.identifier = \"toolbox:demo:badInput\";\nS.message = \"Inputs must be positive integers.\";\ntry\n    error(S);\ncatch err\n    fprintf(\"%s\\n\", err.identifier);\nend"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How do I choose a custom identifier?",
+      "answer": "Use `component:mnemonic` style strings such as `\"MATLAB:io:fileNotFound\"` or `\"runmat:tools:badInput\"`. If you omit a namespace (`:`), RunMat prefixes the identifier with `MATLAB:` automatically."
+    },
+    {
+      "question": "Can I rethrow an existing `MException`?",
+      "answer": "Yes. Pass the object returned by `catch err` directly to `error(err)` to propagate it unchanged."
+    },
+    {
+      "question": "What happens if I pass extra arguments after an `MException` or struct?",
+      "answer": "RunMat treats that as invalid usage and raises `MATLAB:error` explaining that no additional arguments are allowed in those forms."
+    },
+    {
+      "question": "Does `error` run on the GPU?",
+      "answer": "No. The builtin executes on the host. If the message references GPU data, RunMat gathers the values before formatting the diagnostic string."
+    },
+    {
+      "question": "What if I call `error` without arguments?",
+      "answer": "RunMat raises `MATLAB:error` indicating that a message is required, matching MATLAB's behaviour."
+    },
+    {
+      "question": "Why was my identifier normalised to `MATLAB:...`?",
+      "answer": "MATLAB requires message identifiers to contain at least one namespace separator (`:`). RunMat enforces this rule so diagnostics integrate cleanly with tooling that expects fully-qualified identifiers."
+    },
+    {
+      "question": "Can the message span multiple lines?",
+      "answer": "Yes. Any newline characters in the formatted message are preserved exactly in the thrown exception."
+    },
+    {
+      "question": "Does formatting follow MATLAB rules?",
+      "answer": "Yes. `error` uses the same formatter as `sprintf`, including width/precision specifiers and numeric conversions, and will raise `MATLAB:error` if the format string is invalid or under-specified. #"
+    }
+  ],
+  "links": [],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/diagnostics/error.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/diagnostics/error.rs"
+  },
+  "gpu_residency": "`error` is a control-flow builtin and never executes on the GPU. When formatting messages that include GPU-resident arrays (for example, via `%g` or `%s` specifiers), RunMat first gathers those values back to host memory so that the final diagnostic message accurately reflects the data the user passed.",
+  "gpu_behavior": [
+    "`error` is a control-flow builtin and never executes on the GPU. When formatting messages that include GPU-resident arrays (for example, via `%g` or `%s` specifiers), RunMat first gathers those values back to host memory so that the final diagnostic message accurately reflects the data the user passed."
+  ]
+}

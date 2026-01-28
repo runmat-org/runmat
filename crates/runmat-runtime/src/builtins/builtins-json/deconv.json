@@ -1,0 +1,143 @@
+{
+  "title": "deconv",
+  "category": "math/signal",
+  "keywords": [
+    "deconv",
+    "deconvolution",
+    "polynomial division",
+    "signal",
+    "gpu"
+  ],
+  "summary": "Divide one polynomial (or 1-D sequence) by another, returning the quotient and remainder.",
+  "references": [
+    "title: \"MATLAB deconv documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "When the active provider lacks a dedicated deconvolution kernel, RunMat gathers the data to the host, evaluates the quotient/remainder, and uploads the outputs back to the GPU if possible."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::deconv::tests",
+    "integration": "builtins::math::signal::deconv::tests::deconv_gpu_roundtrip"
+  },
+  "description": "`deconv(b, a)` performs one-dimensional polynomial long division. Given coefficient vectors `b` and `a`, it returns a quotient `q` and remainder `r` such that\n\n```\nconv(a, q) + r == b\n```\n\nCoefficients follow MATLAB conventions: the first entry stores the highest-order term and the last entry stores the constant term. Both real and complex inputs are supported.",
+  "behaviors": [
+    "Inputs must be scalars, row vectors, or column vectors. Multi-dimensional tensors are rejected.",
+    "Leading zeros are ignored during division, matching MATLAB\u2019s behaviour. The outputs include just enough coefficients to represent the resulting polynomials (with at least one element for the zero polynomial).",
+    "When `length(b) < length(a)`, the quotient is zero and the remainder equals `b`.",
+    "Logical inputs are promoted to double precision prior to division (TRUE \u2192 1.0, FALSE \u2192 0.0).",
+    "Complex coefficients are handled exactly; the quotient and remainder retain complex values.",
+    "Empty denominators and all-zero denominators raise MATLAB-compatible errors."
+  ],
+  "examples": [
+    {
+      "description": "Recovering a factor from a polynomial product",
+      "input": "p = conv([1 2], [1 -3 2]);   % Multiply two polynomials\n[q, r] = deconv(p, [1 2]);   % Divide by the first factor",
+      "output": "q = [1 -3 2];\nr = 0;"
+    },
+    {
+      "description": "Obtaining a non-zero remainder",
+      "input": "[q, r] = deconv([1 4 7], [1 2]);",
+      "output": "q = [1 2];\nr = [3];"
+    },
+    {
+      "description": "Dividing by a longer sequence",
+      "input": "[q, r] = deconv([3 5], [1 0 2]);",
+      "output": "q = 0;\nr = [3 5];"
+    },
+    {
+      "description": "Handling leading zeros explicitly",
+      "input": "b = [0 0 1 2];\na = [0 1 1];\n[q, r] = deconv(b, a);",
+      "output": "q = [1];\nr = [1];"
+    },
+    {
+      "description": "Complex polynomial division",
+      "input": "b = [1+2i 3-4i 2];\na = [1-i 2+i];\n[q, r] = deconv(b, a);",
+      "output": "q = [1+0i 1-2i];\nr = [0+0i];"
+    },
+    {
+      "description": "GPU inputs with automatic host fallback",
+      "input": "b = gpuArray([1 3 3 1]);\na = gpuArray([1 1]);\n[q, r] = deconv(b, a); % Quotient stays on the GPU when possible\nr = gather(r);         % Explicitly gather the remainder if needed on the host"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What happens if the denominator is empty or entirely zero?",
+      "answer": "An error is raised. MATLAB requires a non-empty, non-zero denominator polynomial."
+    },
+    {
+      "question": "Can I pass logical or integer vectors?",
+      "answer": "Yes. They are promoted to double precision before division so the results match MATLAB exactly."
+    },
+    {
+      "question": "Why are leading zeros dropped from the outputs?",
+      "answer": "They do not change the represented polynomial. Dropping them keeps results compact and mirrors MATLAB\u2019s behaviour. The zero polynomial is returned as a single zero."
+    },
+    {
+      "question": "Does `deconv` support column vectors?",
+      "answer": "Absolutely. The orientation of the numerator (`b`) determines the orientation of both the quotient and remainder."
+    },
+    {
+      "question": "How should I reconstruct the original polynomial?",
+      "answer": "`conv(a, q) + r` (using MATLAB\u2019s polynomial addition rules, which pad shorter vectors on the left) recreates the original numerator."
+    },
+    {
+      "question": "Are FFT-based deconvolutions supported?",
+      "answer": "`deconv` implements exact polynomial long division. For FFT-based signal deconvolution, combine `fft`, elementwise division, and `ifft` manually."
+    },
+    {
+      "question": "What about numerical stability?",
+      "answer": "`deconv` mirrors MATLAB\u2019s long-division semantics. For ill-conditioned problems, consider scaling the coefficients or using higher precision (e.g., symbolic toolboxes) just as you would in MATLAB."
+    },
+    {
+      "question": "Can I request both outputs in one statement?",
+      "answer": "Yes. `[q, r] = deconv(b, a)` returns both quotient and remainder; requesting only one output returns the quotient."
+    }
+  ],
+  "links": [
+    {
+      "label": "conv",
+      "url": "./conv"
+    },
+    {
+      "label": "conv2",
+      "url": "./conv2"
+    },
+    {
+      "label": "fft",
+      "url": "./fft"
+    },
+    {
+      "label": "ifft",
+      "url": "./ifft"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "Open a ticket",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  },
+  "gpu_behavior": [
+    "When either input resides on the GPU (`gpuArray` values), RunMat first checks whether the active acceleration provider exposes a dedicated deconvolution hook. The current providers (in-process and WGPU) do not yet offer this kernel, so the runtime always:\n\n1. Gathers the device operands into host memory. 2. Performs the polynomial long division on the CPU. 3. Re-uploads real-valued results to the provider so downstream fused kernels can remain device-resident (complex outputs stay on the host until providers add complex buffer uploads).\n\nThis fallback keeps behaviour identical to MATLAB. Gather the outputs explicitly only when you need them on the host."
+  ]
+}

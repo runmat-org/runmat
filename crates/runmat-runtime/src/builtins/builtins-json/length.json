@@ -1,0 +1,122 @@
+{
+  "title": "length",
+  "category": "array/introspection",
+  "keywords": [
+    "length",
+    "largest dimension",
+    "vector length",
+    "gpu metadata",
+    "array size"
+  ],
+  "summary": "Return the length of the largest dimension of scalars, vectors, matrices, and N-D arrays.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Reads tensor metadata from handles; falls back to host when provider metadata is incomplete."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::introspection::length::tests",
+    "integration": "builtins::array::introspection::length::tests::length_gpu_tensor_reads_shape"
+  },
+  "description": "`length(A)` returns the length of the largest dimension of `A`. Scalars report `1`, column vectors report their row count, row vectors return their column count, and rectangular matrices yield the larger of their row or column dimensions. For higher-rank arrays, the function returns the maximum extent across every dimension.",
+  "behaviors": [
+    "The result is always a double-precision scalar.",
+    "Empty arrays report `0` when every dimension is zero; otherwise the maximum non-zero dimension is reported (e.g., `0×5` arrays have length `5`).",
+    "Character arrays and string arrays follow their array dimensions, not the number of code points.",
+    "Cell arrays use their MATLAB array shape (`rows × cols`) with the maximum dimension returned.",
+    "GPU-resident arrays are inspected without gathering when the provider populates shape metadata on the tensor handle; otherwise, RunMat gathers once to recover the correct dimensions.",
+    "Arguments that are not arrays (scalars, logicals, strings, handle objects) are treated as `1×1`."
+  ],
+  "examples": [
+    {
+      "description": "Determine the length of a row vector",
+      "input": "row = [1 2 3 4];\nn = length(row);",
+      "output": "n = 4;"
+    },
+    {
+      "description": "Find the longer side of a rectangular matrix",
+      "input": "A = randn(5, 12);\nlen = length(A);",
+      "output": "len = 12;"
+    },
+    {
+      "description": "Handle empty arrays that still have a non-zero dimension",
+      "input": "E = zeros(0, 7);\nlen = length(E);",
+      "output": "len = 7;"
+    },
+    {
+      "description": "Measure the length of a character array",
+      "input": "name = 'RunMat';\nlen = length(name);",
+      "output": "len = 6;"
+    },
+    {
+      "description": "Inspect the length of a gpuArray without gathering",
+      "input": "G = gpuArray(ones(256, 4));\nlen = length(G);",
+      "output": "len = 256;"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `length` different from `size`?",
+      "answer": "`length(A)` returns the maximum dimension length as a scalar, whereas `size(A)` returns every dimension in a row vector. Use `length` when you only care about the longest dimension."
+    },
+    {
+      "question": "What does `length` return for scalars?",
+      "answer": "Scalars are treated as `1×1`, so `length(scalar)` returns `1`."
+    },
+    {
+      "question": "How does `length` behave for empty arrays?",
+      "answer": "If all dimensions are zero, `length` returns `0`. If any dimension is non-zero, the maximum dimension is returned. For example, `zeros(0, 5)` has length `5`, but `zeros(0, 0)` has length `0`."
+    },
+    {
+      "question": "Does `length` gather GPU data?",
+      "answer": "No. The runtime relies on shape metadata stored in the GPU tensor handle. Only when that metadata is missing does RunMat gather the tensor to maintain correctness."
+    },
+    {
+      "question": "Can I use `length` on cell arrays and structs?",
+      "answer": "Yes. `length` examines the MATLAB array shape of the container, so cell arrays and struct arrays return the maximum dimension of their array layout."
+    },
+    {
+      "question": "Does `length` count characters or bytes?",
+      "answer": "For character arrays, the length reflects the array dimensions (rows and columns), not encoded byte length or Unicode scalar counts."
+    },
+    {
+      "question": "What about string arrays?",
+      "answer": "String arrays are treated like any other array. String scalars are `1×1`, so `length(\"abc\")` returns `1`. Use `strlength` if you need the number of characters in each element."
+    },
+    {
+      "question": "Is `length` safe to use inside fused GPU expressions?",
+      "answer": "Yes. `length` never allocates or keeps data on the GPU. It returns a host scalar immediately, so it won't break fusion plans."
+    }
+  ],
+  "links": [
+    {
+      "label": "size",
+      "url": "./size"
+    },
+    {
+      "label": "numel (MathWorks)",
+      "url": "https://www.mathworks.com/help/matlab/ref/numel.html"
+    },
+    {
+      "label": "strlength (MathWorks)",
+      "url": "https://www.mathworks.com/help/matlab/ref/strlength.html"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/introspection/length.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/introspection/length.rs"
+  },
+  "gpu_behavior": [
+    "`length` is a metadata query. When the input is a GPU tensor, RunMat looks at the shape embedded in the GPU handle (`GpuTensorHandle.shape`). If the active provider leaves that metadata empty, the runtime invokes `provider.download(handle)` a single time to recover the shape, ensuring MATLAB-compatible behaviour. No GPU kernels are launched and no device buffers are allocated by this builtin."
+  ]
+}

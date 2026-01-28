@@ -1,0 +1,126 @@
+{
+  "title": "filter2",
+  "category": "image/filters",
+  "keywords": [
+    "filter2",
+    "correlation",
+    "convolution",
+    "image filtering",
+    "gpu"
+  ],
+  "summary": "Apply 2-D correlation or convolution using MATLAB-compatible semantics.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Reuses the imfilter acceleration hook when available; otherwise RunMat gathers tensors to the host automatically."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::image::filters::filter2::tests",
+    "integration": "builtins::image::filters::filter2::tests::filter2_gpu_matches_cpu"
+  },
+  "description": "`filter2(H, X)` performs a 2-D correlation of the image (or matrix) `X` with the kernel `H`. By default the operation returns an array the same size as `X`, mirroring MATLAB\u2019s behaviour and matching the identity `filter2(H, X) == conv2(X, rot90(H, 2), 'same')`.",
+  "behaviors": [
+    "The first argument is the kernel and the second is the image or matrix being filtered.",
+    "The default configuration performs correlation with zero padding and `'same'` output sizing.",
+    "Passing `'full'` or `'valid'` as the third argument switches the output size to the full convolution result or the strictly valid interior, respectively.",
+    "Supplying `'conv'` rotates the kernel by 180\u00b0 so the operation matches MATLAB convolution. Use `'corr'` for an explicit correlation request; it is the default.",
+    "Inputs may be numeric or logical. Logical arrays are promoted to double precision prior to filtering.",
+    "Both arguments may be gpuArray handles; RunMat keeps them on the device whenever the active acceleration provider exposes the `imfilter` hook."
+  ],
+  "examples": [
+    {
+      "description": "Averaging a matrix with a 3x3 kernel",
+      "input": "H = ones(3) / 9;\nX = [1 2 3; 4 5 6; 7 8 9];\nY = filter2(H, X);",
+      "output": "Y =\n    1.3333    2.3333    1.7778\n    3.0000    5.0000    3.6667\n    2.6667    4.3333    3.1111"
+    },
+    {
+      "description": "Requesting the full convolution result",
+      "input": "H = [1 2; 3 4];\nX = [4 1; 2 0];\nY = filter2(H, X, 'full');",
+      "output": "Y =\n     4     9     2\n    14    23     4\n     6     8     0"
+    },
+    {
+      "description": "Restricting the result to the valid interior",
+      "input": "H = ones(3);\nX = magic(5);\nY = filter2(H, X, 'valid');",
+      "output": "Y =\n   100    98   116\n    99   117   135\n   118   136   134"
+    },
+    {
+      "description": "Switching to convolution mode",
+      "input": "H = [1 2; 3 4];\nX = [1 2 3; 4 5 6; 7 8 9];\nY = filter2(H, X, 'conv');",
+      "output": "Y =\n     4    11    18\n    18    37    47\n    36    67    77"
+    },
+    {
+      "description": "Filtering data already on the GPU",
+      "input": "H = gpuArray([1 0 -1; 1 0 -1; 1 0 -1]);\nX = gpuArray([1 2 3; 4 5 6; 7 8 9]);\nY = filter2(H, X);\nresult = gather(Y);",
+      "output": "result =\n     7     4    -7\n    15     6   -15\n    13     4   -13"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can I pass string padding modes like `imfilter`?",
+      "answer": "No. `filter2` mirrors MATLAB and only accepts `'same'`, `'full'`, `'valid'`, `'corr'`, and `'conv'`. For advanced padding control use `imfilter`."
+    },
+    {
+      "question": "Does the builtin normalise the kernel?",
+      "answer": "No. The kernel is used exactly as supplied. Use helpers such as `fspecial` or manual scaling when you need a normalised filter."
+    },
+    {
+      "question": "What happens when the kernel is larger than the image?",
+      "answer": "`'same'` still returns an output the same size as the input, padded with zeros where the kernel extends beyond the image. `'valid'` returns an empty array whenever the kernel does not fully fit within the image."
+    },
+    {
+      "question": "Can I combine `filter2` with gpuArray inputs?",
+      "answer": "Yes. If either argument is a gpuArray, RunMat forwards the computation to the active acceleration provider and only gathers the data when the provider hook is unavailable."
+    },
+    {
+      "question": "Does `filter2` support higher-dimensional arrays?",
+      "answer": "MathWorks MATLAB defines `filter2` for 2-D filtering. Use `imfilter` when you need explicit padding control or want to extend the operation to higher-dimensional arrays."
+    },
+    {
+      "question": "Does `filter2` preserve logical inputs?",
+      "answer": "Logical arrays are promoted to double precision before filtering, matching MATLAB behaviour."
+    },
+    {
+      "question": "How do I perform separable filtering efficiently?",
+      "answer": "Apply successive 1-D `filter2` calls with thin kernels or use `imfilter` for more control over padding and dimensionality."
+    }
+  ],
+  "links": [
+    {
+      "label": "imfilter",
+      "url": "./imfilter"
+    },
+    {
+      "label": "fspecial",
+      "url": "./fspecial"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/image/filters/filter2.rs",
+    "url": "crates/runmat-runtime/src/builtins/image/filters/filter2.rs"
+  },
+  "gpu_residency": "Usually not. When the acceleration provider exposes the `imfilter` hook, `filter2` keeps the operands on the GPU and returns a GPU tensor. Host fallbacks are automatic; the builtin gathers data only when the required hook is missing or reports an error. Explicit `gpuArray` calls remain useful for deterministic residency or backwards compatibility with MATLAB scripts.",
+  "gpu_behavior": [
+    "The builtin delegates to the same acceleration hook that powers `imfilter`. When the provider implements `imfilter`, `filter2` uploads host-resident kernels on demand, keeps GPU-resident images on the device, and only downloads results when absolutely necessary. Providers that skip the hook trigger a transparent fallback: RunMat gathers the operands to the host and executes the shared reference implementation, guaranteeing MATLAB-compatible results without extra configuration."
+  ]
+}

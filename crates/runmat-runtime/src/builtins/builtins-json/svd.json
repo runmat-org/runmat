@@ -1,0 +1,139 @@
+{
+  "title": "svd",
+  "category": "math/linalg/factor",
+  "keywords": [
+    "svd",
+    "singular value decomposition",
+    "linalg",
+    "economy",
+    "vector",
+    "gpu"
+  ],
+  "summary": "Singular value decomposition with full, economy, and vectorised forms.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "No provider hook today; gpuArray inputs gather to host, execute the CPU SVD, and return host tensors."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::factor::svd::tests",
+    "integration": "builtins::math::linalg::factor::svd::tests::svd_three_outputs_reconstruct"
+  },
+  "description": "`svd(A)` computes the singular value decomposition of a real or complex matrix `A`. It factors `A` into the product `U * S * V'`, where `U` and `V` are orthogonal/unitary matrices and `S` is diagonal (or rectangular diagonal) with non-negative, descending singular values.",
+  "behaviors": [
+    "Single output `s = svd(A)` returns the singular values as a column vector sorted in descending order.",
+    "Three outputs `[U,S,V] = svd(A)` return the full-sized factors with `U` square `m\u00d7m`, `S` shaped `m\u00d7n`, and `V` square `n\u00d7n` (`m = size(A,1)`, `n = size(A,2)`).",
+    "Economy form `[U,S,V] = svd(A,'econ')` (or `svd(A,0)`) reduces the shapes to the rank-defining dimension so that `U` and `V` drop the redundant orthogonal columns.",
+    "Vector form `[U,s,V] = svd(A,'vector')` supplies the singular values as a vector instead of a diagonal matrix. You can combine `'vector'` with `'econ'`.",
+    "Logical and integer inputs are promoted to double precision before factorisation.",
+    "Complex inputs yield unitary `U` and `V` (conjugate-transpose preserves orthogonality) with real, non-negative singular values.",
+    "Empty matrices, row/column vectors, and scalars are all supported and follow MATLAB\u2019s shape conventions."
+  ],
+  "examples": [
+    {
+      "description": "Getting the singular values of a matrix",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\ns = svd(A);"
+    },
+    {
+      "description": "Full SVD and reconstruction of a square matrix",
+      "input": "A = [3 1; 0 2];\n[U,S,V] = svd(A);\nA_recon = U * S * V';"
+    },
+    {
+      "description": "Economy-size SVD for a tall matrix",
+      "input": "A = randn(6, 3);\n[U,S,V] = svd(A, 'econ');\nsize(U) %  6 x 3\nsize(S) %  3 x 3\nsize(V) %  3 x 3"
+    },
+    {
+      "description": "Economy-size SVD for a wide matrix",
+      "input": "A = randn(3, 6);\n[U,S,V] = svd(A, 'econ');\nsize(U) %  3 x 3\nsize(S) %  3 x 6\nsize(V) %  6 x 6"
+    },
+    {
+      "description": "Requesting vector form of the singular values",
+      "input": "A = [10 0; 0 1];\n[U,s,V] = svd(A, 'vector');"
+    },
+    {
+      "description": "Computing the SVD of a complex matrix",
+      "input": "A = [1+2i, 2-1i; 0, 3i];\n[U,S,V] = svd(A);"
+    },
+    {
+      "description": "Running `svd` on a `gpuArray` (automatic host fallback today)",
+      "input": "G = gpuArray(randn(128, 64));\ns = svd(G);           % Values are gathered to host transparently"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How are the singular values ordered?",
+      "answer": "They are returned in non-increasing order. MATLAB\u2019s sign conventions are followed: values are non-negative and appear on the diagonal of `S` (or inside the vector form)."
+    },
+    {
+      "question": "What is the difference between full and economy forms?",
+      "answer": "Full SVD returns square `U` and `V` (`m\u00d7m` and `n\u00d7n`). Economy SVD trims them to `m\u00d7min(m,n)` and `n\u00d7min(m,n)`. The `S` factor keeps the same column dimension as the input; it is `min(m,n)\u00d7min(m,n)` when `m \u2265 n` and `min(m,n)\u00d7n` when `m < n`. Use economy when you do not need the redundant orthogonal columns."
+    },
+    {
+      "question": "What does the `\"vector\"` option change?",
+      "answer": "It affects the second output. With `\"vector\"`, `S` is returned as a column vector of singular values, matching `svd(A)` in the single-output form. Without it, `S` is a diagonal matrix."
+    },
+    {
+      "question": "Can I mix `'econ'` and `'vector'`?",
+      "answer": "Yes. Any order of the options is accepted (`svd(A,'vector','econ')` and `svd(A,'econ','vector')` both work), and the returned dimensions mirror MATLAB\u2019s behaviour."
+    },
+    {
+      "question": "What happens with scalars or empty matrices?",
+      "answer": "`svd` of a scalar returns its absolute value. Empty matrices return empty factors with consistent dimensions so that downstream code can continue to operate without special cases."
+    },
+    {
+      "question": "Does RunMat require BLAS/LAPACK for `svd`?",
+      "answer": "No. The builtin is always available. When BLAS/LAPACK is enabled, the host implementation leverages those libraries through `nalgebra` for performance; otherwise a pure-Rust algorithm is used under the hood."
+    },
+    {
+      "question": "Will the results stay on the GPU?",
+      "answer": "Not yet. Presently the builtin gathers GPU operands to the host, runs the CPU factorisation, and returns host tensors. The GPU spec already reserves a hook so providers can keep everything device-resident once GPU kernels land."
+    }
+  ],
+  "links": [
+    {
+      "label": "eig",
+      "url": "./eig"
+    },
+    {
+      "label": "qr",
+      "url": "./qr"
+    },
+    {
+      "label": "lu",
+      "url": "./lu"
+    },
+    {
+      "label": "chol",
+      "url": "./chol"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/math/linalg/factor/svd.rs",
+    "url": "crates/runmat-runtime/src/builtins/math/linalg/factor/svd.rs"
+  },
+  "gpu_behavior": [
+    "RunMat reserves a dedicated `svd` provider hook; once a backend implements it, the factors can stay on the device as `gpuTensor` handles without round-tripping through host memory.",
+    "Today no provider ships that hook, so `gpuArray` inputs are gathered to the host, the CPU SVD executes, and the factors are returned as host tensors. You can re-establish residency with `gpuArray(s)` if you need to continue on the GPU.",
+    "Because SVD is a residency sink, the fusion planner treats it as a barrier\u2014preceding GPU tensors are gathered and subsequent ops run on the host unless you manually promote them again."
+  ]
+}

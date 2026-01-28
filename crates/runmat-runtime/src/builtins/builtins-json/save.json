@@ -1,0 +1,133 @@
+{
+  "title": "save",
+  "category": "io/mat",
+  "keywords": [
+    "save",
+    "mat",
+    "workspace",
+    "io",
+    "matlab save"
+  ],
+  "summary": "Persist variables from the current workspace to a MATLAB-compatible MAT-file.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/save.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "save performs synchronous host I/O. GPU-resident variables are gathered prior to serialisation; no provider hooks are required."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::mat::save::tests",
+    "integration": [
+      "builtins::io::mat::save::tests::save_gpu_tensor_roundtrip",
+      "builtins::io::mat::save::tests::save_wgpu_tensor_roundtrip"
+    ]
+  },
+  "description": "`save` writes variables from the current workspace to a MAT-file on disk. RunMat mirrors MATLAB semantics for choosing variables, handling structs, pattern-based selection via `'-regexp'`, and processing options such as `'-struct'`.",
+  "behaviors": [
+    "`save` with no arguments writes every variable from the caller workspace to `matlab.mat` in the current working directory. Set `RUNMAT_SAVE_DEFAULT_PATH` to override the default target when no filename is supplied.",
+    "`save filename` writes all workspace variables to `filename`. If the supplied name has no extension, `.mat` is added automatically. Paths are resolved relative to the current directory, and parent folders must already exist.",
+    "`save(filename, 'A', 'B')` writes only the listed variables. String arrays or cell arrays of character vectors are accepted to specify multiple names.",
+    "`save(filename, '-struct', 'S')` saves each field of struct `S` as a separate variable. Provide additional field names (`'field1'`, `'field2'`) to restrict the set.",
+    "`save filename -regexp '^foo' 'bar$'` saves every variable whose name matches any of the supplied regular expressions.",
+    "Existing files are overwritten unless `-append` is specified. RunMat currently reports an error when `-append` or other numeric/text format flags (for example `-ascii`, `-double`, `-v6`, `-v7.3`) are requested.",
+    "Unsupported types (function handles, objects, opaque graphics handles) raise descriptive errors. Numeric, logical, character, string, cell, and struct data are stored using MATLAB Level-5 MAT-file layout.",
+    "`save` returns `0` so scripts can treat it as a statement, matching MATLAB's void behaviour."
+  ],
+  "examples": [
+    {
+      "description": "Save the entire workspace",
+      "input": "x = 42;\ny = magic(3);\nsave('session.mat');"
+    },
+    {
+      "description": "Save selected variables only",
+      "input": "a = rand(1, 3);\nb = eye(2);\nc = \"ignore me\";\nsave('selection.mat', 'a', 'b');"
+    },
+    {
+      "description": "Save struct fields as individual variables",
+      "input": "opts.output = y;\nopts.answer = x;\nsave('opts.mat', '-struct', 'opts');"
+    },
+    {
+      "description": "Select variables by regular expression",
+      "input": "result_acc = 1:3;\nresult_tmp = 4:6;\nscratch = pi;\nsave('filtered.mat', '-regexp', '^result_', 'tmp$');"
+    },
+    {
+      "description": "Save multiple names using a string array",
+      "input": "names = [\"result_acc\", \"scratch\"];\nsave('mixed.mat', names);"
+    },
+    {
+      "description": "Save GPU arrays without manual gather",
+      "input": "G = gpuArray(magic(3));\nsave('gpu.mat', 'G');"
+    },
+    {
+      "description": "Error when a variable is missing",
+      "input": "save('bad.mat', 'missing');"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which MAT-file version is generated?",
+      "answer": "RunMat writes Level-5 (MATLAB 5.0) MAT-files, compatible with MATLAB R2006b and later as well as NumPy/Scipy readers. Structures and cell arrays are stored using standard `miMATRIX` elements."
+    },
+    {
+      "question": "Is `-append` supported?",
+      "answer": "Not yet. The builtin currently reports `save: -append is not supported` to signal the limitation. Future releases will add incremental writing."
+    },
+    {
+      "question": "Do text options like `-ascii` or `-double` work?",
+      "answer": "These legacy text/binary format switches are not supported. RunMat favours MATLAB's default MAT-file format."
+    },
+    {
+      "question": "Are objects or function handles saved?",
+      "answer": "No. RunMat matches MATLAB by raising an error when unsupported types are encountered."
+    },
+    {
+      "question": "Does `save` return a value?",
+      "answer": "Yes. The builtin returns `0`, which MATLAB treats as an empty output, so scripts can ignore the return value just as they do in MATLAB."
+    },
+    {
+      "question": "How do I change the default filename used by bare `save`?",
+      "answer": "Set the environment variable `RUNMAT_SAVE_DEFAULT_PATH` before launching RunMat. When `save` is called without explicit filename arguments, the builtin writes to that path instead of `matlab.mat`."
+    },
+    {
+      "question": "Does `save` create parent directories automatically?",
+      "answer": "No. Parent folders must already exist; otherwise the builtin raises an error from the host filesystem."
+    }
+  ],
+  "links": [
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    },
+    {
+      "label": "fileread",
+      "url": "./fileread"
+    },
+    {
+      "label": "fopen",
+      "url": "./fopen"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/mat/save.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/save.rs"
+  },
+  "gpu_residency": "No manual action is required. `save` gathers `gpuArray` inputs automatically before writing the MAT-file. This matches MATLAB's behaviour when `gpuArray` variables are passed to `save`.",
+  "gpu_behavior": [
+    "`save` acts as a residency sink. Before serialising, RunMat gathers any GPU-resident tensors through the active acceleration provider so the MAT-file contains host data. Fusion groups terminate at this builtin and providers do not require custom hooks."
+  ]
+}

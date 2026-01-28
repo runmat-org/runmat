@@ -17,47 +17,7 @@ use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::build_surface_gpu_plot;
 use std::sync::Arc;
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "meshc",
-        builtin_path = "crate::builtins::plotting::meshc"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 const BUILTIN_NAME: &str = "meshc";
-
-#[allow(dead_code)]
-pub const DOC_MD: &str = r#"---
-title: "meshc"
-category: "plotting"
-keywords: ["meshc", "mesh", "contour", "gpuArray"]
-summary: "Render a wireframe surface with contour lines projected onto the base plane."
-references:
-  - https://www.mathworks.com/help/matlab/ref/meshc.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: ["single"]
-  broadcasting: "none"
-  notes: "Single-precision gpuArrays reuse the shared WebGPU context; other inputs gather."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 3
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::plotting::meshc::tests"
----
-
-# What does `meshc` do?
-`meshc(X, Y, Z)` draws a wireframe mesh and overlays contour lines on the XY plane.
-
-## GPU behaviour
-- Single-precision gpuArrays stream directly into the shared WebGPU renderer.
-- Double precision falls back to host gathers until SHADER_F64 is available.
-"#;
 
 #[runtime_builtin(
     name = "meshc",

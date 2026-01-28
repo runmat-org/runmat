@@ -1,0 +1,141 @@
+{
+  "title": "fft",
+  "category": "math/fft",
+  "keywords": [
+    "fft",
+    "fourier transform",
+    "complex",
+    "zero padding",
+    "gpu"
+  ],
+  "summary": "Compute the discrete Fourier transform (DFT) of vectors, matrices, or N-D tensors.",
+  "references": [
+    "title: \"MATLAB fft documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Falls back to host execution when the active acceleration provider does not expose an FFT hook."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::fft::fft::tests",
+    "integration": "builtins::math::fft::fft::tests::fft_gpu_roundtrip_matches_cpu"
+  },
+  "description": "`fft(X)` computes the discrete Fourier transform (DFT) of the input data. When `X` is a vector, `fft` returns the frequency-domain representation of the vector. When `X` is a matrix or an N-D tensor, the transform is applied along the first non-singleton dimension unless another dimension is specified.",
+  "behaviors": [
+    "`fft(X)` transforms along the first dimension whose size is greater than 1.",
+    "`fft(X, n)` zero-pads or truncates `X` to length `n` before transforming along the default dimension.",
+    "`fft(X, n, dim)` applies the transform along dimension `dim`.",
+    "Real inputs produce complex outputs; complex inputs are handled element-wise with no additional conversion.",
+    "Empty inputs remain empty; zero-padding with `n` produces zero-valued spectra.",
+    "GPU arrays are gathered to the host when the selected provider has no FFT implementation."
+  ],
+  "examples": [
+    {
+      "description": "Computing the FFT of a real time-domain vector",
+      "input": "x = [1 2 3 4];\nY = fft(x);",
+      "output": "Y =\n  Columns 1 through 4\n   10 + 0i  -2 + 2i  -2 + 0i  -2 - 2i"
+    },
+    {
+      "description": "Applying fft column-wise to a matrix",
+      "input": "A = [1 2 3; 4 5 6];\nF = fft(A);",
+      "output": "F =\n   5 + 0i   7 + 0i   9 + 0i\n  -3 + 3i  -3 + 3i  -3 + 3i"
+    },
+    {
+      "description": "Zero-padding before the FFT",
+      "input": "x = [1 2 3];\nY = fft(x, 5);"
+    },
+    {
+      "description": "Selecting the transform dimension for a row vector",
+      "input": "x = [1 2 3 4];\nY = fft(x, [], 2);"
+    },
+    {
+      "description": "FFT of a complex-valued signal",
+      "input": "t = 0:3;\nx = exp(1i * pi/2 * t);\nY = fft(x);"
+    },
+    {
+      "description": "FFT with gpuArray inputs",
+      "input": "g = gpuArray(rand(1, 1024));  % Residency is on the GPU\nG = fft(g);                   % Falls back to host if provider FFT hooks are unavailable\nresult = gather(G);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `fft` always return complex values?",
+      "answer": "Yes. Even when the imaginary part is zero, the result is stored as a complex array to match MATLAB semantics."
+    },
+    {
+      "question": "What happens if I pass `[]` as the second argument?",
+      "answer": "Passing `[]` leaves the transform length unchanged. This is equivalent to omitting the `n` parameter."
+    },
+    {
+      "question": "Can I transform along a dimension larger than the current rank?",
+      "answer": "Yes. RunMat automatically treats trailing dimensions as length-1 and will create the requested dimension on output."
+    },
+    {
+      "question": "How does zero-padding work?",
+      "answer": "When `n` is larger than the size of `X` along the transform dimension, RunMat pads with zeros before evaluating the FFT."
+    },
+    {
+      "question": "What precision is used for the FFT?",
+      "answer": "RunMat computes FFTs in double precision on the host. Providers may use single or double precision depending on device capabilities."
+    },
+    {
+      "question": "Will RunMat run the FFT on my GPU automatically?",
+      "answer": "When a provider installs an FFT hook, RunMat executes on the GPU. Otherwise, the runtime gathers the data and performs the transform on the CPU."
+    },
+    {
+      "question": "Is inverse FFT (`ifft`) available?",
+      "answer": "`ifft` will be provided in a companion builtin. Until then, you can recover a time-domain signal by dividing by the length and taking the complex conjugate manually."
+    },
+    {
+      "question": "How do I compute multi-dimensional FFTs?",
+      "answer": "Call `fft` repeatedly along each dimension (`fft(fft(X, [], 1), [], 2)` for a 2-D FFT). Future releases will add dedicated helpers."
+    },
+    {
+      "question": "Does `fft` support complex strides or non-unit sampling intervals?",
+      "answer": "`fft` assumes unit spacing. You can multiply the result by appropriate phase factors to account for custom sampling intervals."
+    }
+  ],
+  "links": [
+    {
+      "label": "ifft",
+      "url": "./ifft"
+    },
+    {
+      "label": "fftshift",
+      "url": "./fftshift"
+    },
+    {
+      "label": "abs",
+      "url": "./abs"
+    },
+    {
+      "label": "angle",
+      "url": "./angle"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "Open a ticket",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  }
+}

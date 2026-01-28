@@ -1,0 +1,133 @@
+{
+  "title": "getfield",
+  "category": "structs/core",
+  "keywords": [
+    "getfield",
+    "struct",
+    "struct array",
+    "object property",
+    "metadata"
+  ],
+  "summary": "Access a field or property from structs, struct arrays, or MATLAB-style objects.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs on the host. Values that already reside on the GPU stay resident; no kernels are dispatched."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::structs::core::getfield::tests",
+    "integration": "runmat_ignition::tests::functions::member_get_set_and_method_call_skeleton"
+  },
+  "description": "`value = getfield(S, field)` returns the contents of `S.field`. RunMat matches MATLAB by supporting nested field access, struct arrays (via index cells), and MATLAB-style objects created with `new_object`.",
+  "behaviors": [
+    "Field names must be character vectors or string scalars. Several field names in a row navigate nested structs: `getfield(S, \"outer\", \"inner\")` is equivalent to `S.outer.inner`.",
+    "When `S` is a struct array, `getfield(S, \"field\")` examines the first element by default. Provide indices in a cell array to target another element: `getfield(S, {k}, \"field\")` yields `S(k).field`.",
+    "After a field name you may supply an index cell to subscript the field value, e.g. `getfield(S, \"values\", {row, col})`. Each position accepts positive integers or the keyword `end` to reference the last element in that dimension.",
+    "MATLAB-style objects honour property attributes: static or private properties raise errors, while dependent properties invoke `get.<name>` when available.",
+    "Handle objects dereference to their underlying instance automatically. Deleted handles raise the standard MATLAB-style error.",
+    "`MException` values expose the `message`, `identifier`, and `stack` fields for compatibility with MATLAB error handling."
+  ],
+  "examples": [
+    {
+      "description": "Reading a scalar struct field",
+      "input": "stats = struct(\"mean\", 42, \"stdev\", 3.5);\nmu = getfield(stats, \"mean\");",
+      "output": "mu = 42"
+    },
+    {
+      "description": "Navigating nested structs with multiple field names",
+      "input": "cfg = struct(\"solver\", struct(\"name\", \"cg\", \"tolerance\", 1e-6));\ntol = getfield(cfg, \"solver\", \"tolerance\");",
+      "output": "tol = 1.0000e-06"
+    },
+    {
+      "description": "Accessing an element of a struct array",
+      "input": "people = struct(\"name\", {\"Ada\", \"Grace\"}, \"id\", {101, 102});\nlastId = getfield(people, {2}, \"id\");",
+      "output": "lastId = 102"
+    },
+    {
+      "description": "Reading the first element of a struct array automatically",
+      "input": "people = struct(\"name\", {\"Ada\", \"Grace\"}, \"id\", {101, 102});\nfirstName = getfield(people, \"name\");",
+      "output": "firstName = \"Ada\""
+    },
+    {
+      "description": "Using `end` to reference the last item in a field",
+      "input": "series = struct(\"values\", {1:5});\nlastValue = getfield(series, \"values\", {\"end\"});",
+      "output": "lastValue = 5"
+    },
+    {
+      "description": "Indexing into a numeric field value",
+      "input": "measurements = struct(\"values\", {[1 2 3; 4 5 6]});\nentry = getfield(measurements, \"values\", {2, 3});",
+      "output": "entry = 6"
+    },
+    {
+      "description": "Gathering the exception message from a try/catch block",
+      "input": "try\n    error(\"MATLAB:domainError\", \"Bad input\");\ncatch e\n    msg = getfield(e, \"message\");\nend",
+      "output": "msg = 'Bad input'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `getfield` work on non-struct values?",
+      "answer": "No. The first argument must be a scalar struct, a struct array (possibly empty), an object instance created with `new_object`, a handle object, or an `MException`. Passing other types raises an error."
+    },
+    {
+      "question": "How do I access nested struct fields?",
+      "answer": "Provide every level explicitly: `getfield(S, \"parent\", \"child\", \"leaf\")` traverses the same path as `S.parent.child.leaf`."
+    },
+    {
+      "question": "How do I read from a struct array?",
+      "answer": "Supply a cell array of indices before the first field name. For example, `getfield(S, {3}, \"value\")` mirrors `S(3).value`. Indices are one-based like MATLAB."
+    },
+    {
+      "question": "Can I index the value stored in a field?",
+      "answer": "Yes. You may supply scalars or `end` inside the index cell to reference elements of the field value."
+    },
+    {
+      "question": "Do dependent properties run their getter methods?",
+      "answer": "Yes. If a property is marked `Dependent` and a `get.propertyName` builtin exists, `getfield` invokes it. Otherwise the backing field `<property>_backing` is inspected."
+    },
+    {
+      "question": "What happens when I query a deleted handle object?",
+      "answer": "RunMat mirrors MATLAB by raising `Invalid or deleted handle object 'ClassName'.`"
+    }
+  ],
+  "links": [
+    {
+      "label": "fieldnames",
+      "url": "./fieldnames"
+    },
+    {
+      "label": "isfield",
+      "url": "./isfield"
+    },
+    {
+      "label": "setfield",
+      "url": "./setfield"
+    },
+    {
+      "label": "struct",
+      "url": "./struct"
+    },
+    {
+      "label": "class",
+      "url": "./class"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/structs/core/getfield.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/structs/core/getfield.rs"
+  },
+  "gpu_residency": "You do not have to move data between CPU and GPU explicitly when calling `getfield`. The builtin works entirely with metadata and returns handles or tensors in whatever memory space they already inhabit.",
+  "gpu_behavior": [
+    "`getfield` is metadata-only. When structs or objects contain GPU tensors, the tensors remain on the device. The builtin manipulates only the host-side metadata and does not dispatch GPU kernels or gather buffers back to the CPU. Results inherit residency from the values being returned."
+  ]
+}

@@ -1,0 +1,144 @@
+{
+  "title": "fliplr",
+  "category": "array/shape",
+  "keywords": [
+    "fliplr",
+    "flip",
+    "horizontal",
+    "matrix",
+    "gpu"
+  ],
+  "summary": "Flip an array left-to-right along the second dimension.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64",
+      "i32",
+      "bool"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses the generic flip provider hook with axis=1; falls back to gather\u2192flip\u2192upload when unavailable."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::fliplr::tests",
+    "integration": "["
+  },
+  "description": "`fliplr(A)` mirrors `A` across its vertical axis, reversing the column order (dimension 2). It accepts scalars, vectors, matrices, N-D tensors, logical arrays, character arrays, string arrays, complex data, and gpuArray handles, matching MATLAB semantics.",
+  "behaviors": [
+    "Always reverses dimension 2 (columns) and leaves all other dimensions untouched, even for rank > 2 data.",
+    "Inputs with fewer than two columns (column vectors, scalars) are returned unchanged because the second dimension is singleton.",
+    "Logical, numeric, complex, character, and string arrays all preserve their MATLAB types and storage layout.",
+    "gpuArray inputs execute on the device via the generic `flip` provider hook (axis = 1); when that hook is missing, RunMat gathers once, mirrors the data on the host, and uploads the result so the returned value is still a gpuArray.",
+    "Dimensions larger than `ndims(A)` are treated as singleton axes, so `fliplr` never errors when `A` has rank < 2."
+  ],
+  "examples": [
+    {
+      "description": "Reverse Columns of a Matrix",
+      "input": "A = [1 2 3; 4 5 6];\nB = fliplr(A);",
+      "output": "B =\n     3     2     1\n     6     5     4"
+    },
+    {
+      "description": "Mirror an Image Matrix Horizontally",
+      "input": "img = reshape(1:16, 4, 4);\nmirrored = fliplr(img);",
+      "output": "mirrored =\n    4     3     2     1\n    8     7     6     5\n   12    11    10     9\n   16    15    14    13"
+    },
+    {
+      "description": "Flip the Order of Polynomial Coefficients",
+      "input": "c = [1 0 -2 5];\nrev = fliplr(c);",
+      "output": "rev = [5  -2  0  1];"
+    },
+    {
+      "description": "Reverse Each Slice in a 3-D Array Along Columns",
+      "input": "T = reshape(1:24, [3 4 2]);\nF = fliplr(T);",
+      "output": "F(:,:,1) =\n     4     3     2     1\n     8     7     6     5\n    12    11    10     9\n\nF(:,:,2) =\n    16    15    14    13\n    20    19    18    17\n    24    23    22    21"
+    },
+    {
+      "description": "Preserve Column Vector Orientation",
+      "input": "col = (1:4)';\nsame = fliplr(col);",
+      "output": "same =\n     1\n     2\n     3\n     4"
+    },
+    {
+      "description": "Flip Characters in a Two-Row Char Array",
+      "input": "C = ['r','u','n'; 'm','a','t'];\nCt = fliplr(C);",
+      "output": "Ct =\n    'nur'\n    'tam'"
+    },
+    {
+      "description": "Keep gpuArray Results on the Device While Flipping Columns",
+      "input": "G = gpuArray(rand(8, 8));\nH = fliplr(G);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `fliplr` change column vectors?",
+      "answer": "No. A column vector has a singleton second dimension, so reversing that axis leaves the data unchanged."
+    },
+    {
+      "question": "Is `fliplr` the same as calling `flip(A, 2)`?",
+      "answer": "Yes. `fliplr` is a convenience wrapper around `flip` that always targets dimension 2 (columns)."
+    },
+    {
+      "question": "Can I apply `fliplr` to N-D tensors?",
+      "answer": "Absolutely. Only dimension 2 is reversed; all other axes keep their original order regardless of rank."
+    },
+    {
+      "question": "Does `fliplr` support string and character arrays?",
+      "answer": "Yes. String arrays reorder their elements, and character arrays mirror each row while preserving UTF-8 data."
+    },
+    {
+      "question": "What happens on the GPU if there is no flip kernel?",
+      "answer": "RunMat gathers the tensor once, mirrors it on the CPU, and uploads the result so you still receive a gpuArray."
+    },
+    {
+      "question": "Does `fliplr` allocate new GPU buffers?",
+      "answer": "Providers may reuse storage, but the builtin always returns a fresh handle. The simple provider uploads a new buffer."
+    },
+    {
+      "question": "Is `fliplr` numerically stable?",
+      "answer": "Yes. The function only reorders elements; values are never modified, so it is numerically stable."
+    }
+  ],
+  "links": [
+    {
+      "label": "`flip`",
+      "url": "./flip"
+    },
+    {
+      "label": "`flipud`",
+      "url": "./flipud"
+    },
+    {
+      "label": "`permute`",
+      "url": "./permute"
+    },
+    {
+      "label": "`reshape`",
+      "url": "./reshape"
+    },
+    {
+      "label": "`gpuArray`",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "`gather`",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/shape/fliplr.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/fliplr.rs"
+  },
+  "gpu_residency": "You typically do not need to call `gpuArray` directly. RunMat\u2019s auto-offload planner keeps tensors on the GPU when profitable and only gathers when a provider lacks the flip hook. Even in that fallback, `fliplr` uploads the flipped result back to the device so subsequent operations can stay gpu-resident.",
+  "gpu_behavior": [
+    "RunMat first tries to execute `fliplr` on the GPU by delegating to the provider\u2019s generic `flip` implementation with axis `1` (zero-based). If the provider does not implement this hook, RunMat transparently gathers the tensor, performs the horizontal flip on the host, and uploads the result back to the device so residency is preserved."
+  ]
+}

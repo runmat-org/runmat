@@ -1,0 +1,143 @@
+{
+  "title": "single",
+  "category": "math/elementwise",
+  "keywords": [
+    "single",
+    "float32",
+    "cast",
+    "convert to single",
+    "gpuArray single"
+  ],
+  "summary": "Convert numeric values, character arrays, and gpuArray handles to IEEE single precision.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/single.html"
+  ],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Prefers a device-side cast when providers expose a dedicated unary hook; otherwise gathers, converts on the host, and re-uploads when a provider is present."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::single::tests",
+    "gpu": "builtins::math::elementwise::single::tests::single_gpu_roundtrip",
+    "wgpu": "builtins::math::elementwise::single::tests::single_wgpu_matches_cpu"
+  },
+  "description": "`single(X)` converts scalars, arrays, complex values, characters, logical inputs, and gpuArray handles into single-precision (`float32`) values while preserving MATLAB's column-major shapes.",
+  "behaviors": [
+    "Numeric scalars and arrays (double or integer) are rounded to IEEE single precision. Scalars remain scalars; arrays keep their exact shape and column-major layout.",
+    "Logical inputs become floating-point `0`/`1`, matching MATLAB\u2019s implicit promotion rules for logical arithmetic.",
+    "Complex values convert both the real and imaginary components to single precision using MATLAB\u2019s analytic extension rules.",
+    "Character arrays return their Unicode code points (equivalent to `double(char)`), quantised to single precision. Strings, structs, cells, objects, and other unsupported classes raise MATLAB-style errors (`\"single: conversion to single from <type> is not possible\"`).",
+    "Empty arrays stay empty, singleton expansion is unaffected, and metadata such as orientation is preserved exactly."
+  ],
+  "examples": [
+    {
+      "description": "Convert a matrix to single precision",
+      "input": "A = [1 2 3; 4 5 6];\nB = single(A);",
+      "output": "B =\n  2\u00d73 single matrix\n     1     2     3\n     4     5     6"
+    },
+    {
+      "description": "Convert a scalar double to single precision",
+      "input": "pi_single = single(pi);",
+      "output": "pi_single =\n  single\n     3.1416"
+    },
+    {
+      "description": "Convert complex numbers to single precision",
+      "input": "z = [1+2i, 3-4i];\nsingle_z = single(z);",
+      "output": "single_z =\n  1\u00d72 single complex row vector\n   1.0000 + 2.0000i   3.0000 - 4.0000i"
+    },
+    {
+      "description": "Convert a character array to single precision codes",
+      "input": "codes = single('ABC');",
+      "output": "codes =\n  1\u00d73 single row vector\n    65    66    67"
+    },
+    {
+      "description": "Keep gpuArray inputs on the GPU",
+      "input": "G = gpuArray(reshape(0:5, 3, 2));\nH = single(G);\ngather(H)",
+      "output": "ans =\n  3\u00d72 single matrix\n     0     3\n     1     4\n     2     5"
+    },
+    {
+      "description": "Convert logical masks to single precision values",
+      "input": "mask = logical([0 1 0 1]);\nweights = single(mask);",
+      "output": "weights =\n  1\u00d74 single row vector\n     0     1     0     1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why does `single` change the numeric value slightly?",
+      "answer": "Single precision has ~7 decimal digits of accuracy. Values that require more precision are rounded to the nearest representable float32 number, matching MATLAB exactly."
+    },
+    {
+      "question": "Does `single` accept integer types?",
+      "answer": "Yes. Integer and logical inputs are promoted to floating point with MATLAB\u2019s semantics. Saturation is not required because the target type is floating-point."
+    },
+    {
+      "question": "Can I convert strings with `single`?",
+      "answer": "No. RunMat mirrors MATLAB\u2019s behaviour: strings raise `\"single: conversion to single from string is not possible\"`. Convert strings to character arrays first with `char`."
+    },
+    {
+      "question": "What about structs, cells, or user objects?",
+      "answer": "They raise the same conversion error with their class name. Extract the numeric data you need before calling `single`."
+    },
+    {
+      "question": "Does `single` support complex numbers?",
+      "answer": "Yes. Both the real and imaginary components are converted elementwise, just like MATLAB\u2019s analytic extension."
+    },
+    {
+      "question": "How does `single` behave on empty arrays?",
+      "answer": "Empty arrays stay empty. Shapes and orientations are preserved (`0\u00d7n` stays `0\u00d7n`)."
+    },
+    {
+      "question": "Will gpuArray inputs stay on the GPU?",
+      "answer": "Yes. RunMat attempts a device-side cast, and if the provider lacks one it converts on the host and re-uploads the result so downstream GPU code still sees a gpuArray."
+    },
+    {
+      "question": "How does this affect `class` or `isa`?",
+      "answer": "RunMat currently reports host tensors as `\"double\"` because their backing storage is f64. This mirrors other parts of the runtime (for example, `gather` of a single-precision gpuArray). GPU results still behave correctly when dispatched through Accelerate."
+    },
+    {
+      "question": "Do NaN or Inf values survive the cast?",
+      "answer": "Yes. IEEE semantics are preserved; NaNs, \u00b1Inf, and signed zeros remain after conversion."
+    },
+    {
+      "question": "Where can I learn more?",
+      "answer": "See MathWorks\u2019 documentation linked above or inspect this builtin\u2019s source file for the exact implementation."
+    }
+  ],
+  "links": [
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    },
+    {
+      "label": "single (MathWorks)",
+      "url": "https://www.mathworks.com/help/matlab/ref/single.html"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/math/elementwise/single.rs",
+    "url": "crates/runmat-runtime/src/builtins/math/elementwise/single.rs"
+  },
+  "gpu_residency": "You rarely need to call `gpuArray` solely for type conversion. RunMat\u2019s planner already keeps hot paths on the GPU. When `single` runs on gpuArray inputs it attempts a device-side cast first, and falls back to gather/convert/re-upload when hooks are missing. The fallback is documented so users understand the temporary host hop.",
+  "gpu_behavior": [
+    "When the input is a gpuArray and the provider implements `unary_single`, RunMat keeps the data on device and returns a new gpuArray handle that already contains single-precision values. This path is also used by fused elementwise kernels emitted by Turbine.",
+    "If the provider lacks the hook, RunMat gathers the data to host memory, converts it to single precision, and re-uploads it so downstream GPU code still receives a device-resident value. The original handle is freed once the replacement upload succeeds.",
+    "When no provider is active the fallback stops after the host conversion, returning a CPU tensor that still respects single-precision rounding. Scalars follow the same logic (`single(gpuArray(pi))` returns a device scalar when possible, or a host scalar if the provider is absent)."
+  ]
+}

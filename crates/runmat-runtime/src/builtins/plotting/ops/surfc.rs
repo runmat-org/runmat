@@ -15,48 +15,7 @@ use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::{build_surface, build_surface_gpu_plot};
 use std::sync::Arc;
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "surfc",
-        builtin_path = "crate::builtins::plotting::surfc"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 const BUILTIN_NAME: &str = "surfc";
-
-#[allow(dead_code)]
-pub const DOC_MD: &str = r#"---
-title: "surfc"
-category: "plotting"
-keywords: ["surfc", "surface", "contour", "gpuArray"]
-summary: "Render a shaded surface with contour lines on the base plane."
-references:
-  - https://www.mathworks.com/help/matlab/ref/surfc.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: ["single"]
-  broadcasting: "none"
-  notes: "Single-precision gpuArray inputs stay on the device via the shared WebGPU renderer."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 3
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::plotting::surfc::tests"
----
-
-# What does `surfc` do?
-`surfc(X, Y, Z)` draws a shaded surface and overlays contour lines projected onto the XY plane.
-RunMat reuses the same surface renderer as `surf` and complements it with GPU-generated iso-lines.
-
-## GPU behaviour
-- Single-precision gpuArrays stream directly into the shared WebGPU renderer.
-- Double-precision data falls back to the CPU path until SHADER_F64 is available.
-"#;
 
 #[runtime_builtin(
     name = "surfc",

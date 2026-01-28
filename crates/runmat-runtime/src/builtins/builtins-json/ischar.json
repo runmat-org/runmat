@@ -1,0 +1,125 @@
+{
+  "title": "ischar",
+  "category": "introspection",
+  "keywords": [
+    "ischar",
+    "character arrays",
+    "type checking",
+    "char",
+    "logical predicate",
+    "gpuArray"
+  ],
+  "summary": "Test whether a value is a MATLAB character array (char vector or char matrix).",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/ischar.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Returns a host logical scalar; GPU inputs are inspected without launching kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::ischar::tests",
+    "integration": "builtins::introspection::ischar::tests::ischar_gpu_inputs_return_false"
+  },
+  "description": "`tf = ischar(x)` returns logical `true` when `x` is a MATLAB character array (a char row vector or matrix) and logical `false` otherwise. Use it to distinguish traditional char arrays from the newer string type, numeric tensors, cells, or gpuArray values.",
+  "behaviors": [
+    "Character vectors such as `'RunMat'` and char matrices created with `['A'; 'B']` return `true`.",
+    "Empty char arrays (including `''` and `char.empty(...)`) still count as character arrays.",
+    "String scalars, string arrays, cell arrays, numeric values, and logical masks all return `false`.",
+    "gpuArray inputs return `false` unless they are explicitly stored as char arrays (which RunMat does not currently support), matching MATLAB\u2019s behaviour where gpuArray does not host char data.",
+    "The result is always a host logical scalar (`logical(0)` or `logical(1)`), so it can be used in branching, masking, or validation code without additional conversions."
+  ],
+  "examples": [
+    {
+      "description": "Checking if a character vector is a char array",
+      "input": "tf = ischar('RunMat');",
+      "output": "tf = logical(1)"
+    },
+    {
+      "description": "Detecting multi-row char matrices",
+      "input": "letters = ['ab'; 'cd'];\ntf = ischar(letters);",
+      "output": "tf = logical(1)"
+    },
+    {
+      "description": "Distinguishing between char arrays and string scalars",
+      "input": "tf_char = ischar('hello');\ntf_string = ischar(\"hello\");",
+      "output": "tf_char = logical(1)\ntf_string = logical(0)"
+    },
+    {
+      "description": "Recognising that numeric and logical data are not char arrays",
+      "input": "numbers = [1 2 3];\nmask = true(1, 3);\ntf_numbers = ischar(numbers);\ntf_mask = ischar(mask);",
+      "output": "tf_numbers = logical(0)\ntf_mask = logical(0)"
+    },
+    {
+      "description": "Testing gpuArray inputs",
+      "input": "G = gpuArray(ones(2, 2));\ntf_gpu = ischar(G);",
+      "output": "tf_gpu = logical(0)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `ischar` treat empty character arrays as char?",
+      "answer": "Yes. Both `''` and arrays created with `char.empty` return `logical(1)` because they are still character arrays, even when they have zero elements."
+    },
+    {
+      "question": "Why does `ischar` return `false` for string scalars?",
+      "answer": "Strings in MATLAB are a distinct type introduced in R2016b. They are not interchangeable with char arrays, so `ischar(\"text\")` correctly returns `logical(0)`."
+    },
+    {
+      "question": "What about cell arrays of characters?",
+      "answer": "Cell arrays such as `{'a', 'b'}` return `logical(0)` because they are cell containers rather than a single char array. Use `iscellstr` if you need to validate cell-of-char collections."
+    },
+    {
+      "question": "Can gpuArray hold char data in RunMat?",
+      "answer": "Not currently. gpuArray values in RunMat contain numeric or logical tensors, so `ischar` reports `false` for all gpuArray inputs, mirroring MATLAB\u2019s behaviour."
+    },
+    {
+      "question": "How do I convert a string to a char array if `ischar` returns false?",
+      "answer": "Use `char(stringScalar)` or the `convertStringsToChars` utility when you need to operate on char arrays for legacy APIs."
+    },
+    {
+      "question": "Is there any performance cost when checking large arrays?",
+      "answer": "No. `ischar` only inspects the value\u2019s metadata; it does not copy or iterate over the array elements, so the cost is constant regardless of array size."
+    }
+  ],
+  "links": [
+    {
+      "label": "isa",
+      "url": "./isa"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "strcmp",
+      "url": "./strcmp"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/ischar.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/ischar.rs"
+  },
+  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nIn RunMat, the fusion planner keeps residency on GPU in branches of fused expressions. As such, calling `ischar` on a gpuArray result preserves the device buffer, and `ischar` answers the query using metadata only.\n\nTo preserve backwards compatibility with MathWorks MATLAB, and for when you want to explicitly bootstrap GPU residency, you can call `gpuArray` explicitly to move data to the GPU if you want to be explicit about the residency.\n\nSince MathWorks MATLAB does not have a fusion planner, and they kept their parallel execution toolbox separate from the core language, as their toolbox is a separate commercial product, MathWorks MATLAB users need to call `gpuArray` to move data to the GPU manually whereas RunMat users can rely on the fusion planner to keep data on the GPU automatically.",
+  "gpu_behavior": [
+    "`ischar` never launches GPU kernels. When you pass a gpuArray value, RunMat inspects the residency metadata and simply reports `false` because device-resident buffers are numeric or logical. This matches MATLAB\u2019s semantics and avoids unnecessary host\u2194device transfers."
+  ]
+}

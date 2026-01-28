@@ -14,140 +14,6 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 
 #[allow(clippy::too_many_lines)]
-#[runmat_macros::register_doc_text(
-    name = "weboptions",
-    builtin_path = "crate::builtins::io::http::weboptions"
-)]
-pub const DOC_MD: &str = r#"---
-title: "weboptions"
-category: "io/http"
-keywords: ["weboptions", "http options", "timeout", "headers", "rest client"]
-summary: "Create an options struct that configures webread and webwrite HTTP behaviour."
-references:
-  - https://www.mathworks.com/help/matlab/ref/weboptions.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "weboptions operates on CPU data structures and gathers gpuArray inputs automatically."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::io::http::weboptions::tests"
-  integration:
-    - "builtins::io::http::weboptions::tests::weboptions_default_struct_matches_expected_fields"
-    - "builtins::io::http::weboptions::tests::weboptions_overrides_timeout_and_headers"
-    - "builtins::io::http::weboptions::tests::weboptions_updates_existing_struct"
-    - "builtins::io::http::weboptions::tests::weboptions_rejects_unknown_option"
-    - "builtins::io::http::weboptions::tests::weboptions_requires_username_when_password_provided"
-    - "builtins::io::http::weboptions::tests::weboptions_rejects_timeout_nonpositive"
-    - "builtins::io::http::weboptions::tests::weboptions_rejects_headerfields_bad_cell_shape"
-    - "builtins::io::http::weboptions::tests::webread_uses_weboptions_without_polluting_query"
-    - "builtins::io::http::weboptions::tests::webwrite_uses_weboptions_auto_request_method"
----
-
-# What does the `weboptions` function do in MATLAB / RunMat?
-`weboptions` builds a MATLAB-style options struct that controls HTTP behaviour for
-functions such as `webread`, `webwrite`, and `websave`. The struct stores option
-fields like `Timeout`, `ContentType`, `HeaderFields`, and `RequestMethod`, all with
-MATLAB-compatible defaults.
-
-## How does the `weboptions` function behave in MATLAB / RunMat?
-- Returns a struct with canonical field names: `ContentType`, `Timeout`, `HeaderFields`,
-  `UserAgent`, `Username`, `Password`, `RequestMethod`, `MediaType`, and `QueryParameters`.
-- Defaults mirror MATLAB: `ContentType="auto"`, `Timeout=60`, `UserAgent=""`
-  (RunMat substitutes a default agent when this is empty), `RequestMethod="auto"`,
-  `MediaType="auto"`, and empty structs for `HeaderFields` and `QueryParameters`.
-- Name-value arguments are case-insensitive. Values are validated to ensure MATLAB-compatible
-  types (text scalars for string options, positive scalars for `Timeout`,
-  structs or two-column cell arrays for `HeaderFields` and `QueryParameters`).
-- Passing an existing options struct as the first argument clones it before applying additional
-  overrides, matching MATLAB's update pattern `opts = weboptions(opts, "Timeout", 5)`.
-- Unknown option names raise descriptive errors.
-
-## `weboptions` Function GPU Execution Behaviour
-`weboptions` operates entirely on CPU metadata. It gathers any `gpuArray` inputs back to host
-memory before validation, because HTTP requests execute on the CPU regardless of the selected
-acceleration provider. No GPU provider hooks are required for this function.
-
-## Examples of using the `weboptions` function in MATLAB / RunMat
-
-### Setting custom timeouts for webread calls
-```matlab
-opts = weboptions("Timeout", 10);
-html = webread("https://example.com", opts);
-```
-The request aborts after 10 seconds instead of the default 60.
-
-### Providing HTTP basic authentication credentials
-```matlab
-opts = weboptions("Username", "ada", "Password", "lovelace");
-profile = webread("https://api.example.com/me", opts);
-```
-Credentials are attached automatically; an empty username leaves authentication disabled.
-
-### Sending JSON payloads with webwrite
-```matlab
-opts = weboptions("ContentType", "json", "MediaType", "application/json");
-payload = struct("title", "RunMat", "stars", 5);
-reply = webwrite("https://api.example.com/projects", payload, opts);
-```
-The request posts JSON and expects a JSON response.
-
-### Applying custom headers with struct syntax
-```matlab
-headers = struct("Accept", "application/json", "X-Client", "RunMat");
-opts = weboptions("HeaderFields", headers);
-data = webread("https://api.example.com/resources", opts);
-```
-`HeaderFields` accepts a struct or two-column cell array of header name/value pairs.
-
-### Combining existing options with overrides
-```matlab
-base = weboptions("ContentType", "json");
-opts = weboptions(base, "Timeout", 15, "QueryParameters", struct("verbose", true));
-result = webread("https://api.example.com/items", opts);
-```
-The new struct inherits all fields from `base` and overrides the ones supplied later.
-
-## FAQ
-
-### Which option names are supported in RunMat?
-`weboptions` implements the options consumed by `webread` and `webwrite`: `ContentType`,
-`Timeout`, `HeaderFields`, `UserAgent`, `Username`, `Password`, `RequestMethod`, `MediaType`,
-and `QueryParameters`. Unknown names raise a MATLAB-style error.
-
-### What does `RequestMethod="auto"` mean?
-`webread` treats `"auto"` as `"get"` while `webwrite` maps it to `"post"`. Override the method when
-you need `put`, `patch`, or `delete`.
-
-### How are empty usernames or passwords handled?
-Empty strings leave authentication disabled. A non-empty password without a username raises a
-MATLAB-compatible error.
-
-### Can I pass query parameters through the options struct?
-Yes. Supply a struct or two-column cell array in the `QueryParameters` option. Values may include
-numbers, logicals, or text scalars, and they are percent-encoded when the request is built.
-
-### Do I need to manage GPU residency for options?
-No. `weboptions` gathers any GPU-resident values automatically and always returns a host struct.
-HTTP builtins ignore GPU residency for metadata.
-
-### Does `weboptions` mutate the input struct?
-No. A copy is made before overrides are applied, preserving the original struct you pass in.
-
-### How can I clear headers or query parameters?
-Pass an empty struct (`struct()`) or empty cell array (`{}`) to reset the respective option.
-
-## See Also
-[webread](./webread), [webwrite](./webwrite), [jsondecode](./jsondecode), [jsonencode](./jsonencode)
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::http::weboptions")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "weboptions",
@@ -541,8 +407,6 @@ pub(crate) mod tests {
     use crate::call_builtin_async;
     use runmat_builtins::CellArray;
 
-    use crate::builtins::common::test_support;
-
     fn spawn_server<F>(handler: F) -> String
     where
         F: FnOnce(TcpStream) + Send + 'static,
@@ -816,12 +680,5 @@ pub(crate) mod tests {
             !body.is_empty(),
             "expected request body to be present when posting form data"
         );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

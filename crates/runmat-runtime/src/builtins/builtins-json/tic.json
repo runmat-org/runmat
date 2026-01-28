@@ -1,0 +1,97 @@
+{
+  "title": "tic",
+  "category": "timing",
+  "keywords": [
+    "tic",
+    "timer",
+    "profile",
+    "benchmark",
+    "performance"
+  ],
+  "summary": "Start a high-resolution stopwatch and optionally return a handle for toc.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Stopwatch helpers always run on the host CPU; GPU providers are not consulted."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::timing::tic::tests",
+    "integration": "runmat_runtime::io::tests::test_tic_toc"
+  },
+  "description": "`tic` starts a high-resolution stopwatch. Calls to `toc` report the elapsed time in seconds. When you assign the return value (for example, `t = tic;`), the resulting handle can be passed to `toc(t)` to measure a different code region while keeping the global stopwatch untouched.",
+  "behaviors": [
+    "Uses the host's monotonic clock for nanosecond-resolution timing.",
+    "Supports nested timers: each call pushes a new start time on an internal stack. `toc` without inputs always reads the most recent `tic` and removes it, leaving earlier timers intact so outer scopes continue measuring.",
+    "Returns an opaque scalar handle (a `double`) that encodes the monotonic timestamp. The handle can be stored or passed explicitly to `toc`.",
+    "Executes entirely on the CPU. There are no GPU variants because `tic` interacts with wall-clock state.",
+    "Calling `toc` before `tic` raises the MATLAB-compatible error `MATLAB:toc:NoMatchingTic`."
+  ],
+  "examples": [
+    {
+      "description": "Measuring a simple loop",
+      "input": "tic;\nfor k = 1:1e5\n    sqrt(k);\nend\nelapsed = toc;"
+    },
+    {
+      "description": "Capturing and reusing the tic handle",
+      "input": "t = tic;\nheavyComputation();\nelapsed = toc(t);"
+    },
+    {
+      "description": "Nesting timers for staged profiling",
+      "input": "tic;              % Outer stopwatch\nstage1();         % Work you want to measure once\ninner = tic;      % Nested stopwatch\nstage2();\ninnerT = toc(inner);  % Elapsed time for stage2 only\nouterT = toc;         % Elapsed time for everything since the first tic"
+    },
+    {
+      "description": "Measuring asynchronous work",
+      "input": "token = tic;\nfuture = backgroundTask();\nwait(future);\nelapsed = toc(token);"
+    },
+    {
+      "description": "Resetting the stopwatch after a measurement",
+      "input": "elapsed1 = toc(tic);  % Equivalent to separate tic/toc calls\npause(0.1);\nelapsed2 = toc(tic);  % Starts a new timer immediately"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `tic` print anything when called without a semicolon?",
+      "answer": "No. `tic` is marked as a sink builtin, so scripts do not display the returned handle unless you assign it or explicitly request output."
+    },
+    {
+      "question": "Is the returned handle portable across sessions?",
+      "answer": "No. The handle encodes a monotonic timestamp that is only meaningful within the current RunMat process. Passing it to another session or saving it to disk is undefined behaviour, matching MATLAB."
+    },
+    {
+      "question": "Can I run `tic` on a worker thread?",
+      "answer": "Yes. Each thread shares the same stopwatch stack. Nested `tic`/`toc` pairs remain well-defined, but you should serialise access at the script level to avoid interleaving unrelated timings."
+    },
+    {
+      "question": "How accurate is the measurement?",
+      "answer": "`tic` relies on a monotonic clock (via `runmat_time::Instant`), typically providing microsecond or better precision. The actual resolution depends on your operating system. There is no artificial jitter or throttling introduced by RunMat."
+    },
+    {
+      "question": "Does `tic` participate in GPU fusion?",
+      "answer": "No. Timer builtins are tagged as CPU-only. Expressions containing `tic` are always executed on the host, and any GPU-resident tensors are gathered automatically by surrounding code when necessary."
+    }
+  ],
+  "links": [
+    {
+      "label": "toc",
+      "url": "./toc"
+    },
+    {
+      "label": "timeit",
+      "url": "./timeit"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/timing/tic.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/timing/tic.rs"
+  }
+}

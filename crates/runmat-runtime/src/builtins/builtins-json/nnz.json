@@ -1,0 +1,136 @@
+{
+  "title": "nnz",
+  "category": "math/reduction",
+  "keywords": [
+    "nnz",
+    "nonzero",
+    "count",
+    "sparsity",
+    "gpu"
+  ],
+  "summary": "Count the number of nonzero elements in an array with MATLAB-compatible semantics.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": true,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Uses provider reduce_nnz / reduce_nnz_dim kernels when available and gathers results to the host for MATLAB-compatible doubles."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": true,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::reduction::nnz::tests::nnz_tensor_counts_entries",
+    "integration": "builtins::math::reduction::nnz::tests::nnz_gpu_provider_roundtrip",
+    "gpu": "builtins::math::reduction::nnz::tests::nnz_wgpu_dim_matches_cpu"
+  },
+  "description": "`nnz(X)` returns the number of elements of `X` that are nonzero. The result is always a double-precision value, matching MATLAB, and the builtin works for dense tensors, logical arrays, complex inputs, and character data.",
+  "behaviors": [
+    "`nnz(X)` treats any value that is not exactly zero as nonzero. Both `NaN` and `Inf` therefore contribute to the total.",
+    "Complex numbers are counted when either the real or imaginary part is nonzero (including `NaN`).",
+    "Logical arrays (`logical`) are summed as if `true` were `1` and `false` were `0`.",
+    "Character arrays use their code points; only the null character (`char(0)`) is considered zero.",
+    "Empty arrays return `0` because no elements are nonzero.",
+    "`nnz(X, dim)` counts nonzeros along the specified dimension, returning a tensor whose size in that dimension becomes `1` (mirroring `sum(X ~= 0, dim)`).",
+    "Dimensions larger than `ndims(X)` leave the result unchanged, again following MATLAB's reduction rules for singleton trailing dimensions."
+  ],
+  "examples": [
+    {
+      "description": "Counting nonzero elements in a dense matrix",
+      "input": "A = [1 0 3; 0 0 5];\ncount = nnz(A);",
+      "output": "count = 3;"
+    },
+    {
+      "description": "Counting nonzero entries in each column",
+      "input": "A = [1 0 3; 0 7 5];\nperColumn = nnz(A, 1);",
+      "output": "perColumn = [1 1 2];"
+    },
+    {
+      "description": "Counting nonzero entries in each row",
+      "input": "A = [1 0 3; 0 7 0];\nperRow = nnz(A, 2);",
+      "output": "perRow = [2; 1];"
+    },
+    {
+      "description": "Recognising `NaN` values as nonzero",
+      "input": "values = [0 NaN 5];\nnanCount = nnz(values);",
+      "output": "nanCount = 2;"
+    },
+    {
+      "description": "Counting GPU-resident values without manual gathers",
+      "input": "G = gpuArray([1 0 2 0 3]);\ngpuCount = nnz(G);",
+      "output": "gpuCount = 3;"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I use the `nnz` function?",
+      "answer": "Use `nnz` whenever you need a quick count of nonzero elements\u2014for example when measuring sparsity or validating that an algorithm produced the expected number of nonzeros."
+    },
+    {
+      "question": "What data types does `nnz` support?",
+      "answer": "Numeric, logical, complex, and character arrays are supported. Other types (structs, cell arrays, strings, objects) raise descriptive errors, as in MATLAB."
+    },
+    {
+      "question": "Does `nnz` treat `NaN` as nonzero?",
+      "answer": "Yes. Because `NaN ~= 0`, each `NaN` contributes to the result."
+    },
+    {
+      "question": "How can I count nonzeros along a dimension?",
+      "answer": "Use `nnz(X, dim)`\u2014it behaves like `sum(X ~= 0, dim)` and returns a tensor whose size in the specified dimension becomes `1`."
+    },
+    {
+      "question": "What does `nnz` return for logical arrays?",
+      "answer": "It returns the number of `true` elements, effectively behaving like `sum(logicalArray)`."
+    },
+    {
+      "question": "Does `nnz` work with GPU arrays?",
+      "answer": "Yes. The builtin dispatches to provider kernels when possible and downloads the MATLAB-compatible double result. When a provider lacks specialised kernels, RunMat gathers the tensor and counts on the CPU."
+    },
+    {
+      "question": "How does `nnz` handle character arrays?",
+      "answer": "Characters are converted to their numeric code points; any character other than the null character counts as nonzero."
+    },
+    {
+      "question": "Can the result exceed double precision?",
+      "answer": "Counts are stored in double precision (like MATLAB). Extremely large arrays share MATLAB's limitation where values above `2^53` may lose the least significant bit, but RunMat still returns a finite double."
+    }
+  ],
+  "links": [
+    {
+      "label": "sum",
+      "url": "./sum"
+    },
+    {
+      "label": "any",
+      "url": "./any"
+    },
+    {
+      "label": "find",
+      "url": "./find"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/nnz.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/nnz.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's auto-offload planner tracks residency automatically. For `nnz`, the runtime inspects the active provider and, when available, invokes device-side reduction kernels to count nonzeros on the GPU before downloading the final result. When a provider cannot supply those kernels, RunMat gathers the tensor and computes on the CPU, preserving MATLAB semantics.",
+  "gpu_behavior": [
+    "When RunMat Accelerate is active, `nnz` keeps work on the GPU whenever the provider implements `reduce_nnz` / `reduce_nnz_dim`. The WGPU provider ships with dedicated kernels that count nonzero elements without gathering intermediate data. The resulting scalar or tensor is then downloaded to the host so the return value matches MATLAB's CPU-resident doubles. If a provider lacks these hooks RunMat falls back to gathering the input and computing on the CPU."
+  ]
+}

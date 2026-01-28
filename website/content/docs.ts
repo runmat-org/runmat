@@ -24,6 +24,17 @@ export const docsTree: DocsNode[] = [
     children: [
       { title: "Getting Started", externalHref: "/docs/getting-started" },
       {
+        title: "Desktop & Browser Guide",
+        slug: ["desktop-browser-guide"],
+        file: "docs/DESKTOP_BROWSER_GUIDE.md",
+        seo: {
+          description: "Get started with RunMat Desktop, a browser-based IDE for writing and running MATLAB-style code with GPU acceleration.",
+          keywords: ["RunMat Desktop", "browser IDE", "sandbox", "WebAssembly", "GPU acceleration", "MATLAB online"],
+          ogTitle: "Desktop & Browser Guide",
+          ogDescription: "Learn how to use RunMat Desktop—a browser-based development environment for MATLAB-style code with automatic GPU acceleration.",
+        },
+      },
+      {
         title: "Design Philosophy",
         slug: ["design-philosophy"],
         file: "docs/DESIGN_PHILOSOPHY.md",
@@ -42,6 +53,7 @@ export const docsTree: DocsNode[] = [
     title: "Using RunMat",
     children: [
       { title: "Builtin Function Reference", externalHref: "/docs/matlab-function-reference" },
+      { title: "Library Reference", slug: ["library"], file: "docs/LIBRARY.md", seo: { description: "How RunMat's built-in MATLAB functions are implemented and organized.", keywords: ["standard library", "builtins", "MATLAB functions"] } },
       {
         title: "Package Manager",
         slug: ["package-manager"],
@@ -60,6 +72,7 @@ export const docsTree: DocsNode[] = [
   {
     title: "Language",
     children: [
+      { title: "Language Reference", slug: ["language"], file: "docs/LANGUAGE.md", seo: { description: "RunMat language compatibility modes and MATLAB syntax support.", keywords: ["language reference", "MATLAB syntax", "compatibility"] } },
       { title: "Language Coverage", slug: ["language-coverage"], file: "docs/LANGUAGE_COVERAGE.md", seo: { description: "MATLAB language feature compatibility in RunMat with an Octave comparison.", keywords: ["MATLAB compatibility", "Octave compatibility", "language coverage", "MATLAB alternative", "Octave alternative"] } },
     ],
   },

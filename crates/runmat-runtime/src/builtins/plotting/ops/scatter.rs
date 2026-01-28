@@ -35,68 +35,7 @@ use super::point::{
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{LineStyleParseOptions, MarkerColor};
-
 use crate::{BuiltinResult, RuntimeError};
-
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "scatter",
-        builtin_path = "crate::builtins::plotting::scatter"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-const BUILTIN_NAME: &str = "scatter";
-
-#[allow(dead_code)]
-pub const DOC_MD: &str = r#"---
-title: "scatter"
-category: "plotting"
-keywords: ["scatter", "2-D scatter", "marker plot", "gpuArray"]
-summary: "Render MATLAB-compatible 2-D scatter plots."
-references:
-  - https://www.mathworks.com/help/matlab/ref/scatter.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Single-precision gpuArray inputs render zero-copy via the shared WebGPU context; other data is gathered to the host."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 2
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::plotting::scatter::tests"
----
-
-# What does `scatter` do?
-`scatter(x, y)` plots paired points in 2-D space. The RunMat implementation mirrors MATLAB's default
-styling—circular markers, grid enabled, and axis labels applied to the active figure. Positional size/color
-arguments (`S`, `C`), the `'filled'` flag, and name-value pairs for marker appearance are supported.
-
-## Behaviour highlights
-- Inputs must contain the same number of elements. Row and column vectors are both accepted.
-- Single-precision gpuArray inputs stay on the device when the shared WebGPU renderer is active,
-  so browser and native builds avoid a gather step. Other tensors automatically fall back to the
-  host path.
-- Positional size/color inputs plus `'Marker*'` name-value pairs match MATLAB semantics. Per-point
-  size/color vectors currently force the CPU path until the scatter GPU shaders consume those
-  attributes directly (tracked separately).
-
-## Examples
-```matlab
-t = linspace(0, 2*pi, 100);
-scatter(cos(t), sin(t));
-```
-
-## GPU residency
-`scatter` terminates fusion graphs. If the inputs are `single` gpuArrays and the shared plotter
-device is active, their buffers are consumed zero-copy by the renderer. Otherwise the tensors are
-gathered before plotting, matching MATLAB semantics.
-"#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::scatter")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -124,6 +63,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "scatter performs I/O and terminates fusion graphs.",
 };
+
+const BUILTIN_NAME: &str = "scatter";
 
 #[runtime_builtin(
     name = "scatter",

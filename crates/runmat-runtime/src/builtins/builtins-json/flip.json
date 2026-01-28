@@ -1,0 +1,141 @@
+{
+  "title": "flip",
+  "category": "array/shape",
+  "keywords": [
+    "flip",
+    "reverse",
+    "dimension",
+    "gpu",
+    "horizontal",
+    "vertical"
+  ],
+  "summary": "Reverse the order of elements along specific dimensions.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64",
+      "i32",
+      "bool"
+    ],
+    "broadcasting": "none",
+    "notes": "Attempts to flip tensors directly on the device when providers expose a flip hook; otherwise gathers once, flips on the host, and re-uploads to keep results gpu-resident."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::flip::tests",
+    "integration": "builtins::array::shape::flip::tests::flip_gpu_roundtrip"
+  },
+  "description": "`flip(A)` reverses the order of elements in `A` along one or more dimensions. With no dimension argument, RunMat (like MATLAB) flips along the first dimension whose extent is greater than one. Positive integer dimensions or dimension vectors allow you to mirror data along any axis, and direction keywords such as `'horizontal'` or `'vertical'` provide a readable alternative to numeric indices.",
+  "behaviors": [
+    "Works for numeric arrays, logical masks, complex arrays, and string or character arrays.",
+    "`flip(A)` locates the first non-singleton dimension and reverses that axis.",
+    "`flip(A, dim)` flips along the dimension `dim` (1-based, MATLAB-compatible).",
+    "`flip(A, dims)` accepts a vector of dimensions, flipping each axis in order.",
+    "Dimension vectors must be numeric row or column vectors of positive integers.",
+    "`flip(A, 'horizontal')` and `flip(A, 'vertical')` map to dimensions 2 and 1 respectively. `'both'` flips along the first two dimensions.",
+    "Dimensions larger than `ndims(A)` are allowed. RunMat pads trailing singleton axes so the request becomes a no-op, matching MATLAB semantics.",
+    "Reversing an empty dimension (extent zero) is a no-op.",
+    "gpuArray inputs stay on the device: the runtime calls provider flip hooks when available and otherwise gathers, flips, and re-uploads the data."
+  ],
+  "examples": [
+    {
+      "description": "Reversing a Row Vector",
+      "input": "row = 1:5;\nrev = flip(row);",
+      "output": "rev = [5 4 3 2 1];"
+    },
+    {
+      "description": "Reversing Matrix Rows (Vertical Flip)",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nB = flip(A);",
+      "output": "B =\n     7     8     9\n     4     5     6\n     1     2     3"
+    },
+    {
+      "description": "Flipping Columns with the Horizontal Direction Keyword",
+      "input": "A = magic(3);\nH = flip(A, 'horizontal');",
+      "output": "H =\n     2     7     6\n     9     5     1\n     4     3     8"
+    },
+    {
+      "description": "Flipping Along Multiple Dimensions",
+      "input": "T = reshape(1:8, [2 2 2]);\nF = flip(T, [1 3]);",
+      "output": "F(:,:,1) =\n     3     4\n     1     2\n\nF(:,:,2) =\n     7     8\n     5     6"
+    },
+    {
+      "description": "Flipping Character Data",
+      "input": "C = ['r','u','n'; 'm','a','t'];\nCt = flip(C, 'horizontal');",
+      "output": "Ct =\n    'nur'\n    'tam'"
+    },
+    {
+      "description": "Flipping gpuArray Data While Staying on the Device",
+      "input": "G = gpuArray(rand(4, 4));\nV = flip(G, 'vertical');\nisgpuarray(V)",
+      "output": "ans = logical 1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which dimension does `flip(A)` use by default?",
+      "answer": "The first dimension whose size is greater than one. Column vectors flip along dimension 1, row vectors flip along dimension 2."
+    },
+    {
+      "question": "What happens if I pass a dimension larger than `ndims(A)`?",
+      "answer": "Nothing changes; RunMat pads missing axes with singleton dimensions, so the flip becomes a no-op, just like MATLAB."
+    },
+    {
+      "question": "Do direction keywords work with any array type?",
+      "answer": "Yes. `'horizontal'` maps to dimension 2, `'vertical'` to dimension 1, and `'both'` applies both flips in sequence."
+    },
+    {
+      "question": "Can I flip logical or string arrays?",
+      "answer": "Absolutely. Logical results stay logical, and string arrays preserve string elements while reordering their positions."
+    },
+    {
+      "question": "Does flipping modify gpuArray data in place?",
+      "answer": "No. The builtin returns a new gpuArray handle. Providers may recycle buffers, but the original value remains unchanged."
+    },
+    {
+      "question": "What about complex inputs?",
+      "answer": "Complex scalars and arrays are reversed just like real data. Scalars remain complex scalars after the operation."
+    }
+  ],
+  "links": [
+    {
+      "label": "`flipud`",
+      "url": "./flipud"
+    },
+    {
+      "label": "`permute`",
+      "url": "./permute"
+    },
+    {
+      "label": "`ipermute`",
+      "url": "./ipermute"
+    },
+    {
+      "label": "`repmat`",
+      "url": "./repmat"
+    },
+    {
+      "label": "`gpuArray`",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "`gather`",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/shape/flip.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/flip.rs"
+  },
+  "gpu_residency": "No additional steps are required. RunMat keeps tensors on the GPU across fused expressions. You can opt-in explicitly with `gpuArray` for MATLAB compatibility, but the auto-offload planner already tracks residency and minimises host/device copies even when a provider falls back to the gather \u2192 flip \u2192 upload pathway.",
+  "gpu_behavior": [
+    "When RunMat Accelerate is active, the runtime first checks whether the selected provider implements the `flip` hook (`ProviderHook::Custom(\"flip\")`). Providers may specialise the operation using device-side kernels. If the hook is missing (common for the simple provider or builds without GPU support), RunMat gathers the tensor once, performs the flip on the host, and uploads the result back to the device. The returned value is still a gpuArray, ensuring residency is preserved for downstream fused expressions."
+  ]
+}

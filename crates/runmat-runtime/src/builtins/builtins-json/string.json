@@ -1,0 +1,147 @@
+{
+  "title": "string",
+  "category": "strings/core",
+  "keywords": [
+    "string",
+    "convert",
+    "text",
+    "char",
+    "gpu"
+  ],
+  "summary": "Convert numeric, logical, character, and text inputs into MATLAB string arrays, with optional format-spec composition.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/string.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Gather-only conversion that downloads GPU tensors to host memory before producing string scalars."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::core::string::tests",
+    "integration": "builtins::strings::core::string::tests::string_gpu_numeric_tensor"
+  },
+  "description": "`string(x)` converts scalars, arrays, and text-like inputs into MATLAB string arrays whose elements are string scalars. Numeric and logical values are formatted using MATLAB's short-`g` style, character arrays are split by row, and existing string arrays pass through unchanged.",
+  "behaviors": [
+    "Scalar inputs return a `1×1` string array containing the converted value.",
+    "Numeric and logical arrays preserve the original shape while converting each element.",
+    "Character arrays turn into columnar string arrays with one row per original row.",
+    "Cell arrays must contain text-like or scalar numeric values; each cell becomes one string scalar.",
+    "`string(formatSpec, A1, ..., An)` formats data using MATLAB-compatible `%` placeholders. Scalar format specs broadcast across array arguments and arrays of specs align element-wise.",
+    "Empty inputs yield empty string arrays that match MATLAB's dimension rules.",
+    "Unsupported types (structs, handle objects, events, functions) raise MATLAB-compatible errors."
+  ],
+  "examples": [
+    {
+      "description": "Converting A Numeric Scalar To A String",
+      "input": "name = string(42);",
+      "output": "name = \"42\""
+    },
+    {
+      "description": "Turning A Numeric Row Vector Into Strings",
+      "input": "values = string([3.14159 2.71828 1.41421]);",
+      "output": "values = 1×3 string\n    \"3.1416\"    \"2.7183\"    \"1.4142\""
+    },
+    {
+      "description": "Converting A Character Matrix Into A String Array",
+      "input": "C = ['North '; 'South '; 'East  '; 'West  '];\nregions = string(C);",
+      "output": "regions = 4×1 string\n    \"North \"\n    \"South \"\n    \"East  \"\n    \"West  \""
+    },
+    {
+      "description": "Converting Logical Data To String Scalars",
+      "input": "flags = string(logical([1 0 1 0]));",
+      "output": "flags = 1×4 string\n    \"true\"    \"false\"    \"true\"    \"false\""
+    },
+    {
+      "description": "Creating Strings From A Cell Array Of Mixed Scalars",
+      "input": "C = {true, 17, \"runmat\"};\nS = string(C);",
+      "output": "S = 1×3 string\n    \"true\"    \"17\"    \"runmat\""
+    },
+    {
+      "description": "Formatting Numbers With A Template",
+      "input": "labels = string(\"Trial %d\", 1:4);",
+      "output": "labels = 1×4 string\n    \"Trial 1\"    \"Trial 2\"    \"Trial 3\"    \"Trial 4\""
+    },
+    {
+      "description": "Converting GPU-Resident Numeric Data To Strings",
+      "input": "G = gpuArray([10 20 30]);\nlabels = string(G);",
+      "output": "labels = 1×3 string\n    \"10\"    \"20\"    \"30\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `string` change the size of my array?",
+      "answer": "No. Array-shaped inputs return string arrays with the same shape. Character arrays become column vectors where each row of characters maps to one string scalar."
+    },
+    {
+      "question": "How are floating-point numbers formatted?",
+      "answer": "Floating-point values use MATLAB's short-`g` formatting (up to 12 significant digits) so the result matches `disp` output and is consistent across CPU and GPU inputs."
+    },
+    {
+      "question": "Can I use format specifiers like `%0.2f`?",
+      "answer": "Yes. Provide a format string as the first argument and pass the values to substitute in the remaining arguments, e.g. `string(\"Value %0.2f\", A)` or `string([\"X%02d\" \"Y%02d\"], 1:2)`. Scalar format specs broadcast across vector inputs following MATLAB's rules."
+    },
+    {
+      "question": "What happens if I pass a GPU tensor?",
+      "answer": "The builtin downloads the tensor using the active acceleration provider and then performs the conversion on the CPU. The resulting string array always resides in host memory."
+    },
+    {
+      "question": "Can I request a specific character encoding?",
+      "answer": "RunMat currently supports UTF-8 (the default). Passing `'UTF-8'`, `'utf8'`, or `'system'` yields the same behaviour. Other encodings raise a descriptive error."
+    },
+    {
+      "question": "Can I convert complex numbers or complex arrays?",
+      "answer": "Yes. Complex scalars and arrays use MATLAB's `a + bi` formatting, with imaginary values rendered using the `i` suffix."
+    },
+    {
+      "question": "What happens with empty inputs?",
+      "answer": "Empty inputs return empty string arrays following MATLAB's dimension rules—for example, `string([])` yields a `0×0` string array, and `string(char.empty(0,5))` yields a `0×1` string array."
+    },
+    {
+      "question": "Why does `string` error on structs or handle objects?",
+      "answer": "MATLAB's `string` only supports text-like or scalar numeric types. Structs, objects, listeners, and other handle types cannot be converted automatically and therefore raise an error in RunMat as well."
+    },
+    {
+      "question": "How can I keep trailing spaces from character arrays?",
+      "answer": "`string` preserves every character, including trailing spaces. Use `strtrim` afterwards if you want to remove padding."
+    },
+    {
+      "question": "Do existing string arrays change when passed to `string`?",
+      "answer": "No. Existing string arrays pass through unchanged, so `string([\"a\" \"b\"])` returns the same array."
+    }
+  ],
+  "links": [
+    {
+      "label": "char",
+      "url": "./char"
+    },
+    {
+      "label": "cellstr",
+      "url": "./cellstr"
+    },
+    {
+      "label": "string.empty",
+      "url": "./string.empty"
+    },
+    {
+      "label": "strings",
+      "url": "./strings"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/string.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/string.rs"
+  },
+  "gpu_behavior": [
+    "`string` is a residency sink. When the input contains GPU tensors, RunMat gathers the data back to host memory before performing the conversion. Providers do not need bespoke kernels—the CPU path is authoritative and ensures identical formatting across devices."
+  ]
+}

@@ -1,0 +1,129 @@
+{
+  "title": "regexprep",
+  "category": "strings/regex",
+  "keywords": [
+    "regexprep",
+    "regular expression",
+    "replace",
+    "substitute",
+    "regex"
+  ],
+  "summary": "Perform MATLAB-compatible regular expression replacements on character vectors, string arrays, or cell arrays.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/regexprep.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs on the CPU. Inputs resident on the GPU are gathered before evaluation, and results remain on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::regex::regexprep::tests",
+    "integration": "builtins::strings::regex::regexprep::tests::regexprep_elementwise_arrays"
+  },
+  "description": "`regexprep(str, pattern, replacement)` searches `str` for regular expression matches and replaces each match with the specified replacement text. Inputs can be character vectors, string scalars, string arrays, or cell arrays of text, and the results honour MATLAB's container semantics.",
+  "behaviors": [
+    "With scalar text inputs, the result is a scalar of the same kind (`char` inputs stay `char`, string scalars stay string scalars).",
+    "String arrays and cell arrays are processed element-wise and produce containers with matching shapes. When patterns and replacements are provided as arrays of the same size, they are paired element-by-element; otherwise, scalar patterns/replacements broadcast to every element.",
+    "Cell or string arrays of patterns apply sequentially: each `(pattern, replacement)` pair is applied in order to every element.",
+    "The `'once'` flag limits each element to the first match. `'emptymatch','remove'` (default) skips zero-length matches, while `'emptymatch','allow'` lets them participate.",
+    "`'ignorecase'` and `'matchcase'` control case sensitivity. `'lineanchors'`, `'dotall'`, and `'dotExceptNewline'` toggle multiline and dot behaviours in the same way as `regexp`.",
+    "`'preservecase'` adjusts the replacement text so the case pattern of the first match (all upper, all lower, or title case) is preserved."
+  ],
+  "examples": [
+    {
+      "description": "Replacing vowels in a character vector",
+      "input": "clean = regexprep('abracadabra', '[aeiou]', 'X');",
+      "output": "clean =\n    'XbrXcXdXbrX'"
+    },
+    {
+      "description": "Applying multiple pattern/replacement pairs sequentially",
+      "input": "result = regexprep(\"Color: red\", {'Color', 'red'}, {'Shade', 'blue'});",
+      "output": "result = \"Shade: blue\""
+    },
+    {
+      "description": "Performing case-insensitive replacements",
+      "input": "names = regexprep([\"Alpha\"; \"beta\"; \"GaMmA\"], 'a', '_', 'ignorecase');",
+      "output": "names =\n  3\u00d71 string array\n    \"_lph_\"\n    \"bet_\"\n    \"G__mM_\""
+    },
+    {
+      "description": "Preserving case of the original match",
+      "input": "words = regexprep('MATLAB and matlab', 'matlab', 'runmat', 'preservecase');",
+      "output": "words =\n    'RUNMAT and runmat'"
+    },
+    {
+      "description": "Limiting replacements to the first match with `'once'`",
+      "input": "out = regexprep(\"abababa\", 'ba', 'XY', 'once');",
+      "output": "out = \"aXYbaba\""
+    },
+    {
+      "description": "Using element-wise patterns for a string array",
+      "input": "expr = [\"foo\", \"bar\"];\npat = [\"f\", \"ar\"];\nrep = [\"F\", \"AR\"];\nexact = regexprep(expr, pat, rep);",
+      "output": "exact = 1\u00d72 string\n    \"Foo\"    \"bAR\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How are container outputs shaped?",
+      "answer": "Outputs mirror the input container. Character vectors return character vectors, string arrays return string arrays with the same size, and cell arrays return cell arrays with matching shape."
+    },
+    {
+      "question": "Can I supply multiple patterns at once?",
+      "answer": "Yes. Provide `pattern` and `replacement` as equally-sized cell or string arrays. Each pair is applied sequentially to every element, mirroring MATLAB's behaviour."
+    },
+    {
+      "question": "What if my replacement needs capture-group text?",
+      "answer": "Use `$1`, `$2`, \u2026 for numbered groups or `${name}` for named groups inside the replacement text. These tokens expand to the corresponding captured substrings."
+    },
+    {
+      "question": "Does `regexprep` support case-insensitive matching?",
+      "answer": "Yes. Pass the `'ignorecase'` option (or `'matchcase'` to revert). You can also request multiline anchors or dot behaviour changes with `'lineanchors'`, `'dotall'`, or `'dotExceptNewline'`."
+    },
+    {
+      "question": "What does `'preservecase'` do?",
+      "answer": "When enabled, `regexprep` inspects the alphabetic characters in the matched text. If they are all uppercase, lowercase, or title-cased, the replacement text is adjusted to match that style."
+    },
+    {
+      "question": "Does `regexprep` execute on the GPU?",
+      "answer": "No. All matching and replacement runs on the CPU. GPU inputs are downloaded automatically, but the results remain in host memory."
+    }
+  ],
+  "links": [
+    {
+      "label": "regexp",
+      "url": "./regexp"
+    },
+    {
+      "label": "regexpi",
+      "url": "./regexpi"
+    },
+    {
+      "label": "strrep",
+      "url": "./strrep"
+    },
+    {
+      "label": "replace",
+      "url": "./replace"
+    },
+    {
+      "label": "contains",
+      "url": "./contains"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/regex/regexprep.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/regex/regexprep.rs"
+  },
+  "gpu_behavior": [
+    "`regexprep` executes entirely on the CPU. When the subject, pattern, or replacement values originate from GPU-resident arrays, RunMat gathers them to host memory before performing the replacements. Results remain on the host; callers that need GPU residency should explicitly move the values back afterwards (e.g. with `gpuArray`)."
+  ]
+}

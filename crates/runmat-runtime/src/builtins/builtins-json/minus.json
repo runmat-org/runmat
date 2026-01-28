@@ -1,0 +1,154 @@
+{
+  "title": "minus",
+  "category": "math/elementwise",
+  "keywords": [
+    "minus",
+    "element-wise subtraction",
+    "-",
+    "gpu",
+    "implicit expansion"
+  ],
+  "summary": "Element-wise subtraction A - B with MATLAB-compatible implicit expansion, complex support, and GPU fallbacks.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/minus.html"
+  ],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Uses provider elem_sub for matching gpuArray shapes, scalar_sub for gpuArray - scalar, scalar_rsub for scalar - gpuArray, and gathers to host for implicit expansion or unsupported operand types."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::minus::tests::minus_scalar_numbers",
+    "integration": "builtins::math::elementwise::minus::tests::minus_row_column_broadcast",
+    "gpu": "builtins::math::elementwise::minus::tests::minus_gpu_pair_roundtrip",
+    "wgpu": "builtins::math::elementwise::minus::tests::minus_wgpu_matches_cpu_elementwise",
+    "like_gpu": "builtins::math::elementwise::minus::tests::minus_like_gpu_prototype_keeps_residency",
+    "like_host": "builtins::math::elementwise::minus::tests::minus_like_host_gathers_gpu_value",
+    "like_complex": "builtins::math::elementwise::minus::tests::minus_like_complex_prototype_yields_complex"
+  },
+  "description": "`minus(A, B)` (or the operator form `A - B`) subtracts corresponding elements of `B` from `A`, honouring MATLAB's implicit expansion rules so that scalars and singleton dimensions broadcast automatically.",
+  "behaviors": [
+    "Supports real, complex, logical, and character inputs; logical and character data are promoted to double precision before subtraction.",
+    "Implicit expansion works across any dimension, provided the non-singleton extents match. Size mismatches raise the standard MATLAB-compatible error message.",
+    "Complex operands follow MATLAB's analytic rule `(a + ib) - (c + id) = (a - c) + i(b - d)`.",
+    "Empty dimensions propagate naturally—if either operand has a zero-sized dimension after broadcasting, the result is empty with the broadcasted shape.",
+    "Integer inputs promote to double precision before subtraction, mirroring MATLAB behaviour and keeping numeric tower rules consistent with other RunMat arithmetic builtins.",
+    "The optional `'like'` prototype makes the output adopt the residency (host or GPU) and complexity characteristics of the prototype, which is particularly useful for keeping implicit-expansion expressions on the device."
+  ],
+  "examples": [
+    {
+      "description": "Subtracting two matrices element-wise",
+      "input": "A = [7 8 9; 4 5 6];\nB = [1 2 3; 1 2 3];\nD = minus(A, B);",
+      "output": "D =\n     6     6     6\n     3     3     3"
+    },
+    {
+      "description": "Subtracting a scalar from every matrix element",
+      "input": "A = magic(3);\nshifted = minus(A, 0.5);",
+      "output": "shifted =\n    7.5    0.5    5.5\n    2.5    4.5    6.5\n    3.5    8.5    1.5"
+    },
+    {
+      "description": "Broadcasting a column minus a row vector",
+      "input": "col = (1:3)';\nrow = [10 20 30];\nM = minus(col, row);",
+      "output": "M =\n    -9   -19   -29\n    -8   -18   -28\n    -7   -17   -27"
+    },
+    {
+      "description": "Subtracting complex numbers element-wise",
+      "input": "z1 = [1+2i, 3-4i];\nz2 = [2-1i, -1+1i];\ndiffz = minus(z1, z2);",
+      "output": "diffz =\n    -1 + 3i     4 - 5i"
+    },
+    {
+      "description": "Subtracting from character codes",
+      "input": "letters = 'DEF';\ncodes = minus(letters, 1);",
+      "output": "codes = [67 68 69]"
+    },
+    {
+      "description": "Keeping element-wise differences on the GPU with `'like'`",
+      "input": "proto = gpuArray.zeros(1, 1);\nG1 = gpuArray([10 20 30]);\nG2 = gpuArray([1 2 3]);\ndeviceDiff = minus(G1, G2, 'like', proto);\nresult = gather(deviceDiff);",
+      "output": "deviceDiff =\n  1x3 gpuArray\n     9    18    27\nresult =\n     9    18    27"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `minus` support MATLAB implicit expansion?",
+      "answer": "Yes. Any singleton dimensions expand automatically. If a dimension has incompatible non-singleton extents, `minus` raises the standard size-mismatch error."
+    },
+    {
+      "question": "What numeric type does `minus` return?",
+      "answer": "Results are double precision for real inputs and complex double when either operand is complex. Logical and character inputs are promoted to double before subtraction."
+    },
+    {
+      "question": "Can I subtract gpuArrays and host scalars?",
+      "answer": "Yes. RunMat keeps the computation on the GPU when the scalar is numeric. For other host operand types, the runtime gathers the gpuArray and computes on the CPU."
+    },
+    {
+      "question": "Does `minus` preserve gpuArray residency after a fallback?",
+      "answer": "When a fallback occurs (for example, implicit expansion that the provider does not implement), the resulting array stays on the host by default. Provide a `'like', gpuArray(...)` prototype if you need the runtime to re-upload the final result automatically."
+    },
+    {
+      "question": "How can I force the result to stay on the GPU?",
+      "answer": "Provide a `'like'` prototype: `minus(A, B, 'like', gpuArray.zeros(1, 1))` keeps the result on the device even if one of the inputs originated on the host."
+    },
+    {
+      "question": "How are empty arrays handled?",
+      "answer": "Empty dimensions propagate. If either operand has an extent of zero in the broadcasted shape, the result is empty with that broadcasted shape."
+    },
+    {
+      "question": "Are integer inputs supported?",
+      "answer": "Yes. Integers promote to double precision during the subtraction, matching other RunMat arithmetic builtins."
+    },
+    {
+      "question": "Can I mix complex and real operands?",
+      "answer": "Absolutely. The result is complex, with broadcasting rules identical to MATLAB."
+    },
+    {
+      "question": "What about string arrays?",
+      "answer": "String arrays are not numeric and therefore raise an error when passed to `minus`."
+    }
+  ],
+  "links": [
+    {
+      "label": "plus",
+      "url": "./plus"
+    },
+    {
+      "label": "times",
+      "url": "./times"
+    },
+    {
+      "label": "ldivide",
+      "url": "./ldivide"
+    },
+    {
+      "label": "rdivide",
+      "url": "./rdivide"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/minus.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/minus.rs"
+  },
+  "gpu_residency": "RunMat's auto-offload planner keeps tensors on the GPU whenever fused expressions benefit from device execution. Explicit `gpuArray` / `gather` calls remain supported for MATLAB code that manages residency manually. When the active provider lacks the kernels needed for a particular call (for example, implicit expansion between gpuArrays of different shapes), RunMat gathers back to the host, computes the MATLAB-accurate result, and resumes execution seamlessly.",
+  "gpu_behavior": [
+    "When a gpuArray provider is active:\n\n1. If both operands are gpuArrays with identical shapes, RunMat dispatches to the provider's `elem_sub` hook. 2. If the left operand is a gpuArray and the right operand is a scalar, RunMat calls `scalar_sub` to keep the computation on the device. 3. If the right operand is a gpuArray and the left operand is a scalar, RunMat calls `scalar_rsub` so the scalar subtraction also remains on the device. 4. Implicit-expansion workloads (e.g., mixing row and column vectors) or unsupported operand kinds gather transparently to host memory, compute the result with full MATLAB semantics, and return a host tensor unless a `'like'` GPU prototype is supplied—in which case the runtime re-uploads the output to honour the residency request."
+  ]
+}

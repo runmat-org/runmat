@@ -1,0 +1,126 @@
+{
+  "title": "cd",
+  "category": "io/repl_fs",
+  "keywords": [
+    "cd",
+    "change directory",
+    "current folder",
+    "working directory",
+    "pwd"
+  ],
+  "summary": "Change the current working folder or query the folder that RunMat is executing in.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/cd.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host CPU. When the folder argument resides on the GPU, RunMat gathers it to the host before resolving the new path."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::cd::tests",
+    "integration": "builtins::io::repl_fs::cd::tests::cd_changes_directory_and_returns_previous"
+  },
+  "description": "`cd` displays the current working folder or switches RunMat to a different folder. It mirrors MATLAB so scripts and interactive sessions can rely on the same workspace layout when loading files, saving artifacts, or invoking other builtins that reference relative paths.",
+  "behaviors": [
+    "`cd` with no input returns the absolute path of the current folder as a character row vector (`1\u00d7N`).",
+    "`cd(newFolder)` changes the working folder and returns the previous folder, enabling the classic MATLAB pattern `old = cd(new); ...; cd(old);`.",
+    "Accepts character vectors and string scalars. String arrays must contain exactly one element. Other types raise `cd: folder name must be a character vector or string scalar`.",
+    "Supports relative paths (for example `cd('..')`), absolute paths, and the shell-style `~` expansion to jump to the user home folder.",
+    "Emits descriptive errors when the folder does not exist or cannot be accessed.",
+    "Does not modify GPU residency; path values always live on the host."
+  ],
+  "examples": [
+    {
+      "description": "Display The Current Working Folder In RunMat",
+      "input": "current = cd;",
+      "output": "% current is the absolute path to the folder where RunMat is executing"
+    },
+    {
+      "description": "Change Directory To A Project Subfolder",
+      "input": "projectRoot = pwd;\nmkdir(\"data/logs\");\nold = cd(\"data/logs\");\n% ... work inside the logs folder ...\ncd(old);",
+      "output": "% old contains the previous folder so you can restore it later, and the final cd(old)\n% call brings you back to projectRoot"
+    },
+    {
+      "description": "Navigate Up One Level From The Current Folder",
+      "input": "old = cd(\"..\");",
+      "output": "% RunMat moves to the parent folder and old captures the prior location"
+    },
+    {
+      "description": "Switch To Your Home Folder With cd ~",
+      "input": "old = cd(\"~\");",
+      "output": "% Changes to the user home directory; old stores the previous folder"
+    },
+    {
+      "description": "Capture The Previous Folder And Restore Later",
+      "input": "old = cd(\"results\");\n% ... run code that writes outputs into results ...\ncd(old);",
+      "output": "% The working folder is restored to its original location at the end"
+    },
+    {
+      "description": "Handle Missing Folders With A try/catch Block",
+      "input": "try\n    cd(\"missing-folder\");\ncatch err\n    disp(err.message);\nend",
+      "output": "% Displays a descriptive error such as:\n% \"cd: unable to change directory to 'missing-folder' (No such file or directory)\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `cd` return the new folder or the old folder?",
+      "answer": "When you pass an input, `cd` returns the previous folder so that you can restore it later. Calling `cd` with no input returns the current folder."
+    },
+    {
+      "question": "Can I pass GPU-resident strings to `cd`?",
+      "answer": "Yes. RunMat gathers any GPU scalar arguments automatically before resolving the path."
+    },
+    {
+      "question": "Is tilde (`~`) expansion supported?",
+      "answer": "Yes. `cd('~')` and `cd('~/subdir')` jump to the user home folder. Other leading `~` patterns are treated literally so existing MATLAB scripts continue to work on platforms that support them."
+    },
+    {
+      "question": "How are relative paths resolved?",
+      "answer": "Relative folders are interpreted with respect to whatever `cd` reports as the current folder, exactly like MATLAB."
+    },
+    {
+      "question": "What happens if the target folder does not exist?",
+      "answer": "`cd` throws an error that includes both the requested folder and the underlying operating system message."
+    },
+    {
+      "question": "Can I change to folders whose names include spaces?",
+      "answer": "Yes. Provide them as strings or character vectors\u2014RunMat preserves whitespace exactly."
+    }
+  ],
+  "links": [
+    {
+      "label": "pwd",
+      "url": "./pwd"
+    },
+    {
+      "label": "ls",
+      "url": "./ls"
+    },
+    {
+      "label": "dir",
+      "url": "./dir"
+    },
+    {
+      "label": "fileread",
+      "url": "./fileread"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/cd.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/cd.rs"
+  },
+  "gpu_residency": "`cd` operates entirely on the CPU, so there is no performance benefit to moving folder arguments onto the GPU. If a path value is already wrapped in `gpuArray`, RunMat transparently gathers it before resolving the change directory request. Scripts can keep using plain character vectors or string scalars without worrying about residency.",
+  "gpu_behavior": [
+    "`cd` performs host-side path manipulation and process-level directory changes. When callers supply the folder argument from GPU memory, RunMat gathers the value before resolving the new path. Providers are not expected to implement hooks for this builtin, and no GPU kernels run as part of `cd`."
+  ]
+}
