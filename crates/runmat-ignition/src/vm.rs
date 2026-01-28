@@ -1601,13 +1601,12 @@ async fn run_interpreter(
                 log_fusion_span_window(&plan, &bytecode, pc);
                 let span = plan.group.span.clone();
                 let mut has_barrier = false;
+                let mut stored_vars: HashSet<(bool, usize)> = HashSet::new();
                 if span.end < bytecode.instructions.len() && span.start <= span.end {
                     for instr in &bytecode.instructions[span.start..=span.end] {
                         if matches!(
                             instr,
-                            Instr::StoreVar(_)
-                                | Instr::StoreLocal(_)
-                                | Instr::StoreIndex(_)
+                            Instr::StoreIndex(_)
                                 | Instr::StoreSlice(_, _, _, _)
                                 | Instr::StoreSliceEx(_, _, _, _, _)
                                 | Instr::StoreRangeEnd { .. }
@@ -1617,6 +1616,43 @@ async fn run_interpreter(
                                 | Instr::StoreMemberDynamic
                         ) {
                             has_barrier = true;
+                            break;
+                        }
+                        match instr {
+                            Instr::StoreVar(idx) => {
+                                stored_vars.insert((false, *idx));
+                            }
+                            Instr::StoreLocal(idx) => {
+                                stored_vars.insert((true, *idx));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                if !has_barrier && !stored_vars.is_empty() && span.end + 1 < bytecode.instructions.len() {
+                    for instr in &bytecode.instructions[span.end + 1..] {
+                        match instr {
+                            Instr::LoadVar(idx) => {
+                                if stored_vars.contains(&(false, *idx)) {
+                                    has_barrier = true;
+                                    break;
+                                }
+                            }
+                            Instr::LoadLocal(idx) => {
+                                if stored_vars.contains(&(true, *idx)) {
+                                    has_barrier = true;
+                                    break;
+                                }
+                            }
+                            Instr::StoreVar(idx) => {
+                                stored_vars.remove(&(false, *idx));
+                            }
+                            Instr::StoreLocal(idx) => {
+                                stored_vars.remove(&(true, *idx));
+                            }
+                            _ => {}
+                        }
+                        if stored_vars.is_empty() {
                             break;
                         }
                     }
