@@ -13,7 +13,7 @@ function extractHeadings(md: string): Heading[] {
     const m = /^(#{2,6})\s+(.+)$/.exec(line);
     if (!m) continue;
     const depth = m[1].length;
-    const text = m[2].replace(/`/g, "");
+    const text = m[2].replace(/`/g, "").replace(/\*\*/g, "");
     const id = slugifyHeading(text);
     out.push({ depth, text, id });
   }
