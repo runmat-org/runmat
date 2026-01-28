@@ -9,16 +9,27 @@ import {
   NavigationMenuItem,
   NavigationMenuLink,
   NavigationMenuList,
+  NavigationMenuTrigger,
+  NavigationMenuContent,
   navigationMenuTriggerStyle,
 } from "@/components/ui/navigation-menu";
 import { Button } from "@/components/ui/button";
 import { Download, Menu, BookOpen, FileText, Scale, Minus } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { ThemeToggle } from "./ThemeToggle";
+import { trackEvent } from "@/components/GoogleAnalytics";
 
 export default function Navigation() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const router = useRouter();
+  const handleTryInBrowserClick = () => {
+    trackEvent("nav_cta_click", "navigation", "try_in_browser");
+  };
+  const handleDocsClick = () => {
+    router.push("/docs");
+  };
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -37,11 +48,67 @@ export default function Navigation() {
           <NavigationMenu>
             <NavigationMenuList>
               <NavigationMenuItem>
-                <NavigationMenuLink className={navigationMenuTriggerStyle()} asChild>
-                  <Link href="/docs">
-                    Documentation
-                  </Link>
-                </NavigationMenuLink>
+                <NavigationMenuTrigger
+                  className={navigationMenuTriggerStyle()}
+                  onClick={handleDocsClick}
+                >
+                  Docs
+                </NavigationMenuTrigger>
+                <NavigationMenuContent className="w-56 rounded-lg border border-gray-700/60 bg-black/95 backdrop-blur-xl shadow-lg">
+                  <ul className="grid gap-1 p-1">
+                    <li>
+                      <NavigationMenuLink asChild>
+                        <Link
+                          href="/docs/getting-started"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                        >
+                          Getting Started
+                        </Link>
+                      </NavigationMenuLink>
+                    </li>
+                    <li>
+                      <NavigationMenuLink asChild>
+                        <Link
+                          href="/docs/matlab-function-reference"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                        >
+                          Function Reference
+                        </Link>
+                      </NavigationMenuLink>
+                    </li>
+                    <li>
+                      <NavigationMenuLink asChild>
+                        <Link
+                          href="/docs/architecture"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                        >
+                          Architecture
+                        </Link>
+                      </NavigationMenuLink>
+                    </li>
+                    <li>
+                      <NavigationMenuLink asChild>
+                        <Link
+                          href="/docs/cli"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                        >
+                          CLI Reference
+                        </Link>
+                      </NavigationMenuLink>
+                    </li>
+                    <li className="my-1 h-px bg-gray-700/50" />
+                    <li>
+                      <NavigationMenuLink asChild>
+                        <Link
+                          href="/docs"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                        >
+                          View all docs
+                        </Link>
+                      </NavigationMenuLink>
+                    </li>
+                  </ul>
+                </NavigationMenuContent>
               </NavigationMenuItem>
               <NavigationMenuItem>
                 <NavigationMenuLink className={navigationMenuTriggerStyle()} asChild>
@@ -119,6 +186,18 @@ export default function Navigation() {
                 Download
               </Link>
             </Button>
+            <Link
+              href="https://runmat.org/sandbox"
+              className="inline-flex items-center justify-center h-10 px-6 text-sm font-semibold flex-shrink-0 whitespace-nowrap rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow hover:from-blue-600 hover:to-purple-700 transition-colors"
+              onClick={handleTryInBrowserClick}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-ph-capture-attribute-destination="sandbox"
+              data-ph-capture-attribute-source="nav-desktop"
+              data-ph-capture-attribute-cta="try-in-browser"
+            >
+              Try in Browser
+            </Link>
           </nav>
         </div>
       </div>

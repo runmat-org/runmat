@@ -328,8 +328,18 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-center">
-                  Same code, everywhere: static binaries with consistent performance on macOS/Windows/Linux and headless servers. GPU portability via Metal, DirectX 12, and Vulkan—no CUDA lock-in. Great for laptops, clusters, and CI.
-
+                  <Link
+                    href="https://runmat.org/sandbox"
+                    className="underline"
+                    target="_blank"
+                    rel="noreferrer"
+                    data-ph-capture-attribute-destination="sandbox"
+                    data-ph-capture-attribute-source="home-portable-card"
+                    data-ph-capture-attribute-cta="try-in-browser"
+                  >
+                    Try instantly in the browser with no install,
+                  </Link>{" "}
+                  or download the CLI for local scripts. Same code runs on macOS, Windows, Linux, and headless servers. GPU portability via Metal, DirectX 12, and Vulkan—no CUDA lock-in.
                 </CardDescription>
               </CardContent>
             </Card>

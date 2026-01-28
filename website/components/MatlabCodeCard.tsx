@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import Prism from "prismjs";
 import "prismjs/components/prism-matlab";
 import { useMemo } from "react";
+import { TryInBrowserButton } from "@/components/TryInBrowserButton";
 
 const sampleCode = `
 x = 0:0.001:4*pi;           % 0 to 4π in steps of 0.001
@@ -27,17 +28,27 @@ export function MatlabCodeCard({ code = sampleCode, className }: MatlabCodeCardP
           <span className="h-3.5 w-3.5 rounded-full bg-[#27c93f]" />
         </div>
       </div>
-      <pre
-        className="mt-3 overflow-x-auto rounded-2xl bg-[#0d1422] p-1 text-left font-mono text-lg leading-8 text-white language-example"
-        tabIndex={0}
-        suppressHydrationWarning
-      >
-        <code
-          className="language-matlab"
-          dangerouslySetInnerHTML={{ __html: highlighted }}
+      <div className="mt-3 relative group">
+        <div className="absolute top-3 right-3 z-10">
+          <TryInBrowserButton
+            code={code}
+            size="sm"
+            className="bg-[#0d1422]/80 backdrop-blur-sm"
+            source="matlab-code-card"
+          />
+        </div>
+        <pre
+          className="markdown-pre m-0 max-w-full overflow-x-auto rounded-2xl bg-[#0d1422] text-left text-white language-example"
+          tabIndex={0}
           suppressHydrationWarning
-        />
-      </pre>
+        >
+          <code
+            className="language-matlab"
+            dangerouslySetInnerHTML={{ __html: highlighted }}
+            suppressHydrationWarning
+          />
+        </pre>
+      </div>
     </div>
   );
 }

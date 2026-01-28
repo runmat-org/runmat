@@ -119,7 +119,7 @@ Click **Run** again. A new **Figure** tab appears in the Runtime Panel showing y
 
 The editor supports standard MATLAB syntax:
 
-```matlab
+```matlab:runnable
 % Element-wise operations (automatically GPU-accelerated for large arrays)
 x = rand(1000000, 1);
 y = sin(x) .* exp(-x);
@@ -199,7 +199,7 @@ If WebGPU isn't available, RunMat falls back to CPU execution. You can still run
 
 Yes. RunMat supports standard `.m` file syntax. Many MATLAB scripts run with few or no changes.
 
-See the [Language Coverage](LANGUAGE_COVERAGE.md) guide for supported features.
+See the [Language Coverage](/docs/language-coverage) guide for supported features.
 
 ### How do I handle user input?
 
@@ -229,7 +229,7 @@ Now that you've run your first script:
 
 - **Explore the built-in functions** — See the [Library Reference](/docs/library)
 - **Learn about GPU acceleration** — Read [Introduction to RunMat GPU](/docs/accelerate/fusion-intro)
-- **Install the CLI** — For local file access and scripting: [CLI Guide](CLI.md)
+- **Install the CLI** — For local file access and scripting: [CLI Guide](/docs/cli)
 - **Try the benchmarks** — Compare RunMat performance against NumPy and PyTorch
 
 ---

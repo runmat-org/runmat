@@ -61,7 +61,7 @@ export default function Footer() {
             </ul>
           </div>
         </div>
-        <div className="w-full md:w-auto md:flex-1 md:max-w-md">
+        <div className="w-full md:w-auto md:flex-1 md:max-w-md" id="newsletter">
           <NewsletterCta
             description="Get updates on releases, benchmarks, and deep dives."
             align="left"
