@@ -543,9 +543,13 @@ impl WebRenderer {
                         }
                         viewports.push((rx as u32, ry as u32, rw as u32, rh as u32));
                     }
-                    let _ = self
-                        .plot_renderer
-                        .render_axes_to_viewports(&mut encoder, &frame_view, &viewports, requested_samples)
+                    self.plot_renderer
+                        .render_axes_to_viewports(
+                            &mut encoder,
+                            &frame_view,
+                            &viewports,
+                            requested_samples,
+                        )
                         .map_err(|err| WebRendererError::Render(err.to_string()))?;
                 } else {
                     let cfg = PlotRenderConfig {
@@ -633,10 +637,8 @@ impl WebRenderer {
 
         let width = self.surface_config.width.max(1);
         let height = self.surface_config.height.max(1);
-        if let Some(_) = &self.msaa_texture {
-            if self.msaa_extent == (width, height) {
-                return Ok(());
-            }
+        if self.msaa_texture.is_some() && self.msaa_extent == (width, height) {
+            return Ok(());
         }
 
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {

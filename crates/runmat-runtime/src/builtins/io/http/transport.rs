@@ -258,7 +258,7 @@ fn send_request_impl(request: &HttpRequest) -> Result<HttpResponse, TransportErr
 
     let status = xhr
         .status()
-        .map_err(|err| map_js_error(&request.url, err))? as u16;
+        .map_err(|err| map_js_error(&request.url, err))?;
     if status == 0 {
         return Err(TransportError::new(
             TransportErrorKind::Connect,

@@ -1955,7 +1955,7 @@ impl WgpuProvider {
         #[cfg(target_arch = "wasm32")]
         {
             let _ = (staging, size_bytes);
-            return Err(anyhow!("{context}: readback requires async path on wasm"));
+            Err(anyhow!("{context}: readback requires async path on wasm"))
         }
         #[cfg(not(target_arch = "wasm32"))]
         {

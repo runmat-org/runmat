@@ -856,12 +856,14 @@ impl RunMatSession {
         use log::{info, warn};
 
         info!("No snapshot provided; building stdlib snapshot inside wasm runtime");
-        let mut config = SnapshotConfig::default();
-        config.compression_enabled = false;
-        config.validation_enabled = false;
-        config.memory_mapping_enabled = false;
-        config.parallel_loading = false;
-        config.progress_reporting = false;
+        let config = SnapshotConfig {
+            compression_enabled: false,
+            validation_enabled: false,
+            memory_mapping_enabled: false,
+            parallel_loading: false,
+            progress_reporting: false,
+            ..Default::default()
+        };
 
         match SnapshotBuilder::new(config).build() {
             Ok(snapshot) => {

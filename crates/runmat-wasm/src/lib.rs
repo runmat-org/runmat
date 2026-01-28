@@ -29,7 +29,6 @@ use runmat_logging::{
 use runmat_runtime::build_runtime_error;
 use runmat_thread_local::runmat_thread_local;
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
-use serde_wasm_bindgen;
 use std::backtrace::Backtrace;
 use tracing::{info, info_span};
 use wasm_bindgen::prelude::*;
@@ -159,27 +158,26 @@ runmat_thread_local! {
     static STDOUT_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
         RefCell::new(HashMap::new());
 }
-static STDOUT_FORWARDER: OnceLock<
-    Arc<dyn Fn(&runmat_runtime::console::ConsoleEntry) + Send + Sync + 'static>,
-> = OnceLock::new();
+type StdoutForwarder =
+    Arc<dyn Fn(&runmat_runtime::console::ConsoleEntry) + Send + Sync + 'static>;
+type RuntimeLogForwarder = Arc<dyn Fn(&runmat_logging::RuntimeLogRecord) + Send + Sync + 'static>;
+type TraceForwarder = Arc<dyn Fn(&[runmat_logging::TraceEvent]) + Send + Sync + 'static>;
+
+static STDOUT_FORWARDER: OnceLock<StdoutForwarder> = OnceLock::new();
 static STDOUT_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 runmat_thread_local! {
     static RUNTIME_LOG_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
         RefCell::new(HashMap::new());
 }
-static RUNTIME_LOG_FORWARDER: OnceLock<
-    Arc<dyn Fn(&runmat_logging::RuntimeLogRecord) + Send + Sync + 'static>,
-> = OnceLock::new();
+static RUNTIME_LOG_FORWARDER: OnceLock<RuntimeLogForwarder> = OnceLock::new();
 static RUNTIME_LOG_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 runmat_thread_local! {
     static TRACE_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
         RefCell::new(HashMap::new());
 }
-static TRACE_FORWARDER: OnceLock<
-    Arc<dyn Fn(&[runmat_logging::TraceEvent]) + Send + Sync + 'static>,
-> = OnceLock::new();
+static TRACE_FORWARDER: OnceLock<TraceForwarder> = OnceLock::new();
 static TRACE_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 static LOGGING_GUARD: OnceLock<LoggingGuard> = OnceLock::new();
 static LOG_FILTER_OVERRIDE: OnceLock<String> = OnceLock::new();
@@ -305,9 +303,10 @@ impl RunMatWasm {
         };
 
         // We must not hold a RefCell borrow across `.await`, so temporarily move the session out.
-        let mut slot = self.session.borrow_mut();
-        let mut session = std::mem::take(&mut *slot);
-        drop(slot);
+        let mut session = {
+            let mut slot = self.session.borrow_mut();
+            std::mem::take(&mut *slot)
+        };
 
         let exec_result = session.execute(&source).await;
         // Always restore the session, even if execution fails (e.g. parse/compile error).
@@ -437,18 +436,16 @@ impl RunMatWasm {
                 set_js_stdin_handler(None);
                 let mut session = self.session.borrow_mut();
                 session.clear_async_input_handler();
-                return Ok(());
-            }
-            let func = handler
-                .dyn_into::<js_sys::Function>()
-                .map_err(|_| js_error("setInputHandler expects a Function or null"))?;
-            set_js_stdin_handler(Some(func));
-            {
+            } else {
+                let func = handler
+                    .dyn_into::<js_sys::Function>()
+                    .map_err(|_| js_error("setInputHandler expects a Function or null"))?;
+                set_js_stdin_handler(Some(func));
                 let mut session = self.session.borrow_mut();
                 session
                     .install_async_input_handler(|req| async move { js_input_request(req).await });
             }
-            return Ok(());
+            Ok(())
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -494,9 +491,10 @@ impl RunMatWasm {
             let target = parse_materialize_target(selector)?;
             let opts = parse_materialize_options(options)?;
             // We must not hold a RefCell borrow across `.await`, so temporarily move the session out.
-            let mut slot = self.session.borrow_mut();
-            let mut session = std::mem::take(&mut *slot);
-            drop(slot);
+            let mut session = {
+                let mut slot = self.session.borrow_mut();
+                std::mem::take(&mut *slot)
+            };
 
             let materialize_result = session.materialize_variable(target, opts).await;
             // Always restore the session, even if materialization fails.
@@ -505,11 +503,11 @@ impl RunMatWasm {
             let value = materialize_result
                 .map_err(|err| js_error(&format!("materializeVariable failed: {err}")))?;
             let payload = MaterializedVariablePayload::from(value);
-            return serde_wasm_bindgen::to_value(&payload).map_err(|err| {
+            serde_wasm_bindgen::to_value(&payload).map_err(|err| {
                 js_error(&format!(
                     "Failed to serialize materialized workspace value: {err}"
                 ))
-            });
+            })
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -1280,7 +1278,7 @@ fn install_cpu_provider(config: &SessionConfig) {
 fn ensure_figure_event_bridge() {
     FIGURE_EVENT_OBSERVER.get_or_init(|| {
         let observer: Arc<dyn for<'a> Fn(FigureEventView<'a>) + Send + Sync> =
-            Arc::new(|event| emit_js_figure_event(event));
+            Arc::new(emit_js_figure_event);
         let _ = runtime_install_figure_observer(observer);
     });
 }
@@ -1288,15 +1286,14 @@ fn ensure_figure_event_bridge() {
 #[cfg(target_arch = "wasm32")]
 fn ensure_runtime_log_forwarder_installed() {
     RUNTIME_LOG_FORWARDER.get_or_init(|| {
-        let forwarder: Arc<dyn Fn(&RuntimeLogRecord) + Send + Sync> =
-            Arc::new(|record: &RuntimeLogRecord| {
-                let js_value = serde_wasm_bindgen::to_value(record).unwrap_or(JsValue::NULL);
-                RUNTIME_LOG_SUBSCRIBERS.with(|cell| {
-                    for cb in cell.borrow().values() {
-                        let _ = cb.call1(&JsValue::NULL, &js_value);
-                    }
-                });
+        let forwarder: RuntimeLogForwarder = Arc::new(|record: &RuntimeLogRecord| {
+            let js_value = serde_wasm_bindgen::to_value(record).unwrap_or(JsValue::NULL);
+            RUNTIME_LOG_SUBSCRIBERS.with(|cell| {
+                for cb in cell.borrow().values() {
+                    let _ = cb.call1(&JsValue::NULL, &js_value);
+                }
             });
+        });
         let hook = forwarder.clone();
         set_runtime_log_hook(move |rec| {
             (hook)(rec);
@@ -1310,8 +1307,7 @@ fn ensure_trace_forwarder_installed() {
     use runmat_logging::{set_trace_hook, TraceEvent};
 
     TRACE_FORWARDER.get_or_init(|| {
-        let forwarder: Arc<dyn Fn(&[TraceEvent]) + Send + Sync> =
-            Arc::new(|events: &[TraceEvent]| {
+        let forwarder: TraceForwarder = Arc::new(|events: &[TraceEvent]| {
                 let js_value = serde_wasm_bindgen::to_value(events).unwrap_or(JsValue::NULL);
                 TRACE_SUBSCRIBERS.with(|cell| {
                     for cb in cell.borrow().values() {
@@ -1484,8 +1480,7 @@ fn emit_js_figure_event(event: FigureEventView<'_>) {
     FIGURE_EVENT_CALLBACK.with(|slot| {
         if let Some(cb) = slot.borrow().as_ref() {
             let payload = convert_event_view(event);
-            let js_value =
-                serde_wasm_bindgen::to_value(&payload).unwrap_or_else(|_| JsValue::UNDEFINED);
+            let js_value = serde_wasm_bindgen::to_value(&payload).unwrap_or(JsValue::UNDEFINED);
             let _ = cb.call1(&JsValue::NULL, &js_value);
         }
     });
@@ -1885,12 +1880,12 @@ fn init_logging_once() {
         #[cfg(target_arch = "wasm32")]
         {
             std::panic::set_hook(Box::new(|info| {
-                let _ = web_sys::console::error_1(&JsValue::from_str(
+                web_sys::console::error_1(&JsValue::from_str(
                     "RunMat panic hook invoked; forwarding to console_error_panic_hook",
                 ));
                 console_error_panic_hook::hook(info);
                 let bt = Backtrace::force_capture();
-                let _ = web_sys::console::error_1(&JsValue::from_str(&format!(
+                web_sys::console::error_1(&JsValue::from_str(&format!(
                     "RunMat panic backtrace:\n{bt:?}"
                 )));
             }));
@@ -2455,7 +2450,7 @@ fn parse_materialize_options(value: JsValue) -> Result<WorkspaceMaterializeOptio
         })?;
     let mut opts = WorkspaceMaterializeOptions::default();
     if let Some(limit) = payload.limit {
-        opts.max_elements = limit.max(1).min(MAX_DATA_PREVIEW);
+        opts.max_elements = limit.clamp(1, MAX_DATA_PREVIEW);
     }
     if let Some(slice) = payload.slice {
         opts.slice = Some(WorkspaceSliceOptions {
@@ -2521,7 +2516,7 @@ fn value_to_json(value: &Value, depth: usize) -> JsonValue {
         }),
         Value::LogicalArray(arr) => {
             let (preview, truncated) = preview_slice(&arr.data, MAX_DATA_PREVIEW);
-            let rows = arr.shape.get(0).copied().unwrap_or(0);
+            let rows = arr.shape.first().copied().unwrap_or(0);
             let cols = arr.shape.get(1).copied().unwrap_or(0);
             json!({
                 "kind": "logical-array",
@@ -2658,7 +2653,7 @@ fn struct_to_json(st: &StructValue, depth: usize) -> JsonValue {
     }
     json!({
         "kind": "struct",
-        "fieldOrder": st.field_names().cloned().take(MAX_STRUCT_FIELDS).collect::<Vec<_>>(),
+        "fieldOrder": st.field_names().take(MAX_STRUCT_FIELDS).cloned().collect::<Vec<_>>(),
         "fields": fields,
         "totalFields": st.fields.len(),
         "truncated": truncated,
@@ -2689,7 +2684,7 @@ fn scalar_shape() -> Vec<usize> {
 }
 
 fn rows_cols_from_shape(shape: &[usize]) -> (usize, usize) {
-    let rows = shape.get(0).copied().unwrap_or(0);
+    let rows = shape.first().copied().unwrap_or(0);
     let cols = if shape.len() >= 2 {
         shape[1]
     } else if rows == 0 {

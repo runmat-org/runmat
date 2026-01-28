@@ -107,7 +107,7 @@ fn try_gpu_sub2ind(dims: &[usize], subs: &[Value]) -> crate::BuiltinResult<Optio
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (dims, subs);
-        return Ok(None);
+        Ok(None)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {

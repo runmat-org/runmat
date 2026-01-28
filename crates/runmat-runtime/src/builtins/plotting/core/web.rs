@@ -19,12 +19,12 @@ fn web_error_with_source(
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
 pub(crate) mod wasm {
     use super::*;
+    use crate::builtins::plotting::state::{clone_figure, current_figure_revision, FigureHandle};
     use log::debug;
     use runmat_plot::web::WebRenderer;
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::HashMap;
-    use crate::builtins::plotting::state::{clone_figure, current_figure_revision, FigureHandle};
 
     runmat_thread_local! {
         static SURFACES: RefCell<HashMap<u32, SurfaceEntry>> = RefCell::new(HashMap::new());
@@ -36,7 +36,10 @@ pub(crate) mod wasm {
         last_revision: Option<u64>,
     }
 
-    pub(super) fn install_surface_impl(surface_id: u32, renderer: WebRenderer) -> BuiltinResult<()> {
+    pub(super) fn install_surface_impl(
+        surface_id: u32,
+        renderer: WebRenderer,
+    ) -> BuiltinResult<()> {
         SURFACES.with(|slot| {
             slot.borrow_mut().insert(
                 surface_id,
@@ -49,7 +52,9 @@ pub(crate) mod wasm {
         });
         SURFACES.with(|slot| {
             let keys: Vec<u32> = slot.borrow().keys().copied().collect();
-            debug!("plot-web: installed surface surface_id={surface_id} (active_surfaces={keys:?})");
+            debug!(
+                "plot-web: installed surface surface_id={surface_id} (active_surfaces={keys:?})"
+            );
         });
         Ok(())
     }
@@ -114,8 +119,7 @@ pub(crate) mod wasm {
                     .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
             }
             Ok::<(), RuntimeError>(())
-        })
-        .map_err(|err| err)?;
+        })?;
         if !rendered_any {
             // It's valid to update a figure when no surfaces are bound to it yet (or no surfaces
             // exist at all). The figure state is still updated + emitted via figure events, and
@@ -162,7 +166,10 @@ pub(crate) mod wasm {
         })
     }
 
-    pub(super) fn present_figure_on_surface_impl(surface_id: u32, handle: u32) -> BuiltinResult<()> {
+    pub(super) fn present_figure_on_surface_impl(
+        surface_id: u32,
+        handle: u32,
+    ) -> BuiltinResult<()> {
         // "Better" path: only invalidate cached render data if the handle actually changes.
         SURFACES.with(|slot| {
             let mut map = slot.borrow_mut();
@@ -189,14 +196,15 @@ pub(crate) mod wasm {
                 ))
             })?;
             let handle = entry.bound_handle.ok_or_else(|| {
-                web_error("Plotting surface is not bound to a figure handle. Call bindSurfaceToFigure().")
+                web_error(
+                    "Plotting surface is not bound to a figure handle. Call bindSurfaceToFigure().",
+                )
             })?;
             // "Better" path: only re-prime render data when the figure revision changed.
             let current_rev = current_figure_revision(FigureHandle::from(handle));
             if entry.last_revision != current_rev {
-                let figure = clone_figure(FigureHandle::from(handle)).ok_or_else(|| {
-                    web_error(format!("figure handle {handle} does not exist"))
-                })?;
+                let figure = clone_figure(FigureHandle::from(handle))
+                    .ok_or_else(|| web_error(format!("figure handle {handle} does not exist")))?;
                 entry
                     .renderer
                     .render_figure(figure)
@@ -288,7 +296,10 @@ pub(crate) mod wasm {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
 
-    pub(super) fn present_figure_on_surface_impl(_surface_id: u32, _handle: u32) -> BuiltinResult<()> {
+    pub(super) fn present_figure_on_surface_impl(
+        _surface_id: u32,
+        _handle: u32,
+    ) -> BuiltinResult<()> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
 }

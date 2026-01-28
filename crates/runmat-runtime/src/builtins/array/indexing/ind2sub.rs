@@ -106,7 +106,7 @@ fn try_gpu_ind2sub(
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (dims, strides, total, indices);
-        return Ok(None);
+        Ok(None)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
