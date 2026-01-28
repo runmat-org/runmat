@@ -59,6 +59,7 @@ use runmat_runtime::builtins::plotting::{
     install_figure_observer as runtime_install_figure_observer,
     install_surface as runtime_install_surface,
     new_figure_handle as runtime_new_figure_handle,
+    reset_hold_state_for_run as runtime_reset_hold_state_for_run,
     render_current_scene as runtime_render_current_scene,
     render_figure_snapshot as runtime_render_figure_snapshot,
     resize_surface as runtime_resize_surface,
@@ -281,6 +282,8 @@ impl RunMatWasm {
             .into_iter()
             .map(|handle| handle.as_u32())
             .collect();
+        // Reset hold state so a previous `hold on` doesn't cause subsequent runs to keep appending.
+        runtime_reset_hold_state_for_run();
         // We must not hold a RefCell borrow across `.await`, so temporarily move the session out.
         let mut slot = self.session.borrow_mut();
         let mut session = std::mem::take(&mut *slot);
@@ -446,10 +449,16 @@ impl RunMatWasm {
         {
             let target = parse_materialize_target(selector)?;
             let opts = parse_materialize_options(options)?;
-            let mut session = self.session.borrow_mut();
-            let value = session
-                .materialize_variable(target, opts)
-                .await
+            // We must not hold a RefCell borrow across `.await`, so temporarily move the session out.
+            let mut slot = self.session.borrow_mut();
+            let mut session = std::mem::take(&mut *slot);
+            drop(slot);
+
+            let materialize_result = session.materialize_variable(target, opts).await;
+            // Always restore the session, even if materialization fails.
+            *self.session.borrow_mut() = session;
+
+            let value = materialize_result
                 .map_err(|err| js_error(&format!("materializeVariable failed: {err}")))?;
             let payload = MaterializedVariablePayload::from(value);
             return serde_wasm_bindgen::to_value(&payload).map_err(|err| {
@@ -615,7 +624,9 @@ pub fn resize_figure_canvas(handle: u32, width: u32, height: u32) -> Result<(), 
     let Some(surface_id) = surface_id else {
         return Err(js_error("Figure canvas not registered"));
     };
-    runtime_resize_surface(surface_id, width.max(1), height.max(1)).map_err(|err| js_error(err.message()))
+    // Legacy API has no access to devicePixelRatio; assume 1.0.
+    runtime_resize_surface(surface_id, width.max(1), height.max(1), 1.0)
+        .map_err(|err| js_error(err.message()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -642,8 +653,14 @@ pub fn destroy_plot_surface(surface_id: u32) {
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = resizePlotSurface)]
-pub fn resize_plot_surface(surface_id: u32, width: u32, height: u32) -> Result<(), JsValue> {
-    runtime_resize_surface(surface_id, width.max(1), height.max(1)).map_err(|err| js_error(err.message()))
+pub fn resize_plot_surface(
+    surface_id: u32,
+    width: u32,
+    height: u32,
+    pixels_per_point: f32,
+) -> Result<(), JsValue> {
+    runtime_resize_surface(surface_id, width.max(1), height.max(1), pixels_per_point)
+        .map_err(|err| js_error(err.message()))
 }
 
 #[cfg(target_arch = "wasm32")]

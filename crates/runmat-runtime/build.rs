@@ -89,8 +89,11 @@ fn ensure_wasm_registry_stub() {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    if !path.exists() {
-        let _ = fs::write(&path, "pub fn register_all() {}\n");
+    // When a build explicitly requests registry generation, reset the file so proc-macros can
+    // append fresh registrations deterministically (avoids stale/corrupt output).
+    let force_reset = env::var("RUNMAT_GENERATE_WASM_REGISTRY").is_ok();
+    if force_reset || !path.exists() {
+        let _ = fs::write(&path, "pub fn register_all() {\n}\n");
     }
     // Re-run if the path changes or the env var forces regeneration
     println!("cargo:rerun-if-changed={}", path.display());

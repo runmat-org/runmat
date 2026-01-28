@@ -503,6 +503,18 @@ pub fn current_hold_enabled() -> bool {
     *state.hold_per_axes.get(&state.active_axes).unwrap_or(&false)
 }
 
+/// Reset hold state for all figures/axes.
+///
+/// In the IDE, we want re-running code to behave like a fresh plotting run unless the code
+/// explicitly enables `hold on` again. Without this, a prior `hold on` will cause subsequent
+/// runs to keep appending to the same axes (surprising for typical "Run" workflows).
+pub fn reset_hold_state_for_run() {
+    let mut reg = registry();
+    for state in reg.figures.values_mut() {
+        state.hold_per_axes.clear();
+    }
+}
+
 pub fn figure_handles() -> Vec<FigureHandle> {
     let reg = registry();
     reg.figures.keys().copied().collect()

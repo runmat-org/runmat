@@ -4,8 +4,6 @@ use once_cell::sync::Lazy;
 use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 use std::sync::RwLock;
-use std::thread;
-use std::time::Duration;
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -203,12 +201,12 @@ enum PauseWait {
 async fn pause_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     match args.len() {
         0 => {
-            perform_wait(PauseWait::Default)?;
+            perform_wait(PauseWait::Default).await?;
             Ok(empty_return_value())
         }
         1 => match classify_argument(&args[0]).await? {
             PauseArgument::Wait(wait) => {
-                perform_wait(wait)?;
+                perform_wait(wait).await?;
                 Ok(empty_return_value())
             }
             PauseArgument::SetState(next_state) => {
@@ -227,34 +225,70 @@ async fn pause_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
-fn perform_wait(wait: PauseWait) -> Result<(), RuntimeError> {
+async fn perform_wait(wait: PauseWait) -> Result<(), RuntimeError> {
     if !pause_enabled()? {
         return Ok(());
     }
 
     match wait {
-        PauseWait::Default => wait_for_key_press(),
+        PauseWait::Default => wait_for_key_press().await,
         PauseWait::Seconds(seconds) => {
             if seconds == 0.0 {
                 return Ok(());
             }
-            // from_secs_f64 rejects NaN/±Inf; classify_argument filters those earlier.
-            let duration = Duration::from_secs_f64(seconds);
-            thread::sleep(duration);
-            Ok(())
+            sleep_seconds(seconds).await
         }
     }
 }
 
-fn wait_for_key_press() -> Result<(), RuntimeError> {
+async fn wait_for_key_press() -> Result<(), RuntimeError> {
     #[cfg(test)]
     {
         Ok(())
     }
     #[cfg(not(test))]
     {
-        interaction::wait_for_key("")
+        interaction::wait_for_key_async("").await
     }
+}
+
+async fn sleep_seconds(seconds: f64) -> Result<(), RuntimeError> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        wasm_sleep_seconds(seconds).await
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // from_secs_f64 rejects NaN/±Inf; classify_argument filters those earlier.
+        let duration = Duration::from_secs_f64(seconds);
+        std::thread::sleep(duration);
+        Ok(())
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn wasm_sleep_seconds(seconds: f64) -> Result<(), RuntimeError> {
+    use js_sys::{Function, Promise};
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+
+    let window = web_sys::window().ok_or_else(|| build_runtime_error("pause: window unavailable").build())?;
+    let millis = (seconds * 1000.0).max(0.0).round();
+    let millis_i32 = if millis > i32::MAX as f64 {
+        i32::MAX
+    } else {
+        millis as i32
+    };
+
+    let promise = Promise::new(&mut |resolve, _reject| {
+        let resolve: Function = resolve.unchecked_into();
+        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, millis_i32);
+    });
+
+    let _ = JsFuture::from(promise)
+        .await
+        .map_err(|err| build_runtime_error(format!("pause: timer failed ({err:?})")).build())?;
+    Ok(())
 }
 
 async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {

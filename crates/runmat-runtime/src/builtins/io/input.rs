@@ -162,7 +162,7 @@ async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         DEFAULT_PROMPT.to_string()
     };
     let return_string = parsed_flag.unwrap_or(false);
-    let line = interaction::request_line(&prompt, true).map_err(|err| {
+    let line = interaction::request_line_async(&prompt, true).await.map_err(|err| {
         let message = err.message().to_string();
         build_runtime_error(format!("input: {message}"))
             .with_source(err)

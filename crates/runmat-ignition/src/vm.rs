@@ -47,6 +47,7 @@ runmat_thread_local! {
     static CURRENT_PC: Cell<usize> = const { Cell::new(0) };
 }
 
+
 #[inline]
 fn set_vm_pc(pc: usize) {
     CURRENT_PC.with(|cell| cell.set(pc));
@@ -1598,6 +1599,28 @@ async fn run_interpreter(
                 }
                 #[cfg(feature = "native-accel")]
                 log_fusion_span_window(&plan, &bytecode, pc);
+                let span = plan.group.span.clone();
+                let mut has_barrier = false;
+                if span.end < bytecode.instructions.len() && span.start <= span.end {
+                    for instr in &bytecode.instructions[span.start..=span.end] {
+                        if matches!(
+                            instr,
+                            Instr::StoreVar(_)
+                                | Instr::StoreLocal(_)
+                                | Instr::StoreIndex(_)
+                                | Instr::StoreSlice(_, _, _, _)
+                                | Instr::StoreSliceEx(_, _, _, _, _)
+                                | Instr::StoreRangeEnd { .. }
+                                | Instr::StoreSlice1DRangeEnd { .. }
+                                | Instr::StoreIndexCell(_)
+                                | Instr::StoreMember(_)
+                                | Instr::StoreMemberDynamic
+                        ) {
+                            has_barrier = true;
+                            break;
+                        }
+                    }
+                }
                 let _fusion_span = info_span!(
                     "fusion.execute",
                     span_start = plan.group.span.start,
@@ -1605,16 +1628,26 @@ async fn run_interpreter(
                     kind = ?plan.group.kind
                 )
                 .entered();
-                match try_execute_fusion_group(&plan, graph, &mut stack, &mut vars, &context).await
-                {
-                    Ok(result) => {
-                        stack.push(result);
-                        pc = plan.group.span.end + 1;
-                        continue;
+                if !has_barrier {
+                    match try_execute_fusion_group(&plan, graph, &mut stack, &mut vars, &context)
+                        .await
+                    {
+                        Ok(result) => {
+                            stack.push(result);
+                            pc = plan.group.span.end + 1;
+                            continue;
+                        }
+                        Err(err) => {
+                            log::debug!("fusion fallback at pc {}: {}", pc, err);
+                        }
                     }
-                    Err(err) => {
-                        log::debug!("fusion fallback at pc {}: {}", pc, err);
-                    }
+                } else if fusion_debug_enabled() {
+                    log::debug!(
+                        "fusion skip at pc {}: side-effecting instrs in span {}..{}",
+                        pc,
+                        span.start,
+                        span.end
+                    );
                 }
             }
         }
@@ -3071,6 +3104,11 @@ async fn run_interpreter(
                 }
                 args.reverse();
 
+                let _callsite_guard = runmat_runtime::callsite::push_callsite(
+                    bytecode.source_id,
+                    bytecode.call_arg_spans.get(pc).cloned().flatten(),
+                );
+
                 let prepared_primary = accel_prepare_args(&name, &args).await?;
                 match call_builtin_vm!(&name, &prepared_primary) {
                     Ok(result) => stack.push(result),
@@ -4452,6 +4490,11 @@ async fn run_interpreter(
                     );
                 }
                 args.reverse();
+
+                let _callsite_guard = runmat_runtime::callsite::push_callsite(
+                    bytecode.source_id,
+                    bytecode.call_arg_spans.get(pc).cloned().flatten(),
+                );
                 if name == "gather" {
                     let eval =
                         match runmat_runtime::builtins::acceleration::gpu::gather::evaluate(&args)

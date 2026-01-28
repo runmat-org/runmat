@@ -125,7 +125,12 @@ pub(crate) mod wasm {
         Ok("Plot rendered to surface".to_string())
     }
 
-    pub(super) fn resize_surface_impl(surface_id: u32, width: u32, height: u32) -> BuiltinResult<()> {
+    pub(super) fn resize_surface_impl(
+        surface_id: u32,
+        width: u32,
+        height: u32,
+        pixels_per_point: f32,
+    ) -> BuiltinResult<()> {
         SURFACES.with(|slot| {
             let mut map = slot.borrow_mut();
             let entry = map.get_mut(&surface_id).ok_or_else(|| {
@@ -133,6 +138,7 @@ pub(crate) mod wasm {
                     "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
                 ))
             })?;
+            entry.renderer.set_pixels_per_point(pixels_per_point);
             entry
                 .renderer
                 .resize_surface(width, height)
@@ -261,7 +267,12 @@ pub(crate) mod wasm {
 
     pub(super) use RendererPlaceholder as RendererType;
 
-    pub(super) fn resize_surface_impl(_surface_id: u32, _width: u32, _height: u32) -> BuiltinResult<()> {
+    pub(super) fn resize_surface_impl(
+        _surface_id: u32,
+        _width: u32,
+        _height: u32,
+        _pixels_per_point: f32,
+    ) -> BuiltinResult<()> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
 
@@ -293,8 +304,13 @@ pub fn detach_surface(surface_id: u32) {
     wasm::detach_surface_impl(surface_id)
 }
 
-pub fn resize_surface(surface_id: u32, width: u32, height: u32) -> BuiltinResult<()> {
-    wasm::resize_surface_impl(surface_id, width, height)
+pub fn resize_surface(
+    surface_id: u32,
+    width: u32,
+    height: u32,
+    pixels_per_point: f32,
+) -> BuiltinResult<()> {
+    wasm::resize_surface_impl(surface_id, width, height, pixels_per_point)
 }
 
 pub fn bind_surface_to_figure(surface_id: u32, handle: u32) -> BuiltinResult<()> {

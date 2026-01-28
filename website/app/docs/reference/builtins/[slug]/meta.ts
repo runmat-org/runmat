@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import builtinsData from '@/content/builtins.json';
 import type { Builtin } from '@/lib/builtins';
 import { resolveOgFields } from '@/lib/og';
+import { buildPageMetadata } from '@/lib/seo';
 
 const BUILTINS: Builtin[] = builtinsData as Builtin[];
 const BUILTIN_MAP: Map<string, Builtin> = new Map(BUILTINS.map(b => [b.slug, b]));
@@ -11,20 +12,13 @@ export function builtinMetadataForSlug(slug: string): Metadata {
     const builtin = BUILTIN_MAP.get(slug);
     if (!builtin) {
         const title = `${slug} | MATLAB Language Function Reference`;
-        return {
-            title,
-            description: FALLBACK_DESCRIPTION,
-            openGraph: {
-                title: slug,
-                description: FALLBACK_DESCRIPTION,
-            },
-            twitter: {
-                card: 'summary_large_image',
-                title: slug,
-                description: FALLBACK_DESCRIPTION,
-            },
-            alternates: { canonical: `/docs/reference/builtins/${slug}` },
-        } satisfies Metadata;
+        return buildPageMetadata({
+          title,
+          description: FALLBACK_DESCRIPTION,
+          canonicalPath: `/docs/reference/builtins/${slug}`,
+          ogType: 'article',
+          ogImagePath: `/docs/reference/builtins/${slug}/opengraph-image`,
+        });
     }
 
     const description = (
@@ -33,20 +27,14 @@ export function builtinMetadataForSlug(slug: string): Metadata {
         FALLBACK_DESCRIPTION
     ).trim();
 
-    return {
-        title: `${builtin.name} | MATLAB Language Function Reference`,
-        description,
-        openGraph: {
-            title: builtin.name,
-            description,
-        },
-        twitter: {
-            card: 'summary_large_image',
-            title: builtin.name,
-            description,
-        },
-        alternates: { canonical: `/docs/reference/builtins/${slug}` },
-    } satisfies Metadata;
+    const title = `${builtin.name} | MATLAB Language Function Reference`;
+    return buildPageMetadata({
+      title,
+      description,
+      canonicalPath: `/docs/reference/builtins/${slug}`,
+      ogType: 'article',
+      ogImagePath: `/docs/reference/builtins/${slug}/opengraph-image`,
+    });
 }
 
 export function builtinOgTitleSubtitle(slug: string): { title: string; subtitle: string } {

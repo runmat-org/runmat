@@ -1,6 +1,6 @@
-import type { Metadata } from "next";
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { buildPageMetadata } from "@/lib/seo";
 
 const fusionTopics = [
   {
@@ -47,12 +47,14 @@ const tocItems = [
   { id: "next-targets", title: "Next Fusion & Kernel Targets" },
 ];
 
-export const metadata: Metadata = {
-  title: "Fusion Guide",
+export const metadata = buildPageMetadata({
+  title: "Fusion Guide | Docs",
   description:
     "Understand RunMat fusion groups, how workloads stay on the GPU, and where to dive deeper into each fusion topic.",
-  alternates: { canonical: "/docs/fusion-guide" },
-};
+  canonicalPath: "/docs/fusion-guide",
+  ogType: "article",
+  ogImagePath: "/docs/opengraph-image",
+});
 
 export default function FusionGuidePage() {
   return (

@@ -1,4 +1,3 @@
-import { Metadata } from "next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
@@ -12,11 +11,16 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { OSInstallCommand } from "@/components/OSInstallCommand";
+import { buildPageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
+export const metadata = buildPageMetadata({
   title: "Getting Started | Docs",
-  description: "Learn how to install and use RunMat, the modern MATLAB/Octave runtime. Complete guide for researchers, engineers, and students.",
-};
+  description:
+    "Learn how to install and use RunMat, the modern MATLAB/Octave runtime. Complete guide for researchers, engineers, and students.",
+  canonicalPath: "/docs/getting-started",
+  ogType: "article",
+  ogImagePath: "/docs/getting-started/opengraph-image",
+});
 
 export default function GettingStartedPage() {
   return (

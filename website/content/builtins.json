@@ -533,7 +533,8 @@
     ],
     "keywords": [
       "any",
-      "logical reduction",
+      "logical",
+      "reduction",
       "omitnan",
       "all",
       "gpu"
@@ -890,6 +891,44 @@
     "mdxPath": "builtins-mdx/atanh.mdx"
   },
   {
+    "name": "axis",
+    "slug": "axis",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Adjust axis limits/aspect.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "axis",
+      "plotting"
+    ],
+    "internal": false
+  },
+  {
     "name": "bandwidth",
     "slug": "bandwidth",
     "category": [
@@ -938,9 +977,50 @@
     "name": "bar",
     "slug": "bar",
     "category": [
-      "general"
+      "plotting"
     ],
-    "summary": "Runtime builtin function",
+    "summary": "Render a MATLAB-compatible bar chart.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "bar",
+      "barchart",
+      "plotting"
+    ],
+    "internal": false
+  },
+  {
+    "name": "box",
+    "slug": "box",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Toggle box outline on current axes.",
     "status": "implemented",
     "signatures": [
       {
@@ -948,13 +1028,13 @@
           "x"
         ],
         "inTypes": [
-          "Tensor"
+          "any"
         ],
         "out": [
           "out"
         ],
         "outTypes": [
-          "string"
+          "any"
         ],
         "nargin": {
           "min": 0,
@@ -965,6 +1045,10 @@
           "max": 1
         }
       }
+    ],
+    "keywords": [
+      "box",
+      "plotting"
     ],
     "internal": false
   },
@@ -1477,6 +1561,44 @@
     "mdxPath": "builtins-mdx/circshift.mdx"
   },
   {
+    "name": "cla",
+    "slug": "cla",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Clear current axes.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "cla",
+      "plotting"
+    ],
+    "internal": false
+  },
+  {
     "name": "class",
     "slug": "class",
     "category": [
@@ -1497,7 +1619,7 @@
           "out"
         ],
         "outTypes": [
-          "string"
+          "any"
         ],
         "nargin": {
           "min": 0,
@@ -1553,6 +1675,67 @@
     "internal": false
   },
   {
+    "name": "clf",
+    "slug": "clf",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Clear figure contents, optionally targeting specific handles.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "clf",
+      "clear figure",
+      "plotting"
+    ],
+    "internal": false
+  },
+  {
     "name": "close",
     "slug": "close",
     "category": [
@@ -1562,6 +1745,50 @@
     "description": "`close` releases TCP clients and servers that were created with `tcpclient`, `tcpserver`, or `accept`.",
     "status": "implemented",
     "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
       {
         "in": [
           "x"
@@ -1640,6 +1867,82 @@
     ],
     "internal": false,
     "mdxPath": "builtins-mdx/colon.mdx"
+  },
+  {
+    "name": "colorbar",
+    "slug": "colorbar",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Show or hide colorbar.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "colorbar",
+      "plotting"
+    ],
+    "internal": false
+  },
+  {
+    "name": "colormap",
+    "slug": "colormap",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Set colormap.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "colormap",
+      "plotting"
+    ],
+    "internal": false
   },
   {
     "name": "compose",
@@ -1779,7 +2082,7 @@
       "containers/map"
     ],
     "summary": "Create MATLAB-style dictionary objects that map keys to values.",
-    "description": "`containers.Map` builds dictionary objects that associate unique keys with values. Keys can be character vectors, string scalars, or numeric scalars (double/int32/uint32/int64/uint64/logical).",
+    "description": "`containers.Map` builds dictionary objects that associate unique keys with values. Keys can be character vectors, string scalars, or numeric scalars (./logical).",
     "status": "implemented",
     "signatures": [
       {
@@ -2079,6 +2382,91 @@
     ],
     "internal": false,
     "mdxPath": "builtins-mdx/contains.mdx"
+  },
+  {
+    "name": "contour",
+    "slug": "contour",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Render MATLAB-compatible contour plots.",
+    "description": "`contour(X, Y, Z, levels)` draws iso-lines of the matrix `Z` projected on the XY plane using MATLAB-compatible defaults.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "contour",
+      "plotting",
+      "isolines"
+    ],
+    "internal": false,
+    "mdxPath": "builtins-mdx/contour.mdx"
+  },
+  {
+    "name": "contourf",
+    "slug": "contourf",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Render MATLAB-compatible filled contour plots.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "contourf",
+      "plotting",
+      "filled",
+      "contour"
+    ],
+    "internal": false
   },
   {
     "name": "conv",
@@ -2922,8 +3310,7 @@
     "category": [
       "array/shape"
     ],
-    "summary": "Create diagonal matrices from vectors or extract diagonals from matrices.",
-    "description": "`diag` either constructs a diagonal matrix from a vector (placing the vector on a specified diagonal) or extracts a diagonal from a matrix.",
+    "summary": "Extract or create a diagonal from a vector or matrix.",
     "status": "implemented",
     "signatures": [
       {
@@ -2954,12 +3341,9 @@
     "keywords": [
       "diag",
       "diagonal",
-      "matrix",
-      "extraction",
-      "gpu"
+      "matrix"
     ],
-    "internal": false,
-    "mdxPath": "builtins-mdx/diag.mdx"
+    "internal": false
   },
   {
     "name": "diff",
@@ -4157,6 +4541,66 @@
     "mdxPath": "builtins-mdx/fieldnames.mdx"
   },
   {
+    "name": "figure",
+    "slug": "figure",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Create or select a plotting figure.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "figure",
+      "plotting"
+    ],
+    "internal": false
+  },
+  {
     "name": "fileread",
     "slug": "fileread",
     "category": [
@@ -4969,6 +5413,80 @@
     "mdxPath": "builtins-mdx/gather.mdx"
   },
   {
+    "name": "gca",
+    "slug": "gca",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Return the handle for the current axes.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "gca",
+      "axes",
+      "plotting"
+    ],
+    "internal": false
+  },
+  {
+    "name": "gcf",
+    "slug": "gcf",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Return the handle of the current figure.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "gcf",
+      "figure",
+      "plotting"
+    ],
+    "internal": false
+  },
+  {
     "name": "ge",
     "slug": "ge",
     "category": [
@@ -5352,6 +5870,44 @@
     "mdxPath": "builtins-mdx/gpuinfo.mdx"
   },
   {
+    "name": "grid",
+    "slug": "grid",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Toggle grid lines on current axes.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "grid",
+      "plotting"
+    ],
+    "internal": false
+  },
+  {
     "name": "gt",
     "slug": "gt",
     "category": [
@@ -5400,33 +5956,40 @@
     "name": "hist",
     "slug": "hist",
     "category": [
-      "general"
+      "plotting"
     ],
-    "summary": "Runtime builtin function",
+    "summary": "Plot a histogram with MATLAB-compatible defaults.",
     "status": "implemented",
     "signatures": [
       {
         "in": [
-          "x"
+          "x",
+          "y"
         ],
         "inTypes": [
-          "Tensor"
+          "any",
+          "any"
         ],
         "out": [
           "out"
         ],
         "outTypes": [
-          "string"
+          "any"
         ],
         "nargin": {
           "min": 0,
-          "max": 1
+          "max": 2
         },
         "nargout": {
           "min": 0,
           "max": 1
         }
       }
+    ],
+    "keywords": [
+      "hist",
+      "histogram",
+      "frequency"
     ],
     "internal": false
   },
@@ -5524,6 +6087,44 @@
     ],
     "internal": false,
     "mdxPath": "builtins-mdx/histcounts2.mdx"
+  },
+  {
+    "name": "hold",
+    "slug": "hold",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Toggle whether plots replace or append to the current axes.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "hold",
+      "plotting"
+    ],
+    "internal": false
   },
   {
     "name": "horzcat",
@@ -5879,6 +6480,50 @@
     ],
     "internal": false,
     "mdxPath": "builtins-mdx/ind2sub.mdx"
+  },
+  {
+    "name": "input",
+    "slug": "input",
+    "category": [
+      "io"
+    ],
+    "summary": "Prompt the user for input. Return either the typed text or a parsed numeric value.",
+    "description": "`input(prompt)` displays `prompt`, waits for the user to type a line of text, and then returns the evaluated value.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "input",
+      "prompt",
+      "stdin",
+      "interactive",
+      "pause",
+      "gather"
+    ],
+    "internal": false,
+    "mdxPath": "builtins-mdx/input.mdx"
   },
   {
     "name": "intersect",
@@ -8121,37 +8766,91 @@
     "name": "mesh",
     "slug": "mesh",
     "category": [
-      "general"
+      "plotting"
     ],
-    "summary": "Runtime builtin function",
+    "summary": "Render a MATLAB-compatible wireframe surface.",
     "status": "implemented",
     "signatures": [
       {
         "in": [
           "x",
           "y",
-          "z"
+          "z",
+          "a"
         ],
         "inTypes": [
           "Tensor",
           "Tensor",
-          "Tensor"
+          "any",
+          "any"
         ],
         "out": [
           "out"
         ],
         "outTypes": [
-          "string"
+          "any"
         ],
         "nargin": {
           "min": 0,
-          "max": 3
+          "max": 4
         },
         "nargout": {
           "min": 0,
           "max": 1
         }
       }
+    ],
+    "keywords": [
+      "mesh",
+      "wireframe",
+      "surface",
+      "plotting"
+    ],
+    "internal": false
+  },
+  {
+    "name": "meshc",
+    "slug": "meshc",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Render a MATLAB-compatible mesh with contour overlay.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z",
+          "a"
+        ],
+        "inTypes": [
+          "Tensor",
+          "Tensor",
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 4
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "meshc",
+      "plotting",
+      "mesh",
+      "contour"
     ],
     "internal": false
   },
@@ -8385,7 +9084,7 @@
       "math/rounding"
     ],
     "summary": "MATLAB-compatible modulus a - b .* floor(a./b) with support for complex values and broadcasting.",
-    "description": "`C = mod(A, B)` returns the modulus after division such that `C` has the same sign as `B` and satisfies `A = B.*Q + C` with `Q = floor(A./B)`.",
+    "description": "`C = mod(A, B)` returns the modulus after division such that `C` has the same sign as `B` and satisfies `A = B.*Q + C` with `Q = floor(./B)`.",
     "status": "implemented",
     "signatures": [
       {
@@ -8476,7 +9175,6 @@
       "math/linalg/ops"
     ],
     "summary": "Matrix power with MATLAB-compatible semantics.",
-    "description": "`C = mpower(A, B)` evaluates the matrix power `A^B`.",
     "status": "implemented",
     "signatures": [
       {
@@ -8510,8 +9208,7 @@
       "linear algebra",
       "gpu"
     ],
-    "internal": false,
-    "mdxPath": "builtins-mdx/mpower.mdx"
+    "internal": false
   },
   {
     "name": "mrdivide",
@@ -9990,29 +10687,32 @@
     "name": "plot",
     "slug": "plot",
     "category": [
-      "general"
+      "plotting"
     ],
-    "summary": "Runtime builtin function",
+    "summary": "Create MATLAB-compatible 2-D line plots.",
+    "description": "`plot(x, y)` creates a 2-D line plot with MATLAB-compatible styling. Inputs may be real row/column vectors or single-precision gpuArray vectors when a shared WebGPU context is available.",
     "status": "implemented",
     "signatures": [
       {
         "in": [
           "x",
-          "y"
+          "y",
+          "z"
         ],
         "inTypes": [
-          "Tensor",
-          "Tensor"
+          "any",
+          "any",
+          "any"
         ],
         "out": [
           "out"
         ],
         "outTypes": [
-          "string"
+          "any"
         ],
         "nargin": {
           "min": 0,
-          "max": 2
+          "max": 3
         },
         "nargout": {
           "min": 0,
@@ -10020,7 +10720,14 @@
         }
       }
     ],
-    "internal": false
+    "keywords": [
+      "plot",
+      "line",
+      "2d",
+      "visualization"
+    ],
+    "internal": false,
+    "mdxPath": "builtins-mdx/plot.mdx"
   },
   {
     "name": "plus",
@@ -11847,45 +12554,9 @@
     "name": "scatter",
     "slug": "scatter",
     "category": [
-      "general"
+      "plotting"
     ],
-    "summary": "Runtime builtin function",
-    "status": "implemented",
-    "signatures": [
-      {
-        "in": [
-          "x",
-          "y"
-        ],
-        "inTypes": [
-          "Tensor",
-          "Tensor"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "string"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 2
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      }
-    ],
-    "internal": false
-  },
-  {
-    "name": "scatter3",
-    "slug": "scatter3",
-    "category": [
-      "general"
-    ],
-    "summary": "Runtime builtin function",
+    "summary": "Create MATLAB-compatible 2-D scatter plots.",
     "status": "implemented",
     "signatures": [
       {
@@ -11895,15 +12566,15 @@
           "z"
         ],
         "inTypes": [
-          "Tensor",
-          "Tensor",
-          "Tensor"
+          "any",
+          "any",
+          "any"
         ],
         "out": [
           "out"
         ],
         "outTypes": [
-          "string"
+          "any"
         ],
         "nargin": {
           "min": 0,
@@ -11914,6 +12585,58 @@
           "max": 1
         }
       }
+    ],
+    "keywords": [
+      "scatter",
+      "plotting",
+      "2d",
+      "markers"
+    ],
+    "internal": false
+  },
+  {
+    "name": "scatter3",
+    "slug": "scatter3",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Render a MATLAB-compatible 3-D scatter plot.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z",
+          "a"
+        ],
+        "inTypes": [
+          "any",
+          "any",
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 4
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "scatter3",
+      "plotting",
+      "3d",
+      "pointcloud"
     ],
     "internal": false
   },
@@ -12087,6 +12810,44 @@
     ],
     "internal": false,
     "mdxPath": "builtins-mdx/setfield.mdx"
+  },
+  {
+    "name": "shading",
+    "slug": "shading",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Set shading mode for surface/mesh plots.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "shading",
+      "plotting"
+    ],
+    "internal": false
   },
   {
     "name": "Shape.area",
@@ -12603,6 +13364,49 @@
     ],
     "internal": false,
     "mdxPath": "builtins-mdx/squeeze.mdx"
+  },
+  {
+    "name": "stairs",
+    "slug": "stairs",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Render MATLAB-compatible stairs plots.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "any",
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "stairs",
+      "plotting",
+      "step"
+    ],
+    "internal": false
   },
   {
     "name": "startsWith",
@@ -13415,6 +14219,71 @@
     "mdxPath": "builtins-mdx/sub2ind.mdx"
   },
   {
+    "name": "subplot",
+    "slug": "subplot",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Select a subplot grid location.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "any",
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "subplot",
+      "axes",
+      "plotting"
+    ],
+    "internal": false
+  },
+  {
     "name": "subsasgn",
     "slug": "subsasgn",
     "category": [
@@ -13542,37 +14411,91 @@
     "name": "surf",
     "slug": "surf",
     "category": [
-      "general"
+      "plotting"
     ],
-    "summary": "Runtime builtin function",
+    "summary": "Render a MATLAB-compatible surface plot.",
     "status": "implemented",
     "signatures": [
       {
         "in": [
           "x",
           "y",
-          "z"
+          "z",
+          "a"
         ],
         "inTypes": [
-          "Tensor",
-          "Tensor",
-          "Tensor"
+          "any",
+          "any",
+          "any",
+          "any"
         ],
         "out": [
           "out"
         ],
         "outTypes": [
-          "string"
+          "any"
         ],
         "nargin": {
           "min": 0,
-          "max": 3
+          "max": 4
         },
         "nargout": {
           "min": 0,
           "max": 1
         }
       }
+    ],
+    "keywords": [
+      "surf",
+      "plotting",
+      "3d",
+      "surface"
+    ],
+    "internal": false
+  },
+  {
+    "name": "surfc",
+    "slug": "surfc",
+    "category": [
+      "plotting"
+    ],
+    "summary": "Render a MATLAB-compatible surface with contour overlay.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z",
+          "a"
+        ],
+        "inTypes": [
+          "Tensor",
+          "Tensor",
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 4
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "keywords": [
+      "surfc",
+      "plotting",
+      "surface",
+      "contour"
     ],
     "internal": false
   },
@@ -13942,7 +14865,7 @@
           "out"
         ],
         "outTypes": [
-          "double"
+          "any"
         ],
         "nargin": {
           "min": 0,
@@ -14075,7 +14998,7 @@
           "out"
         ],
         "outTypes": [
-          "double"
+          "any"
         ],
         "nargin": {
           "min": 0,

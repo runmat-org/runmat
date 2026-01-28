@@ -12,7 +12,6 @@ use runmat_ignition::CompileError;
 use runmat_lexer::{tokenize_detailed, Token as LexToken};
 pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions, SyntaxError};
-use runmat_runtime::builtins::common::gpu_helpers;
 use runmat_runtime::warning_store::RuntimeWarning;
 use runmat_runtime::{build_runtime_error, RuntimeError};
 #[cfg(target_arch = "wasm32")]
@@ -31,6 +30,7 @@ use std::sync::{
     Arc, Mutex,
 };
 use uuid::Uuid;
+use runmat_accelerate_api::{provider_for_handle, ProviderPrecision};
 
 #[cfg(all(test, target_arch = "wasm32"))]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
@@ -441,6 +441,122 @@ fn column_major_index(shape: &[usize], coords: &[usize]) -> usize {
         stride *= *dim_len;
     }
     idx
+}
+
+fn visit_slice_coords<F: FnMut(&[usize])>(
+    full_shape: &[usize],
+    slice: &WorkspaceSliceOptions,
+    axis: usize,
+    coords: &mut [usize],
+    f: &mut F,
+) {
+    if axis == full_shape.len() {
+        f(coords);
+        return;
+    }
+    let start = slice.start.get(axis).copied().unwrap_or(0);
+    let count = slice.shape.get(axis).copied().unwrap_or(1);
+    for offset in 0..count {
+        coords[axis] = start + offset;
+        visit_slice_coords(full_shape, slice, axis + 1, coords, f);
+    }
+}
+
+fn gpu_dtype_label(handle: &runmat_accelerate_api::GpuTensorHandle) -> Option<&'static str> {
+    let precision = runmat_accelerate_api::handle_precision(handle)
+        .unwrap_or(runmat_accelerate_api::ProviderPrecision::F64);
+    match precision {
+        ProviderPrecision::F32 => Some("single"),
+        ProviderPrecision::F64 => Some("double"),
+    }
+}
+
+fn gpu_size_bytes(handle: &runmat_accelerate_api::GpuTensorHandle) -> Option<u64> {
+    let precision = runmat_accelerate_api::handle_precision(handle)
+        .unwrap_or(runmat_accelerate_api::ProviderPrecision::F64);
+    let element_size = match precision {
+        ProviderPrecision::F32 => 4u64,
+        ProviderPrecision::F64 => 8u64,
+    };
+    let elements: u64 = handle.shape.iter().try_fold(1u64, |acc, &d| acc.checked_mul(d as u64))?;
+    elements.checked_mul(element_size)
+}
+
+async fn gather_gpu_preview_values(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    full_shape: &[usize],
+    options: &WorkspaceMaterializeOptions,
+) -> Result<Option<(Vec<f64>, bool)>> {
+    if full_shape.is_empty() || full_shape.iter().any(|&d| d == 0) {
+        return Ok(None);
+    }
+    let total_elements = full_shape.iter().product::<usize>();
+    if total_elements == 0 {
+        return Ok(None);
+    }
+
+    let provider = provider_for_handle(handle)
+        .ok_or_else(|| anyhow::anyhow!("No acceleration provider registered for GPU tensor"))?;
+
+    // Determine which indices to gather.
+    let (indices, output_shape, truncated) = if let Some(slice) = options
+        .slice
+        .as_ref()
+        .and_then(|slice| slice.sanitized(full_shape))
+    {
+        let slice_elements = slice.shape.iter().product::<usize>();
+        let requested = slice_elements.min(options.max_elements.max(1));
+        let mut indices: Vec<u32> = Vec::with_capacity(requested);
+        let mut coords = vec![0usize; full_shape.len()];
+        let mut produced = 0usize;
+        let mut push_idx = |coords: &[usize]| {
+            if produced >= requested {
+                return;
+            }
+            let idx = column_major_index(full_shape, coords);
+            if idx <= u32::MAX as usize {
+                indices.push(idx as u32);
+                produced += 1;
+            }
+        };
+        visit_slice_coords(full_shape, &slice, 0, &mut coords, &mut push_idx);
+        let truncated = requested < slice_elements;
+        let output_shape = if !truncated && indices.len() == slice_elements {
+            slice.shape
+        } else {
+            vec![indices.len().max(1), 1]
+        };
+        (indices, output_shape, truncated)
+    } else {
+        let count = total_elements.min(options.max_elements.max(1));
+        let mut indices: Vec<u32> = Vec::with_capacity(count);
+        for idx in 0..count {
+            if idx > u32::MAX as usize {
+                break;
+            }
+            indices.push(idx as u32);
+        }
+        let len = indices.len();
+        let truncated = total_elements > len;
+        (indices, vec![len.max(1), 1], truncated)
+    };
+
+    if indices.is_empty() {
+        return Ok(None);
+    }
+
+    // Gather a small GPU tensor, then download it.
+    let gathered = provider
+        .gather_linear(handle, &indices, &output_shape)
+        .map_err(|e| anyhow::anyhow!("gpu preview gather_linear: {e}"))?;
+    let host = provider
+        .download(&gathered)
+        .await
+        .map_err(|e| anyhow::anyhow!("gpu preview download: {e}"))?;
+    // Best-effort cleanup.
+    let _ = provider.free(&gathered);
+
+    Ok(Some((host.data, truncated)))
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1060,10 +1176,72 @@ impl RunMatSession {
         let stdin_events: Arc<Mutex<Vec<StdinEvent>>> = Arc::new(Mutex::new(Vec::new()));
         let runtime_handler = self.build_runtime_input_handler(Arc::clone(&stdin_events));
         let _input_guard = runmat_runtime::interaction::replace_handler(Some(runtime_handler));
+        let async_handler = self.async_input_handler.clone();
+        let stdin_events_async = Arc::clone(&stdin_events);
+        let _async_input_guard = runmat_runtime::interaction::replace_async_handler(
+            async_handler.map(|handler| {
+                let h: Arc<runmat_runtime::interaction::AsyncInteractionHandler> =
+                    Arc::new(move |prompt: runmat_runtime::interaction::InteractionPromptOwned| {
+                    let request_kind = match prompt.kind {
+                        runmat_runtime::interaction::InteractionKind::Line { echo } => {
+                            InputRequestKind::Line { echo }
+                        }
+                        runmat_runtime::interaction::InteractionKind::KeyPress
+                        | runmat_runtime::interaction::InteractionKind::GpuMapRead => {
+                            InputRequestKind::KeyPress
+                        }
+                    };
+                    let request = InputRequest {
+                        prompt: prompt.prompt.clone(),
+                        kind: request_kind,
+                    };
+                    let (event_kind, echo_flag) = match &request.kind {
+                        InputRequestKind::Line { echo } => (StdinEventKind::Line, *echo),
+                        InputRequestKind::KeyPress => (StdinEventKind::KeyPress, false),
+                    };
+                    let mut event = StdinEvent {
+                        prompt: request.prompt.clone(),
+                        kind: event_kind,
+                        echo: echo_flag,
+                        value: None,
+                        error: None,
+                    };
+                    let fut = handler(request);
+                    let stdin_events_async = Arc::clone(&stdin_events_async);
+                    Box::pin(async move {
+                        let resp = fut.await.inspect_err(|err| {
+                            event.error = Some(err.clone());
+                            if let Ok(mut guard) = stdin_events_async.lock() {
+                                guard.push(event.clone());
+                            }
+                        })?;
+                        let interaction_resp = match resp {
+                            InputResponse::Line(value) => {
+                                event.value = Some(value.clone());
+                                if let Ok(mut guard) = stdin_events_async.lock() {
+                                    guard.push(event);
+                                }
+                                runmat_runtime::interaction::InteractionResponse::Line(value)
+                            }
+                            InputResponse::KeyPress => {
+                                if let Ok(mut guard) = stdin_events_async.lock() {
+                                    guard.push(event);
+                                }
+                                runmat_runtime::interaction::InteractionResponse::KeyPress
+                            }
+                        };
+                        Ok(interaction_resp)
+                    })
+                });
+                h
+            }),
+        );
 
         if self.verbose {
             debug!("Executing: {}", input.trim());
         }
+
+        let _source_guard = runmat_runtime::source_context::replace_current_source(Some(input));
 
         let PreparedExecution {
             ast,
@@ -1668,43 +1846,54 @@ impl RunMatSession {
         } else {
             WorkspaceResidency::Cpu
         };
-        let host_value = if is_gpu {
-            gpu_helpers::gather_value_async(&value)
-                .await
-                .map_err(|err| {
-                    anyhow::anyhow!("Failed to gather gpuArray '{name}' for preview: {err}")
-                })?
-        } else {
-            value.clone()
-        };
-
+        // For CPU values we can materialize directly. For GPU tensors, avoid downloading the
+        // entire buffer into wasm memory; gather only the requested preview/slice.
+        let host_value = value.clone();
         let value_shape_vec = value_shape(&host_value).unwrap_or_default();
         let mut preview = None;
-        if let Some(slice_opts) = options
-            .slice
-            .as_ref()
-            .and_then(|slice| slice.sanitized(&value_shape_vec))
-        {
-            let slice_elements = slice_opts.shape.iter().product::<usize>();
-            let slice_limit = slice_elements.clamp(1, MATERIALIZE_DEFAULT_LIMIT);
-            if let Some(slice_value) = slice_value_for_preview(&host_value, &slice_opts) {
-                preview = preview_numeric_values(&slice_value, slice_limit)
+        if is_gpu {
+            if let Value::GpuTensor(handle) = &value {
+                if let Some((values, truncated)) =
+                    gather_gpu_preview_values(handle, &value_shape_vec, &options).await?
+                {
+                    preview = Some(WorkspacePreview { values, truncated });
+                }
+            }
+        } else {
+            if let Some(slice_opts) = options
+                .slice
+                .as_ref()
+                .and_then(|slice| slice.sanitized(&value_shape_vec))
+            {
+                let slice_elements = slice_opts.shape.iter().product::<usize>();
+                let slice_limit = slice_elements.clamp(1, MATERIALIZE_DEFAULT_LIMIT);
+                if let Some(slice_value) = slice_value_for_preview(&host_value, &slice_opts) {
+                    preview = preview_numeric_values(&slice_value, slice_limit)
+                        .map(|(values, truncated)| WorkspacePreview { values, truncated });
+                }
+            }
+            if preview.is_none() {
+                let max_elements = options.max_elements.clamp(1, MATERIALIZE_DEFAULT_LIMIT);
+                preview = preview_numeric_values(&host_value, max_elements)
                     .map(|(values, truncated)| WorkspacePreview { values, truncated });
             }
-        }
-        if preview.is_none() {
-            let max_elements = options.max_elements.clamp(1, MATERIALIZE_DEFAULT_LIMIT);
-            preview = preview_numeric_values(&host_value, max_elements)
-                .map(|(values, truncated)| WorkspacePreview { values, truncated });
         }
         Ok(MaterializedVariable {
             name,
             class_name: matlab_class_name(&host_value),
-            dtype: numeric_dtype_label(&host_value).map(|label| label.to_string()),
+            dtype: if let Value::GpuTensor(handle) = &host_value {
+                gpu_dtype_label(handle).map(|label| label.to_string())
+            } else {
+                numeric_dtype_label(&host_value).map(|label| label.to_string())
+            },
             shape: value_shape_vec,
             is_gpu,
             residency,
-            size_bytes: approximate_size_bytes(&host_value),
+            size_bytes: if let Value::GpuTensor(handle) = &host_value {
+                gpu_size_bytes(handle)
+            } else {
+                approximate_size_bytes(&host_value)
+            },
             preview,
             value: host_value,
         })

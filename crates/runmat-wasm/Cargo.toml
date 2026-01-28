@@ -44,4 +44,4 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "regist
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 runmat-runtime = { workspace = true, features = ["plot-web"] }
-runmat-plot = { workspace = true, features = ["web"] }
+runmat-plot = { workspace = true, features = ["web", "egui-overlay"] }
