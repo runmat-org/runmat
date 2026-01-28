@@ -259,7 +259,7 @@ Under the hood, RunMat uses *fusion*—combining multiple array operations into 
 The same MATLAB-style code and automatic GPU routing run across three environments. How you access the GPU depends on where you run RunMat.
 
 **Browser (RunMat Desktop / sandbox)**  
-RunMat can run entirely in your browser: no install, no NVIDIA requirement. Open [runmat.org/sandbox](https://runmat.org/sandbox), write your script, and click Run. GPU acceleration uses **WebGPU** when available (Chrome 113+, Edge 113+, Safari 18+, Firefox 139+). A Variables pane shows whether each array is on CPU or GPU (residency). Browsers often limit GPU and CPU usage to preserve battery, so for very large or long-running jobs you may hit resource caps.
+RunMat can run entirely in your browser: no install, no NVIDIA requirement. Open [runmat.org/sandbox](https://runmat.org/sandbox), write your script, and click Run. GPU acceleration uses **WebGPU** when available (Chrome 113+, Edge 113+, Safari 18+, Firefox 139+). A variables pane shows whether each array is on CPU or GPU (residency). Browsers often limit GPU and CPU usage to preserve battery, so for very large or long-running jobs you may hit resource caps.
 
 **Desktop (RunMat Desktop app — coming soon)**  
 A packaged RunMat Desktop app is in development. When it ships, it will give you the same editor, plots, and variable inspector in a native window. You get **full native GPU access** (Metal on Mac, DirectX 12 on Windows, Vulkan on Linux) and no browser resource limits. Same code, same fusion and auto-offload—just better performance headroom. As of publication, only the browser sandbox and CLI are available.
