@@ -8,7 +8,8 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::real")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -47,6 +48,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion kernels treat real as an identity transform for real tensors; providers can override via fused pipelines when advantageous.",
 };
 
+const BUILTIN_NAME: &str = "real";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 #[runtime_builtin(
     name = "real",
     category = "math/elementwise",
@@ -55,57 +64,64 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::real"
 )]
-fn real_builtin(value: Value) -> Result<Value, String> {
+async fn real_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => real_gpu(handle),
+        Value::GpuTensor(handle) => real_gpu(handle).await,
         Value::Complex(re, _) => Ok(Value::Num(re)),
         Value::ComplexTensor(ct) => real_complex_tensor(ct),
         Value::CharArray(ca) => real_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => Err("real: expected numeric input".to_string()),
+        Value::String(_) | Value::StringArray(_) => {
+            Err(builtin_error("real: expected numeric input"))
+        }
         x @ (Value::Tensor(_)
         | Value::LogicalArray(_)
         | Value::Num(_)
         | Value::Int(_)
         | Value::Bool(_)) => real_real(x),
-        other => Err(format!(
+        other => Err(builtin_error(format!(
             "real: unsupported input type {:?}; expected numeric, logical, or char input",
             other
-        )),
+        ))),
     }
 }
 
-fn real_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn real_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_real(&handle) {
+        if let Ok(out) = provider.unary_real(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
-    real_tensor(tensor).map(tensor::tensor_into_value)
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    Ok(tensor::tensor_into_value(real_tensor(tensor)?))
 }
 
-fn real_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("real", value)?;
-    real_tensor(tensor).map(tensor::tensor_into_value)
+fn real_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("real", value)
+        .map_err(|e| builtin_error(format!("real: {e}")))?;
+    Ok(tensor::tensor_into_value(real_tensor(tensor)?))
 }
 
-fn real_tensor(tensor: Tensor) -> Result<Tensor, String> {
+fn real_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     Ok(tensor)
 }
 
-fn real_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn real_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let data = ct.data.iter().map(|&(re, _)| re).collect::<Vec<_>>();
-    let tensor = Tensor::new(data, ct.shape.clone()).map_err(|e| format!("real: {e}"))?;
+    let tensor =
+        Tensor::new(data, ct.shape.clone()).map_err(|e| builtin_error(format!("real: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn real_char_array(ca: CharArray) -> Result<Value, String> {
+fn real_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data
         .iter()
         .map(|&ch| ch as u32 as f64)
         .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("real: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| builtin_error(format!("real: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -113,7 +129,12 @@ fn real_char_array(ca: CharArray) -> Result<Value, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray};
+
+    fn real_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::real_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -193,7 +214,7 @@ pub(crate) mod tests {
     #[test]
     fn real_string_error() {
         let err = real_builtin(Value::from("hello")).expect_err("real should error");
-        assert!(err.contains("expected numeric"));
+        assert!(err.message().contains("expected numeric"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -230,7 +251,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = real_gpu(h).unwrap();
+        let gpu = block_on(real_gpu(h)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         let cpu_tensor = match cpu {
             Value::Tensor(t) => t,

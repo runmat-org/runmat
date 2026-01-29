@@ -52,6 +52,13 @@ pub fn builtin_function_impl(args: TokenStream, input: TokenStream) -> TokenStre
     let description = description.unwrap_or_else(|| "User-defined function".to_string());
     
     let fn_name = &input_fn.sig.ident;
+    let wrapper_ident = quote::format_ident!("__rt_builtin_wrap_{}", fn_name);
+    let is_async = input_fn.sig.asyncness.is_some();
+    let call_expr = if is_async {
+        quote! { #fn_name(args).await? }
+    } else {
+        quote! { #fn_name(args)? }
+    };
     let fn_vis = &input_fn.vis;
     let fn_block = &input_fn.block;
     let fn_inputs = &input_fn.sig.inputs;
@@ -83,7 +90,12 @@ pub fn builtin_function_impl(args: TokenStream, input: TokenStream) -> TokenStre
 
     let expanded = quote! {
         #fn_vis fn #fn_name(#fn_inputs) #fn_output #fn_block
-        
+
+        fn #wrapper_ident(args: &[runmat_builtins::Value]) -> runmat_builtins::BuiltinFuture {
+            let args = args.to_vec();
+            Box::pin(async move { #call_expr })
+        }
+
         runmat_builtins::inventory::submit! {
             #![crate = runmat_builtins]
             runmat_builtins::BuiltinFunction::new(
@@ -94,7 +106,7 @@ pub fn builtin_function_impl(args: TokenStream, input: TokenStream) -> TokenStre
                 "",
                 #param_info,
                 #return_type_info,
-                #fn_name,
+                #wrapper_ident,
                 &[],
                 false,
                 false,

@@ -59,7 +59,14 @@ impl StopwatchState {
     }
 }
 
+const BUILTIN_NAME: &str = "tic";
 const LOCK_ERR: &str = "tic: failed to acquire stopwatch state";
+
+fn stopwatch_error(builtin: &str, message: impl Into<String>) -> crate::RuntimeError {
+    crate::build_runtime_error(message)
+        .with_builtin(builtin)
+        .build()
+}
 
 /// Start a stopwatch timer and return a handle suitable for `toc`.
 #[runtime_builtin(
@@ -70,23 +77,27 @@ const LOCK_ERR: &str = "tic: failed to acquire stopwatch state";
     sink = true,
     builtin_path = "crate::builtins::timing::tic"
 )]
-pub fn tic_builtin() -> Result<f64, String> {
-    record_tic()
+pub async fn tic_builtin() -> crate::BuiltinResult<f64> {
+    record_tic(BUILTIN_NAME)
 }
 
 /// Record a `tic` start time and return the encoded handle.
-pub(crate) fn record_tic() -> Result<f64, String> {
+pub(crate) fn record_tic(builtin: &str) -> Result<f64, crate::RuntimeError> {
     let now = Instant::now();
     {
-        let mut guard = STOPWATCH.lock().map_err(|_| LOCK_ERR.to_string())?;
+        let mut guard = STOPWATCH
+            .lock()
+            .map_err(|_| stopwatch_error(builtin, LOCK_ERR))?;
         guard.push(now);
     }
     Ok(encode_instant(now))
 }
 
 /// Remove and return the most recently recorded `tic`, if any.
-pub(crate) fn take_latest_start() -> Result<Option<Instant>, String> {
-    let mut guard = STOPWATCH.lock().map_err(|_| LOCK_ERR.to_string())?;
+pub(crate) fn take_latest_start(builtin: &str) -> Result<Option<Instant>, crate::RuntimeError> {
+    let mut guard = STOPWATCH
+        .lock()
+        .map_err(|_| stopwatch_error(builtin, LOCK_ERR))?;
     Ok(guard.pop())
 }
 
@@ -96,9 +107,12 @@ pub(crate) fn encode_instant(instant: Instant) -> f64 {
 }
 
 /// Decode a scalar handle into an `Instant`.
-pub(crate) fn decode_handle(handle: f64) -> Result<Instant, String> {
+pub(crate) fn decode_handle(handle: f64, builtin: &str) -> Result<Instant, crate::RuntimeError> {
     if !handle.is_finite() || handle.is_sign_negative() {
-        return Err("MATLAB:toc:InvalidTimerHandle".to_string());
+        return Err(crate::build_runtime_error("toc: invalid timer handle")
+            .with_builtin(builtin)
+            .with_identifier("MATLAB:toc:InvalidTimerHandle")
+            .build());
     }
     let duration = Duration::from_secs_f64(handle);
     Ok((*MONOTONIC_ORIGIN) + duration)
@@ -107,6 +121,7 @@ pub(crate) fn decode_handle(handle: f64) -> Result<Instant, String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
     use std::thread;
     use std::time::Duration;
 
@@ -120,9 +135,9 @@ pub(crate) mod tests {
     fn tic_returns_monotonic_handle() {
         let _guard = TEST_GUARD.lock().unwrap();
         reset_stopwatch();
-        let handle = tic_builtin().expect("tic");
+        let handle = block_on(tic_builtin()).expect("tic");
         assert!(handle >= 0.0);
-        assert!(take_latest_start().expect("take").is_some());
+        assert!(take_latest_start(BUILTIN_NAME).expect("take").is_some());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -130,9 +145,9 @@ pub(crate) mod tests {
     fn tic_handles_increase_over_time() {
         let _guard = TEST_GUARD.lock().unwrap();
         reset_stopwatch();
-        let first = tic_builtin().expect("tic");
+        let first = block_on(tic_builtin()).expect("tic");
         thread::sleep(Duration::from_millis(5));
-        let second = tic_builtin().expect("tic");
+        let second = block_on(tic_builtin()).expect("tic");
         assert!(second > first);
     }
 
@@ -141,8 +156,8 @@ pub(crate) mod tests {
     fn decode_roundtrip_matches_handle() {
         let _guard = TEST_GUARD.lock().unwrap();
         reset_stopwatch();
-        let handle = tic_builtin().expect("tic");
-        let decoded = decode_handle(handle).expect("decode");
+        let handle = block_on(tic_builtin()).expect("tic");
+        let decoded = decode_handle(handle, "toc").expect("decode");
         let round_trip = encode_instant(decoded);
         let delta = (round_trip - handle).abs();
         assert!(delta < 1e-9, "delta {delta}");
@@ -153,16 +168,18 @@ pub(crate) mod tests {
     fn take_latest_start_pops_stack() {
         let _guard = TEST_GUARD.lock().unwrap();
         reset_stopwatch();
-        tic_builtin().expect("tic");
-        assert!(take_latest_start().expect("take").is_some());
-        assert!(take_latest_start().expect("second take").is_none());
+        block_on(tic_builtin()).expect("tic");
+        assert!(take_latest_start(BUILTIN_NAME).expect("take").is_some());
+        assert!(take_latest_start(BUILTIN_NAME)
+            .expect("second take")
+            .is_none());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn decode_handle_rejects_invalid_values() {
         let _guard = TEST_GUARD.lock().unwrap();
-        assert!(decode_handle(f64::NAN).is_err());
-        assert!(decode_handle(-1.0).is_err());
+        assert!(decode_handle(f64::NAN, "toc").is_err());
+        assert!(decode_handle(-1.0, "toc").is_err());
     }
 }

@@ -12,8 +12,11 @@ struct LineParams {
     _pad: u32,
 };
 
-struct Counter {
-    value: atomic<u32>,
+struct IndirectArgs {
+    vertex_count: atomic<u32>,
+    instance_count: u32,
+    first_vertex: u32,
+    first_instance: u32,
 };
 
 @group(0) @binding(0)
@@ -26,7 +29,7 @@ var<storage, read> buf_y: array<f32>;
 var<storage, read_write> out_vertices: array<VertexRaw>;
 
 @group(0) @binding(3)
-var<storage, read_write> counter: Counter;
+var<storage, read_write> indirect: IndirectArgs;
 
 @group(0) @binding(4)
 var<uniform> params: LineParams;
@@ -85,7 +88,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let thick = params.line_width > 1.0;
     if (!thick) {
-        let base = atomicAdd(&(counter.value), 2u);
+        let base = atomicAdd(&(indirect.vertex_count), 2u);
         write_vertex(base + 0u, p0, params.color);
         write_vertex(base + 1u, p1, params.color);
         return;
@@ -103,7 +106,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let v2 = p1 - offset;
     let v3 = p0 - offset;
 
-    let base = atomicAdd(&(counter.value), 6u);
+    let base = atomicAdd(&(indirect.vertex_count), 6u);
     write_vertex(base + 0u, v0, params.color);
     write_vertex(base + 1u, v1, params.color);
     write_vertex(base + 2u, v2, params.color);
@@ -127,8 +130,11 @@ struct LineParams {
     _pad: u32,
 };
 
-struct Counter {
-    value: atomic<u32>;
+struct IndirectArgs {
+    vertex_count: atomic<u32>,
+    instance_count: u32,
+    first_vertex: u32,
+    first_instance: u32,
 };
 
 @group(0) @binding(0)
@@ -141,7 +147,7 @@ var<storage, read> buf_y: array<f64>;
 var<storage, read_write> out_vertices: array<VertexRaw>;
 
 @group(0) @binding(3)
-var<storage, read_write> counter: Counter;
+var<storage, read_write> indirect: IndirectArgs;
 
 @group(0) @binding(4)
 var<uniform> params: LineParams;
@@ -200,7 +206,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let thick = params.line_width > 1.0;
     if (!thick) {
-        let base = atomicAdd(&(counter.value), 2u);
+        let base = atomicAdd(&(indirect.vertex_count), 2u);
         write_vertex(base + 0u, p0, params.color);
         write_vertex(base + 1u, p1, params.color);
         return;
@@ -218,7 +224,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let v2 = p1 - offset;
     let v3 = p0 - offset;
 
-    let base = atomicAdd(&(counter.value), 6u);
+    let base = atomicAdd(&(indirect.vertex_count), 6u);
     write_vertex(base + 0u, v0, params.color);
     write_vertex(base + 1u, v1, params.color);
     write_vertex(base + 2u, v2, params.color);
@@ -263,6 +269,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let px = buf_x[idx];
     let py = buf_y[idx];
 
+    let base = idx * 6u;
+    let corners = array<vec2<f32>, 6u>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0,  1.0)
+    );
+    for (var i: u32 = 0u; i < 6u; i = i + 1u) {
     var vertex: VertexRaw;
     vertex.data[0u] = px;
     vertex.data[1u] = py;
@@ -274,10 +290,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     vertex.data[7u] = 0.0;
     vertex.data[8u] = 0.0;
     vertex.data[9u] = params.size;
-    vertex.data[10u] = 0.0;
-    vertex.data[11u] = 0.0;
-
-    out_vertices[idx] = vertex;
+        vertex.data[10u] = corners[i].x;
+        vertex.data[11u] = corners[i].y;
+        out_vertices[base + i] = vertex;
+    }
 }
 "#;
 
@@ -316,6 +332,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let px = f32(buf_x[idx]);
     let py = f32(buf_y[idx]);
 
+    let base = idx * 6u;
+    let corners = array<vec2<f32>, 6u>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0,  1.0)
+    );
+    for (var i: u32 = 0u; i < 6u; i = i + 1u) {
     var vertex: VertexRaw;
     vertex.data[0u] = px;
     vertex.data[1u] = py;
@@ -327,9 +353,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     vertex.data[7u] = 0.0;
     vertex.data[8u] = 0.0;
     vertex.data[9u] = params.size;
-    vertex.data[10u] = 0.0;
-    vertex.data[11u] = 0.0;
-
-    out_vertices[idx] = vertex;
+        vertex.data[10u] = corners[i].x;
+        vertex.data[11u] = corners[i].y;
+        out_vertices[base + i] = vertex;
+    }
 }
 "#;

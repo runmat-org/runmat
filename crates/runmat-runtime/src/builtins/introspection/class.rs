@@ -41,7 +41,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "class,type inspection,type name,gpuArray class",
     builtin_path = "crate::builtins::introspection::class"
 )]
-fn class_builtin(value: Value) -> Result<String, String> {
+fn class_builtin(value: Value) -> crate::BuiltinResult<String> {
     Ok(class_name_for_value(&value))
 }
 

@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const MESSAGE_ID_OS_ERROR: &str = "MATLAB:MKDIR:OSError";
 const MESSAGE_ID_DIRECTORY_EXISTS: &str = "MATLAB:MKDIR:DirectoryExists";
@@ -50,6 +50,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Filesystem side-effects terminate fusion; metadata registered for completeness.",
 };
 
+const BUILTIN_NAME: &str = "mkdir";
+
+fn mkdir_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "mkdir",
     category = "io/repl_fs",
@@ -59,19 +78,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::mkdir"
 )]
-fn mkdir_builtin(args: Vec<Value>) -> Result<Value, String> {
-    let eval = evaluate(&args)?;
+async fn mkdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(&args).await?;
     Ok(eval.first_output())
 }
 
 /// Evaluate `mkdir` once and expose all outputs.
-pub fn evaluate(args: &[Value]) -> Result<MkdirResult, String> {
-    let gathered = gather_arguments(args)?;
+pub async fn evaluate(args: &[Value]) -> BuiltinResult<MkdirResult> {
+    let gathered = gather_arguments(args).await?;
     match gathered.len() {
-        0 => Err("mkdir: not enough input arguments".to_string()),
+        0 => Err(mkdir_error("mkdir: not enough input arguments")),
         1 => create_from_single(&gathered[0]),
         2 => create_from_parent_child(&gathered[0], &gathered[1]),
-        _ => Err("mkdir: too many input arguments".to_string()),
+        _ => Err(mkdir_error("mkdir: too many input arguments")),
     }
 }
 
@@ -135,7 +154,7 @@ impl MkdirResult {
     }
 }
 
-fn create_from_single(value: &Value) -> Result<MkdirResult, String> {
+fn create_from_single(value: &Value) -> BuiltinResult<MkdirResult> {
     let raw = extract_folder_name(value, ERR_FOLDER_ARG)?;
     if raw.is_empty() {
         return Ok(MkdirResult::failure(
@@ -143,12 +162,12 @@ fn create_from_single(value: &Value) -> Result<MkdirResult, String> {
             MESSAGE_ID_EMPTY_NAME,
         ));
     }
-    let expanded = expand_user_path(&raw, "mkdir")?;
+    let expanded = expand_user_path(&raw, "mkdir").map_err(mkdir_error)?;
     let path = PathBuf::from(expanded);
     Ok(create_directory(&path))
 }
 
-fn create_from_parent_child(parent: &Value, child: &Value) -> Result<MkdirResult, String> {
+fn create_from_parent_child(parent: &Value, child: &Value) -> BuiltinResult<MkdirResult> {
     let parent_raw = extract_folder_name(parent, ERR_PARENT_ARG)?;
     let child_raw = extract_folder_name(child, ERR_FOLDER_ARG)?;
 
@@ -162,9 +181,9 @@ fn create_from_parent_child(parent: &Value, child: &Value) -> Result<MkdirResult
     let parent_expanded = if parent_raw.is_empty() {
         None
     } else {
-        Some(expand_user_path(&parent_raw, "mkdir")?)
+        Some(expand_user_path(&parent_raw, "mkdir").map_err(mkdir_error)?)
     };
-    let child_expanded = expand_user_path(&child_raw, "mkdir")?;
+    let child_expanded = expand_user_path(&child_raw, "mkdir").map_err(mkdir_error)?;
     let child_path = PathBuf::from(&child_expanded);
 
     if child_path.is_absolute() {
@@ -223,31 +242,35 @@ fn path_exists(path: &Path) -> bool {
     vfs::metadata(path).is_ok()
 }
 
-fn extract_folder_name(value: &Value, error_message: &str) -> Result<String, String> {
+fn extract_folder_name(value: &Value, error_message: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::CharArray(array) => {
             if array.rows == 1 {
                 Ok(array.data.iter().collect())
             } else {
-                Err(error_message.to_string())
+                Err(mkdir_error(error_message))
             }
         }
         Value::StringArray(array) => {
             if array.data.len() == 1 {
                 Ok(array.data[0].clone())
             } else {
-                Err(error_message.to_string())
+                Err(mkdir_error(error_message))
             }
         }
-        _ => Err(error_message.to_string()),
+        _ => Err(mkdir_error(error_message)),
     }
 }
 
-fn gather_arguments(args: &[Value]) -> Result<Vec<Value>, String> {
+async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(|err| format!("mkdir: {err}"))?);
+        out.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     Ok(out)
 }
@@ -265,6 +288,14 @@ pub(crate) mod tests {
     use std::fs;
     use std::fs::File;
     use tempfile::tempdir;
+
+    fn mkdir_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::mkdir_builtin(args))
+    }
+
+    fn evaluate(args: &[Value]) -> BuiltinResult<MkdirResult> {
+        futures::executor::block_on(super::evaluate(args))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -329,10 +360,10 @@ pub(crate) mod tests {
             .unwrap_or_else(|poison| poison.into_inner());
 
         let err = mkdir_builtin(vec![Value::Num(42.0)]).expect_err("expected error");
-        assert_eq!(err, ERR_FOLDER_ARG);
+        assert_eq!(err.message(), ERR_FOLDER_ARG);
 
         let err = evaluate(&[Value::from("parent"), Value::Num(7.0)]).expect_err("error");
-        assert_eq!(err, ERR_FOLDER_ARG);
+        assert_eq!(err.message(), ERR_FOLDER_ARG);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

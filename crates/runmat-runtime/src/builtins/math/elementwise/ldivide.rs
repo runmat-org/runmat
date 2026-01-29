@@ -1,5 +1,6 @@
 //! MATLAB-compatible `ldivide` builtin with GPU-aware semantics for RunMat.
 
+use async_recursion::async_recursion;
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
@@ -12,7 +13,8 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::ldivide")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -58,6 +60,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion emits a plain quotient; providers can override with specialised kernels when desirable.",
 };
 
+const BUILTIN_NAME: &str = "ldivide";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 #[runtime_builtin(
     name = "ldivide",
     category = "math/elementwise",
@@ -66,15 +76,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::math::elementwise::ldivide"
 )]
-fn ldivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn ldivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
     let base = match (lhs, rhs) {
-        (Value::GpuTensor(la), Value::GpuTensor(lb)) => ldivide_gpu_pair(la, lb),
-        (Value::GpuTensor(la), rhs) => ldivide_gpu_host_left(la, rhs),
-        (lhs, Value::GpuTensor(rb)) => ldivide_gpu_host_right(lhs, rb),
-        (lhs, rhs) => ldivide_host(lhs, rhs),
+        (Value::GpuTensor(la), Value::GpuTensor(lb)) => ldivide_gpu_pair(la, lb).await,
+        (Value::GpuTensor(la), rhs) => ldivide_gpu_host_left(la, rhs).await,
+        (lhs, Value::GpuTensor(rb)) => ldivide_gpu_host_right(lhs, rb).await,
+        (lhs, rhs) => Ok(ldivide_host(lhs, rhs)?),
     }?;
-    apply_output_template(base, &template)
+    apply_output_template(base, &template).await
 }
 
 #[derive(Clone)]
@@ -83,29 +93,33 @@ enum OutputTemplate {
     Like(Value),
 }
 
-fn parse_output_template(args: &[Value]) -> Result<OutputTemplate, String> {
+fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     if args.is_empty() {
         return Ok(OutputTemplate::Default);
     }
     if args.len() == 1 {
         if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-            return Err("ldivide: expected prototype after 'like'".to_string());
+            return Err(builtin_error("ldivide: expected prototype after 'like'"));
         }
-        return Err("ldivide: unsupported option; only 'like' is accepted".to_string());
+        return Err(builtin_error(
+            "ldivide: unsupported option; only 'like' is accepted",
+        ));
     }
     if args.len() == 2 {
         if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
             return Ok(OutputTemplate::Like(args[1].clone()));
         }
-        return Err("ldivide: unsupported option; only 'like' is accepted".to_string());
+        return Err(builtin_error(
+            "ldivide: unsupported option; only 'like' is accepted",
+        ));
     }
-    Err("ldivide: too many input arguments".to_string())
+    Err(builtin_error("ldivide: too many input arguments"))
 }
 
-fn apply_output_template(value: Value, template: &OutputTemplate) -> Result<Value, String> {
+async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
     match template {
         OutputTemplate::Default => Ok(value),
-        OutputTemplate::Like(proto) => apply_like_template(value, proto),
+        OutputTemplate::Like(proto) => apply_like_template(value, proto).await,
     }
 }
 
@@ -126,42 +140,44 @@ struct LikeAnalysis {
     class: PrototypeClass,
 }
 
-fn apply_like_template(value: Value, prototype: &Value) -> Result<Value, String> {
-    let analysed = analyse_like_prototype(prototype)?;
+async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
+    let analysed = analyse_like_prototype(prototype).await?;
     match analysed.class {
         PrototypeClass::Real => match analysed.device {
-            DevicePreference::Host => ensure_device(value, DevicePreference::Host),
-            DevicePreference::Gpu => ensure_device(value, DevicePreference::Gpu),
+            DevicePreference::Host => ensure_device(value, DevicePreference::Host).await,
+            DevicePreference::Gpu => ensure_device(value, DevicePreference::Gpu).await,
         },
         PrototypeClass::Complex => {
-            let host_value = ensure_device(value, DevicePreference::Host)?;
-            real_to_complex(host_value)
+            let host_value = ensure_device(value, DevicePreference::Host).await?;
+            real_to_complex(host_value).await
         }
     }
 }
 
-fn ensure_device(value: Value, device: DevicePreference) -> Result<Value, String> {
+async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value> {
     match device {
-        DevicePreference::Host => convert_to_host_like(value),
+        DevicePreference::Host => convert_to_host_like(value).await,
         DevicePreference::Gpu => convert_to_gpu(value),
     }
 }
 
-fn convert_to_host_like(value: Value) -> Result<Value, String> {
+async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     if let Value::GpuTensor(handle) = value {
         let temp = Value::GpuTensor(handle);
-        gpu_helpers::gather_value(&temp)
+        gpu_helpers::gather_value_async(&temp)
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))
+            .map_err(|e| builtin_error(format!("ldivide: {e}")))
     } else {
         Ok(value)
     }
 }
 
-fn convert_to_gpu(value: Value) -> Result<Value, String> {
+fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(
-            "ldivide: GPU output requested via 'like' but no acceleration provider is active"
-                .to_string(),
-        );
+        return Err(builtin_error(
+            "ldivide: GPU output requested via 'like' but no acceleration provider is active",
+        ));
     };
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
@@ -172,43 +188,45 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
             };
             let handle = provider
                 .upload(&view)
-                .map_err(|e| format!("ldivide: failed to upload GPU result: {e}"))?;
+                .map_err(|e| builtin_error(format!("ldivide: failed to upload GPU result: {e}")))?;
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("ldivide: {e}"))?;
+            let tensor = Tensor::new(vec![n], vec![1, 1])
+                .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
         Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 })),
         Value::LogicalArray(logical) => {
-            let tensor =
-                tensor::logical_to_tensor(&logical).map_err(|e| format!("ldivide: {e}"))?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::CharArray(chars) => {
             let tensor = char_array_to_tensor(&chars)?;
             convert_to_gpu(Value::Tensor(tensor))
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err("ldivide: GPU prototypes for 'like' only support real numeric outputs".to_string())
-        }
-        Value::String(_) | Value::StringArray(_) | Value::Cell(_) | Value::Struct(_) => {
-            Err("ldivide: unsupported prototype conversion to GPU output".to_string())
-        }
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
+            "ldivide: GPU prototypes for 'like' only support real numeric outputs",
+        )),
+        Value::String(_) | Value::StringArray(_) | Value::Cell(_) | Value::Struct(_) => Err(
+            builtin_error("ldivide: unsupported prototype conversion to GPU output"),
+        ),
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => {
-            Err("ldivide: unsupported prototype conversion to GPU output".to_string())
-        }
+        | Value::MException(_) => Err(builtin_error(
+            "ldivide: unsupported prototype conversion to GPU output",
+        )),
     }
 }
 
-fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
+#[async_recursion(?Send)]
+async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
     match proto {
         Value::GpuTensor(_) => Ok(LikeAnalysis {
             device: DevicePreference::Gpu,
@@ -228,15 +246,18 @@ fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
             class: PrototypeClass::Complex,
         }),
         other => {
-            let gathered = gather_like_prototype(other)?;
-            analyse_like_prototype(&gathered)
+            let gathered = gather_like_prototype(other).await?;
+            analyse_like_prototype(&gathered).await
         }
     }
 }
 
-fn gather_like_prototype(value: &Value) -> Result<Value, String> {
+async fn gather_like_prototype(value: &Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(_) => gpu_helpers::gather_value(value),
+        Value::GpuTensor(_) => gpu_helpers::gather_value_async(value)
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))
+            .map_err(|e| builtin_error(format!("ldivide: {e}"))),
         Value::Tensor(_)
         | Value::Num(_)
         | Value::Int(_)
@@ -245,45 +266,51 @@ fn gather_like_prototype(value: &Value) -> Result<Value, String> {
         | Value::CharArray(_)
         | Value::Complex(_, _)
         | Value::ComplexTensor(_) => Ok(value.clone()),
-        _ => Err(format!(
+        _ => Err(builtin_error(format!(
             "ldivide: unsupported prototype for 'like' ({value:?})"
-        )),
+        ))),
     }
 }
 
-fn real_to_complex(value: Value) -> Result<Value, String> {
+#[async_recursion(?Send)]
+async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
             let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
-            let tensor =
-                ComplexTensor::new(data, t.shape.clone()).map_err(|e| format!("ldivide: {e}"))?;
+            let tensor = ComplexTensor::new(data, t.shape.clone())
+                .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
         }
         Value::LogicalArray(logical) => {
-            let tensor =
-                tensor::logical_to_tensor(&logical).map_err(|e| format!("ldivide: {e}"))?;
-            real_to_complex(Value::Tensor(tensor))
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
+            real_to_complex(Value::Tensor(tensor)).await
         }
         Value::CharArray(chars) => {
             let tensor = char_array_to_tensor(&chars)?;
-            real_to_complex(Value::Tensor(tensor))
+            real_to_complex(Value::Tensor(tensor)).await
         }
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_value(&Value::GpuTensor(handle.clone()))?;
-            real_to_complex(gathered)
+            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
+                .await
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+            real_to_complex(gathered).await
         }
-        other => Err(format!(
+        other => Err(builtin_error(format!(
             "ldivide: cannot convert value {other:?} to complex output"
-        )),
+        ))),
     }
 }
 
-fn ldivide_gpu_pair(divisor: GpuTensorHandle, numerator: GpuTensorHandle) -> Result<Value, String> {
+async fn ldivide_gpu_pair(
+    divisor: GpuTensorHandle,
+    numerator: GpuTensorHandle,
+) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if divisor.shape == numerator.shape {
-            if let Ok(handle) = provider.elem_div(&numerator, &divisor) {
+            if let Ok(handle) = provider.elem_div(&numerator, &divisor).await {
                 return Ok(Value::GpuTensor(handle));
             }
         }
@@ -296,20 +323,21 @@ fn ldivide_gpu_pair(divisor: GpuTensorHandle, numerator: GpuTensorHandle) -> Res
             let num_expanded = if made_num {
                 provider
                     .repmat(&numerator, &reps_num)
-                    .map_err(|e| e.to_string())?
+                    .map_err(|e| builtin_error(format!("ldivide: {e}")))?
             } else {
                 numerator.clone()
             };
             let div_expanded = if made_div {
                 provider
                     .repmat(&divisor, &reps_div)
-                    .map_err(|e| e.to_string())?
+                    .map_err(|e| builtin_error(format!("ldivide: {e}")))?
             } else {
                 divisor.clone()
             };
             let result = provider
                 .elem_div(&num_expanded, &div_expanded)
-                .map_err(|e| e.to_string());
+                .await
+                .map_err(|e| builtin_error(format!("ldivide: {e}")));
             if made_num {
                 let _ = provider.free(&num_expanded);
             }
@@ -325,22 +353,26 @@ fn ldivide_gpu_pair(divisor: GpuTensorHandle, numerator: GpuTensorHandle) -> Res
             }
         }
         if is_scalar_shape(&divisor.shape) {
-            if let Some(scalar) = gpu_scalar_value(&divisor)? {
+            if let Some(scalar) = gpu_scalar_value(&divisor).await? {
                 if let Ok(handle) = provider.scalar_div(&numerator, scalar) {
                     return Ok(Value::GpuTensor(handle));
                 }
             }
         }
         if is_scalar_shape(&numerator.shape) {
-            if let Some(scalar) = gpu_scalar_value(&numerator)? {
+            if let Some(scalar) = gpu_scalar_value(&numerator).await? {
                 if let Ok(handle) = provider.scalar_rdiv(&divisor, scalar) {
                     return Ok(Value::GpuTensor(handle));
                 }
             }
         }
     }
-    let divisor_host = gpu_helpers::gather_tensor(&divisor)?;
-    let numerator_host = gpu_helpers::gather_tensor(&numerator)?;
+    let divisor_host = gpu_helpers::gather_tensor_async(&divisor)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    let numerator_host = gpu_helpers::gather_tensor_async(&numerator)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     ldivide_host(Value::Tensor(divisor_host), Value::Tensor(numerator_host))
 }
 
@@ -374,7 +406,7 @@ fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, V
     Some((out, reps_a, reps_b))
 }
 
-fn ldivide_gpu_host_left(divisor: GpuTensorHandle, numerator: Value) -> Result<Value, String> {
+async fn ldivide_gpu_host_left(divisor: GpuTensorHandle, numerator: Value) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&numerator)? {
             if let Ok(handle) = provider.scalar_rdiv(&divisor, scalar) {
@@ -382,11 +414,16 @@ fn ldivide_gpu_host_left(divisor: GpuTensorHandle, numerator: Value) -> Result<V
             }
         }
     }
-    let divisor_host = gpu_helpers::gather_tensor(&divisor)?;
+    let divisor_host = gpu_helpers::gather_tensor_async(&divisor)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     ldivide_host(Value::Tensor(divisor_host), numerator)
 }
 
-fn ldivide_gpu_host_right(divisor: Value, numerator: GpuTensorHandle) -> Result<Value, String> {
+async fn ldivide_gpu_host_right(
+    divisor: Value,
+    numerator: GpuTensorHandle,
+) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&divisor)? {
             if let Ok(handle) = provider.scalar_div(&numerator, scalar) {
@@ -394,11 +431,52 @@ fn ldivide_gpu_host_right(divisor: Value, numerator: GpuTensorHandle) -> Result<
             }
         }
     }
-    let numerator_host = gpu_helpers::gather_tensor(&numerator)?;
+    let numerator_host = gpu_helpers::gather_tensor_async(&numerator)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     ldivide_host(divisor, Value::Tensor(numerator_host))
 }
 
-fn ldivide_host(divisor: Value, numerator: Value) -> Result<Value, String> {
+fn scalar_real_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(n) => Some(*n),
+        Value::Int(i) => Some(i.to_f64()),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
+        Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
+            Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
+        }
+        _ => None,
+    }
+}
+
+fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
+    match value {
+        Value::Complex(re, im) => Some((*re, *im)),
+        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
+        _ => None,
+    }
+}
+
+fn scalar_ldivide_value(divisor: &Value, numerator: &Value) -> Option<Value> {
+    let num = scalar_complex_value(numerator)
+        .or_else(|| scalar_real_value(numerator).map(|v| (v, 0.0)))?;
+    let div =
+        scalar_complex_value(divisor).or_else(|| scalar_real_value(divisor).map(|v| (v, 0.0)))?;
+    let (nr, ni) = num;
+    let (dr, di) = div;
+    if ni != 0.0 || di != 0.0 {
+        let quotient = Complex64::new(nr, ni) / Complex64::new(dr, di);
+        return Some(Value::Complex(quotient.re, quotient.im));
+    }
+    Some(Value::Num(nr / dr))
+}
+
+fn ldivide_host(divisor: Value, numerator: Value) -> BuiltinResult<Value> {
+    if let Some(result) = scalar_ldivide_value(&divisor, &numerator) {
+        return Ok(result);
+    }
     match (classify_operand(divisor)?, classify_operand(numerator)?) {
         (LdivideOperand::Real(div), LdivideOperand::Real(num)) => ldivide_real_real(&div, &num),
         (LdivideOperand::Complex(div), LdivideOperand::Complex(num)) => {
@@ -413,32 +491,32 @@ fn ldivide_host(divisor: Value, numerator: Value) -> Result<Value, String> {
     }
 }
 
-fn ldivide_real_real(divisor: &Tensor, numerator: &Tensor) -> Result<Value, String> {
+fn ldivide_real_real(divisor: &Tensor, numerator: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&numerator.shape, &divisor.shape)
-        .map_err(|err| format!("ldivide: {err}"))?;
+        .map_err(|err| builtin_error(format!("ldivide: {err}")))?;
     if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| format!("ldivide: {e}"))?;
+            .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let mut out = vec![0.0f64; plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
         out[out_idx] = numerator.data[idx_lhs] / divisor.data[idx_rhs];
     }
-    let tensor =
-        Tensor::new(out, plan.output_shape().to_vec()).map_err(|e| format!("ldivide: {e}"))?;
+    let tensor = Tensor::new(out, plan.output_shape().to_vec())
+        .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
 fn ldivide_complex_complex(
     divisor: &ComplexTensor,
     numerator: &ComplexTensor,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&numerator.shape, &divisor.shape)
-        .map_err(|err| format!("ldivide: {err}"))?;
+        .map_err(|err| builtin_error(format!("ldivide: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| format!("ldivide: {e}"))?;
+            .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
@@ -449,16 +527,16 @@ fn ldivide_complex_complex(
         out[out_idx] = (quotient.re, quotient.im);
     }
     let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
-        .map_err(|e| format!("ldivide: {e}"))?;
+        .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
-fn ldivide_complex_real(divisor: &ComplexTensor, numerator: &Tensor) -> Result<Value, String> {
+fn ldivide_complex_real(divisor: &ComplexTensor, numerator: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&numerator.shape, &divisor.shape)
-        .map_err(|err| format!("ldivide: {err}"))?;
+        .map_err(|err| builtin_error(format!("ldivide: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| format!("ldivide: {e}"))?;
+            .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
@@ -469,16 +547,16 @@ fn ldivide_complex_real(divisor: &ComplexTensor, numerator: &Tensor) -> Result<V
         out[out_idx] = (quotient.re, quotient.im);
     }
     let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
-        .map_err(|e| format!("ldivide: {e}"))?;
+        .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
-fn ldivide_real_complex(divisor: &Tensor, numerator: &ComplexTensor) -> Result<Value, String> {
+fn ldivide_real_complex(divisor: &Tensor, numerator: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&numerator.shape, &divisor.shape)
-        .map_err(|err| format!("ldivide: {err}"))?;
+        .map_err(|err| builtin_error(format!("ldivide: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| format!("ldivide: {e}"))?;
+            .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
@@ -489,7 +567,7 @@ fn ldivide_real_complex(divisor: &Tensor, numerator: &ComplexTensor) -> Result<V
         out[out_idx] = (quotient.re, quotient.im);
     }
     let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
-        .map_err(|e| format!("ldivide: {e}"))?;
+        .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -498,41 +576,47 @@ enum LdivideOperand {
     Complex(ComplexTensor),
 }
 
-fn classify_operand(value: Value) -> Result<LdivideOperand, String> {
+fn classify_operand(value: Value) -> BuiltinResult<LdivideOperand> {
     match value {
         Value::Tensor(t) => Ok(LdivideOperand::Real(t)),
         Value::Num(n) => Ok(LdivideOperand::Real(
-            Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("ldivide: {e}"))?,
+            Tensor::new(vec![n], vec![1, 1]).map_err(|e| builtin_error(format!("ldivide: {e}")))?,
         )),
         Value::Int(i) => Ok(LdivideOperand::Real(
-            Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| format!("ldivide: {e}"))?,
+            Tensor::new(vec![i.to_f64()], vec![1, 1])
+                .map_err(|e| builtin_error(format!("ldivide: {e}")))?,
         )),
         Value::Bool(b) => Ok(LdivideOperand::Real(
             Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|e| format!("ldivide: {e}"))?,
+                .map_err(|e| builtin_error(format!("ldivide: {e}")))?,
         )),
         Value::LogicalArray(logical) => Ok(LdivideOperand::Real(
-            tensor::logical_to_tensor(&logical).map_err(|e| format!("ldivide: {e}"))?,
+            tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(format!("ldivide: {e}")))?,
         )),
         Value::CharArray(chars) => Ok(LdivideOperand::Real(char_array_to_tensor(&chars)?)),
         Value::Complex(re, im) => Ok(LdivideOperand::Complex(
-            ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| format!("ldivide: {e}"))?,
+            ComplexTensor::new(vec![(re, im)], vec![1, 1])
+                .map_err(|e| builtin_error(format!("ldivide: {e}")))?,
         )),
         Value::ComplexTensor(ct) => Ok(LdivideOperand::Complex(ct)),
-        Value::GpuTensor(_) => Err("ldivide: internal error converting GPU value".to_string()),
-        other => Err(format!(
+        Value::GpuTensor(_) => Err(builtin_error(
+            "ldivide: internal error converting GPU value",
+        )),
+        other => Err(builtin_error(format!(
             "ldivide: unsupported operand type {:?}; expected numeric or logical data",
             other
-        )),
+        ))),
     }
 }
 
-fn char_array_to_tensor(chars: &CharArray) -> Result<Tensor, String> {
+fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-    Tensor::new(data, vec![chars.rows, chars.cols]).map_err(|e| format!("ldivide: {e}"))
+    Tensor::new(data, vec![chars.rows, chars.cols])
+        .map_err(|e| builtin_error(format!("ldivide: {e}")))
 }
 
-fn extract_scalar_f64(value: &Value) -> Result<Option<f64>, String> {
+fn extract_scalar_f64(value: &Value) -> BuiltinResult<Option<f64>> {
     match value {
         Value::Num(n) => Ok(Some(*n)),
         Value::Int(i) => Ok(Some(i.to_f64())),
@@ -548,27 +632,34 @@ fn extract_scalar_f64(value: &Value) -> Result<Option<f64>, String> {
     }
 }
 
-fn is_scalar_shape(shape: &[usize]) -> bool {
-    shape.iter().copied().product::<usize>() <= 1
-}
-
-fn gpu_scalar_value(handle: &GpuTensorHandle) -> Result<Option<f64>, String> {
+async fn gpu_scalar_value(handle: &GpuTensorHandle) -> BuiltinResult<Option<f64>> {
     if !is_scalar_shape(&handle.shape) {
         return Ok(None);
     }
-    let tensor = gpu_helpers::gather_tensor(handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(handle)
+        .await
+        .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
     Ok(tensor.data.first().copied())
+}
+
+fn is_scalar_shape(shape: &[usize]) -> bool {
+    shape.iter().copied().product::<usize>() <= 1
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor};
 
     const EPS: f64 = 1e-12;
     const GPU_EPS: f64 = 1e-6;
+
+    fn ldivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::ldivide_builtin(lhs, rhs, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -830,7 +921,10 @@ pub(crate) mod tests {
         let lhs = Value::Num(2.0);
         let rhs = Value::Num(4.0);
         let err = ldivide_builtin(lhs, rhs, vec![Value::from("like")]).unwrap_err();
-        assert!(err.contains("prototype"), "unexpected error: {err}");
+        assert!(
+            err.message().contains("prototype"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -882,7 +976,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().unwrap();
         let ha = provider.upload(&view_l).unwrap();
         let hb = provider.upload(&view_r).unwrap();
-        let gpu = ldivide_gpu_pair(ha, hb).unwrap();
+        let gpu = block_on(ldivide_gpu_pair(ha, hb)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
             Value::Tensor(t) => {

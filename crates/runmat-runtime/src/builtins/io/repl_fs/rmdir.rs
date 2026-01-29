@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const MESSAGE_ID_OS_ERROR: &str = "MATLAB:RMDIR:OSError";
 const MESSAGE_ID_DIRECTORY_NOT_FOUND: &str = "MATLAB:RMDIR:DirectoryNotFound";
@@ -52,6 +52,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Filesystem side-effects materialise immediately; metadata registered for completeness.",
 };
 
+const BUILTIN_NAME: &str = "rmdir";
+
+fn rmdir_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "rmdir",
     category = "io/repl_fs",
@@ -61,22 +80,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::rmdir"
 )]
-fn rmdir_builtin(args: Vec<Value>) -> Result<Value, String> {
-    let eval = evaluate(&args)?;
+async fn rmdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(&args).await?;
     Ok(eval.first_output())
 }
 
 /// Evaluate `rmdir` once and expose all outputs.
-pub fn evaluate(args: &[Value]) -> Result<RmdirResult, String> {
-    let gathered = gather_arguments(args)?;
+pub async fn evaluate(args: &[Value]) -> BuiltinResult<RmdirResult> {
+    let gathered = gather_arguments(args).await?;
     match gathered.len() {
-        0 => Err("rmdir: not enough input arguments".to_string()),
+        0 => Err(rmdir_error("rmdir: not enough input arguments")),
         1 => remove_folder(&gathered[0], RemoveMode::NonRecursive),
         2 => {
             let mode = parse_remove_mode(&gathered[1])?;
             remove_folder(&gathered[0], mode)
         }
-        _ => Err("rmdir: too many input arguments".to_string()),
+        _ => Err(rmdir_error("rmdir: too many input arguments")),
     }
 }
 
@@ -176,12 +195,12 @@ impl RmdirResult {
     }
 }
 
-fn remove_folder(value: &Value, mode: RemoveMode) -> Result<RmdirResult, String> {
+fn remove_folder(value: &Value, mode: RemoveMode) -> BuiltinResult<RmdirResult> {
     let raw = extract_folder_name(value)?;
     if raw.trim().is_empty() {
         return Ok(RmdirResult::empty_name());
     }
-    let expanded = expand_user_path(&raw, "rmdir")?;
+    let expanded = expand_user_path(&raw, "rmdir").map_err(rmdir_error)?;
     let path = PathBuf::from(&expanded);
     Ok(remove_directory(&path, mode))
 }
@@ -230,58 +249,62 @@ fn remove_directory(path: &Path, mode: RemoveMode) -> RmdirResult {
     }
 }
 
-fn parse_remove_mode(value: &Value) -> Result<RemoveMode, String> {
+fn parse_remove_mode(value: &Value) -> BuiltinResult<RemoveMode> {
     let text = match value {
         Value::String(s) => s.clone(),
         Value::CharArray(array) => {
             if array.rows == 1 {
                 array.data.iter().collect()
             } else {
-                return Err(ERR_FLAG_ARG.to_string());
+                return Err(rmdir_error(ERR_FLAG_ARG));
             }
         }
         Value::StringArray(array) => {
             if array.data.len() == 1 {
                 array.data[0].clone()
             } else {
-                return Err(ERR_FLAG_ARG.to_string());
+                return Err(rmdir_error(ERR_FLAG_ARG));
             }
         }
-        _ => return Err(ERR_FLAG_ARG.to_string()),
+        _ => return Err(rmdir_error(ERR_FLAG_ARG)),
     };
 
     if text.trim().eq_ignore_ascii_case("s") {
         Ok(RemoveMode::Recursive)
     } else {
-        Err(ERR_FLAG_ARG.to_string())
+        Err(rmdir_error(ERR_FLAG_ARG))
     }
 }
 
-fn extract_folder_name(value: &Value) -> Result<String, String> {
+fn extract_folder_name(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::CharArray(array) => {
             if array.rows == 1 {
                 Ok(array.data.iter().collect())
             } else {
-                Err(ERR_FOLDER_ARG.to_string())
+                Err(rmdir_error(ERR_FOLDER_ARG))
             }
         }
         Value::StringArray(array) => {
             if array.data.len() == 1 {
                 Ok(array.data[0].clone())
             } else {
-                Err(ERR_FOLDER_ARG.to_string())
+                Err(rmdir_error(ERR_FOLDER_ARG))
             }
         }
-        _ => Err(ERR_FOLDER_ARG.to_string()),
+        _ => Err(rmdir_error(ERR_FOLDER_ARG)),
     }
 }
 
-fn gather_arguments(args: &[Value]) -> Result<Vec<Value>, String> {
+async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(|err| format!("rmdir: {err}"))?);
+        out.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     Ok(out)
 }
@@ -298,6 +321,10 @@ pub(crate) mod tests {
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
+
+    fn evaluate(args: &[Value]) -> BuiltinResult<RmdirResult> {
+        futures::executor::block_on(super::evaluate(args))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -324,10 +351,10 @@ pub(crate) mod tests {
             .unwrap_or_else(|poison| poison.into_inner());
 
         let err = evaluate(&[Value::Num(1.0)]).expect_err("expected error");
-        assert_eq!(err, ERR_FOLDER_ARG);
+        assert_eq!(err.message(), ERR_FOLDER_ARG);
 
         let err = evaluate(&[Value::from("path"), Value::Num(2.0)]).expect_err("error");
-        assert_eq!(err, ERR_FLAG_ARG);
+        assert_eq!(err.message(), ERR_FLAG_ARG);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

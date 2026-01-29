@@ -14,7 +14,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const MAX_FACTORIAL_N: usize = 170;
 
@@ -59,6 +60,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Factorial is evaluated as a scalar helper; fusion currently bypasses it and executes the standalone host or provider kernel.",
 };
 
+const BUILTIN_NAME: &str = "factorial";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 #[runtime_builtin(
     name = "factorial",
     category = "math/elementwise",
@@ -67,24 +76,27 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::factorial"
 )]
-fn factorial_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn factorial_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let output = parse_output_template(&rest)?;
     let base = match value {
-        Value::GpuTensor(handle) => factorial_gpu(handle)?,
+        Value::GpuTensor(handle) => factorial_gpu(handle).await?,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            return Err(
-                "factorial: complex inputs are not supported; use gamma(z + 1) instead".to_string(),
-            )
+            return Err(builtin_error(
+                "factorial: complex inputs are not supported; use gamma(z + 1) instead",
+            ))
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-            return Err("factorial: expected numeric or logical input".to_string())
+            return Err(builtin_error(
+                "factorial: expected numeric or logical input",
+            ))
         }
         other => {
-            let tensor = tensor::value_into_tensor_for("factorial", other)?;
+            let tensor = tensor::value_into_tensor_for("factorial", other)
+                .map_err(|e| builtin_error(format!("factorial: {e}")))?;
             factorial_tensor(tensor).map(tensor::tensor_into_value)?
         }
     };
-    apply_output_template(base, &output)
+    apply_output_template(base, &output).await
 }
 
 #[derive(Clone)]
@@ -93,43 +105,49 @@ enum OutputTemplate {
     Like(Value),
 }
 
-fn parse_output_template(args: &[Value]) -> Result<OutputTemplate, String> {
+fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     match args.len() {
         0 => Ok(OutputTemplate::Default),
         1 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-                Err("factorial: expected prototype after 'like'".to_string())
+                Err(builtin_error("factorial: expected prototype after 'like'"))
             } else {
-                Err("factorial: unrecognised option; only 'like' is supported".to_string())
+                Err(builtin_error(
+                    "factorial: unrecognised option; only 'like' is supported",
+                ))
             }
         }
         2 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
                 Ok(OutputTemplate::Like(args[1].clone()))
             } else {
-                Err("factorial: unrecognised option; only 'like' is supported".to_string())
+                Err(builtin_error(
+                    "factorial: unrecognised option; only 'like' is supported",
+                ))
             }
         }
-        _ => Err("factorial: too many input arguments".to_string()),
+        _ => Err(builtin_error("factorial: too many input arguments")),
     }
 }
 
-fn factorial_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn factorial_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_factorial(&handle) {
+        if let Ok(out) = provider.unary_factorial(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
-    factorial_tensor(tensor).map(tensor::tensor_into_value)
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    Ok(tensor::tensor_into_value(factorial_tensor(tensor)?))
 }
 
-fn factorial_tensor(tensor: Tensor) -> Result<Tensor, String> {
+fn factorial_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let mut data = Vec::with_capacity(tensor.data.len());
     for &value in &tensor.data {
         data.push(factorial_scalar(value));
     }
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| format!("factorial: {e}"))
+    Tensor::new(data, tensor.shape.clone()).map_err(|e| builtin_error(format!("factorial: {e}")))
 }
 
 fn factorial_scalar(value: f64) -> f64 {
@@ -176,13 +194,13 @@ fn classify_nonnegative_integer(value: f64) -> Option<usize> {
     Some(rounded as usize)
 }
 
-fn apply_output_template(value: Value, template: &OutputTemplate) -> Result<Value, String> {
+async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
     match template {
         OutputTemplate::Default => Ok(value),
         OutputTemplate::Like(proto) => {
-            let analysis = analyse_like_prototype(proto)?;
+            let analysis = analyse_like_prototype(proto).await?;
             match analysis.device {
-                DevicePreference::Host => convert_to_host_like(value),
+                DevicePreference::Host => convert_to_host_like(value).await,
                 DevicePreference::Gpu => convert_to_gpu_like(value),
             }
         }
@@ -199,7 +217,8 @@ struct LikeAnalysis {
     device: DevicePreference,
 }
 
-fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
+#[async_recursion::async_recursion(?Send)]
+async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
     match proto {
         Value::GpuTensor(_) => Ok(LikeAnalysis {
             device: DevicePreference::Gpu,
@@ -210,64 +229,68 @@ fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
         Value::LogicalArray(_) => Ok(LikeAnalysis {
             device: DevicePreference::Host,
         }),
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(
-            "factorial: complex prototypes for 'like' are not supported; results are always real"
-                .to_string(),
-        ),
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-            Err("factorial: prototype must be numeric or a gpuArray".to_string())
-        }
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
+            "factorial: complex prototypes for 'like' are not supported; results are always real",
+        )),
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(builtin_error(
+            "factorial: prototype must be numeric or a gpuArray",
+        )),
         other => {
-            let gathered =
-                gpu_helpers::gather_value(other).map_err(|e| format!("factorial: {e}"))?;
-            analyse_like_prototype(&gathered)
+            let gathered = gpu_helpers::gather_value_async(other)
+                .await
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+            analyse_like_prototype(&gathered).await
         }
     }
 }
 
-fn convert_to_host_like(value: Value) -> Result<Value, String> {
+async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => gpu_helpers::gather_value(&Value::GpuTensor(handle))
-            .map_err(|e| format!("factorial: {e}")),
+        Value::GpuTensor(handle) => gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME)),
         other => Ok(other),
     }
 }
 
-fn convert_to_gpu_like(value: Value) -> Result<Value, String> {
+fn convert_to_gpu_like(value: Value) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        "factorial: GPU output requested via 'like' but no acceleration provider is active"
-            .to_string()
+        builtin_error(
+            "factorial: GPU output requested via 'like' but no acceleration provider is active",
+        )
     })?;
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
         Value::Tensor(tensor) => upload_tensor(provider, tensor),
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("factorial: {e}"))?;
+            let tensor = Tensor::new(vec![n], vec![1, 1])
+                .map_err(|e| builtin_error(format!("factorial: {e}")))?;
             upload_tensor(provider, tensor)
         }
         Value::Int(i) => convert_to_gpu_like(Value::Num(i.to_f64())),
         Value::Bool(b) => convert_to_gpu_like(Value::Num(if b { 1.0 } else { 0.0 })),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(format!("factorial: {e}")))?;
             upload_tensor(provider, tensor)
         }
-        other => Err(format!(
+        other => Err(builtin_error(format!(
             "factorial: cannot place value {other:?} on the GPU via 'like'"
-        )),
+        ))),
     }
 }
 
 fn upload_tensor(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     tensor: Tensor,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     let view = HostTensorView {
         data: &tensor.data,
         shape: &tensor.shape,
     };
     let handle = provider
         .upload(&view)
-        .map_err(|e| format!("factorial: failed to upload GPU result: {e}"))?;
+        .map_err(|e| builtin_error(format!("factorial: failed to upload GPU result: {e}")))?;
     Ok(Value::GpuTensor(handle))
 }
 
@@ -275,7 +298,12 @@ fn upload_tensor(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
+
+    fn factorial_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::factorial_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -354,7 +382,7 @@ pub(crate) mod tests {
     fn factorial_like_missing_prototype_errors() {
         let err = factorial_builtin(Value::Num(3.0), vec![Value::from("like")])
             .expect_err("expected error");
-        assert!(err.contains("prototype"));
+        assert!(err.message().contains("prototype"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -458,7 +486,7 @@ pub(crate) mod tests {
     fn factorial_complex_input_errors() {
         let err = factorial_builtin(Value::Complex(1.0, 0.5), Vec::new())
             .expect_err("expected complex rejection");
-        assert!(err.contains("complex"));
+        assert!(err.message().contains("complex"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -466,7 +494,7 @@ pub(crate) mod tests {
     fn factorial_string_input_errors() {
         let err = factorial_builtin(Value::from("hello"), Vec::new())
             .expect_err("expected string rejection");
-        assert!(err.contains("numeric"));
+        assert!(err.message().contains("numeric"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -477,7 +505,7 @@ pub(crate) mod tests {
             vec![Value::from("like"), Value::Complex(0.0, 1.0)],
         )
         .expect_err("expected complex prototype rejection");
-        assert!(err.contains("complex"));
+        assert!(err.message().contains("complex"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -497,7 +525,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = factorial_gpu(handle).expect("gpu");
+        let gpu = block_on(factorial_gpu(handle)).expect("gpu");
         let gathered = test_support::gather(gpu).expect("gather");
         let cpu_tensor = match cpu {
             Value::Tensor(t) => t,

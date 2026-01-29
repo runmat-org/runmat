@@ -14,6 +14,8 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+const BUILTIN_NAME: &str = "asinh";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::asinh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -31,6 +33,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes:
         "Providers may execute asinh directly on device buffers; runtimes gather to host when unary_asinh is unavailable.",
 };
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::asinh")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -57,40 +65,40 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::asinh"
 )]
-fn asinh_builtin(value: Value) -> Result<Value, String> {
+async fn asinh_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => asinh_gpu(handle),
+        Value::GpuTensor(handle) => asinh_gpu(handle).await,
         Value::Complex(re, im) => Ok(complex_asinh_scalar(re, im)),
         Value::ComplexTensor(ct) => asinh_complex_tensor(ct),
         Value::CharArray(ca) => asinh_char_array(ca),
         Value::String(_) | Value::StringArray(_) => {
-            Err("asinh: expected numeric input".to_string())
+            Err(runtime_error_for("asinh: expected numeric input"))
         }
         other => asinh_real(other),
     }
 }
 
-fn asinh_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn asinh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_asinh(&handle) {
+        if let Ok(out) = provider.unary_asinh(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     asinh_tensor(tensor).map(tensor::tensor_into_value)
 }
 
-fn asinh_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("asinh", value)?;
+fn asinh_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("asinh", value).map_err(runtime_error_for)?;
     asinh_tensor(tensor).map(tensor::tensor_into_value)
 }
 
-fn asinh_tensor(tensor: Tensor) -> Result<Tensor, String> {
+fn asinh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.asinh()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| format!("asinh: {e}"))
+    Tensor::new(data, tensor.shape.clone()).map_err(|e| runtime_error_for(format!("asinh: {e}")))
 }
 
-fn asinh_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn asinh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
         .data
         .iter()
@@ -99,17 +107,19 @@ fn asinh_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
             (res.re, res.im)
         })
         .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(mapped, ct.shape.clone()).map_err(|e| format!("asinh: {e}"))?;
+    let tensor = ComplexTensor::new(mapped, ct.shape.clone())
+        .map_err(|e| runtime_error_for(format!("asinh: {e}")))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
-fn asinh_char_array(ca: CharArray) -> Result<Value, String> {
+fn asinh_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data
         .iter()
         .map(|&ch| (ch as u32 as f64).asinh())
         .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("asinh: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| runtime_error_for(format!("asinh: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -122,8 +132,17 @@ fn complex_asinh_scalar(re: f64, im: f64) -> Value {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use num_complex::Complex64;
     use runmat_builtins::LogicalArray;
+
+    fn asinh_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::asinh_builtin(value))
+    }
+
+    fn error_message(err: RuntimeError) -> String {
+        err.message().to_string()
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -244,9 +263,10 @@ pub(crate) mod tests {
     #[test]
     fn asinh_string_errors() {
         let err = asinh_builtin(Value::from("not numeric")).expect_err("expected error");
+        let message = error_message(err);
         assert!(
-            err.contains("expected numeric input"),
-            "unexpected error: {err}"
+            message.contains("expected numeric input"),
+            "unexpected error: {message}"
         );
     }
 
@@ -267,7 +287,7 @@ pub(crate) mod tests {
             .expect("provider")
             .upload(&view)
             .expect("upload");
-        let gpu = asinh_gpu(handle).unwrap();
+        let gpu = block_on(asinh_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
             Value::Tensor(ct) => {

@@ -12,8 +12,10 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::dispatcher;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1.0e-12;
+const BUILTIN_NAME: &str = "polyint";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyint")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -30,6 +32,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Providers implement the polyint hook for real coefficient vectors; complex inputs fall back to the host.",
 };
+
+fn polyint_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::polyint")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -49,17 +57,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "polyint,polynomial,integral,antiderivative",
     builtin_path = "crate::builtins::math::poly::polyint"
 )]
-fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("polyint: too many input arguments".to_string());
+        return Err(polyint_error("polyint: too many input arguments"));
     }
 
-    let constant = rest
-        .into_iter()
-        .next()
-        .map(parse_constant)
-        .transpose()?
-        .unwrap_or_else(|| Complex64::new(0.0, 0.0));
+    let constant = match rest.into_iter().next() {
+        Some(value) => parse_constant(value).await?,
+        None => Complex64::new(0.0, 0.0),
+    };
 
     if let Value::GpuTensor(handle) = &coeffs {
         if let Some(device_result) = try_polyint_gpu(handle, constant)? {
@@ -68,11 +74,15 @@ fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> Result<Value, String> {
     }
 
     let was_gpu = matches!(coeffs, Value::GpuTensor(_));
-    polyint_host_value(coeffs, constant, was_gpu)
+    polyint_host_value(coeffs, constant, was_gpu).await
 }
 
-fn polyint_host_value(coeffs: Value, constant: Complex64, was_gpu: bool) -> Result<Value, String> {
-    let polynomial = parse_polynomial(coeffs)?;
+async fn polyint_host_value(
+    coeffs: Value,
+    constant: Complex64,
+    was_gpu: bool,
+) -> BuiltinResult<Value> {
+    let polynomial = parse_polynomial(coeffs).await?;
     let mut integrated = integrate_coeffs(&polynomial.coeffs);
     if integrated.is_empty() {
         integrated.push(constant);
@@ -86,7 +96,7 @@ fn polyint_host_value(coeffs: Value, constant: Complex64, was_gpu: bool) -> Resu
 fn try_polyint_gpu(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     constant: Complex64,
-) -> Result<Option<runmat_accelerate_api::GpuTensorHandle>, String> {
+) -> BuiltinResult<Option<runmat_accelerate_api::GpuTensorHandle>> {
     if constant.im.abs() > EPS {
         return Ok(None);
     }
@@ -120,7 +130,7 @@ fn integrate_coeffs(coeffs: &[Complex64]) -> Vec<Complex64> {
     result
 }
 
-fn maybe_return_gpu(value: Value, was_gpu: bool) -> Result<Value, String> {
+fn maybe_return_gpu(value: Value, was_gpu: bool) -> BuiltinResult<Value> {
     if !was_gpu {
         return Ok(value);
     }
@@ -146,27 +156,29 @@ fn maybe_return_gpu(value: Value, was_gpu: bool) -> Result<Value, String> {
     }
 }
 
-fn coeffs_to_value(coeffs: &[Complex64], orientation: Orientation) -> Result<Value, String> {
+fn coeffs_to_value(coeffs: &[Complex64], orientation: Orientation) -> BuiltinResult<Value> {
     if coeffs.iter().all(|c| c.im.abs() <= EPS) {
         let data: Vec<f64> = coeffs.iter().map(|c| c.re).collect();
         let shape = orientation.shape_for_len(data.len());
-        let tensor = Tensor::new(data, shape).map_err(|e| format!("polyint: {e}"))?;
+        let tensor =
+            Tensor::new(data, shape).map_err(|e| polyint_error(format!("polyint: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     } else {
         let data: Vec<(f64, f64)> = coeffs.iter().map(|c| (c.re, c.im)).collect();
         let shape = orientation.shape_for_len(data.len());
-        let tensor = ComplexTensor::new(data, shape).map_err(|e| format!("polyint: {e}"))?;
+        let tensor =
+            ComplexTensor::new(data, shape).map_err(|e| polyint_error(format!("polyint: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
 
-fn parse_polynomial(value: Value) -> Result<Polynomial, String> {
-    let gathered = dispatcher::gather_if_needed(&value).map_err(|e| format!("polyint: {e}"))?;
+async fn parse_polynomial(value: Value) -> BuiltinResult<Polynomial> {
+    let gathered = dispatcher::gather_if_needed_async(&value).await?;
     match gathered {
         Value::Tensor(tensor) => parse_tensor_coeffs(&tensor),
         Value::ComplexTensor(tensor) => parse_complex_tensor_coeffs(&tensor),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(polyint_error)?;
             parse_tensor_coeffs(&tensor)
         }
         Value::Num(n) => Ok(Polynomial {
@@ -185,14 +197,14 @@ fn parse_polynomial(value: Value) -> Result<Polynomial, String> {
             coeffs: vec![Complex64::new(re, im)],
             orientation: Orientation::Scalar,
         }),
-        other => Err(format!(
+        other => Err(polyint_error(format!(
             "polyint: expected a numeric coefficient vector, got {:?}",
             other
-        )),
+        ))),
     }
 }
 
-fn parse_tensor_coeffs(tensor: &Tensor) -> Result<Polynomial, String> {
+fn parse_tensor_coeffs(tensor: &Tensor) -> BuiltinResult<Polynomial> {
     ensure_vector_shape(&tensor.shape)?;
     let orientation = orientation_from_shape(&tensor.shape);
     Ok(Polynomial {
@@ -205,7 +217,7 @@ fn parse_tensor_coeffs(tensor: &Tensor) -> Result<Polynomial, String> {
     })
 }
 
-fn parse_complex_tensor_coeffs(tensor: &ComplexTensor) -> Result<Polynomial, String> {
+fn parse_complex_tensor_coeffs(tensor: &ComplexTensor) -> BuiltinResult<Polynomial> {
     ensure_vector_shape(&tensor.shape)?;
     let orientation = orientation_from_shape(&tensor.shape);
     Ok(Polynomial {
@@ -218,18 +230,22 @@ fn parse_complex_tensor_coeffs(tensor: &ComplexTensor) -> Result<Polynomial, Str
     })
 }
 
-fn parse_constant(value: Value) -> Result<Complex64, String> {
-    let gathered = dispatcher::gather_if_needed(&value).map_err(|e| format!("polyint: {e}"))?;
+async fn parse_constant(value: Value) -> BuiltinResult<Complex64> {
+    let gathered = dispatcher::gather_if_needed_async(&value).await?;
     match gathered {
         Value::Tensor(tensor) => {
             if tensor.data.len() != 1 {
-                return Err("polyint: constant of integration must be a scalar".to_string());
+                return Err(polyint_error(
+                    "polyint: constant of integration must be a scalar",
+                ));
             }
             Ok(Complex64::new(tensor.data[0], 0.0))
         }
         Value::ComplexTensor(tensor) => {
             if tensor.data.len() != 1 {
-                return Err("polyint: constant of integration must be a scalar".to_string());
+                return Err(polyint_error(
+                    "polyint: constant of integration must be a scalar",
+                ));
             }
             let (re, im) = tensor.data[0];
             Ok(Complex64::new(re, im))
@@ -239,25 +255,27 @@ fn parse_constant(value: Value) -> Result<Complex64, String> {
         Value::Bool(b) => Ok(Complex64::new(if b { 1.0 } else { 0.0 }, 0.0)),
         Value::Complex(re, im) => Ok(Complex64::new(re, im)),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(polyint_error)?;
             if tensor.data.len() != 1 {
-                return Err("polyint: constant of integration must be a scalar".to_string());
+                return Err(polyint_error(
+                    "polyint: constant of integration must be a scalar",
+                ));
             }
             Ok(Complex64::new(tensor.data[0], 0.0))
         }
-        other => Err(format!(
+        other => Err(polyint_error(format!(
             "polyint: constant of integration must be numeric, got {:?}",
             other
-        )),
+        ))),
     }
 }
 
-fn ensure_vector_shape(shape: &[usize]) -> Result<(), String> {
+fn ensure_vector_shape(shape: &[usize]) -> BuiltinResult<()> {
     let non_unit = shape.iter().filter(|&&dim| dim > 1).count();
     if non_unit <= 1 {
         Ok(())
     } else {
-        Err("polyint: coefficients must form a vector".to_string())
+        Err(polyint_error("polyint: coefficients must form a vector"))
     }
 }
 
@@ -303,7 +321,16 @@ impl Orientation {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::LogicalArray;
+
+    fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
+        assert!(
+            err.message().contains(needle),
+            "expected error containing '{needle}', got '{}'",
+            err.message()
+        );
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -425,7 +452,7 @@ pub(crate) mod tests {
     fn rejects_matrix_coefficients() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let err = polyint_builtin(Value::Tensor(tensor), Vec::new()).expect_err("expected error");
-        assert!(err.contains("vector"));
+        assert_error_contains(err, "vector");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -435,7 +462,7 @@ pub(crate) mod tests {
         let constant = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let err = polyint_builtin(Value::Tensor(coeffs), vec![Value::Tensor(constant)])
             .expect_err("expected error");
-        assert!(err.contains("constant of integration must be a scalar"));
+        assert_error_contains(err, "constant of integration must be a scalar");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -447,7 +474,7 @@ pub(crate) mod tests {
             vec![Value::Num(1.0), Value::Num(2.0)],
         )
         .expect_err("expected error");
-        assert!(err.contains("too many input arguments"));
+        assert_error_contains(err, "too many input arguments");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -611,5 +638,9 @@ pub(crate) mod tests {
             .iter()
             .zip(expected.data.iter())
             .for_each(|(lhs, rhs)| assert!((lhs - rhs).abs() < tol));
+    }
+
+    fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::polyint_builtin(coeffs, rest))
     }
 }

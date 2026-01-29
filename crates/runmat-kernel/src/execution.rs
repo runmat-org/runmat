@@ -5,7 +5,7 @@
 
 use crate::Result;
 use runmat_builtins::Value;
-use runmat_core::RunMatSession;
+use runmat_core::{RunError, RunMatSession};
 use runmat_time::Instant;
 use std::path::Path;
 use std::time::Duration;
@@ -123,7 +123,7 @@ impl ExecutionEngine {
     }
 
     /// Execute code
-    pub fn execute(&mut self, code: &str) -> Result<ExecutionResult> {
+    pub async fn execute(&mut self, code: &str) -> Result<ExecutionResult> {
         let start_time = Instant::now();
         self.execution_count += 1;
 
@@ -132,32 +132,28 @@ impl ExecutionEngine {
         }
 
         // Execute using the underlying RunMatSession
-        match self.repl_engine.execute(code) {
+        match self.repl_engine.execute(code).await {
             Ok(repl_result) => {
                 let execution_time_ms = start_time.elapsed().as_millis() as u64;
 
-                if let Some(error_msg) = repl_result.error {
-                    // Determine error type based on error message content
-                    let error_type = if error_msg.contains("parse") || error_msg.contains("Parse") {
-                        "ParseError"
-                    } else if error_msg.contains("undefined") || error_msg.contains("variable") {
-                        "RuntimeError"
-                    } else if error_msg.contains("lower") || error_msg.contains("HIR") {
-                        "CompileError"
+                if let Some(error) = repl_result.error {
+                    let error_message = error.format_diagnostic();
+                    let traceback = if error.context.call_stack.is_empty() {
+                        vec!["Error during code execution".to_string()]
                     } else {
-                        "ExecutionError"
+                        error.context.call_stack.clone()
                     };
 
                     Ok(ExecutionResult {
                         status: ExecutionStatus::Error,
                         stdout: self.capture_stdout(),
-                        stderr: self.capture_stderr(&error_msg),
+                        stderr: self.capture_stderr(&error_message),
                         result: None,
                         execution_time_ms,
                         error: Some(ExecutionError {
-                            error_type: error_type.to_string(),
-                            message: error_msg,
-                            traceback: vec!["Error during code execution".to_string()],
+                            error_type: "RuntimeError".to_string(),
+                            message: error_message,
+                            traceback,
                         }),
                     })
                 } else {
@@ -173,17 +169,11 @@ impl ExecutionEngine {
             }
             Err(e) => {
                 let execution_time_ms = start_time.elapsed().as_millis() as u64;
-                let error_msg = e.to_string();
-
-                // Determine error type based on error message content
-                let error_type = if error_msg.contains("parse") || error_msg.contains("Parse") {
-                    "ParseError"
-                } else if error_msg.contains("undefined") || error_msg.contains("variable") {
-                    "RuntimeError"
-                } else if error_msg.contains("lower") || error_msg.contains("HIR") {
-                    "CompileError"
-                } else {
-                    "ExecutionError"
+                let (error_type, message) = match e {
+                    RunError::Syntax(err) => ("SyntaxError", err.to_string()),
+                    RunError::Semantic(err) => ("SemanticError", err.to_string()),
+                    RunError::Compile(err) => ("CompileError", err.to_string()),
+                    RunError::Runtime(err) => ("RuntimeError", err.format_diagnostic()),
                 };
 
                 Ok(ExecutionResult {
@@ -194,7 +184,7 @@ impl ExecutionEngine {
                     execution_time_ms,
                     error: Some(ExecutionError {
                         error_type: error_type.to_string(),
-                        message: error_msg,
+                        message,
                         traceback: vec!["Error during code execution".to_string()],
                     }),
                 })
@@ -203,14 +193,14 @@ impl ExecutionEngine {
     }
 
     /// Execute code with a specific timeout
-    pub fn execute_with_timeout(
+    pub async fn execute_with_timeout(
         &mut self,
         code: &str,
         timeout: Duration,
     ) -> Result<ExecutionResult> {
         let original_timeout = self.timeout;
         self.timeout = Some(timeout);
-        let result = self.execute(code);
+        let result = self.execute(code).await;
         self.timeout = original_timeout;
         result
     }
@@ -291,6 +281,7 @@ pub struct ExecutionStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::executor::block_on;
 
     #[test]
     fn test_execution_engine_creation() {
@@ -309,7 +300,7 @@ mod tests {
     #[test]
     fn test_simple_execution() {
         let mut engine = ExecutionEngine::new();
-        let result = engine.execute("x = 1 + 2").unwrap();
+        let result = block_on(engine.execute("x = 1 + 2")).unwrap();
 
         assert_eq!(result.status, ExecutionStatus::Success);
         assert_eq!(engine.execution_count(), 1);
@@ -321,47 +312,52 @@ mod tests {
     #[test]
     fn test_parse_error_handling() {
         let mut engine = ExecutionEngine::new();
-        let result = engine.execute("x = 1 +").unwrap();
+        let result = block_on(engine.execute("x = 1 +")).unwrap();
 
         assert_eq!(result.status, ExecutionStatus::Error);
         assert!(result.error.is_some());
 
         let error = result.error.unwrap();
-        assert_eq!(error.error_type, "ParseError");
+        assert_eq!(error.error_type, "SyntaxError");
         assert!(!error.message.is_empty());
     }
 
     #[test]
     fn test_runtime_error_handling() {
         let mut engine = ExecutionEngine::new();
-        let result = engine.execute("x = undefined_var").unwrap();
+        let result = block_on(engine.execute("x = undefined_var")).unwrap();
 
         assert_eq!(result.status, ExecutionStatus::Error);
         assert!(result.error.is_some());
 
         let error = result.error.unwrap();
-        assert!(error.error_type == "RuntimeError" || error.error_type == "CompileError");
+        assert!(
+            error.error_type == "RuntimeError"
+                || error.error_type == "CompileError"
+                || error.error_type == "UndefinedVariable"
+                || error.error_type == "SemanticError"
+        );
     }
 
     #[test]
     fn test_execution_count_increment() {
         let mut engine = ExecutionEngine::new();
 
-        engine.execute("x = 1").unwrap();
+        block_on(engine.execute("x = 1")).unwrap();
         assert_eq!(engine.execution_count(), 1);
 
-        engine.execute("y = 2").unwrap();
+        block_on(engine.execute("y = 2")).unwrap();
         assert_eq!(engine.execution_count(), 2);
 
         // Even failed executions increment the counter
-        engine.execute("invalid syntax").unwrap();
+        block_on(engine.execute("invalid syntax")).unwrap();
         assert_eq!(engine.execution_count(), 3);
     }
 
     #[test]
     fn test_engine_reset() {
         let mut engine = ExecutionEngine::new();
-        engine.execute("x = 1").unwrap();
+        block_on(engine.execute("x = 1")).unwrap();
         assert_eq!(engine.execution_count(), 1);
 
         engine.reset();
@@ -384,7 +380,7 @@ mod tests {
     fn test_stats() {
         let mut engine = ExecutionEngine::new();
         engine.set_debug(true);
-        engine.execute("x = 1").unwrap();
+        block_on(engine.execute("x = 1")).unwrap();
 
         let stats = engine.stats();
         assert_eq!(stats.execution_count, 1);

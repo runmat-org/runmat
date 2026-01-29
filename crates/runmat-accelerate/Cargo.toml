@@ -22,6 +22,7 @@ runmat-builtins = { workspace = true }
 runmat-runtime = { workspace = true }
 runmat-hir = { workspace = true }
 runmat-accelerate-api = { workspace = true }
+runmat-async = { workspace = true }
 runmat-time = { workspace = true }
 once_cell = "1"
 bytemuck = { version = "1.14", features = ["derive"] }
@@ -34,9 +35,11 @@ rustfft = "6.2"
 smallvec = "1.13"
 rand = "0.8"
 tracing = "0.1"
+futures-channel = "0.3"
+futures = "0.3"
 
 # Optional backend deps
-wgpu = { version = "0.19", optional = true }
+wgpu = { version = "0.19", optional = true, features = ["trace"] }
 pollster = { version = "0.3", optional = true }
 
 [dev-dependencies]
@@ -44,3 +47,9 @@ tempfile = "3.12"
 runmat-ignition = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-hir = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { workspace = true, default-features = false, features = ["macros", "rt"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, default-features = false, features = ["macros", "rt-multi-thread"] }

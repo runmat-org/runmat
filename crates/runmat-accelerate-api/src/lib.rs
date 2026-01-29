@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
 #[cfg(feature = "wgpu")]
 use std::sync::Arc;
@@ -874,10 +876,17 @@ pub struct KernelLaunchTelemetry {
     pub tuning: Vec<KernelAttrTelemetry>,
 }
 
+pub type AccelProviderFuture<'a, T> = Pin<Box<dyn Future<Output = anyhow::Result<T>> + 'a>>;
+pub type AccelDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostTensorOwned>;
+
+fn unsupported_future<T>(message: &'static str) -> AccelProviderFuture<'static, T> {
+    Box::pin(async move { Err(anyhow::anyhow!(message)) })
+}
+
 /// Device/provider interface that backends implement and register into the runtime layer
 pub trait AccelProvider: Send + Sync {
     fn upload(&self, host: &crate::HostTensorView) -> anyhow::Result<GpuTensorHandle>;
-    fn download(&self, h: &GpuTensorHandle) -> anyhow::Result<crate::HostTensorOwned>;
+    fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a>;
     fn free(&self, h: &GpuTensorHandle) -> anyhow::Result<()>;
     fn device_info(&self) -> String;
     fn device_id(&self) -> u32 {
@@ -1041,13 +1050,21 @@ pub trait AccelProvider: Send + Sync {
     }
 
     /// Apply a lower-triangular mask to the first two dimensions of a tensor.
-    fn tril(&self, _matrix: &GpuTensorHandle, _offset: isize) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow!("tril not supported by provider"))
+    fn tril<'a>(
+        &'a self,
+        _matrix: &'a GpuTensorHandle,
+        _offset: isize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { Err(anyhow!("tril not supported by provider")) })
     }
 
     /// Apply an upper-triangular mask to the first two dimensions of a tensor.
-    fn triu(&self, _matrix: &GpuTensorHandle, _offset: isize) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow!("triu not supported by provider"))
+    fn triu<'a>(
+        &'a self,
+        _matrix: &'a GpuTensorHandle,
+        _offset: isize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { Err(anyhow!("triu not supported by provider")) })
     }
 
     /// Evaluate a polynomial expressed by `coefficients` at each element in `points`.
@@ -1061,39 +1078,44 @@ pub trait AccelProvider: Send + Sync {
     }
 
     /// Fit a polynomial of degree `degree` to `(x, y)` samples. Optional weights must match `x`.
-    fn polyfit(
-        &self,
-        _x: &GpuTensorHandle,
-        _y: &GpuTensorHandle,
+    fn polyfit<'a>(
+        &'a self,
+        _x: &'a GpuTensorHandle,
+        _y: &'a GpuTensorHandle,
         _degree: usize,
-        _weights: Option<&GpuTensorHandle>,
-    ) -> anyhow::Result<ProviderPolyfitResult> {
-        Err(anyhow::anyhow!("polyfit not supported by provider"))
+        _weights: Option<&'a GpuTensorHandle>,
+    ) -> AccelProviderFuture<'a, ProviderPolyfitResult> {
+        Box::pin(async move { Err(anyhow::anyhow!("polyfit not supported by provider")) })
     }
 
     /// Differentiate a polynomial represented as a vector of coefficients.
-    fn polyder_single(&self, _polynomial: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("polyder_single not supported by provider"))
+    fn polyder_single<'a>(
+        &'a self,
+        _polynomial: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { Err(anyhow::anyhow!("polyder_single not supported by provider")) })
     }
 
     /// Apply the product rule to polynomials `p` and `q`.
-    fn polyder_product(
-        &self,
-        _p: &GpuTensorHandle,
-        _q: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("polyder_product not supported by provider"))
+    fn polyder_product<'a>(
+        &'a self,
+        _p: &'a GpuTensorHandle,
+        _q: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { Err(anyhow::anyhow!("polyder_product not supported by provider")) })
     }
 
     /// Apply the quotient rule to polynomials `u` and `v`.
-    fn polyder_quotient(
-        &self,
-        _u: &GpuTensorHandle,
-        _v: &GpuTensorHandle,
-    ) -> anyhow::Result<ProviderPolyderQuotient> {
-        Err(anyhow::anyhow!(
-            "polyder_quotient not supported by provider"
-        ))
+    fn polyder_quotient<'a>(
+        &'a self,
+        _u: &'a GpuTensorHandle,
+        _v: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, ProviderPolyderQuotient> {
+        Box::pin(async move {
+            Err(anyhow::anyhow!(
+                "polyder_quotient not supported by provider"
+            ))
+        })
     }
 
     /// Integrate a polynomial represented as a vector of coefficients and append a constant term.
@@ -1148,13 +1170,13 @@ pub trait AccelProvider: Send + Sync {
     }
 
     /// Apply an N-D correlation/convolution with padding semantics matching MATLAB's `imfilter`.
-    fn imfilter(
-        &self,
-        _image: &GpuTensorHandle,
-        _kernel: &GpuTensorHandle,
-        _options: &ImfilterOptions,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("imfilter not supported by provider"))
+    fn imfilter<'a>(
+        &'a self,
+        _image: &'a GpuTensorHandle,
+        _kernel: &'a GpuTensorHandle,
+        _options: &'a ImfilterOptions,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("imfilter not supported by provider")
     }
 
     /// Allocate a tensor filled with random integers over an inclusive range.
@@ -1195,127 +1217,127 @@ pub trait AccelProvider: Send + Sync {
     }
 
     /// Compute a covariance matrix across the columns of `matrix`.
-    fn covariance(
-        &self,
-        _matrix: &GpuTensorHandle,
-        _second: Option<&GpuTensorHandle>,
-        _weights: Option<&GpuTensorHandle>,
-        _options: &CovarianceOptions,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("covariance not supported by provider"))
+    fn covariance<'a>(
+        &'a self,
+        _matrix: &'a GpuTensorHandle,
+        _second: Option<&'a GpuTensorHandle>,
+        _weights: Option<&'a GpuTensorHandle>,
+        _options: &'a CovarianceOptions,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("covariance not supported by provider")
     }
 
     /// Compute a correlation coefficient matrix across the columns of `matrix`.
-    fn corrcoef(
-        &self,
-        _matrix: &GpuTensorHandle,
-        _options: &CorrcoefOptions,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("corrcoef not supported by provider"))
+    fn corrcoef<'a>(
+        &'a self,
+        _matrix: &'a GpuTensorHandle,
+        _options: &'a CorrcoefOptions,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("corrcoef not supported by provider")
     }
 
     // Optional operator hooks (default to unsupported)
     fn linspace(&self, _start: f64, _stop: f64, _count: usize) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("linspace not supported by provider"))
     }
-    fn elem_add(
-        &self,
-        _a: &GpuTensorHandle,
-        _b: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("elem_add not supported by provider"))
+    fn elem_add<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_add not supported by provider")
     }
-    fn elem_mul(
-        &self,
-        _a: &GpuTensorHandle,
-        _b: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("elem_mul not supported by provider"))
+    fn elem_mul<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_mul not supported by provider")
     }
-    fn elem_max(
-        &self,
-        _a: &GpuTensorHandle,
-        _b: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("elem_max not supported by provider"))
+    fn elem_max<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_max not supported by provider")
     }
-    fn elem_min(
-        &self,
-        _a: &GpuTensorHandle,
-        _b: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("elem_min not supported by provider"))
+    fn elem_min<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_min not supported by provider")
     }
-    fn elem_sub(
-        &self,
-        _a: &GpuTensorHandle,
-        _b: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("elem_sub not supported by provider"))
+    fn elem_sub<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_sub not supported by provider")
     }
-    fn elem_div(
-        &self,
-        _a: &GpuTensorHandle,
-        _b: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("elem_div not supported by provider"))
+    fn elem_div<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_div not supported by provider")
     }
-    fn elem_pow(
-        &self,
-        _a: &GpuTensorHandle,
-        _b: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("elem_pow not supported by provider"))
+    fn elem_pow<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_pow not supported by provider")
     }
 
-    fn elem_hypot(
-        &self,
-        _a: &GpuTensorHandle,
-        _b: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("elem_hypot not supported by provider"))
+    fn elem_hypot<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_hypot not supported by provider")
     }
-    fn elem_ge(
-        &self,
-        _a: &GpuTensorHandle,
-        _b: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("elem_ge not supported by provider"))
+    fn elem_ge<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_ge not supported by provider")
     }
-    fn elem_le(
-        &self,
-        _a: &GpuTensorHandle,
-        _b: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("elem_le not supported by provider"))
+    fn elem_le<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_le not supported by provider")
     }
-    fn elem_lt(
-        &self,
-        _a: &GpuTensorHandle,
-        _b: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("elem_lt not supported by provider"))
+    fn elem_lt<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_lt not supported by provider")
     }
-    fn elem_gt(
-        &self,
-        _a: &GpuTensorHandle,
-        _b: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("elem_gt not supported by provider"))
+    fn elem_gt<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_gt not supported by provider")
     }
-    fn elem_eq(
-        &self,
-        _a: &GpuTensorHandle,
-        _b: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("elem_eq not supported by provider"))
+    fn elem_eq<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_eq not supported by provider")
     }
-    fn elem_ne(
-        &self,
-        _a: &GpuTensorHandle,
-        _b: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("elem_ne not supported by provider"))
+    fn elem_ne<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_ne not supported by provider")
     }
     fn logical_and(
         &self,
@@ -1358,115 +1380,217 @@ pub trait AccelProvider: Send + Sync {
     fn logical_isinf(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("logical_isinf not supported by provider"))
     }
-    fn elem_atan2(
-        &self,
-        _y: &GpuTensorHandle,
-        _x: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("elem_atan2 not supported by provider"))
+    fn elem_atan2<'a>(
+        &'a self,
+        _y: &'a GpuTensorHandle,
+        _x: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_atan2 not supported by provider")
     }
     // Unary elementwise operations (optional)
-    fn unary_sin(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_sin not supported by provider"))
+    fn unary_sin<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_sin not supported by provider")
     }
-    fn unary_gamma(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_gamma not supported by provider"))
+    fn unary_gamma<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_gamma not supported by provider")
     }
-    fn unary_factorial(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_factorial not supported by provider"))
+    fn unary_factorial<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_factorial not supported by provider")
     }
-    fn unary_asinh(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_asinh not supported by provider"))
+    fn unary_asinh<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_asinh not supported by provider")
     }
-    fn unary_sinh(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_sinh not supported by provider"))
+    fn unary_sinh<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_sinh not supported by provider")
     }
-    fn unary_cosh(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_cosh not supported by provider"))
+    fn unary_cosh<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_cosh not supported by provider")
     }
-    fn unary_asin(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_asin not supported by provider"))
+    fn unary_asin<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_asin not supported by provider")
     }
-    fn unary_acos(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_acos not supported by provider"))
+    fn unary_acos<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_acos not supported by provider")
     }
-    fn unary_acosh(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_acosh not supported by provider"))
+    fn unary_acosh<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_acosh not supported by provider")
     }
-    fn unary_tan(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_tan not supported by provider"))
+    fn unary_tan<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_tan not supported by provider")
     }
-    fn unary_tanh(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_tanh not supported by provider"))
+    fn unary_tanh<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_tanh not supported by provider")
     }
-    fn unary_atan(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_atan not supported by provider"))
+    fn unary_atan<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_atan not supported by provider")
     }
-    fn unary_atanh(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_atanh not supported by provider"))
+    fn unary_atanh<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_atanh not supported by provider")
     }
-    fn unary_ceil(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_ceil not supported by provider"))
+    fn unary_ceil<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_ceil not supported by provider")
     }
-    fn unary_floor(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_floor not supported by provider"))
+    fn unary_floor<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_floor not supported by provider")
     }
-    fn unary_round(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_round not supported by provider"))
+    fn unary_round<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_round not supported by provider")
     }
-    fn unary_fix(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_fix not supported by provider"))
+    fn unary_fix<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_fix not supported by provider")
     }
-    fn unary_cos(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_cos not supported by provider"))
+    fn unary_cos<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_cos not supported by provider")
     }
-    fn unary_angle(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_angle not supported by provider"))
+    fn unary_angle<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_angle not supported by provider")
     }
-    fn unary_imag(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_imag not supported by provider"))
+    fn unary_imag<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_imag not supported by provider")
     }
-    fn unary_real(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_real not supported by provider"))
+    fn unary_real<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_real not supported by provider")
     }
-    fn unary_conj(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_conj not supported by provider"))
+    fn unary_conj<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_conj not supported by provider")
     }
-    fn unary_abs(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_abs not supported by provider"))
+    fn unary_abs<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_abs not supported by provider")
     }
-    fn unary_sign(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_sign not supported by provider"))
+    fn unary_sign<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_sign not supported by provider")
     }
-    fn unary_exp(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_exp not supported by provider"))
+    fn unary_exp<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_exp not supported by provider")
     }
-    fn unary_expm1(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_expm1 not supported by provider"))
+    fn unary_expm1<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_expm1 not supported by provider")
     }
-    fn unary_log(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_log not supported by provider"))
+    fn unary_log<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_log not supported by provider")
     }
-    fn unary_log2(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_log2 not supported by provider"))
+    fn unary_log2<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_log2 not supported by provider")
     }
-    fn unary_log10(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_log10 not supported by provider"))
+    fn unary_log10<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_log10 not supported by provider")
     }
-    fn unary_log1p(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_log1p not supported by provider"))
+    fn unary_log1p<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_log1p not supported by provider")
     }
-    fn unary_sqrt(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_sqrt not supported by provider"))
+    fn unary_sqrt<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_sqrt not supported by provider")
     }
-    fn unary_double(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_double not supported by provider"))
+    fn unary_double<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_double not supported by provider")
     }
-    fn unary_single(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_single not supported by provider"))
+    fn unary_single<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_single not supported by provider")
     }
-    fn unary_pow2(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("unary_pow2 not supported by provider"))
+    fn unary_pow2<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_pow2 not supported by provider")
     }
     fn pow2_scale(
         &self,
@@ -1501,29 +1625,29 @@ pub trait AccelProvider: Send + Sync {
     fn scalar_div(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("scalar_div not supported by provider"))
     }
-    fn sort_dim(
-        &self,
-        _a: &GpuTensorHandle,
+    fn sort_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
         _dim: usize,
         _order: SortOrder,
         _comparison: SortComparison,
-    ) -> anyhow::Result<SortResult> {
-        Err(anyhow::anyhow!("sort_dim not supported by provider"))
+    ) -> AccelProviderFuture<'a, SortResult> {
+        unsupported_future("sort_dim not supported by provider")
     }
-    fn sort_rows(
-        &self,
-        _a: &GpuTensorHandle,
-        _columns: &[SortRowsColumnSpec],
+    fn sort_rows<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _columns: &'a [SortRowsColumnSpec],
         _comparison: SortComparison,
-    ) -> anyhow::Result<SortResult> {
-        Err(anyhow::anyhow!("sort_rows not supported by provider"))
+    ) -> AccelProviderFuture<'a, SortResult> {
+        unsupported_future("sort_rows not supported by provider")
     }
-    fn matmul(
-        &self,
-        _a: &GpuTensorHandle,
-        _b: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("matmul not supported by provider"))
+    fn matmul<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("matmul not supported by provider")
     }
 
     fn syrk(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
@@ -1537,112 +1661,121 @@ pub trait AccelProvider: Send + Sync {
     ///
     /// The default implementation falls back to `matmul` when the epilogue is effectively a no-op
     /// (alpha=1, beta=0, no row/col scales), and otherwise returns `Err`.
-    fn matmul_epilogue(
-        &self,
-        a: &GpuTensorHandle,
-        b: &GpuTensorHandle,
-        epilogue: &MatmulEpilogue,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        if epilogue.is_noop() {
-            return self.matmul(a, b);
-        }
-        Err(anyhow::anyhow!("matmul_epilogue not supported by provider"))
+    fn matmul_epilogue<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+        epilogue: &'a MatmulEpilogue,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            if epilogue.is_noop() {
+                return self.matmul(a, b).await;
+            }
+            Err(anyhow::anyhow!("matmul_epilogue not supported by provider"))
+        })
     }
-    fn image_normalize(
-        &self,
-        _input: &GpuTensorHandle,
-        _desc: &ImageNormalizeDescriptor,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!(
-            "image_normalize fusion not supported by provider"
-        ))
+    fn image_normalize<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
+        _desc: &'a ImageNormalizeDescriptor,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("image_normalize fusion not supported by provider")
     }
-    fn matmul_power_step(
-        &self,
-        _lhs: &GpuTensorHandle,
-        _rhs: &GpuTensorHandle,
-        _epilogue: &PowerStepEpilogue,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!(
-            "matmul_power_step normalization not supported by provider"
-        ))
+    fn matmul_power_step<'a>(
+        &'a self,
+        _lhs: &'a GpuTensorHandle,
+        _rhs: &'a GpuTensorHandle,
+        _epilogue: &'a PowerStepEpilogue,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("matmul_power_step normalization not supported by provider")
     }
-    fn linsolve(
-        &self,
-        _lhs: &GpuTensorHandle,
-        _rhs: &GpuTensorHandle,
-        _options: &ProviderLinsolveOptions,
-    ) -> anyhow::Result<ProviderLinsolveResult> {
-        Err(anyhow::anyhow!("linsolve not supported by provider"))
+    fn linsolve<'a>(
+        &'a self,
+        _lhs: &'a GpuTensorHandle,
+        _rhs: &'a GpuTensorHandle,
+        _options: &'a ProviderLinsolveOptions,
+    ) -> AccelProviderFuture<'a, ProviderLinsolveResult> {
+        unsupported_future("linsolve not supported by provider")
     }
-    fn inv(
-        &self,
-        _matrix: &GpuTensorHandle,
+    fn inv<'a>(
+        &'a self,
+        _matrix: &'a GpuTensorHandle,
         _options: ProviderInvOptions,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("inv not supported by provider"))
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("inv not supported by provider")
     }
-    fn pinv(
-        &self,
-        _matrix: &GpuTensorHandle,
+    fn pinv<'a>(
+        &'a self,
+        _matrix: &'a GpuTensorHandle,
         _options: ProviderPinvOptions,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("pinv not supported by provider"))
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("pinv not supported by provider")
     }
-    fn cond(
-        &self,
-        _matrix: &GpuTensorHandle,
+    fn cond<'a>(
+        &'a self,
+        _matrix: &'a GpuTensorHandle,
         _norm: ProviderCondNorm,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("cond not supported by provider"))
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { Err(anyhow::anyhow!("cond not supported by provider")) })
     }
-    fn norm(
-        &self,
-        _tensor: &GpuTensorHandle,
+    fn norm<'a>(
+        &'a self,
+        _tensor: &'a GpuTensorHandle,
         _order: ProviderNormOrder,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("norm not supported by provider"))
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { Err(anyhow::anyhow!("norm not supported by provider")) })
     }
-    fn rank(
-        &self,
-        _matrix: &GpuTensorHandle,
+    fn rank<'a>(
+        &'a self,
+        _matrix: &'a GpuTensorHandle,
         _tolerance: Option<f64>,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("rank not supported by provider"))
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { Err(anyhow::anyhow!("rank not supported by provider")) })
     }
-    fn rcond(&self, _matrix: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("rcond not supported by provider"))
+    fn rcond<'a>(
+        &'a self,
+        _matrix: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { Err(anyhow::anyhow!("rcond not supported by provider")) })
     }
-    fn mldivide(
-        &self,
-        _lhs: &GpuTensorHandle,
-        _rhs: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("mldivide not supported by provider"))
+    fn mldivide<'a>(
+        &'a self,
+        _lhs: &'a GpuTensorHandle,
+        _rhs: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { Err(anyhow::anyhow!("mldivide not supported by provider")) })
     }
-    fn mrdivide(
-        &self,
-        _lhs: &GpuTensorHandle,
-        _rhs: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("mrdivide not supported by provider"))
+    fn mrdivide<'a>(
+        &'a self,
+        _lhs: &'a GpuTensorHandle,
+        _rhs: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { Err(anyhow::anyhow!("mrdivide not supported by provider")) })
     }
-    fn eig(&self, _a: &GpuTensorHandle, _compute_left: bool) -> anyhow::Result<ProviderEigResult> {
-        Err(anyhow::anyhow!("eig not supported by provider"))
+    fn eig<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _compute_left: bool,
+    ) -> AccelProviderFuture<'a, ProviderEigResult> {
+        Box::pin(async move { Err(anyhow::anyhow!("eig not supported by provider")) })
     }
-    fn lu(&self, _a: &GpuTensorHandle) -> anyhow::Result<ProviderLuResult> {
-        Err(anyhow::anyhow!("lu not supported by provider"))
+    fn lu<'a>(&'a self, _a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, ProviderLuResult> {
+        Box::pin(async move { Err(anyhow::anyhow!("lu not supported by provider")) })
     }
 
-    fn chol(&self, _a: &GpuTensorHandle, _lower: bool) -> anyhow::Result<ProviderCholResult> {
-        Err(anyhow::anyhow!("chol not supported by provider"))
+    fn chol<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _lower: bool,
+    ) -> AccelProviderFuture<'a, ProviderCholResult> {
+        Box::pin(async move { Err(anyhow::anyhow!("chol not supported by provider")) })
     }
-    fn qr(
-        &self,
-        _a: &GpuTensorHandle,
+    fn qr<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
         _options: ProviderQrOptions,
-    ) -> anyhow::Result<ProviderQrResult> {
-        Err(anyhow::anyhow!("qr not supported by provider"))
+    ) -> AccelProviderFuture<'a, ProviderQrResult> {
+        Box::pin(async move { Err(anyhow::anyhow!("qr not supported by provider")) })
     }
     fn take_matmul_sources(
         &self,
@@ -1650,15 +1783,15 @@ pub trait AccelProvider: Send + Sync {
     ) -> Option<(GpuTensorHandle, GpuTensorHandle)> {
         None
     }
-    fn qr_power_iter(
-        &self,
-        product: &GpuTensorHandle,
-        _product_lhs: Option<&GpuTensorHandle>,
-        q_handle: &GpuTensorHandle,
-        options: &ProviderQrOptions,
-    ) -> anyhow::Result<Option<ProviderQrPowerIterResult>> {
+    fn qr_power_iter<'a>(
+        &'a self,
+        product: &'a GpuTensorHandle,
+        _product_lhs: Option<&'a GpuTensorHandle>,
+        q_handle: &'a GpuTensorHandle,
+        options: &'a ProviderQrOptions,
+    ) -> AccelProviderFuture<'a, Option<ProviderQrPowerIterResult>> {
         let _ = (product, q_handle, options);
-        Ok(None)
+        Box::pin(async move { Ok(None) })
     }
     fn transpose(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("transpose not supported by provider"))
@@ -1679,14 +1812,14 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("conv2d not supported by provider"))
     }
-    fn iir_filter(
-        &self,
-        _b: &GpuTensorHandle,
-        _a: &GpuTensorHandle,
-        _x: &GpuTensorHandle,
+    fn iir_filter<'a>(
+        &'a self,
+        _b: &'a GpuTensorHandle,
+        _a: &'a GpuTensorHandle,
+        _x: &'a GpuTensorHandle,
         _options: ProviderIirFilterOptions,
-    ) -> anyhow::Result<ProviderIirFilterResult> {
-        Err(anyhow::anyhow!("iir_filter not supported by provider"))
+    ) -> AccelProviderFuture<'a, ProviderIirFilterResult> {
+        Box::pin(async move { Err(anyhow::anyhow!("iir_filter not supported by provider")) })
     }
     /// Reorder tensor dimensions according to `order`, expressed as zero-based indices.
     fn permute(
@@ -1715,52 +1848,52 @@ pub trait AccelProvider: Send + Sync {
         Err(anyhow::anyhow!("diff_dim not supported by provider"))
     }
     /// Perform an in-place FFT along a zero-based dimension, optionally padding/truncating to `len`.
-    fn fft_dim(
-        &self,
-        _handle: &GpuTensorHandle,
+    fn fft_dim<'a>(
+        &'a self,
+        _handle: &'a GpuTensorHandle,
         _len: Option<usize>,
         _dim: usize,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("fft_dim not supported by provider"))
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("fft_dim not supported by provider")
     }
-    fn ifft_dim(
-        &self,
-        _handle: &GpuTensorHandle,
+    fn ifft_dim<'a>(
+        &'a self,
+        _handle: &'a GpuTensorHandle,
         _len: Option<usize>,
         _dim: usize,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("ifft_dim not supported by provider"))
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("ifft_dim not supported by provider")
     }
-    fn unique(
-        &self,
-        _handle: &GpuTensorHandle,
-        _options: &UniqueOptions,
-    ) -> anyhow::Result<UniqueResult> {
-        Err(anyhow::anyhow!("unique not supported by provider"))
+    fn unique<'a>(
+        &'a self,
+        _handle: &'a GpuTensorHandle,
+        _options: &'a UniqueOptions,
+    ) -> AccelProviderFuture<'a, UniqueResult> {
+        Box::pin(async move { Err(anyhow::anyhow!("unique not supported by provider")) })
     }
-    fn union(
-        &self,
-        _a: &GpuTensorHandle,
-        _b: &GpuTensorHandle,
-        _options: &UnionOptions,
-    ) -> anyhow::Result<UnionResult> {
-        Err(anyhow::anyhow!("union not supported by provider"))
+    fn union<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+        _options: &'a UnionOptions,
+    ) -> AccelProviderFuture<'a, UnionResult> {
+        Box::pin(async move { Err(anyhow::anyhow!("union not supported by provider")) })
     }
-    fn setdiff(
-        &self,
-        _a: &GpuTensorHandle,
-        _b: &GpuTensorHandle,
-        _options: &SetdiffOptions,
-    ) -> anyhow::Result<SetdiffResult> {
-        Err(anyhow::anyhow!("setdiff not supported by provider"))
+    fn setdiff<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+        _options: &'a SetdiffOptions,
+    ) -> AccelProviderFuture<'a, SetdiffResult> {
+        Box::pin(async move { Err(anyhow::anyhow!("setdiff not supported by provider")) })
     }
-    fn ismember(
-        &self,
-        _a: &GpuTensorHandle,
-        _b: &GpuTensorHandle,
-        _options: &IsMemberOptions,
-    ) -> anyhow::Result<IsMemberResult> {
-        Err(anyhow::anyhow!("ismember not supported by provider"))
+    fn ismember<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+        _options: &'a IsMemberOptions,
+    ) -> AccelProviderFuture<'a, IsMemberResult> {
+        Box::pin(async move { Err(anyhow::anyhow!("ismember not supported by provider")) })
     }
     fn reshape(
         &self,
@@ -1786,127 +1919,168 @@ pub trait AccelProvider: Send + Sync {
     fn kron(&self, _a: &GpuTensorHandle, _b: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("kron not supported by provider"))
     }
-    fn reduce_sum(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("reduce_sum not supported by provider"))
+    fn reduce_sum<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_sum not supported by provider")
     }
-    fn reduce_sum_dim(&self, _a: &GpuTensorHandle, _dim: usize) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("reduce_sum_dim not supported by provider"))
-    }
-    fn dot(
-        &self,
-        _lhs: &GpuTensorHandle,
-        _rhs: &GpuTensorHandle,
-        _dim: Option<usize>,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("dot not supported by provider"))
-    }
-    fn reduce_nnz(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("reduce_nnz not supported by provider"))
-    }
-    fn reduce_nnz_dim(&self, _a: &GpuTensorHandle, _dim: usize) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("reduce_nnz_dim not supported by provider"))
-    }
-    fn reduce_prod(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("reduce_prod not supported by provider"))
-    }
-    fn reduce_prod_dim(
-        &self,
-        _a: &GpuTensorHandle,
+    fn reduce_sum_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
         _dim: usize,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("reduce_prod_dim not supported by provider"))
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_sum_dim not supported by provider")
     }
-    fn reduce_mean(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("reduce_mean not supported by provider"))
+    fn dot<'a>(
+        &'a self,
+        _lhs: &'a GpuTensorHandle,
+        _rhs: &'a GpuTensorHandle,
+        _dim: Option<usize>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("dot not supported by provider")
+    }
+    fn reduce_nnz<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_nnz not supported by provider")
+    }
+    fn reduce_nnz_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_nnz_dim not supported by provider")
+    }
+    fn reduce_prod<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_prod not supported by provider")
+    }
+    fn reduce_prod_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_prod_dim not supported by provider")
+    }
+    fn reduce_mean<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_mean not supported by provider")
     }
     /// Reduce mean across multiple zero-based dimensions in one device pass.
-    fn reduce_mean_nd(
-        &self,
-        _a: &GpuTensorHandle,
-        _dims_zero_based: &[usize],
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("reduce_mean_nd not supported by provider"))
+    fn reduce_mean_nd<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _dims_zero_based: &'a [usize],
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_mean_nd not supported by provider")
     }
     /// Reduce moments across multiple zero-based dimensions in one device pass.
     /// Returns mean (E[x]) and mean of squares (E[x^2]).
-    fn reduce_moments_nd(
-        &self,
-        _a: &GpuTensorHandle,
-        _dims_zero_based: &[usize],
-    ) -> anyhow::Result<ProviderMoments2> {
-        Err(anyhow::anyhow!(
-            "reduce_moments_nd not supported by provider"
-        ))
+    fn reduce_moments_nd<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _dims_zero_based: &'a [usize],
+    ) -> AccelProviderFuture<'a, ProviderMoments2> {
+        unsupported_future("reduce_moments_nd not supported by provider")
     }
-    fn reduce_mean_dim(
-        &self,
-        _a: &GpuTensorHandle,
+    fn reduce_mean_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
         _dim: usize,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("reduce_mean_dim not supported by provider"))
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_mean_dim not supported by provider")
     }
-    fn reduce_std(
-        &self,
-        _a: &GpuTensorHandle,
+    fn reduce_std<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
         _normalization: ProviderStdNormalization,
         _nan_mode: ProviderNanMode,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("reduce_std not supported by provider"))
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_std not supported by provider")
     }
-    fn reduce_std_dim(
-        &self,
-        _a: &GpuTensorHandle,
+    fn reduce_std_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
         _dim: usize,
         _normalization: ProviderStdNormalization,
         _nan_mode: ProviderNanMode,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("reduce_std_dim not supported by provider"))
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_std_dim not supported by provider")
     }
-    fn reduce_any(&self, _a: &GpuTensorHandle, _omit_nan: bool) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("reduce_any not supported by provider"))
+    fn reduce_any<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _omit_nan: bool,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_any not supported by provider")
     }
-    fn reduce_any_dim(
-        &self,
-        _a: &GpuTensorHandle,
+    fn reduce_any_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
         _dim: usize,
         _omit_nan: bool,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("reduce_any_dim not supported by provider"))
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_any_dim not supported by provider")
     }
-    fn reduce_all(&self, _a: &GpuTensorHandle, _omit_nan: bool) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("reduce_all not supported by provider"))
+    fn reduce_all<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _omit_nan: bool,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_all not supported by provider")
     }
-    fn reduce_all_dim(
-        &self,
-        _a: &GpuTensorHandle,
+    fn reduce_all_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
         _dim: usize,
         _omit_nan: bool,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("reduce_all_dim not supported by provider"))
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_all_dim not supported by provider")
     }
-    fn reduce_median(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("reduce_median not supported by provider"))
+    fn reduce_median<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_median not supported by provider")
     }
-    fn reduce_median_dim(
-        &self,
-        _a: &GpuTensorHandle,
+    fn reduce_median_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
         _dim: usize,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!(
-            "reduce_median_dim not supported by provider"
-        ))
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_median_dim not supported by provider")
     }
-    fn reduce_min(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("reduce_min not supported by provider"))
+    fn reduce_min<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_min not supported by provider")
     }
-    fn reduce_min_dim(&self, _a: &GpuTensorHandle, _dim: usize) -> anyhow::Result<ReduceDimResult> {
-        Err(anyhow::anyhow!("reduce_min_dim not supported by provider"))
+    fn reduce_min_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _dim: usize,
+    ) -> AccelProviderFuture<'a, ReduceDimResult> {
+        unsupported_future("reduce_min_dim not supported by provider")
     }
-    fn reduce_max(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("reduce_max not supported by provider"))
+    fn reduce_max<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_max not supported by provider")
     }
-    fn reduce_max_dim(&self, _a: &GpuTensorHandle, _dim: usize) -> anyhow::Result<ReduceDimResult> {
-        Err(anyhow::anyhow!("reduce_max_dim not supported by provider"))
+    fn reduce_max_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _dim: usize,
+    ) -> AccelProviderFuture<'a, ReduceDimResult> {
+        unsupported_future("reduce_max_dim not supported by provider")
     }
     fn cumsum_scan(
         &self,
@@ -2110,15 +2284,17 @@ pub trait AccelProvider: Send + Sync {
     }
 
     /// Determine if a matrix is Hermitian (or skew-Hermitian) without gathering it to the host.
-    fn ishermitian(
-        &self,
-        _matrix: &GpuTensorHandle,
+    fn ishermitian<'a>(
+        &'a self,
+        _matrix: &'a GpuTensorHandle,
         _kind: ProviderHermitianKind,
         _tolerance: f64,
-    ) -> anyhow::Result<bool> {
-        Err(anyhow::anyhow!(
-            "ishermitian predicate not supported by provider"
-        ))
+    ) -> AccelProviderFuture<'a, bool> {
+        Box::pin(async move {
+            Err(anyhow::anyhow!(
+                "ishermitian predicate not supported by provider"
+            ))
+        })
     }
 
     /// Inspect the bandwidth of a matrix without gathering it back to the host.
@@ -2130,8 +2306,8 @@ pub trait AccelProvider: Send + Sync {
     ///
     /// Implementations may execute on the device or gather to the host. The permutation should be
     /// returned as zero-based indices.
-    fn sym_rcm(&self, _matrix: &GpuTensorHandle) -> anyhow::Result<Vec<usize>> {
-        Err(anyhow::anyhow!("sym_rcm not supported by provider"))
+    fn sym_rcm<'a>(&'a self, _matrix: &'a GpuTensorHandle) -> AccelProviderFuture<'a, Vec<usize>> {
+        Box::pin(async move { Err(anyhow::anyhow!("sym_rcm not supported by provider")) })
     }
 }
 
@@ -2266,9 +2442,9 @@ pub fn set_thread_provider(provider: Option<&'static dyn AccelProvider>) {
 }
 
 /// Convenience: perform elementwise add via provider if possible; otherwise return None
-pub fn try_elem_add(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
+pub async fn try_elem_add(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
     if let Some(p) = provider() {
-        if let Ok(h) = p.elem_add(a, b) {
+        if let Ok(h) = p.elem_add(a, b).await {
             return Some(h);
         }
     }
@@ -2276,9 +2452,9 @@ pub fn try_elem_add(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTenso
 }
 
 /// Convenience: perform elementwise hypot via provider if possible; otherwise return None
-pub fn try_elem_hypot(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
+pub async fn try_elem_hypot(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
     if let Some(p) = provider() {
-        if let Ok(h) = p.elem_hypot(a, b) {
+        if let Ok(h) = p.elem_hypot(a, b).await {
             return Some(h);
         }
     }
@@ -2286,9 +2462,9 @@ pub fn try_elem_hypot(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTen
 }
 
 /// Convenience: perform elementwise max via provider if possible; otherwise return None
-pub fn try_elem_max(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
+pub async fn try_elem_max(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
     if let Some(p) = provider() {
-        if let Ok(h) = p.elem_max(a, b) {
+        if let Ok(h) = p.elem_max(a, b).await {
             return Some(h);
         }
     }
@@ -2296,9 +2472,9 @@ pub fn try_elem_max(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTenso
 }
 
 /// Convenience: perform elementwise min via provider if possible; otherwise return None
-pub fn try_elem_min(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
+pub async fn try_elem_min(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
     if let Some(p) = provider() {
-        if let Ok(h) = p.elem_min(a, b) {
+        if let Ok(h) = p.elem_min(a, b).await {
             return Some(h);
         }
     }
@@ -2306,9 +2482,9 @@ pub fn try_elem_min(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTenso
 }
 
 /// Convenience: perform elementwise atan2 via provider if possible; otherwise return None
-pub fn try_elem_atan2(y: &GpuTensorHandle, x: &GpuTensorHandle) -> Option<GpuTensorHandle> {
+pub async fn try_elem_atan2(y: &GpuTensorHandle, x: &GpuTensorHandle) -> Option<GpuTensorHandle> {
     if let Some(p) = provider() {
-        if let Ok(h) = p.elem_atan2(y, x) {
+        if let Ok(h) = p.elem_atan2(y, x).await {
             return Some(h);
         }
     }

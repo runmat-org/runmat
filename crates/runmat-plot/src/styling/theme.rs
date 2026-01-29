@@ -103,7 +103,7 @@ impl ModernDarkTheme {
     }
 
     /// Apply this theme to egui context
-    #[cfg(feature = "gui")]
+    #[cfg(any(feature = "gui", feature = "egui-overlay"))]
     pub fn apply_to_egui(&self, ctx: &egui::Context) {
         let mut visuals = egui::Visuals::dark();
 

@@ -1,3 +1,5 @@
+use crate::build_runtime_error;
+use futures::executor::block_on;
 use runmat_builtins::{LogicalArray, Tensor, Value};
 
 /// Ensure an in-process acceleration provider is registered for tests,
@@ -14,7 +16,7 @@ where
 }
 
 /// Gather a value (recursively) so assertions can operate on host tensors.
-pub fn gather(value: Value) -> Result<Tensor, String> {
+pub fn gather(value: Value) -> Result<Tensor, crate::RuntimeError> {
     // Ensure the correct provider is active for GPU handles created by the WGPU backend.
     #[cfg(feature = "wgpu")]
     {
@@ -26,16 +28,33 @@ pub fn gather(value: Value) -> Result<Tensor, String> {
             }
         }
     }
-    match crate::dispatcher::gather_if_needed(&value)? {
+    #[cfg(not(target_arch = "wasm32"))]
+    let provider = match &value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::provider_for_handle(handle),
+        _ => runmat_accelerate_api::provider(),
+    };
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let gathered = {
+        let _guard = runmat_accelerate_api::ThreadProviderGuard::set(provider);
+        block_on(crate::dispatcher::gather_if_needed_async(&value))?
+    };
+
+    #[cfg(target_arch = "wasm32")]
+    let gathered = block_on(crate::dispatcher::gather_if_needed_async(&value))?;
+
+    match gathered {
         Value::Tensor(t) => Ok(t),
-        Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("gather: {e}")),
+        Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
+            .map_err(|e| build_runtime_error(format!("gather: {e}")).build()),
         Value::LogicalArray(LogicalArray { data, shape }) => {
             let dense: Vec<f64> = data
                 .iter()
                 .map(|&b| if b != 0 { 1.0 } else { 0.0 })
                 .collect();
-            Tensor::new(dense, shape.clone()).map_err(|e| format!("gather: {e}"))
+            Tensor::new(dense, shape.clone())
+                .map_err(|e| build_runtime_error(format!("gather: {e}")).build())
         }
-        other => Err(format!("gather: unsupported value {other:?}")),
+        other => Err(build_runtime_error(format!("gather: unsupported value {other:?}")).build()),
     }
 }

@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::minus")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -57,6 +58,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion emits a straightforward difference; providers can override with specialised kernels when desirable.",
 };
 
+const BUILTIN_NAME: &str = "minus";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 #[runtime_builtin(
     name = "minus",
     category = "math/elementwise",
@@ -65,15 +74,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::math::elementwise::minus"
 )]
-fn minus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn minus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
     let base = match (lhs, rhs) {
-        (Value::GpuTensor(la), Value::GpuTensor(lb)) => minus_gpu_pair(la, lb),
-        (Value::GpuTensor(la), rhs) => minus_gpu_host_left(la, rhs),
-        (lhs, Value::GpuTensor(rb)) => minus_gpu_host_right(lhs, rb),
+        (Value::GpuTensor(la), Value::GpuTensor(lb)) => minus_gpu_pair(la, lb).await,
+        (Value::GpuTensor(la), rhs) => minus_gpu_host_left(la, rhs).await,
+        (lhs, Value::GpuTensor(rb)) => minus_gpu_host_right(lhs, rb).await,
         (lhs, rhs) => minus_host(lhs, rhs),
     }?;
-    apply_output_template(base, &template)
+    apply_output_template(base, &template).await
 }
 
 #[derive(Clone)]
@@ -82,29 +91,33 @@ enum OutputTemplate {
     Like(Value),
 }
 
-fn parse_output_template(args: &[Value]) -> Result<OutputTemplate, String> {
+fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     if args.is_empty() {
         return Ok(OutputTemplate::Default);
     }
     if args.len() == 1 {
         if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-            return Err("minus: expected prototype after 'like'".to_string());
+            return Err(builtin_error("minus: expected prototype after 'like'"));
         }
-        return Err("minus: unsupported option; only 'like' is accepted".to_string());
+        return Err(builtin_error(
+            "minus: unsupported option; only 'like' is accepted",
+        ));
     }
     if args.len() == 2 {
         if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
             return Ok(OutputTemplate::Like(args[1].clone()));
         }
-        return Err("minus: unsupported option; only 'like' is accepted".to_string());
+        return Err(builtin_error(
+            "minus: unsupported option; only 'like' is accepted",
+        ));
     }
-    Err("minus: too many input arguments".to_string())
+    Err(builtin_error("minus: too many input arguments"))
 }
 
-fn apply_output_template(value: Value, template: &OutputTemplate) -> Result<Value, String> {
+async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
     match template {
         OutputTemplate::Default => Ok(value),
-        OutputTemplate::Like(proto) => apply_like_template(value, proto),
+        OutputTemplate::Like(proto) => apply_like_template(value, proto).await,
     }
 }
 
@@ -125,41 +138,40 @@ struct LikeAnalysis {
     class: PrototypeClass,
 }
 
-fn apply_like_template(value: Value, prototype: &Value) -> Result<Value, String> {
-    let analysed = analyse_like_prototype(prototype)?;
+async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
+    let analysed = analyse_like_prototype(prototype).await?;
     match analysed.class {
         PrototypeClass::Real => match analysed.device {
-            DevicePreference::Host => ensure_device(value, DevicePreference::Host),
-            DevicePreference::Gpu => ensure_device(value, DevicePreference::Gpu),
+            DevicePreference::Host => ensure_device(value, DevicePreference::Host).await,
+            DevicePreference::Gpu => ensure_device(value, DevicePreference::Gpu).await,
         },
         PrototypeClass::Complex => {
-            let host_value = ensure_device(value, DevicePreference::Host)?;
-            real_to_complex(host_value)
+            let host_value = ensure_device(value, DevicePreference::Host).await?;
+            real_to_complex(host_value).await
         }
     }
 }
 
-fn ensure_device(value: Value, device: DevicePreference) -> Result<Value, String> {
+async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value> {
     match device {
-        DevicePreference::Host => convert_to_host_like(value),
+        DevicePreference::Host => convert_to_host_like(value).await,
         DevicePreference::Gpu => convert_to_gpu(value),
     }
 }
 
-fn convert_to_host_like(value: Value) -> Result<Value, String> {
+async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     if let Value::GpuTensor(handle) = value {
-        gpu_helpers::gather_value(&Value::GpuTensor(handle))
+        gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await
     } else {
         Ok(value)
     }
 }
 
-fn convert_to_gpu(value: Value) -> Result<Value, String> {
+fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(
-            "minus: GPU output requested via 'like' but no acceleration provider is active"
-                .to_string(),
-        );
+        return Err(builtin_error(
+            "minus: GPU output requested via 'like' but no acceleration provider is active",
+        ));
     };
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
@@ -170,42 +182,45 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
             };
             let handle = provider
                 .upload(&view)
-                .map_err(|e| format!("minus: failed to upload GPU result: {e}"))?;
+                .map_err(|e| builtin_error(format!("minus: failed to upload GPU result: {e}")))?;
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("minus: {e}"))?;
+            let tensor = Tensor::new(vec![n], vec![1, 1])
+                .map_err(|e| builtin_error(format!("minus: {e}")))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
         Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 })),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(|e| format!("minus: {e}"))?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(format!("minus: {e}")))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::CharArray(chars) => {
             let tensor = char_array_to_tensor(&chars)?;
             convert_to_gpu(Value::Tensor(tensor))
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err("minus: GPU prototypes for 'like' only support real numeric outputs".to_string())
-        }
-        Value::String(_) | Value::StringArray(_) | Value::Cell(_) | Value::Struct(_) => {
-            Err("minus: unsupported prototype conversion to GPU output".to_string())
-        }
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
+            "minus: GPU prototypes for 'like' only support real numeric outputs",
+        )),
+        Value::String(_) | Value::StringArray(_) | Value::Cell(_) | Value::Struct(_) => Err(
+            builtin_error("minus: unsupported prototype conversion to GPU output"),
+        ),
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => {
-            Err("minus: unsupported prototype conversion to GPU output".to_string())
-        }
+        | Value::MException(_) => Err(builtin_error(
+            "minus: unsupported prototype conversion to GPU output",
+        )),
     }
 }
 
-fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
+#[async_recursion::async_recursion(?Send)]
+async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
     match proto {
         Value::GpuTensor(_) => Ok(LikeAnalysis {
             device: DevicePreference::Gpu,
@@ -225,15 +240,15 @@ fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
             class: PrototypeClass::Complex,
         }),
         other => {
-            let gathered = gather_like_prototype(other)?;
-            analyse_like_prototype(&gathered)
+            let gathered = gather_like_prototype(other).await?;
+            analyse_like_prototype(&gathered).await
         }
     }
 }
 
-fn gather_like_prototype(value: &Value) -> Result<Value, String> {
+async fn gather_like_prototype(value: &Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(_) => gpu_helpers::gather_value(value),
+        Value::GpuTensor(_) => gpu_helpers::gather_value_async(value).await,
         Value::Tensor(_)
         | Value::Num(_)
         | Value::Int(_)
@@ -242,44 +257,47 @@ fn gather_like_prototype(value: &Value) -> Result<Value, String> {
         | Value::CharArray(_)
         | Value::Complex(_, _)
         | Value::ComplexTensor(_) => Ok(value.clone()),
-        _ => Err(format!(
+        _ => Err(builtin_error(format!(
             "minus: unsupported prototype for 'like' ({value:?})"
-        )),
+        ))),
     }
 }
 
-fn real_to_complex(value: Value) -> Result<Value, String> {
+#[async_recursion::async_recursion(?Send)]
+async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
             let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
-            let tensor =
-                ComplexTensor::new(data, t.shape.clone()).map_err(|e| format!("minus: {e}"))?;
+            let tensor = ComplexTensor::new(data, t.shape.clone())
+                .map_err(|e| builtin_error(format!("minus: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(|e| format!("minus: {e}"))?;
-            real_to_complex(Value::Tensor(tensor))
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(format!("minus: {e}")))?;
+            real_to_complex(Value::Tensor(tensor)).await
         }
         Value::CharArray(chars) => {
             let tensor = char_array_to_tensor(&chars)?;
-            real_to_complex(Value::Tensor(tensor))
+            real_to_complex(Value::Tensor(tensor)).await
         }
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_value(&Value::GpuTensor(handle.clone()))?;
-            real_to_complex(gathered)
+            let gathered =
+                gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
+            real_to_complex(gathered).await
         }
-        other => Err(format!(
+        other => Err(builtin_error(format!(
             "minus: cannot convert value {other:?} to complex output"
-        )),
+        ))),
     }
 }
 
-fn minus_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> Result<Value, String> {
+async fn minus_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if lhs.shape == rhs.shape {
-            if let Ok(handle) = provider.elem_sub(&lhs, &rhs) {
+            if let Ok(handle) = provider.elem_sub(&lhs, &rhs).await {
                 return Ok(Value::GpuTensor(handle));
             }
         }
@@ -288,18 +306,23 @@ fn minus_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> Result<Value, S
             let made_left = reps_l.iter().any(|&r| r != 1);
             let made_right = reps_r.iter().any(|&r| r != 1);
             let left_expanded = if made_left {
-                provider.repmat(&lhs, &reps_l).map_err(|e| e.to_string())?
+                provider
+                    .repmat(&lhs, &reps_l)
+                    .map_err(|e| builtin_error(format!("minus: {e}")))?
             } else {
                 lhs.clone()
             };
             let right_expanded = if made_right {
-                provider.repmat(&rhs, &reps_r).map_err(|e| e.to_string())?
+                provider
+                    .repmat(&rhs, &reps_r)
+                    .map_err(|e| builtin_error(format!("minus: {e}")))?
             } else {
                 rhs.clone()
             };
             let result = provider
                 .elem_sub(&left_expanded, &right_expanded)
-                .map_err(|e| e.to_string());
+                .await
+                .map_err(|e| builtin_error(format!("minus: {e}")));
             if made_left {
                 let _ = provider.free(&left_expanded);
             }
@@ -315,22 +338,22 @@ fn minus_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> Result<Value, S
             }
         }
         if is_scalar_shape(&lhs.shape) {
-            if let Some(scalar) = gpu_scalar_value(&lhs)? {
+            if let Some(scalar) = gpu_scalar_value(&lhs).await? {
                 if let Ok(handle) = provider.scalar_rsub(&rhs, scalar) {
                     return Ok(Value::GpuTensor(handle));
                 }
             }
         }
         if is_scalar_shape(&rhs.shape) {
-            if let Some(scalar) = gpu_scalar_value(&rhs)? {
+            if let Some(scalar) = gpu_scalar_value(&rhs).await? {
                 if let Ok(handle) = provider.scalar_sub(&lhs, scalar) {
                     return Ok(Value::GpuTensor(handle));
                 }
             }
         }
     }
-    let left = gpu_helpers::gather_tensor(&lhs)?;
-    let right = gpu_helpers::gather_tensor(&rhs)?;
+    let left = gpu_helpers::gather_tensor_async(&lhs).await?;
+    let right = gpu_helpers::gather_tensor_async(&rhs).await?;
     minus_host(Value::Tensor(left), Value::Tensor(right))
 }
 
@@ -364,7 +387,7 @@ fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, V
     Some((out, reps_a, reps_b))
 }
 
-fn minus_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> Result<Value, String> {
+async fn minus_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&rhs)? {
             if let Ok(handle) = provider.scalar_sub(&lhs, scalar) {
@@ -372,11 +395,11 @@ fn minus_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> Result<Value, String
             }
         }
     }
-    let host_lhs = gpu_helpers::gather_tensor(&lhs)?;
+    let host_lhs = gpu_helpers::gather_tensor_async(&lhs).await?;
     minus_host(Value::Tensor(host_lhs), rhs)
 }
 
-fn minus_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> Result<Value, String> {
+async fn minus_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&lhs)? {
             if let Ok(handle) = provider.scalar_rsub(&rhs, scalar) {
@@ -384,11 +407,47 @@ fn minus_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> Result<Value, Strin
             }
         }
     }
-    let host_rhs = gpu_helpers::gather_tensor(&rhs)?;
+    let host_rhs = gpu_helpers::gather_tensor_async(&rhs).await?;
     minus_host(lhs, Value::Tensor(host_rhs))
 }
 
-fn minus_host(lhs: Value, rhs: Value) -> Result<Value, String> {
+fn scalar_real_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(n) => Some(*n),
+        Value::Int(i) => Some(i.to_f64()),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
+        Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
+            Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
+        }
+        _ => None,
+    }
+}
+
+fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
+    match value {
+        Value::Complex(re, im) => Some((*re, *im)),
+        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
+        _ => None,
+    }
+}
+
+fn scalar_minus_value(lhs: &Value, rhs: &Value) -> Option<Value> {
+    let left = scalar_complex_value(lhs).or_else(|| scalar_real_value(lhs).map(|v| (v, 0.0)))?;
+    let right = scalar_complex_value(rhs).or_else(|| scalar_real_value(rhs).map(|v| (v, 0.0)))?;
+    let (ar, ai) = left;
+    let (br, bi) = right;
+    if ai != 0.0 || bi != 0.0 {
+        return Some(Value::Complex(ar - br, ai - bi));
+    }
+    Some(Value::Num(ar - br))
+}
+
+fn minus_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if let Some(result) = scalar_minus_value(&lhs, &rhs) {
+        return Ok(result);
+    }
     match (classify_operand(lhs)?, classify_operand(rhs)?) {
         (MinusOperand::Real(a), MinusOperand::Real(b)) => minus_real_real(&a, &b),
         (MinusOperand::Complex(a), MinusOperand::Complex(b)) => minus_complex_complex(&a, &b),
@@ -402,56 +461,61 @@ enum MinusOperand {
     Complex(ComplexTensor),
 }
 
-fn classify_operand(value: Value) -> Result<MinusOperand, String> {
+fn classify_operand(value: Value) -> BuiltinResult<MinusOperand> {
     match value {
         Value::Tensor(t) => Ok(MinusOperand::Real(t)),
         Value::Num(n) => Ok(MinusOperand::Real(
-            Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("minus: {e}"))?,
+            Tensor::new(vec![n], vec![1, 1]).map_err(|e| builtin_error(format!("minus: {e}")))?,
         )),
         Value::Int(i) => Ok(MinusOperand::Real(
-            Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| format!("minus: {e}"))?,
+            Tensor::new(vec![i.to_f64()], vec![1, 1])
+                .map_err(|e| builtin_error(format!("minus: {e}")))?,
         )),
         Value::Bool(b) => Ok(MinusOperand::Real(
             Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|e| format!("minus: {e}"))?,
+                .map_err(|e| builtin_error(format!("minus: {e}")))?,
         )),
         Value::LogicalArray(logical) => Ok(MinusOperand::Real(
-            tensor::logical_to_tensor(&logical).map_err(|e| format!("minus: {e}"))?,
+            tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(format!("minus: {e}")))?,
         )),
         Value::CharArray(chars) => Ok(MinusOperand::Real(char_array_to_tensor(&chars)?)),
         Value::Complex(re, im) => Ok(MinusOperand::Complex(
-            ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| format!("minus: {e}"))?,
+            ComplexTensor::new(vec![(re, im)], vec![1, 1])
+                .map_err(|e| builtin_error(format!("minus: {e}")))?,
         )),
         Value::ComplexTensor(ct) => Ok(MinusOperand::Complex(ct)),
-        Value::GpuTensor(_) => Err("minus: internal error converting GPU value".to_string()),
-        other => Err(format!(
+        Value::GpuTensor(_) => Err(builtin_error("minus: internal error converting GPU value")),
+        other => Err(builtin_error(format!(
             "minus: unsupported operand type {:?}; expected numeric or logical data",
             other
-        )),
+        ))),
     }
 }
 
-fn minus_real_real(lhs: &Tensor, rhs: &Tensor) -> Result<Value, String> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("minus: {err}"))?;
+fn minus_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|err| builtin_error(format!("minus: {err}")))?;
     if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| format!("minus: {e}"))?;
+            .map_err(|e| builtin_error(format!("minus: {e}")))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let mut out = vec![0.0f64; plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
         out[out_idx] = lhs.data[idx_lhs] - rhs.data[idx_rhs];
     }
-    let tensor =
-        Tensor::new(out, plan.output_shape().to_vec()).map_err(|e| format!("minus: {e}"))?;
+    let tensor = Tensor::new(out, plan.output_shape().to_vec())
+        .map_err(|e| builtin_error(format!("minus: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn minus_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> Result<Value, String> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("minus: {err}"))?;
+fn minus_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|err| builtin_error(format!("minus: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| format!("minus: {e}"))?;
+            .map_err(|e| builtin_error(format!("minus: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
@@ -460,16 +524,17 @@ fn minus_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> Result<Val
         let (br, bi) = rhs.data[idx_rhs];
         out[out_idx] = (ar - br, ai - bi);
     }
-    let tensor =
-        ComplexTensor::new(out, plan.output_shape().to_vec()).map_err(|e| format!("minus: {e}"))?;
+    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+        .map_err(|e| builtin_error(format!("minus: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
-fn minus_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> Result<Value, String> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("minus: {err}"))?;
+fn minus_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> {
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|err| builtin_error(format!("minus: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| format!("minus: {e}"))?;
+            .map_err(|e| builtin_error(format!("minus: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
@@ -478,16 +543,17 @@ fn minus_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> Result<Value, String
         let scalar = rhs.data[idx_rhs];
         out[out_idx] = (ar - scalar, ai);
     }
-    let tensor =
-        ComplexTensor::new(out, plan.output_shape().to_vec()).map_err(|e| format!("minus: {e}"))?;
+    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+        .map_err(|e| builtin_error(format!("minus: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
-fn minus_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> Result<Value, String> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("minus: {err}"))?;
+fn minus_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|err| builtin_error(format!("minus: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| format!("minus: {e}"))?;
+            .map_err(|e| builtin_error(format!("minus: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
@@ -496,17 +562,18 @@ fn minus_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> Result<Value, String
         let (br, bi) = rhs.data[idx_rhs];
         out[out_idx] = (scalar - br, -bi);
     }
-    let tensor =
-        ComplexTensor::new(out, plan.output_shape().to_vec()).map_err(|e| format!("minus: {e}"))?;
+    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+        .map_err(|e| builtin_error(format!("minus: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
-fn char_array_to_tensor(chars: &CharArray) -> Result<Tensor, String> {
+fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-    Tensor::new(data, vec![chars.rows, chars.cols]).map_err(|e| format!("minus: {e}"))
+    Tensor::new(data, vec![chars.rows, chars.cols])
+        .map_err(|e| builtin_error(format!("minus: {e}")))
 }
 
-fn extract_scalar_f64(value: &Value) -> Result<Option<f64>, String> {
+fn extract_scalar_f64(value: &Value) -> BuiltinResult<Option<f64>> {
     match value {
         Value::Num(n) => Ok(Some(*n)),
         Value::Int(i) => Ok(Some(i.to_f64())),
@@ -526,16 +593,16 @@ fn is_scalar_shape(shape: &[usize]) -> bool {
     shape.iter().copied().product::<usize>() <= 1
 }
 
-fn gpu_scalar_value(handle: &GpuTensorHandle) -> Result<Option<f64>, String> {
+async fn gpu_scalar_value(handle: &GpuTensorHandle) -> BuiltinResult<Option<f64>> {
     let Some(provider) = runmat_accelerate_api::provider() else {
         return Ok(None);
     };
     if !is_scalar_shape(&handle.shape) {
         return Ok(None);
     }
-    let host = provider
-        .download(handle)
-        .map_err(|e| format!("minus: {e}"))?;
+    let host = download_handle_async(provider, handle)
+        .await
+        .map_err(|e| builtin_error(format!("minus: {e}")))?;
     if host.data.len() == 1 {
         Ok(Some(host.data[0]))
     } else {
@@ -547,10 +614,15 @@ fn gpu_scalar_value(handle: &GpuTensorHandle) -> Result<Option<f64>, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor};
 
     const EPS: f64 = 1e-12;
+
+    fn minus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::minus_builtin(lhs, rhs, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -660,7 +732,10 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = minus_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).unwrap_err();
-        assert!(err.contains("minus"), "unexpected error message: {err}");
+        assert!(
+            err.message().contains("minus"),
+            "unexpected error message: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -814,7 +889,7 @@ pub(crate) mod tests {
             vec![Value::from("like")],
         )
         .expect_err("expected error");
-        assert!(err.contains("prototype"));
+        assert!(err.message().contains("prototype"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -869,7 +944,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = minus_gpu_pair(h.clone(), h).unwrap();
+        let gpu = block_on(minus_gpu_pair(h.clone(), h)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
             Value::Tensor(ct) => {

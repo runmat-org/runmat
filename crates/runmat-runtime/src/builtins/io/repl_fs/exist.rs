@@ -19,7 +19,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::dispatcher::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const ERROR_NAME_ARG: &str = "exist: name must be a character vector or string scalar";
 const ERROR_TYPE_ARG: &str = "exist: type must be a character vector or string scalar";
@@ -52,6 +52,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "I/O builtins are not eligible for fusion; metadata registered for completeness.",
 };
 
+const BUILTIN_NAME: &str = "exist";
+
+fn exist_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "exist",
     category = "io/repl_fs",
@@ -60,16 +79,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::repl_fs::exist"
 )]
-fn exist_builtin(name: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn exist_builtin(name: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("exist: too many input arguments".to_string());
+        return Err(exist_error("exist: too many input arguments"));
     }
 
-    let name_host = gather_if_needed(&name).map_err(|err| format!("exist: {err}"))?;
-    let type_value = rest
-        .first()
-        .map(|value| gather_if_needed(value).map_err(|err| format!("exist: {err}")))
-        .transpose()?;
+    let name_host = gather_if_needed_async(&name)
+        .await
+        .map_err(map_control_flow)?;
+    let type_value = match rest.first() {
+        Some(value) => Some(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        ),
+        None => None,
+    };
 
     let query = type_value
         .as_ref()
@@ -80,7 +105,7 @@ fn exist_builtin(name: Value, rest: Vec<Value>) -> Result<Value, String> {
     let result = match query {
         ExistQuery::Handle => exist_handle(&name_host),
         _ => {
-            let text = value_to_string(&name_host).ok_or_else(|| ERROR_NAME_ARG.to_string())?;
+            let text = value_to_string(&name_host).ok_or_else(|| exist_error(ERROR_NAME_ARG))?;
             exist_for_query(&text, query)?
         }
     };
@@ -135,8 +160,8 @@ impl ExistResultKind {
     }
 }
 
-fn parse_type_argument(value: &Value) -> Result<ExistQuery, String> {
-    let text = value_to_string(value).ok_or_else(|| ERROR_TYPE_ARG.to_string())?;
+fn parse_type_argument(value: &Value) -> BuiltinResult<ExistQuery> {
+    let text = value_to_string(value).ok_or_else(|| exist_error(ERROR_TYPE_ARG))?;
     match text.trim().to_ascii_lowercase().as_str() {
         "" => Ok(ExistQuery::Any),
         "var" | "variable" => Ok(ExistQuery::Var),
@@ -152,11 +177,11 @@ fn parse_type_argument(value: &Value) -> Result<ExistQuery, String> {
         "thunk" => Ok(ExistQuery::Thunk),
         "lib" | "library" => Ok(ExistQuery::Lib),
         "java" => Ok(ExistQuery::Java),
-        _ => Err(ERROR_INVALID_TYPE.to_string()),
+        _ => Err(exist_error(ERROR_INVALID_TYPE)),
     }
 }
 
-fn exist_for_query(name: &str, query: ExistQuery) -> Result<ExistResultKind, String> {
+fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistResultKind> {
     if contains_wildcards(name) {
         return Ok(ExistResultKind::NotFound);
     }
@@ -185,14 +210,20 @@ fn exist_for_query(name: &str, query: ExistQuery) -> Result<ExistResultKind, Str
         }),
         ExistQuery::File => Ok(detect_file_kind(name)?.unwrap_or(ExistResultKind::NotFound)),
         ExistQuery::Mex => Ok(
-            if path_find_file_with_extensions(name, MEX_EXTENSIONS, "exist")?.is_some() {
+            if path_find_file_with_extensions(name, MEX_EXTENSIONS, "exist")
+                .map_err(exist_error)?
+                .is_some()
+            {
                 ExistResultKind::Mex
             } else {
                 ExistResultKind::NotFound
             },
         ),
         ExistQuery::Pcode => Ok(
-            if path_find_file_with_extensions(name, PCODE_EXTENSIONS, "exist")?.is_some() {
+            if path_find_file_with_extensions(name, PCODE_EXTENSIONS, "exist")
+                .map_err(exist_error)?
+                .is_some()
+            {
                 ExistResultKind::Pcode
             } else {
                 ExistResultKind::NotFound
@@ -204,21 +235,30 @@ fn exist_for_query(name: &str, query: ExistQuery) -> Result<ExistResultKind, Str
             ExistResultKind::NotFound
         }),
         ExistQuery::Simulink => Ok(
-            if path_find_file_with_extensions(name, SIMULINK_EXTENSIONS, "exist")?.is_some() {
+            if path_find_file_with_extensions(name, SIMULINK_EXTENSIONS, "exist")
+                .map_err(exist_error)?
+                .is_some()
+            {
                 ExistResultKind::Simulink
             } else {
                 ExistResultKind::NotFound
             },
         ),
         ExistQuery::Thunk => Ok(
-            if path_find_file_with_extensions(name, THUNK_EXTENSIONS, "exist")?.is_some() {
+            if path_find_file_with_extensions(name, THUNK_EXTENSIONS, "exist")
+                .map_err(exist_error)?
+                .is_some()
+            {
                 ExistResultKind::File
             } else {
                 ExistResultKind::NotFound
             },
         ),
         ExistQuery::Lib => Ok(
-            if path_find_file_with_extensions(name, LIB_EXTENSIONS, "exist")?.is_some() {
+            if path_find_file_with_extensions(name, LIB_EXTENSIONS, "exist")
+                .map_err(exist_error)?
+                .is_some()
+            {
                 ExistResultKind::File
             } else {
                 ExistResultKind::NotFound
@@ -229,7 +269,7 @@ fn exist_for_query(name: &str, query: ExistQuery) -> Result<ExistResultKind, Str
     }
 }
 
-fn evaluate_default(name: &str) -> Result<ExistResultKind, String> {
+fn evaluate_default(name: &str) -> BuiltinResult<ExistResultKind> {
     if variable_exists(name) {
         return Ok(ExistResultKind::Variable);
     }
@@ -279,7 +319,7 @@ fn builtin_exists(name: &str) -> bool {
         .any(|b| b.name.eq_ignore_ascii_case(&lowered))
 }
 
-fn class_exists(name: &str) -> Result<bool, String> {
+fn class_exists(name: &str) -> BuiltinResult<bool> {
     if runmat_builtins::get_class(name).is_some() {
         return Ok(true);
     }
@@ -292,14 +332,15 @@ fn class_exists(name: &str) -> Result<bool, String> {
     Ok(false)
 }
 
-fn class_folder_exists(name: &str) -> Result<bool, String> {
-    Ok(path_class_folder_candidates(name, "exist")?
+fn class_folder_exists(name: &str) -> BuiltinResult<bool> {
+    Ok(path_class_folder_candidates(name, "exist")
+        .map_err(exist_error)?
         .into_iter()
         .any(|path| path_is_directory(&path)))
 }
 
-fn class_file_exists(name: &str) -> Result<bool, String> {
-    path_class_file_exists(name, CLASS_M_FILE_EXTENSIONS, "classdef", "exist")
+fn class_file_exists(name: &str) -> BuiltinResult<bool> {
+    path_class_file_exists(name, CLASS_M_FILE_EXTENSIONS, "classdef", "exist").map_err(exist_error)
 }
 
 fn method_exists(name: &str) -> bool {
@@ -310,23 +351,36 @@ fn method_exists(name: &str) -> bool {
     }
 }
 
-fn directory_exists(name: &str) -> Result<bool, String> {
-    Ok(path_directory_candidates(name, "exist")?
+fn directory_exists(name: &str) -> BuiltinResult<bool> {
+    Ok(path_directory_candidates(name, "exist")
+        .map_err(exist_error)?
         .into_iter()
         .any(|path| path_is_directory(&path)))
 }
 
-fn detect_file_kind(name: &str) -> Result<Option<ExistResultKind>, String> {
-    if path_find_file_with_extensions(name, MEX_EXTENSIONS, "exist")?.is_some() {
+fn detect_file_kind(name: &str) -> BuiltinResult<Option<ExistResultKind>> {
+    if path_find_file_with_extensions(name, MEX_EXTENSIONS, "exist")
+        .map_err(exist_error)?
+        .is_some()
+    {
         return Ok(Some(ExistResultKind::Mex));
     }
-    if path_find_file_with_extensions(name, PCODE_EXTENSIONS, "exist")?.is_some() {
+    if path_find_file_with_extensions(name, PCODE_EXTENSIONS, "exist")
+        .map_err(exist_error)?
+        .is_some()
+    {
         return Ok(Some(ExistResultKind::Pcode));
     }
-    if path_find_file_with_extensions(name, SIMULINK_EXTENSIONS, "exist")?.is_some() {
+    if path_find_file_with_extensions(name, SIMULINK_EXTENSIONS, "exist")
+        .map_err(exist_error)?
+        .is_some()
+    {
         return Ok(Some(ExistResultKind::Simulink));
     }
-    if path_find_file_with_extensions(name, GENERAL_FILE_EXTENSIONS, "exist")?.is_some() {
+    if path_find_file_with_extensions(name, GENERAL_FILE_EXTENSIONS, "exist")
+        .map_err(exist_error)?
+        .is_some()
+    {
         return Ok(Some(ExistResultKind::File));
     }
     Ok(None)
@@ -361,7 +415,6 @@ fn split_method_name(name: &str) -> Option<(String, String)> {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use once_cell::sync::OnceCell;
     use runmat_builtins::Value;
     use runmat_filesystem as vfs;
     use runmat_thread_local::runmat_thread_local;
@@ -373,23 +426,39 @@ pub(crate) mod tests {
     use std::path::PathBuf;
     use tempfile::tempdir;
 
+    fn exist_builtin(name: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::exist_builtin(name, rest))
+    }
+
+    fn workspace_guard() -> std::sync::MutexGuard<'static, ()> {
+        crate::workspace::test_guard()
+    }
+
+    fn test_guard() -> (
+        std::sync::MutexGuard<'static, ()>,
+        std::sync::MutexGuard<'static, ()>,
+    ) {
+        let workspace = workspace_guard();
+        let fs_lock = REPL_FS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        (workspace, fs_lock)
+    }
+
     runmat_thread_local! {
         static TEST_WORKSPACE: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
     }
 
     fn ensure_test_resolver() {
-        static INIT: OnceCell<()> = OnceCell::new();
-        INIT.get_or_init(|| {
-            crate::workspace::register_workspace_resolver(crate::workspace::WorkspaceResolver {
-                lookup: |name| TEST_WORKSPACE.with(|slot| slot.borrow().get(name).cloned()),
-                snapshot: || {
-                    let mut entries: Vec<(String, Value)> =
-                        TEST_WORKSPACE.with(|slot| slot.borrow().clone().into_iter().collect());
-                    entries.sort_by(|a, b| a.0.cmp(&b.0));
-                    entries
-                },
-                globals: || Vec::new(),
-            });
+        crate::workspace::register_workspace_resolver(crate::workspace::WorkspaceResolver {
+            lookup: |name| TEST_WORKSPACE.with(|slot| slot.borrow().get(name).cloned()),
+            snapshot: || {
+                let mut entries: Vec<(String, Value)> =
+                    TEST_WORKSPACE.with(|slot| slot.borrow().clone().into_iter().collect());
+                entries.sort_by(|a, b| a.0.cmp(&b.0));
+                entries
+            },
+            globals: || Vec::new(),
         });
     }
 
@@ -423,9 +492,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_workspace_variables() {
-        let _lock = REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
         ensure_test_resolver();
         set_workspace(&[("alpha", Value::Num(1.0))]);
 
@@ -436,9 +503,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_builtins() {
-        let _lock = REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
 
         let value = exist_builtin(Value::from("sin"), Vec::new()).expect("exist");
         assert_eq!(value, Value::Num(5.0));
@@ -451,9 +516,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_files_and_mex() {
-        let _lock = REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
         ensure_test_resolver();
 
         let temp = tempdir().expect("tempdir");
@@ -478,9 +541,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_directories() {
-        let _lock = REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
 
         let temp = tempdir().expect("tempdir");
         let _guard = DirGuard::new();
@@ -497,9 +558,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_class_files_and_packages() {
-        let _lock = REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
 
         let temp = tempdir().expect("tempdir");
         let _guard = DirGuard::new();
@@ -526,32 +585,26 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_invalid_type_raises_error() {
-        let _lock = REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
 
         let err = exist_builtin(Value::from("foo"), vec![Value::from("unknown")])
             .expect_err("expected error");
-        assert_eq!(err, ERROR_INVALID_TYPE);
+        assert_eq!(err.message(), ERROR_INVALID_TYPE);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_errors_on_non_text_name() {
-        let _lock = REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
 
         let err = exist_builtin(Value::Num(5.0), Vec::new()).expect_err("expected error");
-        assert_eq!(err, ERROR_NAME_ARG);
+        assert_eq!(err.message(), ERROR_NAME_ARG);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_handle_returns_zero_for_non_handle() {
-        let _lock = REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let (_guard, _lock) = test_guard();
 
         let value =
             exist_builtin(Value::Num(17.0), vec![Value::from("handle")]).expect("exist handle");

@@ -4,13 +4,14 @@ use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strcmpi")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -39,6 +40,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Produces logical host results; not eligible for GPU fusion.",
 };
 
+#[allow(dead_code)]
+fn strcmpi_flow(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("strcmpi").build()
+}
+
+fn remap_strcmpi_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, "strcmpi")
+}
+
 #[runtime_builtin(
     name = "strcmpi",
     category = "strings/core",
@@ -47,15 +57,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::strings::core::strcmpi"
 )]
-fn strcmpi_builtin(a: Value, b: Value) -> Result<Value, String> {
-    let a = gather_if_needed(&a).map_err(|e| format!("strcmpi: {e}"))?;
-    let b = gather_if_needed(&b).map_err(|e| format!("strcmpi: {e}"))?;
+async fn strcmpi_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
+    let a = gather_if_needed_async(&a)
+        .await
+        .map_err(remap_strcmpi_flow)?;
+    let b = gather_if_needed_async(&b)
+        .await
+        .map_err(remap_strcmpi_flow)?;
     let left = TextCollection::from_argument("strcmpi", a, "first argument")?;
     let right = TextCollection::from_argument("strcmpi", b, "second argument")?;
     evaluate_strcmpi(&left, &right)
 }
 
-fn evaluate_strcmpi(left: &TextCollection, right: &TextCollection) -> Result<Value, String> {
+fn evaluate_strcmpi(left: &TextCollection, right: &TextCollection) -> BuiltinResult<Value> {
     let shape = broadcast_shapes("strcmpi", &left.shape, &right.shape)?;
     let total = tensor::element_count(&shape);
     if total == 0 {
@@ -87,7 +101,16 @@ fn evaluate_strcmpi(left: &TextCollection, right: &TextCollection) -> Result<Val
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::RuntimeError;
     use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray};
+
+    fn strcmpi_builtin(a: Value, b: Value) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::strcmpi_builtin(a, b))
+    }
+
+    fn error_message(err: RuntimeError) -> String {
+        err.message().to_string()
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -216,16 +239,19 @@ pub(crate) mod tests {
     fn strcmpi_size_mismatch_error() {
         let left = StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap();
         let right = StringArray::new(vec!["a".into(), "b".into(), "c".into()], vec![3, 1]).unwrap();
-        let err = strcmpi_builtin(Value::StringArray(left), Value::StringArray(right))
-            .expect_err("size mismatch");
+        let err = error_message(
+            strcmpi_builtin(Value::StringArray(left), Value::StringArray(right))
+                .expect_err("size mismatch"),
+        );
         assert!(err.contains("size mismatch"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_invalid_argument_type() {
-        let err =
-            strcmpi_builtin(Value::Num(1.0), Value::String("a".into())).expect_err("invalid type");
+        let err = error_message(
+            strcmpi_builtin(Value::Num(1.0), Value::String("a".into())).expect_err("invalid type"),
+        );
         assert!(err.contains("first argument must be text"));
     }
 
@@ -233,8 +259,10 @@ pub(crate) mod tests {
     #[test]
     fn strcmpi_cell_array_invalid_element_errors() {
         let cell = CellArray::new(vec![Value::Num(42.0)], 1, 1).unwrap();
-        let err = strcmpi_builtin(Value::Cell(cell), Value::String("test".into()))
-            .expect_err("cell element type");
+        let err = error_message(
+            strcmpi_builtin(Value::Cell(cell), Value::String("test".into()))
+                .expect_err("cell element type"),
+        );
         assert!(err.contains("cell array elements must be character vectors or string scalars"));
     }
 

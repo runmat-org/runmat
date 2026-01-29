@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::bit::and")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -63,7 +64,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::bit::and"
 )]
-fn and_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
+async fn and_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
         if let Some(provider) = runmat_accelerate_api::provider() {
             if let Ok(handle) = provider.logical_and(a, b) {
@@ -71,13 +72,14 @@ fn and_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
             }
         }
     }
-    and_host(lhs, rhs)
+    and_host(lhs, rhs).await
 }
 
-fn and_host(lhs: Value, rhs: Value) -> Result<Value, String> {
-    let left = logical_buffer_from("and", lhs)?;
-    let right = logical_buffer_from("and", rhs)?;
-    let shape = broadcast_shapes("and", &left.shape, &right.shape)?;
+async fn and_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    let left = logical_buffer_from("and", lhs).await?;
+    let right = logical_buffer_from("and", rhs).await?;
+    let shape = broadcast_shapes("and", &left.shape, &right.shape)
+        .map_err(|err| builtin_error("and", err))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return logical_value("and", Vec::new(), shape);
@@ -106,13 +108,17 @@ fn and_host(lhs: Value, rhs: Value) -> Result<Value, String> {
     logical_value("and", data, shape)
 }
 
-fn logical_value(fn_name: &str, data: Vec<u8>, shape: Vec<usize>) -> Result<Value, String> {
+fn builtin_error(fn_name: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(fn_name).build()
+}
+
+fn logical_value(fn_name: &str, data: Vec<u8>, shape: Vec<usize>) -> BuiltinResult<Value> {
     if data.len() == 1 && tensor::element_count(&shape) == 1 {
         Ok(Value::Bool(data[0] != 0))
     } else {
         LogicalArray::new(data, shape)
             .map(Value::LogicalArray)
-            .map_err(|e| format!("{fn_name}: {e}"))
+            .map_err(|e| builtin_error(fn_name, format!("{fn_name}: {e}")))
     }
 }
 
@@ -121,7 +127,7 @@ struct LogicalBuffer {
     shape: Vec<usize>,
 }
 
-fn logical_buffer_from(name: &str, value: Value) -> Result<LogicalBuffer, String> {
+async fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalBuffer> {
     match value {
         Value::LogicalArray(array) => {
             let LogicalArray { data, shape } = array;
@@ -147,17 +153,22 @@ fn logical_buffer_from(name: &str, value: Value) -> Result<LogicalBuffer, String
         Value::ComplexTensor(tensor) => complex_tensor_to_logical_buffer(tensor),
         Value::CharArray(array) => char_array_to_logical_buffer(array),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(|err| builtin_error(name, format!("{name}: {err}")))?;
             tensor_to_logical_buffer(tensor)
         }
-        other => Err(format!(
-            "{name}: unsupported input type {:?}; expected logical, numeric, complex, or character data",
-            other
+        other => Err(builtin_error(
+            name,
+            format!(
+                "{name}: unsupported input type {:?}; expected logical, numeric, complex, or character data",
+                other
+            ),
         )),
     }
 }
 
-fn tensor_to_logical_buffer(tensor: Tensor) -> Result<LogicalBuffer, String> {
+fn tensor_to_logical_buffer(tensor: Tensor) -> BuiltinResult<LogicalBuffer> {
     let Tensor { data, shape, .. } = tensor;
     let mapped = data.into_iter().map(logical_from_f64).collect();
     Ok(LogicalBuffer {
@@ -166,7 +177,7 @@ fn tensor_to_logical_buffer(tensor: Tensor) -> Result<LogicalBuffer, String> {
     })
 }
 
-fn complex_tensor_to_logical_buffer(tensor: ComplexTensor) -> Result<LogicalBuffer, String> {
+fn complex_tensor_to_logical_buffer(tensor: ComplexTensor) -> BuiltinResult<LogicalBuffer> {
     let ComplexTensor { data, shape, .. } = tensor;
     let mapped = data
         .into_iter()
@@ -178,7 +189,7 @@ fn complex_tensor_to_logical_buffer(tensor: ComplexTensor) -> Result<LogicalBuff
     })
 }
 
-fn char_array_to_logical_buffer(array: CharArray) -> Result<LogicalBuffer, String> {
+fn char_array_to_logical_buffer(array: CharArray) -> BuiltinResult<LogicalBuffer> {
     let CharArray { data, rows, cols } = array;
     let mapped = data
         .into_iter()
@@ -212,7 +223,26 @@ fn logical_from_complex(re: f64, im: f64) -> u8 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeError;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
+
+    fn assert_error_contains(err: RuntimeError, expected: &str) {
+        assert!(
+            err.message().contains(expected),
+            "unexpected error: {}",
+            err.message()
+        );
+    }
+
+    fn run_and(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+        block_on(super::and_builtin(lhs, rhs))
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn run_and_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+        block_on(and_host(lhs, rhs))
+    }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::IntValue;
@@ -221,11 +251,11 @@ pub(crate) mod tests {
     #[test]
     fn and_of_booleans() {
         assert_eq!(
-            and_builtin(Value::Bool(true), Value::Bool(false)).unwrap(),
+            run_and(Value::Bool(true), Value::Bool(false)).unwrap(),
             Value::Bool(false)
         );
         assert_eq!(
-            and_builtin(Value::Bool(true), Value::Bool(true)).unwrap(),
+            run_and(Value::Bool(true), Value::Bool(true)).unwrap(),
             Value::Bool(true)
         );
     }
@@ -235,7 +265,7 @@ pub(crate) mod tests {
     fn and_numeric_arrays() {
         let a = Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![3.0, 4.0, 0.0, 0.0], vec![2, 2]).unwrap();
-        let result = and_builtin(Value::Tensor(a), Value::Tensor(b)).unwrap();
+        let result = run_and(Value::Tensor(a), Value::Tensor(b)).unwrap();
         match result {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![2, 2]);
@@ -249,7 +279,7 @@ pub(crate) mod tests {
     #[test]
     fn and_scalar_broadcasts() {
         let tensor = Tensor::new(vec![1.0, 0.0, 3.0, 0.0], vec![4, 1]).unwrap();
-        let result = and_builtin(Value::Tensor(tensor), Value::Int(IntValue::I32(1))).unwrap();
+        let result = run_and(Value::Tensor(tensor), Value::Int(IntValue::I32(1))).unwrap();
         match result {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![4, 1]);
@@ -265,7 +295,7 @@ pub(crate) mod tests {
         let lhs = CharArray::new("Run".chars().collect(), 1, 3).unwrap();
         let rhs = CharArray::new(vec!['R', 'u', '\0'], 1, 3).unwrap();
         let result =
-            and_builtin(Value::CharArray(lhs), Value::CharArray(rhs)).expect("and char arrays");
+            run_and(Value::CharArray(lhs), Value::CharArray(rhs)).expect("and char arrays");
         match result {
             Value::LogicalArray(arr) => {
                 assert_eq!(arr.shape, vec![1, 3]);
@@ -278,17 +308,17 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_treats_nan_as_true() {
-        let result = and_builtin(Value::Num(f64::NAN), Value::Num(1.0)).unwrap();
+        let result = run_and(Value::Num(f64::NAN), Value::Num(1.0)).unwrap();
         assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_complex_inputs() {
-        let result = and_builtin(Value::Complex(0.0, 0.0), Value::Complex(0.0, 2.0)).unwrap();
+        let result = run_and(Value::Complex(0.0, 0.0), Value::Complex(0.0, 2.0)).unwrap();
         assert_eq!(result, Value::Bool(false));
 
-        let result = and_builtin(Value::Complex(1.0, 0.0), Value::Complex(0.0, 2.0)).unwrap();
+        let result = run_and(Value::Complex(1.0, 0.0), Value::Complex(0.0, 2.0)).unwrap();
         assert_eq!(result, Value::Bool(true));
     }
 
@@ -297,18 +327,15 @@ pub(crate) mod tests {
     fn and_size_mismatch_errors() {
         let lhs = Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![1.0, 0.0, 3.0], vec![3, 1]).unwrap();
-        let err = and_builtin(Value::Tensor(lhs), Value::Tensor(rhs)).unwrap_err();
-        assert!(err.contains("size mismatch"), "unexpected error: {err}");
+        let err = run_and(Value::Tensor(lhs), Value::Tensor(rhs)).unwrap_err();
+        assert_error_contains(err, "size mismatch");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_rejects_unsupported_types() {
-        let err = and_builtin(Value::String("runmat".into()), Value::Bool(true)).unwrap_err();
-        assert!(
-            err.contains("unsupported input type"),
-            "unexpected error message: {err}"
-        );
+        let err = run_and(Value::String("runmat".into()), Value::Bool(true)).unwrap_err();
+        assert_error_contains(err, "unsupported input type");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -322,7 +349,7 @@ pub(crate) mod tests {
             };
             let a = provider.upload(&view).unwrap();
             let b = provider.upload(&view).unwrap();
-            let result = and_builtin(Value::GpuTensor(a), Value::GpuTensor(b)).unwrap();
+            let result = run_and(Value::GpuTensor(a), Value::GpuTensor(b)).unwrap();
             let gathered = test_support::gather(result).unwrap();
             assert_eq!(gathered.shape, vec![2, 2]);
             assert_eq!(gathered.data, vec![0.0, 1.0, 0.0, 1.0]);
@@ -349,7 +376,7 @@ pub(crate) mod tests {
             let gpu_rhs = provider.upload(&rhs_view).expect("upload rhs");
 
             let result =
-                and_builtin(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs)).expect("and");
+                run_and(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs)).expect("and");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
             assert_eq!(gathered.data, vec![0.0, 1.0, 0.0, 1.0]);
@@ -369,7 +396,7 @@ pub(crate) mod tests {
         let rhs = Tensor::new(vec![1.0, 0.0, 3.0, 4.0], vec![2, 2]).unwrap();
 
         let cpu_value =
-            and_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).expect("host and");
+            run_and_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).expect("host and");
         let (expected_data, expected_shape) = match cpu_value {
             Value::LogicalArray(arr) => (arr.data.clone(), arr.shape.clone()),
             other => panic!("expected logical array, got {other:?}"),
@@ -387,7 +414,7 @@ pub(crate) mod tests {
         let gpu_rhs = provider.upload(&view_rhs).expect("upload rhs");
 
         let gpu_value =
-            and_builtin(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs)).expect("gpu and");
+            run_and(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs)).expect("gpu and");
         let gathered = test_support::gather(gpu_value).expect("gather gpu result");
 
         assert_eq!(gathered.shape, expected_shape);

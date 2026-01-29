@@ -1,13 +1,15 @@
-import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { loadBuiltins } from '@/lib/builtins';
 import BuiltinsExplorer from '@/components/BuiltinsExplorer';
+import { buildPageMetadata } from '@/lib/seo';
 
-export const metadata: Metadata = {
-    title: 'Builtin Function Reference',
-    description: 'Search and browse RunMat builtin functions by name, category, or keyword.',
-    alternates: { canonical: '/docs/reference/builtins' },
-};
+export const metadata = buildPageMetadata({
+  title: 'Built-in Functions | Docs',
+  description: 'Search and browse RunMat built-in functions by name, category, or keyword.',
+  canonicalPath: '/docs/reference/builtins',
+  ogType: 'website',
+  ogImagePath: '/docs/reference/builtins/opengraph-image',
+});
 
 export default async function BuiltinsIndexPage() {
     const builtins = loadBuiltins();

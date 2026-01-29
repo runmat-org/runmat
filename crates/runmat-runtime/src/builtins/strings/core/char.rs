@@ -3,11 +3,12 @@
 use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::char")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -37,6 +38,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Character materialisation runs outside of fusion; results always live on the host.",
 };
 
+fn char_flow(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("char").build()
+}
+
+fn remap_char_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, "char")
+}
+
 #[runtime_builtin(
     name = "char",
     category = "strings/core",
@@ -45,9 +54,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "conversion",
     builtin_path = "crate::builtins::strings::core::char"
 )]
-fn char_builtin(rest: Vec<Value>) -> Result<Value, String> {
+async fn char_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        let empty = CharArray::new(Vec::new(), 0, 0).map_err(|e| format!("char: {e}"))?;
+        let empty =
+            CharArray::new(Vec::new(), 0, 0).map_err(|e| char_flow(format!("char: {e}")))?;
         return Ok(Value::CharArray(empty));
     }
 
@@ -55,7 +65,9 @@ fn char_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let mut max_width = 0usize;
 
     for arg in rest {
-        let gathered = gather_if_needed(&arg)?;
+        let gathered = gather_if_needed_async(&arg)
+            .await
+            .map_err(remap_char_flow)?;
         let mut produced = value_to_char_rows(&gathered)?;
         for row in &produced {
             if row.len() > max_width {
@@ -66,7 +78,8 @@ fn char_builtin(rest: Vec<Value>) -> Result<Value, String> {
     }
 
     if rows.is_empty() {
-        let empty = CharArray::new(Vec::new(), 0, 0).map_err(|e| format!("char: {e}"))?;
+        let empty =
+            CharArray::new(Vec::new(), 0, 0).map_err(|e| char_flow(format!("char: {e}")))?;
         return Ok(Value::CharArray(empty));
     }
 
@@ -81,11 +94,12 @@ fn char_builtin(rest: Vec<Value>) -> Result<Value, String> {
         }
     }
 
-    let array = CharArray::new(data, total_rows, cols).map_err(|e| format!("char: {e}"))?;
+    let array =
+        CharArray::new(data, total_rows, cols).map_err(|e| char_flow(format!("char: {e}")))?;
     Ok(Value::CharArray(array))
 }
 
-fn value_to_char_rows(value: &Value) -> Result<Vec<Vec<char>>, String> {
+fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<char>>> {
     match value {
         Value::CharArray(ca) => Ok(char_array_rows(ca)),
         Value::String(s) => Ok(vec![s.chars().collect()]),
@@ -102,9 +116,9 @@ fn value_to_char_rows(value: &Value) -> Result<Vec<Vec<char>>, String> {
         Value::Tensor(t) => tensor_rows(t),
         Value::LogicalArray(la) => logical_rows(la),
         Value::Cell(ca) => cell_rows(ca),
-        Value::GpuTensor(_) => Err("char: expected host data after gather".to_string()),
+        Value::GpuTensor(_) => Err(char_flow("char: expected host data after gather")),
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err("char: complex inputs are not supported".to_string())
+            Err(char_flow("char: complex inputs are not supported"))
         }
         Value::Struct(_)
         | Value::Object(_)
@@ -113,7 +127,10 @@ fn value_to_char_rows(value: &Value) -> Result<Vec<Vec<char>>, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(format!("char: unsupported input type {:?}", value)),
+        | Value::MException(_) => Err(char_flow(format!(
+            "char: unsupported input type {:?}",
+            value
+        ))),
     }
 }
 
@@ -129,7 +146,7 @@ fn char_array_rows(ca: &CharArray) -> Vec<Vec<char>> {
     rows
 }
 
-fn string_array_rows(sa: &StringArray) -> Result<Vec<Vec<char>>, String> {
+fn string_array_rows(sa: &StringArray) -> BuiltinResult<Vec<Vec<char>>> {
     ensure_two_dimensional(&sa.shape, "char")?;
     if sa.data.is_empty() {
         return Ok(Vec::new());
@@ -149,7 +166,7 @@ fn string_array_rows(sa: &StringArray) -> Result<Vec<Vec<char>>, String> {
     Ok(rows)
 }
 
-fn tensor_rows(t: &Tensor) -> Result<Vec<Vec<char>>, String> {
+fn tensor_rows(t: &Tensor) -> BuiltinResult<Vec<Vec<char>>> {
     ensure_two_dimensional(&t.shape, "char")?;
     let (rows, cols) = infer_rows_cols(&t.shape, t.data.len());
     if rows == 0 {
@@ -171,7 +188,7 @@ fn tensor_rows(t: &Tensor) -> Result<Vec<Vec<char>>, String> {
     Ok(out)
 }
 
-fn logical_rows(la: &LogicalArray) -> Result<Vec<Vec<char>>, String> {
+fn logical_rows(la: &LogicalArray) -> BuiltinResult<Vec<Vec<char>>> {
     ensure_two_dimensional(&la.shape, "char")?;
     let (rows, cols) = infer_rows_cols(&la.shape, la.data.len());
     if rows == 0 {
@@ -193,7 +210,7 @@ fn logical_rows(la: &LogicalArray) -> Result<Vec<Vec<char>>, String> {
     Ok(out)
 }
 
-fn cell_rows(ca: &CellArray) -> Result<Vec<Vec<char>>, String> {
+fn cell_rows(ca: &CellArray) -> BuiltinResult<Vec<Vec<char>>> {
     let mut rows = Vec::with_capacity(ca.data.len());
     for ptr in &ca.data {
         let element = (**ptr).clone();
@@ -202,48 +219,48 @@ fn cell_rows(ca: &CellArray) -> Result<Vec<Vec<char>>, String> {
             0 => rows.push(Vec::new()),
             1 => rows.push(converted.remove(0)),
             _ => {
-                return Err(
-                    "char: cell elements must be character vectors or string scalars".to_string(),
-                )
+                return Err(char_flow(
+                    "char: cell elements must be character vectors or string scalars",
+                ))
             }
         }
     }
     Ok(rows)
 }
 
-fn number_to_char(value: f64) -> Result<char, String> {
+fn number_to_char(value: f64) -> BuiltinResult<char> {
     if !value.is_finite() {
-        return Err("char: numeric inputs must be finite".to_string());
+        return Err(char_flow("char: numeric inputs must be finite"));
     }
     let rounded = value.round();
     if (value - rounded).abs() > 1e-9 {
-        return Err(format!(
+        return Err(char_flow(format!(
             "char: numeric inputs must be integers in the Unicode range (got {value})"
-        ));
+        )));
     }
     if rounded < 0.0 {
-        return Err(format!(
+        return Err(char_flow(format!(
             "char: negative code points are invalid (got {rounded})"
-        ));
+        )));
     }
     if rounded > 0x10FFFF as f64 {
-        return Err(format!(
+        return Err(char_flow(format!(
             "char: code point {} exceeds Unicode range",
             rounded as u64
-        ));
+        )));
     }
     let code = rounded as u32;
-    char::from_u32(code).ok_or_else(|| format!("char: invalid code point {code}"))
+    char::from_u32(code).ok_or_else(|| char_flow(format!("char: invalid code point {code}")))
 }
 
-fn ensure_two_dimensional(shape: &[usize], context: &str) -> Result<(), String> {
+fn ensure_two_dimensional(shape: &[usize], context: &str) -> BuiltinResult<()> {
     if shape.len() <= 2 {
         return Ok(());
     }
     if shape.iter().skip(2).all(|&d| d == 1) {
         return Ok(());
     }
-    Err(format!("{context}: inputs must be 2-D"))
+    Err(char_flow(format!("{context}: inputs must be 2-D")))
 }
 
 fn infer_rows_cols(shape: &[usize], len: usize) -> (usize, usize) {
@@ -269,7 +286,15 @@ fn infer_rows_cols(shape: &[usize], len: usize) -> (usize, usize) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+
+    fn char_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::char_builtin(rest))
+    }
     use runmat_builtins::StringArray;
+
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -403,7 +428,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_rejects_non_integer_numeric() {
-        let err = char_builtin(vec![Value::Num(65.5)]).expect_err("non-integer numeric");
+        let err =
+            error_message(char_builtin(vec![Value::Num(65.5)]).expect_err("non-integer numeric"));
         assert!(err.contains("integers"), "unexpected error message: {err}");
     }
 
@@ -412,7 +438,9 @@ pub(crate) mod tests {
     fn char_rejects_high_dimension_tensor() {
         let tensor =
             Tensor::new(vec![65.0, 66.0], vec![1, 1, 2]).expect("tensor construction failed");
-        let err = char_builtin(vec![Value::Tensor(tensor)]).expect_err("should reject >2D tensor");
+        let err = error_message(
+            char_builtin(vec![Value::Tensor(tensor)]).expect_err("should reject >2D tensor"),
+        );
         assert!(err.contains("2-D"), "expected dimension error, got {err}");
     }
 
@@ -442,15 +470,17 @@ pub(crate) mod tests {
     fn char_rejects_high_dimension_string_array() {
         let sa = StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 1, 2])
             .expect("string array");
-        let err =
-            char_builtin(vec![Value::StringArray(sa)]).expect_err("should reject >2D string array");
+        let err = error_message(
+            char_builtin(vec![Value::StringArray(sa)]).expect_err("should reject >2D string array"),
+        );
         assert!(err.contains("2-D"), "expected dimension error, got {err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_rejects_complex_input() {
-        let err = char_builtin(vec![Value::Complex(1.0, 2.0)]).expect_err("complex input");
+        let err =
+            error_message(char_builtin(vec![Value::Complex(1.0, 2.0)]).expect_err("complex input"));
         assert!(
             err.contains("complex"),
             "expected complex error message, got {err}"

@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::filter2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -45,6 +46,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Not a fusion candidate; executes via the dedicated filtering pipeline.",
 };
 
+const FILTER2_BUILTIN: &str = "filter2";
+
+fn filter2_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(FILTER2_BUILTIN)
+        .build()
+}
+
 #[runtime_builtin(
     name = "filter2",
     category = "image/filters",
@@ -53,18 +62,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom-imfilter",
     builtin_path = "crate::builtins::image::filters::filter2"
 )]
-fn filter2_builtin(kernel: Value, image: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn filter2_builtin(
+    kernel: Value,
+    image: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     let options = parse_filter2_options(&rest)?;
     match (kernel, image) {
         (Value::GpuTensor(kernel_handle), Value::GpuTensor(image_handle)) => {
-            filter2_gpu(Value::GpuTensor(kernel_handle), image_handle, &options)
+            filter2_gpu(Value::GpuTensor(kernel_handle), image_handle, &options).await
         }
         (Value::GpuTensor(kernel_handle), image_value) => {
-            let kernel_tensor = gpu_helpers::gather_tensor(&kernel_handle)?;
+            let kernel_tensor = gpu_helpers::gather_tensor_async(&kernel_handle).await?;
             filter2_host(Value::Tensor(kernel_tensor), image_value, &options)
         }
         (kernel_value, Value::GpuTensor(image_handle)) => {
-            filter2_gpu(kernel_value, image_handle, &options)
+            filter2_gpu(kernel_value, image_handle, &options).await
         }
         (kernel_value, image_value) => filter2_host(kernel_value, image_value, &options),
     }
@@ -74,18 +87,20 @@ fn filter2_host(
     kernel_value: Value,
     image_value: Value,
     options: &ImfilterOptions,
-) -> Result<Value, String> {
-    let kernel_tensor = tensor::value_into_tensor_for("filter2", kernel_value)?;
-    let image_tensor = tensor::value_into_tensor_for("filter2", image_value)?;
-    let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, options)?;
+) -> BuiltinResult<Value> {
+    let kernel_tensor =
+        tensor::value_into_tensor_for(FILTER2_BUILTIN, kernel_value).map_err(filter2_error)?;
+    let image_tensor =
+        tensor::value_into_tensor_for(FILTER2_BUILTIN, image_value).map_err(filter2_error)?;
+    let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, options, FILTER2_BUILTIN)?;
     Ok(tensor::tensor_into_value(result))
 }
 
-fn filter2_gpu(
+async fn filter2_gpu(
     kernel_value: Value,
     image_handle: GpuTensorHandle,
     options: &ImfilterOptions,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     let kernel_clone = kernel_value.clone();
     #[cfg(all(test, feature = "wgpu"))]
     {
@@ -99,9 +114,11 @@ fn filter2_gpu(
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => {
-            let image_tensor = gpu_helpers::gather_tensor(&image_handle)?;
-            let kernel_tensor = tensor::value_into_tensor_for("filter2", kernel_clone)?;
-            let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, options)?;
+            let image_tensor = gpu_helpers::gather_tensor_async(&image_handle).await?;
+            let kernel_tensor = tensor::value_into_tensor_for(FILTER2_BUILTIN, kernel_clone)
+                .map_err(filter2_error)?;
+            let result =
+                apply_imfilter_tensor(&image_tensor, &kernel_tensor, options, FILTER2_BUILTIN)?;
             return Ok(tensor::tensor_into_value(result));
         }
     };
@@ -112,7 +129,8 @@ fn filter2_gpu(
     let kernel_handle = match kernel_value {
         Value::GpuTensor(handle) => handle,
         other => {
-            let tensor = tensor::value_into_tensor_for("filter2", other)?;
+            let tensor =
+                tensor::value_into_tensor_for(FILTER2_BUILTIN, other).map_err(filter2_error)?;
             let view = HostTensorView {
                 data: &tensor.data,
                 shape: &tensor.shape,
@@ -124,8 +142,9 @@ fn filter2_gpu(
                     uploaded
                 }
                 Err(_) => {
-                    let image_tensor = gpu_helpers::gather_tensor(&image_handle)?;
-                    let result = apply_imfilter_tensor(&image_tensor, &tensor, options)?;
+                    let image_tensor = gpu_helpers::gather_tensor_async(&image_handle).await?;
+                    let result =
+                        apply_imfilter_tensor(&image_tensor, &tensor, options, FILTER2_BUILTIN)?;
                     return Ok(tensor::tensor_into_value(result));
                 }
             }
@@ -134,7 +153,10 @@ fn filter2_gpu(
 
     let kernel_handle_clone = kernel_handle.clone();
 
-    match provider.imfilter(&image_handle, &kernel_handle, options) {
+    match provider
+        .imfilter(&image_handle, &kernel_handle, options)
+        .await
+    {
         Ok(output) => {
             if let Some(uploaded) = uploaded_kernel {
                 let _ = provider.free(&uploaded);
@@ -145,26 +167,26 @@ fn filter2_gpu(
             if let Some(uploaded) = uploaded_kernel {
                 let _ = provider.free(&uploaded);
             }
-            let image_tensor = gpu_helpers::gather_tensor(&image_handle)?;
+            let image_tensor = gpu_helpers::gather_tensor_async(&image_handle).await?;
             let kernel_tensor = if let Some(ref tensor) = kernel_tensor_cache {
                 tensor.clone()
             } else {
-                gpu_helpers::gather_tensor(&kernel_handle_clone)?
+                gpu_helpers::gather_tensor_async(&kernel_handle_clone).await?
             };
-            let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, options)?;
+            let result =
+                apply_imfilter_tensor(&image_tensor, &kernel_tensor, options, FILTER2_BUILTIN)?;
             Ok(tensor::tensor_into_value(result))
         }
     }
 }
 
-fn parse_filter2_options(args: &[Value]) -> Result<ImfilterOptions, String> {
+fn parse_filter2_options(args: &[Value]) -> BuiltinResult<ImfilterOptions> {
     let mut options = ImfilterOptions::default();
     for value in args {
         let Some(text) = tensor::value_to_string(value) else {
-            return Err(
-                "filter2: expected string option ('same', 'full', 'valid', 'conv', 'corr')"
-                    .to_string(),
-            );
+            return Err(filter2_error(
+                "filter2: expected string option ('same', 'full', 'valid', 'conv', 'corr')",
+            ));
         };
         let lowered = text.trim().to_ascii_lowercase();
         match lowered.as_str() {
@@ -174,10 +196,10 @@ fn parse_filter2_options(args: &[Value]) -> Result<ImfilterOptions, String> {
             "conv" => options.mode = ImfilterMode::Convolution,
             "corr" => options.mode = ImfilterMode::Correlation,
             other => {
-                return Err(format!(
+                return Err(filter2_error(format!(
                 "filter2: unknown option '{}' (supported: 'same', 'full', 'valid', 'conv', 'corr')",
                 other
-            ))
+            )))
             }
         }
     }
@@ -188,6 +210,7 @@ fn parse_filter2_options(args: &[Value]) -> Result<ImfilterOptions, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::{HostTensorView, ImfilterMode, ImfilterOptions, ImfilterShape};
     use runmat_builtins::LogicalArray;
 
@@ -195,16 +218,20 @@ pub(crate) mod tests {
         Tensor::new(data, vec![rows, cols]).expect("tensor construction")
     }
 
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn default_same_matches_imfilter_reference() {
         let kernel = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
         let image = tensor(vec![4.0, 1.0, 2.0, 0.0], 2, 2);
-        let value = filter2_builtin(
+        let value = block_on(filter2_builtin(
             Value::Tensor(kernel.clone()),
             Value::Tensor(image.clone()),
             Vec::new(),
-        )
+        ))
         .expect("filter2");
         let gathered = test_support::gather(value).expect("gather");
         let options = ImfilterOptions {
@@ -212,7 +239,8 @@ pub(crate) mod tests {
             mode: ImfilterMode::Correlation,
             ..Default::default()
         };
-        let expected = apply_imfilter_tensor(&image, &kernel, &options).expect("reference");
+        let expected =
+            apply_imfilter_tensor(&image, &kernel, &options, FILTER2_BUILTIN).expect("reference");
         assert_eq!(gathered.shape, expected.shape);
         assert_eq!(gathered.data, expected.data);
     }
@@ -222,18 +250,19 @@ pub(crate) mod tests {
     fn full_shape_option_expands_output() {
         let kernel = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
         let image = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
-        let value = filter2_builtin(
+        let value = block_on(filter2_builtin(
             Value::Tensor(kernel.clone()),
             Value::Tensor(image.clone()),
             vec![Value::from("full")],
-        )
+        ))
         .expect("filter2");
         let gathered = test_support::gather(value).expect("gather");
         let options = ImfilterOptions {
             shape: ImfilterShape::Full,
             ..Default::default()
         };
-        let expected = apply_imfilter_tensor(&image, &kernel, &options).expect("reference");
+        let expected =
+            apply_imfilter_tensor(&image, &kernel, &options, FILTER2_BUILTIN).expect("reference");
         assert_eq!(gathered.shape, expected.shape);
         assert_eq!(gathered.data, expected.data);
     }
@@ -243,18 +272,19 @@ pub(crate) mod tests {
     fn valid_shape_option_matches_reference() {
         let kernel = tensor(vec![1.0, 0.0, 0.0, -1.0], 2, 2);
         let image = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
-        let value = filter2_builtin(
+        let value = block_on(filter2_builtin(
             Value::Tensor(kernel.clone()),
             Value::Tensor(image.clone()),
             vec![Value::from("valid")],
-        )
+        ))
         .expect("filter2");
         let gathered = test_support::gather(value).expect("gather");
         let options = ImfilterOptions {
             shape: ImfilterShape::Valid,
             ..Default::default()
         };
-        let expected = apply_imfilter_tensor(&image, &kernel, &options).expect("reference");
+        let expected =
+            apply_imfilter_tensor(&image, &kernel, &options, FILTER2_BUILTIN).expect("reference");
         assert_eq!(gathered.shape, expected.shape);
         assert_eq!(gathered.data, expected.data);
     }
@@ -264,18 +294,19 @@ pub(crate) mod tests {
     fn convolution_mode_rotates_kernel() {
         let kernel = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
         let image = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
-        let value = filter2_builtin(
+        let value = block_on(filter2_builtin(
             Value::Tensor(kernel.clone()),
             Value::Tensor(image.clone()),
             vec![Value::from("conv")],
-        )
+        ))
         .expect("filter2");
         let gathered = test_support::gather(value).expect("gather");
         let options = ImfilterOptions {
             mode: ImfilterMode::Convolution,
             ..Default::default()
         };
-        let expected = apply_imfilter_tensor(&image, &kernel, &options).expect("reference");
+        let expected =
+            apply_imfilter_tensor(&image, &kernel, &options, FILTER2_BUILTIN).expect("reference");
         assert_eq!(gathered.shape, expected.shape);
         assert_eq!(gathered.data, expected.data);
     }
@@ -286,17 +317,17 @@ pub(crate) mod tests {
         let kernel = tensor(vec![0.0, 1.0, 1.0, 0.0], 2, 2);
         let image = tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2);
 
-        let default_value = filter2_builtin(
+        let default_value = block_on(filter2_builtin(
             Value::Tensor(kernel.clone()),
             Value::Tensor(image.clone()),
             Vec::new(),
-        )
+        ))
         .expect("filter2 default");
-        let corr_value = filter2_builtin(
+        let corr_value = block_on(filter2_builtin(
             Value::Tensor(kernel.clone()),
             Value::Tensor(image.clone()),
             vec![Value::from("corr")],
-        )
+        ))
         .expect("filter2 corr");
 
         let default_tensor = test_support::gather(default_value).expect("gather default");
@@ -311,17 +342,17 @@ pub(crate) mod tests {
         let kernel = tensor(vec![1.0, -1.0, 2.0, -2.0], 2, 2);
         let image = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
 
-        let conv_first = filter2_builtin(
+        let conv_first = block_on(filter2_builtin(
             Value::Tensor(kernel.clone()),
             Value::Tensor(image.clone()),
             vec![Value::from("conv"), Value::from("full")],
-        )
+        ))
         .expect("filter2 conv,full");
-        let shape_first = filter2_builtin(
+        let shape_first = block_on(filter2_builtin(
             Value::Tensor(kernel.clone()),
             Value::Tensor(image.clone()),
             vec![Value::from("full"), Value::from("conv")],
-        )
+        ))
         .expect("filter2 full,conv");
 
         let conv_first_tensor = test_support::gather(conv_first).expect("gather conv first");
@@ -335,15 +366,16 @@ pub(crate) mod tests {
     fn non_string_option_is_rejected() {
         let kernel = tensor(vec![1.0], 1, 1);
         let image = tensor(vec![1.0], 1, 1);
-        let err = filter2_builtin(
+        let err = block_on(filter2_builtin(
             Value::Tensor(kernel),
             Value::Tensor(image),
             vec![Value::Tensor(tensor(vec![2.0], 1, 1))],
-        )
+        ))
         .expect_err("expected option parsing error");
+        let message = error_message(err);
         assert!(
-            err.contains("expected string option"),
-            "unexpected error message: {err}"
+            message.contains("expected string option"),
+            "unexpected error message: {message}"
         );
     }
 
@@ -353,11 +385,11 @@ pub(crate) mod tests {
         let kernel = tensor(vec![1.0, 1.0, 1.0, 1.0], 2, 2);
         let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).expect("logical array");
 
-        let value = filter2_builtin(
+        let value = block_on(filter2_builtin(
             Value::Tensor(kernel.clone()),
             Value::LogicalArray(logical.clone()),
             Vec::new(),
-        )
+        ))
         .expect("filter2 logical");
 
         let gathered = test_support::gather(value).expect("gather logical result");
@@ -370,8 +402,13 @@ pub(crate) mod tests {
             logical.shape.clone(),
         )
         .expect("logical->tensor");
-        let expected = apply_imfilter_tensor(&image_tensor, &kernel, &ImfilterOptions::default())
-            .expect("expected logical reference");
+        let expected = apply_imfilter_tensor(
+            &image_tensor,
+            &kernel,
+            &ImfilterOptions::default(),
+            FILTER2_BUILTIN,
+        )
+        .expect("expected logical reference");
 
         assert_eq!(gathered.shape, expected.shape);
         assert_eq!(gathered.data, expected.data);
@@ -382,15 +419,16 @@ pub(crate) mod tests {
     fn rejects_unknown_option() {
         let kernel = tensor(vec![1.0], 1, 1);
         let image = tensor(vec![1.0], 1, 1);
-        let err = filter2_builtin(
+        let err = block_on(filter2_builtin(
             Value::Tensor(kernel),
             Value::Tensor(image),
             vec![Value::from("replicate")],
-        )
+        ))
         .expect_err("filter2 should error");
+        let message = error_message(err);
         assert!(
-            err.contains("filter2"),
-            "expected error mentioning builtin, got {err}"
+            message.contains("filter2"),
+            "expected error mentioning builtin, got {message}"
         );
     }
 
@@ -405,15 +443,20 @@ pub(crate) mod tests {
                 shape: &image.shape,
             };
             let image_handle = provider.upload(&image_view).expect("upload image");
-            let result = filter2_builtin(
+            let result = block_on(filter2_builtin(
                 Value::Tensor(kernel.clone()),
                 Value::GpuTensor(image_handle.clone()),
                 Vec::new(),
-            )
+            ))
             .expect("filter2 gpu");
             let gathered = test_support::gather(result).expect("gather");
-            let expected =
-                apply_imfilter_tensor(&image, &kernel, &ImfilterOptions::default()).expect("ref");
+            let expected = apply_imfilter_tensor(
+                &image,
+                &kernel,
+                &ImfilterOptions::default(),
+                FILTER2_BUILTIN,
+            )
+            .expect("ref");
             assert_eq!(gathered.shape, expected.shape);
             assert_eq!(gathered.data, expected.data);
         });
@@ -435,15 +478,20 @@ pub(crate) mod tests {
             };
             let kernel_handle = provider.upload(&kernel_view).expect("upload kernel");
             let image_handle = provider.upload(&image_view).expect("upload image");
-            let result = filter2_builtin(
+            let result = block_on(filter2_builtin(
                 Value::GpuTensor(kernel_handle.clone()),
                 Value::GpuTensor(image_handle.clone()),
                 Vec::new(),
-            )
+            ))
             .expect("filter2 gpu");
             let gathered = test_support::gather(result).expect("gather");
-            let expected = apply_imfilter_tensor(&image, &kernel, &ImfilterOptions::default())
-                .expect("reference");
+            let expected = apply_imfilter_tensor(
+                &image,
+                &kernel,
+                &ImfilterOptions::default(),
+                FILTER2_BUILTIN,
+            )
+            .expect("reference");
             assert_eq!(gathered.shape, expected.shape);
             assert_eq!(gathered.data, expected.data);
         });
@@ -484,16 +532,21 @@ pub(crate) mod tests {
         let kernel_handle = provider.upload(&kernel_view).expect("upload kernel");
         let image_handle = provider.upload(&image_view).expect("upload image");
 
-        let gpu_value = filter2_builtin(
+        let gpu_value = block_on(filter2_builtin(
             Value::GpuTensor(kernel_handle.clone()),
             Value::GpuTensor(image_handle.clone()),
             Vec::new(),
-        )
+        ))
         .expect("filter2 wgpu same");
         let gpu_tensor = test_support::gather(gpu_value).expect("gather gpu result");
 
-        let expected =
-            apply_imfilter_tensor(&image, &kernel, &ImfilterOptions::default()).expect("expected");
+        let expected = apply_imfilter_tensor(
+            &image,
+            &kernel,
+            &ImfilterOptions::default(),
+            FILTER2_BUILTIN,
+        )
+        .expect("expected");
 
         assert_eq!(gpu_tensor.shape, expected.shape);
         assert_eq!(gpu_tensor.data.len(), expected.data.len());
@@ -544,11 +597,11 @@ pub(crate) mod tests {
         let kernel_handle = provider.upload(&kernel_view).expect("upload kernel");
         let image_handle = provider.upload(&image_view).expect("upload image");
 
-        let gpu_value = filter2_builtin(
+        let gpu_value = block_on(filter2_builtin(
             Value::GpuTensor(kernel_handle.clone()),
             Value::GpuTensor(image_handle.clone()),
             vec![Value::from("full"), Value::from("conv")],
-        )
+        ))
         .expect("filter2 wgpu full conv");
         let gpu_tensor = test_support::gather(gpu_value).expect("gather gpu result");
 
@@ -557,8 +610,8 @@ pub(crate) mod tests {
             mode: ImfilterMode::Convolution,
             ..Default::default()
         };
-        let expected =
-            apply_imfilter_tensor(&image, &kernel, &options).expect("expected host result");
+        let expected = apply_imfilter_tensor(&image, &kernel, &options, FILTER2_BUILTIN)
+            .expect("expected host result");
 
         assert_eq!(gpu_tensor.shape, expected.shape);
         assert_eq!(gpu_tensor.data.len(), expected.data.len());

@@ -16,6 +16,8 @@ use crate::builtins::common::{
     tensor,
 };
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::single")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "single",
@@ -55,6 +57,20 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion emits a cast via `f32` then widens back to the WGSL scalar type when necessary.",
 };
 
+const BUILTIN_NAME: &str = "single";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn conversion_error(type_name: &str) -> RuntimeError {
+    builtin_error(format!(
+        "single: conversion to single from {type_name} is not possible"
+    ))
+}
+
 #[runtime_builtin(
     name = "single",
     category = "math/elementwise",
@@ -63,7 +79,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::single"
 )]
-fn single_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
     let converted = match value {
         Value::Num(n) => Ok(Value::Num(cast_f64_to_single(n))),
@@ -77,7 +93,7 @@ fn single_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         Value::ComplexTensor(tensor) => single_from_complex_tensor(tensor),
         Value::LogicalArray(array) => single_from_logical_array(array),
         Value::CharArray(chars) => single_from_char_array(chars),
-        Value::GpuTensor(handle) => single_from_gpu(handle),
+        Value::GpuTensor(handle) => single_from_gpu(handle).await,
         Value::String(_) | Value::StringArray(_) => Err(conversion_error("string")),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
@@ -88,30 +104,31 @@ fn single_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         Value::ClassRef(_) => Err(conversion_error("meta.class")),
         Value::MException(_) => Err(conversion_error("MException")),
     }?;
-    apply_output_template(converted, &template)
+    apply_output_template(converted, &template).await
 }
 
-fn single_from_tensor(tensor: Tensor) -> Result<Value, String> {
+fn single_from_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     single_tensor_to_host(tensor).map(Value::Tensor)
 }
 
-fn single_from_complex_tensor(tensor: ComplexTensor) -> Result<Value, String> {
+fn single_from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     single_complex_tensor_to_host(tensor).map(Value::ComplexTensor)
 }
 
-fn single_from_logical_array(array: LogicalArray) -> Result<Value, String> {
-    let tensor = tensor::logical_to_tensor(&array).map_err(|e| format!("single: {e}"))?;
+fn single_from_logical_array(array: LogicalArray) -> BuiltinResult<Value> {
+    let tensor =
+        tensor::logical_to_tensor(&array).map_err(|e| builtin_error(format!("single: {e}")))?;
     single_tensor_to_host(tensor).map(Value::Tensor)
 }
 
-fn single_from_char_array(chars: CharArray) -> Result<Value, String> {
+fn single_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
     let tensor = char_array_to_tensor(&chars)?;
     single_tensor_to_host(tensor).map(Value::Tensor)
 }
 
-fn single_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn single_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        match provider.unary_single(&handle) {
+        match provider.unary_single(&handle).await {
             Ok(result) => {
                 let _ = provider.free(&handle);
                 return Ok(Value::GpuTensor(result));
@@ -122,7 +139,7 @@ fn single_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let converted = single_tensor_to_host(tensor)?;
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         let _ = provider.free(&handle);
@@ -142,13 +159,13 @@ fn single_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
     Ok(tensor::tensor_into_value(converted))
 }
 
-fn single_tensor_to_host(mut tensor: Tensor) -> Result<Tensor, String> {
+fn single_tensor_to_host(mut tensor: Tensor) -> BuiltinResult<Tensor> {
     cast_slice_to_single(&mut tensor.data);
     tensor.dtype = NumericDType::F32;
     Ok(tensor)
 }
 
-fn single_complex_tensor_to_host(mut tensor: ComplexTensor) -> Result<ComplexTensor, String> {
+fn single_complex_tensor_to_host(mut tensor: ComplexTensor) -> BuiltinResult<ComplexTensor> {
     cast_complex_slice_to_single(&mut tensor.data);
     Ok(tensor)
 }
@@ -170,16 +187,10 @@ fn cast_f64_to_single(value: f64) -> f64 {
     (value as f32) as f64
 }
 
-fn char_array_to_tensor(chars: &CharArray) -> Result<Tensor, String> {
+fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
     let ascii: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-    Tensor::new(ascii, vec![chars.rows, chars.cols]).map_err(|e| format!("single: {e}"))
-}
-
-fn conversion_error(type_name: &str) -> String {
-    format!(
-        "single: conversion to single from {} is not possible",
-        type_name
-    )
+    Tensor::new(ascii, vec![chars.rows, chars.cols])
+        .map_err(|e| builtin_error(format!("single: {e}")))
 }
 
 #[derive(Clone)]
@@ -188,28 +199,30 @@ enum OutputTemplate {
     Like(Value),
 }
 
-fn parse_output_template(args: &[Value]) -> Result<OutputTemplate, String> {
+fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     match args.len() {
         0 => Ok(OutputTemplate::Default),
         1 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-                Err("single: expected prototype after 'like'".to_string())
+                Err(builtin_error("single: expected prototype after 'like'"))
             } else {
-                Err("single: unrecognised argument for single".to_string())
+                Err(builtin_error("single: unrecognised argument for single"))
             }
         }
         2 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
                 Ok(OutputTemplate::Like(args[1].clone()))
             } else {
-                Err("single: unsupported option; only 'like' is accepted".to_string())
+                Err(builtin_error(
+                    "single: unsupported option; only 'like' is accepted",
+                ))
             }
         }
-        _ => Err("single: too many input arguments".to_string()),
+        _ => Err(builtin_error("single: too many input arguments")),
     }
 }
 
-fn apply_output_template(value: Value, template: &OutputTemplate) -> Result<Value, String> {
+async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
     match template {
         OutputTemplate::Default => Ok(value),
         OutputTemplate::Like(proto) => match proto {
@@ -218,21 +231,22 @@ fn apply_output_template(value: Value, template: &OutputTemplate) -> Result<Valu
             | Value::Num(_)
             | Value::Int(_)
             | Value::Bool(_)
-            | Value::LogicalArray(_) => convert_to_host_like(value),
-            Value::Complex(_, _) | Value::ComplexTensor(_) => {
-                Err("single: complex prototypes for 'like' are not supported yet".to_string())
-            }
-            _ => Err(
-                "single: unsupported prototype for 'like'; provide a numeric or gpuArray prototype"
-                    .to_string(),
-            ),
+            | Value::LogicalArray(_) => convert_to_host_like(value).await,
+            Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
+                "single: complex prototypes for 'like' are not supported yet",
+            )),
+            _ => Err(builtin_error(
+                "single: unsupported prototype for 'like'; provide a numeric or gpuArray prototype",
+            )),
         },
     }
 }
 
-fn convert_to_gpu(value: Value) -> Result<Value, String> {
+fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        "single: GPU output requested via 'like' but no acceleration provider is active".to_string()
+        builtin_error(
+            "single: GPU output requested via 'like' but no acceleration provider is active",
+        )
     })?;
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
@@ -241,11 +255,14 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
                 data: &tensor.data,
                 shape: &tensor.shape,
             };
-            let handle = provider.upload(&view).map_err(|e| format!("single: {e}"))?;
+            let handle = provider
+                .upload(&view)
+                .map_err(|e| builtin_error(format!("single: {e}")))?;
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("single: {e}"))?;
+            let tensor = Tensor::new(vec![n], vec![1, 1])
+                .map_err(|e| builtin_error(format!("single: {e}")))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
@@ -254,20 +271,22 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
             let tensor = tensor::logical_to_tensor(&logical)?;
             convert_to_gpu(Value::Tensor(tensor))
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err("single: GPU prototypes for 'like' only support real numeric outputs".to_string())
-        }
-        other => Err(format!(
-            "single: unsupported result type for GPU output via 'like' ({other:?})"
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
+            "single: GPU prototypes for 'like' only support real numeric outputs",
         )),
+        other => Err(builtin_error(format!(
+            "single: unsupported result type for GPU output via 'like' ({other:?})"
+        ))),
     }
 }
 
-fn convert_to_host_like(value: Value) -> Result<Value, String> {
+async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             let proxy = Value::GpuTensor(handle);
-            gpu_helpers::gather_value(&proxy).map_err(|e| format!("single: {e}"))
+            gpu_helpers::gather_value_async(&proxy)
+                .await
+                .map_err(|e| builtin_error(format!("single: {e}")))
         }
         other => Ok(other),
     }
@@ -277,7 +296,12 @@ fn convert_to_host_like(value: Value) -> Result<Value, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
+
+    fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::single_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -349,8 +373,8 @@ pub(crate) mod tests {
     fn single_errors_on_string_input() {
         let err = single_builtin(Value::String("hello".to_string()), Vec::new())
             .expect_err("expected error");
-        assert!(err.contains("single"));
-        assert!(err.contains("string"));
+        assert!(err.message().contains("single"));
+        assert!(err.message().contains("string"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -491,7 +515,7 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let gpu_value = single_from_gpu(handle).expect("gpu single");
+        let gpu_value = block_on(single_from_gpu(handle)).expect("gpu single");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
         assert_eq!(gathered.data, cpu.data);
@@ -512,7 +536,7 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let gpu_value = single_from_gpu(handle).expect("gpu single");
+        let gpu_value = block_on(single_from_gpu(handle)).expect("gpu single");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, tensor.shape);
         let sum: f64 = gathered.data.iter().copied().sum();

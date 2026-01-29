@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/runmat-async",
     "crates/runmat-lexer",
     "crates/runmat-parser",
     "crates/runmat-hir",
@@ -24,7 +25,9 @@ members = [
     "crates/runmat-time",
     "crates/runmat-wasm",
     "crates/runmat-thread-local",
-    "crates/runmat-filesystem", "tools/wasm-paths",
+    "crates/runmat-filesystem",
+    "tools/wasm-paths",
+    "tools/builtin-controlflow-migrate",
     "crates/runmat-config",
 ]
 resolver = "2"
@@ -38,13 +41,14 @@ proc-macro2 = "1"
 logos = "0.15"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", default-features = false }
 zmq = "0.10"
 uuid = { version = "1", features = ["v4"] }
 clap = { version = "4", features = ["derive", "env"] }
 env_logger = "0.11"
 log = "0.4"
 thiserror = "1"
+miette = "7"
 chrono = { version = "0.4.42", features = ["serde"] }
 anyhow = "1"
 cranelift = "0.115"
@@ -61,6 +65,7 @@ runmat-lexer = { version = "=0.2.8", path = "crates/runmat-lexer" }
 runmat-parser = { version = "=0.2.8", path = "crates/runmat-parser" }
 runmat-hir = { version = "=0.2.8", path = "crates/runmat-hir" }
 runmat-ignition = { version = "=0.2.8", path = "crates/runmat-ignition" }
+runmat-async = { version = "=0.2.8", path = "crates/runmat-async" }
 runmat-core = { version = "=0.2.8", path = "crates/runmat-core", default-features = false }
 runmat-plot = { version = "=0.2.8", path = "crates/runmat-plot", default-features = false }
 runmat-macros = { version = "=0.2.8", path = "crates/runmat-macros" }
@@ -77,6 +82,3 @@ runmat-accelerate = { version = "=0.2.8", path = "crates/runmat-accelerate" }
 runmat-accelerate-api = { version = "=0.2.8", path = "crates/runmat-accelerate-api" }
 runmat-gc-api = { version = "=0.2.8", path = "crates/runmat-gc-api" }
 runmat-thread-local = { version = "0.1.0", path = "crates/runmat-thread-local" }
-
-[patch.crates-io]
-# Ensure no accidental cycle via crates.io variants

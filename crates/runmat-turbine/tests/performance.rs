@@ -1,11 +1,16 @@
 use runmat_builtins::Value;
 use runmat_gc::gc_test_context;
-use runmat_hir::lower;
+use runmat_hir::{HirProgram, LoweringContext, SemanticError};
 use runmat_ignition::compile;
 use runmat_parser::parse;
 use runmat_time::Instant;
 use runmat_turbine::TurbineEngine;
+use std::collections::HashMap;
 use std::time::Duration;
+
+fn lower(ast: &runmat_parser::Program) -> Result<HirProgram, SemanticError> {
+    runmat_hir::lower(ast, &LoweringContext::empty()).map(|result| result.hir)
+}
 
 #[test]
 fn test_compilation_performance() {
@@ -14,7 +19,7 @@ fn test_compilation_performance() {
             let source = "perf_test = 42 + 58";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             let start = Instant::now();
             let result = engine.compile_bytecode(&bytecode);
@@ -38,7 +43,7 @@ fn test_execution_performance() {
             let source = "execution_test = 100 * 200";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             let mut vars = vec![Value::Num(0.0); bytecode.var_count];
 
@@ -65,7 +70,7 @@ fn test_repeated_execution_performance() {
             let source = "repeated = 50 + 75";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             let mut execution_times = Vec::new();
 
@@ -101,7 +106,7 @@ fn test_compilation_cache_performance() {
             let source = "cache_perf = 123 + 456";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             // First compilation
             let start1 = Instant::now();
@@ -138,7 +143,7 @@ fn test_memory_usage_during_compilation() {
                 let source = format!("memory_test_{i} = {i} * 2");
                 let ast = parse(&source).unwrap();
                 let hir = lower(&ast).unwrap();
-                let bytecode = compile(&hir).unwrap();
+                let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
                 let result = engine.compile_bytecode(&bytecode);
                 assert!(result.is_ok());
@@ -166,7 +171,7 @@ fn test_hotspot_compilation_timing() {
             let source = "hotspot_timing = 789 + 321";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             let mut vars = vec![Value::Num(0.0); bytecode.var_count];
             let mut times = Vec::new();
@@ -215,7 +220,7 @@ fn test_compilation_scalability() {
 
                 let ast = parse(&source).unwrap();
                 let hir = lower(&ast).unwrap();
-                let bytecode = compile(&hir).unwrap();
+                let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
                 let start = Instant::now();
                 let result = engine.compile_bytecode(&bytecode);
@@ -262,7 +267,7 @@ fn test_concurrent_execution_performance() {
                     let source = format!("concurrent_{} = {} + {}", i, i, i + 1);
                     let ast = parse(&source).unwrap();
                     let hir = lower(&ast).unwrap();
-                    let bytecode = compile(&hir).unwrap();
+                    let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
                     let mut vars = vec![Value::Num(0.0); bytecode.var_count];
 
@@ -296,7 +301,7 @@ fn test_garbage_collection_impact() {
             let source = "gc_impact = 555 + 444";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             // Perform some allocations to stress GC
             for i in 0..100 {
@@ -331,7 +336,7 @@ fn test_engine_statistics_overhead() {
             let source = "stats_overhead = 999";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             let start = Instant::now();
 
@@ -367,7 +372,7 @@ fn test_peak_memory_usage() {
                 let source = format!("peak_test_{} = {} + {} * 2", i, i, i + 1);
                 let ast = parse(&source).unwrap();
                 let hir = lower(&ast).unwrap();
-                let bytecode = compile(&hir).unwrap();
+                let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
                 let result = engine.compile_bytecode(&bytecode);
                 if result.is_err() {
@@ -400,7 +405,7 @@ fn test_cache_hit_ratio_performance() {
             let source = "cache_hit_test = 111 + 222";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             // Multiple compilations to test cache behavior
             for _ in 0..10 {

@@ -14,7 +14,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const PI: f64 = std::f64::consts::PI;
 const SQRT_TWO_PI: f64 = 2.506_628_274_631_000_5;
@@ -60,6 +61,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner currently falls back to host evaluation; providers may supply specialised kernels in the future.",
 };
 
+const BUILTIN_NAME: &str = "gamma";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 #[runtime_builtin(
     name = "gamma",
     category = "math/elementwise",
@@ -68,59 +77,63 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::gamma"
 )]
-fn gamma_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn gamma_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let output = parse_output_template(&rest)?;
     let base = match value {
-        Value::GpuTensor(handle) => gamma_gpu(handle)?,
+        Value::GpuTensor(handle) => gamma_gpu(handle).await?,
         Value::Complex(re, im) => gamma_complex_scalar_value(Complex64::new(re, im)),
         Value::ComplexTensor(ct) => gamma_complex_tensor(ct)?,
         Value::CharArray(ca) => gamma_char_array(ca)?,
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(format!("gamma: {e}")))?;
             gamma_tensor(tensor).map(tensor::tensor_into_value)?
         }
         Value::String(_) | Value::StringArray(_) => {
-            return Err("gamma: expected numeric input".to_string())
+            return Err(builtin_error("gamma: expected numeric input"))
         }
         Value::Tensor(tensor) => gamma_tensor(tensor).map(tensor::tensor_into_value)?,
         Value::Num(n) => Value::Num(gamma_real_scalar(n)),
         Value::Int(i) => Value::Num(gamma_real_scalar(i.to_f64())),
         Value::Bool(b) => Value::Num(gamma_real_scalar(if b { 1.0 } else { 0.0 })),
         other => {
-            return Err(format!(
+            return Err(builtin_error(format!(
                 "gamma: unsupported input type {:?}; expected numeric or gpuArray input",
                 other
-            ));
+            )))
         }
     };
-    apply_output_template(base, &output)
+    apply_output_template(base, &output).await
 }
 
-fn gamma_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn gamma_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_gamma(&handle) {
+        if let Ok(out) = provider.unary_gamma(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
-    gamma_tensor(tensor).map(tensor::tensor_into_value)
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    Ok(tensor::tensor_into_value(gamma_tensor(tensor)?))
 }
 
-fn gamma_tensor(tensor: Tensor) -> Result<Tensor, String> {
+fn gamma_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let mut data = Vec::with_capacity(tensor.data.len());
     for &v in &tensor.data {
         data.push(gamma_real_scalar(v));
     }
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| format!("gamma: {e}"))
+    Tensor::new(data, tensor.shape.clone()).map_err(|e| builtin_error(format!("gamma: {e}")))
 }
 
-fn gamma_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn gamma_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mut out = Vec::with_capacity(ct.data.len());
     for &(re, im) in &ct.data {
         let res = gamma_complex_scalar(Complex64::new(re, im));
         out.push((res.re, res.im));
     }
-    let tensor = ComplexTensor::new(out, ct.shape.clone()).map_err(|e| format!("gamma: {e}"))?;
+    let tensor = ComplexTensor::new(out, ct.shape.clone())
+        .map_err(|e| builtin_error(format!("gamma: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -133,13 +146,14 @@ fn gamma_complex_scalar_value(z: Complex64) -> Value {
     }
 }
 
-fn gamma_char_array(ca: CharArray) -> Result<Value, String> {
+fn gamma_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data
         .iter()
         .map(|&ch| gamma_real_scalar(ch as u32 as f64))
         .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("gamma: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| builtin_error(format!("gamma: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -226,53 +240,57 @@ enum OutputTemplate {
     Like(Value),
 }
 
-fn parse_output_template(args: &[Value]) -> Result<OutputTemplate, String> {
+fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     match args.len() {
         0 => Ok(OutputTemplate::Default),
         1 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-                Err("gamma: expected prototype after 'like'".to_string())
+                Err(builtin_error("gamma: expected prototype after 'like'"))
             } else {
-                Err("gamma: unrecognised argument for gamma".to_string())
+                Err(builtin_error("gamma: unrecognised argument for gamma"))
             }
         }
         2 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
                 Ok(OutputTemplate::Like(args[1].clone()))
             } else {
-                Err("gamma: unsupported option; only 'like' is accepted".to_string())
+                Err(builtin_error(
+                    "gamma: unsupported option; only 'like' is accepted",
+                ))
             }
         }
-        _ => Err("gamma: too many input arguments".to_string()),
+        _ => Err(builtin_error("gamma: too many input arguments")),
     }
 }
 
-fn apply_output_template(value: Value, template: &OutputTemplate) -> Result<Value, String> {
+async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
     match template {
         OutputTemplate::Default => Ok(value),
-        OutputTemplate::Like(proto) => apply_like_template(value, proto),
+        OutputTemplate::Like(proto) => apply_like_template(value, proto).await,
     }
 }
 
-fn apply_like_template(value: Value, prototype: &Value) -> Result<Value, String> {
-    let analysis = analyse_like_prototype(prototype)?;
+async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
+    let analysis = analyse_like_prototype(prototype).await?;
     match analysis.class {
         PrototypeClass::Real => match analysis.device {
-            DevicePreference::Host => convert_to_host_real(value),
+            DevicePreference::Host => convert_to_host_real(value).await,
             DevicePreference::Gpu => convert_to_gpu_real(value),
         },
         PrototypeClass::Complex => match analysis.device {
-            DevicePreference::Host => convert_to_host_complex(value),
-            DevicePreference::Gpu => {
-                Err("gamma: complex GPU prototypes are not supported yet".to_string())
-            }
+            DevicePreference::Host => convert_to_host_complex(value).await,
+            DevicePreference::Gpu => Err(builtin_error(
+                "gamma: complex GPU prototypes are not supported yet",
+            )),
         },
     }
 }
 
-fn convert_to_gpu_real(value: Value) -> Result<Value, String> {
+fn convert_to_gpu_real(value: Value) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        "gamma: GPU output requested via 'like' but no acceleration provider is active".to_string()
+        builtin_error(
+            "gamma: GPU output requested via 'like' but no acceleration provider is active",
+        )
     })?;
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
@@ -281,61 +299,71 @@ fn convert_to_gpu_real(value: Value) -> Result<Value, String> {
                 data: &tensor.data,
                 shape: &tensor.shape,
             };
-            let handle = provider.upload(&view).map_err(|e| format!("gamma: {e}"))?;
+            let handle = provider
+                .upload(&view)
+                .map_err(|e| builtin_error(format!("gamma: {e}")))?;
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("gamma: {e}"))?;
+            let tensor = Tensor::new(vec![n], vec![1, 1])
+                .map_err(|e| builtin_error(format!("gamma: {e}")))?;
             convert_to_gpu_real(Value::Tensor(tensor))
         }
         Value::Int(i) => convert_to_gpu_real(Value::Num(i.to_f64())),
         Value::Bool(b) => convert_to_gpu_real(Value::Num(if b { 1.0 } else { 0.0 })),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(format!("gamma: {e}")))?;
             convert_to_gpu_real(Value::Tensor(tensor))
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err("gamma: GPU prototypes for 'like' only support real numeric outputs".to_string())
-        }
-        other => Err(format!(
-            "gamma: unsupported result type for GPU output via 'like' ({other:?})"
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
+            "gamma: GPU prototypes for 'like' only support real numeric outputs",
         )),
+        other => Err(builtin_error(format!(
+            "gamma: unsupported result type for GPU output via 'like' ({other:?})"
+        ))),
     }
 }
 
-fn convert_to_host_real(value: Value) -> Result<Value, String> {
+async fn convert_to_host_real(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             let proxy = Value::GpuTensor(handle);
-            gpu_helpers::gather_value(&proxy).map_err(|e| format!("gamma: {e}"))
+            gpu_helpers::gather_value_async(&proxy)
+                .await
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))
         }
         other => Ok(other),
     }
 }
 
-fn convert_to_host_complex(value: Value) -> Result<Value, String> {
+#[async_recursion::async_recursion(?Send)]
+async fn convert_to_host_complex(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(tensor) => {
             let data = tensor.data.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
             let complex = ComplexTensor::new(data, tensor.shape.clone())
-                .map_err(|e| format!("gamma: {e}"))?;
+                .map_err(|e| builtin_error(format!("gamma: {e}")))?;
             Ok(complex_tensor_into_value(complex))
         }
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_tensor(&handle)?;
-            convert_to_host_complex(Value::Tensor(gathered))
+            let gathered = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+            convert_to_host_complex(Value::Tensor(gathered)).await
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
-            convert_to_host_complex(Value::Tensor(tensor))
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(format!("gamma: {e}")))?;
+            convert_to_host_complex(Value::Tensor(tensor)).await
         }
-        Value::Bool(b) => convert_to_host_complex(Value::Num(if b { 1.0 } else { 0.0 })),
-        Value::Int(i) => convert_to_host_complex(Value::Num(i.to_f64())),
-        other => Err(format!(
+        Value::Bool(b) => convert_to_host_complex(Value::Num(if b { 1.0 } else { 0.0 })).await,
+        Value::Int(i) => convert_to_host_complex(Value::Num(i.to_f64())).await,
+        other => Err(builtin_error(format!(
             "gamma: cannot convert {other:?} to complex output via 'like'"
-        )),
+        ))),
     }
 }
 
@@ -356,7 +384,8 @@ struct LikeAnalysis {
     device: DevicePreference,
 }
 
-fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
+#[async_recursion::async_recursion(?Send)]
+async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
     match proto {
         Value::GpuTensor(_) => Ok(LikeAnalysis {
             class: PrototypeClass::Real,
@@ -376,9 +405,10 @@ fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
             device: DevicePreference::Host,
         }),
         other => {
-            let gathered =
-                crate::dispatcher::gather_if_needed(other).map_err(|e| format!("gamma: {e}"))?;
-            analyse_like_prototype(&gathered)
+            let gathered = crate::dispatcher::gather_if_needed_async(other)
+                .await
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+            analyse_like_prototype(&gathered).await
         }
     }
 }
@@ -387,8 +417,13 @@ fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};
+
+    fn gamma_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::gamma_builtin(value, rest))
+    }
 
     fn approx_eq(a: f64, b: f64, tol: f64) {
         assert!((a - b).abs() <= tol, "expected {b}, got {a} (tol {tol})");
@@ -493,7 +528,7 @@ pub(crate) mod tests {
     #[test]
     fn gamma_string_input_errors() {
         let err = gamma_builtin(Value::from("hello"), Vec::new()).expect_err("expected error");
-        assert!(err.contains("expected numeric input"));
+        assert!(err.message().contains("expected numeric input"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -529,7 +564,7 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let gpu_value = gamma_gpu(handle).expect("gamma gpu");
+        let gpu_value = block_on(gamma_gpu(handle)).expect("gamma gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
         let tol = match provider.precision() {
@@ -581,7 +616,7 @@ pub(crate) mod tests {
                 vec![Value::from("like"), Value::GpuTensor(proto)],
             )
             .expect_err("expected error");
-            assert!(err.contains("only support real numeric outputs"));
+            assert!(err.message().contains("only support real numeric outputs"));
         });
     }
 
@@ -610,7 +645,7 @@ pub(crate) mod tests {
             vec![Value::from("like"), Value::Num(0.0), Value::Num(1.0)],
         )
         .expect_err("expected error");
-        assert!(err.contains("too many input arguments"));
+        assert!(err.message().contains("too many input arguments"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

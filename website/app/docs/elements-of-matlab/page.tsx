@@ -1,12 +1,15 @@
-import type { Metadata } from 'next';
 import { loadBuiltins } from '@/lib/builtins';
 import ElementsOfMatlabGrid from '@/components/ElementsOfMatlabGrid';
+import { buildPageMetadata } from '@/lib/seo';
 
-export const metadata: Metadata = {
-  title: 'MATLAB Function Reference',
-  description: 'Clickable map of core MATLAB building blocks implemented in RunMat. Explore data types, array operations, math functions, control flow, I/O, and more.',
-  alternates: { canonical: '/docs/matlab-function-reference' },
-};
+export const metadata = buildPageMetadata({
+  title: 'Elements of MATLAB | Docs',
+  description:
+    'Clickable map of core MATLAB building blocks implemented in RunMat. Explore data types, array operations, math functions, control flow, I/O, and more.',
+  canonicalPath: '/docs/elements-of-matlab',
+  ogType: 'website',
+  ogImagePath: '/docs/opengraph-image',
+});
 
 export default async function ElementsOfMatlabPage() {
   const builtins = loadBuiltins();

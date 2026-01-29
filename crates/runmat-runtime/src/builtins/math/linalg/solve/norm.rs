@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "norm";
 
@@ -29,6 +30,32 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Awaiting specialized kernels; RunMat gathers to host when providers omit the optional norm hook.",
 };
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    if err.message() == "interaction pending..." {
+        return build_runtime_error("interaction pending...")
+            .with_builtin(NAME)
+            .build();
+    }
+    let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
+    if let Some(identifier) = err.identifier() {
+        builder = builder.with_identifier(identifier.to_string());
+    }
+    if let Some(task_id) = err.context.task_id.clone() {
+        builder = builder.with_task_id(task_id);
+    }
+    if !err.context.call_stack.is_empty() {
+        builder = builder.with_call_stack(err.context.call_stack.clone());
+    }
+    if let Some(phase) = err.context.phase.clone() {
+        builder = builder.with_phase(phase);
+    }
+    builder.with_source(err).build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::solve::norm")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -50,10 +77,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::linalg::solve::norm"
 )]
-fn norm_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn norm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let order = parse_order(&rest)?;
     match value {
-        Value::GpuTensor(handle) => norm_gpu(handle, order),
+        Value::GpuTensor(handle) => norm_gpu(handle, order).await,
         Value::ComplexTensor(tensor) => {
             let norm = norm_complex_tensor(&tensor, order)?;
             Ok(Value::Num(norm))
@@ -63,13 +90,12 @@ fn norm_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
             Ok(Value::Num(norm))
         }
         Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("{NAME}: {e}"))?;
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(builtin_error)?;
             let norm = norm_complex_tensor(&tensor, order)?;
             Ok(Value::Num(norm))
         }
         other => {
-            let tensor = tensor::value_into_tensor_for(NAME, other)?;
+            let tensor = tensor::value_into_tensor_for(NAME, other).map_err(builtin_error)?;
             let norm = norm_real_tensor(&tensor, order)?;
             Ok(Value::Num(norm))
         }
@@ -95,29 +121,46 @@ enum TensorKind {
     Matrix { rows: usize, cols: usize },
 }
 
-fn norm_gpu(handle: GpuTensorHandle, order: NormOrder) -> Result<Value, String> {
+async fn norm_gpu(handle: GpuTensorHandle, order: NormOrder) -> BuiltinResult<Value> {
     let maybe_provider = runmat_accelerate_api::provider();
 
     if let Some(provider) = maybe_provider {
         let provider_order = ProviderNormOrder::from(order);
-        if let Ok(result) = provider.norm(&handle, provider_order) {
+        if let Ok(result) = provider.norm(&handle, provider_order).await {
             return Ok(Value::GpuTensor(result));
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(map_control_flow)?;
     let norm = norm_real_tensor(&tensor, order)?;
 
     if let Some(provider) = maybe_provider {
-        if let Ok(uploaded) = upload_scalar(provider, norm) {
-            return Ok(Value::GpuTensor(uploaded));
+        match upload_scalar(provider, norm) {
+            Ok(uploaded) => return Ok(Value::GpuTensor(uploaded)),
+            Err(err) => {
+                if err.message() == "interaction pending..." {
+                    return Err(build_runtime_error("interaction pending...")
+                        .with_builtin(NAME)
+                        .build());
+                }
+            }
         }
     }
 
     Ok(Value::Num(norm))
 }
 
-fn norm_real_tensor(tensor: &Tensor, order: NormOrder) -> Result<f64, String> {
+fn norm_real_tensor(tensor: &Tensor, order: NormOrder) -> BuiltinResult<f64> {
+    norm_real_tensor_impl(tensor, order)
+}
+
+fn norm_complex_tensor(tensor: &ComplexTensor, order: NormOrder) -> BuiltinResult<f64> {
+    norm_complex_tensor_impl(tensor, order)
+}
+
+fn norm_real_tensor_impl(tensor: &Tensor, order: NormOrder) -> BuiltinResult<f64> {
     let kind = classify_tensor(&tensor.shape)?;
     let resolved = match order {
         NormOrder::Default => NormOrder::Two,
@@ -132,7 +175,7 @@ fn norm_real_tensor(tensor: &Tensor, order: NormOrder) -> Result<f64, String> {
     }
 }
 
-fn norm_complex_tensor(tensor: &ComplexTensor, order: NormOrder) -> Result<f64, String> {
+fn norm_complex_tensor_impl(tensor: &ComplexTensor, order: NormOrder) -> BuiltinResult<f64> {
     let kind = classify_tensor(&tensor.shape)?;
     let resolved = match order {
         NormOrder::Default => NormOrder::Two,
@@ -147,13 +190,15 @@ fn norm_complex_tensor(tensor: &ComplexTensor, order: NormOrder) -> Result<f64, 
     }
 }
 
-fn classify_tensor(shape: &[usize]) -> Result<TensorKind, String> {
+fn classify_tensor(shape: &[usize]) -> BuiltinResult<TensorKind> {
     if shape.is_empty() {
         return Ok(TensorKind::Vector);
     }
 
     if shape.len() > 2 && shape.iter().skip(2).any(|&d| d > 1) {
-        return Err(format!("{NAME}: input must be a vector or 2-D matrix."));
+        return Err(builtin_error(format!(
+            "{NAME}: input must be a vector or 2-D matrix."
+        )));
     }
 
     let rows = shape.first().copied().unwrap_or(0);
@@ -166,7 +211,7 @@ fn classify_tensor(shape: &[usize]) -> Result<TensorKind, String> {
     }
 }
 
-fn vector_norm_from_magnitudes(magnitudes: &[f64], order: NormOrder) -> Result<f64, String> {
+fn vector_norm_from_magnitudes(magnitudes: &[f64], order: NormOrder) -> BuiltinResult<f64> {
     if magnitudes.iter().any(|v| v.is_nan()) {
         return Ok(f64::NAN);
     }
@@ -206,17 +251,17 @@ fn vector_norm_from_magnitudes(magnitudes: &[f64], order: NormOrder) -> Result<f
             }
             Ok(count)
         }
-        NormOrder::Nuc => Err(format!(
+        NormOrder::Nuc => Err(builtin_error(format!(
             "{NAME}: nuclear norm is only defined for matrices."
-        )),
+        ))),
         NormOrder::P(p) => {
             if !p.is_finite() {
-                return Err(format!("{NAME}: invalid norm order {p}"));
+                return Err(builtin_error(format!("{NAME}: invalid norm order {p}")));
             }
             if p < 1.0 {
-                return Err(format!(
+                return Err(builtin_error(format!(
                     "{NAME}: vector norm order {p} must satisfy p >= 1 (or use 0, Inf, or -Inf)."
-                ));
+                )));
             }
             if magnitudes.is_empty() {
                 return Ok(0.0);
@@ -261,7 +306,7 @@ fn matrix_norm_real(
     rows: usize,
     cols: usize,
     order: NormOrder,
-) -> Result<f64, String> {
+) -> BuiltinResult<f64> {
     if tensor.data.iter().any(|v| v.is_nan()) {
         return Ok(f64::NAN);
     }
@@ -284,15 +329,15 @@ fn matrix_norm_real(
             Ok(root_sum_of_squares(&magnitudes))
         }
         NormOrder::Nuc => nuclear_norm_real(tensor, rows, cols),
-        NormOrder::Zero => Err(format!(
+        NormOrder::Zero => Err(builtin_error(format!(
             "{NAME}: matrix norm order 0 is not supported; use 1, 2, Inf, 'fro', or 'nuc'."
-        )),
-        NormOrder::NegInf => Err(format!(
+        ))),
+        NormOrder::NegInf => Err(builtin_error(format!(
             "{NAME}: matrix norm order -Inf is not supported; use 1, 2, Inf, 'fro', or 'nuc'."
-        )),
-        NormOrder::P(p) => Err(format!(
+        ))),
+        NormOrder::P(p) => Err(builtin_error(format!(
             "{NAME}: matrix norm order {p} is not supported; use 1, 2, Inf, 'fro', or 'nuc'."
-        )),
+        ))),
     }
 }
 
@@ -301,7 +346,7 @@ fn matrix_norm_complex(
     rows: usize,
     cols: usize,
     order: NormOrder,
-) -> Result<f64, String> {
+) -> BuiltinResult<f64> {
     if tensor
         .data
         .iter()
@@ -328,15 +373,15 @@ fn matrix_norm_complex(
             Ok(root_sum_of_squares(&magnitudes))
         }
         NormOrder::Nuc => nuclear_norm_complex(tensor, rows, cols),
-        NormOrder::Zero => Err(format!(
+        NormOrder::Zero => Err(builtin_error(format!(
             "{NAME}: matrix norm order 0 is not supported for complex inputs; use 1, 2, Inf, 'fro', or 'nuc'."
-        )),
-        NormOrder::NegInf => Err(format!(
+        ))),
+        NormOrder::NegInf => Err(builtin_error(format!(
             "{NAME}: matrix norm order -Inf is not supported for complex inputs; use 1, 2, Inf, 'fro', or 'nuc'."
-        )),
-        NormOrder::P(p) => Err(format!(
+        ))),
+        NormOrder::P(p) => Err(builtin_error(format!(
             "{NAME}: matrix norm order {p} is not supported for complex inputs; use 1, 2, Inf, 'fro', or 'nuc'."
-        )),
+        ))),
     }
 }
 
@@ -374,7 +419,7 @@ fn max_row_sum(magnitudes: &[f64], rows: usize, cols: usize) -> f64 {
     max_sum
 }
 
-fn spectral_norm_real(tensor: &Tensor, rows: usize, cols: usize) -> Result<f64, String> {
+fn spectral_norm_real(tensor: &Tensor, rows: usize, cols: usize) -> BuiltinResult<f64> {
     if rows == 0 || cols == 0 {
         return Ok(0.0);
     }
@@ -386,7 +431,7 @@ fn spectral_norm_real(tensor: &Tensor, rows: usize, cols: usize) -> Result<f64, 
         .fold(0.0, |acc, &value| if value > acc { value } else { acc }))
 }
 
-fn spectral_norm_complex(tensor: &ComplexTensor, rows: usize, cols: usize) -> Result<f64, String> {
+fn spectral_norm_complex(tensor: &ComplexTensor, rows: usize, cols: usize) -> BuiltinResult<f64> {
     if rows == 0 || cols == 0 {
         return Ok(0.0);
     }
@@ -403,7 +448,7 @@ fn spectral_norm_complex(tensor: &ComplexTensor, rows: usize, cols: usize) -> Re
         .fold(0.0, |acc, &value| if value > acc { value } else { acc }))
 }
 
-fn nuclear_norm_real(tensor: &Tensor, rows: usize, cols: usize) -> Result<f64, String> {
+fn nuclear_norm_real(tensor: &Tensor, rows: usize, cols: usize) -> BuiltinResult<f64> {
     if rows == 0 || cols == 0 {
         return Ok(0.0);
     }
@@ -412,7 +457,7 @@ fn nuclear_norm_real(tensor: &Tensor, rows: usize, cols: usize) -> Result<f64, S
     Ok(svd.singular_values.iter().sum())
 }
 
-fn nuclear_norm_complex(tensor: &ComplexTensor, rows: usize, cols: usize) -> Result<f64, String> {
+fn nuclear_norm_complex(tensor: &ComplexTensor, rows: usize, cols: usize) -> BuiltinResult<f64> {
     if rows == 0 || cols == 0 {
         return Ok(0.0);
     }
@@ -426,17 +471,17 @@ fn nuclear_norm_complex(tensor: &ComplexTensor, rows: usize, cols: usize) -> Res
     Ok(svd.singular_values.iter().sum())
 }
 
-fn parse_order(args: &[Value]) -> Result<NormOrder, String> {
+fn parse_order(args: &[Value]) -> BuiltinResult<NormOrder> {
     match args.len() {
         0 => Ok(NormOrder::Default),
         1 => parse_order_value(&args[0]),
-        _ => Err(format!(
+        _ => Err(builtin_error(format!(
             "{NAME}: expected a single optional norm order argument."
-        )),
+        ))),
     }
 }
 
-fn parse_order_value(value: &Value) -> Result<NormOrder, String> {
+fn parse_order_value(value: &Value) -> BuiltinResult<NormOrder> {
     match value {
         Value::Num(n) => parse_numeric(*n),
         Value::Int(i) => parse_numeric(i.to_f64()),
@@ -445,7 +490,9 @@ fn parse_order_value(value: &Value) -> Result<NormOrder, String> {
             if tensor::is_scalar_tensor(t) {
                 parse_numeric(t.data[0])
             } else {
-                Err(format!("{NAME}: norm order must be a scalar."))
+                Err(builtin_error(format!(
+                    "{NAME}: norm order must be a scalar."
+                )))
             }
         }
         Value::LogicalArray(l) => {
@@ -453,30 +500,34 @@ fn parse_order_value(value: &Value) -> Result<NormOrder, String> {
                 let val = if l.data[0] != 0 { 1.0 } else { 0.0 };
                 parse_numeric(val)
             } else {
-                Err(format!(
+                Err(builtin_error(format!(
                     "{NAME}: norm order must be a scalar logical value."
-                ))
+                )))
             }
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err(format!("{NAME}: norm order must be real-valued."))
-        }
-        Value::GpuTensor(_) => Err(format!(
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(format!(
+            "{NAME}: norm order must be real-valued."
+        ))),
+        Value::GpuTensor(_) => Err(builtin_error(format!(
             "{NAME}: norm order cannot be a GPU-resident tensor."
-        )),
+        ))),
         _ => {
             if let Some(text) = tensor::value_to_string(value) {
                 parse_order_string(&text)
             } else {
-                Err(format!("{NAME}: unsupported norm order argument {value:?}"))
+                Err(builtin_error(format!(
+                    "{NAME}: unsupported norm order argument {value:?}"
+                )))
             }
         }
     }
 }
 
-fn parse_numeric(raw: f64) -> Result<NormOrder, String> {
+fn parse_numeric(raw: f64) -> BuiltinResult<NormOrder> {
     if raw.is_nan() {
-        return Err(format!("{NAME}: norm order must be a real scalar."));
+        return Err(builtin_error(format!(
+            "{NAME}: norm order must be a real scalar."
+        )));
     }
     if raw.is_infinite() {
         return Ok(if raw.is_sign_positive() {
@@ -497,10 +548,12 @@ fn parse_numeric(raw: f64) -> Result<NormOrder, String> {
     Ok(NormOrder::P(raw))
 }
 
-fn parse_order_string(raw: &str) -> Result<NormOrder, String> {
+fn parse_order_string(raw: &str) -> BuiltinResult<NormOrder> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err(format!("{NAME}: norm order string cannot be empty."));
+        return Err(builtin_error(format!(
+            "{NAME}: norm order string cannot be empty."
+        )));
     }
     let lower = trimmed.to_ascii_lowercase();
     match lower.as_str() {
@@ -512,7 +565,9 @@ fn parse_order_string(raw: &str) -> Result<NormOrder, String> {
             if let Ok(value) = trimmed.parse::<f64>() {
                 parse_numeric(value)
             } else {
-                Err(format!("{NAME}: unrecognised norm order '{trimmed}'."))
+                Err(builtin_error(format!(
+                    "{NAME}: unrecognised norm order '{trimmed}'."
+                )))
             }
         }
     }
@@ -525,7 +580,7 @@ fn approx_eq(a: f64, b: f64) -> bool {
 fn upload_scalar(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     value: f64,
-) -> Result<GpuTensorHandle, String> {
+) -> BuiltinResult<GpuTensorHandle> {
     let data = [value];
     let shape = [1usize, 1usize];
     provider
@@ -533,7 +588,7 @@ fn upload_scalar(
             data: &data,
             shape: &shape,
         })
-        .map_err(|e| format!("{NAME}: {e}"))
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
 impl From<ProviderNormOrder> for NormOrder {
@@ -570,16 +625,20 @@ impl From<NormOrder> for ProviderNormOrder {
 pub fn norm_host_real_for_provider(
     tensor: &Tensor,
     order: ProviderNormOrder,
-) -> Result<f64, String> {
+) -> BuiltinResult<f64> {
     let resolved = NormOrder::from(order);
-    norm_real_tensor(tensor, resolved)
+    norm_real_tensor_impl(tensor, resolved)
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{CharArray, ComplexTensor, Tensor};
+    use futures::executor::block_on;
+    use runmat_builtins::CharArray;
+    fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
+        err
+    }
 
     fn assert_close(actual: f64, expected: f64) {
         if actual.is_nan() && expected.is_nan() {
@@ -659,17 +718,23 @@ pub(crate) mod tests {
     #[test]
     fn norm_vector_p_less_than_one_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = norm_builtin(Value::Tensor(tensor), vec![Value::Num(0.5)]).unwrap_err();
-        assert!(err.contains("p >= 1"), "expected p >= 1 error, got {err}");
+        let err =
+            unwrap_error(norm_builtin(Value::Tensor(tensor), vec![Value::Num(0.5)]).unwrap_err());
+        assert!(
+            err.message().contains("p >= 1"),
+            "expected p >= 1 error, got {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_vector_nuclear_norm_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = norm_builtin(Value::Tensor(tensor), vec![Value::from("nuc")]).unwrap_err();
+        let err = unwrap_error(
+            norm_builtin(Value::Tensor(tensor), vec![Value::from("nuc")]).unwrap_err(),
+        );
         assert!(
-            err.contains("only defined for matrices"),
+            err.message().contains("only defined for matrices"),
             "expected matrix-only message, got {err}"
         );
     }
@@ -713,9 +778,10 @@ pub(crate) mod tests {
     #[test]
     fn norm_matrix_invalid_order_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let err = norm_builtin(Value::Tensor(tensor), vec![Value::Num(3.0)]).unwrap_err();
+        let err =
+            unwrap_error(norm_builtin(Value::Tensor(tensor), vec![Value::Num(3.0)]).unwrap_err());
         assert!(
-            err.contains("not supported"),
+            err.message().contains("not supported"),
             "expected unsupported message, got {err}"
         );
     }
@@ -762,8 +828,13 @@ pub(crate) mod tests {
     fn norm_order_tensor_non_scalar_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let order = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
-        let err = norm_builtin(Value::Tensor(tensor), vec![Value::Tensor(order)]).unwrap_err();
-        assert!(err.contains("scalar"), "expected scalar error, got {err}");
+        let err = unwrap_error(
+            norm_builtin(Value::Tensor(tensor), vec![Value::Tensor(order)]).unwrap_err(),
+        );
+        assert!(
+            err.message().contains("scalar"),
+            "expected scalar error, got {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -771,9 +842,9 @@ pub(crate) mod tests {
     fn norm_higher_dimensional_tensor_errors() {
         let data: Vec<f64> = (1..=8).map(|v| v as f64).collect();
         let tensor = Tensor::new(data, vec![2, 2, 2]).unwrap();
-        let err = norm_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err();
+        let err = unwrap_error(norm_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err());
         assert!(
-            err.contains("vector or 2-D matrix"),
+            err.message().contains("vector or 2-D matrix"),
             "expected dimensionality error, got {err}"
         );
     }
@@ -852,5 +923,9 @@ pub(crate) mod tests {
         let result = norm_builtin(Value::GpuTensor(handle), Vec::new()).expect("norm");
         let gathered = test_support::gather(result).expect("gather");
         assert_close(gathered.data[0], cpu);
+    }
+
+    fn norm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::norm_builtin(value, rest))
     }
 }

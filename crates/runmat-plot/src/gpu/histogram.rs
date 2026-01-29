@@ -94,7 +94,7 @@ enum WeightMode {
     F64,
 }
 
-pub fn histogram_values_buffer(
+pub async fn histogram_values_buffer(
     device: &Arc<wgpu::Device>,
     queue: &Arc<wgpu::Queue>,
     inputs: HistogramGpuInputs,
@@ -151,6 +151,7 @@ pub fn histogram_values_buffer(
         hint
     } else {
         readback_f32(device, &total_weight_buffer)
+            .await
             .map_err(|e| format!("hist: failed to read GPU weights total: {e}"))?
     };
 

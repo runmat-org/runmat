@@ -1,4 +1,4 @@
-use runmat_hir::{lower, HirClassMember, HirStmt};
+use runmat_hir::{lower, HirClassMember, HirStmt, LoweringContext};
 use runmat_parser::parse;
 
 #[test]
@@ -6,7 +6,7 @@ fn classdef_property_attributes_round_trip() {
     let src =
         "classdef A\n  properties(GetAccess=private, SetAccess=public, Static)\n    p\n  end\nend";
     let ast = parse(src).unwrap();
-    let hir = lower(&ast).unwrap();
+    let hir = lower(&ast, &LoweringContext::empty()).unwrap().hir;
     let mut found = false;
     for stmt in hir.body {
         if let HirStmt::ClassDef { members, .. } = stmt {
@@ -41,7 +41,7 @@ fn classdef_property_attributes_round_trip() {
 fn classdef_method_attributes_round_trip() {
     let src = "classdef B\n  methods(Static, Access=private)\n    function y = foo(x); y = x; end\n  end\nend";
     let ast = parse(src).unwrap();
-    let hir = lower(&ast).unwrap();
+    let hir = lower(&ast, &LoweringContext::empty()).unwrap().hir;
     let mut found = false;
     for stmt in hir.body {
         if let HirStmt::ClassDef { members, .. } = stmt {
@@ -76,7 +76,7 @@ fn classdef_property_attributes_enforced() {
     // Static + Dependent invalid
     let src = "classdef C\n  properties(Static, Dependent)\n    p\n  end\nend";
     let ast = parse(src).unwrap();
-    let res = lower(&ast);
+    let res = lower(&ast, &LoweringContext::empty());
     assert!(res.is_err());
 }
 
@@ -85,6 +85,6 @@ fn classdef_access_values_validated() {
     // Invalid Access value
     let src = "classdef D\n  properties(Access=protected)\n    p\n  end\n  methods(Access=internal)\n    function y = f(x); y = x; end\n  end\nend";
     let ast = parse(src).unwrap();
-    let res = lower(&ast);
+    let res = lower(&ast, &LoweringContext::empty());
     assert!(res.is_err());
 }

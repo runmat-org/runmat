@@ -1,17 +1,44 @@
 use runmat_builtins::{Tensor, Value};
 
-/// Normalize a raw shape vector into MATLAB-compatible dimension metadata.
-fn normalize_shape(shape: &[usize]) -> Vec<usize> {
-    match shape.len() {
-        0 => vec![1, 1],
-        1 => vec![1, shape[0]],
-        _ => shape.to_vec(),
+use crate::dispatcher::gather_if_needed_async;
+use crate::RuntimeError;
+
+/// Return true if a shape should be treated as a scalar.
+pub fn is_scalar_shape(shape: &[usize]) -> bool {
+    shape.is_empty()
+        || (shape.len() == 1 && shape[0] == 1)
+        || (shape.len() == 2 && shape[0] == 1 && shape[1] == 1)
+}
+
+/// Return the canonical scalar shape.
+pub fn canonical_scalar_shape() -> Vec<usize> {
+    vec![1, 1]
+}
+
+/// Normalize scalar-like shapes to the canonical scalar shape.
+pub fn normalize_scalar_shape(shape: &[usize]) -> Vec<usize> {
+    if is_scalar_shape(shape) {
+        canonical_scalar_shape()
+    } else {
+        shape.to_vec()
     }
 }
 
+/// Normalize a raw shape vector into MATLAB-compatible dimension metadata.
+fn normalize_shape(shape: &[usize]) -> Vec<usize> {
+    if shape.len() == 1 && shape[0] != 1 {
+        return vec![1, shape[0]];
+    }
+    if is_scalar_shape(shape) {
+        return canonical_scalar_shape();
+    }
+    shape.to_vec()
+}
+
 /// Return the MATLAB-visible dimension vector for a runtime value.
-pub fn value_dimensions(value: &Value) -> Vec<usize> {
-    match value {
+#[async_recursion::async_recursion(?Send)]
+pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError> {
+    let dims = match value {
         Value::Tensor(t) => normalize_shape(&t.shape),
         Value::ComplexTensor(t) => normalize_shape(&t.shape),
         Value::LogicalArray(la) => normalize_shape(&la.shape),
@@ -20,23 +47,20 @@ pub fn value_dimensions(value: &Value) -> Vec<usize> {
         Value::Cell(ca) => normalize_shape(&ca.shape),
         Value::GpuTensor(handle) => {
             if handle.shape.is_empty() {
-                if let Some(provider) = runmat_accelerate_api::provider() {
-                    if let Ok(host) = provider.download(handle) {
-                        return normalize_shape(&host.shape);
-                    }
-                }
-                vec![1, 1]
-            } else {
-                normalize_shape(&handle.shape)
+                let gathered = gather_if_needed_async(&Value::GpuTensor(handle.clone())).await?;
+                return value_dimensions(&gathered).await;
             }
+            normalize_shape(&handle.shape)
         }
         _ => vec![1, 1],
-    }
+    };
+    Ok(dims)
 }
 
 /// Compute the total number of elements contained in a runtime value.
-pub fn value_numel(value: &Value) -> usize {
-    match value {
+#[async_recursion::async_recursion(?Send)]
+pub async fn value_numel(value: &Value) -> Result<usize, RuntimeError> {
+    let numel = match value {
         Value::Tensor(t) => t.data.len(),
         Value::ComplexTensor(t) => t.data.len(),
         Value::LogicalArray(la) => la.data.len(),
@@ -45,31 +69,27 @@ pub fn value_numel(value: &Value) -> usize {
         Value::Cell(ca) => ca.data.len(),
         Value::GpuTensor(handle) => {
             if handle.shape.is_empty() {
-                if let Some(provider) = runmat_accelerate_api::provider() {
-                    if let Ok(host) = provider.download(handle) {
-                        return host.data.len();
-                    }
-                }
-                1
-            } else {
-                handle
-                    .shape
-                    .iter()
-                    .copied()
-                    .fold(1usize, |acc, dim| acc.saturating_mul(dim))
+                let gathered = gather_if_needed_async(&Value::GpuTensor(handle.clone())).await?;
+                return value_numel(&gathered).await;
             }
+            handle
+                .shape
+                .iter()
+                .copied()
+                .fold(1usize, |acc, dim| acc.saturating_mul(dim))
         }
         _ => 1,
-    }
+    };
+    Ok(numel)
 }
 
 /// Compute the dimensionality (NDIMS) of a runtime value, with MATLAB semantics.
-pub fn value_ndims(value: &Value) -> usize {
-    let dims = value_dimensions(value);
+pub async fn value_ndims(value: &Value) -> Result<usize, RuntimeError> {
+    let dims = value_dimensions(value).await?;
     if dims.len() < 2 {
-        2
+        Ok(2)
     } else {
-        dims.len()
+        Ok(dims.len())
     }
 }
 
@@ -84,18 +104,25 @@ pub fn dims_to_row_tensor(dims: &[usize]) -> Result<Tensor, String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dims_scalar_defaults_to_one_by_one() {
-        assert_eq!(value_dimensions(&Value::Num(5.0)), vec![1, 1]);
+        assert_eq!(
+            block_on(value_dimensions(&Value::Num(5.0))).unwrap(),
+            vec![1, 1]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dims_tensor_preserves_rank() {
         let tensor = Tensor::new(vec![0.0; 12], vec![2, 3, 2]).unwrap();
-        assert_eq!(value_dimensions(&Value::Tensor(tensor)), vec![2, 3, 2]);
+        assert_eq!(
+            block_on(value_dimensions(&Value::Tensor(tensor))).unwrap(),
+            vec![2, 3, 2]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -106,7 +133,10 @@ pub(crate) mod tests {
             device_id: 0,
             buffer_id: 1,
         };
-        assert_eq!(value_numel(&Value::GpuTensor(handle)), 120);
+        assert_eq!(
+            block_on(value_numel(&Value::GpuTensor(handle))).unwrap(),
+            120
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

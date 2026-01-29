@@ -11,11 +11,12 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry;
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "Invalid file identifier. Use fopen to generate a valid file ID.";
+const BUILTIN_NAME: &str = "fgets";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fgets")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -32,6 +33,24 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Host-only file I/O; arguments gathered from the GPU when necessary.",
 };
+
+fn fgets_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let message = err.message().to_string();
+    let identifier = err.identifier().map(|value| value.to_string());
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fgets")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -52,8 +71,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::filetext::fgets"
 )]
-fn fgets_builtin(fid: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let eval = evaluate(&fid, &rest)?;
+async fn fgets_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(&fid, &rest).await?;
     Ok(eval.first_output())
 }
 
@@ -84,33 +103,37 @@ impl FgetsEval {
     }
 }
 
-pub fn evaluate(fid_value: &Value, rest: &[Value]) -> Result<FgetsEval, String> {
+pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsEval> {
     if rest.len() > 1 {
-        return Err("fgets: too many input arguments".to_string());
+        return Err(fgets_error("fgets: too many input arguments"));
     }
 
-    let fid_host = gather_value(fid_value)?;
+    let fid_host = gather_value(fid_value).await?;
     let fid = parse_fid(&fid_host)?;
     if fid < 0 {
-        return Err("fgets: file identifier must be non-negative".to_string());
+        return Err(fgets_error("fgets: file identifier must be non-negative"));
     }
     if fid < 3 {
-        return Err("fgets: standard input/output identifiers are not supported yet".to_string());
+        return Err(fgets_error(
+            "fgets: standard input/output identifiers are not supported yet",
+        ));
     }
 
-    let info =
-        registry::info_for(fid).ok_or_else(|| format!("fgets: {INVALID_IDENTIFIER_MESSAGE}"))?;
+    let info = registry::info_for(fid)
+        .ok_or_else(|| fgets_error(format!("fgets: {INVALID_IDENTIFIER_MESSAGE}")))?;
     if !permission_allows_read(&info.permission) {
-        return Err("fgets: file identifier is not open for reading".to_string());
+        return Err(fgets_error(
+            "fgets: file identifier is not open for reading",
+        ));
     }
-    let handle =
-        registry::take_handle(fid).ok_or_else(|| format!("fgets: {INVALID_IDENTIFIER_MESSAGE}"))?;
+    let handle = registry::take_handle(fid)
+        .ok_or_else(|| fgets_error(format!("fgets: {INVALID_IDENTIFIER_MESSAGE}")))?;
     let mut file = handle
         .lock()
-        .map_err(|_| "fgets: failed to lock file handle (poisoned mutex)".to_string())?;
+        .map_err(|_| fgets_error("fgets: failed to lock file handle (poisoned mutex)"))?;
 
-    let limit = parse_nchar(rest)?;
-    let read = read_line(&mut file, limit).map_err(|err| format!("fgets: {err}"))?;
+    let limit = parse_nchar(rest).await?;
+    let read = read_line(&mut file, limit)?;
     if read.eof_before_any {
         return Ok(FgetsEval::end_of_file());
     }
@@ -131,18 +154,22 @@ pub fn evaluate(fid_value: &Value, rest: &[Value]) -> Result<FgetsEval, String> 
     Ok(FgetsEval::new(line_value, terminators_value))
 }
 
-fn gather_value(value: &Value) -> Result<Value, String> {
-    gather_if_needed(value).map_err(|e| format!("fgets: {e}"))
+async fn gather_value(value: &Value) -> BuiltinResult<Value> {
+    gather_if_needed_async(value)
+        .await
+        .map_err(map_control_flow)
 }
 
-fn parse_fid(value: &Value) -> Result<i32, String> {
+fn parse_fid(value: &Value) -> BuiltinResult<i32> {
     match value {
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err("fgets: file identifier must be finite".to_string());
+                return Err(fgets_error("fgets: file identifier must be finite"));
             }
             if (n.fract()).abs() > f64::EPSILON {
-                return Err("fgets: file identifier must be an integer scalar".to_string());
+                return Err(fgets_error(
+                    "fgets: file identifier must be an integer scalar",
+                ));
             }
             Ok(*n as i32)
         }
@@ -150,42 +177,54 @@ fn parse_fid(value: &Value) -> Result<i32, String> {
         Value::Tensor(t) if t.data.len() == 1 => {
             let n = t.data[0];
             if !n.is_finite() {
-                return Err("fgets: file identifier must be finite".to_string());
+                return Err(fgets_error("fgets: file identifier must be finite"));
             }
             if (n.fract()).abs() > f64::EPSILON {
-                return Err("fgets: file identifier must be an integer scalar".to_string());
+                return Err(fgets_error(
+                    "fgets: file identifier must be an integer scalar",
+                ));
             }
             Ok(n as i32)
         }
-        _ => Err("fgets: file identifier must be a numeric scalar".to_string()),
+        _ => Err(fgets_error(
+            "fgets: file identifier must be a numeric scalar",
+        )),
     }
 }
 
-fn parse_nchar(args: &[Value]) -> Result<Option<usize>, String> {
+async fn parse_nchar(args: &[Value]) -> BuiltinResult<Option<usize>> {
     if args.is_empty() {
         return Ok(None);
     }
-    let value = gather_value(&args[0])?;
+    let value = gather_value(&args[0]).await?;
     match value {
         Value::Num(n) => {
             if !n.is_finite() {
                 if n.is_sign_positive() {
                     return Ok(None);
                 }
-                return Err("fgets: nchar must be a non-negative integer scalar".to_string());
+                return Err(fgets_error(
+                    "fgets: nchar must be a non-negative integer scalar",
+                ));
             }
             if n < 0.0 {
-                return Err("fgets: nchar must be a non-negative integer scalar".to_string());
+                return Err(fgets_error(
+                    "fgets: nchar must be a non-negative integer scalar",
+                ));
             }
             if (n.fract()).abs() > f64::EPSILON {
-                return Err("fgets: nchar must be a non-negative integer scalar".to_string());
+                return Err(fgets_error(
+                    "fgets: nchar must be a non-negative integer scalar",
+                ));
             }
             Ok(Some(n as usize))
         }
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 0 {
-                return Err("fgets: nchar must be a non-negative integer scalar".to_string());
+                return Err(fgets_error(
+                    "fgets: nchar must be a non-negative integer scalar",
+                ));
             }
             Ok(Some(raw as usize))
         }
@@ -195,17 +234,25 @@ fn parse_nchar(args: &[Value]) -> Result<Option<usize>, String> {
                 if n.is_sign_positive() {
                     return Ok(None);
                 }
-                return Err("fgets: nchar must be a non-negative integer scalar".to_string());
+                return Err(fgets_error(
+                    "fgets: nchar must be a non-negative integer scalar",
+                ));
             }
             if n < 0.0 {
-                return Err("fgets: nchar must be a non-negative integer scalar".to_string());
+                return Err(fgets_error(
+                    "fgets: nchar must be a non-negative integer scalar",
+                ));
             }
             if (n.fract()).abs() > f64::EPSILON {
-                return Err("fgets: nchar must be a non-negative integer scalar".to_string());
+                return Err(fgets_error(
+                    "fgets: nchar must be a non-negative integer scalar",
+                ));
             }
             Ok(Some(n as usize))
         }
-        _ => Err("fgets: nchar must be a non-negative integer scalar".to_string()),
+        _ => Err(fgets_error(
+            "fgets: nchar must be a non-negative integer scalar",
+        )),
     }
 }
 
@@ -220,7 +267,7 @@ struct LineRead {
     eof_before_any: bool,
 }
 
-fn read_line(file: &mut File, limit: Option<usize>) -> Result<LineRead, String> {
+fn read_line(file: &mut File, limit: Option<usize>) -> BuiltinResult<LineRead> {
     let mut data = Vec::new();
     let mut terminators = Vec::new();
     let mut eof_before_any = false;
@@ -241,9 +288,12 @@ fn read_line(file: &mut File, limit: Option<usize>) -> Result<LineRead, String> 
             break;
         }
 
-        let read = file
-            .read(&mut buffer)
-            .map_err(|err| format!("failed to read from file: {err}"))?;
+        let read = file.read(&mut buffer).map_err(|err| {
+            build_runtime_error(format!("fgets: failed to read from file: {err}"))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err)
+                .build()
+        })?;
         if read == 0 {
             if data.is_empty() && first_attempt {
                 eof_before_any = true;
@@ -255,8 +305,12 @@ fn read_line(file: &mut File, limit: Option<usize>) -> Result<LineRead, String> 
 
         if byte == b'\n' {
             if data.len().saturating_add(1) > max_bytes {
-                file.seek(SeekFrom::Current(-1))
-                    .map_err(|err| format!("failed to seek in file: {err}"))?;
+                file.seek(SeekFrom::Current(-1)).map_err(|err| {
+                    build_runtime_error(format!("fgets: failed to seek in file: {err}"))
+                        .with_builtin(BUILTIN_NAME)
+                        .with_source(err)
+                        .build()
+                })?;
             } else {
                 data.push(b'\n');
                 terminators.push(b'\n');
@@ -269,23 +323,34 @@ fn read_line(file: &mut File, limit: Option<usize>) -> Result<LineRead, String> 
             let mut consumed = 1i64;
 
             let mut next = [0u8; 1];
-            let read_next = file
-                .read(&mut next)
-                .map_err(|err| format!("failed to read from file: {err}"))?;
+            let read_next = file.read(&mut next).map_err(|err| {
+                build_runtime_error(format!("fgets: failed to read from file: {err}"))
+                    .with_builtin(BUILTIN_NAME)
+                    .with_source(err)
+                    .build()
+            })?;
             if read_next > 0 {
                 if next[0] == b'\n' {
                     newline[1] = b'\n';
                     newline_len = 2;
                     consumed = 2;
                 } else {
-                    file.seek(SeekFrom::Current(-1))
-                        .map_err(|err| format!("failed to seek in file: {err}"))?;
+                    file.seek(SeekFrom::Current(-1)).map_err(|err| {
+                        build_runtime_error(format!("fgets: failed to seek in file: {err}"))
+                            .with_builtin(BUILTIN_NAME)
+                            .with_source(err)
+                            .build()
+                    })?;
                 }
             }
 
             if data.len().saturating_add(newline_len) > max_bytes {
-                file.seek(SeekFrom::Current(-consumed))
-                    .map_err(|err| format!("failed to seek in file: {err}"))?;
+                file.seek(SeekFrom::Current(-consumed)).map_err(|err| {
+                    build_runtime_error(format!("fgets: failed to seek in file: {err}"))
+                        .with_builtin(BUILTIN_NAME)
+                        .with_source(err)
+                        .build()
+                })?;
             } else {
                 data.extend_from_slice(&newline[..newline_len]);
                 terminators.extend_from_slice(&newline[..newline_len]);
@@ -303,15 +368,15 @@ fn read_line(file: &mut File, limit: Option<usize>) -> Result<LineRead, String> 
     })
 }
 
-fn bytes_to_char_array(bytes: &[u8], encoding: &str) -> Result<Value, String> {
+fn bytes_to_char_array(bytes: &[u8], encoding: &str) -> BuiltinResult<Value> {
     let chars = decode_bytes(bytes, encoding)?;
     let cols = chars.len();
     let char_array = CharArray::new(chars, 1, cols)
-        .map_err(|e| format!("fgets: failed to build char array: {e}"))?;
+        .map_err(|e| fgets_error(format!("fgets: failed to build char array: {e}")))?;
     Ok(Value::CharArray(char_array))
 }
 
-fn decode_bytes(bytes: &[u8], encoding: &str) -> Result<Vec<char>, String> {
+fn decode_bytes(bytes: &[u8], encoding: &str) -> BuiltinResult<Vec<char>> {
     let label = encoding.trim();
     if label.is_empty() || label.eq_ignore_ascii_case("utf-8") || label.eq_ignore_ascii_case("utf8")
     {
@@ -363,26 +428,28 @@ fn decode_bytes(bytes: &[u8], encoding: &str) -> Result<Vec<char>, String> {
         return decode_with_encoding(bytes, enc);
     }
 
-    Err(format!("fgets: unsupported encoding '{encoding}'"))
+    Err(fgets_error(format!(
+        "fgets: unsupported encoding '{encoding}'"
+    )))
 }
 
-fn decode_with_encoding(bytes: &[u8], enc: &'static Encoding) -> Result<Vec<char>, String> {
+fn decode_with_encoding(bytes: &[u8], enc: &'static Encoding) -> BuiltinResult<Vec<char>> {
     let (cow, _, had_errors) = enc.decode(bytes);
     if had_errors {
-        return Err(format!(
+        return Err(fgets_error(format!(
             "fgets: unable to decode bytes using encoding '{}'",
             enc.name()
-        ));
+        )));
     }
     Ok(cow.chars().collect())
 }
 
-fn decode_ascii(bytes: &[u8]) -> Result<Vec<char>, String> {
+fn decode_ascii(bytes: &[u8]) -> BuiltinResult<Vec<char>> {
     if let Some(byte) = bytes.iter().find(|&&b| b > 0x7F) {
-        return Err(format!(
+        return Err(fgets_error(format!(
             "fgets: byte value {} is outside the ASCII range",
             byte
-        ));
+        )));
     }
     Ok(bytes
         .iter()
@@ -390,10 +457,10 @@ fn decode_ascii(bytes: &[u8]) -> Result<Vec<char>, String> {
         .collect())
 }
 
-fn numeric_row(bytes: &[u8]) -> Result<Value, String> {
+fn numeric_row(bytes: &[u8]) -> BuiltinResult<Value> {
     let data: Vec<f64> = bytes.iter().map(|&b| b as f64).collect();
     let tensor = Tensor::new(data, vec![1, bytes.len()])
-        .map_err(|e| format!("fgets: failed to construct numeric array: {e}"))?;
+        .map_err(|e| fgets_error(format!("fgets: failed to construct numeric array: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -418,12 +485,29 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::{fopen, registry};
+    use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::IntValue;
     use runmat_filesystem as fs;
     use runmat_time::system_time_now;
     use std::path::{Path, PathBuf};
     use std::time::UNIX_EPOCH;
+
+    fn unwrap_error_message(err: RuntimeError) -> String {
+        err.message().to_string()
+    }
+
+    fn run_evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsEval> {
+        futures::executor::block_on(evaluate(fid_value, rest))
+    }
+
+    fn run_fopen(args: &[Value]) -> BuiltinResult<fopen::FopenEval> {
+        futures::executor::block_on(fopen::evaluate(args))
+    }
+
+    fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
+        registry::test_guard()
+    }
 
     fn unique_path(prefix: &str) -> PathBuf {
         let now = system_time_now()
@@ -434,8 +518,7 @@ pub(crate) mod tests {
     }
 
     fn fopen_path(path: &Path) -> FopenHandle {
-        let eval =
-            fopen::evaluate(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
+        let eval = run_fopen(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
         let open = eval.as_open().expect("open outputs");
         assert!(open.fid >= 3.0);
         FopenHandle {
@@ -456,12 +539,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_reads_line_with_newline() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_line");
         fs::write(&path, "Hello world\nSecond line\n").unwrap();
 
         let handle = fopen_path(&path);
-        let eval = evaluate(&Value::Num(handle.fid as f64), &[]).expect("fgets");
+        let eval = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("fgets");
         let line = eval.first_output();
         match line {
             Value::CharArray(ca) => {
@@ -485,13 +569,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_returns_minus_one_at_eof() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_eof");
         fs::write(&path, "line\n").unwrap();
         let handle = fopen_path(&path);
 
-        let _ = evaluate(&Value::Num(handle.fid as f64), &[]).expect("first read");
-        let eval = evaluate(&Value::Num(handle.fid as f64), &[]).expect("second read");
+        let _ = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("first read");
+        let eval = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("second read");
         assert_eq!(eval.first_output(), Value::Num(-1.0));
         assert_eq!(eval.outputs()[1], Value::Num(-1.0));
 
@@ -501,13 +586,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_honours_nchar_limit() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_limit");
         fs::write(&path, "abcdefghij\nrest\n").unwrap();
         let handle = fopen_path(&path);
 
         let eval =
-            evaluate(&Value::Num(handle.fid as f64), &[Value::Num(5.0)]).expect("limited read");
+            run_evaluate(&Value::Num(handle.fid as f64), &[Value::Num(5.0)]).expect("limited read");
         match eval.first_output() {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
@@ -528,17 +614,18 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_errors_for_write_only_identifier() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_write_only");
         fs::write(&path, "payload").unwrap();
-        let eval = fopen::evaluate(&[
+        let eval = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("w"),
         ])
         .expect("fopen");
         let open = eval.as_open().expect("open outputs");
         assert!(open.fid >= 3.0);
-        let err = evaluate(&Value::Num(open.fid), &[]).expect_err("fgets should fail");
+        let err = unwrap_error_message(run_evaluate(&Value::Num(open.fid), &[]).unwrap_err());
         assert_eq!(err, "fgets: file identifier is not open for reading");
         fs::remove_file(&path).unwrap();
     }
@@ -546,12 +633,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_respects_limit_before_crlf_sequence() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_limit_crlf");
         fs::write(&path, b"ABCDE\r\nnext\n").unwrap();
         let handle = fopen_path(&path);
 
-        let first = evaluate(&Value::Num(handle.fid as f64), &[Value::Num(3.0)]).expect("first");
+        let first =
+            run_evaluate(&Value::Num(handle.fid as f64), &[Value::Num(3.0)]).expect("first");
         match first.first_output() {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
@@ -564,7 +653,7 @@ pub(crate) mod tests {
             other => panic!("expected empty numeric tensor, got {other:?}"),
         }
 
-        let second = evaluate(&Value::Num(handle.fid as f64), &[]).expect("second");
+        let second = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("second");
         match second.first_output() {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
@@ -577,7 +666,7 @@ pub(crate) mod tests {
             other => panic!("expected CRLF terminators, got {other:?}"),
         }
 
-        let third = evaluate(&Value::Num(handle.fid as f64), &[]).expect("third");
+        let third = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("third");
         match third.first_output() {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
@@ -592,12 +681,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_handles_crlf_newlines() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_crlf");
         fs::write(&path, b"first line\r\nsecond\r\n").unwrap();
         let handle = fopen_path(&path);
 
-        let eval = evaluate(&Value::Num(handle.fid as f64), &[]).expect("fgets");
+        let eval = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("fgets");
         let outputs = eval.outputs();
         match &outputs[0] {
             Value::CharArray(ca) => {
@@ -619,10 +709,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_decodes_latin1() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_latin1");
         fs::write(&path, [0x48u8, 0x6f, 0x6c, 0x61, 0x20, 0xf1, b'\n']).unwrap();
-        let eval = fopen::evaluate(&[
+        let eval = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("r"),
             Value::from("native"),
@@ -632,7 +723,7 @@ pub(crate) mod tests {
         let open = eval.as_open().expect("open outputs");
         let fid = open.fid as i32;
 
-        let read = evaluate(&Value::Num(fid as f64), &[]).expect("fgets");
+        let read = run_evaluate(&Value::Num(fid as f64), &[]).expect("fgets");
         match read.first_output() {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
@@ -648,12 +739,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_nchar_zero_returns_empty_char() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_zero");
         fs::write(&path, "hello\n").unwrap();
         let handle = fopen_path(&path);
 
-        let eval = evaluate(
+        let eval = run_evaluate(
             &Value::Num(handle.fid as f64),
             &[Value::Int(IntValue::I32(0))],
         )
@@ -673,6 +765,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_gathers_gpu_scalar_arguments() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_gpu_args");
         fs::write(&path, b"abcdef\nextra").unwrap();
@@ -693,7 +786,7 @@ pub(crate) mod tests {
             };
             let limit_gpu = Value::GpuTensor(provider.upload(&limit_view).expect("upload limit"));
 
-            let eval = evaluate(&fid_gpu, &[limit_gpu]).expect("fgets");
+            let eval = run_evaluate(&fid_gpu, &[limit_gpu]).expect("fgets");
             match eval.first_output() {
                 Value::CharArray(ca) => {
                     let text: String = ca.data.iter().collect();

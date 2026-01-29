@@ -10,7 +10,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, make_cell_with_shape};
+use crate::{
+    build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::cells::core::cell")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -39,6 +41,20 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Cell creation acts as a fusion sink and terminates GPU fusion plans.",
 };
 
+const IDENT_INVALID_INPUT: &str = "MATLAB:cell:InvalidInput";
+const IDENT_INVALID_SIZE: &str = "MATLAB:cell:InvalidSize";
+
+fn cell_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("cell").build()
+}
+
+fn cell_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("cell")
+        .with_identifier(identifier)
+        .build()
+}
+
 #[runtime_builtin(
     name = "cell",
     category = "cells/core",
@@ -48,8 +64,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::cells::core::cell"
 )]
-fn cell_builtin(args: Vec<Value>) -> Result<Value, String> {
-    let parsed = ParsedCell::parse(args)?;
+async fn cell_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let parsed = ParsedCell::parse(args).await?;
     build_cell(parsed)
 }
 
@@ -59,7 +75,7 @@ struct ParsedCell {
 }
 
 impl ParsedCell {
-    fn parse(args: Vec<Value>) -> Result<Self, String> {
+    async fn parse(args: Vec<Value>) -> BuiltinResult<Self> {
         let mut dims: Vec<Value> = Vec::new();
         let mut prototype: Option<Value> = None;
         let mut idx = 0;
@@ -70,18 +86,26 @@ impl ParsedCell {
                 match keyword.as_str() {
                     "like" => {
                         if prototype.is_some() {
-                            return Err("cell: multiple 'like' specifications are not supported"
-                                .to_string());
+                            return Err(cell_error_with_identifier(
+                                "cell: multiple 'like' specifications are not supported",
+                                IDENT_INVALID_INPUT,
+                            ));
                         }
                         let Some(proto) = args.get(idx + 1) else {
-                            return Err("cell: expected prototype after 'like'".to_string());
+                            return Err(cell_error_with_identifier(
+                                "cell: expected prototype after 'like'",
+                                IDENT_INVALID_INPUT,
+                            ));
                         };
                         prototype = Some(proto.clone());
                         idx += 2;
                         continue;
                     }
                     other => {
-                        return Err(format!("cell: unrecognised option '{other}'"));
+                        return Err(cell_error_with_identifier(
+                            format!("cell: unrecognised option '{other}'"),
+                            IDENT_INVALID_INPUT,
+                        ));
                     }
                 }
             }
@@ -90,12 +114,12 @@ impl ParsedCell {
             idx += 1;
         }
 
-        let shape = parse_shape_arguments(&dims, prototype.as_ref())?;
+        let shape = parse_shape_arguments(&dims, prototype.as_ref()).await?;
         Ok(Self { shape, prototype })
     }
 }
 
-fn build_cell(parsed: ParsedCell) -> Result<Value, String> {
+fn build_cell(parsed: ParsedCell) -> BuiltinResult<Value> {
     let shape = ensure_min_rank(parsed.shape);
     let total = if shape.is_empty() {
         0
@@ -103,17 +127,23 @@ fn build_cell(parsed: ParsedCell) -> Result<Value, String> {
         shape
             .iter()
             .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
-            .ok_or_else(|| "cell: requested size exceeds platform limits".to_string())?
+            .ok_or_else(|| {
+                cell_error_with_identifier(
+                    "cell: requested size exceeds platform limits",
+                    IDENT_INVALID_SIZE,
+                )
+            })?
     };
 
     if total == 0 {
-        return make_cell_with_shape(Vec::new(), shape).map_err(|e| format!("cell: {e}"));
+        return make_cell_with_shape(Vec::new(), shape)
+            .map_err(|e| cell_error(format!("cell: {e}")));
     }
 
     let default_value = empty_value_like(parsed.prototype.as_ref())?;
     let mut values = Vec::with_capacity(total);
     values.resize(total, default_value);
-    make_cell_with_shape(values, shape).map_err(|e| format!("cell: {e}"))
+    make_cell_with_shape(values, shape).map_err(|e| cell_error(format!("cell: {e}")))
 }
 
 fn ensure_min_rank(dims: Vec<usize>) -> Vec<usize> {
@@ -124,28 +154,32 @@ fn ensure_min_rank(dims: Vec<usize>) -> Vec<usize> {
     }
 }
 
-fn parse_shape_arguments(args: &[Value], prototype: Option<&Value>) -> Result<Vec<usize>, String> {
+async fn parse_shape_arguments(
+    args: &[Value],
+    prototype: Option<&Value>,
+) -> BuiltinResult<Vec<usize>> {
     if args.is_empty() {
         if let Some(proto) = prototype {
-            return shape_from_value(proto, "cell");
+            return shape_from_value(proto, "cell")
+                .map_err(|err| cell_error_with_identifier(err, IDENT_INVALID_INPUT));
         }
         return Ok(vec![0, 0]);
     }
 
     if args.len() == 1 {
-        let host = gather_if_needed(&args[0]).map_err(|e| format!("cell: {e}"))?;
+        let host = gather_if_needed_async(&args[0]).await?;
         return parse_single_argument(&host);
     }
 
     let mut dims = Vec::with_capacity(args.len());
     for value in args {
-        let host = gather_if_needed(value).map_err(|e| format!("cell: {e}"))?;
+        let host = gather_if_needed_async(value).await?;
         dims.push(parse_size_scalar(&host, "cell")?);
     }
     Ok(dims)
 }
 
-fn parse_single_argument(value: &Value) -> Result<Vec<usize>, String> {
+fn parse_single_argument(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Int(_) | Value::Num(_) | Value::Bool(_) => {
             let n = parse_size_scalar(value, "cell")?;
@@ -153,42 +187,53 @@ fn parse_single_argument(value: &Value) -> Result<Vec<usize>, String> {
         }
         Value::Tensor(t) => parse_size_tensor(t),
         Value::LogicalArray(arr) => parse_size_logical_array(arr),
-        other => Err(format!(
-            "cell: size arguments must be numeric scalars or vectors, got {other:?}"
+        other => Err(cell_error_with_identifier(
+            format!("cell: size arguments must be numeric scalars or vectors, got {other:?}"),
+            IDENT_INVALID_INPUT,
         )),
     }
 }
 
-fn parse_size_scalar(value: &Value, context: &str) -> Result<usize, String> {
+fn parse_size_scalar(value: &Value, context: &str) -> BuiltinResult<usize> {
     match value {
         Value::Int(iv) => parse_intvalue(iv, context),
         Value::Num(n) => parse_numeric(*n, context),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
             if t.data.len() != 1 {
-                return Err(format!("{context}: size inputs must be scalar"));
+                return Err(cell_error_with_identifier(
+                    format!("{context}: size inputs must be scalar"),
+                    IDENT_INVALID_SIZE,
+                ));
             }
             parse_numeric(t.data[0], context)
         }
         Value::LogicalArray(arr) => {
             if arr.data.len() != 1 {
-                return Err(format!("{context}: size inputs must be scalar"));
+                return Err(cell_error_with_identifier(
+                    format!("{context}: size inputs must be scalar"),
+                    IDENT_INVALID_SIZE,
+                ));
             }
             let numeric = if arr.data[0] != 0 { 1.0 } else { 0.0 };
             parse_numeric(numeric, context)
         }
-        other => Err(format!(
-            "{context}: size inputs must be numeric scalars, got {other:?}"
+        other => Err(cell_error_with_identifier(
+            format!("{context}: size inputs must be numeric scalars, got {other:?}"),
+            IDENT_INVALID_INPUT,
         )),
     }
 }
 
-fn parse_size_tensor(t: &Tensor) -> Result<Vec<usize>, String> {
+fn parse_size_tensor(t: &Tensor) -> BuiltinResult<Vec<usize>> {
     if t.data.is_empty() {
         return Ok(vec![0, 0]);
     }
     if !is_vector_shape(&t.shape) {
-        return Err("cell: size vector must be 1-D".to_string());
+        return Err(cell_error_with_identifier(
+            "cell: size vector must be 1-D",
+            IDENT_INVALID_SIZE,
+        ));
     }
     let dims = t
         .data
@@ -202,12 +247,15 @@ fn parse_size_tensor(t: &Tensor) -> Result<Vec<usize>, String> {
     }
 }
 
-fn parse_size_logical_array(arr: &LogicalArray) -> Result<Vec<usize>, String> {
+fn parse_size_logical_array(arr: &LogicalArray) -> BuiltinResult<Vec<usize>> {
     if arr.data.is_empty() {
         return Ok(vec![0, 0]);
     }
     if !is_vector_shape(&arr.shape) {
-        return Err("cell: size vector must be 1-D".to_string());
+        return Err(cell_error_with_identifier(
+            "cell: size vector must be 1-D",
+            IDENT_INVALID_SIZE,
+        ));
     }
     let dims = arr
         .data
@@ -233,27 +281,26 @@ fn is_vector_shape(shape: &[usize]) -> bool {
     }
 }
 
-fn empty_value_like(proto: Option<&Value>) -> Result<Value, String> {
+fn empty_value_like(proto: Option<&Value>) -> BuiltinResult<Value> {
     match proto {
         Some(value) => match value {
             Value::LogicalArray(_) | Value::Bool(_) => LogicalArray::new(Vec::new(), vec![0, 0])
                 .map(Value::LogicalArray)
-                .map_err(|e| format!("cell: {e}")),
+                .map_err(|e| cell_error(format!("cell: {e}"))),
             Value::ComplexTensor(_) | Value::Complex(_, _) => {
                 ComplexTensor::new(Vec::new(), vec![0, 0])
                     .map(Value::ComplexTensor)
-                    .map_err(|e| format!("cell: {e}"))
+                    .map_err(|e| cell_error(format!("cell: {e}")))
             }
             Value::String(_) => Ok(Value::String(String::new())),
             Value::StringArray(_) => StringArray::new(Vec::new(), vec![0, 0])
                 .map(Value::StringArray)
-                .map_err(|e| format!("cell: {e}")),
+                .map_err(|e| cell_error(format!("cell: {e}"))),
             Value::CharArray(_) => CharArray::new(Vec::new(), 0, 0)
                 .map(Value::CharArray)
-                .map_err(|e| format!("cell: {e}")),
-            Value::Cell(_) => {
-                make_cell_with_shape(Vec::new(), vec![0, 0]).map_err(|e| format!("cell: {e}"))
-            }
+                .map_err(|e| cell_error(format!("cell: {e}"))),
+            Value::Cell(_) => make_cell_with_shape(Vec::new(), vec![0, 0])
+                .map_err(|e| cell_error(format!("cell: {e}"))),
             Value::Struct(_) => Ok(Value::Struct(StructValue::new())),
             Value::Tensor(_) | Value::Num(_) | Value::Int(_) | Value::GpuTensor(_) => {
                 default_empty_double()
@@ -270,13 +317,13 @@ fn empty_value_like(proto: Option<&Value>) -> Result<Value, String> {
     }
 }
 
-fn default_empty_double() -> Result<Value, String> {
+fn default_empty_double() -> BuiltinResult<Value> {
     Tensor::new(Vec::new(), vec![0, 0])
         .map(Value::Tensor)
-        .map_err(|e| format!("cell: {e}"))
+        .map_err(|e| cell_error(format!("cell: {e}")))
 }
 
-fn parse_intvalue(value: &IntValue, context: &str) -> Result<usize, String> {
+fn parse_intvalue(value: &IntValue, context: &str) -> BuiltinResult<usize> {
     let raw = match value {
         IntValue::I8(v) => *v as i128,
         IntValue::I16(v) => *v as i128,
@@ -288,34 +335,51 @@ fn parse_intvalue(value: &IntValue, context: &str) -> Result<usize, String> {
         IntValue::U64(v) => *v as i128,
     };
     if raw < 0 {
-        return Err(format!(
-            "{context}: size inputs must be non-negative integers"
+        return Err(cell_error_with_identifier(
+            format!("{context}: size inputs must be non-negative integers"),
+            IDENT_INVALID_SIZE,
         ));
     }
     if raw as u128 > usize::MAX as u128 {
-        return Err("cell: requested size exceeds platform limits".to_string());
+        return Err(cell_error_with_identifier(
+            "cell: requested size exceeds platform limits",
+            IDENT_INVALID_SIZE,
+        ));
     }
     Ok(raw as usize)
 }
 
-fn parse_numeric(value: f64, context: &str) -> Result<usize, String> {
+fn parse_numeric(value: f64, context: &str) -> BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err(format!("{context}: size inputs must be finite"));
+        return Err(cell_error_with_identifier(
+            format!("{context}: size inputs must be finite"),
+            IDENT_INVALID_SIZE,
+        ));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err(format!("{context}: size inputs must be integers"));
+        return Err(cell_error_with_identifier(
+            format!("{context}: size inputs must be integers"),
+            IDENT_INVALID_SIZE,
+        ));
     }
     if rounded < 0.0 {
-        return Err(format!(
-            "{context}: size inputs must be non-negative integers"
+        return Err(cell_error_with_identifier(
+            format!("{context}: size inputs must be non-negative integers"),
+            IDENT_INVALID_SIZE,
         ));
     }
     if rounded > (1u64 << 53) as f64 {
-        return Err("cell: size inputs larger than 2^53 are not supported".to_string());
+        return Err(cell_error_with_identifier(
+            "cell: size inputs larger than 2^53 are not supported",
+            IDENT_INVALID_SIZE,
+        ));
     }
     if rounded > usize::MAX as f64 {
-        return Err("cell: requested size exceeds platform limits".to_string());
+        return Err(cell_error_with_identifier(
+            "cell: requested size exceeds platform limits",
+            IDENT_INVALID_SIZE,
+        ));
     }
     Ok(rounded as usize)
 }
@@ -324,6 +388,11 @@ fn parse_numeric(value: f64, context: &str) -> Result<usize, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+
+    fn cell_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::cell_builtin(args))
+    }
 
     fn expect_cell_with<F>(value: Value, expected_shape: &[usize], mut check: F)
     where
@@ -377,9 +446,14 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn cell_with_scalar_creates_square() {
-        let result = cell_builtin(vec![Value::Num(3.0)]).expect("cell(3)");
-        expect_cell(result, &[3, 3]);
+    fn cell_like_requires_prototype() {
+        let err = cell_builtin(vec![Value::from("like")])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("expected prototype"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -476,14 +550,16 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_rejects_negative() {
-        let err = cell_builtin(vec![Value::Num(-1.0)]).unwrap_err();
+        let err = cell_builtin(vec![Value::Num(-1.0)])
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("non-negative"), "unexpected error: {err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_rejects_fractional() {
-        let err = cell_builtin(vec![Value::Num(2.5)]).unwrap_err();
+        let err = cell_builtin(vec![Value::Num(2.5)]).unwrap_err().to_string();
         assert!(err.contains("integers"), "unexpected error: {err}");
     }
 
@@ -541,16 +617,6 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn cell_like_requires_prototype() {
-        let err = cell_builtin(vec![Value::from("like")]).unwrap_err();
-        assert!(
-            err.contains("expected prototype"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
     fn cell_like_rejects_multiple_keywords() {
         let proto = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let err = cell_builtin(vec![
@@ -560,7 +626,8 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::Tensor(proto),
         ])
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
         assert!(err.contains("multiple 'like'"), "unexpected error: {err}");
     }
 

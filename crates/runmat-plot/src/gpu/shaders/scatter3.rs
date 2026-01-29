@@ -14,8 +14,11 @@ struct Scatter3Params {
     color_stride: u32,
 };
 
-struct Counter {
-    value: atomic<u32>,
+struct IndirectArgs {
+    vertex_count: atomic<u32>,
+    instance_count: u32,
+    first_vertex: u32,
+    first_instance: u32,
 }
 
 @group(0) @binding(0)
@@ -40,7 +43,7 @@ var<storage, read> buf_sizes: array<f32>;
 var<storage, read> buf_colors: array<f32>;
 
 @group(0) @binding(7)
-var<storage, read_write> counter: Counter;
+var<storage, read_write> indirect: IndirectArgs;
 
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -91,7 +94,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     vertex.data[10u] = 0.0;
     vertex.data[11u] = 0.0;
 
-    let out_idx = atomicAdd(&(counter.value), 1u);
+    let out_idx = atomicAdd(&(indirect.vertex_count), 1u);
     out_vertices[out_idx] = vertex;
 }
 "#;
@@ -112,8 +115,11 @@ struct Scatter3Params {
     color_stride: u32,
 };
 
-struct Counter {
-    value: atomic<u32>,
+struct IndirectArgs {
+    vertex_count: atomic<u32>,
+    instance_count: u32,
+    first_vertex: u32,
+    first_instance: u32,
 }
 
 @group(0) @binding(0)
@@ -138,7 +144,7 @@ var<storage, read> buf_sizes: array<f32>;
 var<storage, read> buf_colors: array<f32>;
 
 @group(0) @binding(7)
-var<storage, read_write> counter: Counter;
+var<storage, read_write> indirect: IndirectArgs;
 
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -189,7 +195,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     vertex.data[10u] = 0.0;
     vertex.data[11u] = 0.0;
 
-    let out_idx = atomicAdd(&(counter.value), 1u);
+    let out_idx = atomicAdd(&(indirect.vertex_count), 1u);
     out_vertices[out_idx] = vertex;
 }
 "#;

@@ -56,9 +56,21 @@ Initialization
 --------------
 Call once during runtime startup:
 ```rust
-runmat_logging::init_logging();
+runmat_logging::init_logging(LoggingOptions {
+    enable_otlp: false,
+    enable_traces: true,
+    pid: 0,
+    default_filter: None,
+});
 ```
-This installs the subscriber globally. In WASM builds, `runmat-wasm::init_logging_once` wraps this and also sets panic hooks.
+This installs the subscriber globally. `LogTracer` is initialized first so any `log` invocations flow through `tracing`. In WASM builds, `runmat-wasm::init_logging_once` wraps this, supplies a `default_filter` of `debug`, and installs panic hooks before the subscriber is created.
+
+`LoggingOptions`
+----------------
+- `enable_otlp`: toggle the optional OTLP exporter (requires the `otlp` cargo feature).
+- `enable_traces`: attach the `TraceBridgeLayer` so `TraceEvent`s are produced.
+- `pid`: process identifier for trace metadata.
+- `default_filter`: optional `EnvFilter` expression used when neither `RUST_LOG` nor `RUNMAT_LOG` are set. All builds now fall back to `info` unless you override this value explicitly.
 
 Environment controls
 --------------------

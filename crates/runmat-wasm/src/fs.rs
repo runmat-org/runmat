@@ -286,9 +286,9 @@ impl FsProvider for JsFsProvider {
             append: flags.append,
             dirty: false,
         };
-        Ok(Box::new(JsFileHandle {
-            inner: Arc::new(Mutex::new(inner)),
-        }))
+        #[allow(clippy::arc_with_non_send_sync)]
+        let inner = Arc::new(Mutex::new(inner));
+        Ok(Box::new(JsFileHandle { inner }))
     }
 
     fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
@@ -368,6 +368,7 @@ impl JsFileState {
 }
 
 struct JsFileHandle {
+    #[allow(clippy::arc_with_non_send_sync)]
     inner: Arc<Mutex<JsFileState>>,
 }
 
@@ -479,7 +480,7 @@ fn map_js_error(op: &str, err: JsValue) -> io::Error {
         return io::Error::new(ErrorKind::NotFound, format!("{op}: not found"));
     }
     let message = err.as_string().unwrap_or_else(|| format!("{:?}", err));
-    io::Error::new(ErrorKind::Other, format!("{op}: {message}"))
+    io::Error::other(format!("{op}: {message}"))
 }
 
 fn is_not_found_error(err: &JsValue) -> bool {

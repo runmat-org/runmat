@@ -21,6 +21,7 @@ page_size = "0.6"
 serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
+futures = "0.3"
 rand = "0.8"
 criterion = "0.5"
 runmat-ignition = { workspace = true }

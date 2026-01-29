@@ -450,6 +450,125 @@ impl LinePlot {
         }
     }
 
+    /// Generate render data, using an optional viewport size hint (width, height in pixels).
+    ///
+    /// For thick 2D lines we build triangle geometry. The user-facing `line_width` is
+    /// expressed in *pixels*, but triangle extrusion operates in data space. When a viewport
+    /// is supplied we convert pixels → data-units using the current data range and target size.
+    pub fn render_data_with_viewport(&mut self, viewport_px: Option<(u32, u32)>) -> RenderData {
+        if self.gpu_vertices.is_some() {
+            // GPU paths already handle sizing via pipeline/state; keep existing behavior.
+            return self.render_data();
+        }
+
+        let (vertices, vertex_count, pipeline) = if self.line_width > 1.0 {
+            let (w_px, h_px) = viewport_px.unwrap_or((600, 400));
+            let w_px = w_px.max(1) as f32;
+            let h_px = h_px.max(1) as f32;
+
+            let (min_x, max_x) = self
+                .x_data
+                .iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &v| {
+                    (mn.min(v), mx.max(v))
+                });
+            let (min_y, max_y) = self
+                .y_data
+                .iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &v| {
+                    (mn.min(v), mx.max(v))
+                });
+            let x_range = ((max_x - min_x).abs() as f32).max(1e-6);
+            let y_range = ((max_y - min_y).abs() as f32).max(1e-6);
+            let data_per_px = (x_range / w_px).max(y_range / h_px);
+            let width_data = (self.line_width.max(0.1)) * data_per_px;
+
+            let base_tris = match self.line_cap {
+                LineCap::Butt => vertex_utils::create_thick_polyline_with_join(
+                    &self.x_data,
+                    &self.y_data,
+                    self.color,
+                    width_data,
+                    self.line_join,
+                ),
+                LineCap::Square => vertex_utils::create_thick_polyline_square_caps(
+                    &self.x_data,
+                    &self.y_data,
+                    self.color,
+                    width_data,
+                ),
+                LineCap::Round => vertex_utils::create_thick_polyline_round_caps(
+                    &self.x_data,
+                    &self.y_data,
+                    self.color,
+                    width_data,
+                    12,
+                ),
+            };
+            let tris = match self.line_style {
+                LineStyle::Solid => base_tris,
+                LineStyle::Dashed | LineStyle::DashDot | LineStyle::Dotted => {
+                    vertex_utils::create_thick_polyline_dashed(
+                        &self.x_data,
+                        &self.y_data,
+                        self.color,
+                        width_data,
+                        self.line_style,
+                    )
+                }
+            };
+            let count = tris.len();
+            (tris, count, PipelineType::Triangles)
+        } else {
+            let verts = self.generate_vertices().clone();
+            let count = verts.len();
+            (verts, count, PipelineType::Lines)
+        };
+
+        let style_code = match self.line_style {
+            LineStyle::Solid => 0.0,
+            LineStyle::Dashed => 1.0,
+            LineStyle::Dotted => 2.0,
+            LineStyle::DashDot => 3.0,
+        };
+        let cap_code = match self.line_cap {
+            LineCap::Butt => 0.0,
+            LineCap::Square => 1.0,
+            LineCap::Round => 2.0,
+        };
+        let join_code = match self.line_join {
+            LineJoin::Miter => 0.0,
+            LineJoin::Bevel => 1.0,
+            LineJoin::Round => 2.0,
+        };
+        let mut material = Material {
+            albedo: self.color,
+            ..Default::default()
+        };
+        // Keep the user-facing width in pixels for exporters/metadata.
+        material.roughness = self.line_width.max(0.0);
+        material.metallic = style_code;
+        material.emissive = Vec4::new(cap_code, join_code, -1.0, 0.0);
+
+        let draw_call = DrawCall {
+            vertex_offset: 0,
+            vertex_count,
+            index_offset: None,
+            index_count: None,
+            instance_count: 1,
+        };
+
+        RenderData {
+            pipeline_type: pipeline,
+            vertices,
+            indices: None,
+            gpu_vertices: None,
+            material,
+            draw_calls: vec![draw_call],
+            image: None,
+        }
+    }
+
     /// Generate render data representing the markers for this line plot.
     pub fn marker_render_data(&mut self) -> Option<RenderData> {
         let marker = self.marker.clone()?;

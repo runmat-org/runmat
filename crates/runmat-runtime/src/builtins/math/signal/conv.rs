@@ -9,7 +9,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::conv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -39,6 +40,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Convolution boundaries terminate fusion plans; intermediate expressions run on the host today.",
 };
 
+const BUILTIN_NAME: &str = "conv";
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 #[runtime_builtin(
     name = "conv",
     category = "math/signal",
@@ -47,13 +56,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::math::signal::conv"
 )]
-fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mode = parse_mode(&rest)?;
     if let Some(device_value) = try_conv_gpu(&a, &b, mode)? {
         return Ok(device_value);
     }
-    let lhs = normalize_input(a)?;
-    let rhs = normalize_input(b)?;
+    let lhs = normalize_input(a).await?;
+    let rhs = normalize_input(b).await?;
     let orientation = output_orientation(&lhs, &rhs);
 
     if lhs.len == 0 || rhs.len == 0 {
@@ -102,32 +111,32 @@ struct ConvInput {
     hint: OrientationHint,
 }
 
-fn parse_mode(args: &[Value]) -> Result<ConvMode, String> {
+fn parse_mode(args: &[Value]) -> BuiltinResult<ConvMode> {
     match args.len() {
         0 => Ok(ConvMode::Full),
         1 => {
             let Some(text) = tensor::value_to_string(&args[0]) else {
-                return Err(
-                    "conv: third argument must be the string 'full', 'same', or 'valid'"
-                        .to_string(),
-                );
+                return Err(runtime_error_for(
+                    "conv: third argument must be the string 'full', 'same', or 'valid'",
+                ));
             };
             let lowered = text.trim().to_ascii_lowercase();
             match lowered.as_str() {
                 "full" => Ok(ConvMode::Full),
                 "same" => Ok(ConvMode::Same),
                 "valid" => Ok(ConvMode::Valid),
-                _ => Err(
-                    "conv: third argument must be the string 'full', 'same', or 'valid'"
-                        .to_string(),
-                ),
+                _ => Err(runtime_error_for(
+                    "conv: third argument must be the string 'full', 'same', or 'valid'",
+                )),
             }
         }
-        _ => Err("conv: expected at most three input arguments".to_string()),
+        _ => Err(runtime_error_for(
+            "conv: expected at most three input arguments",
+        )),
     }
 }
 
-fn try_conv_gpu(a: &Value, b: &Value, mode: ConvMode) -> Result<Option<Value>, String> {
+fn try_conv_gpu(a: &Value, b: &Value, mode: ConvMode) -> BuiltinResult<Option<Value>> {
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),
@@ -194,17 +203,19 @@ fn try_conv_gpu(a: &Value, b: &Value, mode: ConvMode) -> Result<Option<Value>, S
     }
 }
 
-fn normalize_input(value: Value) -> Result<ConvInput, String> {
+async fn normalize_input(value: Value) -> BuiltinResult<ConvInput> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
             convert_tensor(tensor)
         }
         Value::Tensor(tensor) => convert_tensor(tensor),
         Value::ComplexTensor(tensor) => convert_complex_tensor(tensor),
-        Value::LogicalArray(logical) => {
-            tensor::logical_to_tensor(&logical).and_then(convert_tensor)
-        }
+        Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical)
+            .map_err(|err| runtime_error_for(format!("conv: {err}")))
+            .and_then(convert_tensor),
         Value::Num(n) => Ok(ConvInput {
             data: vec![Complex::new(n, 0.0)],
             len: 1,
@@ -225,14 +236,14 @@ fn normalize_input(value: Value) -> Result<ConvInput, String> {
             len: 1,
             hint: OrientationHint::Scalar,
         }),
-        other => Err(format!(
+        other => Err(runtime_error_for(format!(
             "conv: unsupported input type {:?}; expected numeric or logical values",
             other
-        )),
+        ))),
     }
 }
 
-fn convert_tensor(tensor: Tensor) -> Result<ConvInput, String> {
+fn convert_tensor(tensor: Tensor) -> BuiltinResult<ConvInput> {
     let Tensor {
         data,
         shape: _,
@@ -246,7 +257,7 @@ fn convert_tensor(tensor: Tensor) -> Result<ConvInput, String> {
     Ok(ConvInput { data, len, hint })
 }
 
-fn convert_complex_tensor(tensor: ComplexTensor) -> Result<ConvInput, String> {
+fn convert_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<ConvInput> {
     let ComplexTensor {
         data,
         shape: _,
@@ -348,7 +359,7 @@ fn apply_mode(
     }
 }
 
-fn convert_output(data: Vec<Complex<f64>>, orientation: Orientation) -> Result<Value, String> {
+fn convert_output(data: Vec<Complex<f64>>, orientation: Orientation) -> BuiltinResult<Value> {
     let len = data.len();
     let shape = match (orientation, len) {
         (Orientation::Row, 0) => vec![1, 0],
@@ -361,13 +372,13 @@ fn convert_output(data: Vec<Complex<f64>>, orientation: Orientation) -> Result<V
     if all_real {
         let real_data: Vec<f64> = data.into_iter().map(|c| c.re).collect();
         let tensor = Tensor::new(real_data, shape)
-            .map_err(|e| format!("conv: failed to build tensor: {e}"))?;
+            .map_err(|e| runtime_error_for(format!("conv: failed to build tensor: {e}")))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
 
     let complex_data: Vec<(f64, f64)> = data.into_iter().map(|c| (c.re, c.im)).collect();
     let tensor = ComplexTensor::new(complex_data, shape)
-        .map_err(|e| format!("conv: failed to build complex tensor: {e}"))?;
+        .map_err(|e| runtime_error_for(format!("conv: failed to build complex tensor: {e}")))?;
     if tensor.data.len() == 1 {
         let (re, im) = tensor.data[0];
         if im.abs() <= EPS {
@@ -382,10 +393,15 @@ fn convert_output(data: Vec<Complex<f64>>, orientation: Orientation) -> Result<V
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
+
+    fn error_message(error: RuntimeError) -> String {
+        error.message().to_string()
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -555,19 +571,23 @@ pub(crate) mod tests {
     fn conv_rejects_invalid_shape_keyword() {
         let a = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let b = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let err = conv_builtin(
-            Value::Tensor(a),
-            Value::Tensor(b),
-            vec![Value::from("diagonal")],
-        )
-        .unwrap_err();
+        let err = error_message(
+            conv_builtin(
+                Value::Tensor(a),
+                Value::Tensor(b),
+                vec![Value::from("diagonal")],
+            )
+            .unwrap_err(),
+        );
         assert!(err.contains("third argument"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_rejects_non_numeric_input() {
-        let err = conv_builtin(Value::from("hi"), Value::Num(1.0), Vec::new()).unwrap_err();
+        let err = error_message(
+            conv_builtin(Value::from("hi"), Value::Num(1.0), Vec::new()).unwrap_err(),
+        );
         assert!(err.contains("unsupported input type"));
     }
 
@@ -659,5 +679,9 @@ pub(crate) mod tests {
             vec![Value::Int(IntValue::I32(1))],
         );
         assert!(result.is_err());
+    }
+
+    fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::conv_builtin(a, b, rest))
     }
 }

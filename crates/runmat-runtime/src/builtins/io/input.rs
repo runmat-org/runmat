@@ -8,7 +8,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::interaction;
-use crate::{call_builtin, gather_if_needed};
+use crate::{
+    build_runtime_error, call_builtin_async, gather_if_needed_async, BuiltinResult, RuntimeError,
+};
 
 const DEFAULT_PROMPT: &str = "Input: ";
 
@@ -40,25 +42,27 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 #[runtime_builtin(name = "input", builtin_path = "crate::builtins::io::input")]
-fn input_builtin(args: Vec<Value>) -> Result<Value, String> {
+async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.len() > 2 {
-        return Err("MATLAB:input:TooManyInputs".to_string());
+        return Err(build_runtime_error("MATLAB:input:TooManyInputs").build());
     }
 
     let mut prompt_index = if args.is_empty() { None } else { Some(0usize) };
     let mut parsed_flag: Option<bool> = None;
 
     if let Some(idx) = if args.len() == 2 { Some(1usize) } else { None } {
-        match parse_string_flag(&args[idx]) {
+        match parse_string_flag(&args[idx]).await {
             Ok(flag) => parsed_flag = Some(flag),
             Err(original_err) => {
                 if let Some(prompt_idx) = prompt_index {
-                    match parse_string_flag(&args[prompt_idx]) {
+                    match parse_string_flag(&args[prompt_idx]).await {
                         Ok(swapped_flag) => {
                             parsed_flag = Some(swapped_flag);
                             prompt_index = Some(idx);
                         }
-                        Err(_) => return Err(original_err),
+                        Err(_) => {
+                            return Err(original_err);
+                        }
                     }
                 } else {
                     return Err(original_err);
@@ -68,32 +72,31 @@ fn input_builtin(args: Vec<Value>) -> Result<Value, String> {
     }
 
     let prompt = if let Some(idx) = prompt_index {
-        parse_prompt(&args[idx])?
+        parse_prompt(&args[idx]).await?
     } else {
         DEFAULT_PROMPT.to_string()
     };
     let return_string = parsed_flag.unwrap_or(false);
-    let line = match interaction::request_line(&prompt, true) {
-        Ok(line) => line,
-        Err(err) => {
-            if err == interaction::PENDING_INTERACTION_ERR {
-                return Err(err);
-            }
-            return Err(format!("input: {err}"));
-        }
-    };
+    let line = interaction::request_line_async(&prompt, true)
+        .await
+        .map_err(|err| {
+            let message = err.message().to_string();
+            build_runtime_error(format!("input: {message}"))
+                .with_source(err)
+                .build()
+        })?;
     if return_string {
         return Ok(Value::CharArray(CharArray::new_row(&line)));
     }
-    parse_numeric_response(&line)
+    parse_numeric_response(&line).await
 }
 
-fn parse_prompt(value: &Value) -> Result<String, String> {
-    let gathered = gather_if_needed(value)?;
+async fn parse_prompt(value: &Value) -> Result<String, RuntimeError> {
+    let gathered = gather_if_needed_async(value).await?;
     match gathered {
         Value::CharArray(ca) => {
             if ca.rows != 1 {
-                Err("MATLAB:input:PromptMustBeRowVector".to_string())
+                Err(build_runtime_error("MATLAB:input:PromptMustBeRowVector").build())
             } else {
                 Ok(ca.data.iter().collect())
             }
@@ -103,36 +106,48 @@ fn parse_prompt(value: &Value) -> Result<String, String> {
             if sa.data.len() == 1 {
                 Ok(sa.data[0].clone())
             } else {
-                Err("MATLAB:input:PromptMustBeScalarString".to_string())
+                Err(build_runtime_error("MATLAB:input:PromptMustBeScalarString").build())
             }
         }
-        other => Err(format!("MATLAB:input:InvalidPromptType ({other:?})")),
+        other => {
+            Err(build_runtime_error(format!("MATLAB:input:InvalidPromptType ({other:?})")).build())
+        }
     }
 }
 
-fn parse_string_flag(value: &Value) -> Result<bool, String> {
-    let gathered = gather_if_needed(value)?;
+async fn parse_string_flag(value: &Value) -> Result<bool, RuntimeError> {
+    let gathered = gather_if_needed_async(value).await?;
     let text = match gathered {
         Value::CharArray(ca) if ca.rows == 1 => ca.data.iter().collect::<String>(),
         Value::String(s) => s,
         Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
-        other => return Err(format!("MATLAB:input:InvalidStringFlag ({other:?})")),
+        other => {
+            return Err(
+                build_runtime_error(format!("MATLAB:input:InvalidStringFlag ({other:?})")).build(),
+            )
+        }
     };
     let trimmed = text.trim();
     if trimmed.eq_ignore_ascii_case("s") {
         Ok(true)
     } else {
-        Err(format!("MATLAB:input:InvalidStringFlag ({trimmed})"))
+        Err(build_runtime_error(format!("MATLAB:input:InvalidStringFlag ({trimmed})")).build())
     }
 }
 
-fn parse_numeric_response(line: &str) -> Result<Value, String> {
+async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
     let trimmed = line.trim();
     if trimmed.is_empty() || trimmed == "[]" {
         return Ok(Value::Tensor(Tensor::zeros(vec![0, 0])));
     }
-    call_builtin("str2double", &[Value::String(trimmed.to_string())])
-        .map_err(|err| format!("MATLAB:input:InvalidNumericExpression ({err})"))
+    call_builtin_async("str2double", &[Value::String(trimmed.to_string())])
+        .await
+        .map_err(|err| {
+            let message = err.message().to_string();
+            build_runtime_error(format!("MATLAB:input:InvalidNumericExpression ({message})"))
+                .with_source(err)
+                .build()
+        })
 }
 
 #[cfg(test)]
@@ -144,7 +159,7 @@ pub(crate) mod tests {
     #[test]
     fn numeric_input_parses_scalar() {
         push_queued_response(Ok(InteractionResponse::Line("41".into())));
-        let value = input_builtin(vec![]).expect("input");
+        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
         assert_eq!(value, Value::Num(41.0));
     }
 
@@ -154,7 +169,7 @@ pub(crate) mod tests {
         push_queued_response(Ok(InteractionResponse::Line("RunMat".into())));
         let prompt = Value::CharArray(CharArray::new_row("Name: "));
         let mode = Value::String("s".to_string());
-        let value = input_builtin(vec![prompt, mode]).expect("input");
+        let value = futures::executor::block_on(input_builtin(vec![prompt, mode])).expect("input");
         assert_eq!(value, Value::CharArray(CharArray::new_row("RunMat")));
     }
 
@@ -162,7 +177,7 @@ pub(crate) mod tests {
     #[test]
     fn empty_response_returns_empty_tensor() {
         push_queued_response(Ok(InteractionResponse::Line("   ".into())));
-        let value = input_builtin(vec![]).expect("input");
+        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
         match value {
             Value::Tensor(t) => assert!(t.data.is_empty()),
             other => panic!("expected empty tensor, got {other:?}"),
@@ -175,7 +190,7 @@ pub(crate) mod tests {
         push_queued_response(Ok(InteractionResponse::Line("ignored".into())));
         let prompt = Value::String("Ready?".to_string());
         let bad_flag = Value::String("not-string-mode".to_string());
-        let err = input_builtin(vec![prompt, bad_flag]).unwrap_err();
-        assert!(err.contains("InvalidStringFlag"));
+        let err = futures::executor::block_on(input_builtin(vec![prompt, bad_flag])).unwrap_err();
+        assert!(err.message().contains("InvalidStringFlag"));
     }
 }

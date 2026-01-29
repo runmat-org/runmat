@@ -1,4 +1,5 @@
-use runmat_parser::parse_simple as parse;
+mod parse;
+use parse::parse;
 
 #[test]
 fn mixed_lvalue_in_multi_assign_is_rejected() {

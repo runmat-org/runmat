@@ -1,4 +1,3 @@
-import { Metadata } from "next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { 
@@ -13,11 +12,16 @@ import {
   BarChart3
 } from "lucide-react";
 import Link from "next/link";
+import { buildPageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
+export const metadata = buildPageMetadata({
   title: "How RunMat Works | Docs",
-  description: "RunMat implements the full MATLAB language grammar and core semantics with a modern, V8-inspired engine, a slim core, generational GC, and a package-first model.",
-};
+  description:
+    "RunMat implements the full MATLAB language grammar and core semantics with a modern, V8-inspired engine, a slim core, generational GC, and a package-first model.",
+  canonicalPath: "/docs/how-it-works",
+  ogType: "article",
+  ogImagePath: "/docs/how-it-works/opengraph-image",
+});
 
 export default function HowItWorksPage() {
   return (

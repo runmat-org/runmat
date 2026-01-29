@@ -12,8 +12,8 @@ fn register_provider() -> &'static dyn AccelProvider {
 }
 
 #[ignore]
-#[test]
-fn matmul_pca_zero_regression() {
+#[tokio::test]
+async fn matmul_pca_zero_regression() {
     let provider = register_provider();
     provider.reset_telemetry();
 
@@ -52,6 +52,7 @@ fn matmul_pca_zero_regression() {
     for iter in 0..15 {
         let rhs_host = provider
             .download(&rhs_handle)
+            .await
             .expect("download rhs for inspection");
         let max_rhs = rhs_host
             .data
@@ -92,9 +93,11 @@ fn matmul_pca_zero_regression() {
 
         let product_handle = provider
             .matmul(&lhs_handle, &rhs_handle)
+            .await
             .expect("gpu product check");
         let gpu_product_host = provider
             .download(&product_handle)
+            .await
             .expect("download gpu product check");
         let max_gpu_product = gpu_product_host
             .data
@@ -112,11 +115,15 @@ fn matmul_pca_zero_regression() {
 
         let result = provider
             .qr_power_iter(&product_handle, Some(&lhs_handle), &rhs_handle, &options)
+            .await
             .expect("invoke qr_power_iter")
             .expect("device qr path");
         provider.free(&product_handle).ok();
 
-        let gpu_host = provider.download(&result.q).expect("download q result");
+        let gpu_host = provider
+            .download(&result.q)
+            .await
+            .expect("download q result");
         let max_gpu = gpu_host
             .data
             .iter()

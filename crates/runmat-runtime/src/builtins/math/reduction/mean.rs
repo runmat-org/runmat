@@ -6,12 +6,18 @@ const NAME: &str = "mean";
 
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{
+    gpu_helpers,
+    shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
+    tensor,
+};
 use crate::dispatcher;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::mean")]
@@ -36,6 +42,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: true,
     notes: "Providers can specialise mean reductions; omitnan currently falls back to the host.",
 };
+
+fn mean_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::mean")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -154,13 +164,17 @@ impl IntClass {
         }
     }
 
-    fn to_value(self, scalar: f64) -> Result<Value, String> {
+    fn to_value(self, scalar: f64) -> BuiltinResult<Value> {
         if scalar.is_nan() {
-            return Err("mean: cannot represent NaN as an integer output".to_string());
+            return Err(mean_error(
+                "mean: cannot represent NaN as an integer output",
+            ));
         }
         let rounded = scalar.round();
         if !rounded.is_finite() {
-            return Err("mean: integer output overflowed the target type".to_string());
+            return Err(mean_error(
+                "mean: integer output overflowed the target type",
+            ));
         }
         Ok(match self {
             IntClass::I8 => Value::Int(IntValue::I8(rounded as i8)),
@@ -191,7 +205,7 @@ enum MeanAxes {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::mean"
 )]
-fn mean_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     // Normalise argument order defensively:
     // If the primary 'value' is not data-like (e.g., 'all'), but a data-like
     // argument exists in 'rest', swap them so we interpret calls like
@@ -199,14 +213,14 @@ fn mean_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (value, rest) = normalise_mean_call_args(value, rest);
 
     let input_meta = InputMeta::from_value(&value);
-    let parsed = parse_arguments(&rest)?;
+    let parsed = parse_arguments(&rest).await?;
     let raw = match value {
-        Value::GpuTensor(handle) => mean_gpu(handle, &parsed)?,
+        Value::GpuTensor(handle) => mean_gpu(handle, &parsed).await?,
         Value::Complex(re, im) => mean_host_complex_scalar(re, im, &parsed)?,
         Value::ComplexTensor(ct) => mean_host_complex_tensor(ct, &parsed)?,
         other => mean_host(other, &parsed)?,
     };
-    apply_output_template(raw, &parsed.output, &input_meta)
+    apply_output_template(raw, &parsed.output, &input_meta).await
 }
 
 fn normalise_mean_call_args(value: Value, rest: Vec<Value>) -> (Value, Vec<Value>) {
@@ -240,7 +254,7 @@ fn is_data_like(v: &Value) -> bool {
     )
 }
 
-fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
+async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut axes = MeanAxes::Default;
     let mut axes_set = false;
     let mut nan_mode = ReductionNaN::Include;
@@ -264,9 +278,9 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                 }
                 "all" => {
                     if axes_set && !matches!(axes, MeanAxes::Default) {
-                        return Err(
-                            "mean: 'all' cannot be combined with an explicit dimension".to_string()
-                        );
+                        return Err(mean_error(
+                            "mean: 'all' cannot be combined with an explicit dimension",
+                        ));
                     }
                     axes = MeanAxes::All;
                     axes_set = true;
@@ -275,9 +289,9 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                 }
                 "double" | "default" => {
                     if output_set {
-                        return Err(
-                            "mean: multiple output class specifications provided".to_string()
-                        );
+                        return Err(mean_error(
+                            "mean: multiple output class specifications provided",
+                        ));
                     }
                     output = OutputTemplate::Double;
                     output_set = true;
@@ -286,9 +300,9 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                 }
                 "native" => {
                     if output_set {
-                        return Err(
-                            "mean: multiple output class specifications provided".to_string()
-                        );
+                        return Err(mean_error(
+                            "mean: multiple output class specifications provided",
+                        ));
                     }
                     output = OutputTemplate::Native;
                     output_set = true;
@@ -297,18 +311,17 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                 }
                 "like" => {
                     if output_set {
-                        return Err(
-                            "mean: cannot combine 'like' with another output class specifier"
-                                .to_string(),
-                        );
+                        return Err(mean_error(
+                            "mean: cannot combine 'like' with another output class specifier",
+                        ));
                     }
                     let Some(proto) = args.get(idx + 1).cloned() else {
-                        return Err("mean: expected prototype after 'like'".to_string());
+                        return Err(mean_error("mean: expected prototype after 'like'"));
                     };
                     output = OutputTemplate::Like(proto);
                     idx += 2;
                     if idx < args.len() {
-                        return Err("mean: 'like' must be the final argument".to_string());
+                        return Err(mean_error("mean: 'like' must be the final argument"));
                     }
                     break;
                 }
@@ -317,14 +330,14 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
         }
 
         if !axes_set || matches!(axes, MeanAxes::Default) {
-            if let Some(selection) = parse_axes(arg)? {
+            if let Some(selection) = parse_axes(arg).await? {
                 if matches!(selection, MeanAxes::All)
                     && axes_set
                     && !matches!(axes, MeanAxes::Default)
                 {
-                    return Err(
-                        "mean: 'all' cannot be combined with an explicit dimension".to_string()
-                    );
+                    return Err(mean_error(
+                        "mean: 'all' cannot be combined with an explicit dimension",
+                    ));
                 }
                 axes = selection;
                 axes_set = true;
@@ -334,17 +347,19 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
         }
 
         if axes_set && !matches!(axes, MeanAxes::Default) {
-            if let Some(selection) = parse_axes(arg)? {
+            if let Some(selection) = parse_axes(arg).await? {
                 if matches!(selection, MeanAxes::All) {
-                    return Err(
-                        "mean: 'all' cannot be combined with an explicit dimension".to_string()
-                    );
+                    return Err(mean_error(
+                        "mean: 'all' cannot be combined with an explicit dimension",
+                    ));
                 }
-                return Err("mean: multiple dimension specifications provided".to_string());
+                return Err(mean_error(
+                    "mean: multiple dimension specifications provided",
+                ));
             }
         }
 
-        return Err(format!("mean: unrecognised argument {arg:?}"));
+        return Err(mean_error(format!("mean: unrecognised argument {arg:?}")));
     }
 
     Ok(ParsedArguments {
@@ -354,51 +369,63 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
     })
 }
 
-fn parse_axes(value: &Value) -> Result<Option<MeanAxes>, String> {
+async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
     if let Some(text) = value_as_str(value) {
         let lowered = text.trim().to_ascii_lowercase();
         return match lowered.as_str() {
             "all" => Ok(Some(MeanAxes::All)),
             "omitnan" | "includenan" | "double" | "native" | "default" | "like" => Ok(None),
-            "" => Err("mean: dimension string must not be empty".to_string()),
+            "" => Err(mean_error("mean: dimension string must not be empty")),
             _ => Ok(None),
         };
     }
 
-    match value {
-        Value::Tensor(t) => {
-            if t.data.is_empty() {
-                return Ok(Some(MeanAxes::Default));
-            }
-            if t.data.len() == 1 {
-                let scalar = Value::Num(t.data[0]);
-                let dim = tensor::parse_dimension(&scalar, "mean")?;
-                return Ok(Some(MeanAxes::Dim(dim)));
-            }
-            let dims = parse_dimension_vector(t)?;
-            Ok(Some(MeanAxes::Vec(dims)))
+    let scalar_hint = match value {
+        Value::Num(_) | Value::Int(_) => true,
+        Value::Tensor(t) => t.data.len() == 1,
+        Value::LogicalArray(logical) => logical.data.len() == 1,
+        Value::GpuTensor(handle) => {
+            is_scalar_shape(&handle.shape) || tensor::element_count(&handle.shape) == 1
         }
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(logical)?;
-            if tensor.data.is_empty() {
-                return Ok(Some(MeanAxes::Default));
-            }
-            if tensor.data.len() == 1 {
-                let scalar = Value::Num(tensor.data[0]);
-                let dim = tensor::parse_dimension(&scalar, "mean")?;
-                return Ok(Some(MeanAxes::Dim(dim)));
-            }
-            let dims = parse_dimension_vector(&tensor)?;
-            Ok(Some(MeanAxes::Vec(dims)))
+        _ => false,
+    };
+
+    let dims = match value {
+        Value::Tensor(_)
+        | Value::LogicalArray(_)
+        | Value::Int(_)
+        | Value::Num(_)
+        | Value::GpuTensor(_) => tensor::dims_from_value_async(value)
+            .await
+            .map_err(|err| map_dims_error(err, scalar_hint))?,
+        Value::Bool(_) => {
+            return Err(mean_error("mean: dimension must be numeric"));
         }
-        Value::Int(_) | Value::Num(_) => {
-            let dim = tensor::parse_dimension(value, "mean")?;
-            Ok(Some(MeanAxes::Dim(dim)))
-        }
-        Value::GpuTensor(_) => Err("mean: dimension arguments cannot be GPU tensors".to_string()),
-        Value::Bool(_) => Err("mean: dimension must be numeric".to_string()),
-        _ => Ok(None),
+        _ => return Ok(None),
+    };
+
+    let Some(mut dims) = dims else {
+        return Ok(None);
+    };
+    if dims.is_empty() {
+        return Ok(Some(MeanAxes::Default));
     }
+    if dims.len() == 1 {
+        let dim = dims[0];
+        if dim < 1 {
+            return Err(mean_error("mean: dimension must be >= 1"));
+        }
+        return Ok(Some(MeanAxes::Dim(dim)));
+    }
+    for dim in &mut dims {
+        if *dim == 0 {
+            *dim = 1;
+        }
+        if *dim < 1 {
+            return Err(mean_error("mean: dimension entries must be >= 1"));
+        }
+    }
+    Ok(Some(MeanAxes::Vec(dims)))
 }
 
 fn value_as_str(value: &Value) -> Option<String> {
@@ -410,50 +437,42 @@ fn value_as_str(value: &Value) -> Option<String> {
     }
 }
 
-fn parse_dimension_vector(tensor: &Tensor) -> Result<Vec<usize>, String> {
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for &val in &tensor.data {
-        if !val.is_finite() {
-            return Err("mean: dimension entries must be finite integers".to_string());
+fn map_dims_error(message: String, scalar: bool) -> RuntimeError {
+    if message.contains("non-negative") {
+        if scalar {
+            return mean_error("mean: dimension must be >= 1");
         }
-        let rounded = val.round();
-        let adjusted = if (0.0..1.0).contains(&rounded) {
-            1.0
-        } else {
-            rounded
-        };
-        if adjusted < 1.0 {
-            return Err("mean: dimension entries must be >= 1".to_string());
+        return mean_error("mean: dimension entries must be >= 1");
+    }
+    if scalar {
+        if message.contains("finite") {
+            return mean_error("mean: dimension must be finite");
         }
-        dims.push(adjusted as usize);
+        if message.contains("integer") {
+            return mean_error("mean: dimension must be an integer");
+        }
     }
-    if dims.is_empty() {
-        return Err("mean: dimension vector must not be empty".to_string());
-    }
-    Ok(dims)
+    mean_error("mean: dimension entries must be finite integers")
 }
 
-fn mean_host(value: Value, args: &ParsedArguments) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("mean", value)?;
+fn mean_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("mean", value).map_err(mean_error)?;
     let reduced = mean_tensor(tensor, args.axes.clone(), args.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
 
-fn mean_host_complex_scalar(re: f64, im: f64, args: &ParsedArguments) -> Result<Value, String> {
-    let tensor =
-        ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| format!("mean: {e}"))?;
+fn mean_host_complex_scalar(re: f64, im: f64, args: &ParsedArguments) -> BuiltinResult<Value> {
+    let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
+        .map_err(|e| mean_error(format!("mean: {e}")))?;
     mean_host_complex_tensor(tensor, args)
 }
 
-fn mean_host_complex_tensor(
-    tensor: ComplexTensor,
-    args: &ParsedArguments,
-) -> Result<Value, String> {
+fn mean_host_complex_tensor(tensor: ComplexTensor, args: &ParsedArguments) -> BuiltinResult<Value> {
     let reduced = mean_complex_tensor(tensor, args.axes.clone(), args.nan_mode)?;
     Ok(complex_tensor_into_value(reduced))
 }
 
-fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> Result<Value, String> {
+async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -465,36 +484,36 @@ fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> Result<Value, St
     if let Some(provider) = runmat_accelerate_api::provider() {
         // Include-NaN: use provider reduce_mean_* hooks
         if args.nan_mode == ReductionNaN::Include {
-            if let Some(device_result) = mean_gpu_try(provider, &handle, &args.axes) {
+            if let Some(device_result) = mean_gpu_try(provider, &handle, &args.axes).await {
                 return Ok(Value::GpuTensor(device_result));
             }
         } else {
             // Omit-NaN: compute fully on device via cleaned sum and non-NaN counts
-            if let Some(device_result) = mean_gpu_omitnan(provider, &handle, &args.axes) {
+            if let Some(device_result) = mean_gpu_omitnan(provider, &handle, &args.axes).await {
                 return Ok(Value::GpuTensor(device_result));
             }
         }
     }
 
-    let gathered = gpu_helpers::gather_tensor(&handle)?;
+    let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
     let reduced = mean_tensor(gathered, args.axes.clone(), args.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
 
-fn mean_gpu_try(
+async fn mean_gpu_try(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
     axes: &MeanAxes,
 ) -> Option<GpuTensorHandle> {
     match axes {
         MeanAxes::Default => {
-            if handle.shape.is_empty() {
+            if is_scalar_shape(&handle.shape) {
                 return Some(handle.clone());
             }
             let dim = default_dimension_from_shape(&handle.shape);
-            reduce_mean_dim_gpu(provider, handle.clone(), dim)
+            reduce_mean_dim_gpu(provider, handle.clone(), dim).await
         }
-        MeanAxes::Dim(dim) => reduce_mean_dim_gpu(provider, handle.clone(), *dim),
+        MeanAxes::Dim(dim) => reduce_mean_dim_gpu(provider, handle.clone(), *dim).await,
         MeanAxes::Vec(dims) => {
             // Prefer provider N-D reduce if available
             let mut dims0: Vec<usize> = dims
@@ -504,12 +523,12 @@ fn mean_gpu_try(
             dims0.sort_unstable();
             dims0.dedup();
             if !dims0.is_empty() {
-                if let Ok(out) = provider.reduce_mean_nd(handle, &dims0) {
+                if let Ok(out) = provider.reduce_mean_nd(handle, &dims0).await {
                     return Some(out);
                 }
             }
             // Try fast permute+2D fallback
-            if let Some(nd) = reduce_mean_vecdim_nd_gpu(provider, handle, dims) {
+            if let Some(nd) = reduce_mean_vecdim_nd_gpu(provider, handle, dims).await {
                 return Some(nd);
             }
             // Sequential per-dimension reductions
@@ -518,33 +537,40 @@ fn mean_gpu_try(
             dims_sorted.sort_unstable();
             dims_sorted.dedup();
             for dim in dims_sorted {
-                if result.shape.is_empty() {
+                if is_scalar_shape(&result.shape) {
                     break;
                 }
-                result = reduce_mean_dim_gpu(provider, result, dim)?;
+                result = reduce_mean_dim_gpu(provider, result, dim).await?;
             }
             Some(result)
         }
         MeanAxes::All => {
-            if handle.shape.is_empty() {
+            if is_scalar_shape(&handle.shape) {
                 return Some(handle.clone());
             }
-            match provider.reduce_mean(handle) {
+            match provider.reduce_mean(handle).await {
                 Ok(out) => Some(out),
                 Err(err) => {
                     log::trace!("mean: provider reduce_mean fallback triggered: {err}");
                     let rank = handle.shape.len();
-                    if rank == 0 {
+                    if is_scalar_shape(&handle.shape) || rank == 0 {
                         Some(handle.clone())
                     } else {
                         let dims: Vec<usize> = (1..=rank).collect();
-                        reduce_mean_vecdim_nd_gpu(provider, handle, &dims).or_else(|| {
+                        if let Some(result) =
+                            reduce_mean_vecdim_nd_gpu(provider, handle, &dims).await
+                        {
+                            Some(result)
+                        } else {
                             let mut result = handle.clone();
                             for dim in 1..=rank {
-                                result = reduce_mean_dim_gpu(provider, result, dim)?;
+                                match reduce_mean_dim_gpu(provider, result, dim).await {
+                                    Some(updated) => result = updated,
+                                    None => return None,
+                                }
                             }
                             Some(result)
-                        })
+                        }
                     }
                 }
             }
@@ -552,7 +578,7 @@ fn mean_gpu_try(
     }
 }
 
-fn reduce_mean_dim_gpu(
+async fn reduce_mean_dim_gpu(
     provider: &dyn AccelProvider,
     handle: GpuTensorHandle,
     dim: usize,
@@ -565,6 +591,7 @@ fn reduce_mean_dim_gpu(
     }
     provider
         .reduce_mean_dim(&handle, dim - 1)
+        .await
         .map_err(|err| {
             log::trace!("mean: provider reduce_mean_dim fallback triggered: {err}");
             err
@@ -576,7 +603,7 @@ fn reduce_mean_dim_gpu(
 /// permuting reduce dims to the front, reshaping to 2-D, reducing rows, and
 /// reshaping/permuting back to the original order with size-1 dims preserved.
 // (N-D mean fast path omitted for now; sequential per-dimension GPU reductions used instead.)
-fn reduce_mean_vecdim_nd_gpu(
+async fn reduce_mean_vecdim_nd_gpu(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
     dims_1based: &[usize],
@@ -624,7 +651,7 @@ fn reduce_mean_vecdim_nd_gpu(
         .reshape(&permuted, &[reduce_len, num_slices])
         .ok()?;
     // Reduce along rows (dim 0) -> [1, num_slices]
-    let reduced_rows = provider.reduce_mean_dim(&reshaped2d, 0).ok()?;
+    let reduced_rows = provider.reduce_mean_dim(&reshaped2d, 0).await.ok()?;
     let _ = provider.free(&reshaped2d);
     let _ = provider.free(&permuted);
     // Reshape to kept sizes (permuted order)
@@ -654,7 +681,7 @@ fn reduce_mean_vecdim_nd_gpu(
     Some(out)
 }
 
-fn mean_gpu_omitnan(
+async fn mean_gpu_omitnan(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
     axes: &MeanAxes,
@@ -662,7 +689,7 @@ fn mean_gpu_omitnan(
     // Early return for empty dim selection
     let dims_in_bounds: Vec<usize> = match axes {
         MeanAxes::Default => {
-            if handle.shape.is_empty() {
+            if is_scalar_shape(&handle.shape) {
                 return Some(handle.clone());
             }
             vec![default_dimension_from_shape(&handle.shape) - 1]
@@ -689,7 +716,7 @@ fn mean_gpu_omitnan(
             dims
         }
         MeanAxes::All => {
-            if handle.shape.is_empty() {
+            if is_scalar_shape(&handle.shape) {
                 return Some(handle.clone());
             }
             (0..handle.shape.len()).collect()
@@ -708,12 +735,12 @@ fn mean_gpu_omitnan(
     let mut sum_h = cleaned.clone();
     let mut cnt_h = mask.clone();
     for &dim in &dims_in_bounds {
-        sum_h = provider.reduce_sum_dim(&sum_h, dim).ok()?;
-        cnt_h = provider.reduce_sum_dim(&cnt_h, dim).ok()?;
+        sum_h = provider.reduce_sum_dim(&sum_h, dim).await.ok()?;
+        cnt_h = provider.reduce_sum_dim(&cnt_h, dim).await.ok()?;
     }
 
     // mean = sum ./ count (0/0 -> NaN when all NaN)
-    let out = provider.elem_div(&sum_h, &cnt_h).ok()?;
+    let out = provider.elem_div(&sum_h, &cnt_h).await.ok()?;
 
     // Free intermediates
     let _ = provider.free(&cleaned);
@@ -724,7 +751,7 @@ fn mean_gpu_omitnan(
     Some(out)
 }
 
-fn mean_tensor(tensor: Tensor, axes: MeanAxes, nan_mode: ReductionNaN) -> Result<Tensor, String> {
+fn mean_tensor(tensor: Tensor, axes: MeanAxes, nan_mode: ReductionNaN) -> BuiltinResult<Tensor> {
     match axes {
         MeanAxes::Default => {
             let dim = default_dimension(&tensor);
@@ -745,8 +772,8 @@ fn mean_tensor(tensor: Tensor, axes: MeanAxes, nan_mode: ReductionNaN) -> Result
     }
 }
 
-fn mean_tensor_all(tensor: &Tensor, nan_mode: ReductionNaN) -> Result<Tensor, String> {
-    if tensor.shape.is_empty() {
+fn mean_tensor_all(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<Tensor> {
+    if is_scalar_shape(&tensor.shape) {
         return Ok(tensor.clone());
     }
     let total_elems = tensor
@@ -756,7 +783,8 @@ fn mean_tensor_all(tensor: &Tensor, nan_mode: ReductionNaN) -> Result<Tensor, St
         .map(|dim| dim.max(1))
         .fold(1usize, |acc, dim| acc.saturating_mul(dim));
     if total_elems == 0 || tensor.data.is_empty() {
-        return Tensor::new(vec![f64::NAN], vec![1, 1]).map_err(|e| format!("mean: {e}"));
+        return Tensor::new(vec![f64::NAN], vec![1, 1])
+            .map_err(|e| mean_error(format!("mean: {e}")));
     }
     let mut sum = 0.0f64;
     let mut count = 0usize;
@@ -775,7 +803,7 @@ fn mean_tensor_all(tensor: &Tensor, nan_mode: ReductionNaN) -> Result<Tensor, St
             } else {
                 sum / (total_elems as f64)
             };
-            Tensor::new(vec![result], vec![1, 1]).map_err(|e| format!("mean: {e}"))
+            Tensor::new(vec![result], vec![1, 1]).map_err(|e| mean_error(format!("mean: {e}")))
         }
         ReductionNaN::Omit => {
             for &value in &tensor.data {
@@ -790,7 +818,7 @@ fn mean_tensor_all(tensor: &Tensor, nan_mode: ReductionNaN) -> Result<Tensor, St
             } else {
                 sum / (count as f64)
             };
-            Tensor::new(vec![result], vec![1, 1]).map_err(|e| format!("mean: {e}"))
+            Tensor::new(vec![result], vec![1, 1]).map_err(|e| mean_error(format!("mean: {e}")))
         }
     }
 }
@@ -799,12 +827,12 @@ fn reduce_tensor_mean_dim(
     tensor: &Tensor,
     dim: usize,
     nan_mode: ReductionNaN,
-) -> Result<Tensor, String> {
+) -> BuiltinResult<Tensor> {
     if dim == 0 {
-        return Err("mean: dimension must be >= 1".to_string());
+        return Err(mean_error("mean: dimension must be >= 1"));
     }
 
-    if tensor.shape.is_empty() {
+    if is_scalar_shape(&tensor.shape) {
         let value = tensor.data.first().copied().unwrap_or(f64::NAN);
         let result = match nan_mode {
             ReductionNaN::Include => value,
@@ -816,7 +844,7 @@ fn reduce_tensor_mean_dim(
                 }
             }
         };
-        return Tensor::new(vec![result], vec![1, 1]).map_err(|e| format!("mean: {e}"));
+        return Tensor::new(vec![result], vec![1, 1]).map_err(|e| mean_error(format!("mean: {e}")));
     }
 
     let Some(output_shape) = reduction_shape(&tensor.shape, dim) else {
@@ -825,7 +853,7 @@ fn reduce_tensor_mean_dim(
 
     if tensor.data.is_empty() {
         let fill = vec![f64::NAN; tensor::element_count(&output_shape)];
-        return Tensor::new(fill, output_shape).map_err(|e| format!("mean: {e}"));
+        return Tensor::new(fill, output_shape).map_err(|e| mean_error(format!("mean: {e}")));
     }
 
     let dim_index = dim - 1;
@@ -882,14 +910,14 @@ fn reduce_tensor_mean_dim(
         }
     }
 
-    Tensor::new(output, output_shape).map_err(|e| format!("mean: {e}"))
+    Tensor::new(output, output_shape).map_err(|e| mean_error(format!("mean: {e}")))
 }
 
 fn mean_complex_tensor(
     tensor: ComplexTensor,
     axes: MeanAxes,
     nan_mode: ReductionNaN,
-) -> Result<ComplexTensor, String> {
+) -> BuiltinResult<ComplexTensor> {
     match axes {
         MeanAxes::Default => {
             let dim = default_dimension_from_shape(&tensor.shape);
@@ -906,7 +934,7 @@ fn mean_complex_tensor(
             Ok(current)
         }
         MeanAxes::All => {
-            if tensor.shape.is_empty() {
+            if is_scalar_shape(&tensor.shape) {
                 Ok(tensor)
             } else {
                 let mut current = tensor;
@@ -924,18 +952,18 @@ fn reduce_complex_tensor_mean_dim(
     tensor: &ComplexTensor,
     dim: usize,
     nan_mode: ReductionNaN,
-) -> Result<ComplexTensor, String> {
+) -> BuiltinResult<ComplexTensor> {
     if dim == 0 {
-        return Err("mean: dimension must be >= 1".to_string());
+        return Err(mean_error("mean: dimension must be >= 1"));
     }
 
-    let shape = if tensor.shape.is_empty() {
-        vec![tensor.rows, tensor.cols]
+    let shape = if is_scalar_shape(&tensor.shape) {
+        normalize_scalar_shape(&tensor.shape)
     } else {
         tensor.shape.clone()
     };
 
-    if shape.is_empty() {
+    if is_scalar_shape(&shape) {
         let (re, im) = tensor.data.first().copied().unwrap_or((f64::NAN, f64::NAN));
         let result = match nan_mode {
             ReductionNaN::Include => (re, im),
@@ -947,7 +975,8 @@ fn reduce_complex_tensor_mean_dim(
                 }
             }
         };
-        return ComplexTensor::new(vec![result], vec![1, 1]).map_err(|e| format!("mean: {e}"));
+        return ComplexTensor::new(vec![result], canonical_scalar_shape())
+            .map_err(|e| mean_error(format!("mean: {e}")));
     }
 
     let Some(output_shape) = reduction_shape(&shape, dim) else {
@@ -956,7 +985,8 @@ fn reduce_complex_tensor_mean_dim(
 
     if tensor.data.is_empty() {
         let fill = vec![(f64::NAN, f64::NAN); tensor::element_count(&output_shape)];
-        return ComplexTensor::new(fill, output_shape).map_err(|e| format!("mean: {e}"));
+        return ComplexTensor::new(fill, output_shape)
+            .map_err(|e| mean_error(format!("mean: {e}")));
     }
 
     let dim_index = dim - 1;
@@ -1021,16 +1051,16 @@ fn reduce_complex_tensor_mean_dim(
         }
     }
 
-    ComplexTensor::new(output, output_shape).map_err(|e| format!("mean: {e}"))
+    ComplexTensor::new(output, output_shape).map_err(|e| mean_error(format!("mean: {e}")))
 }
 
 fn reduction_shape(shape: &[usize], dim: usize) -> Option<Vec<usize>> {
     if dim == 0 {
         return None;
     }
-    if shape.is_empty() {
+    if is_scalar_shape(shape) {
         if dim == 1 {
-            return Some(vec![1, 1]);
+            return Some(canonical_scalar_shape());
         }
         return None;
     }
@@ -1053,7 +1083,7 @@ fn default_dimension(tensor: &Tensor) -> usize {
 }
 
 fn default_dimension_from_shape(shape: &[usize]) -> usize {
-    if shape.is_empty() {
+    if is_scalar_shape(shape) {
         return 1;
     }
     shape
@@ -1063,22 +1093,22 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
         .unwrap_or(1)
 }
 
-fn apply_output_template(
+async fn apply_output_template(
     value: Value,
     template: &OutputTemplate,
     meta: &InputMeta,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     match template {
         OutputTemplate::Double => Ok(value),
         OutputTemplate::Native => {
-            let value = apply_native_template(value, meta)?;
-            ensure_device(value, meta.device)
+            let value = apply_native_template(value, meta).await?;
+            ensure_device(value, meta.device).await
         }
-        OutputTemplate::Like(proto) => apply_like_template(value, proto),
+        OutputTemplate::Like(proto) => apply_like_template(value, proto).await,
     }
 }
 
-fn apply_native_template(value: Value, meta: &InputMeta) -> Result<Value, String> {
+async fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
     match meta.class {
         InputClass::Integer(class) => match value {
             Value::Num(n) => class.to_value(n),
@@ -1087,7 +1117,7 @@ fn apply_native_template(value: Value, meta: &InputMeta) -> Result<Value, String
         },
         _ => {
             if let Some(dtype) = meta.numeric_dtype {
-                coerce_value_to_dtype(value, dtype)
+                coerce_value_to_dtype(value, dtype).await
             } else {
                 Ok(value)
             }
@@ -1095,7 +1125,7 @@ fn apply_native_template(value: Value, meta: &InputMeta) -> Result<Value, String
     }
 }
 
-fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> Result<Value, String> {
+async fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Value> {
     match dtype {
         NumericDType::F64 => Ok(value),
         NumericDType::F32 => match value {
@@ -1105,17 +1135,17 @@ fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> Result<Value, Str
             }
             Value::Num(n) => {
                 let tensor = Tensor::new_with_dtype(vec![n], vec![1, 1], NumericDType::F32)
-                    .map_err(|e| format!("{NAME}: {e}"))?;
+                    .map_err(|e| mean_error(format!("{NAME}: {e}")))?;
                 Ok(Value::Tensor(tensor))
             }
             Value::LogicalArray(logical) => {
-                let tensor =
-                    tensor::logical_to_tensor(&logical).map_err(|e| format!("{NAME}: {e}"))?;
+                let tensor = tensor::logical_to_tensor(&logical)
+                    .map_err(|e| mean_error(format!("{NAME}: {e}")))?;
                 let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
                 Ok(Value::Tensor(tensor))
             }
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                 let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
                 Ok(Value::Tensor(tensor))
             }
@@ -1139,11 +1169,11 @@ fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
     tensor
 }
 
-fn ensure_device(value: Value, device: DevicePreference) -> Result<Value, String> {
+async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value> {
     match device {
         DevicePreference::Host => match value {
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                 Ok(tensor::tensor_into_value(tensor))
             }
             _ => Ok(value),
@@ -1152,21 +1182,26 @@ fn ensure_device(value: Value, device: DevicePreference) -> Result<Value, String
             Value::GpuTensor(_) => Ok(value),
             Value::Tensor(t) => upload_tensor(t),
             Value::Num(n) => {
-                let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("mean: {e}"))?;
+                let tensor = Tensor::new(vec![n], vec![1, 1])
+                    .map_err(|e| mean_error(format!("mean: {e}")))?;
                 upload_tensor(tensor)
             }
             Value::LogicalArray(logical) => {
                 let tensor = tensor::logical_to_tensor(&logical)?;
                 upload_tensor(tensor)
             }
-            other => Err(format!("mean: cannot place value {other:?} on the GPU")),
+            other => Err(mean_error(format!(
+                "mean: cannot place value {other:?} on the GPU"
+            ))),
         },
     }
 }
 
-fn upload_tensor(tensor: Tensor) -> Result<Value, String> {
+fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err("mean: no acceleration provider available to honour GPU output".to_string());
+        return Err(mean_error(
+            "mean: no acceleration provider available to honour GPU output",
+        ));
     };
     let view = HostTensorView {
         data: &tensor.data,
@@ -1174,41 +1209,41 @@ fn upload_tensor(tensor: Tensor) -> Result<Value, String> {
     };
     let handle = provider
         .upload(&view)
-        .map_err(|e| format!("mean: failed to upload GPU result: {e}"))?;
+        .map_err(|e| mean_error(format!("mean: failed to upload GPU result: {e}")))?;
     Ok(Value::GpuTensor(handle))
 }
 
-fn apply_like_template(value: Value, prototype: &Value) -> Result<Value, String> {
-    let analysed = analyse_like_prototype(prototype)?;
+async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
+    let analysed = analyse_like_prototype(prototype).await?;
     match analysed.class {
         PrototypeClass::Real => match analysed.device {
-            DevicePreference::Host => ensure_device(value, DevicePreference::Host),
-            DevicePreference::Gpu => ensure_device(value, DevicePreference::Gpu),
+            DevicePreference::Host => ensure_device(value, DevicePreference::Host).await,
+            DevicePreference::Gpu => ensure_device(value, DevicePreference::Gpu).await,
         },
         PrototypeClass::Complex => {
-            let host_value = ensure_device(value, DevicePreference::Host)?;
+            let host_value = ensure_device(value, DevicePreference::Host).await?;
             real_to_complex(host_value)
         }
     }
 }
 
-fn real_to_complex(value: Value) -> Result<Value, String> {
+fn real_to_complex(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
             let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
-            let tensor =
-                ComplexTensor::new(data, t.shape.clone()).map_err(|e| format!("mean: {e}"))?;
+            let tensor = ComplexTensor::new(data, t.shape.clone())
+                .map_err(|e| mean_error(format!("mean: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)?;
             real_to_complex(Value::Tensor(tensor))
         }
-        other => Err(format!(
+        other => Err(mean_error(format!(
             "mean: cannot convert value {other:?} to a complex result"
-        )),
+        ))),
     }
 }
 
@@ -1222,7 +1257,8 @@ enum PrototypeClass {
     Complex,
 }
 
-fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
+#[async_recursion::async_recursion(?Send)]
+async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
     match proto {
         Value::GpuTensor(_) => Ok(LikeAnalysis {
             device: DevicePreference::Gpu,
@@ -1241,8 +1277,10 @@ fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
             class: PrototypeClass::Complex,
         }),
         other => {
-            let gathered = dispatcher::gather_if_needed(other).map_err(|e| format!("mean: {e}"))?;
-            analyse_like_prototype(&gathered)
+            let gathered = dispatcher::gather_if_needed_async(other)
+                .await
+                .map_err(|e| mean_error(format!("mean: {e}")))?;
+            analyse_like_prototype(&gathered).await
         }
     }
 }
@@ -1251,7 +1289,12 @@ fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::IntValue;
+
+    fn mean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::mean_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1371,7 +1414,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = mean_builtin(Value::Tensor(tensor), vec![Value::from("like")])
             .expect_err("expected error");
-        assert!(err.contains("prototype"));
+        assert!(err.message().contains("prototype"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1697,7 +1740,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = mean_gpu(h, &args).unwrap();
+        let gpu = block_on(mean_gpu(h, &args)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {

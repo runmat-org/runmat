@@ -6,12 +6,13 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::format::format_variadic;
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::string")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -49,32 +50,42 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::strings::core::string"
 )]
-fn string_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn string_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        let gathered = gather_if_needed(&value).map_err(|e| format!("string: {e}"))?;
-        let array = convert_to_string_array(gathered, StringEncoding::Utf8)?;
+        let gathered = gather_if_needed_async(&value)
+            .await
+            .map_err(|flow| remap_string_flow(flow))?;
+        let array = convert_to_string_array(gathered, StringEncoding::Utf8).await?;
         return Ok(Value::StringArray(array));
     }
 
     let mut args = rest;
-    let format_value = gather_if_needed(&value).map_err(|e| format!("string: {e}"))?;
+    let format_value = gather_if_needed_async(&value)
+        .await
+        .map_err(|flow| remap_string_flow(flow))?;
 
     if args.len() == 1 {
         let arg = args.pop().unwrap();
-        let gathered_arg = gather_if_needed(&arg).map_err(|e| format!("string: {e}"))?;
+        let gathered_arg = gather_if_needed_async(&arg)
+            .await
+            .map_err(|flow| remap_string_flow(flow))?;
         if let Some(encoding) = try_encoding_argument(&format_value, &gathered_arg)? {
-            let array = convert_to_string_array(format_value, encoding)?;
+            let array = convert_to_string_array(format_value, encoding).await?;
             return Ok(Value::StringArray(array));
         }
-        let formatted = format_from_spec(format_value, vec![gathered_arg])?;
+        let formatted = format_from_spec(format_value, vec![gathered_arg]).await?;
         return Ok(Value::StringArray(formatted));
     }
 
-    let gathered_args = args
-        .into_iter()
-        .map(|arg| gather_if_needed(&arg).map_err(|e| format!("string: {e}")))
-        .collect::<Result<Vec<_>, _>>()?;
-    let formatted = format_from_spec(format_value, gathered_args)?;
+    let mut gathered_args = Vec::with_capacity(args.len());
+    for arg in args {
+        gathered_args.push(
+            gather_if_needed_async(&arg)
+                .await
+                .map_err(|flow| remap_string_flow(flow))?,
+        );
+    }
+    let formatted = format_from_spec(format_value, gathered_args).await?;
     Ok(Value::StringArray(formatted))
 }
 
@@ -86,7 +97,7 @@ enum StringEncoding {
 fn try_encoding_argument(
     first: &Value,
     candidate: &Value,
-) -> Result<Option<StringEncoding>, String> {
+) -> BuiltinResult<Option<StringEncoding>> {
     if !matches!(
         first,
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) | Value::Cell(_)
@@ -107,14 +118,14 @@ fn try_encoding_argument(
     parse_encoding_text(&text).map(Some)
 }
 
-fn parse_encoding_text(raw: &str) -> Result<StringEncoding, String> {
+fn parse_encoding_text(raw: &str) -> BuiltinResult<StringEncoding> {
     let trimmed = raw.trim();
     let lowered = trimmed.to_ascii_lowercase();
     match lowered.as_str() {
         "utf-8" | "utf8" | "unicode" | "system" => Ok(StringEncoding::Utf8),
-        _ => Err(format!(
+        _ => Err(string_flow(format!(
             "string: unsupported character encoding '{trimmed}'; only UTF-8 is available"
-        )),
+        ))),
     }
 }
 
@@ -197,14 +208,22 @@ struct ArgumentData {
     shape: Vec<usize>,
 }
 
-pub(crate) fn format_from_spec(
+fn string_flow(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("string").build()
+}
+
+fn remap_string_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, "string")
+}
+
+pub(crate) async fn format_from_spec(
     format_value: Value,
     args: Vec<Value>,
-) -> Result<StringArray, String> {
-    let spec = extract_format_spec(format_value)?;
+) -> crate::BuiltinResult<StringArray> {
+    let spec = extract_format_spec(format_value).await?;
     let mut arguments = Vec::with_capacity(args.len());
     for arg in args {
-        arguments.push(extract_argument_data(arg)?);
+        arguments.push(extract_argument_data(arg).await?);
     }
 
     let (target_len, mut target_shape) = resolve_target_shape(&spec, &arguments)?;
@@ -219,23 +238,22 @@ pub(crate) fn format_from_spec(
         } else {
             target_shape
         };
-        return StringArray::new(Vec::new(), shape).map_err(|e| format!("string: {e}"));
+        return StringArray::new(Vec::new(), shape)
+            .map_err(|e| string_flow(format!("string: {e}")));
     }
 
     let spec_len = spec.specs.len();
     if spec_len == 0 {
-        return Err(
-            "string: formatSpec must contain at least one element when formatting with data"
-                .to_string(),
-        );
+        return Err(string_flow(
+            "string: formatSpec must contain at least one element when formatting with data",
+        ));
     }
 
     for arg in &arguments {
         if target_len > 0 && arg.values.is_empty() {
-            return Err(
-                "string: format data arguments must be scalars or match formatSpec size"
-                    .to_string(),
-            );
+            return Err(string_flow(
+                "string: format data arguments must be scalars or match formatSpec size",
+            ));
         }
     }
 
@@ -250,14 +268,14 @@ pub(crate) fn format_from_spec(
                     0 => continue,
                     1 => arg.values[0].clone(),
                     len if len == target_len => arg.values[idx].clone(),
-                    _ => return Err(
-                        "string: format data arguments must be scalars or match formatSpec size"
-                            .to_string(),
-                    ),
+                    _ => return Err(string_flow(
+                        "string: format data arguments must be scalars or match formatSpec size",
+                    )),
                 };
             per_call.push(value);
         }
-        let formatted = format_variadic(spec_str, &per_call).map_err(|e| format!("string: {e}"))?;
+        let formatted =
+            format_variadic(spec_str, &per_call).map_err(|flow| remap_string_flow(flow))?;
         output.push(formatted);
     }
 
@@ -273,13 +291,13 @@ pub(crate) fn format_from_spec(
         target_shape = vec![target_len, 1];
     }
 
-    StringArray::new(output, target_shape).map_err(|e| format!("string: {e}"))
+    StringArray::new(output, target_shape).map_err(|e| string_flow(format!("string: {e}")))
 }
 
 fn resolve_target_shape(
     spec: &FormatSpecData,
     args: &[ArgumentData],
-) -> Result<(usize, Vec<usize>), String> {
+) -> BuiltinResult<(usize, Vec<usize>)> {
     let mut target_len = spec.specs.len();
     let mut target_shape = if target_len > 1 || (target_len == 1 && !spec.shape.is_empty()) {
         spec.shape.clone()
@@ -306,10 +324,9 @@ fn resolve_target_shape(
             continue;
         }
         if len != target_len {
-            return Err(
-                "string: format data arguments must be scalars or match formatSpec size"
-                    .to_string(),
-            );
+            return Err(string_flow(
+                "string: format data arguments must be scalars or match formatSpec size",
+            ));
         }
         if target_shape.is_empty() && len > 1 {
             target_shape = arg.shape.clone();
@@ -343,7 +360,7 @@ fn resolve_target_shape(
     Ok((target_len, target_shape))
 }
 
-pub(crate) fn extract_format_spec(value: Value) -> Result<FormatSpecData, String> {
+pub(crate) async fn extract_format_spec(value: Value) -> BuiltinResult<FormatSpecData> {
     match value {
         Value::String(s) => Ok(FormatSpecData {
             specs: vec![s],
@@ -367,9 +384,11 @@ pub(crate) fn extract_format_spec(value: Value) -> Result<FormatSpecData, String
                     let idx = row * cell.cols + col;
                     let element = &cell.data[idx];
                     let value = (**element).clone();
-                    let gathered = gather_if_needed(&value).map_err(|e| format!("string: {e}"))?;
+                    let gathered = gather_if_needed_async(&value)
+                        .await
+                        .map_err(|flow| remap_string_flow(flow))?;
                     let text = value_to_scalar_text(&gathered).ok_or_else(|| {
-                        "string: formatSpec cell elements must be text scalars".to_string()
+                        string_flow("string: formatSpec cell elements must be text scalars")
                     })?;
                     specs.push(text);
                 }
@@ -379,11 +398,14 @@ pub(crate) fn extract_format_spec(value: Value) -> Result<FormatSpecData, String
                 shape: vec![cell.rows, cell.cols],
             })
         }
-        _ => Err("string: formatSpec must be text (string, char, or cellstr)".to_string()),
+        _ => Err(string_flow(
+            "string: formatSpec must be text (string, char, or cellstr)",
+        )),
     }
 }
 
-fn extract_argument_data(value: Value) -> Result<ArgumentData, String> {
+#[async_recursion::async_recursion(?Send)]
+async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
     match value {
         Value::String(s) => Ok(ArgumentData {
             values: vec![Value::String(s)],
@@ -443,7 +465,9 @@ fn extract_argument_data(value: Value) -> Result<ArgumentData, String> {
                     let idx = row * cell.cols + col;
                     let element = &cell.data[idx];
                     let value = (**element).clone();
-                    let gathered = gather_if_needed(&value).map_err(|e| format!("string: {e}"))?;
+                    let gathered = gather_if_needed_async(&value)
+                        .await
+                        .map_err(|flow| remap_string_flow(flow))?;
                     let value = match gathered {
                         Value::String(s) => Value::String(s),
                         Value::StringArray(sa) if sa.data.len() == 1 => {
@@ -451,9 +475,9 @@ fn extract_argument_data(value: Value) -> Result<ArgumentData, String> {
                         }
                         Value::CharArray(ca) => {
                             if ca.rows != 1 {
-                                return Err(
-                                    "string: cell format arguments must contain char row vectors".to_string(),
-                                );
+                                return Err(string_flow(
+                                    "string: cell format arguments must contain char row vectors",
+                                ));
                             }
                             let mut row_str = String::with_capacity(ca.cols);
                             for ch in ca.data {
@@ -466,19 +490,17 @@ fn extract_argument_data(value: Value) -> Result<ArgumentData, String> {
                         Value::Bool(b) => Value::Num(if b { 1.0 } else { 0.0 }),
                         Value::Tensor(t) => {
                             if t.data.len() != 1 {
-                                return Err(
-                                    "string: cell format arguments must contain scalar values"
-                                        .to_string(),
-                                );
+                                return Err(string_flow(
+                                    "string: cell format arguments must contain scalar values",
+                                ));
                             }
                             Value::Num(t.data[0])
                         }
                         Value::LogicalArray(la) => {
                             if la.data.len() != 1 {
-                                return Err(
-                                    "string: cell format arguments must contain scalar values"
-                                        .to_string(),
-                                );
+                                return Err(string_flow(
+                                    "string: cell format arguments must contain scalar values",
+                                ));
                             }
                             Value::Num(if la.data[0] != 0 { 1.0 } else { 0.0 })
                         }
@@ -487,18 +509,17 @@ fn extract_argument_data(value: Value) -> Result<ArgumentData, String> {
                         }
                         Value::ComplexTensor(t) => {
                             if t.data.len() != 1 {
-                                return Err(
-                                    "string: cell format arguments must contain scalar values"
-                                        .to_string(),
-                                );
+                                return Err(string_flow(
+                                    "string: cell format arguments must contain scalar values",
+                                ));
                             }
                             let (re, im) = t.data[0];
                             Value::String(Value::Complex(re, im).to_string())
                         }
                         other => {
-                            return Err(format!(
+                            return Err(string_flow(format!(
                                 "string: unsupported cell format argument {other:?}; expected scalar text or numeric values"
-                            ))
+                            )))
                         }
                     };
                     values.push(value);
@@ -510,22 +531,27 @@ fn extract_argument_data(value: Value) -> Result<ArgumentData, String> {
             })
         }
         Value::GpuTensor(handle) => {
-            let gathered =
-                gather_if_needed(&Value::GpuTensor(handle)).map_err(|e| format!("string: {e}"))?;
-            extract_argument_data(gathered)
+            let gathered = gather_if_needed_async(&Value::GpuTensor(handle))
+                .await
+                .map_err(|flow| remap_string_flow(flow))?;
+            extract_argument_data(gathered).await
         }
         Value::MException(_)
         | Value::HandleObject(_)
         | Value::Object(_)
         | Value::Listener(_)
-        | Value::Struct(_) => Err("string: unsupported format argument type".to_string()),
+        | Value::Struct(_) => Err(string_flow("string: unsupported format argument type")),
         Value::FunctionHandle(_) | Value::Closure(_) | Value::ClassRef(_) => {
-            Err("string: unsupported format argument type".to_string())
+            Err(string_flow("string: unsupported format argument type"))
         }
     }
 }
 
-fn convert_to_string_array(value: Value, encoding: StringEncoding) -> Result<StringArray, String> {
+#[async_recursion::async_recursion(?Send)]
+async fn convert_to_string_array(
+    value: Value,
+    encoding: StringEncoding,
+) -> BuiltinResult<StringArray> {
     match value {
         Value::String(s) => string_scalar(s),
         Value::StringArray(sa) => Ok(sa),
@@ -533,30 +559,32 @@ fn convert_to_string_array(value: Value, encoding: StringEncoding) -> Result<Str
         Value::Tensor(tensor) => tensor_to_string_array(tensor),
         Value::ComplexTensor(tensor) => complex_tensor_to_string_array(tensor),
         Value::LogicalArray(logical) => logical_array_to_string_array(logical),
-        Value::Cell(cell) => cell_array_to_string_array(cell, encoding),
+        Value::Cell(cell) => cell_array_to_string_array(cell, encoding).await,
         Value::Num(n) => string_scalar(Value::Num(n).to_string()),
         Value::Int(i) => string_scalar(int_value_to_string(&i)),
         Value::Bool(b) => string_scalar(bool_to_string(b).to_string()),
         Value::Complex(re, im) => string_scalar(Value::Complex(re, im).to_string()),
         Value::GpuTensor(handle) => {
             // Defensive fallback: gather and retry.
-            let gathered = gather_if_needed(&Value::GpuTensor(handle))
-                .map_err(|e| format!("string: {e}"))?;
-            convert_to_string_array(gathered, encoding)
+            let gathered = gather_if_needed_async(&Value::GpuTensor(handle))
+                .await
+                .map_err(|flow| remap_string_flow(flow))?;
+            convert_to_string_array(gathered, encoding).await
         }
-        Value::Object(_) | Value::HandleObject(_) | Value::Listener(_) => Err(
-            "string: unsupported conversion from handle-based objects. Use class-specific formatters."
-                .to_string(),
-        ),
-        Value::Struct(_) => Err("string: structs are not supported for automatic conversion".to_string()),
+        Value::Object(_) | Value::HandleObject(_) | Value::Listener(_) => Err(string_flow(
+            "string: unsupported conversion from handle-based objects. Use class-specific formatters.",
+        )),
+        Value::Struct(_) => Err(string_flow(
+            "string: structs are not supported for automatic conversion",
+        )),
         Value::FunctionHandle(_) | Value::Closure(_) | Value::ClassRef(_) | Value::MException(_) => Err(
-            "string: unsupported conversion for function or exception handles".to_string(),
+            string_flow("string: unsupported conversion for function or exception handles"),
         ),
     }
 }
 
-fn string_scalar<S: Into<String>>(text: S) -> Result<StringArray, String> {
-    StringArray::new(vec![text.into()], vec![1, 1]).map_err(|e| format!("string: {e}"))
+fn string_scalar<S: Into<String>>(text: S) -> BuiltinResult<StringArray> {
+    StringArray::new(vec![text.into()], vec![1, 1]).map_err(|e| string_flow(format!("string: {e}")))
 }
 
 fn value_to_scalar_text(value: &Value) -> Option<String> {
@@ -571,7 +599,7 @@ fn value_to_scalar_text(value: &Value) -> Option<String> {
 fn char_array_to_string_array(
     array: CharArray,
     _encoding: StringEncoding,
-) -> Result<StringArray, String> {
+) -> BuiltinResult<StringArray> {
     let mut rows: Vec<String> = Vec::with_capacity(array.rows);
     for r in 0..array.rows {
         let mut row = String::with_capacity(array.cols);
@@ -585,68 +613,72 @@ fn char_array_to_string_array(
     } else {
         vec![array.rows, 1]
     };
-    StringArray::new(rows, shape).map_err(|e| format!("string: {e}"))
+    StringArray::new(rows, shape).map_err(|e| string_flow(format!("string: {e}")))
 }
 
-fn tensor_to_string_array(tensor: Tensor) -> Result<StringArray, String> {
+fn tensor_to_string_array(tensor: Tensor) -> BuiltinResult<StringArray> {
     let mut strings = Vec::with_capacity(tensor.data.len());
     for &value in &tensor.data {
         strings.push(Value::Num(value).to_string());
     }
-    StringArray::new(strings, tensor.shape).map_err(|e| format!("string: {e}"))
+    StringArray::new(strings, tensor.shape).map_err(|e| string_flow(format!("string: {e}")))
 }
 
-fn complex_tensor_to_string_array(tensor: ComplexTensor) -> Result<StringArray, String> {
+fn complex_tensor_to_string_array(tensor: ComplexTensor) -> BuiltinResult<StringArray> {
     let mut strings = Vec::with_capacity(tensor.data.len());
     for &(re, im) in &tensor.data {
         strings.push(Value::Complex(re, im).to_string());
     }
-    StringArray::new(strings, tensor.shape).map_err(|e| format!("string: {e}"))
+    StringArray::new(strings, tensor.shape).map_err(|e| string_flow(format!("string: {e}")))
 }
 
-fn logical_array_to_string_array(logical: LogicalArray) -> Result<StringArray, String> {
+fn logical_array_to_string_array(logical: LogicalArray) -> BuiltinResult<StringArray> {
     let mut strings = Vec::with_capacity(logical.data.len());
     for &byte in &logical.data {
         strings.push(bool_to_string(byte != 0).to_string());
     }
-    StringArray::new(strings, logical.shape).map_err(|e| format!("string: {e}"))
+    StringArray::new(strings, logical.shape).map_err(|e| string_flow(format!("string: {e}")))
 }
 
-fn cell_array_to_string_array(
+async fn cell_array_to_string_array(
     cell: runmat_builtins::CellArray,
     _encoding: StringEncoding,
-) -> Result<StringArray, String> {
+) -> BuiltinResult<StringArray> {
     let mut strings = Vec::with_capacity(cell.data.len());
     for col in 0..cell.cols {
         for row in 0..cell.rows {
             let idx = row * cell.cols + col;
             let element = &cell.data[idx];
             let value = (**element).clone();
-            let gathered = gather_if_needed(&value).map_err(|e| format!("string: {e}"))?;
+            let gathered = gather_if_needed_async(&value)
+                .await
+                .map_err(|flow| remap_string_flow(flow))?;
             strings.push(cell_element_to_string(&gathered)?);
         }
     }
-    StringArray::new(strings, vec![cell.rows, cell.cols]).map_err(|e| format!("string: {e}"))
+    StringArray::new(strings, vec![cell.rows, cell.cols])
+        .map_err(|e| string_flow(format!("string: {e}")))
 }
 
-fn cell_element_to_string(value: &Value) -> Result<String, String> {
+fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::StringArray(sa) => {
             if sa.data.len() == 1 {
                 Ok(sa.data[0].clone())
             } else {
-                Err(
-                    "string: cell elements must contain string scalars, not string arrays"
-                        .to_string(),
-                )
+                Err(string_flow(
+                    "string: cell elements must contain string scalars, not string arrays",
+                ))
             }
         }
         Value::CharArray(ca) => {
             if ca.rows == 1 {
                 Ok(ca.data.iter().collect())
             } else {
-                Err("string: cell character arrays must be row vectors".to_string())
+                Err(string_flow(
+                    "string: cell character arrays must be row vectors",
+                ))
             }
         }
         Value::Num(n) => Ok(Value::Num(*n).to_string()),
@@ -656,14 +688,14 @@ fn cell_element_to_string(value: &Value) -> Result<String, String> {
             if array.data.len() == 1 {
                 Ok(bool_to_string(array.data[0] != 0).to_string())
             } else {
-                Err("string: cell logical values must be scalar".to_string())
+                Err(string_flow("string: cell logical values must be scalar"))
             }
         }
         Value::Tensor(t) => {
             if t.data.len() == 1 {
                 Ok(Value::Num(t.data[0]).to_string())
             } else {
-                Err("string: cell numeric values must be scalar".to_string())
+                Err(string_flow("string: cell numeric values must be scalar"))
             }
         }
         Value::Complex(re, im) => Ok(Value::Complex(*re, *im).to_string()),
@@ -672,13 +704,13 @@ fn cell_element_to_string(value: &Value) -> Result<String, String> {
                 let (re, im) = t.data[0];
                 Ok(Value::Complex(re, im).to_string())
             } else {
-                Err("string: cell complex values must be scalar".to_string())
+                Err(string_flow("string: cell complex values must be scalar"))
             }
         }
-        other => Err(format!(
+        other => Err(string_flow(format!(
             "string: unsupported cell element type {:?}; expected text or scalar values",
             other
-        )),
+        ))),
     }
 }
 
@@ -708,6 +740,14 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, IntValue, StringArray, StructValue};
+
+    fn string_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::string_builtin(value, rest))
+    }
+
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -809,26 +849,29 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let cell =
             CellArray::new(vec![Value::Tensor(tensor)], 1, 1).expect("cell with numeric tensor");
-        let err = string_builtin(Value::Cell(cell), Vec::new()).unwrap_err();
+        let err = error_message(string_builtin(Value::Cell(cell), Vec::new()).unwrap_err());
         assert!(err.contains("cell numeric values must be scalar"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_rejects_struct_input() {
-        let err =
-            string_builtin(Value::Struct(StructValue::new()), Vec::new()).expect_err("string");
+        let err = error_message(
+            string_builtin(Value::Struct(StructValue::new()), Vec::new()).expect_err("string"),
+        );
         assert!(err.contains("structs are not supported"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_errors_on_unsupported_encoding() {
-        let err = string_builtin(
-            Value::CharArray(CharArray::new_row("abc")),
-            vec![Value::from("UTF-16")],
-        )
-        .unwrap_err();
+        let err = error_message(
+            string_builtin(
+                Value::CharArray(CharArray::new_row("abc")),
+                vec![Value::from("UTF-16")],
+            )
+            .unwrap_err(),
+        );
         assert!(
             err.contains("unsupported character encoding"),
             "unexpected error message: {err}"
@@ -873,7 +916,9 @@ pub(crate) mod tests {
     #[test]
     fn string_format_spec_cell_requires_text_scalars() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell");
-        let err = string_builtin(Value::Cell(cell), vec![Value::from("data")]).expect_err("string");
+        let err = error_message(
+            string_builtin(Value::Cell(cell), vec![Value::from("data")]).expect_err("string"),
+        );
         assert!(
             err.contains("formatSpec cell elements must be text scalars"),
             "unexpected error: {err}"
@@ -885,7 +930,9 @@ pub(crate) mod tests {
     fn string_format_cell_argument_requires_scalar_values() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let cell = CellArray::new(vec![Value::Tensor(tensor)], 1, 1).expect("cell argument values");
-        let err = string_builtin(Value::from("%d"), vec![Value::Cell(cell)]).expect_err("string");
+        let err = error_message(
+            string_builtin(Value::from("%d"), vec![Value::Cell(cell)]).expect_err("string"),
+        );
         assert!(err.contains("cell format arguments must contain scalar values"));
     }
 
@@ -965,8 +1012,9 @@ pub(crate) mod tests {
     fn string_format_mismatched_lengths_errors() {
         let spec = StringArray::new(vec!["%d".into(), "%d".into()], vec![2, 1]).unwrap();
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err =
-            string_builtin(Value::StringArray(spec), vec![Value::Tensor(tensor)]).unwrap_err();
+        let err = error_message(
+            string_builtin(Value::StringArray(spec), vec![Value::Tensor(tensor)]).unwrap_err(),
+        );
         assert!(err.contains("must be scalars or match formatSpec size"));
     }
 

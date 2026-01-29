@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::{build_runtime_error, RuntimeError};
 
 const ERR_TOO_MANY_INPUTS: &str = "tempdir: too many input arguments";
 const ERR_UNABLE_TO_DETERMINE: &str =
@@ -43,6 +44,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "I/O builtin that always executes on the host; fusion metadata is present for introspection completeness.",
 };
 
+const BUILTIN_NAME: &str = "tempdir";
+
+fn tempdir_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 #[runtime_builtin(
     name = "tempdir",
     category = "io/repl_fs",
@@ -51,18 +60,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::repl_fs::tempdir"
 )]
-fn tempdir_builtin(args: Vec<Value>) -> Result<Value, String> {
+async fn tempdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !args.is_empty() {
-        return Err(ERR_TOO_MANY_INPUTS.to_string());
+        return Err(tempdir_error(ERR_TOO_MANY_INPUTS));
     }
     let path = env::temp_dir();
     if path.as_os_str().is_empty() {
-        return Err(ERR_UNABLE_TO_DETERMINE.to_string());
+        return Err(tempdir_error(ERR_UNABLE_TO_DETERMINE));
     }
     let value = path_to_char_array(&path);
     if let Ok(text) = String::try_from(&value) {
         if text.is_empty() {
-            return Err(ERR_UNABLE_TO_DETERMINE.to_string());
+            return Err(tempdir_error(ERR_UNABLE_TO_DETERMINE));
         }
     }
     Ok(value)
@@ -86,8 +95,13 @@ fn ends_with_separator(text: &str) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::BuiltinResult;
     use std::convert::TryFrom;
     use std::path::{Path, PathBuf};
+
+    fn tempdir_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::tempdir_builtin(args))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -161,7 +175,7 @@ pub(crate) mod tests {
     #[test]
     fn tempdir_errors_when_arguments_provided() {
         let err = tempdir_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
-        assert_eq!(err, ERR_TOO_MANY_INPUTS);
+        assert_eq!(err.message(), ERR_TOO_MANY_INPUTS);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

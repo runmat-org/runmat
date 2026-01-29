@@ -17,8 +17,8 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::json::jsondecode::decode_json_text;
-use crate::call_builtin;
-use crate::gather_if_needed;
+use crate::call_builtin_async;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 const DEFAULT_USER_AGENT: &str = "RunMat webwrite/0.0";
@@ -40,6 +40,26 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "HTTP uploads run on the CPU and gather gpuArray inputs before serialisation.",
 };
 
+fn webwrite_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("webwrite")
+        .build()
+}
+
+fn remap_webwrite_flow<F>(err: RuntimeError, message: F) -> RuntimeError
+where
+    F: FnOnce(&RuntimeError) -> String,
+{
+    build_runtime_error(message(&err))
+        .with_builtin("webwrite")
+        .with_source(err)
+        .build()
+}
+
+fn webwrite_flow_with_context(err: RuntimeError) -> RuntimeError {
+    remap_webwrite_flow(err, |err| format!("webwrite: {}", err.message()))
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::http::webwrite")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "webwrite",
@@ -59,36 +79,42 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::io::http::webwrite"
 )]
-fn webwrite_builtin(url: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let gathered_url = gather_if_needed(&url).map_err(|e| format!("webwrite: {e}"))?;
+async fn webwrite_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let gathered_url = gather_if_needed_async(&url)
+        .await
+        .map_err(webwrite_flow_with_context)?;
     let url_text = expect_string_scalar(
         &gathered_url,
         "webwrite: URL must be a character vector or string scalar",
     )?;
     if url_text.trim().is_empty() {
-        return Err("webwrite: URL must not be empty".to_string());
+        return Err(webwrite_error("webwrite: URL must not be empty"));
     }
     if rest.is_empty() {
-        return Err("webwrite: missing data argument".to_string());
+        return Err(webwrite_error("webwrite: missing data argument"));
     }
 
     let mut gathered = Vec::with_capacity(rest.len());
     for value in rest {
-        gathered.push(gather_if_needed(&value).map_err(|e| format!("webwrite: {e}"))?);
+        gathered.push(
+            gather_if_needed_async(&value)
+                .await
+                .map_err(webwrite_flow_with_context)?,
+        );
     }
     let mut queue: VecDeque<Value> = VecDeque::from(gathered);
     let data_value = queue
         .pop_front()
-        .ok_or_else(|| "webwrite: missing data argument".to_string())?;
+        .ok_or_else(|| webwrite_error("webwrite: missing data argument"))?;
 
     let (options, query_params) = parse_arguments(queue)?;
-    let body = prepare_request_body(data_value, &options)?;
+    let body = prepare_request_body(data_value, &options).await?;
     execute_request(&url_text, options, &query_params, body)
 }
 
 fn parse_arguments(
     mut queue: VecDeque<Value>,
-) -> Result<(WebWriteOptions, Vec<(String, String)>), String> {
+) -> BuiltinResult<(WebWriteOptions, Vec<(String, String)>)> {
     let mut options = WebWriteOptions::default();
     let mut query_params = Vec::new();
 
@@ -109,7 +135,7 @@ fn parse_arguments(
         )?;
         let value = queue
             .pop_front()
-            .ok_or_else(|| "webwrite: missing value for name-value argument".to_string())?;
+            .ok_or_else(|| webwrite_error("webwrite: missing value for name-value argument"))?;
         process_name_value_pair(&name, &value, &mut options, &mut query_params)?;
     }
 
@@ -120,7 +146,7 @@ fn process_struct_fields(
     struct_value: &StructValue,
     options: &mut WebWriteOptions,
     query_params: &mut Vec<(String, String)>,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     for (key, value) in &struct_value.fields {
         process_name_value_pair(key, value, options, query_params)?;
     }
@@ -132,7 +158,7 @@ fn process_name_value_pair(
     value: &Value,
     options: &mut WebWriteOptions,
     query_params: &mut Vec<(String, String)>,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     let lower = name.to_ascii_lowercase();
     match lower.as_str() {
         "contenttype" => {
@@ -205,7 +231,7 @@ fn execute_request(
     options: WebWriteOptions,
     query_params: &[(String, String)],
     body: PreparedBody,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     let username_present = options
         .username
         .as_ref()
@@ -217,11 +243,17 @@ fn execute_request(
         .map(|s| !s.is_empty())
         .unwrap_or(false);
     if password_present && !username_present {
-        return Err("webwrite: Password requires a Username option".to_string());
+        return Err(webwrite_error(
+            "webwrite: Password requires a Username option",
+        ));
     }
 
-    let mut url =
-        Url::parse(url_text).map_err(|err| format!("webwrite: invalid URL '{url_text}': {err}"))?;
+    let mut url = Url::parse(url_text).map_err(|err| {
+        build_runtime_error(format!("webwrite: invalid URL '{url_text}': {err}"))
+            .with_builtin("webwrite")
+            .with_source(err)
+            .build()
+    })?;
     if !query_params.is_empty() {
         {
             let mut pairs = url.query_pairs_mut();
@@ -267,7 +299,12 @@ fn execute_request(
         user_agent,
     };
 
-    let response = transport::send_request(&request).map_err(|err| err.into_context("webwrite"))?;
+    let response = transport::send_request(&request).map_err(|err| {
+        build_runtime_error(err.message_with_prefix("webwrite"))
+            .with_builtin("webwrite")
+            .with_source(err)
+            .build()
+    })?;
 
     let header_content_type =
         header_value(&response.headers, HEADER_CONTENT_TYPE).map(|value| value.to_string());
@@ -276,10 +313,8 @@ fn execute_request(
     match resolved {
         ResolvedContentType::Json => {
             let body_text = decode_body_as_text(&response.body, header_content_type.as_deref());
-            match decode_json_text(&body_text) {
-                Ok(value) => Ok(value),
-                Err(err) => Err(map_json_error(err)),
-            }
+            let value = decode_json_text(&body_text).map_err(map_json_error)?;
+            Ok(value)
         }
         ResolvedContentType::Text => {
             let body_text = decode_body_as_text(&response.body, header_content_type.as_deref());
@@ -288,14 +323,17 @@ fn execute_request(
         ResolvedContentType::Binary => {
             let data: Vec<f64> = response.body.iter().map(|b| f64::from(*b)).collect();
             let cols = data.len();
-            let tensor =
-                Tensor::new(data, vec![1, cols]).map_err(|err| format!("webwrite: {err}"))?;
+            let tensor = Tensor::new(data, vec![1, cols])
+                .map_err(|err| webwrite_error(format!("webwrite: {err}")))?;
             Ok(Value::Tensor(tensor))
         }
     }
 }
 
-fn prepare_request_body(data: Value, options: &WebWriteOptions) -> Result<PreparedBody, String> {
+async fn prepare_request_body(
+    data: Value,
+    options: &WebWriteOptions,
+) -> BuiltinResult<PreparedBody> {
     let format = match options.request_format {
         RequestFormat::Auto => guess_request_format(&data),
         set => set,
@@ -306,10 +344,10 @@ fn prepare_request_body(data: Value, options: &WebWriteOptions) -> Result<Prepar
         .or_else(|| default_content_type_for(format));
     let bytes = match format {
         RequestFormat::Form => encode_form_payload(&data)?,
-        RequestFormat::Json => encode_json_payload(&data)?,
+        RequestFormat::Json => encode_json_payload(&data).await?,
         RequestFormat::Text => encode_text_payload(&data)?,
         RequestFormat::Binary => encode_binary_payload(&data)?,
-        RequestFormat::Auto => encode_json_payload(&data)?,
+        RequestFormat::Auto => encode_json_payload(&data).await?,
     };
     Ok(PreparedBody {
         bytes,
@@ -317,7 +355,7 @@ fn prepare_request_body(data: Value, options: &WebWriteOptions) -> Result<Prepar
     })
 }
 
-fn encode_form_payload(value: &Value) -> Result<Vec<u8>, String> {
+fn encode_form_payload(value: &Value) -> BuiltinResult<Vec<u8>> {
     let mut pairs = Vec::new();
     match value {
         Value::Struct(struct_value) => {
@@ -339,10 +377,9 @@ fn encode_form_payload(value: &Value) -> Result<Vec<u8>, String> {
             pairs.push(("data".to_string(), text));
         }
         _ => {
-            return Err(
-                "webwrite: form payloads must be structs, two-column cell arrays, or scalars"
-                    .to_string(),
-            )
+            return Err(webwrite_error(
+                "webwrite: form payloads must be structs, two-column cell arrays, or scalars",
+            ))
         }
     }
 
@@ -389,9 +426,10 @@ fn hex_digit(nibble: u8) -> char {
     }
 }
 
-fn encode_json_payload(value: &Value) -> Result<Vec<u8>, String> {
-    let encoded = call_builtin("jsonencode", std::slice::from_ref(value))
-        .map_err(|e| format!("webwrite: {e}"))?;
+async fn encode_json_payload(value: &Value) -> BuiltinResult<Vec<u8>> {
+    let encoded = call_builtin_async("jsonencode", std::slice::from_ref(value))
+        .await
+        .map_err(|flow| remap_webwrite_flow(flow, |err| format!("webwrite: {}", err.message())))?;
     let text = expect_string_scalar(
         &encoded,
         "webwrite: jsonencode returned unexpected value; expected text scalar",
@@ -399,12 +437,12 @@ fn encode_json_payload(value: &Value) -> Result<Vec<u8>, String> {
     Ok(text.into_bytes())
 }
 
-fn encode_text_payload(value: &Value) -> Result<Vec<u8>, String> {
+fn encode_text_payload(value: &Value) -> BuiltinResult<Vec<u8>> {
     let text = scalar_to_string(value)?;
     Ok(text.into_bytes())
 }
 
-fn encode_binary_payload(value: &Value) -> Result<Vec<u8>, String> {
+fn encode_binary_payload(value: &Value) -> BuiltinResult<Vec<u8>> {
     match value {
         Value::Tensor(tensor) => tensor_f64_to_bytes(tensor),
         Value::Num(n) => Ok(vec![float_to_byte(*n)?]),
@@ -416,7 +454,9 @@ fn encode_binary_payload(value: &Value) -> Result<Vec<u8>, String> {
             for ch in &ca.data {
                 let code = *ch as u32;
                 if code > 0xFF {
-                    return Err("webwrite: character codes exceed 255 for binary payload".into());
+                    return Err(webwrite_error(
+                        "webwrite: character codes exceed 255 for binary payload",
+                    ));
                 }
                 bytes.push(code as u8);
             }
@@ -427,14 +467,18 @@ fn encode_binary_payload(value: &Value) -> Result<Vec<u8>, String> {
             if sa.data.len() == 1 {
                 Ok(sa.data[0].as_bytes().to_vec())
             } else {
-                Err("webwrite: binary payload string arrays must be scalar".to_string())
+                Err(webwrite_error(
+                    "webwrite: binary payload string arrays must be scalar",
+                ))
             }
         }
-        _ => Err("webwrite: unsupported value for binary payload".to_string()),
+        _ => Err(webwrite_error(
+            "webwrite: unsupported value for binary payload",
+        )),
     }
 }
 
-fn tensor_f64_to_bytes(tensor: &Tensor) -> Result<Vec<u8>, String> {
+fn tensor_f64_to_bytes(tensor: &Tensor) -> BuiltinResult<Vec<u8>> {
     let mut bytes = Vec::with_capacity(tensor.data.len());
     for value in &tensor.data {
         bytes.push(float_to_byte(*value)?);
@@ -442,29 +486,36 @@ fn tensor_f64_to_bytes(tensor: &Tensor) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn float_to_byte(value: f64) -> Result<u8, String> {
+fn float_to_byte(value: f64) -> BuiltinResult<u8> {
     if !value.is_finite() {
-        return Err("webwrite: binary payload values must be finite".to_string());
+        return Err(webwrite_error(
+            "webwrite: binary payload values must be finite",
+        ));
     }
     let rounded = value.round();
     if (value - rounded).abs() > 1e-9 {
-        return Err("webwrite: binary payload values must be integers in 0..255".to_string());
+        return Err(webwrite_error(
+            "webwrite: binary payload values must be integers in 0..255",
+        ));
     }
     let int_val = rounded as i64;
     int_to_byte(int_val)
 }
 
-fn int_to_byte(value: i64) -> Result<u8, String> {
+fn int_to_byte(value: i64) -> BuiltinResult<u8> {
     if !(0..=255).contains(&value) {
-        return Err("webwrite: binary payload values must be in the range 0..255".to_string());
+        return Err(webwrite_error(
+            "webwrite: binary payload values must be in the range 0..255",
+        ));
     }
+
     Ok(value as u8)
 }
 
 fn append_query_from_value(
     value: &Value,
     query_params: &mut Vec<(String, String)>,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     match value {
         Value::Struct(struct_value) => {
             for (key, val) in &struct_value.fields {
@@ -474,20 +525,28 @@ fn append_query_from_value(
             Ok(())
         }
         Value::Cell(cell) => append_query_from_cell(cell, query_params),
-        _ => Err("webwrite: QueryParameters must be a struct or cell array".to_string()),
+        _ => Err(webwrite_error(
+            "webwrite: QueryParameters must be a struct or cell array",
+        )),
     }
 }
 
 fn append_query_from_cell(
     cell: &CellArray,
     query_params: &mut Vec<(String, String)>,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     if cell.cols != 2 {
-        return Err("webwrite: cell array of query parameters must have two columns".to_string());
+        return Err(webwrite_error(
+            "webwrite: cell array of query parameters must have two columns",
+        ));
     }
     for row in 0..cell.rows {
-        let name_value = cell.get(row, 0).map_err(|e| format!("webwrite: {e}"))?;
-        let value_value = cell.get(row, 1).map_err(|e| format!("webwrite: {e}"))?;
+        let name_value = cell
+            .get(row, 0)
+            .map_err(|err| webwrite_error(format!("webwrite: {err}")))?;
+        let value_value = cell
+            .get(row, 1)
+            .map_err(|err| webwrite_error(format!("webwrite: {err}")))?;
         let name = expect_string_scalar(
             &name_value,
             "webwrite: query parameter names must be text scalars",
@@ -498,7 +557,7 @@ fn append_query_from_cell(
     Ok(())
 }
 
-fn parse_content_type(value: &Value) -> Result<ContentTypeHint, String> {
+fn parse_content_type(value: &Value) -> BuiltinResult<ContentTypeHint> {
     let text = expect_string_scalar(
         value,
         "webwrite: ContentType must be a character vector or string scalar",
@@ -509,24 +568,26 @@ fn parse_content_type(value: &Value) -> Result<ContentTypeHint, String> {
         "json" => Ok(ContentTypeHint::Json),
         "text" => Ok(ContentTypeHint::Text),
         "binary" => Ok(ContentTypeHint::Binary),
-        _ => Err("webwrite: ContentType must be 'auto', 'json', 'text', or 'binary'".to_string()),
+        _ => Err(webwrite_error(
+            "webwrite: ContentType must be 'auto', 'json', 'text', or 'binary'",
+        )),
     }
 }
 
-fn parse_timeout(value: &Value) -> Result<Duration, String> {
+fn parse_timeout(value: &Value) -> BuiltinResult<Duration> {
     let seconds = numeric_scalar(
         value,
         "webwrite: Timeout must be a finite, non-negative scalar numeric value",
     )?;
     if !seconds.is_finite() || seconds < 0.0 {
-        return Err(
-            "webwrite: Timeout must be a finite, non-negative scalar numeric value".to_string(),
-        );
+        return Err(webwrite_error(
+            "webwrite: Timeout must be a finite, non-negative scalar numeric value",
+        ));
     }
     Ok(Duration::from_secs_f64(seconds))
 }
 
-fn parse_request_method(value: &Value) -> Result<HttpMethod, String> {
+fn parse_request_method(value: &Value) -> BuiltinResult<HttpMethod> {
     let text = expect_string_scalar(
         value,
         "webwrite: RequestMethod must be a character vector or string scalar",
@@ -537,14 +598,14 @@ fn parse_request_method(value: &Value) -> Result<HttpMethod, String> {
         "put" => Ok(HttpMethod::Put),
         "patch" => Ok(HttpMethod::Patch),
         "delete" => Ok(HttpMethod::Delete),
-        other => Err(format!(
+        other => Err(webwrite_error(format!(
             "webwrite: unsupported RequestMethod '{}'; expected auto, post, put, patch, or delete",
             other
-        )),
+        ))),
     }
 }
 
-fn parse_header_fields(value: &Value) -> Result<Vec<(String, String)>, String> {
+fn parse_header_fields(value: &Value) -> BuiltinResult<Vec<(String, String)>> {
     match value {
         Value::Struct(struct_value) => {
             let mut headers = Vec::with_capacity(struct_value.fields.len());
@@ -559,20 +620,24 @@ fn parse_header_fields(value: &Value) -> Result<Vec<(String, String)>, String> {
         }
         Value::Cell(cell) => {
             if cell.cols != 2 {
-                return Err(
-                    "webwrite: HeaderFields cell array must have exactly two columns".to_string(),
-                );
+                return Err(webwrite_error(
+                    "webwrite: HeaderFields cell array must have exactly two columns",
+                ));
             }
             let mut headers = Vec::with_capacity(cell.rows);
             for row in 0..cell.rows {
-                let name = cell.get(row, 0).map_err(|e| format!("webwrite: {e}"))?;
-                let value = cell.get(row, 1).map_err(|e| format!("webwrite: {e}"))?;
+                let name = cell
+                    .get(row, 0)
+                    .map_err(|err| webwrite_error(format!("webwrite: {err}")))?;
+                let value = cell
+                    .get(row, 1)
+                    .map_err(|err| webwrite_error(format!("webwrite: {err}")))?;
                 let header_name = expect_string_scalar(
                     &name,
                     "webwrite: header names must be character vectors or string scalars",
                 )?;
                 if header_name.trim().is_empty() {
-                    return Err("webwrite: header names must not be empty".to_string());
+                    return Err(webwrite_error("webwrite: header names must not be empty"));
                 }
                 let header_value = expect_string_scalar(
                     &value,
@@ -582,19 +647,28 @@ fn parse_header_fields(value: &Value) -> Result<Vec<(String, String)>, String> {
             }
             Ok(headers)
         }
-        _ => Err("webwrite: HeaderFields must be a struct or two-column cell array".to_string()),
+        _ => Err(webwrite_error(
+            "webwrite: HeaderFields must be a struct or two-column cell array",
+        )),
     }
 }
 
-fn map_json_error(err: String) -> String {
-    if let Some(rest) = err.strip_prefix("jsondecode: ") {
+fn map_json_error(err: RuntimeError) -> RuntimeError {
+    let message = if let Some(rest) = err.message().strip_prefix("jsondecode: ") {
         format!("webwrite: failed to parse JSON response ({rest})")
     } else {
-        format!("webwrite: failed to parse JSON response ({err})")
-    }
+        format!(
+            "webwrite: failed to parse JSON response ({})",
+            err.message()
+        )
+    };
+    build_runtime_error(message)
+        .with_builtin("webwrite")
+        .with_source(err)
+        .build()
 }
 
-fn numeric_scalar(value: &Value, context: &str) -> Result<f64, String> {
+fn numeric_scalar(value: &Value, context: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
@@ -602,14 +676,14 @@ fn numeric_scalar(value: &Value, context: &str) -> Result<f64, String> {
             if tensor.data.len() == 1 {
                 Ok(tensor.data[0])
             } else {
-                Err(context.to_string())
+                Err(webwrite_error(context))
             }
         }
-        _ => Err(context.to_string()),
+        _ => Err(webwrite_error(context)),
     }
 }
 
-fn scalar_to_string(value: &Value) -> Result<String, String> {
+fn scalar_to_string(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
@@ -621,7 +695,9 @@ fn scalar_to_string(value: &Value) -> Result<String, String> {
             if tensor.data.len() == 1 {
                 Ok(format!("{}", tensor.data[0]))
             } else {
-                Err("webwrite: expected scalar value for text payload".to_string())
+                Err(webwrite_error(
+                    "webwrite: expected scalar value for text payload",
+                ))
             }
         }
         Value::LogicalArray(array) => {
@@ -632,23 +708,27 @@ fn scalar_to_string(value: &Value) -> Result<String, String> {
                     "false".into()
                 })
             } else {
-                Err("webwrite: expected scalar value for text payload".to_string())
+                Err(webwrite_error(
+                    "webwrite: expected scalar value for text payload",
+                ))
             }
         }
-        _ => Err("webwrite: unsupported value type for text payload".to_string()),
+        _ => Err(webwrite_error(
+            "webwrite: unsupported value type for text payload",
+        )),
     }
 }
 
-fn expect_string_scalar(value: &Value, context: &str) -> Result<String, String> {
+fn expect_string_scalar(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(context.to_string()),
+        _ => Err(webwrite_error(context)),
     }
 }
 
-fn value_to_query_string(value: &Value, name: &str) -> Result<String, String> {
+fn value_to_query_string(value: &Value, name: &str) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
@@ -660,10 +740,10 @@ fn value_to_query_string(value: &Value, name: &str) -> Result<String, String> {
             if tensor.data.len() == 1 {
                 Ok(format!("{}", tensor.data[0]))
             } else {
-                Err(format!(
+                Err(webwrite_error(format!(
                     "webwrite: query parameter '{}' must be scalar",
                     name
-                ))
+                )))
             }
         }
         Value::LogicalArray(array) => {
@@ -674,16 +754,16 @@ fn value_to_query_string(value: &Value, name: &str) -> Result<String, String> {
                     "false".into()
                 })
             } else {
-                Err(format!(
+                Err(webwrite_error(format!(
                     "webwrite: query parameter '{}' must be scalar",
                     name
-                ))
+                )))
             }
         }
-        _ => Err(format!(
+        _ => Err(webwrite_error(format!(
             "webwrite: unsupported value type for query parameter '{}'",
             name
-        )),
+        ))),
     }
 }
 
@@ -901,6 +981,10 @@ pub(crate) mod tests {
         let _ = stream.write_all(body);
     }
 
+    fn run_webwrite(url: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(webwrite_builtin(url, rest))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webwrite_posts_form_data_by_default() {
@@ -928,7 +1012,7 @@ pub(crate) mod tests {
             );
         });
 
-        let result = webwrite_builtin(
+        let result = run_webwrite(
             Value::from(url),
             vec![Value::Struct(payload), Value::Struct(opts)],
         )
@@ -980,7 +1064,7 @@ pub(crate) mod tests {
             respond_with(stream, "application/json", br#"{"ok":true}"#);
         });
 
-        let result = webwrite_builtin(
+        let result = run_webwrite(
             Value::from(url),
             vec![Value::Struct(payload), Value::Struct(opts)],
         )
@@ -1036,7 +1120,7 @@ pub(crate) mod tests {
             respond_with(stream, "text/plain", b"OK");
         });
 
-        let result = webwrite_builtin(Value::from(url), vec![payload, Value::Struct(opts_struct)])
+        let result = run_webwrite(Value::from(url), vec![payload, Value::Struct(opts_struct)])
             .expect("webwrite");
 
         let headers = rx.recv().expect("headers");
@@ -1075,7 +1159,7 @@ pub(crate) mod tests {
             respond_with(stream, "application/json", br#"{"ok":true}"#);
         });
 
-        let _ = webwrite_builtin(
+        let _ = run_webwrite(
             Value::from(url.clone()),
             vec![payload, Value::Struct(opts_struct)],
         )
@@ -1109,7 +1193,7 @@ pub(crate) mod tests {
             respond_with(stream, "text/plain", b"OK");
         });
 
-        let _ = webwrite_builtin(Value::from(url), vec![payload, Value::Struct(opts_struct)])
+        let _ = run_webwrite(Value::from(url), vec![payload, Value::Struct(opts_struct)])
             .expect("webwrite");
 
         let (headers, body) = rx.recv().expect("request");

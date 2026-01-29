@@ -990,21 +990,26 @@ fn test_jit_user_function_fallback() {
                         Box::new(runmat_hir::HirExpr {
                             kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
                             ty: Type::Num,
+                            span: runmat_hir::Span::default(),
                         }),
                         runmat_parser::BinOp::Mul,
                         Box::new(runmat_hir::HirExpr {
                             kind: runmat_hir::HirExprKind::Number("2".to_string()),
                             ty: Type::Num,
+                            span: runmat_hir::Span::default(),
                         }),
                     ),
                     ty: Type::Num,
+                    span: runmat_hir::Span::default(),
                 },
                 false, // Assignment suppression flag for test
+                runmat_hir::Span::default(),
             )],
             local_var_count: 2,
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            source_id: None,
         },
     );
 
@@ -1082,21 +1087,26 @@ fn test_jit_function_variable_preservation() {
                         Box::new(runmat_hir::HirExpr {
                             kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
                             ty: Type::Num,
+                            span: runmat_hir::Span::default(),
                         }),
                         runmat_parser::BinOp::Add,
                         Box::new(runmat_hir::HirExpr {
                             kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(1)),
                             ty: Type::Num,
+                            span: runmat_hir::Span::default(),
                         }),
                     ),
                     ty: Type::Num,
+                    span: runmat_hir::Span::default(),
                 },
-                false, // Assignment suppression flag for test
+                false,
+                runmat_hir::Span::default(),
             )],
             local_var_count: 3,
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            source_id: None,
         },
     );
 
@@ -1156,21 +1166,26 @@ fn test_jit_mixed_execution_patterns() {
                         Box::new(runmat_hir::HirExpr {
                             kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
                             ty: Type::Num,
+                            span: runmat_hir::Span::default(),
                         }),
                         runmat_parser::BinOp::Mul,
                         Box::new(runmat_hir::HirExpr {
                             kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
                             ty: Type::Num,
+                            span: runmat_hir::Span::default(),
                         }),
                     ),
                     ty: Type::Num,
+                    span: runmat_hir::Span::default(),
                 },
                 false, // Assignment suppression flag for test
+                runmat_hir::Span::default(),
             )],
             local_var_count: 2,
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            source_id: None,
         },
     );
 
@@ -1286,6 +1301,7 @@ fn test_jit_engine_statistics_with_functions() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            source_id: None,
         },
     );
 
@@ -1330,21 +1346,26 @@ fn test_jit_simple_function_compilation() {
                         Box::new(runmat_hir::HirExpr {
                             kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
                             ty: Type::Num,
+                            span: runmat_hir::Span::default(),
                         }),
                         runmat_parser::BinOp::Mul,
                         Box::new(runmat_hir::HirExpr {
                             kind: runmat_hir::HirExprKind::Number("2".to_string()),
                             ty: Type::Num,
+                            span: runmat_hir::Span::default(),
                         }),
                     ),
                     ty: Type::Num,
+                    span: runmat_hir::Span::default(),
                 },
-                false, // Assignment suppression flag for test
+                false,
+                runmat_hir::Span::default(),
             )],
             local_var_count: 2,
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            source_id: None,
         },
     );
 
@@ -1415,21 +1436,26 @@ fn test_jit_nested_function_calls_compilation() {
                         Box::new(runmat_hir::HirExpr {
                             kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
                             ty: Type::Num,
+                            span: runmat_hir::Span::default(),
                         }),
                         runmat_parser::BinOp::Add,
                         Box::new(runmat_hir::HirExpr {
                             kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(1)),
                             ty: Type::Num,
+                            span: runmat_hir::Span::default(),
                         }),
                     ),
                     ty: Type::Num,
+                    span: runmat_hir::Span::default(),
                 },
                 false, // Assignment suppression flag for test
+                runmat_hir::Span::default(),
             )],
             local_var_count: 3,
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            source_id: None,
         },
     );
 
@@ -1450,39 +1476,48 @@ fn test_jit_nested_function_calls_compilation() {
                                     Box::new(runmat_hir::HirExpr {
                                         kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(3)),
                                         ty: Type::Num,
+                                        span: runmat_hir::Span::default(),
                                     }),
                                     runmat_parser::BinOp::Mul,
                                     Box::new(runmat_hir::HirExpr {
                                         kind: runmat_hir::HirExprKind::Number("2".to_string()),
                                         ty: Type::Num,
+                                        span: runmat_hir::Span::default(),
                                     }),
                                 ),
                                 ty: Type::Num,
+                                span: runmat_hir::Span::default(),
                             },
                             runmat_hir::HirExpr {
                                 kind: runmat_hir::HirExprKind::Binary(
                                     Box::new(runmat_hir::HirExpr {
                                         kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(3)),
                                         ty: Type::Num,
+                                        span: runmat_hir::Span::default(),
                                     }),
                                     runmat_parser::BinOp::Mul,
                                     Box::new(runmat_hir::HirExpr {
                                         kind: runmat_hir::HirExprKind::Number("3".to_string()),
                                         ty: Type::Num,
+                                        span: runmat_hir::Span::default(),
                                     }),
                                 ),
                                 ty: Type::Num,
+                                span: runmat_hir::Span::default(),
                             },
                         ],
                     ),
                     ty: Type::Num,
+                    span: runmat_hir::Span::default(),
                 },
                 false, // Assignment suppression flag for test
+                runmat_hir::Span::default(),
             )],
             local_var_count: 5,
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            source_id: None,
         },
     );
 
@@ -1547,21 +1582,26 @@ fn test_jit_function_parameter_validation() {
                         Box::new(runmat_hir::HirExpr {
                             kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
                             ty: Type::Num,
+                            span: runmat_hir::Span::default(),
                         }),
                         runmat_parser::BinOp::Add,
                         Box::new(runmat_hir::HirExpr {
                             kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(1)),
                             ty: Type::Num,
+                            span: runmat_hir::Span::default(),
                         }),
                     ),
                     ty: Type::Num,
+                    span: runmat_hir::Span::default(),
                 },
-                false, // Assignment suppression flag for test
+                false,
+                runmat_hir::Span::default(),
             )],
             local_var_count: 3,
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            source_id: None,
         },
     );
 
@@ -1640,21 +1680,26 @@ fn test_jit_function_variable_isolation() {
                         Box::new(runmat_hir::HirExpr {
                             kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
                             ty: Type::Num,
+                            span: runmat_hir::Span::default(),
                         }),
                         runmat_parser::BinOp::Add,
                         Box::new(runmat_hir::HirExpr {
                             kind: runmat_hir::HirExprKind::Number("42".to_string()),
                             ty: Type::Num,
+                            span: runmat_hir::Span::default(),
                         }),
                     ),
                     ty: Type::Num,
+                    span: runmat_hir::Span::default(),
                 },
-                false, // Assignment suppression flag for test
+                false,
+                runmat_hir::Span::default(),
             )],
             local_var_count: 2,
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            source_id: None,
         },
     );
 
@@ -1721,16 +1766,20 @@ fn test_jit_function_compilation_performance() {
                             Box::new(runmat_hir::HirExpr {
                                 kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
                                 ty: Type::Num,
+                                span: runmat_hir::Span::default(),
                             }),
                             runmat_parser::BinOp::Mul,
                             Box::new(runmat_hir::HirExpr {
                                 kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
                                 ty: Type::Num,
+                                span: runmat_hir::Span::default(),
                             }),
                         ),
                         ty: Type::Num,
+                        span: runmat_hir::Span::default(),
                     },
                     false, // Assignment suppression flag for test
+                    runmat_hir::Span::default(),
                 ),
                 // result = temp + temp
                 runmat_hir::HirStmt::Assign(
@@ -1740,22 +1789,27 @@ fn test_jit_function_compilation_performance() {
                             Box::new(runmat_hir::HirExpr {
                                 kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(2)),
                                 ty: Type::Num,
+                                span: runmat_hir::Span::default(),
                             }),
                             runmat_parser::BinOp::Add,
                             Box::new(runmat_hir::HirExpr {
                                 kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(2)),
                                 ty: Type::Num,
+                                span: runmat_hir::Span::default(),
                             }),
                         ),
                         ty: Type::Num,
+                        span: runmat_hir::Span::default(),
                     },
                     false, // Assignment suppression flag for test
+                    runmat_hir::Span::default(),
                 ),
             ],
             local_var_count: 3,
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            source_id: None,
         },
     );
 
@@ -1837,13 +1891,16 @@ fn test_jit_function_error_handling() {
                 runmat_hir::HirExpr {
                     kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
                     ty: Type::Num,
+                    span: runmat_hir::Span::default(),
                 },
                 false, // Assignment suppression flag for test
+                runmat_hir::Span::default(),
             )],
             local_var_count: 2,
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            source_id: None,
         },
     );
 

@@ -67,8 +67,8 @@ fn invert_upper_triangular_produces_identity() {
     }
 }
 
-#[test]
-fn cholesky_qr_matches_host_qr() {
+#[tokio::test]
+async fn cholesky_qr_matches_host_qr() {
     let rows = 12;
     let cols = 4;
     let data = make_column_major(rows, cols, |r, c| {
@@ -103,6 +103,7 @@ fn cholesky_qr_matches_host_qr() {
         Value::Tensor(tensor_gram),
         &[],
     )
+    .await
     .expect("chol");
     let r_tensor = host_tensor_from_value("qr_chol_r", chol_eval.factor()).expect("chol factor");
     let r_inv = invert_upper_triangular(&r_tensor.data, cols).expect("invert");

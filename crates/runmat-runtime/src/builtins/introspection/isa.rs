@@ -5,6 +5,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::introspection::class::class_name_for_value;
+use crate::{build_runtime_error, BuiltinResult};
 use runmat_accelerate_api::handle_is_logical;
 use runmat_builtins::{get_class, Value};
 use runmat_macros::runtime_builtin;
@@ -45,30 +46,45 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::introspection::isa"
 )]
-fn isa_builtin(value: Value, class_designator: Value) -> Result<Value, String> {
+fn isa_builtin(value: Value, class_designator: Value) -> crate::BuiltinResult<Value> {
     let type_name = parse_type_name(&class_designator)?;
     let result = value_is_a(&value, &type_name);
     Ok(Value::Bool(result))
 }
 
-fn parse_type_name(value: &Value) -> Result<String, String> {
+fn parse_type_name(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::StringArray(sa) => {
             if sa.rows == 1 && sa.cols == 1 && !sa.data.is_empty() {
                 Ok(sa.data[0].clone())
             } else {
-                Err("isa: TYPE must be a string scalar or character vector".to_string())
+                Err(
+                    build_runtime_error("isa: TYPE must be a string scalar or character vector")
+                        .with_builtin("isa")
+                        .build()
+                        .into(),
+                )
             }
         }
         Value::CharArray(ca) => {
             if ca.rows == 1 {
                 Ok(ca.data.iter().collect())
             } else {
-                Err("isa: TYPE must be a string scalar or character vector".to_string())
+                Err(
+                    build_runtime_error("isa: TYPE must be a string scalar or character vector")
+                        .with_builtin("isa")
+                        .build()
+                        .into(),
+                )
             }
         }
-        _ => Err("isa: TYPE must be a string scalar or character vector".to_string()),
+        _ => Err(
+            build_runtime_error("isa: TYPE must be a string scalar or character vector")
+                .with_builtin("isa")
+                .build()
+                .into(),
+        ),
     }
 }
 
@@ -179,6 +195,10 @@ pub(crate) mod tests {
     };
     use runmat_gc_api::GcPtr;
     use std::collections::HashMap;
+
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -366,7 +386,11 @@ pub(crate) mod tests {
             StringArray::new(vec!["double".into(), "single".into()], vec![1, 2]).unwrap(),
         );
         let err = isa_builtin(Value::Num(1.0), type_array).unwrap_err();
-        assert_eq!(err, "isa: TYPE must be a string scalar or character vector");
+        let message = error_message(err);
+        assert_eq!(
+            message,
+            "isa: TYPE must be a string scalar or character vector"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

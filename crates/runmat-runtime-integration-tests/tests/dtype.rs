@@ -1,3 +1,4 @@
+use futures::executor::block_on;
 use runmat_builtins::{CharArray, NumericDType, Tensor, Value};
 
 #[test]
@@ -127,8 +128,10 @@ fn gpu_array_single_roundtrip_preserves_dtype() {
             other => panic!("expected tensor result, got {other:?}"),
         }
 
-        let direct_eval = runmat_runtime::builtins::acceleration::gpu::gather::evaluate(
-            std::slice::from_ref(&gpu),
+        let direct_eval = block_on(
+            runmat_runtime::builtins::acceleration::gpu::gather::evaluate(std::slice::from_ref(
+                &gpu,
+            )),
         )
         .expect("gather eval")
         .into_first();

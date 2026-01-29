@@ -47,14 +47,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::array::introspection::isvector"
 )]
-fn isvector_builtin(value: Value) -> Result<Value, String> {
-    Ok(Value::Bool(value_is_vector(&value)))
+async fn isvector_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    Ok(Value::Bool(value_is_vector(&value).await?))
 }
 
-fn value_is_vector(value: &Value) -> bool {
-    let dims = value_dimensions(value);
+async fn value_is_vector(value: &Value) -> crate::BuiltinResult<bool> {
+    let dims = value_dimensions(value).await?;
     if dims.len() > 2 {
-        return false;
+        return Ok(false);
     }
     let mut non_singleton_dims = 0usize;
 
@@ -62,17 +62,22 @@ fn value_is_vector(value: &Value) -> bool {
         if dim != 1 {
             non_singleton_dims += 1;
             if non_singleton_dims > 1 {
-                return false;
+                return Ok(false);
             }
         }
     }
-    true
+    Ok(true)
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+
+    fn isvector_builtin(value: Value) -> crate::BuiltinResult<Value> {
+        block_on(super::isvector_builtin(value))
+    }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_builtins::{CellArray, CharArray, Tensor};

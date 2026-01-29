@@ -1,7 +1,7 @@
 use runmat_builtins::{BuiltinDoc, BuiltinFunction};
 
 /// Helpers for documentation linking/formatting.
-const RUNMAT_DOC_BASE_URL: &str = "https://runmat.org/docs/builtins/";
+const RUNMAT_DOC_BASE_URL: &str = "https://runmat.org/docs/reference/builtins/";
 
 /// Build a documentation URL for a builtin name.
 pub fn builtin_doc_url(name: &str) -> String {

@@ -1,6 +1,6 @@
 //! MATLAB-compatible `fprintf` builtin enabling formatted text output to files and standard streams.
 
-use std::io::{self, Write};
+use std::io::Write;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use runmat_builtins::Value;
@@ -15,12 +15,13 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::io::filetext::registry::{self, FileInfo};
 use crate::console::{record_console_output, ConsoleStream};
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "fprintf: Invalid file identifier. Use fopen to generate a valid file ID.";
 const MISSING_FORMAT_MESSAGE: &str = "fprintf: missing format string";
+const BUILTIN_NAME: &str = "fprintf";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fprintf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -37,6 +38,28 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Host-only text I/O. Arguments residing on the GPU are gathered before formatting.",
 };
+
+fn fprintf_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let message = err.message().to_string();
+    let identifier = err.identifier().map(|value| value.to_string());
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_string_result<T>(result: Result<T, String>) -> BuiltinResult<T> {
+    result.map_err(fprintf_error)
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fprintf")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -63,15 +86,15 @@ impl FprintfEval {
 }
 
 /// Evaluate the `fprintf` builtin without going through the dispatcher.
-pub fn evaluate(args: &[Value]) -> Result<FprintfEval, String> {
+pub async fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
     if args.is_empty() {
-        return Err("fprintf: not enough input arguments".to_string());
+        return Err(fprintf_error("fprintf: not enough input arguments"));
     }
 
     // Gather all arguments to host first
     let mut all: Vec<Value> = Vec::with_capacity(args.len());
     for v in args {
-        all.push(gather_value(v)?);
+        all.push(gather_value(v).await?);
     }
 
     // Locate the first valid formatSpec anywhere in the list
@@ -82,13 +105,13 @@ pub fn evaluate(args: &[Value]) -> Result<FprintfEval, String> {
         if match_stream_label(value).is_some() {
             continue;
         }
-        if let Some(Value::String(s)) = coerce_to_format_string(value)? {
+        if let Some(Value::String(s)) = map_string_result(coerce_to_format_string(value))? {
             fmt_idx = Some(i);
             format_string_val = Some(s);
             break;
         }
     }
-    let fmt_idx = fmt_idx.ok_or_else(|| MISSING_FORMAT_MESSAGE.to_string())?;
+    let fmt_idx = fmt_idx.ok_or_else(|| fprintf_error(MISSING_FORMAT_MESSAGE))?;
     let raw_format = format_string_val.unwrap();
 
     // Determine output target by scanning only arguments BEFORE the format
@@ -114,7 +137,7 @@ pub fn evaluate(args: &[Value]) -> Result<FprintfEval, String> {
             if matches!(value, Value::Num(_) | Value::Int(_) | Value::Tensor(_)) {
                 if let Ok(fid) = parse_fid(value) {
                     target_idx = Some(i);
-                    target = target_from_fid(fid)?;
+                    target = map_string_result(target_from_fid(fid))?;
                     break;
                 }
             }
@@ -135,11 +158,14 @@ pub fn evaluate(args: &[Value]) -> Result<FprintfEval, String> {
         data_args.push(v);
     }
 
-    let format_string = decode_escape_sequences("fprintf", &raw_format)?;
-    let flattened_args = flatten_arguments(&data_args, "fprintf")?;
+    let format_string =
+        decode_escape_sequences("fprintf", &raw_format).map_err(map_control_flow)?;
+    let flattened_args = flatten_arguments(&data_args, "fprintf")
+        .await
+        .map_err(map_control_flow)?;
     let rendered = format_with_repetition(&format_string, &flattened_args)?;
-    let bytes = encode_output(&rendered, target.encoding_label())?;
-    target.write(&bytes)?;
+    let bytes = map_string_result(encode_output(&rendered, target.encoding_label()))?;
+    map_string_result(target.write(&bytes))?;
     Ok(FprintfEval {
         bytes_written: bytes.len(),
     })
@@ -215,11 +241,11 @@ fn coerce_to_format_string(value: &Value) -> Result<Option<Value>, String> {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::filetext::fprintf"
 )]
-fn fprintf_builtin(first: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn fprintf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut args = Vec::with_capacity(rest.len() + 1);
     args.push(first);
     args.extend(rest);
-    let eval = evaluate(&args)?;
+    let eval = evaluate(&args).await?;
     Ok(Value::Num(eval.bytes_written() as f64))
 }
 
@@ -249,18 +275,10 @@ impl OutputTarget {
     fn write(&self, bytes: &[u8]) -> Result<(), String> {
         match self {
             OutputTarget::Stdout => {
-                let mut stdout = io::stdout().lock();
-                stdout
-                    .write_all(bytes)
-                    .map_err(|err| format!("fprintf: failed to write to stdout ({err})"))?;
                 record_console_chunk(ConsoleStream::Stdout, bytes);
                 Ok(())
             }
             OutputTarget::Stderr => {
-                let mut stderr = io::stderr().lock();
-                stderr
-                    .write_all(bytes)
-                    .map_err(|err| format!("fprintf: failed to write to stderr ({err})"))?;
                 record_console_chunk(ConsoleStream::Stderr, bytes);
                 Ok(())
             }
@@ -284,8 +302,10 @@ fn record_console_chunk(stream: ConsoleStream, bytes: &[u8]) {
     record_console_output(stream, text);
 }
 
-fn gather_value(value: &Value) -> Result<Value, String> {
-    gather_if_needed(value).map_err(|e| format!("fprintf: {e}"))
+async fn gather_value(value: &Value) -> BuiltinResult<Value> {
+    gather_if_needed_async(value)
+        .await
+        .map_err(map_control_flow)
 }
 
 #[allow(dead_code)]
@@ -428,7 +448,7 @@ fn match_stream_label(value: &Value) -> Option<SpecialStream> {
     }
 }
 
-fn format_with_repetition(format: &str, args: &[Value]) -> Result<String, String> {
+fn format_with_repetition(format: &str, args: &[Value]) -> BuiltinResult<String> {
     let mut cursor = ArgCursor::new(args);
     let mut out = String::new();
     loop {
@@ -436,7 +456,9 @@ fn format_with_repetition(format: &str, args: &[Value]) -> Result<String, String
         out.push_str(&step.output);
         if step.consumed == 0 {
             if cursor.remaining() > 0 {
-                return Err("fprintf: formatSpec contains no conversion specifiers but additional arguments were supplied".to_string());
+                return Err(fprintf_error(
+                    "fprintf: formatSpec contains no conversion specifiers but additional arguments were supplied",
+                ));
             }
             break;
         }
@@ -447,12 +469,16 @@ fn format_with_repetition(format: &str, args: &[Value]) -> Result<String, String
     Ok(out)
 }
 
-fn remap_format_error(err: String) -> String {
-    if err.contains("sprintf") {
-        err.replace("sprintf", "fprintf")
-    } else {
-        err
+fn remap_format_error(err: RuntimeError) -> RuntimeError {
+    let message = err.message().replace("sprintf", "fprintf");
+    let identifier = err.identifier().map(|value| value.to_string());
+    let mut builder = build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 fn encode_output(text: &str, encoding: Option<&str>) -> Result<Vec<u8>, String> {
@@ -514,6 +540,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::{fclose, fopen, registry};
+    use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};
     use runmat_filesystem::{self as fs, File};
@@ -522,12 +549,33 @@ pub(crate) mod tests {
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
 
+    fn unwrap_error_message(err: RuntimeError) -> String {
+        err.message().to_string()
+    }
+
+    fn run_evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
+        futures::executor::block_on(evaluate(args))
+    }
+
+    fn run_fopen(args: &[Value]) -> BuiltinResult<fopen::FopenEval> {
+        futures::executor::block_on(fopen::evaluate(args))
+    }
+
+    fn run_fclose(args: &[Value]) -> BuiltinResult<fclose::FcloseEval> {
+        futures::executor::block_on(fclose::evaluate(args))
+    }
+
+    fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
+        registry::test_guard()
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_matrix_column_major() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fprintf_matrix");
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("w"),
         ])
@@ -540,10 +588,10 @@ pub(crate) mod tests {
             Value::String("%d %d\n".to_string()),
             Value::Tensor(tensor),
         ];
-        let eval = evaluate(&args).expect("fprintf");
+        let eval = run_evaluate(&args).expect("fprintf");
         assert_eq!(eval.bytes_written(), 12);
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
 
         let contents = fs::read_to_string(&path).expect("read");
         assert_eq!(contents, "1 4\n2 5\n3 6\n");
@@ -553,9 +601,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_ascii_encoding_errors() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fprintf_ascii");
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("w"),
             Value::from("native"),
@@ -569,22 +618,23 @@ pub(crate) mod tests {
             Value::String("%s".to_string()),
             Value::String("café".to_string()),
         ];
-        let err = evaluate(&args).expect_err("fprintf should reject ASCII-incompatible text");
+        let err = unwrap_error_message(run_evaluate(&args).unwrap_err());
         assert!(err.contains("cannot be encoded as ASCII"), "{err}");
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
         fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_gpu_gathers_values() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fprintf_gpu");
 
         test_support::with_test_provider(|provider| {
             registry::reset_for_tests();
-            let open = fopen::evaluate(&[
+            let open = run_fopen(&[
                 Value::from(path.to_string_lossy().to_string()),
                 Value::from("w"),
             ])
@@ -602,10 +652,10 @@ pub(crate) mod tests {
                 Value::String("%.1f,".to_string()),
                 Value::GpuTensor(handle),
             ];
-            let eval = evaluate(&args).expect("fprintf");
+            let eval = run_evaluate(&args).expect("fprintf");
             assert_eq!(eval.bytes_written(), 12);
 
-            fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+            run_fclose(&[Value::Num(fid as f64)]).unwrap();
         });
 
         let mut file = File::open(&path).expect("open");
@@ -618,46 +668,51 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_missing_format_errors() {
-        let err = evaluate(&[Value::Num(1.0)]).expect_err("fprintf should require format");
+        let err = unwrap_error_message(run_evaluate(&[Value::Num(1.0)]).unwrap_err());
         assert!(err.contains("missing format string"), "{err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_literal_with_extra_args_errors() {
-        let err = evaluate(&[
-            Value::String("literal text".to_string()),
-            Value::Int(IntValue::I32(1)),
-        ])
-        .expect_err("fprintf should reject extra args without conversions");
+        let err = unwrap_error_message(
+            run_evaluate(&[
+                Value::String("literal text".to_string()),
+                Value::Int(IntValue::I32(1)),
+            ])
+            .unwrap_err(),
+        );
         assert!(err.contains("contains no conversion specifiers"), "{err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_invalid_identifier_errors() {
-        let err = evaluate(&[Value::Num(99.0), Value::String("value".to_string())])
-            .expect_err("fprintf should reject unknown fid");
+        let err = unwrap_error_message(
+            run_evaluate(&[Value::Num(99.0), Value::String("value".to_string())]).unwrap_err(),
+        );
         assert!(err.contains("Invalid file identifier"), "{err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_read_only_error() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fprintf_read_only");
         fs::write(&path, b"readonly").unwrap();
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("r"),
         ])
         .expect("fopen");
         let fid = open.as_open().unwrap().fid as i32;
-        let err = evaluate(&[Value::Num(fid as f64), Value::String("text".to_string())])
-            .expect_err("fprintf should reject read-only handles");
+        let err = unwrap_error_message(
+            run_evaluate(&[Value::Num(fid as f64), Value::String("text".to_string())]).unwrap_err(),
+        );
         assert!(err.contains("not open for writing"), "{err}");
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
     }
 
     fn unique_path(prefix: &str) -> PathBuf {

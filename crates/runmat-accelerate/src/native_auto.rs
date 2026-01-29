@@ -18,7 +18,7 @@ use log::{debug, info, trace, warn};
 use once_cell::sync::{Lazy, OnceCell};
 use runmat_accelerate_api::{AccelProvider, ApiDeviceInfo, HostTensorView, ProviderPrecision};
 use runmat_builtins::{builtin_functions, AccelTag, Tensor, Value};
-use runmat_runtime::gather_if_needed;
+use runmat_runtime::gather_if_needed_async;
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_CPU_ELEM_PER_ELEM: f64 = 1.0e-7;
@@ -1095,7 +1095,7 @@ impl NativeAutoOffload {
         }
     }
 
-    fn prepare_builtin(&self, name: &str, args: &[Value]) -> Result<Vec<Value>> {
+    async fn prepare_builtin(&self, name: &str, args: &[Value]) -> Result<Vec<Value>> {
         if !self.enabled {
             return Ok(args.to_vec());
         }
@@ -1108,7 +1108,7 @@ impl NativeAutoOffload {
         }
         if let Some(policy) = builtin_policy(name) {
             if policy.is_sink {
-                return gather_args(args);
+                return gather_args(args).await;
             }
 
             let mut processed = args.to_vec();
@@ -1234,13 +1234,17 @@ fn is_empty_placeholder_value(value: &Value) -> bool {
     }
 }
 
-fn gather_args(args: &[Value]) -> Result<Vec<Value>> {
+async fn gather_args(args: &[Value]) -> Result<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
         if let Value::GpuTensor(handle) = value {
             fusion_residency::clear(handle);
         }
-        out.push(gather_if_needed(value).map_err(|e| anyhow!(e))?);
+        out.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(|e| anyhow!(e))?,
+        );
     }
     Ok(out)
 }
@@ -1529,7 +1533,7 @@ fn compare_elemwise(
     let ha = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
     let hb = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
     let start = Instant::now();
-    let hc = match provider.elem_add(&ha, &hb) {
+    let hc = match futures::executor::block_on(provider.elem_add(&ha, &hb)) {
         Ok(h) => h,
         Err(_) => {
             let _ = provider.free(&ha);
@@ -1597,7 +1601,7 @@ fn compare_reduction(
     };
     let h = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
     let start = Instant::now();
-    let out = match provider.reduce_sum(&h) {
+    let out = match futures::executor::block_on(provider.reduce_sum(&h)) {
         Ok(hc) => hc,
         Err(_) => {
             provider.free(&h).ok();
@@ -1657,7 +1661,8 @@ fn compare_matmul(
     };
     let a = Value::Tensor(ta.clone());
     let b = Value::Tensor(tb.clone());
-    let cpu_time = time(|| runmat_runtime::matrix::value_matmul(&a, &b))?;
+    let cpu_time =
+        time(|| futures::executor::block_on(runmat_runtime::matrix::value_matmul(&a, &b)))?;
     let flops = (n * n * n) as f64;
     update_cpu_cost(cpu_cost_slot, cpu_time.as_secs_f64() / flops);
     if let Some(model) = profile_cost_model() {
@@ -1686,7 +1691,7 @@ fn compare_matmul(
         .upload(&view_b)
         .map_err(|e| anyhow!(e.to_string()))?;
     let start = Instant::now();
-    let hc = match provider.matmul(&ha, &hb) {
+    let hc = match futures::executor::block_on(provider.matmul(&ha, &hb)) {
         Ok(h) => h,
         Err(_) => {
             let _ = provider.free(&ha);
@@ -1703,10 +1708,10 @@ fn compare_matmul(
 
 fn time<F, T>(mut f: F) -> Result<Duration>
 where
-    F: FnMut() -> Result<T, String>,
+    F: FnMut() -> runmat_runtime::BuiltinResult<T>,
 {
     let start = Instant::now();
-    let _ = f().map_err(|e| anyhow!(e))?;
+    let _ = f().map_err(|err| anyhow!(err))?;
     Ok(start.elapsed())
 }
 
@@ -1964,17 +1969,17 @@ pub fn promote_unary(op: UnaryOp, value: &Value) -> Result<Value> {
     }
 }
 
-pub fn prepare_builtin_args(name: &str, args: &[Value]) -> Result<Vec<Value>> {
+pub async fn prepare_builtin_args(name: &str, args: &[Value]) -> Result<Vec<Value>> {
     if let Some(policy) = builtin_policy(name) {
         if policy.is_sink {
-            return gather_args(args);
+            return gather_args(args).await;
         }
     }
     if !auto_enabled() {
         return Ok(args.to_vec());
     }
     if let Some(auto) = global() {
-        auto.prepare_builtin(name, args)
+        auto.prepare_builtin(name, args).await
     } else {
         Ok(args.to_vec())
     }

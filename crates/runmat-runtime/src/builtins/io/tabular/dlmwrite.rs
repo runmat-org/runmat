@@ -21,7 +21,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+
+const BUILTIN_NAME: &str = "dlmwrite";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::dlmwrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -38,6 +40,34 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Runs entirely on the host; gpuArray inputs are gathered before formatting.",
 };
+
+fn dlmwrite_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn dlmwrite_error_with_source<E>(message: impl Into<String>, source: E) -> RuntimeError
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source)
+        .build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(|value| value.to_string());
+    let message = err.message().to_string();
+    let mut builder = build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::dlmwrite")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -58,18 +88,31 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::tabular::dlmwrite"
 )]
-fn dlmwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let gathered_path = gather_if_needed(&filename).map_err(|e| format!("dlmwrite: {e}"))?;
+async fn dlmwrite_builtin(
+    filename: Value,
+    data: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let gathered_path = gather_if_needed_async(&filename)
+        .await
+        .map_err(map_control_flow)?;
     let path = resolve_path(&gathered_path)?;
 
     let mut gathered_args = Vec::with_capacity(rest.len());
     for value in &rest {
-        gathered_args.push(gather_if_needed(value).map_err(|e| format!("dlmwrite: {e}"))?);
+        gathered_args.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     let options = parse_arguments(&gathered_args)?;
 
-    let gathered_data = gather_if_needed(&data).map_err(|e| format!("dlmwrite: {e}"))?;
-    let tensor = tensor::value_into_tensor_for("dlmwrite", gathered_data)?;
+    let gathered_data = gather_if_needed_async(&data)
+        .await
+        .map_err(map_control_flow)?;
+    let tensor =
+        tensor::value_into_tensor_for("dlmwrite", gathered_data).map_err(dlmwrite_error)?;
     ensure_matrix_shape(&tensor)?;
 
     let bytes = write_dlm(&path, &tensor, &options)?;
@@ -130,7 +173,7 @@ enum PrecisionSpec {
     Format(String),
 }
 
-fn parse_arguments(args: &[Value]) -> Result<DlmWriteOptions, String> {
+fn parse_arguments(args: &[Value]) -> BuiltinResult<DlmWriteOptions> {
     let mut options = DlmWriteOptions::default();
     if args.is_empty() {
         return Ok(options);
@@ -179,11 +222,17 @@ fn parse_arguments(args: &[Value]) -> Result<DlmWriteOptions, String> {
             continue;
         }
 
-        let name = value_to_lowercase_string(&args[idx])
-            .ok_or_else(|| format!("dlmwrite: expected name-value pair, got {:?}", args[idx]))?;
+        let name = value_to_lowercase_string(&args[idx]).ok_or_else(|| {
+            dlmwrite_error(format!(
+                "dlmwrite: expected name-value pair, got {:?}",
+                args[idx]
+            ))
+        })?;
         idx += 1;
         if idx >= args.len() {
-            return Err("dlmwrite: name-value arguments must appear in pairs".to_string());
+            return Err(dlmwrite_error(
+                "dlmwrite: name-value arguments must appear in pairs",
+            ));
         }
         let value = &args[idx];
         idx += 1;
@@ -208,7 +257,9 @@ fn parse_arguments(args: &[Value]) -> Result<DlmWriteOptions, String> {
                 options.append = parse_append_value(value)?;
             }
             other => {
-                return Err(format!("dlmwrite: unsupported name-value pair '{other}'"));
+                return Err(dlmwrite_error(format!(
+                    "dlmwrite: unsupported name-value pair '{other}'"
+                )));
             }
         }
     }
@@ -246,7 +297,7 @@ fn is_positional_delimiter_candidate(value: &Value) -> bool {
     }
 }
 
-fn parse_delimiter_value(value: &Value) -> Result<String, String> {
+fn parse_delimiter_value(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => interpret_delimiter_string(s),
         Value::CharArray(ca) if ca.rows == 1 => {
@@ -254,13 +305,15 @@ fn parse_delimiter_value(value: &Value) -> Result<String, String> {
             interpret_delimiter_string(&text)
         }
         Value::StringArray(sa) if sa.data.len() == 1 => interpret_delimiter_string(&sa.data[0]),
-        _ => Err("dlmwrite: delimiter must be a string scalar or character vector".to_string()),
+        _ => Err(dlmwrite_error(
+            "dlmwrite: delimiter must be a string scalar or character vector",
+        )),
     }
 }
 
-fn interpret_delimiter_string(raw: &str) -> Result<String, String> {
+fn interpret_delimiter_string(raw: &str) -> BuiltinResult<String> {
     if raw.is_empty() {
-        return Err("dlmwrite: delimiter must not be empty".to_string());
+        return Err(dlmwrite_error("dlmwrite: delimiter must not be empty"));
     }
     if raw == r"\t" {
         return Ok("\t".to_string());
@@ -283,42 +336,51 @@ fn is_numeric_scalar(value: &Value) -> bool {
     }
 }
 
-fn parse_offset_value(value: &Value, context: &str) -> Result<usize, String> {
-    let scalar = extract_scalar(value).map_err(|e| format!("dlmwrite: {context} {e}"))?;
+fn parse_offset_value(value: &Value, context: &str) -> BuiltinResult<usize> {
+    let scalar =
+        extract_scalar(value).map_err(|e| dlmwrite_error(format!("dlmwrite: {context} {e}")))?;
     if !scalar.is_finite() {
-        return Err(format!("dlmwrite: {context} must be finite"));
+        return Err(dlmwrite_error(format!(
+            "dlmwrite: {context} must be finite"
+        )));
     }
     let rounded = scalar.round();
     if (rounded - scalar).abs() > 1e-9 {
-        return Err(format!(
+        return Err(dlmwrite_error(format!(
             "dlmwrite: {context} must be an integer, got {scalar}"
-        ));
+        )));
     }
     if rounded < 0.0 {
-        return Err(format!("dlmwrite: {context} must be >= 0"));
+        return Err(dlmwrite_error(format!("dlmwrite: {context} must be >= 0")));
     }
     Ok(rounded as usize)
 }
 
-fn parse_precision_value(value: &Value) -> Result<PrecisionSpec, String> {
+fn parse_precision_value(value: &Value) -> BuiltinResult<PrecisionSpec> {
     match value {
         Value::Int(i) => {
             let digits = i.to_i64();
             if digits <= 0 {
-                return Err("dlmwrite: precision must be a positive integer".to_string());
+                return Err(dlmwrite_error(
+                    "dlmwrite: precision must be a positive integer",
+                ));
             }
             Ok(PrecisionSpec::Significant(digits as u32))
         }
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err("dlmwrite: precision scalar must be finite".to_string());
+                return Err(dlmwrite_error("dlmwrite: precision scalar must be finite"));
             }
             let rounded = n.round();
             if (rounded - n).abs() > 1e-9 {
-                return Err("dlmwrite: precision scalar must be an integer".to_string());
+                return Err(dlmwrite_error(
+                    "dlmwrite: precision scalar must be an integer",
+                ));
             }
             if rounded <= 0.0 {
-                return Err("dlmwrite: precision must be a positive integer".to_string());
+                return Err(dlmwrite_error(
+                    "dlmwrite: precision must be a positive integer",
+                ));
             }
             Ok(PrecisionSpec::Significant(rounded as u32))
         }
@@ -327,14 +389,18 @@ fn parse_precision_value(value: &Value) -> Result<PrecisionSpec, String> {
             if logical.data[0] != 0 {
                 Ok(PrecisionSpec::Significant(1))
             } else {
-                Err("dlmwrite: precision must be a positive integer".to_string())
+                Err(dlmwrite_error(
+                    "dlmwrite: precision must be a positive integer",
+                ))
             }
         }
         Value::Bool(b) => {
             if *b {
                 Ok(PrecisionSpec::Significant(1))
             } else {
-                Err("dlmwrite: precision must be a positive integer".to_string())
+                Err(dlmwrite_error(
+                    "dlmwrite: precision must be a positive integer",
+                ))
             }
         }
         Value::String(s) => parse_precision_format(s),
@@ -343,32 +409,36 @@ fn parse_precision_value(value: &Value) -> Result<PrecisionSpec, String> {
             parse_precision_format(&text)
         }
         Value::StringArray(sa) if sa.data.len() == 1 => parse_precision_format(&sa.data[0]),
-        _ => Err("dlmwrite: precision must be numeric or a format string".to_string()),
+        _ => Err(dlmwrite_error(
+            "dlmwrite: precision must be numeric or a format string",
+        )),
     }
 }
 
-fn parse_precision_format(text: &str) -> Result<PrecisionSpec, String> {
+fn parse_precision_format(text: &str) -> BuiltinResult<PrecisionSpec> {
     if text.is_empty() {
-        return Err("dlmwrite: precision format string must not be empty".to_string());
+        return Err(dlmwrite_error(
+            "dlmwrite: precision format string must not be empty",
+        ));
     }
     Ok(PrecisionSpec::Format(text.to_string()))
 }
 
-fn parse_newline_value(value: &Value) -> Result<LineEnding, String> {
+fn parse_newline_value(value: &Value) -> BuiltinResult<LineEnding> {
     let text = value_to_lowercase_string(value).ok_or_else(|| {
-        "dlmwrite: newline must be a string scalar or character vector".to_string()
+        dlmwrite_error("dlmwrite: newline must be a string scalar or character vector")
     })?;
     match text.as_str() {
         "pc" | "windows" | "crlf" => Ok(LineEnding::Pc),
         "unix" | "lf" => Ok(LineEnding::Unix),
         "mac" | "cr" => Ok(LineEnding::Mac),
-        other => Err(format!(
+        other => Err(dlmwrite_error(format!(
             "dlmwrite: unsupported newline setting '{other}' (expected 'pc' or 'unix')"
-        )),
+        ))),
     }
 }
 
-fn parse_append_value(value: &Value) -> Result<bool, String> {
+fn parse_append_value(value: &Value) -> BuiltinResult<bool> {
     match value {
         Value::Bool(b) => Ok(*b),
         Value::Int(i) => Ok(i.to_i64() != 0),
@@ -379,20 +449,20 @@ fn parse_append_value(value: &Value) -> Result<bool, String> {
             parse_bool_string(&text)
         }
         Value::StringArray(sa) if sa.data.len() == 1 => parse_bool_string(&sa.data[0]),
-        _ => Err("dlmwrite: append value must be logical".to_string()),
+        _ => Err(dlmwrite_error("dlmwrite: append value must be logical")),
     }
 }
 
-fn parse_bool_string(text: &str) -> Result<bool, String> {
+fn parse_bool_string(text: &str) -> BuiltinResult<bool> {
     let lowered = text.trim().to_ascii_lowercase();
     match lowered.as_str() {
         "true" | "on" | "yes" | "1" => Ok(true),
         "false" | "off" | "no" | "0" => Ok(false),
-        _ => Err("dlmwrite: append value must be logical".to_string()),
+        _ => Err(dlmwrite_error("dlmwrite: append value must be logical")),
     }
 }
 
-fn extract_scalar(value: &Value) -> Result<f64, String> {
+fn extract_scalar(value: &Value) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
@@ -401,7 +471,7 @@ fn extract_scalar(value: &Value) -> Result<f64, String> {
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
-        _ => Err("must be numeric scalar".to_string()),
+        _ => Err(dlmwrite_error("must be numeric scalar")),
     }
 }
 
@@ -409,35 +479,37 @@ fn value_to_lowercase_string(value: &Value) -> Option<String> {
     tensor::value_to_string(value).map(|s| s.trim().to_ascii_lowercase())
 }
 
-fn resolve_path(value: &Value) -> Result<PathBuf, String> {
+fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
     let raw = match value {
         Value::String(s) => s.clone(),
         Value::CharArray(ca) if ca.rows == 1 => ca.data.iter().collect(),
         Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
         _ => {
-            return Err(
-                "dlmwrite: filename must be a string scalar or character vector".to_string(),
-            )
+            return Err(dlmwrite_error(
+                "dlmwrite: filename must be a string scalar or character vector",
+            ))
         }
     };
     if raw.trim().is_empty() {
-        return Err("dlmwrite: filename must not be empty".to_string());
+        return Err(dlmwrite_error("dlmwrite: filename must not be empty"));
     }
-    let expanded = expand_user_path(&raw, "dlmwrite").map_err(|e| format!("dlmwrite: {e}"))?;
+    let expanded = expand_user_path(&raw, BUILTIN_NAME).map_err(dlmwrite_error)?;
     Ok(Path::new(&expanded).to_path_buf())
 }
 
-fn ensure_matrix_shape(tensor: &Tensor) -> Result<(), String> {
+fn ensure_matrix_shape(tensor: &Tensor) -> BuiltinResult<()> {
     if tensor.shape.len() <= 2 {
         return Ok(());
     }
     if tensor.shape[2..].iter().all(|&dim| dim == 1) {
         return Ok(());
     }
-    Err("dlmwrite: input must be 2-D; reshape before writing".to_string())
+    Err(dlmwrite_error(
+        "dlmwrite: input must be 2-D; reshape before writing",
+    ))
 }
 
-fn write_dlm(path: &Path, tensor: &Tensor, options: &DlmWriteOptions) -> Result<usize, String> {
+fn write_dlm(path: &Path, tensor: &Tensor, options: &DlmWriteOptions) -> BuiltinResult<usize> {
     let rows = tensor.rows();
     let cols = tensor.cols();
     let newline = options.newline.as_str();
@@ -445,10 +517,13 @@ fn write_dlm(path: &Path, tensor: &Tensor, options: &DlmWriteOptions) -> Result<
     let (existing_nonempty, ends_with_newline) = if options.append {
         match vfs::metadata(path) {
             Ok(meta) if !meta.is_empty() => {
-                let ends = file_ends_with_newline(path).map_err(|e| {
-                    format!(
-                        "dlmwrite: failed to inspect existing file \"{}\" ({e})",
-                        path.display()
+                let ends = file_ends_with_newline(path).map_err(|err| {
+                    dlmwrite_error_with_source(
+                        format!(
+                            "dlmwrite: failed to inspect existing file \"{}\" ({err})",
+                            path.display()
+                        ),
+                        err,
                     )
                 })?;
                 (true, ends)
@@ -458,9 +533,9 @@ fn write_dlm(path: &Path, tensor: &Tensor, options: &DlmWriteOptions) -> Result<
                 if err.kind() == io::ErrorKind::NotFound {
                     (false, false)
                 } else {
-                    return Err(format!(
-                        "dlmwrite: unable to inspect \"{}\" ({err})",
-                        path.display()
+                    return Err(dlmwrite_error_with_source(
+                        format!("dlmwrite: unable to inspect \"{}\" ({err})", path.display()),
+                        err,
                     ));
                 }
             }
@@ -478,17 +553,24 @@ fn write_dlm(path: &Path, tensor: &Tensor, options: &DlmWriteOptions) -> Result<
     }
 
     let mut file = open.open(path).map_err(|err| {
-        format!(
-            "dlmwrite: unable to open \"{}\" for writing ({err})",
-            path.display()
+        dlmwrite_error_with_source(
+            format!(
+                "dlmwrite: unable to open \"{}\" for writing ({err})",
+                path.display()
+            ),
+            err,
         )
     })?;
 
     let mut bytes = 0usize;
 
     if options.append && existing_nonempty && !ends_with_newline {
-        file.write_all(newline.as_bytes())
-            .map_err(|e| format!("dlmwrite: failed to insert newline before append ({e})"))?;
+        file.write_all(newline.as_bytes()).map_err(|err| {
+            dlmwrite_error_with_source(
+                format!("dlmwrite: failed to insert newline before append ({err})"),
+                err,
+            )
+        })?;
         bytes += newline.len();
     }
 
@@ -503,8 +585,9 @@ fn write_dlm(path: &Path, tensor: &Tensor, options: &DlmWriteOptions) -> Result<
     }
 
     if rows == 0 || cols == 0 {
-        file.flush()
-            .map_err(|e| format!("dlmwrite: failed to flush output ({e})"))?;
+        file.flush().map_err(|err| {
+            dlmwrite_error_with_source(format!("dlmwrite: failed to flush output ({err})"), err)
+        })?;
         return Ok(bytes);
     }
 
@@ -520,17 +603,20 @@ fn write_dlm(path: &Path, tensor: &Tensor, options: &DlmWriteOptions) -> Result<
         }
         let line = fields.join(&options.delimiter);
         if !line.is_empty() {
-            file.write_all(line.as_bytes())
-                .map_err(|e| format!("dlmwrite: failed to write data ({e})"))?;
+            file.write_all(line.as_bytes()).map_err(|err| {
+                dlmwrite_error_with_source(format!("dlmwrite: failed to write data ({err})"), err)
+            })?;
             bytes += line.len();
         }
-        file.write_all(newline.as_bytes())
-            .map_err(|e| format!("dlmwrite: failed to write newline ({e})"))?;
+        file.write_all(newline.as_bytes()).map_err(|err| {
+            dlmwrite_error_with_source(format!("dlmwrite: failed to write newline ({err})"), err)
+        })?;
         bytes += newline.len();
     }
 
-    file.flush()
-        .map_err(|e| format!("dlmwrite: failed to flush output ({e})"))?;
+    file.flush().map_err(|err| {
+        dlmwrite_error_with_source(format!("dlmwrite: failed to flush output ({err})"), err)
+    })?;
     Ok(bytes)
 }
 
@@ -540,11 +626,15 @@ fn write_blank_row(
     coffset: usize,
     delimiter: &str,
     newline: &str,
-) -> Result<usize, String> {
+) -> BuiltinResult<usize> {
     let mut bytes = 0usize;
     if coffset == 0 && cols == 0 {
-        file.write_all(newline.as_bytes())
-            .map_err(|e| format!("dlmwrite: failed to write offset newline ({e})"))?;
+        file.write_all(newline.as_bytes()).map_err(|err| {
+            dlmwrite_error_with_source(
+                format!("dlmwrite: failed to write offset newline ({err})"),
+                err,
+            )
+        })?;
         return Ok(newline.len());
     }
     let mut fields = Vec::with_capacity(coffset + cols);
@@ -556,12 +646,17 @@ fn write_blank_row(
     }
     let line = fields.join(delimiter);
     if !line.is_empty() {
-        file.write_all(line.as_bytes())
-            .map_err(|e| format!("dlmwrite: failed to write offset row ({e})"))?;
+        file.write_all(line.as_bytes()).map_err(|err| {
+            dlmwrite_error_with_source(format!("dlmwrite: failed to write offset row ({err})"), err)
+        })?;
         bytes += line.len();
     }
-    file.write_all(newline.as_bytes())
-        .map_err(|e| format!("dlmwrite: failed to write offset newline ({e})"))?;
+    file.write_all(newline.as_bytes()).map_err(|err| {
+        dlmwrite_error_with_source(
+            format!("dlmwrite: failed to write offset newline ({err})"),
+            err,
+        )
+    })?;
     bytes += newline.len();
     Ok(bytes)
 }
@@ -580,7 +675,7 @@ fn file_ends_with_newline(path: &Path) -> io::Result<bool> {
     Ok(buffer.contains(&b'\n') || buffer.contains(&b'\r'))
 }
 
-fn format_numeric(value: f64, precision: &PrecisionSpec) -> Result<String, String> {
+fn format_numeric(value: f64, precision: &PrecisionSpec) -> BuiltinResult<String> {
     if value.is_nan() {
         return Ok("NaN".to_string());
     }
@@ -594,7 +689,7 @@ fn format_numeric(value: f64, precision: &PrecisionSpec) -> Result<String, Strin
     match precision {
         PrecisionSpec::Significant(digits) => {
             if *digits == 0 {
-                return Err("dlmwrite: precision must be positive".to_string());
+                return Err(dlmwrite_error("dlmwrite: precision must be positive"));
             }
             let fmt = format!("%.{digits}g");
             let mut rendered = c_format(value, &fmt)?;
@@ -615,9 +710,9 @@ fn format_numeric(value: f64, precision: &PrecisionSpec) -> Result<String, Strin
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn c_format(value: f64, spec: &str) -> Result<String, String> {
+fn c_format(value: f64, spec: &str) -> BuiltinResult<String> {
     let fmt = CString::new(spec.as_bytes()).map_err(|_| {
-        "dlmwrite: precision format must not contain embedded null bytes".to_string()
+        dlmwrite_error("dlmwrite: precision format must not contain embedded null bytes")
     })?;
     let mut size: usize = 128;
     loop {
@@ -631,7 +726,9 @@ fn c_format(value: f64, spec: &str) -> Result<String, String> {
             )
         };
         if written < 0 {
-            return Err("dlmwrite: failed to apply precision format string".to_string());
+            return Err(dlmwrite_error(
+                "dlmwrite: failed to apply precision format string",
+            ));
         }
         let written = written as usize;
         if written >= size {
@@ -640,12 +737,12 @@ fn c_format(value: f64, spec: &str) -> Result<String, String> {
         }
         buffer.truncate(written);
         return String::from_utf8(buffer)
-            .map_err(|_| "dlmwrite: formatted output was not valid UTF-8".to_string());
+            .map_err(|_| dlmwrite_error("dlmwrite: formatted output was not valid UTF-8"));
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn c_format(value: f64, spec: &str) -> Result<String, String> {
+fn c_format(value: f64, spec: &str) -> BuiltinResult<String> {
     wasm_format_float(value, spec)
 }
 
@@ -685,7 +782,7 @@ unsafe fn platform_snprintf(
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-fn wasm_format_float(value: f64, spec: &str) -> Result<String, String> {
+fn wasm_format_float(value: f64, spec: &str) -> BuiltinResult<String> {
     let parsed = ParsedFormat::parse(spec)?;
     Ok(parsed.render(value))
 }
@@ -721,14 +818,14 @@ struct ParsedFormat {
 
 #[cfg(any(target_arch = "wasm32", test))]
 impl ParsedFormat {
-    fn parse(input: &str) -> Result<Self, String> {
+    fn parse(input: &str) -> BuiltinResult<Self> {
         use std::iter::Peekable;
         use std::str::Chars;
 
         fn parse_number(
             chars: &mut Peekable<Chars<'_>>,
             label: &str,
-        ) -> Result<Option<usize>, String> {
+        ) -> BuiltinResult<Option<usize>> {
             let mut value: usize = 0;
             let mut saw_digit = false;
             while let Some(&ch) = chars.peek() {
@@ -738,7 +835,9 @@ impl ParsedFormat {
                         .checked_mul(10)
                         .and_then(|v| v.checked_add((ch as u8 - b'0') as usize))
                         .ok_or_else(|| {
-                            format!("dlmwrite: {label} too large in precision format")
+                            dlmwrite_error(format!(
+                                "dlmwrite: {label} too large in precision format"
+                            ))
                         })?;
                     chars.next();
                 } else {
@@ -752,7 +851,9 @@ impl ParsedFormat {
         match chars.next() {
             Some('%') => {}
             _ => {
-                return Err("dlmwrite: precision format must start with '%'".to_string());
+                return Err(dlmwrite_error(
+                    "dlmwrite: precision format must start with '%'",
+                ));
             }
         }
 
@@ -800,16 +901,18 @@ impl ParsedFormat {
         };
 
         if matches!(chars.peek(), Some('l' | 'L' | 'h')) {
-            return Err(
-                "dlmwrite: length modifiers are not supported in precision formats".to_string(),
-            );
+            return Err(dlmwrite_error(
+                "dlmwrite: length modifiers are not supported in precision formats",
+            ));
         }
 
         let spec_ch = chars
             .next()
-            .ok_or_else(|| "dlmwrite: incomplete precision format".to_string())?;
+            .ok_or_else(|| dlmwrite_error("dlmwrite: incomplete precision format"))?;
         if chars.next().is_some() {
-            return Err("dlmwrite: unexpected trailing characters in precision format".to_string());
+            return Err(dlmwrite_error(
+                "dlmwrite: unexpected trailing characters in precision format",
+            ));
         }
 
         let (specifier, uppercase) = match spec_ch {
@@ -820,9 +923,9 @@ impl ParsedFormat {
             'g' => (FloatSpecifier::General, false),
             'G' => (FloatSpecifier::General, true),
             other => {
-                return Err(format!(
+                return Err(dlmwrite_error(format!(
                     "dlmwrite: unsupported precision format specifier '{other}'"
-                ));
+                )));
             }
         };
 
@@ -1075,7 +1178,15 @@ pub(crate) mod tests {
 
     use crate::builtins::common::fs as fs_helpers;
 
+    fn dlmwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::dlmwrite_builtin(filename, data, rest))
+    }
+
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+    fn error_message(err: RuntimeError) -> String {
+        err.message().to_string()
+    }
 
     fn temp_path(ext: &str) -> PathBuf {
         let millis = unix_timestamp_ms();
@@ -1326,13 +1437,15 @@ pub(crate) mod tests {
         let path = temp_path("csv");
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
         let filename = path.to_string_lossy().into_owned();
-        let err = dlmwrite_builtin(
-            Value::from(filename),
-            Value::Tensor(tensor),
-            vec![Value::from("roffset"), Value::Int(IntValue::I32(-1))],
-        )
-        .unwrap_err();
-        assert!(err.to_ascii_lowercase().contains("row offset"));
+        let message = error_message(
+            dlmwrite_builtin(
+                Value::from(filename),
+                Value::Tensor(tensor),
+                vec![Value::from("roffset"), Value::Int(IntValue::I32(-1))],
+            )
+            .unwrap_err(),
+        );
+        assert!(message.to_ascii_lowercase().contains("row offset"));
         assert!(!path.exists());
     }
 
@@ -1342,13 +1455,15 @@ pub(crate) mod tests {
         let path = temp_path("csv");
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let filename = path.to_string_lossy().into_owned();
-        let err = dlmwrite_builtin(
-            Value::from(filename),
-            Value::Tensor(tensor),
-            vec![Value::from("coffset"), Value::Num(1.5)],
-        )
-        .unwrap_err();
-        assert!(err.to_ascii_lowercase().contains("integer"));
+        let message = error_message(
+            dlmwrite_builtin(
+                Value::from(filename),
+                Value::Tensor(tensor),
+                vec![Value::from("coffset"), Value::Num(1.5)],
+            )
+            .unwrap_err(),
+        );
+        assert!(message.to_ascii_lowercase().contains("integer"));
         assert!(!path.exists());
     }
 
@@ -1358,13 +1473,15 @@ pub(crate) mod tests {
         let path = temp_path("csv");
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let filename = path.to_string_lossy().into_owned();
-        let err = dlmwrite_builtin(
-            Value::from(filename),
-            Value::Tensor(tensor),
-            vec![Value::from("")],
-        )
-        .unwrap_err();
-        assert!(err.to_ascii_lowercase().contains("delimiter"));
+        let message = error_message(
+            dlmwrite_builtin(
+                Value::from(filename),
+                Value::Tensor(tensor),
+                vec![Value::from("")],
+            )
+            .unwrap_err(),
+        );
+        assert!(message.to_ascii_lowercase().contains("delimiter"));
         assert!(!path.exists());
     }
 
@@ -1374,13 +1491,15 @@ pub(crate) mod tests {
         let path = temp_path("csv");
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let filename = path.to_string_lossy().into_owned();
-        let err = dlmwrite_builtin(
-            Value::from(filename),
-            Value::Tensor(tensor),
-            vec![Value::from("precision"), Value::Int(IntValue::I32(0))],
-        )
-        .unwrap_err();
-        assert!(err.to_ascii_lowercase().contains("precision"));
+        let message = error_message(
+            dlmwrite_builtin(
+                Value::from(filename),
+                Value::Tensor(tensor),
+                vec![Value::from("precision"), Value::Int(IntValue::I32(0))],
+            )
+            .unwrap_err(),
+        );
+        assert!(message.to_ascii_lowercase().contains("precision"));
         assert!(!path.exists());
     }
 
@@ -1390,13 +1509,15 @@ pub(crate) mod tests {
         let path = temp_path("csv");
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let filename = path.to_string_lossy().into_owned();
-        let err = dlmwrite_builtin(
-            Value::from(filename),
-            Value::Tensor(tensor),
-            vec![Value::from("delimiter")],
-        )
-        .unwrap_err();
-        assert!(err
+        let message = error_message(
+            dlmwrite_builtin(
+                Value::from(filename),
+                Value::Tensor(tensor),
+                vec![Value::from("delimiter")],
+            )
+            .unwrap_err(),
+        );
+        assert!(message
             .to_ascii_lowercase()
             .contains("name-value arguments must appear in pairs"));
         assert!(!path.exists());
@@ -1431,12 +1552,14 @@ pub(crate) mod tests {
     fn dlmwrite_rejects_non_numeric_inputs() {
         let path = temp_path("csv");
         let filename = path.to_string_lossy().into_owned();
-        let err = dlmwrite_builtin(
-            Value::from(filename),
-            Value::String("abc".into()),
-            Vec::new(),
-        )
-        .unwrap_err();
-        assert!(err.contains("dlmwrite"));
+        let message = error_message(
+            dlmwrite_builtin(
+                Value::from(filename),
+                Value::String("abc".into()),
+                Vec::new(),
+            )
+            .unwrap_err(),
+        );
+        assert!(message.contains("dlmwrite"));
     }
 }

@@ -15,7 +15,7 @@ name = "runmat"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -27,6 +27,7 @@ env_logger = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
+miette = { workspace = true }
 uuid = { workspace = true }
 crossbeam-channel = "0.5"
 once_cell = "1.19"

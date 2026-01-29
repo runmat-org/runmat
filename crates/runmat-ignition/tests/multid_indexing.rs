@@ -1,6 +1,10 @@
-use runmat_hir::lower;
-use runmat_ignition::execute;
+mod test_helpers;
+
+use runmat_hir::LoweringContext;
 use runmat_parser::parse;
+use std::collections::HashMap;
+use test_helpers::execute;
+use test_helpers::lower;
 
 #[test]
 fn reshape_and_index_3d_element() {
@@ -32,7 +36,7 @@ fn mixed_selectors_basic_2d_range() {
 
 #[test]
 fn logical_mask_rows_select() {
-    let ast = parse("A=[1 2; 3 4; 5 6]; sel = A([1 0 1], :);").unwrap();
+    let ast = parse("A=[1 2; 3 4; 5 6]; sel = A([true false true], :);").unwrap();
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     // Expect rows 1 and 3 selected. In column-major storage, resulting 2x2 has data [1 5 2 6].
@@ -47,20 +51,34 @@ fn logical_mask_rows_select() {
     }
 }
 
+fn lower_with_vars(src: &str) -> (runmat_hir::HirProgram, HashMap<String, usize>) {
+    let program = parse(src).unwrap();
+    let result = runmat_hir::lower(&program, &LoweringContext::empty()).unwrap();
+    (result.hir, result.variables)
+}
+
+fn get_var_tensor(
+    vars: &[runmat_builtins::Value],
+    vars_map: &HashMap<String, usize>,
+    name: &str,
+) -> runmat_builtins::Tensor {
+    let index = *vars_map
+        .get(name)
+        .unwrap_or_else(|| panic!("missing var {name}"));
+    match &vars[index] {
+        runmat_builtins::Value::Tensor(t) => t.clone(),
+        other => panic!("var {name} not tensor: {other:?}"),
+    }
+}
+
 #[test]
 fn slice_assignment_column_and_row() {
-    let ast = parse("A=[1 2 3; 4 5 6]; A(:,2) = [8;9]; A(1,:) = [7 7 7];").unwrap();
-    let hir = lower(&ast).unwrap();
+    let src = "A=[1 2 3; 4 5 6]; A(:,2) = [8;9]; A(1,:) = [7 7 7];";
+    let (hir, vars_map) = lower_with_vars(src);
     let vars = execute(&hir).unwrap();
     // Final A should be [7 7 7; 4 9 6] -> column-major data [7 4 7 9 7 6]
-    let a = vars
-        .iter()
-        .rev()
-        .find(|v| matches!(v, runmat_builtins::Value::Tensor(_)))
-        .unwrap();
-    if let runmat_builtins::Value::Tensor(t) = a {
-        assert_eq!(t.data, vec![7.0, 4.0, 7.0, 9.0, 7.0, 6.0]);
-    }
+    let a = get_var_tensor(&vars, &vars_map, "A");
+    assert_eq!(a.data, vec![7.0, 4.0, 7.0, 9.0, 7.0, 6.0]);
 }
 
 #[test]
@@ -99,4 +117,63 @@ fn slice_assignment_3d_entire_slice() {
         }
         assert_eq!(gathered, second_slice_vals);
     }
+}
+
+#[test]
+fn gpu_slice_assignment_and_range_indexing() {
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+    let ast = parse("A = gpuArray([1 2 3; 4 5 6]); A(:,2) = [8; 9]; B = gather(A(1:2, 2));")
+        .expect("parse");
+    let hir = lower(&ast).expect("lower");
+    let vars = execute(&hir).expect("execute");
+
+    let b_tensor = vars
+        .into_iter()
+        .filter_map(|value| match value {
+            runmat_builtins::Value::Tensor(tensor) => Some(tensor),
+            _ => None,
+        })
+        .find(|tensor| tensor.data == vec![8.0, 9.0])
+        .expect("B tensor");
+
+    assert_eq!(b_tensor.data, vec![8.0, 9.0]);
+}
+
+#[test]
+fn gpu_range_end_indexing() {
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+    let ast =
+        parse("A = gpuArray([1 2 3; 4 5 6; 7 8 9]); B = gather(A(1:end-1, 2));").expect("parse");
+    let hir = lower(&ast).expect("lower");
+    let vars = execute(&hir).expect("execute");
+
+    let b_tensor = vars
+        .into_iter()
+        .filter_map(|value| match value {
+            runmat_builtins::Value::Tensor(tensor) => Some(tensor),
+            _ => None,
+        })
+        .find(|tensor| tensor.data == vec![2.0, 5.0])
+        .expect("B tensor");
+
+    assert_eq!(b_tensor.data, vec![2.0, 5.0]);
+}
+
+#[test]
+fn gpu_range_end_assignment() {
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+    let ast = parse("A = gpuArray([1 2 3 4]); A(1:end-1) = 9; B = gather(A);").expect("parse");
+    let hir = lower(&ast).expect("lower");
+    let vars = execute(&hir).expect("execute");
+
+    let b_tensor = vars
+        .into_iter()
+        .filter_map(|value| match value {
+            runmat_builtins::Value::Tensor(tensor) => Some(tensor),
+            _ => None,
+        })
+        .find(|tensor| tensor.data == vec![9.0, 9.0, 9.0, 4.0])
+        .expect("B tensor");
+
+    assert_eq!(b_tensor.data, vec![9.0, 9.0, 9.0, 4.0]);
 }

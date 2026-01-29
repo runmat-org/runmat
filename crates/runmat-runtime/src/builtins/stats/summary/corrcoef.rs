@@ -12,6 +12,13 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor::{self, value_to_string};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+const NAME: &str = "corrcoef";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::summary::corrcoef")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -48,12 +55,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::stats::summary::corrcoef"
 )]
-fn corrcoef_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn corrcoef_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let args = CorrcoefArgs::parse(value, rest)?;
-    if let Some(result) = corrcoef_try_gpu(&args)? {
+    if let Some(result) = corrcoef_try_gpu(&args).await? {
         return Ok(result);
     }
-    corrcoef_host(args)
+    corrcoef_host(args).await
 }
 
 /// Exposed for acceleration providers that need the host reference implementation.
@@ -62,7 +69,7 @@ pub fn corrcoef_from_tensors(
     right: Option<Tensor>,
     normalization: CorrcoefNormalization,
     rows: CorrcoefRows,
-) -> Result<Tensor, String> {
+) -> BuiltinResult<Tensor> {
     let matrix = combine_tensors(left, right)?;
     match rows {
         CorrcoefRows::All => corrcoef_dense(&matrix, normalization),
@@ -83,7 +90,7 @@ struct CorrcoefArgs {
 }
 
 impl CorrcoefArgs {
-    fn parse(first: Value, rest: Vec<Value>) -> Result<Self, String> {
+    fn parse(first: Value, rest: Vec<Value>) -> BuiltinResult<Self> {
         let mut second: Option<Value> = None;
         let mut normalization: Option<CorrcoefNormalization> = None;
         let mut rows = CorrcoefRows::All;
@@ -93,41 +100,50 @@ impl CorrcoefArgs {
             match arg {
                 Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
                     let key = value_to_string(&arg)
-                        .ok_or_else(|| "corrcoef: expected string argument".to_string())?
+                        .ok_or_else(|| builtin_error("corrcoef: expected string argument"))?
                         .to_ascii_lowercase();
                     match key.as_str() {
                         "rows" => {
                             let option = iter.next().ok_or_else(|| {
-                                "corrcoef: expected a rows option after 'rows'".to_string()
+                                builtin_error("corrcoef: expected a rows option after 'rows'")
                             })?;
                             let choice = value_to_string(&option)
                                 .ok_or_else(|| {
-                                    "corrcoef: rows option must be a string value".to_string()
+                                    builtin_error("corrcoef: rows option must be a string value")
                                 })?
                                 .to_ascii_lowercase();
                             rows = parse_rows_option(&choice)?;
                         }
-                        _ => return Err(format!("corrcoef: unknown option '{key}'")),
+                        _ => {
+                            return Err(builtin_error(format!("corrcoef: unknown option '{key}'")))
+                        }
                     }
                 }
                 Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
                     if normalization.is_some() {
-                        return Err(
-                            "corrcoef: normalization flag specified more than once".to_string()
-                        );
+                        return Err(builtin_error(
+                            "corrcoef: normalization flag specified more than once",
+                        ));
                     }
                     normalization = Some(parse_normalization(arg)?);
                 }
                 Value::Tensor(_) | Value::LogicalArray(_) | Value::GpuTensor(_) => {
                     if second.is_some() {
-                        return Err("corrcoef: too many input arrays".to_string());
+                        return Err(builtin_error("corrcoef: too many input arrays"));
                     }
                     second = Some(arg);
                 }
                 Value::ComplexTensor(_) => {
-                    return Err("corrcoef: complex inputs are not supported yet".to_string());
+                    return Err(builtin_error(
+                        "corrcoef: complex inputs are not supported yet",
+                    ));
                 }
-                other => return Err(format!("corrcoef: unsupported argument type {:?}", other)),
+                other => {
+                    return Err(builtin_error(format!(
+                        "corrcoef: unsupported argument type {:?}",
+                        other
+                    )))
+                }
             }
         }
 
@@ -140,7 +156,7 @@ impl CorrcoefArgs {
     }
 }
 
-fn corrcoef_try_gpu(args: &CorrcoefArgs) -> Result<Option<Value>, String> {
+async fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Option<Value>> {
     if args.rows != CorrcoefRows::All {
         return Ok(None);
     }
@@ -178,7 +194,7 @@ fn corrcoef_try_gpu(args: &CorrcoefArgs) -> Result<Option<Value>, String> {
         rows: args.rows,
     };
 
-    match provider.corrcoef(&matrix_handle, &options) {
+    match provider.corrcoef(&matrix_handle, &options).await {
         Ok(result) => {
             if let Some(temp) = owned_concat {
                 let _ = provider.free(&temp);
@@ -194,63 +210,67 @@ fn corrcoef_try_gpu(args: &CorrcoefArgs) -> Result<Option<Value>, String> {
     }
 }
 
-fn corrcoef_host(args: CorrcoefArgs) -> Result<Value, String> {
+async fn corrcoef_host(args: CorrcoefArgs) -> BuiltinResult<Value> {
     let CorrcoefArgs {
         first,
         second,
         normalization,
         rows,
     } = args;
-    let left = value_to_tensor_gather(first)?;
+    let left = value_to_tensor_gather(first).await?;
     let right = match second {
-        Some(value) => Some(value_to_tensor_gather(value)?),
+        Some(value) => Some(value_to_tensor_gather(value).await?),
         None => None,
     };
     let tensor = corrcoef_from_tensors(left, right, normalization, rows)?;
     Ok(Value::Tensor(tensor))
 }
 
-fn value_to_tensor_gather(value: Value) -> Result<Tensor, String> {
+async fn value_to_tensor_gather(value: Value) -> BuiltinResult<Tensor> {
     match value {
-        Value::GpuTensor(handle) => gpu_helpers::gather_tensor(&handle),
-        other => tensor::value_into_tensor_for("corrcoef", other),
+        Value::GpuTensor(handle) => gpu_helpers::gather_tensor_async(&handle).await,
+        other => tensor::value_into_tensor_for("corrcoef", other).map_err(builtin_error),
     }
 }
 
-fn parse_rows_option(value: &str) -> Result<CorrcoefRows, String> {
+fn parse_rows_option(value: &str) -> BuiltinResult<CorrcoefRows> {
     match value {
         "all" => Ok(CorrcoefRows::All),
         "complete" | "completecase" | "completecases" => Ok(CorrcoefRows::Complete),
         "pairwise" | "pairwisecomplete" | "pairwisecompletecase" | "pairwisecompletecases" => {
             Ok(CorrcoefRows::Pairwise)
         }
-        other => Err(format!("corrcoef: unknown rows option '{other}'")),
+        other => Err(builtin_error(format!(
+            "corrcoef: unknown rows option '{other}'"
+        ))),
     }
 }
 
-fn parse_normalization(value: Value) -> Result<CorrcoefNormalization, String> {
+fn parse_normalization(value: Value) -> BuiltinResult<CorrcoefNormalization> {
     match value {
         Value::Int(i) => match i.to_i64() {
             0 => Ok(CorrcoefNormalization::Unbiased),
             1 => Ok(CorrcoefNormalization::Biased),
-            other => Err(format!(
+            other => Err(builtin_error(format!(
                 "corrcoef: normalization flag must be 0 or 1, received {other}"
-            )),
+            ))),
         },
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err("corrcoef: normalization flag must be finite".to_string());
+                return Err(builtin_error("corrcoef: normalization flag must be finite"));
             }
             let rounded = n.round();
             if (rounded - n).abs() > 1.0e-12 {
-                return Err("corrcoef: normalization flag must be an integer".to_string());
+                return Err(builtin_error(
+                    "corrcoef: normalization flag must be an integer",
+                ));
             }
             match rounded as i64 {
                 0 => Ok(CorrcoefNormalization::Unbiased),
                 1 => Ok(CorrcoefNormalization::Biased),
-                other => Err(format!(
+                other => Err(builtin_error(format!(
                     "corrcoef: normalization flag must be 0 or 1, received {other}"
-                )),
+                ))),
             }
         }
         Value::Bool(b) => Ok(if b {
@@ -258,9 +278,9 @@ fn parse_normalization(value: Value) -> Result<CorrcoefNormalization, String> {
         } else {
             CorrcoefNormalization::Unbiased
         }),
-        other => Err(format!(
+        other => Err(builtin_error(format!(
             "corrcoef: normalization flag must be numeric or logical, received {other:?}"
-        )),
+        ))),
     }
 }
 
@@ -279,9 +299,11 @@ struct Matrix {
 }
 
 impl Matrix {
-    fn from_tensor(tensor: Tensor) -> Result<Self, String> {
+    fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
-            return Err("corrcoef: inputs must be 2-D matrices or vectors".to_string());
+            return Err(builtin_error(
+                "corrcoef: inputs must be 2-D matrices or vectors",
+            ));
         }
         Ok(Self {
             rows: tensor.rows(),
@@ -303,12 +325,14 @@ impl Matrix {
     }
 }
 
-fn combine_tensors(left: Tensor, right: Option<Tensor>) -> Result<Matrix, String> {
+fn combine_tensors(left: Tensor, right: Option<Tensor>) -> BuiltinResult<Matrix> {
     let mut matrix = Matrix::from_tensor(left)?;
     if let Some(second) = right {
         let right_matrix = Matrix::from_tensor(second)?;
         if matrix.rows != right_matrix.rows {
-            return Err("corrcoef: inputs must have the same number of rows".to_string());
+            return Err(builtin_error(
+                "corrcoef: inputs must have the same number of rows",
+            ));
         }
         matrix.cols += right_matrix.cols;
         matrix
@@ -365,21 +389,24 @@ fn filter_complete_rows(matrix: &Matrix) -> Matrix {
     }
 }
 
-fn corrcoef_dense(matrix: &Matrix, normalization: CorrcoefNormalization) -> Result<Tensor, String> {
+fn corrcoef_dense(matrix: &Matrix, normalization: CorrcoefNormalization) -> BuiltinResult<Tensor> {
     let cols = matrix.cols;
     if cols == 0 {
-        return Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("corrcoef: {e}"));
+        return Tensor::new(Vec::new(), vec![0, 0])
+            .map_err(|e| builtin_error(format!("corrcoef: {e}")));
     }
 
     let mut result = vec![f64::NAN; cols * cols];
     let rows = matrix.rows;
     if rows == 0 {
-        return Tensor::new(result, vec![cols, cols]).map_err(|e| format!("corrcoef: {e}"));
+        return Tensor::new(result, vec![cols, cols])
+            .map_err(|e| builtin_error(format!("corrcoef: {e}")));
     }
 
     let denom = normalization_denominator(normalization, rows);
     if denom <= 0.0 {
-        return Tensor::new(result, vec![cols, cols]).map_err(|e| format!("corrcoef: {e}"));
+        return Tensor::new(result, vec![cols, cols])
+            .map_err(|e| builtin_error(format!("corrcoef: {e}")));
     }
 
     let mut means = vec![0.0; cols];
@@ -431,7 +458,7 @@ fn corrcoef_dense(matrix: &Matrix, normalization: CorrcoefNormalization) -> Resu
         }
     }
 
-    Tensor::new(result, vec![cols, cols]).map_err(|e| format!("corrcoef: {e}"))
+    Tensor::new(result, vec![cols, cols]).map_err(|e| builtin_error(format!("corrcoef: {e}")))
 }
 
 fn column_pair_corr(matrix: &Matrix, lhs: usize, rhs: usize, means: &[f64], denom: f64) -> f64 {
@@ -467,10 +494,11 @@ fn column_pair_corr(matrix: &Matrix, lhs: usize, rhs: usize, means: &[f64], deno
 fn corrcoef_pairwise(
     matrix: &Matrix,
     normalization: CorrcoefNormalization,
-) -> Result<Tensor, String> {
+) -> BuiltinResult<Tensor> {
     let cols = matrix.cols;
     if cols == 0 {
-        return Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("corrcoef: {e}"));
+        return Tensor::new(Vec::new(), vec![0, 0])
+            .map_err(|e| builtin_error(format!("corrcoef: {e}")));
     }
     let mut result = vec![f64::NAN; cols * cols];
     for col in 0..cols {
@@ -480,7 +508,7 @@ fn corrcoef_pairwise(
             set_entry(&mut result, cols, col, other, corr);
         }
     }
-    Tensor::new(result, vec![cols, cols]).map_err(|e| format!("corrcoef: {e}"))
+    Tensor::new(result, vec![cols, cols]).map_err(|e| builtin_error(format!("corrcoef: {e}")))
 }
 
 fn pairwise_corr(
@@ -586,6 +614,9 @@ fn set_entry(buffer: &mut [f64], dim: usize, row: usize, col: usize, value: f64)
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    #[cfg(feature = "wgpu")]
+    use crate::dispatcher::download_handle_async;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor, Value};
 
     fn assert_tensor_close(actual: &Tensor, expected: &[f64], tol: f64) {
@@ -606,6 +637,14 @@ pub(crate) mod tests {
         }
     }
 
+    fn assert_flow_message(err: RuntimeError, needle: &str) {
+        assert!(
+            err.message().contains(needle),
+            "unexpected error message: {}",
+            err.message()
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_matrix_basic() {
@@ -618,7 +657,8 @@ pub(crate) mod tests {
             vec![4, 3],
         )
         .unwrap();
-        let result = corrcoef_builtin(Value::Tensor(tensor), Vec::new()).expect("corrcoef");
+        let result =
+            block_on(corrcoef_builtin(Value::Tensor(tensor), Vec::new())).expect("corrcoef");
         match result {
             Value::Tensor(out) => {
                 let expected = [
@@ -660,13 +700,13 @@ pub(crate) mod tests {
         )
         .unwrap();
 
-        let via_two = corrcoef_builtin(
+        let via_two = block_on(corrcoef_builtin(
             Value::Tensor(left.clone()),
             vec![Value::Tensor(right.clone())],
-        )
+        ))
         .expect("corrcoef");
-        let via_combined =
-            corrcoef_builtin(Value::Tensor(combined), Vec::new()).expect("corrcoef combined");
+        let via_combined = block_on(corrcoef_builtin(Value::Tensor(combined), Vec::new()))
+            .expect("corrcoef combined");
 
         let expected_tensor = match via_combined {
             Value::Tensor(t) => t,
@@ -696,10 +736,10 @@ pub(crate) mod tests {
             vec![4, 2],
         )
         .unwrap();
-        let result = corrcoef_builtin(
+        let result = block_on(corrcoef_builtin(
             Value::Tensor(tensor),
             vec![Value::from("rows"), Value::from("complete")],
-        )
+        ))
         .expect("corrcoef");
         match result {
             Value::Tensor(out) => {
@@ -734,10 +774,10 @@ pub(crate) mod tests {
             vec![4, 3],
         )
         .unwrap();
-        let result = corrcoef_builtin(
+        let result = block_on(corrcoef_builtin(
             Value::Tensor(tensor),
             vec![Value::from("rows"), Value::from("pairwise")],
-        )
+        ))
         .expect("corrcoef");
         match result {
             Value::Tensor(out) => {
@@ -763,10 +803,13 @@ pub(crate) mod tests {
             vec![3, 2],
         )
         .unwrap();
-        let unbiased =
-            corrcoef_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("unbiased");
-        let biased = corrcoef_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(1))])
-            .expect("biased");
+        let unbiased = block_on(corrcoef_builtin(Value::Tensor(tensor.clone()), Vec::new()))
+            .expect("unbiased");
+        let biased = block_on(corrcoef_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Int(IntValue::I32(1))],
+        ))
+        .expect("biased");
 
         let a = match biased {
             Value::Tensor(t) => t,
@@ -797,7 +840,8 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = corrcoef_builtin(Value::GpuTensor(handle), Vec::new()).expect("corrcoef");
+            let result =
+                block_on(corrcoef_builtin(Value::GpuTensor(handle), Vec::new())).expect("corrcoef");
             let gathered = test_support::gather(result).expect("gather");
             let expected = [
                 1.0,
@@ -819,24 +863,24 @@ pub(crate) mod tests {
     fn corrcoef_mismatched_rows_errors() {
         let left = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
         let right = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = corrcoef_builtin(Value::Tensor(left), vec![Value::Tensor(right)])
-            .expect_err("expected mismatch error");
-        assert!(
-            err.contains("same number of rows"),
-            "unexpected error message: {err}"
-        );
+        let err = block_on(corrcoef_builtin(
+            Value::Tensor(left),
+            vec![Value::Tensor(right)],
+        ))
+        .expect_err("expected mismatch error");
+        assert_flow_message(err, "same number of rows");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_invalid_flag_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = corrcoef_builtin(Value::Tensor(tensor), vec![Value::Num(2.5)])
-            .expect_err("expected invalid flag error");
-        assert!(
-            err.contains("normalization flag"),
-            "unexpected error: {err}"
-        );
+        let err = block_on(corrcoef_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Num(2.5)],
+        ))
+        .expect_err("expected invalid flag error");
+        assert_flow_message(err, "normalization flag");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -872,8 +916,8 @@ pub(crate) mod tests {
             normalization: CorrcoefNormalization::Unbiased,
             rows: CorrcoefRows::All,
         };
-        let gpu = provider.corrcoef(&handle, &options).expect("corrcoef");
-        let host = provider.download(&gpu).expect("download");
+        let gpu = block_on(provider.corrcoef(&handle, &options)).expect("corrcoef");
+        let host = block_on(download_handle_async(provider, &gpu)).expect("download");
         let gathered =
             Tensor::new(host.data.clone(), host.shape.clone()).expect("tensor reconstruction");
         assert_tensor_close(&gathered, &cpu.data, 1.0e-6);

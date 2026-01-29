@@ -226,7 +226,7 @@ impl KernelServer {
                             let mut eng = futures::executor::block_on(engine_shell.lock());
                             let req_again: ExecuteRequest =
                                 serde_json::from_value(msg.content.clone())?;
-                            eng.execute(&req_again.code)
+                            futures::executor::block_on(eng.execute(&req_again.code))
                                 .map_err(|e| KernelError::Execution(e.to_string()))?
                         };
 
@@ -580,7 +580,7 @@ impl MessageRouter {
 
         // Execute the code
         let mut engine = self.engine.lock().await;
-        let exec_result = engine.execute(&execute_req.code)?;
+        let exec_result = engine.execute(&execute_req.code).await?;
 
         // Create execute reply
         let status = match exec_result.status {

@@ -1,8 +1,8 @@
 use crate::core::renderer::Vertex;
-use crate::core::scene::GpuVertexBuffer;
+use crate::core::scene::{DrawIndirectArgsRaw, GpuVertexBuffer};
 use crate::gpu::scatter2::{ScatterAttributeBuffer, ScatterColorBuffer};
 use crate::gpu::shaders;
-use crate::gpu::{tuning, util, ScalarType};
+use crate::gpu::{tuning, ScalarType};
 use glam::Vec4;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -164,15 +164,21 @@ pub fn pack_vertices_from_xyz(
         mapped_at_creation: false,
     }));
 
-    let counter_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("scatter3-gpu-counter"),
-        size: std::mem::size_of::<u32>() as u64,
+    let indirect_args = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("scatter3-gpu-indirect-args"),
+        size: std::mem::size_of::<DrawIndirectArgsRaw>() as u64,
         usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::INDIRECT
             | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
-    });
-    queue.write_buffer(&counter_buffer, 0, bytemuck::bytes_of(&0u32));
+    }));
+    let init = DrawIndirectArgsRaw {
+        vertex_count: 0,
+        instance_count: 1,
+        first_vertex: 0,
+        first_instance: 0,
+    };
+    queue.write_buffer(&indirect_args, 0, bytemuck::bytes_of(&init));
 
     let (size_buffer, has_sizes) = prepare_size_buffer(device, params);
     let (color_buffer, has_colors, color_stride) = prepare_color_buffer(device, params);
@@ -227,7 +233,7 @@ pub fn pack_vertices_from_xyz(
             },
             wgpu::BindGroupEntry {
                 binding: 7,
-                resource: counter_buffer.as_entire_binding(),
+                resource: indirect_args.as_entire_binding(),
             },
         ],
     });
@@ -245,25 +251,13 @@ pub fn pack_vertices_from_xyz(
         let workgroups = inputs.len.div_ceil(workgroup_size);
         pass.dispatch_workgroups(workgroups, 1, 1);
     }
-    let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("scatter3-pack-counter-readback"),
-        size: std::mem::size_of::<u32>() as u64,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    encoder.copy_buffer_to_buffer(
-        &counter_buffer,
-        0,
-        &readback_buffer,
-        0,
-        std::mem::size_of::<u32>() as u64,
-    );
     queue.submit(Some(encoder.finish()));
 
-    let drawn_vertices = util::readback_u32(device, &readback_buffer)
-        .map_err(|e| format!("scatter3: failed to read GPU vertex count: {e}"))?;
-
-    Ok(GpuVertexBuffer::new(output_buffer, drawn_vertices as usize))
+    Ok(GpuVertexBuffer::with_indirect(
+        output_buffer,
+        max_points as usize,
+        indirect_args,
+    ))
 }
 
 fn prepare_size_buffer(

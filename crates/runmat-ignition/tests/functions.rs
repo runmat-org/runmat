@@ -1,6 +1,10 @@
-use runmat_hir::lower;
-use runmat_ignition::execute;
+mod test_helpers;
+
 use runmat_parser::parse;
+use std::collections::HashMap;
+use std::thread;
+use test_helpers::lower;
+use test_helpers::{execute, interpret};
 
 #[test]
 fn nargin_nargout_in_user_functions() {
@@ -46,7 +50,7 @@ fn not_enough_and_too_many_inputs_fixed_arity() {
     "#;
     let hir = lower(&parse(program).unwrap()).unwrap();
     let err = execute(&hir).err().unwrap();
-    assert!(err.contains("MATLAB:NotEnoughInputs"));
+    assert_eq!(err.identifier(), Some("MATLAB:NotEnoughInputs"));
 
     // too many inputs
     let program2 = r#"
@@ -57,7 +61,7 @@ fn not_enough_and_too_many_inputs_fixed_arity() {
     "#;
     let hir2 = lower(&parse(program2).unwrap()).unwrap();
     let err2 = execute(&hir2).err().unwrap();
-    assert!(err2.contains("MATLAB:TooManyInputs"));
+    assert_eq!(err2.identifier(), Some("MATLAB:TooManyInputs"));
 }
 
 #[test]
@@ -71,7 +75,7 @@ fn inputs_with_varargin_minimum_only() {
     "#;
     let hir_e = lower(&parse(program_err).unwrap()).unwrap();
     let err = execute(&hir_e).err().unwrap();
-    assert!(err.contains("MATLAB:NotEnoughInputs"));
+    assert_eq!(err.identifier(), Some("MATLAB:NotEnoughInputs"));
 
     let program_ok = r#"
         function y = f(a,b,varargin)
@@ -99,7 +103,7 @@ fn too_many_outputs_and_varargout_mismatch() {
     "#;
     let hir_tmo = lower(&parse(program_tmo).unwrap()).unwrap();
     let err_tmo = execute(&hir_tmo).err().unwrap();
-    assert!(err_tmo.contains("MATLAB:TooManyOutputs"));
+    assert_eq!(err_tmo.identifier(), Some("MATLAB:TooManyOutputs"));
 
     // Varargout requested more than provided
     let program_mis = r#"
@@ -110,7 +114,7 @@ fn too_many_outputs_and_varargout_mismatch() {
     "#;
     let hir_mis = lower(&parse(program_mis).unwrap()).unwrap();
     let err_mis = execute(&hir_mis).err().unwrap();
-    assert!(err_mis.contains("MATLAB:VarargoutMismatch"));
+    assert_eq!(err_mis.identifier(), Some("MATLAB:VarargoutMismatch"));
 }
 #[allow(dead_code)]
 fn function_definition_and_calls() {
@@ -122,10 +126,17 @@ fn function_definition_and_calls() {
 
 #[test]
 fn nested_function_calls() {
-    let ast = parse("function y = add(a, b); y = a + b; end; function y = multiply_and_add(x); y = add(x * 2, x * 3); end; result = multiply_and_add(4);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let result = execute(&hir);
-    assert!(result.is_ok());
+    let program = "function y = add(a, b); y = a + b; end; function y = multiply_and_add(x); y = add(x * 2, x * 3); end; result = multiply_and_add(4);";
+    let handle = thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(move || {
+            let ast = parse(program).unwrap();
+            let hir = lower(&ast).unwrap();
+            let result = execute(&hir);
+            assert!(result.is_ok());
+        })
+        .expect("spawn nested_function_calls thread");
+    handle.join().expect("nested_function_calls thread failed");
 }
 
 #[test]
@@ -142,7 +153,7 @@ fn member_get_set_and_method_call_skeleton() {
     let input2 = "obj = new_object('Point'); obj = setfield(obj,'x',5); obj = setfield(obj,'y',7); obj = call_method(obj, 'move', 1, 2); rx = getfield(obj,'x'); ry = getfield(obj,'y');";
     let ast2 = parse(input2).unwrap();
     let hir2 = lower(&ast2).unwrap();
-    let vars2 = runmat_ignition::execute(&hir2).unwrap();
+    let vars2 = execute(&hir2).unwrap();
     assert!(vars2
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 6.0).abs() < f64::EPSILON)));
@@ -205,7 +216,7 @@ fn classes_static_and_inheritance() {
         parse("__register_test_classes(); p = new_object('Point'); s = getfield(p,'secret');")
             .unwrap();
     let hir5 = lower(&ast5).unwrap();
-    assert!(runmat_ignition::execute(&hir5).is_err());
+    assert!(execute(&hir5).is_err());
 }
 
 #[cfg(any(feature = "test-classes", test))]
@@ -238,7 +249,7 @@ fn classes_property_access_attributes() {
         parse("__register_test_classes(); p = new_object('Point'); p = setfield(p,'secret', 7);")
             .unwrap();
     let hir = lower(&ast).unwrap();
-    assert!(runmat_ignition::execute(&hir).is_err());
+    assert!(execute(&hir).is_err());
 }
 
 #[test]
@@ -273,7 +284,8 @@ fn import_ambiguity_specific_conflict_errors() {
     // Use classes with same method name as proxies (no actual builtins needed); compile should detect ambiguity
     let program = "import Point.origin; import Circle.area; r = origin();";
     let ast = runmat_parser::parse(program).unwrap();
-    let res = runmat_hir::lower(&ast).and_then(|hir| runmat_ignition::compile(&hir));
+    let hir = lower(&ast).unwrap();
+    let res = runmat_ignition::compile(&hir, &HashMap::new());
     assert!(res.is_err());
 }
 #[test]
@@ -320,7 +332,8 @@ fn import_ambiguity_between_specifics_errors() {
         y = foo();
     "#;
     let ast = runmat_parser::parse(program).unwrap();
-    let res = runmat_hir::lower(&ast).and_then(|hir| runmat_ignition::compile(&hir));
+    let hir = lower(&ast).unwrap();
+    let res = runmat_ignition::compile(&hir, &HashMap::new());
     assert!(res.is_err());
 }
 
@@ -333,7 +346,8 @@ fn import_ambiguity_between_wildcards_errors() {
         y = foo();
     "#;
     let ast = runmat_parser::parse(program).unwrap();
-    let res = runmat_hir::lower(&ast).and_then(|hir| runmat_ignition::compile(&hir));
+    let hir = lower(&ast).unwrap();
+    let res = runmat_ignition::compile(&hir, &HashMap::new());
     assert!(res.is_err());
 }
 
@@ -396,7 +410,8 @@ fn import_wildcard_static_method_ambiguity_errors() {
         z = foo();   % ambiguous via wildcard imports
     "#;
     let ast = runmat_parser::parse(program).unwrap();
-    let res = runmat_hir::lower(&ast).and_then(|hir| runmat_ignition::compile(&hir));
+    let hir = lower(&ast).unwrap();
+    let res = runmat_ignition::compile(&hir, &HashMap::new());
     assert!(res.is_err());
 }
 
@@ -444,7 +459,8 @@ fn unqualified_static_property_without_imports_errors() {
         v = staticValue;
     "#;
     let ast = runmat_parser::parse(program).unwrap();
-    let res = runmat_hir::lower(&ast).and_then(|hir| runmat_ignition::compile(&hir));
+    let hir = lower(&ast).unwrap();
+    let res = runmat_ignition::compile(&hir, &HashMap::new());
     assert!(res.is_err());
 }
 
@@ -493,7 +509,7 @@ fn class_property_attribute_conflicts_error() {
         end
     "#;
     let ast = runmat_parser::parse(program).unwrap();
-    let res = runmat_hir::lower(&ast);
+    let res = lower(&ast);
     assert!(res.is_err());
 }
 
@@ -510,7 +526,7 @@ fn class_method_attribute_conflicts_error() {
         end
     "#;
     let ast = runmat_parser::parse(program).unwrap();
-    let res = runmat_hir::lower(&ast);
+    let res = lower(&ast);
     assert!(res.is_err());
 }
 
@@ -603,7 +619,7 @@ fn user_function_with_two_expanded_args() {
 fn expansion_on_non_cell_errors() {
     let program = "r = max(5, 10{1});";
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    assert!(runmat_ignition::execute(&hir).is_err());
+    assert!(execute(&hir).is_err());
 }
 
 #[cfg(any(feature = "test-classes", test))]
@@ -733,7 +749,7 @@ fn mixed_range_end_assign_shape_mismatch_error() {
     // RHS shape 3x1 does not match rows 2:end (len 2) and cannot broadcast
     let program = "A = [1 2 3 4; 5 6 7 8; 9 10 11 12]; B = [1;2;3]; A(2:end, 1:2:end-1) = B;";
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let res = runmat_ignition::execute(&hir);
+    let res = execute(&hir);
     assert!(res.is_err());
 }
 
@@ -763,7 +779,7 @@ fn broadcasting_roundtrip_property_like() {
 #[test]
 fn logical_mask_write_scalar_and_vector() {
     // Scalar write via linear logical mask
-    let program = "A = [1 2 3 4 5 6]; m = [1 0 1 0 1 0]; A(m) = 9; s1 = sum(A);\nB = [1 2 3 4 5 6]; idx = [1 3 5]; B(idx) = [7 8 9]; s2 = sum(B);";
+    let program = "A = [1 2 3 4 5 6]; m = [true false true false true false]; A(m) = 9; s1 = sum(A);\nB = [1 2 3 4 5 6]; idx = [1 3 5]; B(idx) = [7 8 9]; s2 = sum(B);";
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
     let vars = execute(&hir).unwrap();
     // After A(m)=9, A becomes [9 2 9 4 9 6] => sum 39
@@ -970,7 +986,7 @@ fn operator_overloading_full_grid_basic() {
         let ast = runmat_parser::parse(&program).unwrap();
         let hir = lower(&ast).unwrap();
         execute(&hir).unwrap_or_else(|err| {
-            let bc = runmat_ignition::compile(&hir).unwrap();
+            let bc = runmat_ignition::compile(&hir, &HashMap::new()).unwrap();
             panic!(
                 "operator overload script failed after stmt #{idx} `{stmt}`: {err}\nbytecode={:?}",
                 bc.instructions
@@ -1060,9 +1076,9 @@ fn operator_overloading_left_division_variants() {
 fn bitwise_or_row_vectors() {
     let program = "f = ([1 0 1] | [0 1 1]);";
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let bc = runmat_ignition::compile(&hir).unwrap();
+    let bc = runmat_ignition::compile(&hir, &HashMap::new()).unwrap();
     dbg!(&bc.instructions);
-    let _ = runmat_ignition::interpret(&bc).unwrap();
+    let _ = interpret(&bc).unwrap();
 }
 
 #[test]
@@ -1138,7 +1154,7 @@ fn nested_try_catch_rethrow_unified_exception_ids() {
 fn globals_basic_and_shadowing() {
     let prog = "global G; G = 5; function y = f(x); global G; y = G + x; end; a = f(3);";
     let ast = runmat_parser::parse(prog).unwrap();
-    let hir = runmat_hir::lower(&ast).unwrap();
+    let hir = lower(&ast).unwrap();
     let res = execute(&hir);
     if let Ok(vars) = res {
         assert!(vars
@@ -1152,7 +1168,7 @@ fn globals_basic_and_shadowing() {
 fn persistents_init_once_across_calls() {
     let prog = "function y = counter(); persistent C; if C==0; C = 0; end; C = C + 1; y = C; end; a = counter(); b = counter(); c = counter();";
     let ast = runmat_parser::parse(prog).unwrap();
-    let hir = runmat_hir::lower(&ast).unwrap();
+    let hir = lower(&ast).unwrap();
     let res = execute(&hir);
     if let Ok(vars) = res {
         // Expect last value 3 somewhere in vars
@@ -1409,7 +1425,8 @@ fn import_wildcard_vs_classstar_ambiguity_for_static_method() {
 		r = origin();
 	"#;
     let ast = runmat_parser::parse(program).unwrap();
-    let res = runmat_hir::lower(&ast).and_then(|hir| runmat_ignition::compile(&hir));
+    let hir = lower(&ast).unwrap();
+    let res = runmat_ignition::compile(&hir, &HashMap::new());
     assert!(res.is_err());
 }
 

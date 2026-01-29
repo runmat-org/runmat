@@ -9,7 +9,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1e-12;
 
@@ -40,6 +41,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Currently implemented as a standalone op; future work may add FFT-backed or fused variants.",
 };
 
+const BUILTIN_NAME: &str = "conv2";
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 #[runtime_builtin(
     name = "conv2",
     category = "math/signal",
@@ -48,7 +57,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::math::signal::conv2"
 )]
-fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut extras = rest;
     let mode = extract_mode(&mut extras)?;
 
@@ -57,20 +66,22 @@ fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> 
             if let Some(device_value) = try_conv2_gpu(&a, &b, mode)? {
                 return Ok(device_value);
             }
-            let left = convert_matrix(a, "conv2", "A")?;
-            let right = convert_matrix(b, "conv2", "B")?;
+            let left = convert_matrix(a, "conv2", "A").await?;
+            let right = convert_matrix(b, "conv2", "B").await?;
             let result = conv2_matrices(&left, &right, mode);
-            matrix_to_value(result)
+            Ok(matrix_to_value(result)?)
         }
         1 => {
-            let signal = convert_matrix(extras.remove(0), "conv2", "A")?;
-            let column = convert_vector(a, "conv2", "H column")?;
-            let row = convert_vector(b, "conv2", "H row")?;
+            let signal = convert_matrix(extras.remove(0), "conv2", "A").await?;
+            let column = convert_vector(a, "conv2", "H column").await?;
+            let row = convert_vector(b, "conv2", "H row").await?;
             let kernel = outer_product(&column, &row);
             let result = conv2_matrices(&signal, &kernel, mode);
-            matrix_to_value(result)
+            Ok(matrix_to_value(result)?)
         }
-        _ => Err("conv2: expected at most four input arguments".to_string()),
+        _ => Err(runtime_error_for(
+            "conv2: expected at most four input arguments",
+        )),
     }
 }
 
@@ -81,7 +92,7 @@ enum Conv2Mode {
     Valid,
 }
 
-fn try_conv2_gpu(a: &Value, b: &Value, mode: Conv2Mode) -> Result<Option<Value>, String> {
+fn try_conv2_gpu(a: &Value, b: &Value, mode: Conv2Mode) -> BuiltinResult<Option<Value>> {
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),
@@ -200,7 +211,7 @@ impl Matrix {
     }
 }
 
-fn extract_mode(extras: &mut Vec<Value>) -> Result<Conv2Mode, String> {
+fn extract_mode(extras: &mut Vec<Value>) -> BuiltinResult<Conv2Mode> {
     if let Some(mode) = extras
         .last()
         .and_then(|last| parse_mode_value(last).transpose())
@@ -212,7 +223,7 @@ fn extract_mode(extras: &mut Vec<Value>) -> Result<Conv2Mode, String> {
     Ok(Conv2Mode::Full)
 }
 
-fn parse_mode_value(value: &Value) -> Result<Option<Conv2Mode>, String> {
+fn parse_mode_value(value: &Value) -> BuiltinResult<Option<Conv2Mode>> {
     let Some(text) = tensor::value_to_string(value) else {
         return Ok(None);
     };
@@ -222,26 +233,27 @@ fn parse_mode_value(value: &Value) -> Result<Option<Conv2Mode>, String> {
         "same" => Conv2Mode::Same,
         "valid" => Conv2Mode::Valid,
         _ => {
-            return Err(
-                "conv2: shape argument must be the string 'full', 'same', or 'valid'".to_string(),
-            )
+            return Err(runtime_error_for(
+                "conv2: shape argument must be the string 'full', 'same', or 'valid'",
+            ))
         }
     };
     Ok(Some(mode))
 }
 
-fn convert_matrix(value: Value, name: &str, arg: &str) -> Result<Matrix, String> {
+async fn convert_matrix(value: Value, name: &str, arg: &str) -> BuiltinResult<Matrix> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
             tensor_to_matrix(tensor, name, arg)
         }
         Value::Tensor(tensor) => tensor_to_matrix(tensor, name, arg),
         Value::ComplexTensor(tensor) => complex_tensor_to_matrix(tensor, name, arg),
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
-            tensor_to_matrix(tensor, name, arg)
-        }
+        Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical)
+            .map_err(|err| runtime_error_for(format!("{name}: {err}")))
+            .and_then(|tensor| tensor_to_matrix(tensor, name, arg)),
         Value::Num(n) => Ok(Matrix {
             rows: 1,
             cols: 1,
@@ -262,30 +274,30 @@ fn convert_matrix(value: Value, name: &str, arg: &str) -> Result<Matrix, String>
             cols: 1,
             data: vec![Complex::new(re, im)],
         }),
-        other => Err(format!(
+        other => Err(runtime_error_for(format!(
             "{name}: unsupported input type for {arg}: expected numeric or logical values, got {:?}",
             other
-        )),
+        ))),
     }
 }
 
-fn convert_vector(value: Value, name: &str, arg: &str) -> Result<Vec<Complex<f64>>, String> {
-    let matrix = convert_matrix(value, name, arg)?;
+async fn convert_vector(value: Value, name: &str, arg: &str) -> BuiltinResult<Vec<Complex<f64>>> {
+    let matrix = convert_matrix(value, name, arg).await?;
     if matrix.rows > 1 && matrix.cols > 1 {
-        return Err(format!(
+        return Err(runtime_error_for(format!(
             "{name}: {arg} must be a vector (row or column), got {}×{}",
             matrix.rows, matrix.cols
-        ));
+        )));
     }
     Ok(matrix.data)
 }
 
-fn tensor_to_matrix(tensor: Tensor, name: &str, arg: &str) -> Result<Matrix, String> {
+fn tensor_to_matrix(tensor: Tensor, name: &str, arg: &str) -> BuiltinResult<Matrix> {
     if tensor.shape.iter().skip(2).any(|&dim| dim > 1) {
-        return Err(format!(
+        return Err(runtime_error_for(format!(
             "{name}: {arg} must be 2-D; received shape {:?}",
             tensor.shape
-        ));
+        )));
     }
     Ok(Matrix {
         rows: tensor.rows,
@@ -298,16 +310,12 @@ fn tensor_to_matrix(tensor: Tensor, name: &str, arg: &str) -> Result<Matrix, Str
     })
 }
 
-fn complex_tensor_to_matrix(
-    tensor: ComplexTensor,
-    name: &str,
-    arg: &str,
-) -> Result<Matrix, String> {
+fn complex_tensor_to_matrix(tensor: ComplexTensor, name: &str, arg: &str) -> BuiltinResult<Matrix> {
     if tensor.shape.iter().skip(2).any(|&dim| dim > 1) {
-        return Err(format!(
+        return Err(runtime_error_for(format!(
             "{name}: {arg} must be 2-D; received shape {:?}",
             tensor.shape
-        ));
+        )));
     }
     Ok(Matrix {
         rows: tensor.rows,
@@ -385,7 +393,7 @@ fn empty_result(a: &Matrix, _b: &Matrix, mode: Conv2Mode) -> Matrix {
     }
 }
 
-fn matrix_to_value(matrix: Matrix) -> Result<Value, String> {
+fn matrix_to_value(matrix: Matrix) -> BuiltinResult<Value> {
     let rows = matrix.rows;
     let cols = matrix.cols;
     let all_real = matrix.data.iter().all(|c| c.im.abs() <= EPS);
@@ -393,13 +401,13 @@ fn matrix_to_value(matrix: Matrix) -> Result<Value, String> {
     if all_real {
         let real_data: Vec<f64> = matrix.data.into_iter().map(|c| c.re).collect();
         let tensor = Tensor::new(real_data, vec![rows, cols])
-            .map_err(|e| format!("conv2: failed to build tensor: {e}"))?;
+            .map_err(|e| runtime_error_for(format!("conv2: failed to build tensor: {e}")))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
 
     let complex_data: Vec<(f64, f64)> = matrix.data.into_iter().map(|c| (c.re, c.im)).collect();
     let tensor = ComplexTensor::new(complex_data, vec![rows, cols])
-        .map_err(|e| format!("conv2: failed to build complex tensor: {e}"))?;
+        .map_err(|e| runtime_error_for(format!("conv2: failed to build complex tensor: {e}")))?;
     if tensor.data.len() == 1 {
         let (re, im) = tensor.data[0];
         if im.abs() <= EPS {
@@ -414,8 +422,13 @@ fn matrix_to_value(matrix: Matrix) -> Result<Value, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{tensor, test_support};
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::LogicalArray;
+
+    fn error_message(error: RuntimeError) -> String {
+        error.message().to_string()
+    }
 
     fn tensor_from_rows(rows: usize, cols: usize, data: &[f64]) -> Tensor {
         assert_eq!(rows * cols, data.len());
@@ -577,12 +590,14 @@ pub(crate) mod tests {
     fn conv2_rejects_invalid_shape_keyword() {
         let a = tensor_from_rows(1, 1, &[1.0]);
         let b = tensor_from_rows(1, 1, &[1.0]);
-        let err = conv2_builtin(
-            Value::Tensor(a),
-            Value::Tensor(b),
-            vec![Value::from("diagonal")],
-        )
-        .unwrap_err();
+        let err = error_message(
+            conv2_builtin(
+                Value::Tensor(a),
+                Value::Tensor(b),
+                vec![Value::from("diagonal")],
+            )
+            .unwrap_err(),
+        );
         assert!(err.contains("shape argument"));
     }
 
@@ -744,5 +759,9 @@ pub(crate) mod tests {
 
         assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
         assert_eq!(gpu_tensor.data, cpu_tensor.data);
+    }
+
+    fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::conv2_builtin(a, b, rest))
     }
 }

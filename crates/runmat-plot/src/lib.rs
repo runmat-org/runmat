@@ -24,6 +24,10 @@ pub use context::{install_shared_wgpu_context, shared_wgpu_context, SharedWgpuCo
 #[cfg(feature = "gui")]
 pub mod gui;
 
+// Egui overlay rendering (usable without winit, including wasm)
+#[cfg(feature = "egui-overlay")]
+pub mod overlay;
+
 // WASM/WebGPU bridge
 #[cfg(all(target_arch = "wasm32", feature = "web"))]
 pub mod web;

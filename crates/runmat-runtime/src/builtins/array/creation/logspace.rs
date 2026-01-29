@@ -4,6 +4,7 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::build_runtime_error;
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -35,6 +36,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement a dedicated logspace path or compose it from linspace + scalar multiply + unary_exp. The runtime uploads host-generated data when hooks are unavailable.",
 };
 
+fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("logspace")
+        .build()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::logspace")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "logspace",
@@ -55,22 +62,28 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::logspace"
 )]
-fn logspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn logspace_builtin(
+    start: Value,
+    stop: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("logspace: expected two or three input arguments".to_string());
+        return Err(builtin_error(
+            "logspace: expected two or three input arguments",
+        ));
     }
 
-    let (start_scalar, start_gpu) = parse_scalar("logspace", start)?;
-    let (stop_scalar, stop_gpu) = parse_scalar("logspace", stop)?;
+    let (start_scalar, start_gpu) = parse_scalar("logspace", start).await?;
+    let (stop_scalar, stop_gpu) = parse_scalar("logspace", stop).await?;
     let count = if rest.is_empty() {
         50usize
     } else {
-        parse_count(&rest[0])?
+        parse_count(&rest[0]).await?
     };
 
     let prefer_gpu =
         sequence_gpu_preference(count, SequenceIntent::Logspace, start_gpu || stop_gpu).prefer_gpu;
-    build_sequence(start_scalar, stop_scalar, count, prefer_gpu)
+    build_sequence(start_scalar, stop_scalar, count, prefer_gpu).await
 }
 
 #[derive(Clone, Copy)]
@@ -88,7 +101,7 @@ impl Scalar {
     }
 }
 
-fn parse_scalar(name: &str, value: Value) -> Result<(Scalar, bool), String> {
+async fn parse_scalar(name: &str, value: Value) -> crate::BuiltinResult<(Scalar, bool)> {
     match value {
         Value::Num(n) => Ok((Scalar::Real(n), false)),
         Value::Int(i) => Ok((Scalar::Real(i.to_f64()), false)),
@@ -97,101 +110,105 @@ fn parse_scalar(name: &str, value: Value) -> Result<(Scalar, bool), String> {
         Value::Tensor(t) => tensor_scalar(name, &t).map(|scalar| (scalar, false)),
         Value::ComplexTensor(t) => complex_tensor_scalar(name, &t).map(|scalar| (scalar, false)),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             tensor_scalar(name, &tensor).map(|scalar| (scalar, true))
         }
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(format!(
-            "{name}: endpoints must be numeric scalars; received a string-like value"
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(builtin_error(
+            format!("{name}: endpoints must be numeric scalars; received a string-like value"),
         )),
-        other => Err(format!(
+        other => Err(builtin_error(format!(
             "{name}: endpoints must be numeric scalars; received {other:?}"
-        )),
+        ))),
     }
 }
 
-fn tensor_scalar(name: &str, tensor: &Tensor) -> Result<Scalar, String> {
+fn tensor_scalar(name: &str, tensor: &Tensor) -> crate::BuiltinResult<Scalar> {
     if !tensor::is_scalar_tensor(tensor) {
-        return Err(format!("{name}: expected scalar input"));
+        return Err(builtin_error(format!("{name}: expected scalar input")));
     }
     Ok(Scalar::Real(tensor.data[0]))
 }
 
-fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> Result<Scalar, String> {
+fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinResult<Scalar> {
     if tensor.data.len() != 1 {
-        return Err(format!("{name}: expected scalar input"));
+        return Err(builtin_error(format!("{name}: expected scalar input")));
     }
     let (re, im) = tensor.data[0];
     Ok(Scalar::Complex { re, im })
 }
 
-fn parse_count(value: &Value) -> Result<usize, String> {
+async fn parse_count(value: &Value) -> crate::BuiltinResult<usize> {
     match value {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 0 {
-                return Err("logspace: number of points must be >= 0".to_string());
+                return Err(builtin_error("logspace: number of points must be >= 0"));
             }
             usize::try_from(raw).map_err(|_| {
-                "logspace: number of points is too large for this platform".to_string()
+                builtin_error("logspace: number of points is too large for this platform")
             })
         }
         Value::Num(n) => parse_numeric_count(*n),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
             if !tensor::is_scalar_tensor(t) {
-                return Err("logspace: number of points must be a scalar".to_string());
+                return Err(builtin_error("logspace: number of points must be a scalar"));
             }
             parse_numeric_count(t.data[0])
         }
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(handle).await?;
             if !tensor::is_scalar_tensor(&tensor) {
-                return Err("logspace: number of points must be a scalar".to_string());
+                return Err(builtin_error("logspace: number of points must be a scalar"));
             }
             parse_numeric_count(tensor.data[0])
         }
-        other => Err(format!(
+        other => Err(builtin_error(format!(
             "logspace: number of points must be numeric, got {other:?}"
-        )),
+        ))),
     }
 }
 
-fn parse_numeric_count(raw: f64) -> Result<usize, String> {
+fn parse_numeric_count(raw: f64) -> crate::BuiltinResult<usize> {
     if !raw.is_finite() {
-        return Err("logspace: number of points must be finite".to_string());
+        return Err(builtin_error("logspace: number of points must be finite"));
     }
     let rounded = raw.round();
     if (rounded - raw).abs() > f64::EPSILON {
-        return Err("logspace: number of points must be an integer".to_string());
+        return Err(builtin_error(
+            "logspace: number of points must be an integer",
+        ));
     }
     if rounded < 0.0 {
-        return Err("logspace: number of points must be >= 0".to_string());
+        return Err(builtin_error("logspace: number of points must be >= 0"));
     }
     if rounded > usize::MAX as f64 {
-        return Err("logspace: number of points is too large for this platform".to_string());
+        return Err(builtin_error(
+            "logspace: number of points is too large for this platform",
+        ));
     }
     Ok(rounded as usize)
 }
 
-fn build_sequence(
+async fn build_sequence(
     start: Scalar,
     stop: Scalar,
     count: usize,
     prefer_gpu: bool,
-) -> Result<Value, String> {
+) -> crate::BuiltinResult<Value> {
     let (start_re, start_im) = start.parts();
     let (stop_re, stop_im) = stop.parts();
     let complex = start_im != 0.0 || stop_im != 0.0;
 
     if complex {
         let data = generate_complex_log_sequence(start_re, start_im, stop_re, stop_im, count);
-        let tensor =
-            ComplexTensor::new(data, vec![1, count]).map_err(|e| format!("logspace: {e}"))?;
+        let tensor = ComplexTensor::new(data, vec![1, count])
+            .map_err(|e| builtin_error(format!("logspace: {e}")))?;
         return Ok(Value::ComplexTensor(tensor));
     }
 
     if prefer_gpu {
-        if let Some(value) = try_gpu_logspace(start_re, stop_re, count) {
+        if let Some(value) = try_gpu_logspace(start_re, stop_re, count).await {
             return Ok(value);
         }
     }
@@ -218,11 +235,12 @@ fn build_sequence(
         }
     }
 
-    let tensor = Tensor::new(data, vec![1, count]).map_err(|e| format!("logspace: {e}"))?;
+    let tensor =
+        Tensor::new(data, vec![1, count]).map_err(|e| builtin_error(format!("logspace: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
-fn try_gpu_logspace(start: f64, stop: f64, count: usize) -> Option<Value> {
+async fn try_gpu_logspace(start: f64, stop: f64, count: usize) -> Option<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if runmat_accelerate_api::provider().is_none() {
@@ -243,7 +261,7 @@ fn try_gpu_logspace(start: f64, stop: f64, count: usize) -> Option<Value> {
     };
     provider.free(&exponents).ok();
 
-    let result = match provider.unary_exp(&scaled) {
+    let result = match provider.unary_exp(&scaled).await {
         Ok(handle) => handle,
         Err(_) => {
             provider.free(&scaled).ok();
@@ -338,7 +356,16 @@ fn complex_pow10(re: f64, im: f64) -> (f64, f64) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::IntValue;
+
+    fn logspace_builtin(
+        start: Value,
+        stop: Value,
+        rest: Vec<Value>,
+    ) -> crate::BuiltinResult<Value> {
+        block_on(super::logspace_builtin(start, stop, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -477,7 +504,7 @@ pub(crate) mod tests {
     fn logspace_rejects_non_integer_count() {
         let err = logspace_builtin(Value::Num(1.0), Value::Num(2.0), vec![Value::Num(3.5)])
             .expect_err("expected error");
-        assert!(err.contains("integer"));
+        assert!(err.message().contains("integer"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -489,7 +516,7 @@ pub(crate) mod tests {
             vec![Value::Int(IntValue::I32(-1))],
         )
         .expect_err("expected error");
-        assert!(err.contains(">="));
+        assert!(err.message().contains(">="));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -501,7 +528,7 @@ pub(crate) mod tests {
             vec![Value::Num(f64::INFINITY)],
         )
         .expect_err("expected error");
-        assert!(err.contains("finite"));
+        assert!(err.message().contains("finite"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -510,7 +537,7 @@ pub(crate) mod tests {
         let start = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let err =
             logspace_builtin(Value::Tensor(start), Value::Num(1.0), Vec::new()).expect_err("error");
-        assert!(err.contains("scalar"));
+        assert!(err.message().contains("scalar"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

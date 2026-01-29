@@ -68,8 +68,8 @@ fn cpu_image_normalize(
 }
 
 #[cfg(feature = "wgpu")]
-#[test]
-fn image_normalize_matches_cpu() {
+#[tokio::test]
+async fn image_normalize_matches_cpu() {
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
     let p = runmat_accelerate_api::provider().expect("provider");
 
@@ -108,8 +108,11 @@ fn image_normalize_matches_cpu() {
         gamma,
     };
 
-    let gpu = p.image_normalize(&handle, &desc).expect("image_normalize");
-    let host = p.download(&gpu).expect("download");
+    let gpu = p
+        .image_normalize(&handle, &desc)
+        .await
+        .expect("image_normalize");
+    let host = p.download(&gpu).await.expect("download");
     assert_eq!(host.shape, vec![batch, height, width]);
 
     let expected = cpu_image_normalize(&data, batch, height, width, epsilon, gain, bias, gamma);

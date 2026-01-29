@@ -8,6 +8,10 @@ use runmat_accelerate_api::{
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+const NAME: &str = "cummin";
+
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -30,6 +34,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes:
         "Providers may expose prefix-min kernels that return running values and indices; the runtime gathers to host when hooks or options are unsupported.",
 };
+
+fn cummin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::cummin")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -86,18 +94,18 @@ impl CumminEvaluation {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::cummin"
 )]
-fn cummin_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    evaluate(value, &rest).map(|eval| eval.into_value())
+async fn cummin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    evaluate(value, &rest).await.map(|eval| eval.into_value())
 }
 
 /// Evaluate the builtin once and expose both outputs (value + indices).
-pub fn evaluate(value: Value, rest: &[Value]) -> Result<CumminEvaluation, String> {
+pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CumminEvaluation> {
     let (dim, direction, nan_mode) = parse_arguments(rest)?;
     match value {
-        Value::GpuTensor(handle) => cummin_gpu(handle, dim, direction, nan_mode),
+        Value::GpuTensor(handle) => cummin_gpu(handle, dim, direction, nan_mode).await,
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("cummin: {e}"))?;
+                .map_err(|e| cummin_error(format!("cummin: {e}")))?;
             let target_dim = dim.unwrap_or(1);
             let (values, indices) =
                 cummin_complex_tensor(&tensor, target_dim, direction, nan_mode)?;
@@ -120,9 +128,9 @@ pub fn evaluate(value: Value, rest: &[Value]) -> Result<CumminEvaluation, String
 
 fn parse_arguments(
     args: &[Value],
-) -> Result<(Option<usize>, CumminDirection, CumminNanMode), String> {
+) -> BuiltinResult<(Option<usize>, CumminDirection, CumminNanMode)> {
     if args.len() > 3 {
-        return Err("cummin: unsupported arguments".to_string());
+        return Err(cummin_error("cummin: unsupported arguments"));
     }
 
     let mut dim: Option<usize> = None;
@@ -135,9 +143,11 @@ fn parse_arguments(
         match value {
             Value::Int(_) | Value::Num(_) => {
                 if dim.is_some() {
-                    return Err("cummin: dimension specified more than once".to_string());
+                    return Err(cummin_error("cummin: dimension specified more than once"));
                 }
-                dim = Some(tensor::parse_dimension(value, "cummin")?);
+                dim = Some(
+                    tensor::parse_dimension(value, "cummin").map_err(|err| cummin_error(err))?,
+                );
             }
             Value::Tensor(t) if t.data.is_empty() => {
                 // MATLAB allows [] placeholders; ignore them.
@@ -149,51 +159,55 @@ fn parse_arguments(
                     match keyword.as_str() {
                         "forward" => {
                             if direction_set {
-                                return Err(
-                                    "cummin: direction specified more than once".to_string()
-                                );
+                                return Err(cummin_error(
+                                    "cummin: direction specified more than once",
+                                ));
                             }
                             direction = CumminDirection::Forward;
                             direction_set = true;
                         }
                         "reverse" => {
                             if direction_set {
-                                return Err(
-                                    "cummin: direction specified more than once".to_string()
-                                );
+                                return Err(cummin_error(
+                                    "cummin: direction specified more than once",
+                                ));
                             }
                             direction = CumminDirection::Reverse;
                             direction_set = true;
                         }
                         "omitnan" | "omitmissing" => {
                             if nan_set {
-                                return Err(
-                                    "cummin: missing-value handling specified more than once"
-                                        .to_string(),
-                                );
+                                return Err(cummin_error(
+                                    "cummin: missing-value handling specified more than once",
+                                ));
                             }
                             nan_mode = CumminNanMode::Omit;
                             nan_set = true;
                         }
                         "includenan" | "includemissing" => {
                             if nan_set {
-                                return Err(
-                                    "cummin: missing-value handling specified more than once"
-                                        .to_string(),
-                                );
+                                return Err(cummin_error(
+                                    "cummin: missing-value handling specified more than once",
+                                ));
                             }
                             nan_mode = CumminNanMode::Include;
                             nan_set = true;
                         }
                         "" => {
-                            return Err("cummin: empty string option is not supported".to_string());
+                            return Err(cummin_error(
+                                "cummin: empty string option is not supported",
+                            ));
                         }
                         other => {
-                            return Err(format!("cummin: unrecognised option '{other}'"));
+                            return Err(cummin_error(format!(
+                                "cummin: unrecognised option '{other}'"
+                            )));
                         }
                     }
                 } else {
-                    return Err(format!("cummin: unsupported argument type {value:?}"));
+                    return Err(cummin_error(format!(
+                        "cummin: unsupported argument type {value:?}"
+                    )));
                 }
             }
         }
@@ -207,8 +221,8 @@ fn cummin_host(
     dim: Option<usize>,
     direction: CumminDirection,
     nan_mode: CumminNanMode,
-) -> Result<CumminEvaluation, String> {
-    let tensor = tensor::value_into_tensor_for("cummin", value)?;
+) -> BuiltinResult<CumminEvaluation> {
+    let tensor = tensor::value_into_tensor_for("cummin", value).map_err(|err| cummin_error(err))?;
     let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
     let (values, indices) = cummin_tensor(&tensor, target_dim, direction, nan_mode)?;
     Ok(CumminEvaluation {
@@ -217,12 +231,12 @@ fn cummin_host(
     })
 }
 
-fn cummin_gpu(
+async fn cummin_gpu(
     handle: GpuTensorHandle,
     dim: Option<usize>,
     direction: CumminDirection,
     nan_mode: CumminNanMode,
-) -> Result<CumminEvaluation, String> {
+) -> BuiltinResult<CumminEvaluation> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -233,13 +247,13 @@ fn cummin_gpu(
     }
     if let Some(target) = dim {
         if target == 0 {
-            return Err("cummin: dimension must be >= 1".to_string());
+            return Err(cummin_error("cummin: dimension must be >= 1"));
         }
     }
 
     let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&handle.shape));
     if target_dim == 0 {
-        return Err("cummin: dimension must be >= 1".to_string());
+        return Err(cummin_error("cummin: dimension must be >= 1"));
     }
 
     if target_dim > handle.shape.len() {
@@ -275,7 +289,7 @@ fn cummin_gpu(
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let (values, indices) = cummin_tensor(&tensor, target_dim, direction, nan_mode)?;
     Ok(CumminEvaluation {
         values: tensor::tensor_into_value(values),
@@ -288,13 +302,13 @@ fn cummin_tensor(
     dim: usize,
     direction: CumminDirection,
     nan_mode: CumminNanMode,
-) -> Result<(Tensor, Tensor), String> {
+) -> BuiltinResult<(Tensor, Tensor)> {
     if dim == 0 {
-        return Err("cummin: dimension must be >= 1".to_string());
+        return Err(cummin_error("cummin: dimension must be >= 1"));
     }
     if tensor.data.is_empty() {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| format!("cummin: {e}"))?;
+        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
+            .map_err(|e| cummin_error(format!("cummin: {e}")))?;
         return Ok((tensor.clone(), indices));
     }
     if dim > tensor.shape.len() {
@@ -305,8 +319,8 @@ fn cummin_tensor(
     let dim_index = dim - 1;
     let segment_len = tensor.shape[dim_index];
     if segment_len == 0 {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| format!("cummin: {e}"))?;
+        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
+            .map_err(|e| cummin_error(format!("cummin: {e}")))?;
         return Ok((tensor.clone(), indices));
     }
 
@@ -432,10 +446,10 @@ fn cummin_tensor(
         }
     }
 
-    let values_tensor =
-        Tensor::new(values_out, tensor.shape.clone()).map_err(|e| format!("cummin: {e}"))?;
-    let indices_tensor =
-        Tensor::new(indices_out, tensor.shape.clone()).map_err(|e| format!("cummin: {e}"))?;
+    let values_tensor = Tensor::new(values_out, tensor.shape.clone())
+        .map_err(|e| cummin_error(format!("cummin: {e}")))?;
+    let indices_tensor = Tensor::new(indices_out, tensor.shape.clone())
+        .map_err(|e| cummin_error(format!("cummin: {e}")))?;
     Ok((values_tensor, indices_tensor))
 }
 
@@ -444,13 +458,13 @@ fn cummin_complex_tensor(
     dim: usize,
     direction: CumminDirection,
     nan_mode: CumminNanMode,
-) -> Result<(ComplexTensor, Tensor), String> {
+) -> BuiltinResult<(ComplexTensor, Tensor)> {
     if dim == 0 {
-        return Err("cummin: dimension must be >= 1".to_string());
+        return Err(cummin_error("cummin: dimension must be >= 1"));
     }
     if tensor.data.is_empty() {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| format!("cummin: {e}"))?;
+        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
+            .map_err(|e| cummin_error(format!("cummin: {e}")))?;
         return Ok((tensor.clone(), indices));
     }
     if dim > tensor.shape.len() {
@@ -461,8 +475,8 @@ fn cummin_complex_tensor(
     let dim_index = dim - 1;
     let segment_len = tensor.shape[dim_index];
     if segment_len == 0 {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| format!("cummin: {e}"))?;
+        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
+            .map_err(|e| cummin_error(format!("cummin: {e}")))?;
         return Ok((tensor.clone(), indices));
     }
 
@@ -590,10 +604,10 @@ fn cummin_complex_tensor(
         }
     }
 
-    let values_tensor =
-        ComplexTensor::new(values_out, tensor.shape.clone()).map_err(|e| format!("cummin: {e}"))?;
-    let indices_tensor =
-        Tensor::new(indices_out, tensor.shape.clone()).map_err(|e| format!("cummin: {e}"))?;
+    let values_tensor = ComplexTensor::new(values_out, tensor.shape.clone())
+        .map_err(|e| cummin_error(format!("cummin: {e}")))?;
+    let indices_tensor = Tensor::new(indices_out, tensor.shape.clone())
+        .map_err(|e| cummin_error(format!("cummin: {e}")))?;
     Ok((values_tensor, indices_tensor))
 }
 
@@ -642,14 +656,14 @@ fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
     }
 }
 
-fn ones_indices(shape: &[usize]) -> Result<Tensor, String> {
+fn ones_indices(shape: &[usize]) -> BuiltinResult<Tensor> {
     let len = tensor::element_count(shape);
     let data = if len == 0 {
         Vec::new()
     } else {
         vec![1.0f64; len]
     };
-    Tensor::new(data, shape.to_vec()).map_err(|e| format!("cummin: {e}"))
+    Tensor::new(data, shape.to_vec()).map_err(|e| cummin_error(format!("cummin: {e}")))
 }
 
 fn default_dimension(tensor: &Tensor) -> usize {
@@ -677,7 +691,12 @@ fn dim_product(dims: &[usize]) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::IntValue;
+
+    fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CumminEvaluation> {
+        block_on(super::evaluate(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -841,7 +860,9 @@ pub(crate) mod tests {
         let args = [Value::Int(IntValue::I32(0))];
         match evaluate(Value::Tensor(tensor), &args) {
             Ok(_) => panic!("expected dimension error"),
-            Err(err) => assert!(err.contains("dimension must be >= 1")),
+            Err(err) => {
+                assert!(err.message().contains("dimension must be >= 1"));
+            }
         }
     }
 
@@ -852,7 +873,9 @@ pub(crate) mod tests {
         let args = [Value::from("reverse"), Value::from("forward")];
         match evaluate(Value::Tensor(tensor), &args) {
             Ok(_) => panic!("expected duplicate direction error"),
-            Err(err) => assert!(err.contains("direction specified more than once")),
+            Err(err) => {
+                assert!(err.message().contains("direction specified more than once"));
+            }
         }
     }
 

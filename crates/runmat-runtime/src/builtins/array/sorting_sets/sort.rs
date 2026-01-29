@@ -8,6 +8,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -42,6 +43,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Sorting breaks fusion chains and acts as a residency sink; upstream tensors are gathered to host memory.",
 };
 
+fn sort_error(message: impl Into<String>) -> crate::RuntimeError {
+    build_runtime_error(message).with_builtin("sort").build()
+}
+
 #[runtime_builtin(
     name = "sort",
     category = "array/sorting_sets",
@@ -51,24 +56,27 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::sort"
 )]
-fn sort_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    evaluate(value, &rest).map(|eval| eval.into_sorted_value())
+async fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    Ok(evaluate(value, &rest).await?.into_sorted_value())
 }
 
 /// Evaluate the `sort` builtin once and expose both outputs.
-pub fn evaluate(value: Value, rest: &[Value]) -> Result<SortEvaluation, String> {
+pub async fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortEvaluation> {
     let args = SortArgs::parse(rest)?;
     match value {
-        Value::GpuTensor(handle) => sort_gpu(handle, &args),
+        Value::GpuTensor(handle) => sort_gpu(handle, &args).await,
         other => sort_host(other, &args),
     }
 }
 
-fn sort_gpu(handle: GpuTensorHandle, args: &SortArgs) -> Result<SortEvaluation, String> {
+async fn sort_gpu(
+    handle: GpuTensorHandle,
+    args: &SortArgs,
+) -> crate::BuiltinResult<SortEvaluation> {
     let shape = handle.shape.clone();
     let dim = args.dimension.unwrap_or_else(|| default_dimension(&shape));
     if dim == 0 {
-        return Err("sort: dimension must be >= 1".to_string());
+        return Err(sort_error("sort: dimension must be >= 1"));
     }
     let dim_len = dimension_length(&shape, dim);
     if dim_len > 1 {
@@ -76,12 +84,15 @@ fn sort_gpu(handle: GpuTensorHandle, args: &SortArgs) -> Result<SortEvaluation, 
             let order = args.direction.to_provider();
             let comparison = args.comparison.to_provider();
             let zero_based = dim - 1;
-            if let Ok(result) = provider.sort_dim(&handle, zero_based, order, comparison) {
+            if let Ok(result) = provider
+                .sort_dim(&handle, zero_based, order, comparison)
+                .await
+            {
                 let sorted_tensor = Tensor::new(result.values.data, result.values.shape)
-                    .map_err(|e| format!("sort: {e}"))?;
+                    .map_err(|e| sort_error(format!("sort: {e}")))?;
                 let sorted_value = tensor::tensor_into_value(sorted_tensor);
                 let indices_tensor = Tensor::new(result.indices.data, result.indices.shape)
-                    .map_err(|e| format!("sort: {e}"))?;
+                    .map_err(|e| sort_error(format!("sort: {e}")))?;
                 return Ok(SortEvaluation {
                     sorted: sorted_value,
                     indices: indices_tensor,
@@ -89,38 +100,38 @@ fn sort_gpu(handle: GpuTensorHandle, args: &SortArgs) -> Result<SortEvaluation, 
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     sort_real_tensor(tensor, args)
 }
 
-fn sort_host(value: Value, args: &SortArgs) -> Result<SortEvaluation, String> {
+fn sort_host(value: Value, args: &SortArgs) -> crate::BuiltinResult<SortEvaluation> {
     match value {
         Value::ComplexTensor(ct) => sort_complex_tensor(ct, args),
         Value::Complex(re, im) => {
-            let tensor =
-                ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| format!("sort: {e}"))?;
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
+                .map_err(|e| sort_error(format!("sort: {e}")))?;
             sort_complex_tensor(tensor, args)
         }
         other => {
-            let tensor = tensor::value_into_tensor_for("sort", other)?;
+            let tensor = tensor::value_into_tensor_for("sort", other).map_err(|e| sort_error(e))?;
             sort_real_tensor(tensor, args)
         }
     }
 }
 
-fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> Result<SortEvaluation, String> {
+fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<SortEvaluation> {
     let dim = args
         .dimension
         .unwrap_or_else(|| default_dimension(&tensor.shape));
     if dim == 0 {
-        return Err("sort: dimension must be >= 1".to_string());
+        return Err(sort_error("sort: dimension must be >= 1"));
     }
 
     let dim_len = dimension_length(&tensor.shape, dim);
     if tensor.data.is_empty() || dim_len <= 1 {
         let indices = vec![1.0; tensor.data.len()];
-        let index_tensor =
-            Tensor::new(indices, tensor.shape.clone()).map_err(|e| format!("sort: {e}"))?;
+        let index_tensor = Tensor::new(indices, tensor.shape.clone())
+            .map_err(|e| sort_error(format!("sort: {e}")))?;
         let sorted_value = tensor::tensor_into_value(tensor);
         return Ok(SortEvaluation {
             sorted: sorted_value,
@@ -152,9 +163,9 @@ fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> Result<SortEvaluation, S
     }
 
     let sorted_tensor =
-        Tensor::new(sorted, tensor.shape.clone()).map_err(|e| format!("sort: {e}"))?;
+        Tensor::new(sorted, tensor.shape.clone()).map_err(|e| sort_error(format!("sort: {e}")))?;
     let index_tensor =
-        Tensor::new(indices, tensor.shape.clone()).map_err(|e| format!("sort: {e}"))?;
+        Tensor::new(indices, tensor.shape.clone()).map_err(|e| sort_error(format!("sort: {e}")))?;
 
     Ok(SortEvaluation {
         sorted: tensor::tensor_into_value(sorted_tensor),
@@ -162,19 +173,22 @@ fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> Result<SortEvaluation, S
     })
 }
 
-fn sort_complex_tensor(tensor: ComplexTensor, args: &SortArgs) -> Result<SortEvaluation, String> {
+fn sort_complex_tensor(
+    tensor: ComplexTensor,
+    args: &SortArgs,
+) -> crate::BuiltinResult<SortEvaluation> {
     let dim = args
         .dimension
         .unwrap_or_else(|| default_dimension(&tensor.shape));
     if dim == 0 {
-        return Err("sort: dimension must be >= 1".to_string());
+        return Err(sort_error("sort: dimension must be >= 1"));
     }
 
     let dim_len = dimension_length(&tensor.shape, dim);
     if tensor.data.is_empty() || dim_len <= 1 {
         let indices = vec![1.0; tensor.data.len()];
-        let index_tensor =
-            Tensor::new(indices, tensor.shape.clone()).map_err(|e| format!("sort: {e}"))?;
+        let index_tensor = Tensor::new(indices, tensor.shape.clone())
+            .map_err(|e| sort_error(format!("sort: {e}")))?;
         return Ok(SortEvaluation {
             sorted: complex_tensor_into_value(tensor),
             indices: index_tensor,
@@ -204,10 +218,10 @@ fn sort_complex_tensor(tensor: ComplexTensor, args: &SortArgs) -> Result<SortEva
         }
     }
 
-    let sorted_tensor =
-        ComplexTensor::new(sorted, tensor.shape.clone()).map_err(|e| format!("sort: {e}"))?;
+    let sorted_tensor = ComplexTensor::new(sorted, tensor.shape.clone())
+        .map_err(|e| sort_error(format!("sort: {e}")))?;
     let index_tensor =
-        Tensor::new(indices, tensor.shape.clone()).map_err(|e| format!("sort: {e}"))?;
+        Tensor::new(indices, tensor.shape.clone()).map_err(|e| sort_error(format!("sort: {e}")))?;
 
     Ok(SortEvaluation {
         sorted: complex_tensor_into_value(sorted_tensor),
@@ -394,7 +408,7 @@ struct SortArgs {
 }
 
 impl SortArgs {
-    fn parse(rest: &[Value]) -> Result<Self, String> {
+    fn parse(rest: &[Value]) -> crate::BuiltinResult<Self> {
         let mut args = SortArgs::default();
         let mut i = 0usize;
         while i < rest.len() {
@@ -411,7 +425,7 @@ impl SortArgs {
                     }
                     Err(err) => {
                         if matches!(rest[i], Value::Int(_) | Value::Num(_)) {
-                            return Err(err);
+                            return Err(sort_error(err));
                         }
                     }
                 }
@@ -432,17 +446,21 @@ impl SortArgs {
                     "comparisonmethod" => {
                         i += 1;
                         if i >= rest.len() {
-                            return Err("sort: expected a value for 'ComparisonMethod'".to_string());
+                            return Err(sort_error(
+                                "sort: expected a value for 'ComparisonMethod'",
+                            ));
                         }
                         let raw = &rest[i];
                         let value = match raw {
                             Value::String(s) => s.clone(),
                             Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
-                            Value::CharArray(ca) if ca.rows == 1 => ca.data.iter().collect(),
+                            Value::CharArray(ca) if ca.rows == 1 => {
+                                ca.data.iter().copied().collect()
+                            }
                             _ => {
-                                return Err(
-                                    "sort: 'ComparisonMethod' requires a string value".to_string()
-                                )
+                                return Err(sort_error(
+                                    "sort: 'ComparisonMethod' requires a string value",
+                                ))
                             }
                         };
                         let lowered_value = value.trim().to_ascii_lowercase();
@@ -451,21 +469,28 @@ impl SortArgs {
                             "real" => ComparisonMethod::Real,
                             "abs" | "magnitude" => ComparisonMethod::Abs,
                             other => {
-                                return Err(format!("sort: unsupported ComparisonMethod '{other}'"))
+                                return Err(sort_error(format!(
+                                    "sort: unsupported ComparisonMethod '{other}'"
+                                ))
+                                .into())
                             }
                         };
                         i += 1;
                         continue;
                     }
                     "missingplacement" => {
-                        return Err(
-                            "sort: the 'MissingPlacement' option is not supported yet".to_string()
-                        );
+                        return Err(sort_error(
+                            "sort: the 'MissingPlacement' option is not supported yet",
+                        )
+                        .into());
                     }
                     _ => {}
                 }
             }
-            return Err(format!("sort: unrecognised argument {:?}", rest[i]));
+            return Err(sort_error(format!(
+                "sort: unrecognised argument {:?}",
+                rest[i]
+            )));
         }
         Ok(args)
     }
@@ -503,7 +528,20 @@ impl SortEvaluation {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{ComplexTensor, IntValue, Tensor, Value};
+
+    fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::sort_builtin(value, rest))
+    }
+
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
+    }
+
+    fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortEvaluation> {
+        block_on(super::evaluate(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -785,36 +823,42 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sort_invalid_argument_errors() {
-        let err = sort_builtin(
-            Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
-            vec![Value::from("missingplacement"), Value::from("first")],
-        )
-        .unwrap_err();
+        let err = error_message(
+            sort_builtin(
+                Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+                vec![Value::from("missingplacement"), Value::from("first")],
+            )
+            .unwrap_err(),
+        );
         assert!(err.contains("MissingPlacement"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sort_invalid_comparison_method_errors() {
-        let err = sort_builtin(
-            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
-            vec![Value::from("ComparisonMethod"), Value::from("unknown")],
-        )
-        .unwrap_err();
+        let err = error_message(
+            sort_builtin(
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+                vec![Value::from("ComparisonMethod"), Value::from("unknown")],
+            )
+            .unwrap_err(),
+        );
         assert!(err.contains("ComparisonMethod"), "unexpected error: {err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sort_invalid_comparison_method_value_errors() {
-        let err = sort_builtin(
-            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
-            vec![
-                Value::from("ComparisonMethod"),
-                Value::Int(IntValue::I32(1)),
-            ],
-        )
-        .unwrap_err();
+        let err = error_message(
+            sort_builtin(
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+                vec![
+                    Value::from("ComparisonMethod"),
+                    Value::Int(IntValue::I32(1)),
+                ],
+            )
+            .unwrap_err(),
+        );
         assert!(
             err.contains("requires a string value"),
             "unexpected error: {err}"
@@ -824,11 +868,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sort_dimension_zero_errors() {
-        let err = sort_builtin(
-            Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
-            vec![Value::Num(0.0)],
-        )
-        .unwrap_err();
+        let err = error_message(
+            sort_builtin(
+                Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+                vec![Value::Num(0.0)],
+            )
+            .unwrap_err(),
+        );
         assert!(
             err.contains("dimension must be >= 1"),
             "unexpected error: {err}"

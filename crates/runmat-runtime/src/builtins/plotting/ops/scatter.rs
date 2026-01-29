@@ -1,5 +1,6 @@
 //! MATLAB-compatible `scatter` builtin.
 
+use futures::executor::block_on;
 use glam::{Vec3, Vec4};
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
@@ -15,16 +16,18 @@ use runmat_plot::plots::surface::ColorMap;
 use runmat_plot::plots::LineStyle;
 use runmat_plot::plots::ScatterPlot;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::gather_if_needed_async;
 use std::convert::TryFrom;
 
 use super::common::numeric_pair;
 use super::gpu_helpers::axis_bounds;
 use super::perf::scatter_target_points;
+use super::plotting_error;
 use super::point::{
     convert_rgb_color_matrix, convert_scalar_color_values, convert_size_vector,
     map_scalar_values_to_colors, validate_gpu_color_matrix, validate_gpu_vector_length, PointArgs,
@@ -32,6 +35,7 @@ use super::point::{
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{LineStyleParseOptions, MarkerColor};
+use crate::{BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::scatter")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -60,6 +64,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "scatter performs I/O and terminates fusion graphs.",
 };
 
+const BUILTIN_NAME: &str = "scatter";
+
 #[runtime_builtin(
     name = "scatter",
     category = "plotting",
@@ -69,7 +75,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::scatter"
 )]
-pub fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, String> {
+pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter())?;
     let mut x_input = Some(ScatterInput::from_value(x)?);
     let mut y_input = Some(ScatterInput::from_value(y)?);
@@ -79,7 +85,7 @@ pub fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, S
         y_label: "Y",
         ..Default::default()
     };
-    render_active_plot(opts, move |figure, axes| {
+    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let style_args = style_args.clone();
         let point_count = x_input.as_ref().map(|input| input.len()).unwrap_or(0);
         let mut resolved_style = resolve_scatter_style(point_count, &style_args, "scatter")?;
@@ -105,25 +111,28 @@ pub fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, S
         let scatter = build_scatter_plot(x_data, y_data, &mut resolved_style)?;
         figure.add_scatter_plot_on_axes(scatter, axes);
         Ok(())
-    })
+    })?;
+    Ok(rendered)
 }
 
 fn build_scatter_plot(
     x: Vec<f64>,
     y: Vec<f64>,
     style: &mut ScatterResolvedStyle,
-) -> Result<ScatterPlot, String> {
+) -> BuiltinResult<ScatterPlot> {
     if x.len() != y.len() {
-        return Err("scatter: X and Y inputs must share the same length".to_string());
+        return Err(scatter_err(
+            "scatter: X and Y inputs must share the same length",
+        ));
     }
     if x.is_empty() {
-        return Err("scatter: inputs cannot be empty".to_string());
+        return Err(scatter_err("scatter: inputs cannot be empty"));
     }
 
     ensure_host_marker_metadata(style, x.len())?;
 
     let mut scatter = ScatterPlot::new(x, y)
-        .map_err(|err| format!("scatter: {err}"))?
+        .map_err(|err| scatter_err(format!("scatter: {err}")))?
         .with_style(style.uniform_color, style.marker_size, style.marker_style)
         .with_label(style.label.clone());
     scatter.colormap = style.colormap;
@@ -145,6 +154,11 @@ fn build_scatter_plot(
 }
 
 const DEFAULT_MARKER_SIZE: f32 = 10.0;
+
+fn scatter_err(message: impl Into<String>) -> RuntimeError {
+    plotting_error(BUILTIN_NAME, message)
+}
+
 const DEFAULT_LINE_WIDTH: f32 = 1.0;
 const DEFAULT_SCATTER_LABEL: &str = "Data";
 
@@ -176,8 +190,8 @@ struct ScatterResolvedStyle {
 fn resolve_scatter_style(
     point_count: usize,
     args: &PointArgs,
-    context: &str,
-) -> Result<ScatterResolvedStyle, String> {
+    context: &'static str,
+) -> BuiltinResult<ScatterResolvedStyle> {
     let mut style = ScatterResolvedStyle {
         uniform_color: default_color(),
         edge_color: default_color(),
@@ -293,17 +307,17 @@ fn resolve_scatter_style(
 
     if style.marker_face_flat {
         if style.per_point_colors.is_none() && style.gpu_colors.is_none() {
-            return Err(format!(
+            return Err(scatter_err(format!(
                 "{context}: MarkerFaceColor 'flat' requires per-point color data (C argument)"
-            ));
+            )));
         }
         style.filled = true;
     }
 
     if style.marker_edge_flat && style.per_point_colors.is_none() && style.gpu_colors.is_none() {
-        return Err(format!(
+        return Err(scatter_err(format!(
             "{context}: MarkerEdgeColor 'flat' requires per-point color data (C argument)"
-        ));
+        )));
     }
 
     if args.style.appearance.line_style != LineStyle::Solid && args.style.line_style_explicit {
@@ -332,11 +346,12 @@ enum ScatterInput {
 }
 
 impl ScatterInput {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
             other => {
-                let tensor = Tensor::try_from(&other).map_err(|e| format!("scatter: {e}"))?;
+                let tensor =
+                    Tensor::try_from(&other).map_err(|e| scatter_err(format!("scatter: {e}")))?;
                 Ok(Self::Host(tensor))
             }
         }
@@ -356,7 +371,7 @@ impl ScatterInput {
         }
     }
 
-    fn into_tensor(self, name: &str) -> Result<Tensor, String> {
+    fn into_tensor(self, name: &'static str) -> BuiltinResult<Tensor> {
         match self {
             Self::Host(tensor) => Ok(tensor),
             Self::Gpu(handle) => gather_tensor_from_gpu(handle, name),
@@ -364,37 +379,50 @@ impl ScatterInput {
     }
 }
 
-fn gather_tensor_from_gpu(handle: GpuTensorHandle, name: &str) -> Result<Tensor, String> {
+async fn gather_tensor_from_gpu_async(
+    handle: GpuTensorHandle,
+    name: &'static str,
+) -> BuiltinResult<Tensor> {
     let value = Value::GpuTensor(handle);
-    let gathered = gather_if_needed(&value)?;
-    Tensor::try_from(&gathered).map_err(|e| format!("{name}: {e}"))
+    let gathered = gather_if_needed_async(&value)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, name))?;
+    Tensor::try_from(&gathered).map_err(|e| scatter_err(format!("{name}: {e}")))
+}
+
+fn gather_tensor_from_gpu(handle: GpuTensorHandle, name: &'static str) -> BuiltinResult<Tensor> {
+    block_on(gather_tensor_from_gpu_async(handle, name))
 }
 
 fn build_scatter_gpu_plot(
     x: &GpuTensorHandle,
     y: &GpuTensorHandle,
     style: &ScatterResolvedStyle,
-) -> Result<ScatterPlot, String> {
+) -> BuiltinResult<ScatterPlot> {
     let context = runmat_plot::shared_wgpu_context()
-        .ok_or_else(|| "scatter: plotting GPU context unavailable".to_string())?;
+        .ok_or_else(|| scatter_err("scatter: plotting GPU context unavailable"))?;
 
     let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
-        .ok_or_else(|| "scatter: unable to export GPU X data".to_string())?;
+        .ok_or_else(|| scatter_err("scatter: unable to export GPU X data"))?;
     let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
-        .ok_or_else(|| "scatter: unable to export GPU Y data".to_string())?;
+        .ok_or_else(|| scatter_err("scatter: unable to export GPU Y data"))?;
 
     if x_ref.len == 0 {
-        return Err("scatter: empty input tensor".to_string());
+        return Err(scatter_err("scatter: empty input tensor"));
     }
     if x_ref.len != y_ref.len {
-        return Err("scatter: X and Y inputs must have identical lengths".to_string());
+        return Err(scatter_err(
+            "scatter: X and Y inputs must have identical lengths",
+        ));
     }
     if x_ref.precision != y_ref.precision {
-        return Err("scatter: X and Y gpuArrays must have matching precision".to_string());
+        return Err(scatter_err(
+            "scatter: X and Y gpuArrays must have matching precision",
+        ));
     }
     let point_count = x_ref.len;
     let len_u32 = u32::try_from(point_count)
-        .map_err(|_| "scatter: point count exceeds supported range".to_string())?;
+        .map_err(|_| scatter_err("scatter: point count exceeds supported range"))?;
     let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
     let lod_stride = scatter_lod_stride(len_u32);
 
@@ -423,7 +451,7 @@ fn build_scatter_gpu_plot(
         &inputs,
         &params,
     )
-    .map_err(|e| format!("scatter: failed to build GPU vertices: {e}"))?;
+    .map_err(|e| scatter_err(format!("scatter: failed to build GPU vertices: {e}")))?;
     let drawn_points = gpu_vertices.vertex_count;
 
     let bounds = build_gpu_bounds(x, y)?;
@@ -461,9 +489,9 @@ fn scatter_lod_stride(point_count: u32) -> u32 {
     }
 }
 
-fn build_gpu_bounds(x: &GpuTensorHandle, y: &GpuTensorHandle) -> Result<BoundingBox, String> {
-    let (min_x, max_x) = axis_bounds(x, "scatter")?;
-    let (min_y, max_y) = axis_bounds(y, "scatter")?;
+fn build_gpu_bounds(x: &GpuTensorHandle, y: &GpuTensorHandle) -> BuiltinResult<BoundingBox> {
+    let (min_x, max_x) = axis_bounds(x, BUILTIN_NAME)?;
+    let (min_y, max_y) = axis_bounds(y, BUILTIN_NAME)?;
     Ok(BoundingBox::new(
         Vec3::new(min_x, min_y, 0.0),
         Vec3::new(max_x, max_y, 0.0),
@@ -473,21 +501,20 @@ fn build_gpu_bounds(x: &GpuTensorHandle, y: &GpuTensorHandle) -> Result<Bounding
 fn build_size_buffer(
     style: &ScatterResolvedStyle,
     point_count: usize,
-) -> Result<ScatterAttributeBuffer, String> {
+) -> BuiltinResult<ScatterAttributeBuffer> {
     if let Some(handle) = style.gpu_sizes.as_ref() {
         let exported = runmat_accelerate_api::export_wgpu_buffer(handle)
-            .ok_or_else(|| "scatter: unable to export GPU marker sizes".to_string())?;
+            .ok_or_else(|| scatter_err("scatter: unable to export GPU marker sizes"))?;
         if exported.len != point_count {
-            return Err(format!(
+            return Err(scatter_err(format!(
                 "scatter: marker size array must have {point_count} elements (got {})",
                 exported.len
-            ));
+            )));
         }
         if exported.precision != ProviderPrecision::F32 {
-            return Err(
-                "scatter: GPU marker sizes must be single-precision (cast before plotting)"
-                    .to_string(),
-            );
+            return Err(scatter_err(
+                "scatter: GPU marker sizes must be single-precision (cast before plotting)",
+            ));
         }
         return Ok(ScatterAttributeBuffer::Gpu(exported.buffer));
     }
@@ -506,22 +533,21 @@ fn build_size_buffer(
 fn build_color_buffer(
     style: &ScatterResolvedStyle,
     point_count: usize,
-) -> Result<ScatterColorBuffer, String> {
+) -> BuiltinResult<ScatterColorBuffer> {
     if let Some(gpu_color) = style.gpu_colors.as_ref() {
         let exported = runmat_accelerate_api::export_wgpu_buffer(&gpu_color.handle)
-            .ok_or_else(|| "scatter: unable to export GPU color data".to_string())?;
+            .ok_or_else(|| scatter_err("scatter: unable to export GPU color data"))?;
         let expected = point_count * gpu_color.components.stride() as usize;
         if exported.len != expected {
-            return Err(format!(
+            return Err(scatter_err(format!(
                 "scatter: color array must contain {} elements (got {})",
                 expected, exported.len
-            ));
+            )));
         }
         if exported.precision != ProviderPrecision::F32 {
-            return Err(
-                "scatter: GPU color arrays must be single-precision (cast before plotting)"
-                    .to_string(),
-            );
+            return Err(scatter_err(
+                "scatter: GPU color arrays must be single-precision (cast before plotting)",
+            ));
         }
         return Ok(ScatterColorBuffer::Gpu {
             buffer: exported.buffer,
@@ -544,7 +570,7 @@ fn build_color_buffer(
 fn ensure_host_marker_metadata(
     style: &mut ScatterResolvedStyle,
     point_count: usize,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     if style.per_point_sizes.is_none() {
         if let Some(handle) = style.gpu_sizes.clone() {
             let tensor = gather_tensor_from_gpu(handle, "scatter")?;
@@ -572,10 +598,16 @@ pub(crate) mod tests {
     };
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use crate::RuntimeError;
+    use futures::executor::block_on;
     use runmat_builtins::Value;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
+    }
+
+    fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<String> {
+        block_on(super::scatter_builtin(x, y, rest))
     }
 
     fn test_style() -> ScatterResolvedStyle {
@@ -610,11 +642,11 @@ pub(crate) mod tests {
         }
     }
 
-    fn assert_plotting_unavailable(msg: &str) {
-        let lower = msg.to_lowercase();
+    fn assert_plotting_unavailable(err: &RuntimeError) {
+        let lower = err.to_string().to_lowercase();
         assert!(
             lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
-            "unexpected error: {msg}"
+            "unexpected error: {err}"
         );
     }
 
@@ -634,8 +666,8 @@ pub(crate) mod tests {
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Vec::new(),
         );
-        if let Err(msg) = out {
-            assert_plotting_unavailable(&msg);
+        if let Err(flow) = out {
+            assert_plotting_unavailable(&flow);
         }
     }
 
@@ -702,7 +734,7 @@ pub(crate) mod tests {
         ];
         let args = PointArgs::parse(rest, LineStyleParseOptions::scatter()).unwrap();
         let err = resolve_scatter_style(2, &args, "scatter").unwrap_err();
-        assert!(err.contains("requires per-point color data"));
+        assert!(err.to_string().contains("requires per-point color data"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

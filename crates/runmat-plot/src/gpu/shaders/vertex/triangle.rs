@@ -28,11 +28,12 @@ struct VertexOutput {
 fn vs_main(input: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    // TEMP: Bypass projection matrix - use direct NDC coordinates
-    out.clip_position = vec4<f32>(input.position, 1.0);
-    out.world_position = input.position;
+    let world_position = uniforms.model * vec4<f32>(input.position, 1.0);
+    out.clip_position = uniforms.view_proj * world_position;
+    out.world_position = world_position.xyz;
     out.color = input.color;
-    out.normal = normalize(input.normal); // Skip normal transformation for 2D plotting
+    // normal_matrix is mat3x4 for alignment (see Rust side). In WGSL, mat3x4 * vec3 -> vec4.
+    out.normal = normalize((uniforms.normal_matrix * input.normal).xyz);
     out.tex_coords = input.tex_coords;
 
     return out;

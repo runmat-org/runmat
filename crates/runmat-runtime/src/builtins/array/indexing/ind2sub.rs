@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::make_cell;
+use crate::{build_runtime_error, make_cell, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::indexing::ind2sub")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -47,22 +47,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::array::indexing::ind2sub"
 )]
-fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> Result<Value, String> {
-    let (dims_value, dims_was_gpu) = materialize_value(dims_val)?;
-    let dims = parse_dims(&dims_value)?;
+async fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinResult<Value> {
+    let (dims_value, dims_was_gpu) = materialize_value(dims_val, "ind2sub").await?;
+    let dims = parse_dims(&dims_value, "ind2sub").await?;
     if dims.is_empty() {
-        return Err("Size vector must have at least one element.".to_string());
+        return Err(ind2sub_error("Size vector must have at least one element."));
     }
 
-    let total = total_elements(&dims)?;
-    let strides = build_strides(&dims)?;
+    let total = total_elements(&dims, "ind2sub")?;
+    let strides = build_strides(&dims, "ind2sub")?;
 
     if let Some(result) = try_gpu_ind2sub(&dims, &strides, total, &indices_val)? {
         return Ok(result);
     }
 
-    let (indices_value, indices_was_gpu) = materialize_value(indices_val)?;
-    let indices_tensor = tensor::value_into_tensor_for("ind2sub", indices_value)?;
+    let (indices_value, indices_was_gpu) = materialize_value(indices_val, "ind2sub").await?;
+    let indices_tensor = tensor::value_into_tensor_for("ind2sub", indices_value)
+        .map_err(|message| ind2sub_error(message))?;
 
     let subscripts = compute_subscripts(&dims, total, &strides, &indices_tensor)?;
 
@@ -93,7 +94,7 @@ fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> Result<Value, String>
         outputs.push(tensor::tensor_into_value(tensor));
     }
 
-    make_cell(outputs, 1, dims.len())
+    make_cell(outputs, 1, dims.len()).map_err(|message| ind2sub_error(message))
 }
 
 fn try_gpu_ind2sub(
@@ -101,64 +102,76 @@ fn try_gpu_ind2sub(
     strides: &[usize],
     total: usize,
     indices: &Value,
-) -> Result<Option<Value>, String> {
-    #[cfg(all(test, feature = "wgpu"))]
+) -> crate::BuiltinResult<Option<Value>> {
+    #[cfg(target_arch = "wasm32")]
     {
-        if let Value::GpuTensor(h) = indices {
-            if h.device_id != 0 {
-                let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                    runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-                );
+        let _ = (dims, strides, total, indices);
+        Ok(None)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        #[cfg(all(test, feature = "wgpu"))]
+        {
+            if let Value::GpuTensor(h) = indices {
+                if h.device_id != 0 {
+                    let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+                    );
+                }
             }
         }
-    }
-    let provider = match runmat_accelerate_api::provider() {
-        Some(p) => p,
-        None => return Ok(None),
-    };
-    if !provider.supports_ind2sub() {
-        return Ok(None);
-    }
-    let handle = match indices {
-        Value::GpuTensor(handle) => handle,
-        _ => return Ok(None),
-    };
-    if dims.len() != strides.len() {
-        return Err("Size vector must have at least one element.".to_string());
-    }
-    if dims.iter().any(|&d| d > u32::MAX as usize)
-        || strides.iter().any(|&s| s > u32::MAX as usize)
-        || total > u32::MAX as usize
-    {
-        return Ok(None);
-    }
-    let len = if handle.shape.is_empty() {
-        1usize
-    } else {
-        handle.shape.iter().copied().product()
-    };
-    if total == 0 && len > 0 {
-        return Err("Index exceeds number of array elements. Index must not exceed 0.".to_string());
-    }
-    if len > u32::MAX as usize {
-        return Ok(None);
-    }
-    let output_shape = if handle.shape.is_empty() {
-        vec![len, 1]
-    } else {
-        handle.shape.clone()
-    };
-    match provider.ind2sub(dims, strides, handle, total, len, &output_shape) {
-        Ok(handles) => {
-            if handles.len() != dims.len() {
-                return Err(
-                    "ind2sub: provider returned an unexpected number of outputs.".to_string(),
-                );
-            }
-            let values: Vec<Value> = handles.into_iter().map(Value::GpuTensor).collect();
-            make_cell(values, 1, dims.len()).map(Some)
+        let provider = match runmat_accelerate_api::provider() {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+        if !provider.supports_ind2sub() {
+            return Ok(None);
         }
-        Err(err) => Err(err.to_string()),
+        let handle = match indices {
+            Value::GpuTensor(handle) => handle,
+            _ => return Ok(None),
+        };
+        if dims.len() != strides.len() {
+            return Err(ind2sub_error("Size vector must have at least one element."));
+        }
+        if dims.iter().any(|&d| d > u32::MAX as usize)
+            || strides.iter().any(|&s| s > u32::MAX as usize)
+            || total > u32::MAX as usize
+        {
+            return Ok(None);
+        }
+        let len = if handle.shape.is_empty() {
+            1usize
+        } else {
+            handle.shape.iter().copied().product()
+        };
+        if total == 0 && len > 0 {
+            return Err(ind2sub_error(
+                "Index exceeds number of array elements. Index must not exceed 0.",
+            ));
+        }
+        if len > u32::MAX as usize {
+            return Ok(None);
+        }
+        let output_shape = if handle.shape.is_empty() {
+            vec![len, 1]
+        } else {
+            handle.shape.clone()
+        };
+        match provider.ind2sub(dims, strides, handle, total, len, &output_shape) {
+            Ok(handles) => {
+                if handles.len() != dims.len() {
+                    return Err(ind2sub_error(
+                        "ind2sub: provider returned an unexpected number of outputs.",
+                    ));
+                }
+                let values: Vec<Value> = handles.into_iter().map(Value::GpuTensor).collect();
+                make_cell(values, 1, dims.len())
+                    .map(Some)
+                    .map_err(|message| ind2sub_error(message))
+            }
+            Err(err) => Err(ind2sub_error(err.to_string())),
+        }
     }
 }
 
@@ -167,9 +180,9 @@ fn compute_subscripts(
     total: usize,
     strides: &[usize],
     indices: &Tensor,
-) -> Result<Vec<Tensor>, String> {
+) -> crate::BuiltinResult<Vec<Tensor>> {
     if strides.len() != dims.len() {
-        return Err("Size vector must have at least one element.".to_string());
+        return Err(ind2sub_error("Size vector must have at least one element."));
     }
 
     let len = indices.data.len();
@@ -192,43 +205,53 @@ fn compute_subscripts(
 
     let mut tensors = Vec::with_capacity(dims.len());
     for data in outputs {
-        let tensor =
-            Tensor::new(data, output_shape.clone()).map_err(|e| format!("ind2sub: {e}"))?;
+        let tensor = Tensor::new(data, output_shape.clone())
+            .map_err(|e| ind2sub_error(format!("ind2sub: {e}")))?;
         tensors.push(tensor);
     }
     Ok(tensors)
 }
 
-fn coerce_linear_index(value: f64, max_index: usize) -> Result<usize, String> {
+fn coerce_linear_index(value: f64, max_index: usize) -> crate::BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err("Linear indices must be positive integers.".to_string());
+        return Err(ind2sub_error("Linear indices must be positive integers."));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err("Linear indices must be positive integers.".to_string());
+        return Err(ind2sub_error("Linear indices must be positive integers."));
     }
     if rounded < 1.0 {
-        return Err("Linear indices must be positive integers.".to_string());
+        return Err(ind2sub_error("Linear indices must be positive integers."));
     }
     if rounded > usize::MAX as f64 {
-        return Err("Index exceeds maximum supported size for this platform.".to_string());
+        return Err(ind2sub_error(
+            "Index exceeds maximum supported size for this platform.",
+        ));
     }
     let coerced = rounded as usize;
     if coerced > max_index {
-        return Err(format!(
+        return Err(ind2sub_error(format!(
             "Index exceeds number of array elements. Index must not exceed {}.",
             max_index
-        ));
+        )));
     }
     Ok(coerced)
 }
 
+fn ind2sub_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("ind2sub").build()
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{Tensor, Value};
+
+    fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinResult<Value> {
+        block_on(super::ind2sub_builtin(dims_val, indices_val))
+    }
 
     fn cell_to_vec(cell: &runmat_builtins::CellArray) -> Vec<Value> {
         cell.data.iter().map(|ptr| (**ptr).clone()).collect()
@@ -236,7 +259,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn recovers_matrix_indices() {
+    fn recovers_tensor_indices() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
         let result = ind2sub_builtin(Value::Tensor(dims), Value::Num(8.0)).unwrap();
         match result {
@@ -314,7 +337,8 @@ pub(crate) mod tests {
         let err =
             ind2sub_builtin(Value::Tensor(dims), Value::Num(13.0)).expect_err("expected failure");
         assert!(
-            err.contains("Index exceeds number of array elements"),
+            err.message()
+                .contains("Index exceeds number of array elements"),
             "unexpected error: {err}"
         );
     }
@@ -349,7 +373,8 @@ pub(crate) mod tests {
         let dims = Tensor::new(vec![3.5, 4.0], vec![1, 2]).unwrap();
         let err = ind2sub_builtin(Value::Tensor(dims), Value::Num(5.0)).expect_err("expected fail");
         assert!(
-            err.contains("Size arguments must be positive integers"),
+            err.to_string()
+                .contains("Size arguments must be positive integers"),
             "unexpected error: {err}"
         );
     }

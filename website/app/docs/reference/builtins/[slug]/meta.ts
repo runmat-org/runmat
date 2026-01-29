@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { getBuiltinDocBySlug, formatCategoryLabel } from '@/lib/builtins';
 import { resolveOgFields } from '@/lib/og';
+import { buildPageMetadata } from '@/lib/seo';
 
 const FALLBACK_DESCRIPTION = 'RunMat / MATLAB Language Function documentation';
 
@@ -8,38 +9,25 @@ export function builtinMetadataForSlug(slug: string): Metadata {
     const builtin = getBuiltinDocBySlug(slug);
     if (!builtin) {
         const title = `${slug} | MATLAB Language Function Reference`;
-        return {
-            title,
-            description: FALLBACK_DESCRIPTION,
-            openGraph: {
-                title: slug,
-                description: FALLBACK_DESCRIPTION,
-            },
-            twitter: {
-                card: 'summary_large_image',
-                title: slug,
-                description: FALLBACK_DESCRIPTION,
-            },
-            alternates: { canonical: `/docs/reference/builtins/${slug}` },
-        } satisfies Metadata;
+        return buildPageMetadata({
+          title,
+          description: FALLBACK_DESCRIPTION,
+          canonicalPath: `/docs/reference/builtins/${slug}`,
+          ogType: 'article',
+          ogImagePath: `/docs/reference/builtins/${slug}/opengraph-image`,
+        });
     }
 
     const description = (builtin.description || builtin.summary || FALLBACK_DESCRIPTION).trim();
 
-    return {
-        title: { absolute: `${builtin.title} in MATLAB: Free Online Compiler & Reference` },
-        description,
-        openGraph: {
-            title: builtin.title,
-            description,
-        },
-        twitter: {
-            card: 'summary_large_image',
-            title: builtin.title,
-            description,
-        },
-        alternates: { canonical: `/docs/reference/builtins/${slug}` },
-    } satisfies Metadata;
+    const title = `${builtin.name} | MATLAB Language Function Reference`;
+    return buildPageMetadata({
+      title,
+      description,
+      canonicalPath: `/docs/reference/builtins/${slug}`,
+      ogType: 'article',
+      ogImagePath: `/docs/reference/builtins/${slug}/opengraph-image`,
+    });
 }
 
 export function builtinOgTitleSubtitle(slug: string): { title: string; subtitle: string } {

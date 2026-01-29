@@ -12,6 +12,6 @@ use super::state::current_figure_handle;
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::gcf"
 )]
-pub fn gcf_builtin() -> Result<f64, String> {
+pub fn gcf_builtin() -> crate::BuiltinResult<f64> {
     Ok(current_figure_handle().as_u32() as f64)
 }

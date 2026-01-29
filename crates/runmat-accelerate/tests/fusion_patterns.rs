@@ -1,9 +1,14 @@
 use runmat_accelerate::fusion::{detect_fusion_groups, FusionKind, FusionPlan};
 use runmat_accelerate::graph::{AccelGraph, AccelNodeLabel, PrimitiveOp, ValueOrigin};
-use runmat_hir::lower;
+use runmat_hir::{HirProgram, LoweringContext, SemanticError};
 use runmat_ignition::compile;
 use runmat_parser::parse;
+use std::collections::HashMap;
 use std::sync::Once;
+
+fn lower(ast: &runmat_parser::Program) -> Result<HirProgram, SemanticError> {
+    runmat_hir::lower(ast, &LoweringContext::empty()).map(|result| result.hir)
+}
 
 fn init_logger() {
     static INIT: Once = Once::new();
@@ -15,7 +20,7 @@ fn compile_graph(source: &str) -> AccelGraph {
     let trimmed = source.trim_start_matches(|c: char| c.is_whitespace());
     let ast = parse(trimmed).expect("parse");
     let hir = lower(&ast).expect("lower");
-    let bytecode = compile(&hir).expect("compile");
+    let bytecode = compile(&hir, &HashMap::new()).expect("compile");
     bytecode.accel_graph.clone().expect("bytecode accel graph")
 }
 

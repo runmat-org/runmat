@@ -30,8 +30,8 @@ fn cpu_matmul(a: &[f64], ar: usize, ac: usize, b: &[f64], br: usize, bc: usize) 
     out
 }
 
-#[test]
-fn transpose_roundtrip_matches_cpu() {
+#[tokio::test]
+async fn transpose_roundtrip_matches_cpu() {
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
     let p = runmat_accelerate_api::provider().expect("provider");
 
@@ -52,7 +52,7 @@ fn transpose_roundtrip_matches_cpu() {
         .expect("upload");
     let transposed = p.transpose(&handle).expect("transpose");
     assert!(runmat_accelerate_api::handle_transpose_info(&transposed).is_some());
-    let host_t = p.download(&transposed).expect("download transpose");
+    let host_t = p.download(&transposed).await.expect("download transpose");
     assert_eq!(host_t.shape, vec![cols, rows]);
 
     let expected_t = cpu_transpose(&data, rows, cols);
@@ -68,6 +68,7 @@ fn transpose_roundtrip_matches_cpu() {
     assert!(runmat_accelerate_api::handle_transpose_info(&transposed_back).is_none());
     let host_tt = p
         .download(&transposed_back)
+        .await
         .expect("download double transpose");
     assert_eq!(host_tt.shape, vec![rows, cols]);
     for (idx, (&got, &want)) in host_tt.data.iter().zip(data.iter()).enumerate() {
@@ -79,8 +80,8 @@ fn transpose_roundtrip_matches_cpu() {
     }
 }
 
-#[test]
-fn matmul_with_transposed_operand_matches_cpu() {
+#[tokio::test]
+async fn matmul_with_transposed_operand_matches_cpu() {
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
     let p = runmat_accelerate_api::provider().expect("provider");
     if p.precision() != ProviderPrecision::F64 {
@@ -123,8 +124,8 @@ fn matmul_with_transposed_operand_matches_cpu() {
         .expect("upload B");
 
     let a_t = p.transpose(&handle_a).expect("transpose A");
-    let result = p.matmul(&a_t, &handle_b).expect("matmul A^T * B");
-    let host = p.download(&result).expect("download result");
+    let result = p.matmul(&a_t, &handle_b).await.expect("matmul A^T * B");
+    let host = p.download(&result).await.expect("download result");
     assert_eq!(host.shape, vec![k, n]);
 
     let a_t_cpu = cpu_transpose(&a, m, k);

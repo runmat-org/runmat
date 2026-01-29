@@ -3,15 +3,18 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 
-use runmat_builtins::{CharArray, Tensor, Value};
+use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::io::filetext::registry::{self, FileInfo, RegisteredFile};
-use crate::{gather_if_needed, make_cell};
+use crate::builtins::io::filetext::{
+    helpers::{char_array_value, extract_scalar_string, normalize_encoding_label},
+    registry::{self, FileInfo, RegisteredFile},
+};
+use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 use runmat_filesystem::OpenOptions;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fopen")]
@@ -42,6 +45,26 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "File I/O is not eligible for fusion; metadata registered for completeness only.",
 };
 
+const BUILTIN_NAME: &str = "fopen";
+
+fn fopen_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let message = err.message().to_string();
+    let identifier = err.identifier().map(|value| value.to_string());
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "fopen",
     category = "io/filetext",
@@ -50,8 +73,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::filetext::fopen"
 )]
-fn fopen_builtin(args: Vec<Value>) -> Result<Value, String> {
-    let eval = evaluate(&args)?;
+async fn fopen_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(&args).await?;
     Ok(eval.first_output())
 }
 
@@ -214,14 +237,14 @@ impl QueryOutputs {
 }
 
 impl ListOutputs {
-    fn from_infos(infos: Vec<FileInfo>) -> Result<Self, String> {
+    fn from_infos(infos: Vec<FileInfo>) -> BuiltinResult<Self> {
         let mut handles: Vec<f64> = infos.iter().map(|info| info.id as f64).collect();
         let rows = handles.len();
         if rows == 0 {
             handles = Vec::new();
         }
         let shape = if rows == 0 { vec![0, 1] } else { vec![rows, 1] };
-        let tensor = Tensor::new(handles, shape).map_err(|e| format!("fopen: {e}"))?;
+        let tensor = Tensor::new(handles, shape).map_err(|e| fopen_error(format!("fopen: {e}")))?;
 
         let mut name_values = Vec::with_capacity(infos.len());
         let mut machine_values = Vec::with_capacity(infos.len());
@@ -270,7 +293,7 @@ struct Permission {
 }
 
 impl Permission {
-    fn parse(value: Option<&Value>) -> Result<Self, String> {
+    fn parse(value: Option<&Value>) -> BuiltinResult<Self> {
         let raw = match value {
             Some(v) => {
                 let text = scalar_string(
@@ -279,7 +302,7 @@ impl Permission {
                 )?;
                 let trimmed = text.trim();
                 if trimmed.is_empty() {
-                    return Err("fopen: permission string must not be empty".to_string());
+                    return Err(fopen_error("fopen: permission string must not be empty"));
                 }
                 trimmed.to_string()
             }
@@ -289,7 +312,7 @@ impl Permission {
         let mut chars = raw.chars();
         let base = chars
             .next()
-            .ok_or_else(|| "fopen: permission string must not be empty".to_string())?
+            .ok_or_else(|| fopen_error("fopen: permission string must not be empty"))?
             .to_ascii_lowercase();
 
         let mut read = false;
@@ -313,7 +336,9 @@ impl Permission {
                 append = true;
             }
             _ => {
-                return Err(format!("fopen: unsupported permission prefix '{base}'"));
+                return Err(fopen_error(format!(
+                    "fopen: unsupported permission prefix '{base}'"
+                )));
             }
         }
 
@@ -325,9 +350,9 @@ impl Permission {
             match c {
                 '+' => {
                     if plus {
-                        return Err(
-                            "fopen: duplicate '+' modifier in permission string".to_string()
-                        );
+                        return Err(fopen_error(
+                            "fopen: duplicate '+' modifier in permission string",
+                        ));
                     }
                     plus = true;
                     read = true;
@@ -335,30 +360,32 @@ impl Permission {
                 }
                 'b' | 'B' => {
                     if binary {
-                        return Err(
-                            "fopen: duplicate 'b' modifier in permission string".to_string()
-                        );
+                        return Err(fopen_error(
+                            "fopen: duplicate 'b' modifier in permission string",
+                        ));
                     }
                     binary = true;
                 }
                 't' | 'T' => {
                     if explicit_text {
-                        return Err(
-                            "fopen: duplicate 't' modifier in permission string".to_string()
-                        );
+                        return Err(fopen_error(
+                            "fopen: duplicate 't' modifier in permission string",
+                        ));
                     }
                     explicit_text = true;
                 }
                 other => {
-                    return Err(format!("fopen: unrecognised permission modifier '{other}'"));
+                    return Err(fopen_error(format!(
+                        "fopen: unrecognised permission modifier '{other}'"
+                    )));
                 }
             }
         }
 
         if binary && explicit_text {
-            return Err(
-                "fopen: permission modifiers 'b' and 't' are mutually exclusive".to_string(),
-            );
+            return Err(fopen_error(
+                "fopen: permission modifiers 'b' and 't' are mutually exclusive",
+            ));
         }
 
         let mut canonical = String::new();
@@ -384,8 +411,8 @@ impl Permission {
     }
 }
 
-pub fn evaluate(args: &[Value]) -> Result<FopenEval, String> {
-    let gathered = gather_args(args)?;
+pub async fn evaluate(args: &[Value]) -> BuiltinResult<FopenEval> {
+    let gathered = gather_args(args).await?;
     if gathered.is_empty() {
         return handle_all(&[]);
     }
@@ -399,9 +426,9 @@ pub fn evaluate(args: &[Value]) -> Result<FopenEval, String> {
     handle_open(first, &gathered[1..])
 }
 
-fn handle_open(path_value: &Value, rest: &[Value]) -> Result<FopenEval, String> {
+fn handle_open(path_value: &Value, rest: &[Value]) -> BuiltinResult<FopenEval> {
     if rest.len() > 3 {
-        return Err("fopen: too many input arguments".to_string());
+        return Err(fopen_error("fopen: too many input arguments"));
     }
 
     let path = value_to_path(path_value)?;
@@ -436,9 +463,9 @@ fn handle_open(path_value: &Value, rest: &[Value]) -> Result<FopenEval, String> 
     }
 }
 
-fn handle_query(fid_value: &Value, rest: &[Value]) -> Result<FopenEval, String> {
+fn handle_query(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FopenEval> {
     if !rest.is_empty() {
-        return Err("fopen: too many input arguments".to_string());
+        return Err(fopen_error("fopen: too many input arguments"));
     }
     let fid = parse_fid(fid_value)?;
     let outputs = match registry::info_for(fid) {
@@ -448,9 +475,9 @@ fn handle_query(fid_value: &Value, rest: &[Value]) -> Result<FopenEval, String> 
     Ok(FopenEval::query(outputs))
 }
 
-fn handle_all(rest: &[Value]) -> Result<FopenEval, String> {
+fn handle_all(rest: &[Value]) -> BuiltinResult<FopenEval> {
     if rest.len() > 1 {
-        return Err("fopen: too many input arguments".to_string());
+        return Err(fopen_error("fopen: too many input arguments"));
     }
     let machinefmt_filter = if let Some(value) = rest.first() {
         Some(parse_machinefmt(Some(value))?)
@@ -465,10 +492,14 @@ fn handle_all(rest: &[Value]) -> Result<FopenEval, String> {
     Ok(FopenEval::list(outputs))
 }
 
-fn gather_args(args: &[Value]) -> Result<Vec<Value>, String> {
+async fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut gathered = Vec::with_capacity(args.len());
     for value in args {
-        gathered.push(gather_if_needed(value).map_err(|e| format!("fopen: {e}"))?);
+        gathered.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     Ok(gathered)
 }
@@ -483,24 +514,24 @@ fn is_numeric_value(value: &Value) -> bool {
     matches!(value, Value::Num(_) | Value::Int(_))
 }
 
-fn parse_fid(value: &Value) -> Result<i32, String> {
+fn parse_fid(value: &Value) -> BuiltinResult<i32> {
     let num: f64 = value
         .try_into()
-        .map_err(|_| "fopen: file identifier must be numeric".to_string())?;
+        .map_err(|_| fopen_error("fopen: file identifier must be numeric"))?;
     if !num.is_finite() {
-        return Err("fopen: file identifier must be finite".to_string());
+        return Err(fopen_error("fopen: file identifier must be finite"));
     }
     let rounded = num.round();
     if (rounded - num).abs() > f64::EPSILON {
-        return Err("fopen: file identifier must be an integer".to_string());
+        return Err(fopen_error("fopen: file identifier must be an integer"));
     }
     if rounded < i32::MIN as f64 || rounded > i32::MAX as f64 {
-        return Err("fopen: file identifier is out of range".to_string());
+        return Err(fopen_error("fopen: file identifier is out of range"));
     }
     Ok(rounded as i32)
 }
 
-fn value_to_path(value: &Value) -> Result<PathBuf, String> {
+fn value_to_path(value: &Value) -> BuiltinResult<PathBuf> {
     let raw = scalar_string(
         value,
         "fopen: expected filename as a string scalar or character vector",
@@ -508,14 +539,14 @@ fn value_to_path(value: &Value) -> Result<PathBuf, String> {
     normalize_path(&raw)
 }
 
-fn normalize_path(raw: &str) -> Result<PathBuf, String> {
+fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
     if raw.trim().is_empty() {
-        return Err("fopen: filename must not be empty".to_string());
+        return Err(fopen_error("fopen: filename must not be empty"));
     }
     Ok(Path::new(raw).to_path_buf())
 }
 
-fn parse_machinefmt(value: Option<&Value>) -> Result<String, String> {
+fn parse_machinefmt(value: Option<&Value>) -> BuiltinResult<String> {
     match value {
         None => Ok("native".to_string()),
         Some(v) => {
@@ -525,7 +556,7 @@ fn parse_machinefmt(value: Option<&Value>) -> Result<String, String> {
             )?;
             let trimmed = text.trim();
             if trimmed.is_empty() {
-                return Err("fopen: machine format must not be empty".to_string());
+                return Err(fopen_error("fopen: machine format must not be empty"));
             }
             let lower = trimmed.to_ascii_lowercase();
             let collapsed: String = lower
@@ -550,12 +581,14 @@ fn parse_machinefmt(value: Option<&Value>) -> Result<String, String> {
             if let Some(suffix) = lower.strip_prefix("ieee-be") {
                 return Ok(format!("ieee-be{suffix}"));
             }
-            Err(format!("fopen: unsupported machine format '{trimmed}'"))
+            Err(fopen_error(format!(
+                "fopen: unsupported machine format '{trimmed}'"
+            )))
         }
     }
 }
 
-fn parse_encoding(value: Option<&Value>, permission: &Permission) -> Result<String, String> {
+fn parse_encoding(value: Option<&Value>, permission: &Permission) -> BuiltinResult<String> {
     match value {
         None => {
             if permission.binary {
@@ -571,55 +604,28 @@ fn parse_encoding(value: Option<&Value>, permission: &Permission) -> Result<Stri
             )?;
             let trimmed = text.trim();
             if trimmed.is_empty() {
-                return Err("fopen: encoding name must not be empty".to_string());
+                return Err(fopen_error("fopen: encoding name must not be empty"));
             }
             Ok(normalize_encoding_label(trimmed))
         }
     }
 }
 
-fn normalize_encoding_label(label: &str) -> String {
-    let lower = label.to_ascii_lowercase();
-    match lower.as_str() {
-        "utf-8" | "utf8" | "unicode" => "UTF-8".to_string(),
-        "ascii" | "us-ascii" | "us_ascii" | "usascii" => "US-ASCII".to_string(),
-        "latin1" | "latin-1" | "iso-8859-1" | "iso8859-1" => "latin1".to_string(),
-        "windows-1252" | "cp1252" => "windows-1252".to_string(),
-        "shift-jis" | "shift_jis" | "sjis" => "Shift_JIS".to_string(),
-        "binary" => "binary".to_string(),
-        "system" | "default" | "native" => "system".to_string(),
-        _ => label.to_string(),
-    }
-}
-
-fn scalar_string(value: &Value, err: &str) -> Result<String, String> {
+fn scalar_string(value: &Value, err: &str) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(err.to_string()),
+        _ => Err(fopen_error(err)),
     }
 }
 
-fn extract_scalar_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        _ => None,
-    }
-}
-
-fn char_array_value(text: &str) -> Value {
-    Value::CharArray(CharArray::new_row(text))
-}
-
-fn make_cell_column(values: Vec<Value>) -> Result<Value, String> {
+fn make_cell_column(values: Vec<Value>) -> BuiltinResult<Value> {
     let len = values.len();
     if len == 0 {
-        make_cell(values, 0, 0)
+        make_cell(values, 0, 0).map_err(|err| fopen_error(format!("fopen: {err}")))
     } else {
-        make_cell(values, len, 1)
+        make_cell(values, len, 1).map_err(|err| fopen_error(format!("fopen: {err}")))
     }
 }
 
@@ -641,15 +647,24 @@ pub(crate) mod tests {
         std::env::temp_dir().join(filename)
     }
 
+    fn run_evaluate(args: &[Value]) -> BuiltinResult<FopenEval> {
+        futures::executor::block_on(evaluate(args))
+    }
+
+    fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
+        registry::test_guard()
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_read_existing_file_returns_fid() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fopen_read");
         fs::write(&path, "hello world").unwrap();
 
         let args = vec![Value::from(path.to_string_lossy().to_string())];
-        let eval = evaluate(&args).expect("fopen");
+        let eval = run_evaluate(&args).expect("fopen");
         let open = eval.as_open().expect("expected open result");
         assert!(open.fid >= 3.0);
         assert!(open.message.is_empty());
@@ -663,10 +678,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_missing_file_returns_error() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fopen_missing");
         let args = vec![Value::from(path.to_string_lossy().to_string())];
-        let eval = evaluate(&args).expect("fopen");
+        let eval = run_evaluate(&args).expect("fopen");
         let open = eval.as_open().expect("open output");
         assert_eq!(open.fid, -1.0);
         assert!(!open.message.is_empty());
@@ -677,6 +693,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_query_returns_metadata() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fopen_query");
         {
@@ -684,12 +701,12 @@ pub(crate) mod tests {
             writeln!(&mut file, "data").unwrap();
         }
         let args = vec![Value::from(path.to_string_lossy().to_string())];
-        let eval = evaluate(&args).expect("fopen");
+        let eval = run_evaluate(&args).expect("fopen");
         let open = eval.as_open().expect("open result");
         let fid = open.fid;
         assert!(fid >= 3.0);
 
-        let query_eval = evaluate(&[Value::from(fid)]).expect("fopen query");
+        let query_eval = run_evaluate(&[Value::from(fid)]).expect("fopen query");
         let query = query_eval.as_query().expect("query result");
         assert!(query.filename.contains("fopen_query"));
         assert_eq!(query.permission, "r");
@@ -702,14 +719,15 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_all_lists_handles() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fopen_all");
         fs::write(&path, "abc").unwrap();
         let eval_open =
-            evaluate(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
+            run_evaluate(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
         let fid = eval_open.as_open().unwrap().fid;
 
-        let list_eval = evaluate(&[Value::from("all")]).expect("fopen all");
+        let list_eval = run_evaluate(&[Value::from("all")]).expect("fopen all");
         let list = list_eval.as_list().expect("list result");
         assert!(!list.handles.data.is_empty());
         assert!(list
@@ -745,17 +763,18 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_all_machinefmt_filters_entries() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let native_path = unique_path("fopen_native");
         let be_path = unique_path("fopen_ieee_be");
         fs::write(&native_path, "native").unwrap();
         fs::write(&be_path, "be").unwrap();
 
-        let native_eval =
-            evaluate(&[Value::from(native_path.to_string_lossy().to_string())]).expect("native");
+        let native_eval = run_evaluate(&[Value::from(native_path.to_string_lossy().to_string())])
+            .expect("native");
         let native_fid = native_eval.as_open().unwrap().fid;
 
-        let be_eval = evaluate(&[
+        let be_eval = run_evaluate(&[
             Value::from(be_path.to_string_lossy().to_string()),
             Value::from("r"),
             Value::from("ieee-be"),
@@ -764,7 +783,7 @@ pub(crate) mod tests {
         let be_fid = be_eval.as_open().unwrap().fid;
 
         let list_eval =
-            evaluate(&[Value::from("all"), Value::from("ieee-be")]).expect("fopen all filter");
+            run_evaluate(&[Value::from("all"), Value::from("ieee-be")]).expect("fopen all filter");
         let list = list_eval.as_list().expect("list result");
         assert_eq!(list.handles.data.len(), 1);
         assert!((list.handles.data[0] - be_fid).abs() < f64::EPSILON);
@@ -778,12 +797,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_binary_default_encoding_binary() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fopen_binary");
         {
             let _ = fs::File::create(&path).unwrap();
         }
-        let eval = evaluate(&[
+        let eval = run_evaluate(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("wb"),
         ])
@@ -797,9 +817,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_encoding_argument_is_preserved() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fopen_encoding");
-        let eval = evaluate(&[
+        let eval = run_evaluate(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("w"),
             Value::from("ieee-be"),
@@ -818,10 +839,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_permission_canonicalizes_plus_binary_order() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fopen_perm_order");
         fs::write(&path, "seed").unwrap();
-        let eval = evaluate(&[
+        let eval = run_evaluate(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("r+b"),
         ])
@@ -829,7 +851,7 @@ pub(crate) mod tests {
         let open = eval.as_open().unwrap();
         assert!(open.fid >= 3.0);
         assert_eq!(open.encoding, "binary");
-        let query = evaluate(&[Value::Num(open.fid)]).expect("query");
+        let query = run_evaluate(&[Value::Num(open.fid)]).expect("query");
         let info = query.as_query().unwrap();
         assert_eq!(info.permission, "rb+");
         let _ = registry::close(open.fid as i32);
@@ -839,9 +861,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_machinefmt_preserves_suffix() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fopen_machinefmt_suffix");
-        let eval = evaluate(&[
+        let eval = run_evaluate(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("w"),
             Value::from("ieee-be.l64"),
@@ -849,7 +872,7 @@ pub(crate) mod tests {
         .expect("fopen");
         let open = eval.as_open().unwrap();
         assert_eq!(open.machinefmt, "ieee-be.l64");
-        let query = evaluate(&[Value::Num(open.fid)]).expect("query");
+        let query = run_evaluate(&[Value::Num(open.fid)]).expect("query");
         let info = query.as_query().unwrap();
         assert_eq!(info.machinefmt, "ieee-be.l64");
         let _ = registry::close(open.fid as i32);
@@ -861,9 +884,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_machinefmt_pc_alias_maps_to_ieee_le() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fopen_machinefmt_pc");
-        let eval = evaluate(&[
+        let eval = run_evaluate(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("w"),
             Value::from("pc"),
@@ -871,7 +895,7 @@ pub(crate) mod tests {
         .expect("fopen");
         let open = eval.as_open().unwrap();
         assert_eq!(open.machinefmt, "ieee-le");
-        let query = evaluate(&[Value::Num(open.fid)]).expect("query");
+        let query = run_evaluate(&[Value::Num(open.fid)]).expect("query");
         let info = query.as_query().unwrap();
         assert_eq!(info.machinefmt, "ieee-le");
         let _ = registry::close(open.fid as i32);
@@ -883,10 +907,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_outputs_vector_padding() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fopen_outputs");
         fs::write(&path, "check").unwrap();
-        let eval = evaluate(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
+        let eval = run_evaluate(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
         let outputs = eval.outputs();
         assert_eq!(outputs.len(), 4);
         assert!(matches!(outputs[0], Value::Num(_)));
@@ -898,8 +923,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_invalid_fid_returns_empty() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
-        let eval = evaluate(&[Value::from(9999.0)]).expect("fopen");
+        let eval = run_evaluate(&[Value::from(9999.0)]).expect("fopen");
         let query = eval.as_query().expect("query result");
         assert!(query.filename.is_empty());
         assert!(query.permission.is_empty());

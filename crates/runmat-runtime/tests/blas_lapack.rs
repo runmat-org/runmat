@@ -180,7 +180,7 @@ fn test_builtin_blas_functions() {
         Ok(Value::Tensor(m)) => {
             assert_eq!(m.data, vec![4.0, 10.0, 5.0, 11.0]);
         }
-        Err(message) if message.contains("Undefined function") => {
+        Err(message) if message.message().contains("Undefined function") => {
             // Builtin not wired up yet; direct helper coverage above still exercises implementation.
             return;
         }
@@ -204,7 +204,7 @@ fn test_builtin_blas_functions() {
 
     match call_builtin("dot", &[Value::Cell(vec_a), Value::Cell(vec_b)]) {
         Ok(Value::Num(dot)) => assert_eq!(dot, 32.0),
-        Err(message) if message.contains("Undefined function") => (),
+        Err(message) if message.message().contains("Undefined function") => (),
         Ok(other) => panic!("Expected numeric result, got {other:?}"),
         Err(message) => panic!("Unexpected error calling dot builtin: {message}"),
     }
@@ -226,7 +226,7 @@ fn test_builtin_lapack_functions() {
                 panic!("Expected numeric solution");
             }
         }
-        Err(message) if message.contains("Undefined function") => (),
+        Err(message) if message.message().contains("Undefined function") => (),
         Ok(other) => panic!("Expected vector result, got {other:?}"),
         Err(message) => panic!("Unexpected error calling solve builtin: {message}"),
     }

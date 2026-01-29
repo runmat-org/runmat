@@ -10,7 +10,14 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{
+    gpu_helpers,
+    shape::{is_scalar_shape, normalize_scalar_shape},
+    tensor,
+};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+const NAME: &str = "var";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::var")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -34,6 +41,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: true,
     notes: "Providers compute variance via standard-deviation reductions followed by an in-device squaring pass.",
 };
+
+fn var_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::var")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -82,18 +93,18 @@ enum NormParse {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::var"
 )]
-fn var_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let parsed = parse_arguments(&rest)?;
+async fn var_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let parsed = parse_arguments(&rest).await?;
     match value {
-        Value::GpuTensor(handle) => var_gpu(handle, &parsed),
+        Value::GpuTensor(handle) => var_gpu(handle, &parsed).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err("var: complex inputs are not supported yet".to_string())
+            Err(var_error("var: complex inputs are not supported yet"))
         }
         other => var_host(other, &parsed),
     }
 }
 
-fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
+async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut axes = VarAxes::Default;
     let mut axes_set = false;
     let mut normalization = VarNormalization::Sample;
@@ -118,9 +129,9 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                 }
                 "all" => {
                     if axes_set && !matches!(axes, VarAxes::Default) {
-                        return Err(
-                            "var: 'all' cannot be combined with an explicit dimension".to_string()
-                        );
+                        return Err(var_error(
+                            "var: 'all' cannot be combined with an explicit dimension",
+                        ));
                     }
                     axes = VarAxes::All;
                     axes_set = true;
@@ -128,7 +139,7 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                     continue;
                 }
                 _ => {
-                    return Err(format!("var: unrecognised option '{keyword}'"));
+                    return Err(var_error(format!("var: unrecognised option '{keyword}'")));
                 }
             }
         }
@@ -147,35 +158,35 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                     continue;
                 }
                 NormParse::Weighted => {
-                    return Err("var: weighted variance is not implemented yet".to_string());
+                    return Err(var_error("var: weighted variance is not implemented yet"));
                 }
                 NormParse::NotMatched => {}
             }
         }
 
         if !axes_set || matches!(axes, VarAxes::Default) {
-            if let Some(selection) = parse_axes(arg)? {
+            if let Some(selection) = parse_axes(arg).await? {
                 if axes_set && !matches!(axes, VarAxes::Default) {
-                    return Err("var: multiple dimension specifications provided".to_string());
+                    return Err(var_error("var: multiple dimension specifications provided"));
                 }
                 if matches!(selection, VarAxes::All)
                     && axes_set
                     && !matches!(axes, VarAxes::Default)
                 {
-                    return Err(
-                        "var: 'all' cannot be combined with an explicit dimension".to_string()
-                    );
+                    return Err(var_error(
+                        "var: 'all' cannot be combined with an explicit dimension",
+                    ));
                 }
                 axes = selection;
                 axes_set = true;
                 idx += 1;
                 continue;
             }
-        } else if parse_axes(arg)?.is_some() {
-            return Err("var: multiple dimension specifications provided".to_string());
+        } else if parse_axes(arg).await?.is_some() {
+            return Err(var_error("var: multiple dimension specifications provided"));
         }
 
-        return Err(format!("var: unrecognised argument {arg:?}"));
+        return Err(var_error(format!("var: unrecognised argument {arg:?}")));
     }
 
     Ok(ParsedArguments {
@@ -185,7 +196,7 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
     })
 }
 
-fn parse_normalization(value: &Value) -> Result<NormParse, String> {
+fn parse_normalization(value: &Value) -> BuiltinResult<NormParse> {
     match value {
         Value::Tensor(tensor) => {
             if tensor.data.is_empty() {
@@ -214,17 +225,17 @@ fn parse_normalization(value: &Value) -> Result<NormParse, String> {
         Value::Int(i) => match i.to_i64() {
             0 => Ok(NormParse::Value(VarNormalization::Sample)),
             1 => Ok(NormParse::Value(VarNormalization::Population)),
-            _ => Err("var: normalisation flag must be 0, 1, or []".to_string()),
+            _ => Err(var_error("var: normalisation flag must be 0, 1, or []")),
         },
         Value::Num(n) => parse_normalization_scalar(*n),
-        Value::GpuTensor(_) => Err("var: normalisation flag must reside on the host".to_string()),
+        Value::GpuTensor(_) => Err(var_error("var: normalisation flag must reside on the host")),
         _ => Ok(NormParse::NotMatched),
     }
 }
 
-fn parse_normalization_scalar(value: f64) -> Result<NormParse, String> {
+fn parse_normalization_scalar(value: f64) -> BuiltinResult<NormParse> {
     if !value.is_finite() {
-        return Err("var: normalisation flag must be finite".to_string());
+        return Err(var_error("var: normalisation flag must be finite"));
     }
     if (value - 0.0).abs() < f64::EPSILON {
         return Ok(NormParse::Value(VarNormalization::Sample));
@@ -232,10 +243,10 @@ fn parse_normalization_scalar(value: f64) -> Result<NormParse, String> {
     if (value - 1.0).abs() < f64::EPSILON {
         return Ok(NormParse::Value(VarNormalization::Population));
     }
-    Err("var: normalisation flag must be 0, 1, or []".to_string())
+    Err(var_error("var: normalisation flag must be 0, 1, or []"))
 }
 
-fn parse_axes(value: &Value) -> Result<Option<VarAxes>, String> {
+async fn parse_axes(value: &Value) -> BuiltinResult<Option<VarAxes>> {
     if let Some(keyword) = keyword_of(value) {
         if keyword == "all" {
             return Ok(Some(VarAxes::All));
@@ -243,16 +254,16 @@ fn parse_axes(value: &Value) -> Result<Option<VarAxes>, String> {
         return Ok(None);
     }
 
-    let Some(dims) = extract_dims(value, "var")? else {
+    let Some(dims) = extract_dims(value, "var").await.map_err(var_error)? else {
         return Ok(None);
     };
     if dims.is_empty() {
-        return Err("var: dimension vector must not be empty".to_string());
+        return Err(var_error("var: dimension vector must not be empty"));
     }
     let mut cleaned = Vec::with_capacity(dims.len());
     for dim in dims {
         if dim == 0 {
-            return Err("var: dimensions must be >= 1".to_string());
+            return Err(var_error("var: dimensions must be >= 1"));
         }
         cleaned.push(dim);
     }
@@ -263,8 +274,8 @@ fn parse_axes(value: &Value) -> Result<Option<VarAxes>, String> {
     }
 }
 
-fn var_host(value: Value, args: &ParsedArguments) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("var", value)?;
+fn var_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("var", value).map_err(var_error)?;
     let reduced = var_tensor(tensor, &args.axes, args.normalization, args.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
@@ -274,7 +285,7 @@ fn var_tensor(
     axes: &VarAxes,
     normalization: VarNormalization,
     nan_mode: ReductionNaN,
-) -> Result<Tensor, String> {
+) -> BuiltinResult<Tensor> {
     let (dims, had_request) = resolve_axes(&tensor.shape, axes)?;
     if dims.is_empty() {
         if had_request && tensor.data.len() == 1 {
@@ -285,7 +296,7 @@ fn var_tensor(
     var_tensor_reduce(&tensor, &dims, normalization, nan_mode)
 }
 
-fn var_scalar_tensor(tensor: &Tensor, nan_mode: ReductionNaN) -> Result<Tensor, String> {
+fn var_scalar_tensor(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<Tensor> {
     let value = tensor.data.first().copied().unwrap_or(f64::NAN);
     let result = if value.is_nan() {
         f64::NAN
@@ -294,7 +305,7 @@ fn var_scalar_tensor(tensor: &Tensor, nan_mode: ReductionNaN) -> Result<Tensor, 
             ReductionNaN::Include | ReductionNaN::Omit => 0.0,
         }
     };
-    Tensor::new(vec![result], vec![1, 1]).map_err(|e| format!("var: {e}"))
+    Tensor::new(vec![result], vec![1, 1]).map_err(|e| var_error(format!("var: {e}")))
 }
 
 fn var_tensor_reduce(
@@ -302,7 +313,7 @@ fn var_tensor_reduce(
     dims: &[usize],
     normalization: VarNormalization,
     nan_mode: ReductionNaN,
-) -> Result<Tensor, String> {
+) -> BuiltinResult<Tensor> {
     let mut dims_sorted = dims.to_vec();
     dims_sorted.sort_unstable();
     dims_sorted.dedup();
@@ -314,7 +325,7 @@ fn var_tensor_reduce(
     let out_len = tensor::element_count(&output_shape);
     if tensor.data.is_empty() {
         let fill = vec![f64::NAN; out_len];
-        return Tensor::new(fill, output_shape).map_err(|e| format!("var: {e}"));
+        return Tensor::new(fill, output_shape).map_err(|e| var_error(format!("var: {e}")));
     }
 
     let mut counts = vec![0usize; out_len];
@@ -373,13 +384,13 @@ fn var_tensor_reduce(
             };
     }
 
-    Tensor::new(output, output_shape).map_err(|e| format!("var: {e}"))
+    Tensor::new(output, output_shape).map_err(|e| var_error(format!("var: {e}")))
 }
 
-fn resolve_axes(shape: &[usize], axes: &VarAxes) -> Result<(Vec<usize>, bool), String> {
+fn resolve_axes(shape: &[usize], axes: &VarAxes) -> BuiltinResult<(Vec<usize>, bool)> {
     match axes {
         VarAxes::Default => {
-            if shape.is_empty() {
+            if is_scalar_shape(shape) {
                 Ok((Vec::new(), true))
             } else {
                 let dim = default_dimension_from_shape(shape);
@@ -393,7 +404,7 @@ fn resolve_axes(shape: &[usize], axes: &VarAxes) -> Result<(Vec<usize>, bool), S
         }
         VarAxes::Dim(dim) => {
             if *dim == 0 {
-                return Err("var: dimension must be >= 1".to_string());
+                return Err(var_error("var: dimension must be >= 1"));
             }
             let zero = dim - 1;
             if zero < shape.len() {
@@ -409,7 +420,7 @@ fn resolve_axes(shape: &[usize], axes: &VarAxes) -> Result<(Vec<usize>, bool), S
             let mut out = Vec::with_capacity(dims.len());
             for &dim in dims {
                 if dim == 0 {
-                    return Err("var: dimension must be >= 1".to_string());
+                    return Err(var_error("var: dimension must be >= 1"));
                 }
                 let zero = dim - 1;
                 if zero < shape.len() {
@@ -421,7 +432,7 @@ fn resolve_axes(shape: &[usize], axes: &VarAxes) -> Result<(Vec<usize>, bool), S
             Ok((out, true))
         }
         VarAxes::All => {
-            if shape.is_empty() {
+            if is_scalar_shape(shape) {
                 Ok((Vec::new(), true))
             } else {
                 Ok(((0..shape.len()).collect(), true))
@@ -431,8 +442,8 @@ fn resolve_axes(shape: &[usize], axes: &VarAxes) -> Result<(Vec<usize>, bool), S
 }
 
 fn reduced_shape(shape: &[usize], dims: &[usize]) -> Vec<usize> {
-    if shape.is_empty() {
-        return Vec::new();
+    if is_scalar_shape(shape) {
+        return normalize_scalar_shape(shape);
     }
     let mut out = shape.to_vec();
     for &dim in dims {
@@ -468,7 +479,7 @@ fn multi_to_linear(coords: &[usize], shape: &[usize]) -> usize {
     idx
 }
 
-fn var_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> Result<Value, String> {
+async fn var_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -478,14 +489,14 @@ fn var_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> Result<Value, Str
         }
     }
     if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Some(device_value) = var_gpu_reduce(provider, &handle, args) {
+        if let Some(device_value) = var_gpu_reduce(provider, &handle, args).await {
             return Ok(Value::GpuTensor(device_value));
         }
     }
-    var_gpu_fallback(&handle, args)
+    var_gpu_fallback(&handle, args).await
 }
 
-fn var_gpu_reduce(
+async fn var_gpu_reduce(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
     args: &ParsedArguments,
@@ -509,11 +520,12 @@ fn var_gpu_reduce(
     };
 
     let std_handle = if dims.len() == handle.shape.len() {
-        if handle.shape.is_empty() {
+        if is_scalar_shape(&handle.shape) {
             return Some(handle.clone());
         }
         provider
             .reduce_std(handle, normalization, nan_mode)
+            .await
             .map_err(|err| {
                 log::trace!("var: provider reduce_std fallback triggered: {err}");
                 err
@@ -521,13 +533,14 @@ fn var_gpu_reduce(
             .ok()?
     } else if dims.len() == 1 {
         let dim = dims[0] + 1;
-        reduce_std_dim_gpu(provider, handle.clone(), dim, normalization, nan_mode)?
+        reduce_std_dim_gpu(provider, handle.clone(), dim, normalization, nan_mode).await?
     } else {
         return None;
     };
 
     provider
         .elem_mul(&std_handle, &std_handle)
+        .await
         .map_err(|err| {
             log::trace!("var: provider elem_mul fallback triggered: {err}");
             err
@@ -535,7 +548,7 @@ fn var_gpu_reduce(
         .ok()
 }
 
-fn reduce_std_dim_gpu(
+async fn reduce_std_dim_gpu(
     provider: &dyn AccelProvider,
     handle: GpuTensorHandle,
     dim: usize,
@@ -550,6 +563,7 @@ fn reduce_std_dim_gpu(
     }
     provider
         .reduce_std_dim(&handle, dim - 1, normalization, nan_mode)
+        .await
         .map_err(|err| {
             log::trace!("var: provider reduce_std_dim fallback triggered: {err}");
             err
@@ -557,14 +571,17 @@ fn reduce_std_dim_gpu(
         .ok()
 }
 
-fn var_gpu_fallback(handle: &GpuTensorHandle, args: &ParsedArguments) -> Result<Value, String> {
-    let tensor = gpu_helpers::gather_tensor(handle)?;
+async fn var_gpu_fallback(
+    handle: &GpuTensorHandle,
+    args: &ParsedArguments,
+) -> BuiltinResult<Value> {
+    let tensor = gpu_helpers::gather_tensor_async(handle).await?;
     let reduced = var_tensor(tensor, &args.axes, args.normalization, args.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
 
 fn default_dimension_from_shape(shape: &[usize]) -> usize {
-    if shape.is_empty() {
+    if is_scalar_shape(shape) {
         return 1;
     }
     shape
@@ -578,8 +595,13 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor, Value};
+
+    fn var_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::var_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -678,7 +700,7 @@ pub(crate) mod tests {
         let weights = Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap();
         let err = var_builtin(Value::Tensor(tensor), vec![Value::Tensor(weights)])
             .expect_err("var should reject weighted inputs");
-        assert!(err.contains("weighted variance"));
+        assert!(err.message().contains("weighted variance"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -816,14 +838,14 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = var_gpu(
+        let gpu = block_on(var_gpu(
             handle,
             &ParsedArguments {
                 axes: VarAxes::Dim(1),
                 normalization: VarNormalization::Sample,
                 nan_mode: ReductionNaN::Include,
             },
-        )
+        ))
         .unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {

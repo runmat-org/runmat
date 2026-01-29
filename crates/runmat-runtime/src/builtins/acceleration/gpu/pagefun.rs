@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, PagefunOp, PagefunRequest};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -43,6 +43,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a fusion barrier because pagefun can invoke arbitrary MATLAB operators.",
 };
 
+fn pagefun_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("pagefun").build()
+}
+
 #[runtime_builtin(
     name = "pagefun",
     category = "acceleration/gpu",
@@ -51,13 +55,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::acceleration::gpu::pagefun"
 )]
-fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn pagefun_builtin(
+    func: Value,
+    first: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     let operation = PageOperation::from_callable(func)?;
     let mut operands = Vec::with_capacity(rest.len() + 1);
     operands.push(first);
     operands.extend(rest);
     if operands.is_empty() {
-        return Err("pagefun: requires at least one array input".to_string());
+        return Err(pagefun_error("pagefun: requires at least one array input"));
     }
 
     operation.validate_arity(operands.len())?;
@@ -69,7 +77,7 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value,
     let all_gpu = operands.iter().all(|v| matches!(v, Value::GpuTensor(_)));
     let mut host_values = Vec::with_capacity(operands.len());
     for value in operands {
-        host_values.push(gather_if_needed(&value)?);
+        host_values.push(gather_if_needed_async(&value).await?);
     }
 
     let mut page_inputs = Vec::with_capacity(host_values.len());
@@ -101,12 +109,12 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value,
                 if target == 1 {
                     target = size;
                 } else if target != size {
-                    return Err(format!(
+                    return Err(pagefun_error(format!(
                         "pagefun: page dimension {} mismatch ({} vs {})",
                         dim + 3,
                         target,
                         size
-                    ));
+                    )));
                 }
             }
         }
@@ -152,8 +160,8 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value,
             page_args.push(input.page_value(&multi_index)?);
         }
 
-        let mut evaluated = operation.evaluate(&page_args)?;
-        evaluated = gather_if_needed(&evaluated)?;
+        let mut evaluated = operation.evaluate(&page_args).await?;
+        evaluated = gather_if_needed_async(&evaluated).await?;
         match output_kind {
             OutputKind::Real => {
                 let (data, rows, cols) = tensor_matrix_data(evaluated)?;
@@ -162,7 +170,9 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value,
                     result_cols = cols;
                     real_data = Some(Vec::with_capacity(rows * cols * page_volume));
                 } else if rows != result_rows || cols != result_cols {
-                    return Err("pagefun: result matrices must be the same size".to_string());
+                    return Err(pagefun_error(
+                        "pagefun: result matrices must be the same size",
+                    ));
                 }
                 if let Some(vec) = real_data.as_mut() {
                     vec.extend(data);
@@ -175,7 +185,9 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value,
                     result_cols = cols;
                     complex_data = Some(Vec::with_capacity(rows * cols * page_volume));
                 } else if rows != result_rows || cols != result_cols {
-                    return Err("pagefun: result matrices must be the same size".to_string());
+                    return Err(pagefun_error(
+                        "pagefun: result matrices must be the same size",
+                    ));
                 }
                 if let Some(vec) = complex_data.as_mut() {
                     vec.extend(data);
@@ -194,14 +206,18 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value,
     let output = match output_kind {
         OutputKind::Real => {
             let data = real_data.unwrap_or_default();
-            let tensor = Tensor::new(data, final_shape)
-                .map_err(|e| format!("pagefun: failed to construct result tensor ({e})"))?;
+            let tensor = Tensor::new(data, final_shape).map_err(|e| {
+                pagefun_error(format!("pagefun: failed to construct result tensor ({e})"))
+            })?;
             FinalOutput::Real(tensor)
         }
         OutputKind::Complex => {
             let data = complex_data.unwrap_or_default();
-            let tensor = ComplexTensor::new(data, final_shape)
-                .map_err(|e| format!("pagefun: failed to construct complex result tensor ({e})"))?;
+            let tensor = ComplexTensor::new(data, final_shape).map_err(|e| {
+                pagefun_error(format!(
+                    "pagefun: failed to construct complex result tensor ({e})"
+                ))
+            })?;
             FinalOutput::Complex(tensor)
         }
     };
@@ -209,7 +225,7 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value,
     output.into_value(all_gpu)
 }
 
-fn try_pagefun_gpu(operation: &PageOperation, operands: &[Value]) -> Result<Option<Value>, String> {
+fn try_pagefun_gpu(operation: &PageOperation, operands: &[Value]) -> BuiltinResult<Option<Value>> {
     if operands.is_empty() {
         return Ok(None);
     }
@@ -261,20 +277,22 @@ fn try_pagefun_gpu(operation: &PageOperation, operands: &[Value]) -> Result<Opti
 fn build_pagefun_request(
     operation: &PageOperation,
     handles: &[GpuTensorHandle],
-) -> Result<Option<PagefunRequest>, String> {
+) -> BuiltinResult<Option<PagefunRequest>> {
     match operation {
         PageOperation::Mtimes => {
             if handles.len() != 2 {
-                return Err("pagefun: @mtimes requires exactly two array inputs".to_string());
+                return Err(pagefun_error(
+                    "pagefun: @mtimes requires exactly two array inputs",
+                ));
             }
 
             let (lhs_rows, lhs_cols, lhs_pages) = handle_matrix_meta(&handles[0])?;
             let (rhs_rows, rhs_cols, rhs_pages) = handle_matrix_meta(&handles[1])?;
             if lhs_cols != rhs_rows {
-                return Err(format!(
+                return Err(pagefun_error(format!(
                     "pagefun: inner matrix dimensions must agree ({}x{} * {}x{})",
                     lhs_rows, lhs_cols, rhs_rows, rhs_cols
-                ));
+                )));
             }
 
             let rank = lhs_pages.len().max(rhs_pages.len());
@@ -299,12 +317,12 @@ fn build_pagefun_request(
                         if target == 1 {
                             target = size;
                         } else if target != size {
-                            return Err(format!(
+                            return Err(pagefun_error(format!(
                                 "pagefun: page dimension {} mismatch ({} vs {})",
                                 dim + 3,
                                 target,
                                 size
-                            ));
+                            )));
                         }
                     }
                 }
@@ -335,10 +353,10 @@ fn build_pagefun_request(
     }
 }
 
-fn handle_matrix_meta(handle: &GpuTensorHandle) -> Result<(usize, usize, Vec<usize>), String> {
+fn handle_matrix_meta(handle: &GpuTensorHandle) -> BuiltinResult<(usize, usize, Vec<usize>)> {
     let canonical = canonical_matrix_shape(&handle.shape);
     if canonical.len() < 2 {
-        return Err("pagefun: gpu tensor must be at least 2-D".to_string());
+        return Err(pagefun_error("pagefun: gpu tensor must be at least 2-D"));
     }
     let rows = canonical[0];
     let cols = canonical[1];
@@ -356,7 +374,7 @@ fn finalise_empty_output(
     page_dims: &[usize],
     output_kind: OutputKind,
     wants_gpu: bool,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     let (rows, cols) = operation.output_matrix_shape(inputs, output_kind)?;
     let final_shape = assemble_shape(rows, cols, page_dims);
     let page_factor: usize = if page_dims.is_empty() {
@@ -371,13 +389,18 @@ fn finalise_empty_output(
         .unwrap_or(0);
     match output_kind {
         OutputKind::Real => {
-            let tensor = Tensor::new(vec![0.0; entries], final_shape)
-                .map_err(|e| format!("pagefun: failed to build empty tensor ({e})"))?;
+            let tensor = Tensor::new(vec![0.0; entries], final_shape).map_err(|e| {
+                pagefun_error(format!("pagefun: failed to build empty tensor ({e})"))
+            })?;
             FinalOutput::Real(tensor).into_value(wants_gpu)
         }
         OutputKind::Complex => {
-            let tensor = ComplexTensor::new(vec![(0.0, 0.0); entries], final_shape)
-                .map_err(|e| format!("pagefun: failed to build empty complex tensor ({e})"))?;
+            let tensor =
+                ComplexTensor::new(vec![(0.0, 0.0); entries], final_shape).map_err(|e| {
+                    pagefun_error(format!(
+                        "pagefun: failed to build empty complex tensor ({e})"
+                    ))
+                })?;
             FinalOutput::Complex(tensor).into_value(false)
         }
     }
@@ -389,7 +412,7 @@ fn assemble_shape(rows: usize, cols: usize, page_dims: &[usize]) -> Vec<usize> {
     shape
 }
 
-fn increment_multi_index(indices: &mut [usize], dims: &[usize]) -> Result<(), String> {
+fn increment_multi_index(indices: &mut [usize], dims: &[usize]) -> BuiltinResult<()> {
     if dims.contains(&0) {
         return Ok(());
     }
@@ -421,7 +444,7 @@ enum FinalOutput {
 }
 
 impl FinalOutput {
-    fn into_value(self, wants_gpu: bool) -> Result<Value, String> {
+    fn into_value(self, wants_gpu: bool) -> BuiltinResult<Value> {
         match self {
             FinalOutput::Real(tensor) => {
                 if wants_gpu {
@@ -465,36 +488,40 @@ enum PageData {
 }
 
 impl PageInput {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::Tensor(t) => Self::from_tensor(t),
             Value::Num(n) => Self::from_tensor(
-                Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("pagefun: {e}"))?,
+                Tensor::new(vec![n], vec![1, 1])
+                    .map_err(|e| pagefun_error(format!("pagefun: {e}")))?,
             ),
             Value::Int(i) => Self::from_tensor(
-                Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| format!("pagefun: {e}"))?,
+                Tensor::new(vec![i.to_f64()], vec![1, 1])
+                    .map_err(|e| pagefun_error(format!("pagefun: {e}")))?,
             ),
             Value::Bool(flag) => Self::from_tensor(
                 Tensor::new(vec![if flag { 1.0 } else { 0.0 }], vec![1, 1])
-                    .map_err(|e| format!("pagefun: {e}"))?,
+                    .map_err(|e| pagefun_error(format!("pagefun: {e}")))?,
             ),
             Value::Complex(re, im) => {
                 let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                    .map_err(|e| format!("pagefun: {e}"))?;
+                    .map_err(|e| pagefun_error(format!("pagefun: {e}")))?;
                 Self::from_complex_tensor(tensor)
             }
             Value::ComplexTensor(t) => Self::from_complex_tensor(t),
-            other => Err(format!(
+            other => Err(pagefun_error(format!(
                 "pagefun: unsupported input type {}",
                 other.type_name()
-            )),
+            ))),
         }
     }
 
-    fn from_tensor(tensor: Tensor) -> Result<Self, String> {
+    fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
         let shape = canonical_matrix_shape(&tensor.shape);
         if tensor.data.len() != shape.iter().copied().product::<usize>() {
-            return Err("pagefun: tensor data does not match its shape".to_string());
+            return Err(pagefun_error(
+                "pagefun: tensor data does not match its shape",
+            ));
         }
         let rows = shape[0];
         let cols = shape[1];
@@ -511,10 +538,12 @@ impl PageInput {
         })
     }
 
-    fn from_complex_tensor(tensor: ComplexTensor) -> Result<Self, String> {
+    fn from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Self> {
         let shape = canonical_matrix_shape(&tensor.shape);
         if tensor.data.len() != shape.iter().copied().product::<usize>() {
-            return Err("pagefun: tensor data does not match its shape".to_string());
+            return Err(pagefun_error(
+                "pagefun: tensor data does not match its shape",
+            ));
         }
         let rows = shape[0];
         let cols = shape[1];
@@ -570,16 +599,16 @@ impl PreparedInput {
         self.data.is_complex()
     }
 
-    fn page_value(&self, multi_index: &[usize]) -> Result<Value, String> {
+    fn page_value(&self, multi_index: &[usize]) -> BuiltinResult<Value> {
         let mut linear_page = 0usize;
         for (dim, stride) in self.strides.iter().enumerate() {
             let source_extent = self.padded_dims.get(dim).copied().unwrap_or(1);
             let requested = multi_index.get(dim).copied().unwrap_or(0);
             if source_extent == 0 {
-                return Err("pagefun: source page extent is zero".to_string());
+                return Err(pagefun_error("pagefun: source page extent is zero"));
             }
             if source_extent != 1 && requested >= source_extent {
-                return Err("pagefun: page index out of bounds".to_string());
+                return Err(pagefun_error("pagefun: page index out of bounds"));
             }
             let actual = if source_extent == 1 { 0 } else { requested };
             linear_page += actual * stride;
@@ -591,19 +620,19 @@ impl PreparedInput {
                 let end = offset + self.data.page_size();
                 let slice = buffer
                     .get(offset..end)
-                    .ok_or_else(|| "pagefun: page slice out of bounds".to_string())?;
+                    .ok_or_else(|| pagefun_error("pagefun: page slice out of bounds"))?;
                 let tensor = Tensor::new(slice.to_vec(), vec![self.data.rows, self.data.cols])
-                    .map_err(|e| format!("pagefun: {e}"))?;
+                    .map_err(|e| pagefun_error(format!("pagefun: {e}")))?;
                 Ok(Value::Tensor(tensor))
             }
             PageData::Complex(buffer) => {
                 let end = offset + self.data.page_size();
                 let slice = buffer
                     .get(offset..end)
-                    .ok_or_else(|| "pagefun: page slice out of bounds".to_string())?;
+                    .ok_or_else(|| pagefun_error("pagefun: page slice out of bounds"))?;
                 let tensor =
                     ComplexTensor::new(slice.to_vec(), vec![self.data.rows, self.data.cols])
-                        .map_err(|e| format!("pagefun: {e}"))?;
+                        .map_err(|e| pagefun_error(format!("pagefun: {e}")))?;
                 Ok(Value::ComplexTensor(tensor))
             }
         }
@@ -620,52 +649,52 @@ fn compute_strides(dims: &[usize]) -> Vec<usize> {
     strides
 }
 
-fn tensor_matrix_data(value: Value) -> Result<(Vec<f64>, usize, usize), String> {
+fn tensor_matrix_data(value: Value) -> BuiltinResult<(Vec<f64>, usize, usize)> {
     match value {
         Value::Tensor(t) => {
             if t.shape.len() > 2 {
-                return Err(
-                    "pagefun: operator returned an array with more than two dimensions".to_string(),
-                );
+                return Err(pagefun_error(
+                    "pagefun: operator returned an array with more than two dimensions",
+                ));
             }
             let canonical = canonical_matrix_shape(&t.shape);
             let rows = canonical[0];
             let cols = canonical[1];
             if rows * cols != t.data.len() {
-                return Err("pagefun: result size mismatch".to_string());
+                return Err(pagefun_error("pagefun: result size mismatch"));
             }
             Ok((t.data, rows, cols))
         }
         Value::Num(n) => Ok((vec![n], 1, 1)),
         Value::Int(i) => Ok((vec![i.to_f64()], 1, 1)),
-        other => Err(format!(
+        other => Err(pagefun_error(format!(
             "pagefun: expected numeric matrix result, received {}",
             other.type_name()
-        )),
+        ))),
     }
 }
 
-fn complex_matrix_data(value: Value) -> Result<ComplexMatrixData, String> {
+fn complex_matrix_data(value: Value) -> BuiltinResult<ComplexMatrixData> {
     match value {
         Value::ComplexTensor(t) => {
             if t.shape.len() > 2 {
-                return Err(
-                    "pagefun: operator returned an array with more than two dimensions".to_string(),
-                );
+                return Err(pagefun_error(
+                    "pagefun: operator returned an array with more than two dimensions",
+                ));
             }
             let canonical = canonical_matrix_shape(&t.shape);
             let rows = canonical[0];
             let cols = canonical[1];
             if rows * cols != t.data.len() {
-                return Err("pagefun: result size mismatch".to_string());
+                return Err(pagefun_error("pagefun: result size mismatch"));
             }
             Ok((t.data, rows, cols))
         }
         Value::Complex(re, im) => Ok((vec![(re, im)], 1, 1)),
-        other => Err(format!(
+        other => Err(pagefun_error(format!(
             "pagefun: expected complex matrix result, received {}",
             other.type_name()
-        )),
+        ))),
     }
 }
 
@@ -689,69 +718,50 @@ enum PageOperation {
 }
 
 impl PageOperation {
-    fn from_callable(value: Value) -> Result<Self, String> {
+    fn from_callable(value: Value) -> BuiltinResult<Self> {
         let raw = match value {
             Value::FunctionHandle(func) => func,
             Value::String(s) => s,
             Value::StringArray(sa) => {
                 if sa.data.len() != 1 {
-                    return Err(
-                        "pagefun: function string array must contain exactly one element"
-                            .to_string(),
-                    );
+                    return Err(pagefun_error(
+                        "pagefun: function string array must contain exactly one element",
+                    ));
                 }
                 sa.data[0].clone()
             }
             Value::CharArray(chars) => {
                 if chars.rows != 1 {
-                    return Err(
-                        "pagefun: function char array must be a single row character vector"
-                            .to_string(),
-                    );
+                    return Err(pagefun_error(
+                        "pagefun: function char array must be a single row character vector",
+                    ));
                 }
                 chars.data.iter().collect()
             }
             other => {
-                return Err(format!(
+                return Err(pagefun_error(format!(
                     "pagefun: unsupported function handle type {}",
                     other.type_name()
-                ))
+                )))
             }
         };
         let trimmed = raw.trim();
         let lowered = trimmed.trim_start_matches('@').to_ascii_lowercase();
         match lowered.as_str() {
             "mtimes" => Ok(Self::Mtimes),
-            _ => Err(format!(
+            _ => Err(pagefun_error(format!(
                 "pagefun: unsupported function '{}'; currently only @mtimes is implemented",
                 trimmed
-            )),
+            ))),
         }
     }
 
-    fn validate_arity(&self, arg_count: usize) -> Result<(), String> {
+    fn validate_arity(&self, arg_count: usize) -> BuiltinResult<()> {
         match self {
             Self::Mtimes => {
                 if arg_count != 2 {
-                    return Err("pagefun: @mtimes requires exactly two array inputs".to_string());
-                }
-                Ok(())
-            }
-        }
-    }
-
-    fn validate_shapes(&self, inputs: &[PreparedInput]) -> Result<(), String> {
-        match self {
-            Self::Mtimes => {
-                let lhs = &inputs[0];
-                let rhs = &inputs[1];
-                if lhs.cols() != rhs.rows() {
-                    return Err(format!(
-                        "pagefun: inner matrix dimensions must agree ({}x{} * {}x{})",
-                        lhs.rows(),
-                        lhs.cols(),
-                        rhs.rows(),
-                        rhs.cols()
+                    return Err(pagefun_error(
+                        "pagefun: @mtimes requires exactly two array inputs",
                     ));
                 }
                 Ok(())
@@ -759,9 +769,28 @@ impl PageOperation {
         }
     }
 
-    fn evaluate(&self, args: &[Value]) -> Result<Value, String> {
+    fn validate_shapes(&self, inputs: &[PreparedInput]) -> BuiltinResult<()> {
         match self {
-            Self::Mtimes => crate::call_builtin("mtimes", args),
+            Self::Mtimes => {
+                let lhs = &inputs[0];
+                let rhs = &inputs[1];
+                if lhs.cols() != rhs.rows() {
+                    return Err(pagefun_error(format!(
+                        "pagefun: inner matrix dimensions must agree ({}x{} * {}x{})",
+                        lhs.rows(),
+                        lhs.cols(),
+                        rhs.rows(),
+                        rhs.cols()
+                    )));
+                }
+                Ok(())
+            }
+        }
+    }
+
+    async fn evaluate(&self, args: &[Value]) -> crate::BuiltinResult<Value> {
+        match self {
+            Self::Mtimes => crate::call_builtin_async("mtimes", args).await,
         }
     }
 
@@ -781,7 +810,7 @@ impl PageOperation {
         &self,
         inputs: &[PreparedInput],
         kind: OutputKind,
-    ) -> Result<(usize, usize), String> {
+    ) -> BuiltinResult<(usize, usize)> {
         match self {
             Self::Mtimes => {
                 let lhs = &inputs[0];
@@ -831,6 +860,7 @@ impl TypeName for Value {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{CharArray, StringArray};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -842,8 +872,8 @@ pub(crate) mod tests {
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        .expect("pagefun");
+        );
+        let result = block_on(result).expect("pagefun");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -862,8 +892,8 @@ pub(crate) mod tests {
             Value::from("@mtimes"),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        .expect("pagefun");
+        );
+        let result = block_on(result).expect("pagefun");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2, 2]);
@@ -882,8 +912,8 @@ pub(crate) mod tests {
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        .expect("pagefun");
+        );
+        let result = block_on(result).expect("pagefun");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2, 2]);
@@ -906,8 +936,8 @@ pub(crate) mod tests {
             Value::from("@mtimes"),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        .expect("pagefun");
+        );
+        let result = block_on(result).expect("pagefun");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2, 0]);
@@ -927,8 +957,8 @@ pub(crate) mod tests {
             Value::CharArray(func),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        .expect("pagefun char array");
+        );
+        let result = block_on(result).expect("pagefun char array");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -948,8 +978,8 @@ pub(crate) mod tests {
             Value::StringArray(strings),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        .expect("pagefun string array");
+        );
+        let result = block_on(result).expect("pagefun string array");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -969,8 +999,8 @@ pub(crate) mod tests {
             Value::CharArray(chars),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        .expect_err("expected multi-row char array error");
+        );
+        let err = block_on(err).expect_err("expected multi-row char array error");
         assert!(
             err.contains("char array"),
             "unexpected error for multi-row char array: {err}"
@@ -988,8 +1018,8 @@ pub(crate) mod tests {
             Value::StringArray(strings),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        .expect_err("expected multi-element string array error");
+        );
+        let err = block_on(err).expect_err("expected multi-element string array error");
         assert!(
             err.contains("string array"),
             "unexpected error for string array: {err}"
@@ -1011,8 +1041,8 @@ pub(crate) mod tests {
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        .expect_err("expected page dimension mismatch");
+        );
+        let err = block_on(err).expect_err("expected page dimension mismatch");
         assert!(
             err.contains("page dimension"),
             "unexpected mismatch error message: {err}"
@@ -1028,8 +1058,8 @@ pub(crate) mod tests {
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
-        )
-        .expect_err("expected dimension mismatch");
+        );
+        let err = block_on(err).expect_err("expected dimension mismatch");
         assert!(
             err.contains("inner matrix dimensions"),
             "unexpected error message {err}"
@@ -1059,8 +1089,8 @@ pub(crate) mod tests {
                 Value::FunctionHandle("mtimes".into()),
                 Value::GpuTensor(lhs),
                 vec![Value::GpuTensor(rhs)],
-            )
-            .expect("pagefun");
+            );
+            let result = block_on(result).expect("pagefun");
 
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2, 2]);
@@ -1126,16 +1156,16 @@ pub(crate) mod tests {
             Value::FunctionHandle("mtimes".into()),
             Value::GpuTensor(lhs_handle.clone()),
             vec![Value::GpuTensor(rhs_handle.clone())],
-        )
-        .expect("pagefun builtin on GPU");
+        );
+        let builtin_value = block_on(builtin_value).expect("pagefun builtin on GPU");
         let builtin_tensor = test_support::gather(builtin_value).expect("gather builtin");
 
         let expected_value = pagefun_builtin(
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(lhs.clone()),
             vec![Value::Tensor(rhs.clone())],
-        )
-        .expect("pagefun host baseline");
+        );
+        let expected_value = block_on(expected_value).expect("pagefun host baseline");
         let expected_tensor = match expected_value {
             Value::Tensor(t) => t,
             other => panic!("expected tensor result, got {other:?}"),

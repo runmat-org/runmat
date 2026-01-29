@@ -19,6 +19,8 @@ pub struct UserFunction {
     pub has_varargout: bool,
     #[serde(default)]
     pub var_types: Vec<Type>,
+    #[serde(default)]
+    pub source_id: Option<runmat_hir::SourceId>,
 }
 
 /// Represents a call frame in the call stack
@@ -43,6 +45,15 @@ pub struct ExecutionContext {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bytecode {
     pub instructions: Vec<Instr>,
+    #[serde(default)]
+    pub instr_spans: Vec<runmat_hir::Span>,
+    /// Per-invocation argument spans for call-like instructions.
+    ///
+    /// Entry `i` corresponds to `instructions[i]`. Only call instructions populate this.
+    #[serde(default)]
+    pub call_arg_spans: Vec<Option<Vec<runmat_hir::Span>>>,
+    #[serde(default)]
+    pub source_id: Option<runmat_hir::SourceId>,
     pub var_count: usize,
     pub functions: HashMap<String, UserFunction>,
     #[serde(default)]
@@ -61,6 +72,9 @@ impl Bytecode {
     pub fn empty() -> Self {
         Self {
             instructions: Vec::new(),
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            source_id: None,
             var_count: 0,
             functions: HashMap::new(),
             var_types: Vec::new(),
@@ -73,8 +87,12 @@ impl Bytecode {
     }
 
     pub fn with_instructions(instructions: Vec<Instr>, var_count: usize) -> Self {
+        let instr_spans = vec![runmat_hir::Span::default(); instructions.len()];
+        let call_arg_spans = vec![None; instructions.len()];
         Self {
             instructions,
+            instr_spans,
+            call_arg_spans,
             var_count,
             ..Self::empty()
         }

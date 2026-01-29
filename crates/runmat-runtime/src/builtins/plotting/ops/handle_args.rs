@@ -1,15 +1,21 @@
 use runmat_builtins::Value;
 
+use super::plotting_error;
 use super::state::FigureHandle;
 use super::style::value_as_string;
 
-pub(super) fn handles_from_value(value: &Value, ctx: &str) -> Result<Vec<FigureHandle>, String> {
+use crate::{build_runtime_error, BuiltinResult};
+
+pub(super) fn handles_from_value(value: &Value, ctx: &str) -> BuiltinResult<Vec<FigureHandle>> {
     match value {
         Value::Num(v) => Ok(vec![handle_from_scalar(*v, ctx)?]),
         Value::Int(i) => Ok(vec![handle_from_scalar(i.to_f64(), ctx)?]),
         Value::Tensor(tensor) => {
             if tensor.data.is_empty() {
-                return Err(format!("{ctx}: handle array cannot be empty"));
+                return Err(plotting_error(
+                    ctx,
+                    format!("{ctx}: handle array cannot be empty"),
+                ));
             }
             let mut handles = Vec::with_capacity(tensor.data.len());
             for val in &tensor.data {
@@ -20,11 +26,17 @@ pub(super) fn handles_from_value(value: &Value, ctx: &str) -> Result<Vec<FigureH
         Value::CharArray(_) | Value::String(_) => {
             let text = parse_string(value).unwrap_or_default();
             if text.is_empty() {
-                return Err(format!("{ctx}: handle string cannot be empty"));
+                return Err(plotting_error(
+                    ctx,
+                    format!("{ctx}: handle string cannot be empty"),
+                ));
             }
             Ok(vec![handle_from_string(&text, ctx)?])
         }
-        _ => Err(format!("{ctx}: unsupported argument type")),
+        _ => Err(plotting_error(
+            ctx,
+            format!("{ctx}: unsupported argument type"),
+        )),
     }
 }
 
@@ -32,28 +44,44 @@ pub(super) fn parse_string(value: &Value) -> Option<String> {
     value_as_string(value).map(|s| s.trim().to_string())
 }
 
-pub(super) fn handle_from_string(text: &str, ctx: &str) -> Result<FigureHandle, String> {
-    if text.trim().is_empty() {
-        return Err(format!("{ctx}: handle text cannot be empty"));
+pub(super) fn handle_from_string(text: &str, ctx: &str) -> BuiltinResult<FigureHandle> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err(plotting_error(
+            ctx,
+            format!("{ctx}: handle text cannot be empty"),
+        ));
     }
-    if let Ok(id) = text.trim().parse::<u32>() {
-        if id == 0 {
-            return Err(format!("{ctx}: figure handle must be positive"));
-        }
-        return Ok(FigureHandle::from(id));
+    let id = trimmed.parse::<u32>().map_err(|err| {
+        build_runtime_error(format!(
+            "{ctx}: expected numeric figure handle text, got `{text}`"
+        ))
+        .with_builtin(ctx)
+        .with_source(err)
+        .build()
+    })?;
+    if id == 0 {
+        return Err(plotting_error(
+            ctx,
+            format!("{ctx}: figure handle must be positive"),
+        ));
     }
-    Err(format!(
-        "{ctx}: expected numeric figure handle text, got `{text}`"
-    ))
+    Ok(FigureHandle::from(id))
 }
 
-pub(super) fn handle_from_scalar(value: f64, ctx: &str) -> Result<FigureHandle, String> {
+pub(super) fn handle_from_scalar(value: f64, ctx: &str) -> BuiltinResult<FigureHandle> {
     if !value.is_finite() {
-        return Err(format!("{ctx}: figure handle must be finite"));
+        return Err(plotting_error(
+            ctx,
+            format!("{ctx}: figure handle must be finite"),
+        ));
     }
     let rounded = value.round() as i64;
     if rounded <= 0 {
-        return Err(format!("{ctx}: figure handle must be positive"));
+        return Err(plotting_error(
+            ctx,
+            format!("{ctx}: figure handle must be positive"),
+        ));
     }
     Ok(FigureHandle::from(rounded as u32))
 }

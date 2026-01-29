@@ -8,8 +8,8 @@ fn register_provider() -> &'static dyn AccelProvider {
     runmat_accelerate_api::provider().expect("wgpu provider registered")
 }
 
-#[test]
-fn matmul_output_reuse_from_pool() {
+#[tokio::test]
+async fn matmul_output_reuse_from_pool() {
     let provider = register_provider();
 
     let lhs_data: Vec<f64> = (0..16).map(|v| (v + 1) as f64 * 0.01).collect();
@@ -39,8 +39,11 @@ fn matmul_output_reuse_from_pool() {
     }
 
     for _ in 0..8 {
-        let gpu_out = provider.matmul(&lhs_handle, &rhs_handle).expect("matmul");
-        let host = provider.download(&gpu_out).expect("download");
+        let gpu_out = provider
+            .matmul(&lhs_handle, &rhs_handle)
+            .await
+            .expect("matmul");
+        let host = provider.download(&gpu_out).await.expect("download");
         assert_eq!(host.shape, vec![4, 4]);
 
         let mut max_err = 0.0f64;

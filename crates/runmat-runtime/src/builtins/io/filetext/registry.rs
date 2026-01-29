@@ -126,6 +126,9 @@ impl FileRegistry {
 
 static REGISTRY: Lazy<Mutex<FileRegistry>> = Lazy::new(|| Mutex::new(FileRegistry::new()));
 
+#[cfg(test)]
+static TEST_REGISTRY_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
 pub(crate) fn register_file(file: RegisteredFile) -> i32 {
     let mut guard = REGISTRY.lock().expect("file registry poisoned");
     let id = guard.allocate_id();
@@ -169,4 +172,11 @@ pub(crate) fn reset_for_tests() {
     let mut guard = REGISTRY.lock().expect("file registry poisoned");
     guard.entries.retain(|&id, _| id < 3);
     guard.next_id = 3;
+}
+
+#[cfg(test)]
+pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+    TEST_REGISTRY_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
 }

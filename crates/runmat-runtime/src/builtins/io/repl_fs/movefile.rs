@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const MESSAGE_ID_OS_ERROR: &str = "MATLAB:MOVEFILE:OSError";
 const MESSAGE_ID_SOURCE_NOT_FOUND: &str = "MATLAB:MOVEFILE:FileDoesNotExist";
@@ -57,6 +57,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Filesystem side-effects materialise immediately; metadata registered for completeness.",
 };
 
+const BUILTIN_NAME: &str = "movefile";
+
+fn movefile_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "movefile",
     category = "io/repl_fs",
@@ -66,22 +85,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::movefile"
 )]
-fn movefile_builtin(args: Vec<Value>) -> Result<Value, String> {
-    let eval = evaluate(&args)?;
+async fn movefile_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(&args).await?;
     Ok(eval.first_output())
 }
 
 /// Evaluate `movefile` once and expose all outputs.
-pub fn evaluate(args: &[Value]) -> Result<MovefileResult, String> {
-    let gathered = gather_arguments(args)?;
+pub async fn evaluate(args: &[Value]) -> BuiltinResult<MovefileResult> {
+    let gathered = gather_arguments(args).await?;
     match gathered.len() {
-        0 | 1 => Err("movefile: not enough input arguments".to_string()),
+        0 | 1 => Err(movefile_error("movefile: not enough input arguments")),
         2 => move_operation(&gathered[0], &gathered[1], false),
         3 => {
             let force = parse_force_flag(&gathered[2])?;
             move_operation(&gathered[0], &gathered[1], force)
         }
-        _ => Err("movefile: too many input arguments".to_string()),
+        _ => Err(movefile_error("movefile: too many input arguments")),
     }
 }
 
@@ -203,7 +222,7 @@ fn move_operation(
     source: &Value,
     destination: &Value,
     force: bool,
-) -> Result<MovefileResult, String> {
+) -> BuiltinResult<MovefileResult> {
     let source_raw = extract_path(source, ERR_SOURCE_ARG)?;
     if source_raw.is_empty() {
         return Ok(MovefileResult::empty_source());
@@ -214,8 +233,9 @@ fn move_operation(
         return Ok(MovefileResult::empty_destination());
     }
 
-    let source_expanded = expand_user_path(&source_raw, "movefile")?;
-    let destination_expanded = expand_user_path(&destination_raw, "movefile")?;
+    let source_expanded = expand_user_path(&source_raw, "movefile").map_err(movefile_error)?;
+    let destination_expanded =
+        expand_user_path(&destination_raw, "movefile").map_err(movefile_error)?;
 
     if contains_wildcards(&source_expanded) {
         Ok(move_with_pattern(
@@ -459,40 +479,44 @@ fn execute_plan(plan: &[MovePlanEntry]) -> Result<(), MoveError> {
     Ok(())
 }
 
-fn parse_force_flag(value: &Value) -> Result<bool, String> {
+fn parse_force_flag(value: &Value) -> BuiltinResult<bool> {
     let text = extract_path(value, ERR_FLAG_ARG)?;
     if text.eq_ignore_ascii_case("f") {
         Ok(true)
     } else {
-        Err(ERR_FLAG_ARG.to_string())
+        Err(movefile_error(ERR_FLAG_ARG))
     }
 }
 
-fn extract_path(value: &Value, error_message: &str) -> Result<String, String> {
+fn extract_path(value: &Value, error_message: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::CharArray(array) => {
             if array.rows == 1 {
                 Ok(array.data.iter().collect())
             } else {
-                Err(error_message.to_string())
+                Err(movefile_error(error_message))
             }
         }
         Value::StringArray(array) => {
             if array.data.len() == 1 {
                 Ok(array.data[0].clone())
             } else {
-                Err(error_message.to_string())
+                Err(movefile_error(error_message))
             }
         }
-        _ => Err(error_message.to_string()),
+        _ => Err(movefile_error(error_message)),
     }
 }
 
-fn gather_arguments(args: &[Value]) -> Result<Vec<Value>, String> {
+async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(|err| format!("movefile: {err}"))?);
+        out.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     Ok(out)
 }
@@ -511,6 +535,10 @@ pub(crate) mod tests {
     use super::*;
     use std::fs::{self, File};
     use tempfile::tempdir;
+
+    fn evaluate(args: &[Value]) -> BuiltinResult<MovefileResult> {
+        futures::executor::block_on(super::evaluate(args))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -685,7 +713,7 @@ pub(crate) mod tests {
 
         let err = evaluate(&[Value::from("a"), Value::from("b"), Value::Num(1.0)])
             .expect_err("expected error");
-        assert_eq!(err, ERR_FLAG_ARG);
+        assert_eq!(err.message(), ERR_FLAG_ARG);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

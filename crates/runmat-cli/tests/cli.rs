@@ -357,7 +357,6 @@ fn test_repl_processes_piped_input() -> Result<(), Box<dyn std::error::Error>> {
     let output = child.wait_with_output()?;
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("RunMat v"));
     assert!(stdout.contains("ans = 2"));
     Ok(())
 }

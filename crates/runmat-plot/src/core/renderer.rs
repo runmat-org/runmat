@@ -1021,6 +1021,7 @@ impl WgpuRenderer {
         vertex_buffer: &'a wgpu::Buffer,
         vertex_count: u32,
         index_buffer: Option<(&'a wgpu::Buffer, u32)>,
+        indirect: Option<(&'a wgpu::Buffer, u64)>,
     ) {
         // Ensure the pipeline exists first
         self.ensure_pipeline(pipeline_type);
@@ -1030,6 +1031,11 @@ impl WgpuRenderer {
         render_pass.set_pipeline(pipeline);
         render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
         render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+
+        if let Some((args, offset)) = indirect {
+            render_pass.draw_indirect(args, offset);
+            return;
+        }
 
         match index_buffer {
             Some((indices, index_count)) => {
@@ -1106,7 +1112,10 @@ pub mod vertex_utils {
         if points.len() < 2 {
             return out;
         }
-        let half_w = (width.max(1.0)) * 0.5;
+        // `width` is expected to already be in data-space units. Do NOT clamp to 1.0 here:
+        // plot axes ranges are often small (e.g. y in [-1,1]), and clamping would explode
+        // thick line geometry into a huge filled shape.
+        let half_w = width.max(0.0) * 0.5;
         for i in 0..points.len() - 1 {
             let p0 = points[i];
             let p1 = points[i + 1];
@@ -1151,7 +1160,8 @@ pub mod vertex_utils {
         if points.len() < 2 {
             return out;
         }
-        let half_w = (width.max(1.0)) * 0.5;
+        // See `extrude_polyline` for rationale: keep width in data-space units.
+        let half_w = width.max(0.0) * 0.5;
         // Base quads
         out.extend(extrude_polyline(points, color, width));
 

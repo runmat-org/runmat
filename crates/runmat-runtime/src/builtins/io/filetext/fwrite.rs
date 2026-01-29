@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry;
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fwrite")]
@@ -39,6 +39,30 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "File I/O is never fused; metadata recorded for completeness.",
 };
 
+const BUILTIN_NAME: &str = "fwrite";
+
+fn fwrite_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let message = err.message().to_string();
+    let identifier = err.identifier().map(|value| value.to_string());
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_string_result<T>(result: Result<T, String>) -> BuiltinResult<T> {
+    result.map_err(fwrite_error)
+}
+
 #[runtime_builtin(
     name = "fwrite",
     category = "io/filetext",
@@ -47,8 +71,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::filetext::fwrite"
 )]
-fn fwrite_builtin(fid: Value, data: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let eval = evaluate(&fid, &data, &rest)?;
+async fn fwrite_builtin(fid: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(&fid, &data, &rest).await?;
     Ok(Value::Num(eval.count as f64))
 }
 
@@ -70,58 +94,66 @@ impl FwriteEval {
 }
 
 /// Evaluate the `fwrite` builtin without invoking the runtime dispatcher.
-pub fn evaluate(
+pub async fn evaluate(
     fid_value: &Value,
     data_value: &Value,
     rest: &[Value],
-) -> Result<FwriteEval, String> {
-    let fid_host = gather_value(fid_value)?;
-    let fid = parse_fid(&fid_host)?;
+) -> BuiltinResult<FwriteEval> {
+    let fid_host = gather_value(fid_value).await?;
+    let fid = map_string_result(parse_fid(&fid_host))?;
     if fid < 0 {
-        return Err("fwrite: file identifier must be non-negative".to_string());
+        return Err(fwrite_error("fwrite: file identifier must be non-negative"));
     }
     if fid < 3 {
-        return Err("fwrite: standard input/output identifiers are not supported yet".to_string());
+        return Err(fwrite_error(
+            "fwrite: standard input/output identifiers are not supported yet",
+        ));
     }
 
     let info = registry::info_for(fid).ok_or_else(|| {
-        "fwrite: Invalid file identifier. Use fopen to generate a valid file ID.".to_string()
+        fwrite_error("fwrite: Invalid file identifier. Use fopen to generate a valid file ID.")
     })?;
     let handle = registry::take_handle(fid).ok_or_else(|| {
-        "fwrite: Invalid file identifier. Use fopen to generate a valid file ID.".to_string()
+        fwrite_error("fwrite: Invalid file identifier. Use fopen to generate a valid file ID.")
     })?;
 
     let mut file = handle
         .lock()
-        .map_err(|_| "fwrite: failed to lock file handle (poisoned mutex)".to_string())?;
+        .map_err(|_| fwrite_error("fwrite: failed to lock file handle (poisoned mutex)"))?;
 
-    let data_host = gather_value(data_value)?;
-    let rest_host = gather_args(rest)?;
-    let (precision_arg, skip_arg, machine_arg) = classify_arguments(&rest_host)?;
+    let data_host = gather_value(data_value).await?;
+    let rest_host = gather_args(rest).await?;
+    let (precision_arg, skip_arg, machine_arg) = map_string_result(classify_arguments(&rest_host))?;
 
-    let precision_spec = parse_precision(precision_arg)?;
-    let skip_bytes = parse_skip(skip_arg)?;
-    let machine_format = parse_machine_format(machine_arg, &info.machinefmt)?;
+    let precision_spec = map_string_result(parse_precision(precision_arg))?;
+    let skip_bytes = map_string_result(parse_skip(skip_arg))?;
+    let machine_format = map_string_result(parse_machine_format(machine_arg, &info.machinefmt))?;
 
-    let elements = flatten_elements(&data_host)?;
-    let count = write_elements(
+    let elements = map_string_result(flatten_elements(&data_host))?;
+    let count = map_string_result(write_elements(
         &mut file,
         &elements,
         precision_spec,
         skip_bytes,
         machine_format,
-    )?;
+    ))?;
     Ok(FwriteEval::new(count))
 }
 
-fn gather_value(value: &Value) -> Result<Value, String> {
-    gather_if_needed(value).map_err(|e| format!("fwrite: {e}"))
+async fn gather_value(value: &Value) -> BuiltinResult<Value> {
+    gather_if_needed_async(value)
+        .await
+        .map_err(map_control_flow)
 }
 
-fn gather_args(args: &[Value]) -> Result<Vec<Value>, String> {
+async fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut gathered = Vec::with_capacity(args.len());
     for value in args {
-        gathered.push(gather_if_needed(value).map_err(|e| format!("fwrite: {e}"))?);
+        gathered.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     Ok(gathered)
 }
@@ -635,6 +667,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::registry;
     use crate::builtins::io::filetext::{fclose, fopen};
+    use crate::RuntimeError;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider;
     #[cfg(feature = "wgpu")]
@@ -647,12 +680,37 @@ pub(crate) mod tests {
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
 
+    fn unwrap_error_message(err: RuntimeError) -> String {
+        err.message().to_string()
+    }
+
+    fn run_evaluate(
+        fid_value: &Value,
+        data_value: &Value,
+        rest: &[Value],
+    ) -> BuiltinResult<FwriteEval> {
+        futures::executor::block_on(evaluate(fid_value, data_value, rest))
+    }
+
+    fn run_fopen(args: &[Value]) -> BuiltinResult<fopen::FopenEval> {
+        futures::executor::block_on(fopen::evaluate(args))
+    }
+
+    fn run_fclose(args: &[Value]) -> BuiltinResult<fclose::FcloseEval> {
+        futures::executor::block_on(fclose::evaluate(args))
+    }
+
+    fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
+        registry::test_guard()
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_default_uint8_bytes() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fwrite_uint8");
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("w+b"),
         ])
@@ -660,11 +718,11 @@ pub(crate) mod tests {
         let fid = open.as_open().unwrap().fid as i32;
 
         let tensor = Tensor::new(vec![1.0, 2.0, 255.0], vec![3, 1]).unwrap();
-        let eval =
-            evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &Vec::new()).expect("fwrite");
+        let eval = run_evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &Vec::new())
+            .expect("fwrite");
         assert_eq!(eval.count(), 3);
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
 
         let bytes = fs::read(&path).expect("read");
         assert_eq!(bytes, vec![1u8, 2, 255]);
@@ -674,9 +732,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_double_precision_writes_native_endian() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fwrite_double");
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("w+b"),
         ])
@@ -686,10 +745,10 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.5, -2.25], vec![2, 1]).unwrap();
         let args = vec![Value::from("double")];
         let eval =
-            evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args).expect("fwrite");
+            run_evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args).expect("fwrite");
         assert_eq!(eval.count(), 2);
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
 
         let bytes = fs::read(&path).expect("read");
         let expected: Vec<u8> = if cfg!(target_endian = "little") {
@@ -704,9 +763,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_big_endian_uint16() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fwrite_be");
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("w+b"),
             Value::from("ieee-be"),
@@ -717,10 +777,10 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![258.0, 772.0], vec![2, 1]).unwrap();
         let args = vec![Value::from("uint16")];
         let eval =
-            evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args).expect("fwrite");
+            run_evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args).expect("fwrite");
         assert_eq!(eval.count(), 2);
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
 
         let bytes = fs::read(&path).expect("read");
         assert_eq!(bytes, vec![0x01, 0x02, 0x03, 0x04]);
@@ -730,9 +790,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_skip_inserts_padding() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fwrite_skip");
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("w+b"),
         ])
@@ -742,10 +803,10 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![10.0, 20.0, 30.0], vec![3, 1]).unwrap();
         let args = vec![Value::from("uint8"), Value::Num(1.0)];
         let eval =
-            evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args).expect("fwrite");
+            run_evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args).expect("fwrite");
         assert_eq!(eval.count(), 3);
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
 
         let bytes = fs::read(&path).expect("read");
         assert_eq!(bytes, vec![10u8, 0, 20, 0, 30]);
@@ -755,12 +816,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_gpu_tensor_gathers_before_write() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fwrite_gpu");
 
         test_support::with_test_provider(|provider| {
             registry::reset_for_tests();
-            let open = fopen::evaluate(&[
+            let open = run_fopen(&[
                 Value::from(path.to_string_lossy().to_string()),
                 Value::from("w+b"),
             ])
@@ -774,11 +836,11 @@ pub(crate) mod tests {
             };
             let handle = provider.upload(&view).expect("upload");
             let args = vec![Value::from("uint16")];
-            let eval = evaluate(&Value::Num(fid as f64), &Value::GpuTensor(handle), &args)
+            let eval = run_evaluate(&Value::Num(fid as f64), &Value::GpuTensor(handle), &args)
                 .expect("fwrite");
             assert_eq!(eval.count(), 4);
 
-            fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+            run_fclose(&[Value::Num(fid as f64)]).unwrap();
         });
 
         let mut file = File::open(&path).expect("open");
@@ -801,9 +863,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_invalid_precision_errors() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fwrite_invalid_precision");
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("w+b"),
         ])
@@ -812,18 +875,21 @@ pub(crate) mod tests {
 
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let args = vec![Value::from("bogus-class")];
-        let err = evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args).unwrap_err();
+        let err = unwrap_error_message(
+            run_evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args).unwrap_err(),
+        );
         assert!(err.contains("unsupported precision"));
-        let _ = fclose::evaluate(&[Value::Num(fid as f64)]);
+        let _ = run_fclose(&[Value::Num(fid as f64)]);
         fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_negative_skip_errors() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fwrite_negative_skip");
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("w+b"),
         ])
@@ -832,9 +898,11 @@ pub(crate) mod tests {
 
         let tensor = Tensor::new(vec![10.0], vec![1, 1]).unwrap();
         let args = vec![Value::from("uint8"), Value::Num(-1.0)];
-        let err = evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args).unwrap_err();
+        let err = unwrap_error_message(
+            run_evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args).unwrap_err(),
+        );
         assert!(err.contains("skip value must be non-negative"));
-        let _ = fclose::evaluate(&[Value::Num(fid as f64)]);
+        let _ = run_fclose(&[Value::Num(fid as f64)]);
         fs::remove_file(path).unwrap();
     }
 
@@ -842,9 +910,10 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn fwrite_wgpu_tensor_roundtrip() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fwrite_wgpu_roundtrip");
-        let open = fopen::evaluate(&[
+        let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("w+b"),
         ])
@@ -862,11 +931,11 @@ pub(crate) mod tests {
         };
         let handle = provider.upload(&view).expect("upload to gpu");
         let args = vec![Value::from("double")];
-        let eval =
-            evaluate(&Value::Num(fid as f64), &Value::GpuTensor(handle), &args).expect("fwrite");
+        let eval = run_evaluate(&Value::Num(fid as f64), &Value::GpuTensor(handle), &args)
+            .expect("fwrite");
         assert_eq!(eval.count(), 3);
 
-        fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
 
         let mut file = File::open(&path).expect("open");
         let mut bytes = Vec::new();
@@ -893,8 +962,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_invalid_identifier_errors() {
+        let _guard = registry_guard();
         registry::reset_for_tests();
-        let err = evaluate(&Value::Num(-1.0), &Value::Num(1.0), &Vec::new()).unwrap_err();
+        let err = unwrap_error_message(
+            run_evaluate(&Value::Num(-1.0), &Value::Num(1.0), &Vec::new()).unwrap_err(),
+        );
         assert!(err.contains("file identifier must be non-negative"));
     }
 

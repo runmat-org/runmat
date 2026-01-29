@@ -1,7 +1,7 @@
 use crate::core::renderer::Vertex;
-use crate::core::scene::GpuVertexBuffer;
+use crate::core::scene::{DrawIndirectArgsRaw, GpuVertexBuffer};
 use crate::gpu::shaders;
-use crate::gpu::{tuning, util, ScalarType};
+use crate::gpu::{tuning, ScalarType};
 use crate::plots::line::LineStyle;
 use glam::Vec4;
 use std::sync::Arc;
@@ -142,15 +142,21 @@ pub fn pack_vertices_from_xy(
         mapped_at_creation: false,
     }));
 
-    let counter_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("line-gpu-counter"),
-        size: std::mem::size_of::<u32>() as u64,
+    let indirect_args = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("line-gpu-indirect-args"),
+        size: std::mem::size_of::<DrawIndirectArgsRaw>() as u64,
         usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::INDIRECT
             | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
-    });
-    queue.write_buffer(&counter_buffer, 0, bytemuck::bytes_of(&0u32));
+    }));
+    let init = DrawIndirectArgsRaw {
+        vertex_count: 0,
+        instance_count: 1,
+        first_vertex: 0,
+        first_instance: 0,
+    };
+    queue.write_buffer(&indirect_args, 0, bytemuck::bytes_of(&init));
 
     let uniforms = LineSegmentUniforms {
         color: params.color.to_array(),
@@ -183,7 +189,7 @@ pub fn pack_vertices_from_xy(
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: counter_buffer.as_entire_binding(),
+                resource: indirect_args.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 4,
@@ -205,25 +211,12 @@ pub fn pack_vertices_from_xy(
         let workgroups = segments.div_ceil(workgroup_size);
         pass.dispatch_workgroups(workgroups, 1, 1);
     }
-    let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("line-pack-count-readback"),
-        size: std::mem::size_of::<u32>() as u64,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    encoder.copy_buffer_to_buffer(
-        &counter_buffer,
-        0,
-        &readback_buffer,
-        0,
-        std::mem::size_of::<u32>() as u64,
-    );
-
     queue.submit(Some(encoder.finish()));
-
-    let drawn_vertices = util::readback_u32(device, &readback_buffer)
-        .map_err(|e| format!("plot: failed to read GPU vertex count: {e}"))?;
-    Ok(GpuVertexBuffer::new(output_buffer, drawn_vertices as usize))
+    Ok(GpuVertexBuffer::with_indirect(
+        output_buffer,
+        max_vertices as usize,
+        indirect_args,
+    ))
 }
 
 fn compile_shader(
@@ -248,8 +241,8 @@ pub fn pack_marker_vertices_from_xy(
     inputs: &LineGpuInputs,
     params: &LineGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
-    if inputs.len < 2 {
-        return Err("plot: line inputs must contain at least two points".to_string());
+    if inputs.len < 1 {
+        return Err("plot: marker inputs must contain at least one point".to_string());
     }
 
     let workgroup_size = tuning::effective_workgroup_size();
@@ -314,7 +307,9 @@ pub fn pack_marker_vertices_from_xy(
         entry_point: "main",
     });
 
-    let output_size = inputs.len as u64 * std::mem::size_of::<Vertex>() as u64;
+    // Direct point rendering expands each point into a quad (2 triangles = 6 vertices).
+    let expanded_vertices = inputs.len as u64 * 6;
+    let output_size = expanded_vertices * std::mem::size_of::<Vertex>() as u64;
     let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("line-marker-gpu-vertices"),
         size: output_size,
@@ -374,7 +369,10 @@ pub fn pack_marker_vertices_from_xy(
     }
     queue.submit(Some(encoder.finish()));
 
-    Ok(GpuVertexBuffer::new(output_buffer, inputs.len as usize))
+    Ok(GpuVertexBuffer::new(
+        output_buffer,
+        (inputs.len as usize) * 6,
+    ))
 }
 
 fn compile_marker_shader(

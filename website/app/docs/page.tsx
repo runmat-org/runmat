@@ -1,20 +1,17 @@
-import { Metadata } from "next";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { BookOpen, Zap, Code, Cpu, Settings, Terminal, GitBranch, FileText } from "lucide-react";
+import { buildPageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
+export const metadata = buildPageMetadata({
   title: "Docs",
-  description: "Complete guides and API reference to get you started with RunMat. Learn installation, usage, MATLAB migration, and advanced features.",
-  openGraph: {
-    title: "RunMat Documentation - Complete Guides and API Reference",
-    description: "Complete guides and API reference to get you started with RunMat.",
-    type: "website",
-    url: "https://runmat.org/docs",
-  },
-  alternates: { canonical: "https://runmat.org/docs" },
-};
+  description:
+    "Complete guides and API reference to get you started with RunMat. Learn installation, usage, MATLAB migration, and advanced features.",
+  canonicalPath: "/docs",
+  ogType: "website",
+  ogImagePath: "/docs/opengraph-image",
+});
 
 export default function DocsPage() {
   return (

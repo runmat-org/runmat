@@ -2,12 +2,13 @@
 use runmat_builtins::{CellArray, CharArray, StringArray, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, uppercase_preserving_missing};
-use crate::{gather_if_needed, make_cell};
+use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::upper")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -37,10 +38,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "String transformation builtin; not eligible for fusion and always gathers GPU inputs.",
 };
 
+const BUILTIN_NAME: &str = "upper";
 const ARG_TYPE_ERROR: &str =
     "upper: first argument must be a string array, character array, or cell array of character vectors";
 const CELL_ELEMENT_ERROR: &str =
     "upper: cell array elements must be string scalars or character vectors";
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn map_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, BUILTIN_NAME)
+}
 
 #[runtime_builtin(
     name = "upper",
@@ -50,28 +62,29 @@ const CELL_ELEMENT_ERROR: &str =
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::upper"
 )]
-fn upper_builtin(value: Value) -> Result<Value, String> {
-    let gathered = gather_if_needed(&value).map_err(|e| format!("upper: {e}"))?;
+async fn upper_builtin(value: Value) -> BuiltinResult<Value> {
+    let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
     match gathered {
         Value::String(text) => Ok(Value::String(uppercase_preserving_missing(text))),
         Value::StringArray(array) => upper_string_array(array),
         Value::CharArray(array) => upper_char_array(array),
         Value::Cell(cell) => upper_cell_array(cell),
-        _ => Err(ARG_TYPE_ERROR.to_string()),
+        _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
     }
 }
 
-fn upper_string_array(array: StringArray) -> Result<Value, String> {
+fn upper_string_array(array: StringArray) -> BuiltinResult<Value> {
     let StringArray { data, shape, .. } = array;
     let uppered = data
         .into_iter()
         .map(uppercase_preserving_missing)
         .collect::<Vec<_>>();
-    let upper_array = StringArray::new(uppered, shape).map_err(|e| format!("upper: {e}"))?;
+    let upper_array = StringArray::new(uppered, shape)
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
     Ok(Value::StringArray(upper_array))
 }
 
-fn upper_char_array(array: CharArray) -> Result<Value, String> {
+fn upper_char_array(array: CharArray) -> BuiltinResult<Value> {
     let CharArray { data, rows, cols } = array;
     if rows == 0 || cols == 0 {
         return Ok(Value::CharArray(CharArray { data, rows, cols }));
@@ -97,10 +110,10 @@ fn upper_char_array(array: CharArray) -> Result<Value, String> {
 
     CharArray::new(upper_data, rows, target_cols)
         .map(Value::CharArray)
-        .map_err(|e| format!("upper: {e}"))
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn upper_cell_array(cell: CellArray) -> Result<Value, String> {
+fn upper_cell_array(cell: CellArray) -> BuiltinResult<Value> {
     let CellArray {
         data, rows, cols, ..
     } = cell;
@@ -112,18 +125,19 @@ fn upper_cell_array(cell: CellArray) -> Result<Value, String> {
             upper_values.push(upper);
         }
     }
-    make_cell(upper_values, rows, cols).map_err(|e| format!("upper: {e}"))
+    make_cell(upper_values, rows, cols)
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn upper_cell_element(value: &Value) -> Result<Value, String> {
+fn upper_cell_element(value: &Value) -> BuiltinResult<Value> {
     match value {
         Value::String(text) => Ok(Value::String(uppercase_preserving_missing(text.clone()))),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(Value::String(
             uppercase_preserving_missing(sa.data[0].clone()),
         )),
         Value::CharArray(ca) if ca.rows <= 1 => upper_char_array(ca.clone()),
-        Value::CharArray(_) => Err(CELL_ELEMENT_ERROR.to_string()),
-        _ => Err(CELL_ELEMENT_ERROR.to_string()),
+        Value::CharArray(_) => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+        _ => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
     }
 }
 
@@ -131,10 +145,14 @@ fn upper_cell_element(value: &Value) -> Result<Value, String> {
 pub(crate) mod tests {
     use super::*;
 
+    fn run_upper(value: Value) -> BuiltinResult<Value> {
+        futures::executor::block_on(upper_builtin(value))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn upper_string_scalar_value() {
-        let result = upper_builtin(Value::String("RunMat".into())).expect("upper");
+        let result = run_upper(Value::String("RunMat".into())).expect("upper");
         assert_eq!(result, Value::String("RUNMAT".into()));
     }
 
@@ -151,7 +169,7 @@ pub(crate) mod tests {
             vec![2, 2],
         )
         .unwrap();
-        let result = upper_builtin(Value::StringArray(array)).expect("upper");
+        let result = run_upper(Value::StringArray(array)).expect("upper");
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
@@ -174,7 +192,7 @@ pub(crate) mod tests {
     fn upper_char_array_multiple_rows() {
         let data: Vec<char> = vec!['c', 'a', 't', 'd', 'o', 'g'];
         let array = CharArray::new(data, 2, 3).unwrap();
-        let result = upper_builtin(Value::CharArray(array)).expect("upper");
+        let result = run_upper(Value::CharArray(array)).expect("upper");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
@@ -189,7 +207,7 @@ pub(crate) mod tests {
     #[test]
     fn upper_char_vector_handles_padding() {
         let array = CharArray::new_row("hello ");
-        let result = upper_builtin(Value::CharArray(array)).expect("upper");
+        let result = run_upper(Value::CharArray(array)).expect("upper");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
@@ -206,7 +224,7 @@ pub(crate) mod tests {
     fn upper_char_array_unicode_expansion_extends_width() {
         let data: Vec<char> = vec!['ß', 'a'];
         let array = CharArray::new(data, 1, 2).unwrap();
-        let result = upper_builtin(Value::CharArray(array)).expect("upper");
+        let result = run_upper(Value::CharArray(array)).expect("upper");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
@@ -230,7 +248,7 @@ pub(crate) mod tests {
             2,
         )
         .unwrap();
-        let result = upper_builtin(Value::Cell(cell)).expect("upper");
+        let result = run_upper(Value::Cell(cell)).expect("upper");
         match result {
             Value::Cell(out) => {
                 let first = out.get(0, 0).unwrap();
@@ -245,22 +263,22 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn upper_errors_on_invalid_input() {
-        let err = upper_builtin(Value::Num(1.0)).unwrap_err();
-        assert_eq!(err, ARG_TYPE_ERROR);
+        let err = run_upper(Value::Num(1.0)).unwrap_err();
+        assert_eq!(err.to_string(), ARG_TYPE_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn upper_cell_errors_on_invalid_element() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
-        let err = upper_builtin(Value::Cell(cell)).unwrap_err();
-        assert_eq!(err, CELL_ELEMENT_ERROR);
+        let err = run_upper(Value::Cell(cell)).unwrap_err();
+        assert_eq!(err.to_string(), CELL_ELEMENT_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn upper_preserves_missing_string() {
-        let result = upper_builtin(Value::String("<missing>".into())).expect("upper");
+        let result = run_upper(Value::String("<missing>".into())).expect("upper");
         assert_eq!(result, Value::String("<missing>".into()));
     }
 
@@ -269,7 +287,7 @@ pub(crate) mod tests {
     fn upper_cell_allows_empty_char_vector() {
         let empty_char = CharArray::new(Vec::new(), 1, 0).unwrap();
         let cell = CellArray::new(vec![Value::CharArray(empty_char.clone())], 1, 1).unwrap();
-        let result = upper_builtin(Value::Cell(cell)).expect("upper");
+        let result = run_upper(Value::Cell(cell)).expect("upper");
         match result {
             Value::Cell(out) => {
                 let element = out.get(0, 0).unwrap();
@@ -295,8 +313,8 @@ pub(crate) mod tests {
                 shape: &shape,
             })
             .expect("upload");
-        let err = upper_builtin(Value::GpuTensor(handle.clone())).unwrap_err();
-        assert_eq!(err, ARG_TYPE_ERROR);
+        let err = run_upper(Value::GpuTensor(handle.clone())).unwrap_err();
+        assert_eq!(err.to_string(), ARG_TYPE_ERROR);
         provider.free(&handle).ok();
     }
 }

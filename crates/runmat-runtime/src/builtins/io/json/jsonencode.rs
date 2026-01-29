@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const OPTION_NAME_ERROR: &str = "jsonencode: option names must be character vectors or strings";
 const OPTION_VALUE_ERROR: &str = "jsonencode: option value must be scalar logical or numeric";
@@ -38,6 +38,19 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes:
         "Serialization sink that gathers GPU data to host memory before emitting UTF-8 JSON text.",
 };
+
+fn jsonencode_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("jsonencode")
+        .build()
+}
+
+fn jsonencode_flow_with_context(err: RuntimeError) -> RuntimeError {
+    build_runtime_error(err.message().to_string())
+        .with_builtin("jsonencode")
+        .with_source(err)
+        .build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::json::jsonencode")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -90,12 +103,18 @@ enum JsonNumber {
     accel = "cpu",
     builtin_path = "crate::builtins::io::json::jsonencode"
 )]
-fn jsonencode_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let host_value = gather_if_needed(&value)?;
-    let gathered_args: Vec<Value> = rest
-        .iter()
-        .map(gather_if_needed)
-        .collect::<Result<_, _>>()?;
+async fn jsonencode_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let host_value = gather_if_needed_async(&value)
+        .await
+        .map_err(jsonencode_flow_with_context)?;
+    let mut gathered_args = Vec::with_capacity(rest.len());
+    for value in &rest {
+        gathered_args.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(jsonencode_flow_with_context)?,
+        );
+    }
 
     let options = parse_options(&gathered_args)?;
     let json_value = value_to_json(&host_value, &options)?;
@@ -104,7 +123,7 @@ fn jsonencode_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     Ok(Value::CharArray(CharArray::new_row(&json_string)))
 }
 
-fn parse_options(args: &[Value]) -> Result<JsonEncodeOptions, String> {
+fn parse_options(args: &[Value]) -> BuiltinResult<JsonEncodeOptions> {
     let mut options = JsonEncodeOptions::default();
     if args.is_empty() {
         return Ok(options);
@@ -115,11 +134,15 @@ fn parse_options(args: &[Value]) -> Result<JsonEncodeOptions, String> {
             apply_struct_options(struct_value, &mut options)?;
             return Ok(options);
         }
-        return Err("jsonencode: expected name/value pairs or options struct".to_string());
+        return Err(jsonencode_error(
+            "jsonencode: expected name/value pairs or options struct",
+        ));
     }
 
     if !args.len().is_multiple_of(2) {
-        return Err("jsonencode: name/value pairs must come in pairs".to_string());
+        return Err(jsonencode_error(
+            "jsonencode: name/value pairs must come in pairs",
+        ));
     }
 
     let mut idx = 0usize;
@@ -136,19 +159,19 @@ fn parse_options(args: &[Value]) -> Result<JsonEncodeOptions, String> {
 fn apply_struct_options(
     struct_value: &StructValue,
     options: &mut JsonEncodeOptions,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     for (key, value) in &struct_value.fields {
         apply_option(key, value, options)?;
     }
     Ok(())
 }
 
-fn option_name(value: &Value) -> Result<String, String> {
+fn option_name(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(OPTION_NAME_ERROR.to_string()),
+        _ => Err(jsonencode_error(OPTION_NAME_ERROR)),
     }
 }
 
@@ -156,7 +179,7 @@ fn apply_option(
     raw_name: &str,
     value: &Value,
     options: &mut JsonEncodeOptions,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     let lowered = raw_name.to_ascii_lowercase();
     match lowered.as_str() {
         "prettyprint" => {
@@ -167,11 +190,14 @@ fn apply_option(
             options.convert_inf_and_nan = coerce_bool(value)?;
             Ok(())
         }
-        other => Err(format!("jsonencode: unknown option '{}'", other)),
+        other => Err(jsonencode_error(format!(
+            "jsonencode: unknown option '{}'",
+            other
+        ))),
     }
 }
 
-fn coerce_bool(value: &Value) -> Result<bool, String> {
+fn coerce_bool(value: &Value) -> BuiltinResult<bool> {
     match value {
         Value::Bool(b) => Ok(*b),
         Value::Int(i) => Ok(i.to_i64() != 0),
@@ -180,39 +206,39 @@ fn coerce_bool(value: &Value) -> Result<bool, String> {
             if t.data.len() == 1 {
                 bool_from_f64(t.data[0])
             } else {
-                Err(OPTION_VALUE_ERROR.to_string())
+                Err(jsonencode_error(OPTION_VALUE_ERROR))
             }
         }
         Value::LogicalArray(la) => match la.data.len() {
             1 => Ok(la.data[0] != 0),
-            _ => Err(OPTION_VALUE_ERROR.to_string()),
+            _ => Err(jsonencode_error(OPTION_VALUE_ERROR)),
         },
         Value::CharArray(ca) if ca.rows == 1 => {
             parse_bool_string(&ca.data.iter().collect::<String>())
         }
         Value::String(s) => parse_bool_string(s),
         Value::StringArray(sa) if sa.data.len() == 1 => parse_bool_string(&sa.data[0]),
-        _ => Err(OPTION_VALUE_ERROR.to_string()),
+        _ => Err(jsonencode_error(OPTION_VALUE_ERROR)),
     }
 }
 
-fn bool_from_f64(value: f64) -> Result<bool, String> {
+fn bool_from_f64(value: f64) -> BuiltinResult<bool> {
     if value.is_finite() {
         Ok(value != 0.0)
     } else {
-        Err(OPTION_VALUE_ERROR.to_string())
+        Err(jsonencode_error(OPTION_VALUE_ERROR))
     }
 }
 
-fn parse_bool_string(text: &str) -> Result<bool, String> {
+fn parse_bool_string(text: &str) -> BuiltinResult<bool> {
     match text.trim().to_ascii_lowercase().as_str() {
         "true" | "on" | "yes" | "1" => Ok(true),
         "false" | "off" | "no" | "0" => Ok(false),
-        _ => Err(OPTION_VALUE_ERROR.to_string()),
+        _ => Err(jsonencode_error(OPTION_VALUE_ERROR)),
     }
 }
 
-fn value_to_json(value: &Value, options: &JsonEncodeOptions) -> Result<JsonValue, String> {
+fn value_to_json(value: &Value, options: &JsonEncodeOptions) -> BuiltinResult<JsonValue> {
     match value {
         Value::Num(n) => number_to_json(*n, options),
         Value::Int(i) => Ok(JsonValue::Number(int_to_number(i))),
@@ -227,15 +253,15 @@ fn value_to_json(value: &Value, options: &JsonEncodeOptions) -> Result<JsonValue
         Value::Struct(sv) => struct_to_json(sv, options),
         Value::Cell(ca) => cell_array_to_json(ca, options),
         Value::Object(obj) => object_to_json(obj, options),
-        Value::GpuTensor(_) => {
-            Err("jsonencode: unexpected gpuArray handle after gather pass".to_string())
-        }
+        Value::GpuTensor(_) => Err(jsonencode_error(
+            "jsonencode: unexpected gpuArray handle after gather pass",
+        )),
         Value::HandleObject(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(UNSUPPORTED_TYPE_ERROR.to_string()),
+        | Value::MException(_) => Err(jsonencode_error(UNSUPPORTED_TYPE_ERROR)),
     }
 }
 
@@ -252,12 +278,12 @@ fn int_to_number(value: &IntValue) -> JsonNumber {
     }
 }
 
-fn number_to_json(value: f64, options: &JsonEncodeOptions) -> Result<JsonValue, String> {
+fn number_to_json(value: f64, options: &JsonEncodeOptions) -> BuiltinResult<JsonValue> {
     if !value.is_finite() {
         if options.convert_inf_and_nan {
             return Ok(JsonValue::Null);
         }
-        return Err(INF_NAN_ERROR.to_string());
+        return Err(jsonencode_error(INF_NAN_ERROR));
     }
     Ok(JsonValue::Number(JsonNumber::Float(value)))
 }
@@ -265,7 +291,7 @@ fn number_to_json(value: f64, options: &JsonEncodeOptions) -> Result<JsonValue, 
 fn logical_array_to_json(
     logical: &LogicalArray,
     _options: &JsonEncodeOptions,
-) -> Result<JsonValue, String> {
+) -> BuiltinResult<JsonValue> {
     let keep_dims = compute_keep_dims(&logical.shape, true);
     if logical.shape.is_empty() || logical.data.is_empty() {
         return Ok(JsonValue::Array(Vec::new()));
@@ -279,7 +305,7 @@ fn logical_array_to_json(
     })
 }
 
-fn tensor_to_json(tensor: &Tensor, options: &JsonEncodeOptions) -> Result<JsonValue, String> {
+fn tensor_to_json(tensor: &Tensor, options: &JsonEncodeOptions) -> BuiltinResult<JsonValue> {
     if tensor.data.is_empty() {
         return Ok(JsonValue::Array(Vec::new()));
     }
@@ -296,7 +322,7 @@ fn complex_scalar_to_json(
     real: f64,
     imag: f64,
     options: &JsonEncodeOptions,
-) -> Result<JsonValue, String> {
+) -> BuiltinResult<JsonValue> {
     let real_json = number_to_json(real, options)?;
     let imag_json = number_to_json(imag, options)?;
     Ok(JsonValue::Object(vec![
@@ -308,7 +334,7 @@ fn complex_scalar_to_json(
 fn complex_tensor_to_json(
     ct: &ComplexTensor,
     options: &JsonEncodeOptions,
-) -> Result<JsonValue, String> {
+) -> BuiltinResult<JsonValue> {
     if ct.data.is_empty() {
         return Ok(JsonValue::Array(Vec::new()));
     }
@@ -326,7 +352,7 @@ fn complex_tensor_to_json(
 fn string_array_to_json(
     sa: &StringArray,
     _options: &JsonEncodeOptions,
-) -> Result<JsonValue, String> {
+) -> BuiltinResult<JsonValue> {
     if sa.data.is_empty() {
         return Ok(JsonValue::Array(Vec::new()));
     }
@@ -339,7 +365,7 @@ fn string_array_to_json(
     })
 }
 
-fn char_array_to_json(ca: &CharArray, _options: &JsonEncodeOptions) -> Result<JsonValue, String> {
+fn char_array_to_json(ca: &CharArray, _options: &JsonEncodeOptions) -> BuiltinResult<JsonValue> {
     if ca.rows == 0 {
         return Ok(JsonValue::Array(Vec::new()));
     }
@@ -370,7 +396,7 @@ fn char_array_to_json(ca: &CharArray, _options: &JsonEncodeOptions) -> Result<Js
     Ok(JsonValue::Array(rows))
 }
 
-fn struct_to_json(sv: &StructValue, options: &JsonEncodeOptions) -> Result<JsonValue, String> {
+fn struct_to_json(sv: &StructValue, options: &JsonEncodeOptions) -> BuiltinResult<JsonValue> {
     if sv.fields.is_empty() {
         return Ok(JsonValue::Object(Vec::new()));
     }
@@ -381,7 +407,7 @@ fn struct_to_json(sv: &StructValue, options: &JsonEncodeOptions) -> Result<JsonV
     Ok(JsonValue::Object(map.into_iter().collect()))
 }
 
-fn object_to_json(obj: &ObjectInstance, options: &JsonEncodeOptions) -> Result<JsonValue, String> {
+fn object_to_json(obj: &ObjectInstance, options: &JsonEncodeOptions) -> BuiltinResult<JsonValue> {
     let mut map = BTreeMap::new();
     for (key, value) in &obj.properties {
         map.insert(key.clone(), value_to_json(value, options)?);
@@ -389,20 +415,24 @@ fn object_to_json(obj: &ObjectInstance, options: &JsonEncodeOptions) -> Result<J
     Ok(JsonValue::Object(map.into_iter().collect()))
 }
 
-fn cell_array_to_json(ca: &CellArray, options: &JsonEncodeOptions) -> Result<JsonValue, String> {
+fn cell_array_to_json(ca: &CellArray, options: &JsonEncodeOptions) -> BuiltinResult<JsonValue> {
     if ca.rows == 0 || ca.cols == 0 {
         return Ok(JsonValue::Array(Vec::new()));
     }
 
     if ca.rows == 1 && ca.cols == 1 {
-        let value = ca.get(0, 0).map_err(|e| format!("jsonencode: {e}"))?;
+        let value = ca
+            .get(0, 0)
+            .map_err(|e| jsonencode_error(format!("jsonencode: {e}")))?;
         return Ok(JsonValue::Array(vec![value_to_json(&value, options)?]));
     }
 
     if ca.rows == 1 {
         let mut row = Vec::with_capacity(ca.cols);
         for c in 0..ca.cols {
-            let element = ca.get(0, c).map_err(|e| format!("jsonencode: {e}"))?;
+            let element = ca
+                .get(0, c)
+                .map_err(|e| jsonencode_error(format!("jsonencode: {e}")))?;
             row.push(value_to_json(&element, options)?);
         }
         return Ok(JsonValue::Array(row));
@@ -411,7 +441,9 @@ fn cell_array_to_json(ca: &CellArray, options: &JsonEncodeOptions) -> Result<Jso
     if ca.cols == 1 {
         let mut column = Vec::with_capacity(ca.rows);
         for r in 0..ca.rows {
-            let element = ca.get(r, 0).map_err(|e| format!("jsonencode: {e}"))?;
+            let element = ca
+                .get(r, 0)
+                .map_err(|e| jsonencode_error(format!("jsonencode: {e}")))?;
             column.push(value_to_json(&element, options)?);
         }
         return Ok(JsonValue::Array(column));
@@ -421,7 +453,9 @@ fn cell_array_to_json(ca: &CellArray, options: &JsonEncodeOptions) -> Result<Jso
     for r in 0..ca.rows {
         let mut row = Vec::with_capacity(ca.cols);
         for c in 0..ca.cols {
-            let element = ca.get(r, c).map_err(|e| format!("jsonencode: {e}"))?;
+            let element = ca
+                .get(r, c)
+                .map_err(|e| jsonencode_error(format!("jsonencode: {e}")))?;
             row.push(value_to_json(&element, options)?);
         }
         rows.push(JsonValue::Array(row));
@@ -453,9 +487,9 @@ fn build_strided_array<F>(
     shape: &[usize],
     keep_dims: &[usize],
     mut fetch: F,
-) -> Result<JsonValue, String>
+) -> BuiltinResult<JsonValue>
 where
-    F: FnMut(usize) -> Result<JsonValue, String>,
+    F: FnMut(usize) -> BuiltinResult<JsonValue>,
 {
     if keep_dims.is_empty() {
         return fetch(0);
@@ -474,9 +508,9 @@ where
     })
 }
 
-fn build_nd_array<F>(dims: &[usize], mut fetch: F) -> Result<JsonValue, String>
+fn build_nd_array<F>(dims: &[usize], mut fetch: F) -> BuiltinResult<JsonValue>
 where
-    F: FnMut(&[usize]) -> Result<JsonValue, String>,
+    F: FnMut(&[usize]) -> BuiltinResult<JsonValue>,
 {
     if dims.is_empty() {
         return fetch(&[]);
@@ -493,9 +527,9 @@ fn build_nd_array_recursive<F>(
     level: usize,
     indices: &mut [usize],
     fetch: &mut F,
-) -> Result<JsonValue, String>
+) -> BuiltinResult<JsonValue>
 where
-    F: FnMut(&[usize]) -> Result<JsonValue, String>,
+    F: FnMut(&[usize]) -> BuiltinResult<JsonValue>,
 {
     let size = dims[level];
     if size == 0 {
@@ -716,6 +750,7 @@ fn format_number(value: f64) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{
         CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, StructValue, Tensor,
     };
@@ -728,10 +763,15 @@ pub(crate) mod tests {
         }
     }
 
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_scalar_double() {
-        let encoded = jsonencode_builtin(Value::Num(5.0), Vec::new()).expect("jsonencode");
+        let encoded =
+            block_on(jsonencode_builtin(Value::Num(5.0), Vec::new())).expect("jsonencode");
         assert_eq!(as_string(encoded), "5");
     }
 
@@ -740,7 +780,8 @@ pub(crate) mod tests {
     fn jsonencode_matrix_pretty_print() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).expect("tensor");
         let args = vec![Value::from("PrettyPrint"), Value::Bool(true)];
-        let encoded = jsonencode_builtin(Value::Tensor(tensor), args).expect("jsonencode");
+        let encoded =
+            block_on(jsonencode_builtin(Value::Tensor(tensor), args)).expect("jsonencode");
         let expected = "[\n    [1,2,3],\n    [4,5,6]\n]";
         assert_eq!(as_string(encoded), expected);
     }
@@ -755,7 +796,8 @@ pub(crate) mod tests {
         fields
             .fields
             .insert("year".to_string(), Value::Int(IntValue::I32(2025)));
-        let encoded = jsonencode_builtin(Value::Struct(fields), Vec::new()).expect("jsonencode");
+        let encoded =
+            block_on(jsonencode_builtin(Value::Struct(fields), Vec::new())).expect("jsonencode");
         assert_eq!(as_string(encoded), "{\"name\":\"RunMat\",\"year\":2025}");
     }
 
@@ -766,8 +808,11 @@ pub(crate) mod tests {
         let mut opts = StructValue::new();
         opts.fields
             .insert("PrettyPrint".to_string(), Value::Bool(true));
-        let encoded = jsonencode_builtin(Value::Tensor(tensor), vec![Value::Struct(opts)])
-            .expect("jsonencode");
+        let encoded = block_on(jsonencode_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Struct(opts)],
+        ))
+        .expect("jsonencode");
         let expected = "[\n    [1,2],\n    [4,5]\n]";
         assert_eq!(as_string(encoded), expected);
     }
@@ -777,7 +822,7 @@ pub(crate) mod tests {
     fn jsonencode_options_accept_scalar_tensor_bool() {
         let tensor_value = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
         let args = vec![Value::from("PrettyPrint"), Value::Tensor(tensor_value)];
-        let encoded = jsonencode_builtin(Value::Num(42.0), args).expect("jsonencode");
+        let encoded = block_on(jsonencode_builtin(Value::Num(42.0), args)).expect("jsonencode");
         assert_eq!(as_string(encoded), "42");
     }
 
@@ -785,12 +830,12 @@ pub(crate) mod tests {
     #[test]
     fn jsonencode_options_reject_non_scalar_tensor_bool() {
         let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).expect("tensor");
-        let err = jsonencode_builtin(
+        let err = block_on(jsonencode_builtin(
             Value::Num(1.0),
             vec![Value::from("PrettyPrint"), Value::Tensor(tensor)],
-        )
+        ))
         .expect_err("expected failure");
-        assert_eq!(err, OPTION_VALUE_ERROR);
+        assert_eq!(error_message(err), OPTION_VALUE_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -798,7 +843,7 @@ pub(crate) mod tests {
     fn jsonencode_options_accept_scalar_logical_array() {
         let logical = LogicalArray::new(vec![1], vec![1]).expect("logical");
         let args = vec![Value::from("PrettyPrint"), Value::LogicalArray(logical)];
-        let encoded = jsonencode_builtin(Value::Num(7.0), args).expect("jsonencode");
+        let encoded = block_on(jsonencode_builtin(Value::Num(7.0), args)).expect("jsonencode");
         assert_eq!(as_string(encoded), "7");
     }
 
@@ -806,16 +851,19 @@ pub(crate) mod tests {
     #[test]
     fn jsonencode_convert_inf_and_nan_controls_null_output() {
         let tensor = Tensor::new(vec![1.0, f64::NAN], vec![1, 2]).expect("tensor");
-        let encoded =
-            jsonencode_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("jsonencode");
+        let encoded = block_on(jsonencode_builtin(
+            Value::Tensor(tensor.clone()),
+            Vec::new(),
+        ))
+        .expect("jsonencode");
         assert_eq!(as_string(encoded), "[1,null]");
 
-        let err = jsonencode_builtin(
+        let err = block_on(jsonencode_builtin(
             Value::Tensor(tensor),
             vec![Value::from("ConvertInfAndNaN"), Value::Bool(false)],
-        )
+        ))
         .expect_err("expected failure");
-        assert_eq!(err, INF_NAN_ERROR);
+        assert_eq!(error_message(err), INF_NAN_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -823,7 +871,8 @@ pub(crate) mod tests {
     fn jsonencode_cell_array() {
         let elements = vec![Value::from(1.0), Value::from("two")];
         let cell = CellArray::new(elements, 1, 2).expect("cell");
-        let encoded = jsonencode_builtin(Value::Cell(cell), Vec::new()).expect("jsonencode");
+        let encoded =
+            block_on(jsonencode_builtin(Value::Cell(cell), Vec::new())).expect("jsonencode");
         assert_eq!(as_string(encoded), "[1,\"two\"]");
     }
 
@@ -831,7 +880,8 @@ pub(crate) mod tests {
     #[test]
     fn jsonencode_char_array_zero_rows_is_empty_array() {
         let chars = CharArray::new(Vec::new(), 0, 3).expect("char array");
-        let encoded = jsonencode_builtin(Value::CharArray(chars), Vec::new()).expect("jsonencode");
+        let encoded =
+            block_on(jsonencode_builtin(Value::CharArray(chars), Vec::new())).expect("jsonencode");
         assert_eq!(as_string(encoded), "[]");
     }
 
@@ -839,7 +889,8 @@ pub(crate) mod tests {
     #[test]
     fn jsonencode_char_array_empty_strings_per_row() {
         let chars = CharArray::new(Vec::new(), 2, 0).expect("char array");
-        let encoded = jsonencode_builtin(Value::CharArray(chars), Vec::new()).expect("jsonencode");
+        let encoded =
+            block_on(jsonencode_builtin(Value::CharArray(chars), Vec::new())).expect("jsonencode");
         let encoded_str = as_string(encoded);
         assert_eq!(encoded_str, "[\"\",\"\"]");
     }
@@ -849,7 +900,8 @@ pub(crate) mod tests {
     fn jsonencode_string_array_matrix() {
         let sa = StringArray::new(vec!["alpha".to_string(), "beta".to_string()], vec![2, 1])
             .expect("string array");
-        let encoded = jsonencode_builtin(Value::StringArray(sa), Vec::new()).expect("jsonencode");
+        let encoded =
+            block_on(jsonencode_builtin(Value::StringArray(sa), Vec::new())).expect("jsonencode");
         assert_eq!(as_string(encoded), "[\"alpha\",\"beta\"]");
     }
 
@@ -857,7 +909,8 @@ pub(crate) mod tests {
     #[test]
     fn jsonencode_complex_tensor_outputs_objects() {
         let ct = ComplexTensor::new(vec![(1.0, 2.0), (3.5, -4.0)], vec![2, 1]).expect("complex");
-        let encoded = jsonencode_builtin(Value::ComplexTensor(ct), Vec::new()).expect("jsonencode");
+        let encoded =
+            block_on(jsonencode_builtin(Value::ComplexTensor(ct), Vec::new())).expect("jsonencode");
         assert_eq!(
             as_string(encoded),
             "[{\"real\":1,\"imag\":2},{\"real\":3.5,\"imag\":-4}]"
@@ -874,8 +927,8 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let encoded =
-                jsonencode_builtin(Value::GpuTensor(handle), Vec::new()).expect("jsonencode");
+            let encoded = block_on(jsonencode_builtin(Value::GpuTensor(handle), Vec::new()))
+                .expect("jsonencode");
             assert_eq!(as_string(encoded), "[[1,0],[0,1]]");
         });
     }
@@ -896,7 +949,8 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let encoded = jsonencode_builtin(Value::GpuTensor(handle), Vec::new()).expect("jsonencode");
+        let encoded =
+            block_on(jsonencode_builtin(Value::GpuTensor(handle), Vec::new())).expect("jsonencode");
         assert_eq!(as_string(encoded), "[1,2,3]");
     }
 }

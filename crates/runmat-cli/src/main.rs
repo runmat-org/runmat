@@ -7,20 +7,27 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use env_logger::Env;
 use log::{debug, error, info, warn};
+use miette::{SourceOffset, SourceSpan};
 use std::env;
 
 mod telemetry;
 use runmat_accelerate::AccelerateInitOptions;
 use runmat_builtins::Value;
 use runmat_config::{self as config, ConfigLoader, PlotBackend, PlotMode, RunMatConfig};
-use runmat_core::{ExecutionStreamEntry, ExecutionStreamKind, RunMatSession};
+use runmat_core::{ExecutionStreamEntry, ExecutionStreamKind, RunError, RunMatSession};
 use runmat_gc::{
     gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats, GcConfig,
 };
+use runmat_hir::LoweringContext;
+use runmat_ignition::instr::Instr;
 use runmat_kernel::{ConnectionInfo, KernelConfig, KernelServer};
+use runmat_parser::ParserOptions;
+use runmat_runtime::build_runtime_error;
 use runmat_snapshot::presets::SnapshotPreset;
 use runmat_snapshot::{SnapshotBuilder, SnapshotConfig, SnapshotLoader};
 use runmat_time::Instant;
+use std::collections::HashMap;
+use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
@@ -35,6 +42,82 @@ fn parser_compat(mode: config::LanguageCompatMode) -> runmat_parser::CompatMode 
         config::LanguageCompatMode::Matlab => runmat_parser::CompatMode::Matlab,
         config::LanguageCompatMode::Strict => runmat_parser::CompatMode::Strict,
     }
+}
+
+fn format_frontend_error(err: &RunError, source_name: &str, source: &str) -> Option<String> {
+    match err {
+        RunError::Syntax(err) => {
+            let mut message = err.message.clone();
+            if let Some(expected) = &err.expected {
+                message = format!("{message} (expected {expected})");
+            }
+            if let Some(found) = &err.found_token {
+                message = format!("{message} (found '{found}')");
+            }
+            let span = SourceSpan::new(SourceOffset::from(err.position), 1);
+            Some(format_diagnostic(
+                &message,
+                Some("RunMat:SyntaxError"),
+                Some(span),
+                source_name,
+                source,
+            ))
+        }
+        RunError::Semantic(err) => {
+            let span = err.span.map(|span| {
+                SourceSpan::new(
+                    SourceOffset::from(span.start),
+                    span.end.saturating_sub(span.start).max(1),
+                )
+            });
+            let identifier = err.identifier.as_deref().or(Some("RunMat:SemanticError"));
+            Some(format_diagnostic(
+                &err.message,
+                identifier,
+                span,
+                source_name,
+                source,
+            ))
+        }
+        RunError::Compile(err) => {
+            let span = err.span.map(|span| {
+                SourceSpan::new(
+                    SourceOffset::from(span.start),
+                    span.end.saturating_sub(span.start).max(1),
+                )
+            });
+            let identifier = err.identifier.as_deref().or(Some("RunMat:CompileError"));
+            Some(format_diagnostic(
+                &err.message,
+                identifier,
+                span,
+                source_name,
+                source,
+            ))
+        }
+        RunError::Runtime(err) => {
+            Some(err.format_diagnostic_with_source(Some(source_name), Some(source)))
+        }
+    }
+}
+
+fn format_diagnostic(
+    message: &str,
+    identifier: Option<&str>,
+    span: Option<SourceSpan>,
+    source_name: &str,
+    source: &str,
+) -> String {
+    let mut builder = build_runtime_error(message);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    if let Some(span) = span {
+        builder = builder.with_span(span);
+    }
+    builder
+        .build()
+        .format_diagnostic_with_source(Some(source_name), Some(source))
 }
 #[derive(Parser)]
 #[command(
@@ -69,6 +152,7 @@ Examples:
   runmat --no-jit                          # Start REPL with interpreter only
   runmat --gc-preset low-latency           # Optimize GC for low latency
   runmat script.m                          # Execute MATLAB/Octave script
+  runmat --emit-bytecode script.m           # Emit bytecode disassembly
   runmat --install-kernel                  # Install as Jupyter kernel
   runmat kernel                            # Start Jupyter kernel
   runmat kernel-connection connection.json # Start with connection file
@@ -81,6 +165,8 @@ Environment Variables:
   RUNMAT_KERNEL_IP=127.0.0.1  Kernel IP address  
   RUNMAT_KERNEL_KEY=<key>     Kernel authentication key
   RUNMAT_TIMEOUT=300          Execution timeout in seconds
+  RUNMAT_CALLSTACK_LIMIT=200  Maximum call stack frames to record
+  RUNMAT_ERROR_NAMESPACE=RunMat Error identifier namespace prefix
   RUNMAT_CONFIG=<path>        Path to configuration file
   RUNMAT_SNAPSHOT_PATH=<path> Snapshot file to preload standard library
   
@@ -104,12 +190,24 @@ struct Cli {
     debug: bool,
 
     /// Set log level
-    #[arg(long, value_enum, env = "RUNMAT_LOG_LEVEL", default_value = "info", value_parser = parse_log_level_env)]
+    #[arg(long, value_enum, env = "RUNMAT_LOG_LEVEL", default_value = "warn", value_parser = parse_log_level_env)]
     log_level: LogLevel,
 
     /// Execution timeout in seconds
     #[arg(long, env = "RUNMAT_TIMEOUT", default_value = "300")]
     timeout: u64,
+
+    /// Maximum number of call stack frames to record
+    #[arg(long, env = "RUNMAT_CALLSTACK_LIMIT", default_value = "200")]
+    callstack_limit: usize,
+
+    /// Emit bytecode disassembly for a script (stdout if omitted path)
+    #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "-")]
+    emit_bytecode: Option<PathBuf>,
+
+    /// Error identifier namespace prefix
+    #[arg(long, env = "RUNMAT_ERROR_NAMESPACE", default_value = "RunMat")]
+    error_namespace: String,
 
     /// Configuration file path
     #[arg(long, env = "RUNMAT_CONFIG")]
@@ -637,10 +735,24 @@ async fn main() -> Result<()> {
 
     // Handle command or script execution
     let command = cli.command.clone();
-    let script = cli.script.clone();
+    let mut script = cli.script.clone();
+    let mut emit_bytecode = cli.emit_bytecode.clone();
+    if command.is_none() && script.is_none() {
+        if let Some(path) = emit_bytecode.clone() {
+            let is_matlab = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("m"))
+                .unwrap_or(false);
+            if is_matlab || path.exists() {
+                script = Some(path);
+                emit_bytecode = Some(PathBuf::from("-"));
+            }
+        }
+    }
     match (command, script) {
         (Some(command), None) => execute_command(command, &cli, &config).await,
-        (None, Some(script)) => execute_script(script, &cli, &config).await,
+        (None, Some(script)) => execute_script(script, emit_bytecode, &cli, &config).await,
         (None, None) => {
             // Default to REPL
             execute_repl(&config).await
@@ -732,6 +844,8 @@ fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli) {
 
     // Runtime settings
     config.runtime.timeout = cli.timeout;
+    config.runtime.callstack_limit = cli.callstack_limit;
+    config.runtime.error_namespace = cli.error_namespace.clone();
     config.runtime.verbose = cli.verbose;
     if let Some(snapshot) = &cli.snapshot {
         config.runtime.snapshot_path = Some(snapshot.clone());
@@ -900,7 +1014,9 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) ->
         Commands::KernelConnection { connection_file } => {
             execute_kernel_with_connection(connection_file, cli.timeout).await
         }
-        Commands::Run { file, args } => execute_script_with_args(file, args, cli, config).await,
+        Commands::Run { file, args } => {
+            execute_script_with_args(file, args, cli.emit_bytecode.clone(), cli, config).await
+        }
         Commands::Version { detailed } => {
             show_version(detailed);
             Ok(())
@@ -958,6 +1074,8 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     .context("Failed to create REPL engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
     engine.set_compat_mode(parser_compat(config.language.compat));
+    engine.set_callstack_limit(config.runtime.callstack_limit);
+    engine.set_error_namespace(config.runtime.error_namespace.clone());
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
@@ -969,6 +1087,21 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     use rustyline::DefaultEditor;
 
     let mut rl = DefaultEditor::new().context("Failed to initialize line editor")?;
+
+    let stdin_is_tty = atty::is(atty::Stream::Stdin);
+    if !stdin_is_tty {
+        let mut buffer = String::new();
+        io::stdin()
+            .read_to_string(&mut buffer)
+            .context("Failed to read piped input")?;
+        for raw_line in buffer.lines() {
+            if !process_repl_line(raw_line, &mut engine, config).await? {
+                break;
+            }
+        }
+        finalize_repl_session(&engine, config, session_start);
+        return Ok(());
+    }
 
     println!(
         "RunMat v{} by Dystr (https://dystr.com)",
@@ -1001,21 +1134,6 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     println!("Type 'help' for help, 'exit' to quit, '.info' for system information");
     println!();
 
-    let stdin_is_tty = atty::is(atty::Stream::Stdin);
-    if !stdin_is_tty {
-        let mut buffer = String::new();
-        io::stdin()
-            .read_to_string(&mut buffer)
-            .context("Failed to read piped input")?;
-        for raw_line in buffer.lines() {
-            if !process_repl_line(raw_line, &mut engine, config)? {
-                break;
-            }
-        }
-        finalize_repl_session(&engine, config, session_start);
-        return Ok(());
-    }
-
     loop {
         let readline = rl.readline("runmat> ");
         match readline {
@@ -1023,7 +1141,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
                 let line = line.trim();
                 let _ = rl.add_history_entry(line);
 
-                if !process_repl_line(line, &mut engine, config)? {
+                if !process_repl_line(line, &mut engine, config).await? {
                     break;
                 }
             }
@@ -1046,7 +1164,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     Ok(())
 }
 
-fn process_repl_line(
+async fn process_repl_line(
     line: &str,
     engine: &mut RunMatSession,
     config: &RunMatConfig,
@@ -1099,11 +1217,14 @@ fn process_repl_line(
         return Ok(true);
     }
 
-    match engine.execute(line) {
+    match engine.execute(line).await {
         Ok(result) => {
             emit_execution_streams(&result.streams);
             if let Some(error) = result.error {
-                eprintln!("Error: {error}");
+                eprintln!(
+                    "{}",
+                    error.format_diagnostic_with_source(Some("<repl>"), Some(line))
+                );
             } else if result.value.is_some()
                 && config.runtime.verbose
                 && result.execution_time_ms > 10
@@ -1120,7 +1241,11 @@ fn process_repl_line(
             }
         }
         Err(e) => {
-            eprintln!("Execution error: {e}");
+            if let Some(diag) = format_frontend_error(&e, "<repl>", line) {
+                eprintln!("{diag}");
+            } else {
+                eprintln!("Execution error: {e}");
+            }
         }
     }
 
@@ -1264,13 +1389,19 @@ async fn execute_kernel_with_connection(connection_file: PathBuf, timeout: u64) 
     Ok(())
 }
 
-async fn execute_script(script: PathBuf, cli: &Cli, config: &RunMatConfig) -> Result<()> {
-    execute_script_with_args(script, vec![], cli, config).await
+async fn execute_script(
+    script: PathBuf,
+    emit_bytecode_path: Option<PathBuf>,
+    cli: &Cli,
+    config: &RunMatConfig,
+) -> Result<()> {
+    execute_script_with_args(script, vec![], emit_bytecode_path, cli, config).await
 }
 
 async fn execute_script_with_args(
     script: PathBuf,
     _args: Vec<String>,
+    emit_bytecode_path: Option<PathBuf>,
     _cli: &Cli,
     config: &RunMatConfig,
 ) -> Result<()> {
@@ -1285,6 +1416,13 @@ async fn execute_script_with_args(
     let content = fs::read_to_string(&script)
         .with_context(|| format!("Failed to read script file: {script:?}"))?;
 
+    if let Some(path) = &emit_bytecode_path {
+        let output = emit_bytecode(&content, config)
+            .with_context(|| format!("Failed to emit bytecode for {script:?}"))?;
+        write_bytecode_output(path, &output)?;
+        return Ok(());
+    }
+
     let enable_jit = config.jit.enabled;
     let mut engine = RunMatSession::with_snapshot(
         enable_jit,
@@ -1294,18 +1432,34 @@ async fn execute_script_with_args(
     .context("Failed to create execution engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
     engine.set_compat_mode(parser_compat(config.language.compat));
+    engine.set_callstack_limit(config.runtime.callstack_limit);
+    engine.set_error_namespace(config.runtime.error_namespace.clone());
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
+    engine.set_source_name_override(Some(script.to_string_lossy().to_string()));
     let start_time = Instant::now();
-    let result = engine
-        .execute(&content)
-        .context("Failed to execute script")?;
+    let result = match engine.execute(&content).await {
+        Ok(result) => result,
+        Err(err) => {
+            if let Some(diag) =
+                format_frontend_error(&err, script.to_string_lossy().as_ref(), &content)
+            {
+                eprintln!("{diag}");
+            } else {
+                eprintln!("Execution error: {err}");
+            }
+            std::process::exit(1);
+        }
+    };
 
     let execution_time = start_time.elapsed();
+    emit_execution_streams(&result.streams);
 
     let provider_snapshot = capture_provider_snapshot();
-    let error_payload = result.error.clone();
+    let error_payload = result.error.as_ref().map(|err| {
+        err.format_diagnostic_with_source(Some(script.to_string_lossy().as_ref()), Some(&content))
+    });
     let success = error_payload.is_none();
     emit_runtime_value(RuntimeTelemetryRecord {
         kind: TelemetryRunKind::Script,
@@ -1320,7 +1474,7 @@ async fn execute_script_with_args(
     });
 
     if let Some(error) = error_payload {
-        error!("Script execution failed: {error}");
+        eprintln!("{error}");
         std::process::exit(1);
     } else {
         if result.used_jit {
@@ -1337,10 +1491,82 @@ async fn execute_script_with_args(
         }
     }
 
+    engine.set_source_name_override(None);
+
     #[cfg(feature = "wgpu")]
     dump_provider_telemetry_if_requested();
 
     Ok(())
+}
+
+fn emit_bytecode(source: &str, config: &RunMatConfig) -> Result<String> {
+    let options = ParserOptions::new(parser_compat(config.language.compat));
+    let ast = runmat_parser::parse_with_options(source, options)
+        .map_err(|err| anyhow::anyhow!(format!("Parse error: {err:?}")))?;
+    let lowering = runmat_hir::lower(&ast, &LoweringContext::empty())
+        .map_err(|err| anyhow::anyhow!(format!("Lowering error: {err:?}")))?;
+    let mut bytecode = runmat_ignition::compile(&lowering.hir, &HashMap::new())
+        .map_err(|err| anyhow::anyhow!(format!("Compile error: {err:?}")))?;
+    bytecode.var_names = lowering
+        .var_names
+        .iter()
+        .map(|(id, name)| (id.0, name.clone()))
+        .collect();
+    Ok(disassemble_bytecode(&bytecode))
+}
+
+fn write_bytecode_output(path: &PathBuf, output: &str) -> Result<()> {
+    if path.as_os_str() == "-" {
+        println!("{output}");
+        return Ok(());
+    }
+    let mut file = fs::File::create(path)
+        .with_context(|| format!("Failed to create bytecode output file {}", path.display()))?;
+    file.write_all(output.as_bytes())
+        .with_context(|| format!("Failed to write bytecode output file {}", path.display()))?;
+    Ok(())
+}
+
+fn disassemble_bytecode(bytecode: &runmat_ignition::Bytecode) -> String {
+    let mut out = String::new();
+    if !bytecode.var_names.is_empty() {
+        let mut entries: Vec<_> = bytecode.var_names.iter().collect();
+        entries.sort_by_key(|(idx, _)| *idx);
+        let _ = writeln!(&mut out, "# Variables");
+        for (idx, name) in entries {
+            let _ = writeln!(&mut out, "v{} = {}", idx, name);
+        }
+        let _ = writeln!(&mut out);
+    }
+    let _ = writeln!(&mut out, "# Bytecode");
+    for (idx, instr) in bytecode.instructions.iter().enumerate() {
+        let mut line = format!("{:04}: {}", idx, format_instr(instr, &bytecode.var_names));
+        if let Some(span) = bytecode.instr_spans.get(idx) {
+            if span.start != 0 || span.end != 0 {
+                let _ = write!(line, "  ; span {}..{}", span.start, span.end);
+            }
+        }
+        let _ = writeln!(&mut out, "{line}");
+    }
+    out
+}
+
+fn format_instr(instr: &Instr, var_names: &HashMap<usize, String>) -> String {
+    let label = |idx: usize| var_names.get(&idx).map(|n| n.as_str()).unwrap_or("?");
+    match instr {
+        Instr::LoadVar(idx) => format!("LoadVar {} ({})", idx, label(*idx)),
+        Instr::StoreVar(idx) => format!("StoreVar {} ({})", idx, label(*idx)),
+        Instr::LoadLocal(idx) => format!("LoadLocal {}", idx),
+        Instr::StoreLocal(idx) => format!("StoreLocal {}", idx),
+        Instr::EmitVar {
+            var_index,
+            label: emit,
+        } => {
+            format!("EmitVar {} ({}) {:?}", var_index, label(*var_index), emit)
+        }
+        Instr::EmitStackTop { label: emit } => format!("EmitStackTop {:?}", emit),
+        other => format!("{other:?}"),
+    }
 }
 
 #[cfg(feature = "wgpu")]
@@ -1571,9 +1797,12 @@ async fn execute_benchmark(
         .context("Failed to create execution engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
     engine.set_compat_mode(parser_compat(config.language.compat));
+    engine.set_callstack_limit(config.runtime.callstack_limit);
+    engine.set_error_namespace(config.runtime.error_namespace.clone());
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
+    engine.set_source_name_override(Some(file.to_string_lossy().to_string()));
 
     let mut total_time = Duration::ZERO;
     let mut jit_executions: u64 = 0;
@@ -1582,15 +1811,17 @@ async fn execute_benchmark(
     println!("Warming up...");
     // Warmup runs
     for _ in 0..3 {
-        let _ = engine.execute(&content)?;
+        let _ = engine.execute(&content).await.map_err(anyhow::Error::new)?;
     }
 
     println!("Running benchmark...");
     for i in 1..=iterations {
-        let result = engine.execute(&content)?;
+        let result = engine.execute(&content).await.map_err(anyhow::Error::new)?;
 
         let iter_duration = Duration::from_millis(result.execution_time_ms);
-        if let Some(error) = result.error.clone() {
+        if let Some(error) = result.error.as_ref().map(|err| {
+            err.format_diagnostic_with_source(Some(file.to_string_lossy().as_ref()), Some(&content))
+        }) {
             total_time += iter_duration;
             let counters = RuntimeExecutionCounters {
                 total_executions: i as u64,
@@ -1652,6 +1883,8 @@ async fn execute_benchmark(
         counters: Some(counters),
         provider: capture_provider_snapshot(),
     });
+
+    engine.set_source_name_override(None);
 
     Ok(())
 }

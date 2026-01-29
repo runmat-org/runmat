@@ -5,15 +5,24 @@ use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const DEFAULT_PRECISION: usize = 15;
 const MAX_PRECISION: usize = 52;
+
+fn num2str_flow(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("num2str").build()
+}
+
+fn remap_num2str_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, "num2str")
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::num2str")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -51,11 +60,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     examples = "txt = num2str([1 2 3]);",
     builtin_path = "crate::builtins::strings::core::num2str"
 )]
-fn num2str_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let gathered = gather_if_needed(&value).map_err(|e| format!("num2str: {e}"))?;
-    let data = extract_numeric_data(gathered)?;
+async fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let gathered = gather_if_needed_async(&value)
+        .await
+        .map_err(remap_num2str_flow)?;
+    let data = extract_numeric_data(gathered).await?;
 
-    let options = parse_options(rest)?;
+    let options = parse_options(rest).await?;
     let char_array = format_numeric_data(data, &options)?;
     Ok(Value::CharArray(char_array))
 }
@@ -102,7 +113,7 @@ enum NumericData {
     },
 }
 
-fn parse_options(args: Vec<Value>) -> Result<FormatOptions, String> {
+async fn parse_options(args: Vec<Value>) -> BuiltinResult<FormatOptions> {
     if args.is_empty() {
         return Ok(FormatOptions {
             spec: FormatSpec::General {
@@ -114,7 +125,11 @@ fn parse_options(args: Vec<Value>) -> Result<FormatOptions, String> {
 
     let mut gathered = Vec::with_capacity(args.len());
     for arg in args {
-        gathered.push(gather_if_needed(&arg).map_err(|e| format!("num2str: {e}"))?);
+        gathered.push(
+            gather_if_needed_async(&arg)
+                .await
+                .map_err(remap_num2str_flow)?,
+        );
     }
 
     let mut iter = gathered.into_iter();
@@ -127,7 +142,7 @@ fn parse_options(args: Vec<Value>) -> Result<FormatOptions, String> {
         if is_local_token(&first)? {
             decimal = detect_decimal_separator(true);
             if iter.next().is_some() {
-                return Err("num2str: too many input arguments".to_string());
+                return Err(num2str_flow("num2str: too many input arguments"));
             }
             return Ok(FormatOptions { spec, decimal });
         }
@@ -137,34 +152,36 @@ fn parse_options(args: Vec<Value>) -> Result<FormatOptions, String> {
         } else if let Some(text) = value_to_text(&first) {
             FormatSpec::Custom(parse_custom_format(&text)?)
         } else {
-            return Err(
-                "num2str: second argument must be a precision or format string".to_string(),
-            );
+            return Err(num2str_flow(
+                "num2str: second argument must be a precision or format string",
+            ));
         };
     }
 
     if let Some(second) = iter.next() {
         if !is_local_token(&second)? {
-            return Err("num2str: expected 'local' as the third argument".to_string());
+            return Err(num2str_flow(
+                "num2str: expected 'local' as the third argument",
+            ));
         }
         decimal = detect_decimal_separator(true);
     }
 
     if iter.next().is_some() {
-        return Err("num2str: too many input arguments".to_string());
+        return Err(num2str_flow("num2str: too many input arguments"));
     }
 
     Ok(FormatOptions { spec, decimal })
 }
 
-fn is_local_token(value: &Value) -> Result<bool, String> {
+fn is_local_token(value: &Value) -> BuiltinResult<bool> {
     let Some(text) = value_to_text(value) else {
         return Ok(false);
     };
     Ok(text.trim().eq_ignore_ascii_case("local"))
 }
 
-fn try_extract_precision(value: &Value) -> Result<Option<usize>, String> {
+fn try_extract_precision(value: &Value) -> BuiltinResult<Option<usize>> {
     match value {
         Value::Int(i) => {
             let digits = i.to_i64();
@@ -173,11 +190,11 @@ fn try_extract_precision(value: &Value) -> Result<Option<usize>, String> {
         }
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err("num2str: precision must be finite".to_string());
+                return Err(num2str_flow("num2str: precision must be finite"));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
-                return Err("num2str: precision must be an integer".to_string());
+                return Err(num2str_flow("num2str: precision must be an integer"));
             }
             validate_precision(rounded as i64)?;
             Ok(Some(rounded as usize))
@@ -185,11 +202,11 @@ fn try_extract_precision(value: &Value) -> Result<Option<usize>, String> {
         Value::Tensor(t) if t.data.len() == 1 => {
             let value = t.data[0];
             if !value.is_finite() {
-                return Err("num2str: precision must be finite".to_string());
+                return Err(num2str_flow("num2str: precision must be finite"));
             }
             let rounded = value.round();
             if (rounded - value).abs() > f64::EPSILON {
-                return Err("num2str: precision must be an integer".to_string());
+                return Err(num2str_flow("num2str: precision must be an integer"));
             }
             validate_precision(rounded as i64)?;
             Ok(Some(rounded as usize))
@@ -207,11 +224,11 @@ fn try_extract_precision(value: &Value) -> Result<Option<usize>, String> {
     }
 }
 
-fn validate_precision(value: i64) -> Result<(), String> {
+fn validate_precision(value: i64) -> BuiltinResult<()> {
     if value < 0 || value > MAX_PRECISION as i64 {
-        return Err(format!(
+        return Err(num2str_flow(format!(
             "num2str: precision must satisfy 0 <= p <= {MAX_PRECISION}"
-        ));
+        )));
     }
     Ok(())
 }
@@ -261,12 +278,14 @@ fn detect_decimal_separator(local: bool) -> char {
     '.'
 }
 
-fn parse_custom_format(text: &str) -> Result<CustomFormat, String> {
+fn parse_custom_format(text: &str) -> BuiltinResult<CustomFormat> {
     if !text.starts_with('%') {
-        return Err("num2str: format must start with '%'".to_string());
+        return Err(num2str_flow("num2str: format must start with '%'"));
     }
     if text == "%%" {
-        return Err("num2str: '%' escape is not supported for numeric conversion".to_string());
+        return Err(num2str_flow(
+            "num2str: '%' escape is not supported for numeric conversion",
+        ));
     }
 
     static FORMAT_RE: once_cell::sync::Lazy<Regex> = once_cell::sync::Lazy::new(|| {
@@ -274,7 +293,7 @@ fn parse_custom_format(text: &str) -> Result<CustomFormat, String> {
     });
 
     let captures = FORMAT_RE.captures(text).ok_or_else(|| {
-        "num2str: unsupported format string; expected variants like '%0.3f' or '%.5g'".to_string()
+        num2str_flow("num2str: unsupported format string; expected variants like '%0.3f' or '%.5g'")
     })?;
 
     let flags = captures.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -303,19 +322,19 @@ fn parse_custom_format(text: &str) -> Result<CustomFormat, String> {
             '-' => left_align = true,
             '0' => zero_pad = true,
             _ => {
-                return Err(format!(
+                return Err(num2str_flow(format!(
                     "num2str: unsupported format flag '{}'; only '+', '-', and '0' are supported",
                     ch
-                ))
+                )))
             }
         }
     }
 
     if let Some(p) = precision {
         if p > MAX_PRECISION {
-            return Err(format!(
+            return Err(num2str_flow(format!(
                 "num2str: precision must satisfy 0 <= p <= {MAX_PRECISION}"
-            ));
+            )));
         }
     }
 
@@ -340,7 +359,7 @@ fn parse_custom_format(text: &str) -> Result<CustomFormat, String> {
     })
 }
 
-fn extract_numeric_data(value: Value) -> Result<NumericData, String> {
+async fn extract_numeric_data(value: Value) -> BuiltinResult<NumericData> {
     match value {
         Value::Num(n) => Ok(NumericData::Real {
             data: vec![n],
@@ -359,7 +378,7 @@ fn extract_numeric_data(value: Value) -> Result<NumericData, String> {
         }),
         Value::Tensor(t) => tensor_to_numeric_data(t),
         Value::LogicalArray(la) => {
-            let tensor = tensor::logical_to_tensor(&la)?;
+            let tensor = tensor::logical_to_tensor(&la).map_err(num2str_flow)?;
             tensor_to_numeric_data(tensor)
         }
         Value::Complex(re, im) => Ok(NumericData::Complex {
@@ -369,19 +388,23 @@ fn extract_numeric_data(value: Value) -> Result<NumericData, String> {
         }),
         Value::ComplexTensor(t) => complex_tensor_to_data(t),
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_tensor(&handle)?;
+            let gathered = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(remap_num2str_flow)?;
             tensor_to_numeric_data(gathered)
         }
-        other => Err(format!(
+        other => Err(num2str_flow(format!(
             "num2str: unsupported input type {:?}; expected numeric or logical values",
             other
-        )),
+        ))),
     }
 }
 
-fn tensor_to_numeric_data(tensor: Tensor) -> Result<NumericData, String> {
+fn tensor_to_numeric_data(tensor: Tensor) -> BuiltinResult<NumericData> {
     if tensor.shape.len() > 2 {
-        return Err("num2str: input must be scalar, vector, or 2-D matrix".to_string());
+        return Err(num2str_flow(
+            "num2str: input must be scalar, vector, or 2-D matrix",
+        ));
     }
     let rows = tensor.rows();
     let cols = tensor.cols();
@@ -399,9 +422,11 @@ fn tensor_to_numeric_data(tensor: Tensor) -> Result<NumericData, String> {
     })
 }
 
-fn complex_tensor_to_data(tensor: ComplexTensor) -> Result<NumericData, String> {
+fn complex_tensor_to_data(tensor: ComplexTensor) -> BuiltinResult<NumericData> {
     if tensor.shape.len() > 2 {
-        return Err("num2str: complex input must be scalar, vector, or 2-D matrix".to_string());
+        return Err(num2str_flow(
+            "num2str: complex input must be scalar, vector, or 2-D matrix",
+        ));
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
@@ -418,7 +443,7 @@ struct CellEntry {
     width: usize,
 }
 
-fn format_numeric_data(data: NumericData, options: &FormatOptions) -> Result<CharArray, String> {
+fn format_numeric_data(data: NumericData, options: &FormatOptions) -> BuiltinResult<CharArray> {
     match data {
         NumericData::Real { data, rows, cols } => format_real_matrix(&data, rows, cols, options),
         NumericData::Complex { data, rows, cols } => {
@@ -432,12 +457,13 @@ fn format_real_matrix(
     rows: usize,
     cols: usize,
     options: &FormatOptions,
-) -> Result<CharArray, String> {
+) -> BuiltinResult<CharArray> {
     if rows == 0 {
-        return CharArray::new(Vec::new(), 0, 0).map_err(|e| format!("num2str: {e}"));
+        return CharArray::new(Vec::new(), 0, 0).map_err(|e| num2str_flow(format!("num2str: {e}")));
     }
     if cols == 0 {
-        return CharArray::new(Vec::new(), rows, 0).map_err(|e| format!("num2str: {e}"));
+        return CharArray::new(Vec::new(), rows, 0)
+            .map_err(|e| num2str_flow(format!("num2str: {e}")));
     }
 
     let mut entries = vec![
@@ -485,12 +511,13 @@ fn format_complex_matrix(
     rows: usize,
     cols: usize,
     options: &FormatOptions,
-) -> Result<CharArray, String> {
+) -> BuiltinResult<CharArray> {
     if rows == 0 {
-        return CharArray::new(Vec::new(), 0, 0).map_err(|e| format!("num2str: {e}"));
+        return CharArray::new(Vec::new(), 0, 0).map_err(|e| num2str_flow(format!("num2str: {e}")));
     }
     if cols == 0 {
-        return CharArray::new(Vec::new(), rows, 0).map_err(|e| format!("num2str: {e}"));
+        return CharArray::new(Vec::new(), rows, 0)
+            .map_err(|e| num2str_flow(format!("num2str: {e}")));
     }
 
     let mut entries = vec![
@@ -554,9 +581,9 @@ fn assemble_rows(entries: Vec<Vec<CellEntry>>, col_widths: Vec<usize>) -> Vec<St
         .collect()
 }
 
-fn rows_to_char_array(rows: Vec<String>) -> Result<CharArray, String> {
+fn rows_to_char_array(rows: Vec<String>) -> BuiltinResult<CharArray> {
     if rows.is_empty() {
-        return CharArray::new(Vec::new(), 0, 0).map_err(|e| format!("num2str: {e}"));
+        return CharArray::new(Vec::new(), 0, 0).map_err(|e| num2str_flow(format!("num2str: {e}")));
     }
     let row_count = rows.len();
     let col_count = rows
@@ -574,7 +601,7 @@ fn rows_to_char_array(rows: Vec<String>) -> Result<CharArray, String> {
         data.extend(chars);
     }
 
-    CharArray::new(data, row_count, col_count).map_err(|e| format!("num2str: {e}"))
+    CharArray::new(data, row_count, col_count).map_err(|e| num2str_flow(format!("num2str: {e}")))
 }
 
 fn format_real(value: f64, spec: &FormatSpec, decimal: char) -> String {
@@ -785,7 +812,15 @@ fn apply_format_flags(mut text: String, fmt: &CustomFormat) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+
+    fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::num2str_builtin(value, rest))
+    }
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
+
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -922,14 +957,17 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_invalid_input_type() {
-        let err = num2str_builtin(Value::String("hello".into()), Vec::new()).unwrap_err();
+        let err =
+            error_message(num2str_builtin(Value::String("hello".into()), Vec::new()).unwrap_err());
         assert!(err.contains("unsupported input type"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_invalid_format_string() {
-        let err = num2str_builtin(Value::Num(1.0), vec![Value::String("%q".into())]).unwrap_err();
+        let err = error_message(
+            num2str_builtin(Value::Num(1.0), vec![Value::String("%q".into())]).unwrap_err(),
+        );
         assert!(err.contains("unsupported format string"));
     }
 }

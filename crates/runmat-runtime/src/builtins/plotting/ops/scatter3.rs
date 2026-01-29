@@ -1,5 +1,6 @@
 //! MATLAB-compatible `scatter3` builtin.
 
+use futures::executor::block_on;
 use glam::{Vec3, Vec4};
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
@@ -13,16 +14,19 @@ use runmat_plot::plots::surface::ColorMap;
 use runmat_plot::plots::LineStyle;
 use runmat_plot::plots::Scatter3Plot;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::gather_if_needed_async;
+use crate::{BuiltinResult, RuntimeError};
 use std::convert::TryFrom;
 
 use super::common::numeric_triplet;
 use super::gpu_helpers::axis_bounds;
 use super::perf::scatter3_lod_stride;
+use super::plotting_error;
 use super::point::{
     convert_rgb_color_matrix, convert_scalar_color_values, convert_size_vector,
     map_scalar_values_to_colors, validate_gpu_color_matrix, validate_gpu_vector_length, PointArgs,
@@ -30,6 +34,8 @@ use super::point::{
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::LineStyleParseOptions;
+
+const BUILTIN_NAME: &str = "scatter3";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::scatter3")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -67,7 +73,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::scatter3"
 )]
-pub fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> Result<String, String> {
+pub async fn scatter3_builtin(
+    x: Value,
+    y: Value,
+    z: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<String> {
     let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter3())?;
     let mut x_input = Some(ScatterInput::from_value(x)?);
     let mut y_input = Some(ScatterInput::from_value(y)?);
@@ -79,7 +90,7 @@ pub fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> Resul
         axis_equal: true,
         ..Default::default()
     };
-    render_active_plot(opts, move |figure, axes| {
+    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let style_args = style_args.clone();
         let point_count = x_input.as_ref().map(|input| input.len()).unwrap_or(0);
         let mut resolved_style = resolve_scatter3_style(point_count, &style_args, "scatter3")?;
@@ -112,11 +123,16 @@ pub fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> Resul
         let scatter = build_scatter3_plot(x_vals, y_vals, z_vals, &mut resolved_style)?;
         figure.add_scatter3_plot_on_axes(scatter, axes);
         Ok(())
-    })
+    })?;
+    Ok(rendered)
 }
 
 const DEFAULT_POINT_SIZE: f32 = 6.0;
 const DEFAULT_SCATTER3_LABEL: &str = "Data";
+
+fn scatter3_err(message: impl Into<String>) -> RuntimeError {
+    plotting_error(BUILTIN_NAME, message)
+}
 
 fn default_color() -> Vec4 {
     Vec4::new(0.1, 0.6, 0.9, 0.9)
@@ -140,8 +156,8 @@ struct Scatter3ResolvedStyle {
 fn resolve_scatter3_style(
     point_count: usize,
     args: &PointArgs,
-    context: &str,
-) -> Result<Scatter3ResolvedStyle, String> {
+    context: &'static str,
+) -> BuiltinResult<Scatter3ResolvedStyle> {
     let mut style = Scatter3ResolvedStyle {
         uniform_color: default_color(),
         point_size: DEFAULT_POINT_SIZE,
@@ -229,9 +245,11 @@ fn build_scatter3_plot(
     y: Vec<f64>,
     z: Vec<f64>,
     style: &mut Scatter3ResolvedStyle,
-) -> Result<Scatter3Plot, String> {
+) -> BuiltinResult<Scatter3Plot> {
     if x.len() != y.len() || x.len() != z.len() {
-        return Err("scatter3: X, Y, and Z inputs must have identical lengths".to_string());
+        return Err(scatter3_err(
+            "scatter3: X, Y, and Z inputs must have identical lengths",
+        ));
     }
 
     ensure_scatter3_host_metadata(style, x.len())?;
@@ -244,7 +262,7 @@ fn build_scatter3_plot(
         .collect();
 
     let mut scatter = Scatter3Plot::new(points)
-        .map_err(|err| format!("scatter3: {err}"))?
+        .map_err(|err| scatter3_err(format!("scatter3: {err}")))?
         .with_point_size(style.point_size)
         .with_color(style.uniform_color)
         .with_label(style.label.clone());
@@ -254,7 +272,7 @@ fn build_scatter3_plot(
     if let Some(colors) = style.per_point_colors.take() {
         scatter = scatter
             .with_colors(colors)
-            .map_err(|e| format!("scatter3: {e}"))?;
+            .map_err(|e| scatter3_err(format!("scatter3: {e}")))?;
     }
     Ok(scatter)
 }
@@ -265,11 +283,12 @@ enum ScatterInput {
 }
 
 impl ScatterInput {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
             other => {
-                let tensor = Tensor::try_from(&other).map_err(|e| format!("scatter3: {e}"))?;
+                let tensor =
+                    Tensor::try_from(&other).map_err(|e| scatter3_err(format!("scatter3: {e}")))?;
                 Ok(Self::Host(tensor))
             }
         }
@@ -289,7 +308,7 @@ impl ScatterInput {
         }
     }
 
-    fn into_tensor(self, name: &str) -> Result<Tensor, String> {
+    fn into_tensor(self, name: &'static str) -> BuiltinResult<Tensor> {
         match self {
             Self::Host(t) => Ok(t),
             Self::Gpu(handle) => gather_tensor_from_gpu(handle, name),
@@ -297,10 +316,19 @@ impl ScatterInput {
     }
 }
 
-fn gather_tensor_from_gpu(handle: GpuTensorHandle, name: &str) -> Result<Tensor, String> {
+async fn gather_tensor_from_gpu_async(
+    handle: GpuTensorHandle,
+    name: &'static str,
+) -> BuiltinResult<Tensor> {
     let value = Value::GpuTensor(handle);
-    let gathered = gather_if_needed(&value)?;
-    Tensor::try_from(&gathered).map_err(|e| format!("{name}: {e}"))
+    let gathered = gather_if_needed_async(&value)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, name))?;
+    Tensor::try_from(&gathered).map_err(|e| scatter3_err(format!("{name}: {e}")))
+}
+
+fn gather_tensor_from_gpu(handle: GpuTensorHandle, name: &'static str) -> BuiltinResult<Tensor> {
+    block_on(gather_tensor_from_gpu_async(handle, name))
 }
 
 fn build_scatter3_gpu_plot(
@@ -308,29 +336,33 @@ fn build_scatter3_gpu_plot(
     y: &GpuTensorHandle,
     z: &GpuTensorHandle,
     style: &Scatter3ResolvedStyle,
-) -> Result<Scatter3Plot, String> {
+) -> BuiltinResult<Scatter3Plot> {
     let context = runmat_plot::shared_wgpu_context()
-        .ok_or_else(|| "scatter3: plotting GPU context unavailable".to_string())?;
+        .ok_or_else(|| scatter3_err("scatter3: plotting GPU context unavailable"))?;
 
     let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
-        .ok_or_else(|| "scatter3: unable to export GPU X data".to_string())?;
+        .ok_or_else(|| scatter3_err("scatter3: unable to export GPU X data"))?;
     let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
-        .ok_or_else(|| "scatter3: unable to export GPU Y data".to_string())?;
+        .ok_or_else(|| scatter3_err("scatter3: unable to export GPU Y data"))?;
     let z_ref = runmat_accelerate_api::export_wgpu_buffer(z)
-        .ok_or_else(|| "scatter3: unable to export GPU Z data".to_string())?;
+        .ok_or_else(|| scatter3_err("scatter3: unable to export GPU Z data"))?;
 
     if x_ref.len == 0 {
-        return Err("scatter3: empty input tensor".to_string());
+        return Err(scatter3_err("scatter3: empty input tensor"));
     }
     if x_ref.len != y_ref.len || x_ref.len != z_ref.len {
-        return Err("scatter3: X, Y, and Z inputs must have identical lengths".to_string());
+        return Err(scatter3_err(
+            "scatter3: X, Y, and Z inputs must have identical lengths",
+        ));
     }
     if x_ref.precision != y_ref.precision || x_ref.precision != z_ref.precision {
-        return Err("scatter3: gpuArray inputs must have matching precision".to_string());
+        return Err(scatter3_err(
+            "scatter3: gpuArray inputs must have matching precision",
+        ));
     }
     let point_count = x_ref.len;
     let len_u32 = u32::try_from(point_count)
-        .map_err(|_| "scatter3: point count exceeds supported range".to_string())?;
+        .map_err(|_| scatter3_err("scatter3: point count exceeds supported range"))?;
     let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
     let bounds = build_gpu_bounds(x, y, z)?;
     let extent_hint = scatter3_extent_hint(&bounds);
@@ -360,7 +392,7 @@ fn build_scatter3_gpu_plot(
         &inputs,
         &params,
     )
-    .map_err(|e| format!("scatter3: failed to build GPU vertices: {e}"))?;
+    .map_err(|e| scatter3_err(format!("scatter3: failed to build GPU vertices: {e}")))?;
 
     let drawn_points = gpu_vertices.vertex_count;
     Ok(Scatter3Plot::from_gpu_buffer(
@@ -377,10 +409,10 @@ fn build_gpu_bounds(
     x: &GpuTensorHandle,
     y: &GpuTensorHandle,
     z: &GpuTensorHandle,
-) -> Result<BoundingBox, String> {
-    let (min_x, max_x) = axis_bounds(x, "scatter3")?;
-    let (min_y, max_y) = axis_bounds(y, "scatter3")?;
-    let (min_z, max_z) = axis_bounds(z, "scatter3")?;
+) -> BuiltinResult<BoundingBox> {
+    let (min_x, max_x) = axis_bounds(x, BUILTIN_NAME)?;
+    let (min_y, max_y) = axis_bounds(y, BUILTIN_NAME)?;
+    let (min_z, max_z) = axis_bounds(z, BUILTIN_NAME)?;
     Ok(BoundingBox::new(
         Vec3::new(min_x, min_y, min_z),
         Vec3::new(max_x, max_y, max_z),
@@ -394,21 +426,20 @@ fn scatter3_extent_hint(bounds: &BoundingBox) -> f32 {
 fn build_scatter3_size_buffer(
     style: &Scatter3ResolvedStyle,
     point_count: usize,
-) -> Result<ScatterAttributeBuffer, String> {
+) -> BuiltinResult<ScatterAttributeBuffer> {
     if let Some(handle) = style.gpu_sizes.as_ref() {
         let exported = runmat_accelerate_api::export_wgpu_buffer(handle)
-            .ok_or_else(|| "scatter3: unable to export GPU marker sizes".to_string())?;
+            .ok_or_else(|| scatter3_err("scatter3: unable to export GPU marker sizes"))?;
         if exported.len != point_count {
-            return Err(format!(
+            return Err(scatter3_err(format!(
                 "scatter3: marker size array must have {point_count} elements (got {})",
                 exported.len
-            ));
+            )));
         }
         if exported.precision != ProviderPrecision::F32 {
-            return Err(
-                "scatter3: GPU marker sizes must be single-precision (cast before plotting)"
-                    .to_string(),
-            );
+            return Err(scatter3_err(
+                "scatter3: GPU marker sizes must be single-precision (cast before plotting)",
+            ));
         }
         return Ok(ScatterAttributeBuffer::Gpu(exported.buffer));
     }
@@ -426,22 +457,21 @@ fn build_scatter3_size_buffer(
 fn build_scatter3_color_buffer(
     style: &Scatter3ResolvedStyle,
     point_count: usize,
-) -> Result<ScatterColorBuffer, String> {
+) -> BuiltinResult<ScatterColorBuffer> {
     if let Some(gpu_color) = style.gpu_colors.as_ref() {
         let exported = runmat_accelerate_api::export_wgpu_buffer(&gpu_color.handle)
-            .ok_or_else(|| "scatter3: unable to export GPU color data".to_string())?;
+            .ok_or_else(|| scatter3_err("scatter3: unable to export GPU color data"))?;
         let expected = point_count * gpu_color.components.stride() as usize;
         if exported.len != expected {
-            return Err(format!(
+            return Err(scatter3_err(format!(
                 "scatter3: color array must contain {} elements (got {})",
                 expected, exported.len
-            ));
+            )));
         }
         if exported.precision != ProviderPrecision::F32 {
-            return Err(
-                "scatter3: GPU color arrays must be single-precision (cast before plotting)"
-                    .to_string(),
-            );
+            return Err(scatter3_err(
+                "scatter3: GPU color arrays must be single-precision (cast before plotting)",
+            ));
         }
         return Ok(ScatterColorBuffer::Gpu {
             buffer: exported.buffer,
@@ -464,7 +494,7 @@ fn build_scatter3_color_buffer(
 fn ensure_scatter3_host_metadata(
     style: &mut Scatter3ResolvedStyle,
     point_count: usize,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     if style.per_point_sizes.is_none() {
         if let Some(handle) = style.gpu_sizes.clone() {
             let tensor = gather_tensor_from_gpu(handle, "scatter3")?;
@@ -488,10 +518,16 @@ pub(crate) mod tests {
     use super::super::style::LineStyleParseOptions;
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use crate::RuntimeError;
+    use futures::executor::block_on;
     use runmat_builtins::Value;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
+    }
+
+    fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> BuiltinResult<String> {
+        block_on(super::scatter3_builtin(x, y, z, rest))
     }
 
     fn test_style() -> Scatter3ResolvedStyle {
@@ -520,11 +556,11 @@ pub(crate) mod tests {
         }
     }
 
-    fn assert_plotting_unavailable(msg: &str) {
-        let lower = msg.to_lowercase();
+    fn assert_plotting_unavailable(err: &RuntimeError) {
+        let lower = err.to_string().to_lowercase();
         assert!(
             lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
-            "unexpected error: {msg}"
+            "unexpected error: {err}"
         );
     }
 
@@ -545,8 +581,8 @@ pub(crate) mod tests {
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Vec::new(),
         );
-        if let Err(msg) = out {
-            assert_plotting_unavailable(&msg);
+        if let Err(flow) = out {
+            assert_plotting_unavailable(&flow);
         }
     }
 

@@ -13,8 +13,8 @@ fn upload_vector(provider: &dyn AccelProvider, data: &[f64]) -> GpuTensorHandle 
         .expect("upload vector")
 }
 
-#[test]
-fn stochastic_evolution_handles_zero_scale() {
+#[tokio::test]
+async fn stochastic_evolution_handles_zero_scale() {
     let provider = register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
     let drift = 0.05;
     let scale = 0.0;
@@ -23,7 +23,7 @@ fn stochastic_evolution_handles_zero_scale() {
     let evolved = provider
         .stochastic_evolution(&state, drift, scale, steps)
         .expect("stochastic evolution");
-    let gathered = provider.download(&evolved).expect("download");
+    let gathered = provider.download(&evolved).await.expect("download");
     let factor = (drift * steps as f64).exp();
     let tolerance = match provider.precision() {
         ProviderPrecision::F64 => 1e-9,

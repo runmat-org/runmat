@@ -16,7 +16,9 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
+const BUILTIN_NAME: &str = "acos";
 const ZERO_EPS: f64 = 1e-12;
 const DOMAIN_TOL: f64 = 1e-12;
 
@@ -35,6 +37,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Providers may execute acos in-place when inputs stay within [-1, 1]; otherwise the runtime gathers to host to honour MATLAB-compatible complex promotion.",
 };
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::acos")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -61,27 +69,29 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::acos"
 )]
-fn acos_builtin(value: Value) -> Result<Value, String> {
+async fn acos_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => acos_gpu(handle),
+        Value::GpuTensor(handle) => acos_gpu(handle).await,
         Value::Complex(re, im) => Ok(acos_complex_value(re, im)),
         Value::ComplexTensor(ct) => acos_complex_tensor(ct),
         Value::CharArray(ca) => acos_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => Err("acos: expected numeric input".to_string()),
+        Value::String(_) | Value::StringArray(_) => {
+            Err(runtime_error_for("acos: expected numeric input"))
+        }
         other => acos_real(other),
     }
 }
 
-fn acos_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn acos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        match detect_gpu_requires_complex(provider, &handle) {
+        match detect_gpu_requires_complex(provider, &handle).await {
             Ok(false) => {
-                if let Ok(out) = provider.unary_acos(&handle) {
+                if let Ok(out) = provider.unary_acos(&handle).await {
                     return Ok(Value::GpuTensor(out));
                 }
             }
             Ok(true) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                 return acos_tensor_real(tensor);
             }
             Err(_) => {
@@ -89,44 +99,49 @@ fn acos_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     acos_tensor_real(tensor)
 }
 
-fn detect_gpu_requires_complex(
+async fn detect_gpu_requires_complex(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
-) -> Result<bool, String> {
+) -> BuiltinResult<bool> {
     let min_handle = provider
         .reduce_min(handle)
-        .map_err(|e| format!("acos: reduce_min failed: {e}"))?;
-    let max_handle = match provider.reduce_max(handle) {
+        .await
+        .map_err(|e| runtime_error_for(format!("acos: reduce_min failed: {e}")))?;
+    let max_handle = match provider.reduce_max(handle).await {
         Ok(handle) => handle,
         Err(err) => {
             let _ = provider.free(&min_handle);
-            return Err(format!("acos: reduce_max failed: {err}"));
+            return Err(runtime_error_for(format!("acos: reduce_max failed: {err}")));
         }
     };
-    let min_host = match provider.download(&min_handle) {
+    let min_host = match download_handle_async(provider, &min_handle).await {
         Ok(host) => host,
         Err(err) => {
             let _ = provider.free(&min_handle);
             let _ = provider.free(&max_handle);
-            return Err(format!("acos: reduce_min download failed: {err}"));
+            return Err(runtime_error_for(format!(
+                "acos: reduce_min download failed: {err}"
+            )));
         }
     };
-    let max_host = match provider.download(&max_handle) {
+    let max_host = match download_handle_async(provider, &max_handle).await {
         Ok(host) => host,
         Err(err) => {
             let _ = provider.free(&min_handle);
             let _ = provider.free(&max_handle);
-            return Err(format!("acos: reduce_max download failed: {err}"));
+            return Err(runtime_error_for(format!(
+                "acos: reduce_max download failed: {err}"
+            )));
         }
     };
     let _ = provider.free(&min_handle);
     let _ = provider.free(&max_handle);
     if min_host.data.iter().any(|&v| v.is_nan()) || max_host.data.iter().any(|&v| v.is_nan()) {
-        return Err("acos: reduction results contained NaN".to_string());
+        return Err(runtime_error_for("acos: reduction results contained NaN"));
     }
     let min_val = min_host.data.iter().copied().fold(f64::INFINITY, f64::min);
     let max_val = max_host
@@ -137,12 +152,12 @@ fn detect_gpu_requires_complex(
     Ok(min_val < -1.0 - DOMAIN_TOL || max_val > 1.0 + DOMAIN_TOL)
 }
 
-fn acos_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("acos", value)?;
+fn acos_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("acos", value).map_err(runtime_error_for)?;
     acos_tensor_real(tensor)
 }
 
-fn acos_tensor_real(tensor: Tensor) -> Result<Value, String> {
+fn acos_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
     let len = tensor.data.len();
     if len == 0 {
         return Ok(tensor::tensor_into_value(tensor));
@@ -169,12 +184,12 @@ fn acos_tensor_real(tensor: Tensor) -> Result<Value, String> {
             Ok(Value::Complex(re, im))
         } else {
             let tensor = ComplexTensor::new(complex_data, tensor.shape.clone())
-                .map_err(|e| format!("acos: {e}"))?;
+                .map_err(|e| runtime_error_for(format!("acos: {e}")))?;
             Ok(Value::ComplexTensor(tensor))
         }
     } else {
-        let tensor =
-            Tensor::new(real_data, tensor.shape.clone()).map_err(|e| format!("acos: {e}"))?;
+        let tensor = Tensor::new(real_data, tensor.shape.clone())
+            .map_err(|e| runtime_error_for(format!("acos: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     }
 }
@@ -184,7 +199,7 @@ fn acos_complex_value(re: f64, im: f64) -> Value {
     Value::Complex(zero_small(result.re), zero_small(result.im))
 }
 
-fn acos_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn acos_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     if ct.data.is_empty() {
         return Ok(Value::ComplexTensor(ct));
     }
@@ -197,20 +212,21 @@ fn acos_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
         let (re, im) = data[0];
         Ok(Value::Complex(re, im))
     } else {
-        let tensor =
-            ComplexTensor::new(data, ct.shape.clone()).map_err(|e| format!("acos: {e}"))?;
+        let tensor = ComplexTensor::new(data, ct.shape.clone())
+            .map_err(|e| runtime_error_for(format!("acos: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
 
-fn acos_char_array(ca: CharArray) -> Result<Value, String> {
+fn acos_char_array(ca: CharArray) -> BuiltinResult<Value> {
     if ca.data.is_empty() {
-        let tensor =
-            Tensor::new(Vec::new(), vec![ca.rows, ca.cols]).map_err(|e| format!("acos: {e}"))?;
+        let tensor = Tensor::new(Vec::new(), vec![ca.rows, ca.cols])
+            .map_err(|e| runtime_error_for(format!("acos: {e}")))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("acos: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| runtime_error_for(format!("acos: {e}")))?;
     acos_tensor_real(tensor)
 }
 
@@ -226,7 +242,16 @@ fn zero_small(value: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray};
+
+    fn acos_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::acos_builtin(value))
+    }
+
+    fn error_message(err: RuntimeError) -> String {
+        err.message().to_string()
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -311,7 +336,8 @@ pub(crate) mod tests {
     #[test]
     fn acos_string_errors() {
         let err = acos_builtin(Value::from("hello")).expect_err("acos string should error");
-        assert!(err.contains("expected numeric input"));
+        let message = error_message(err);
+        assert!(message.contains("expected numeric input"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -401,7 +427,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = acos_gpu(h).expect("acos gpu");
+        let gpu = block_on(acos_gpu(h)).expect("acos gpu");
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {

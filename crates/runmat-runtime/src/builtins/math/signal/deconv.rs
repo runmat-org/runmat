@@ -9,7 +9,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1.0e-12;
 
@@ -40,6 +41,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Polynomial division is not part of current fusion pipelines; metadata is present for completeness.",
 };
 
+const BUILTIN_NAME: &str = "deconv";
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 #[runtime_builtin(
     name = "deconv",
     category = "math/signal",
@@ -48,19 +57,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::math::signal::deconv"
 )]
-fn deconv_builtin(numerator: Value, denominator: Value) -> Result<Value, String> {
-    let eval = evaluate(numerator, denominator)?;
+async fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(numerator, denominator).await?;
     Ok(eval.quotient())
 }
 
 /// Evaluate `deconv` and retain both outputs for multi-value contexts.
-pub fn evaluate(numerator: Value, denominator: Value) -> Result<DeconvEval, String> {
-    let (num_input, mut prefer_gpu) = convert_value(numerator)?;
-    let (den_input, den_gpu) = convert_value(denominator)?;
+pub async fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<DeconvEval> {
+    let (num_input, mut prefer_gpu) = convert_value(numerator).await?;
+    let (den_input, den_gpu) = convert_value(denominator).await?;
     prefer_gpu |= den_gpu;
 
-    let (quotient_raw, remainder_raw) = polynomial_division(&num_input.data, &den_input.data)
-        .map_err(|e| format!("deconv: {e}"))?;
+    let (quotient_raw, remainder_raw) = polynomial_division(&num_input.data, &den_input.data)?;
 
     let orientation = orientation_from_hint(num_input.hint);
     let quotient = convert_output(quotient_raw, orientation, prefer_gpu)?;
@@ -112,11 +120,14 @@ enum Orientation {
     Column,
 }
 
-fn convert_value(value: Value) -> Result<(PolyInput, bool), String> {
+#[async_recursion::async_recursion(?Send)]
+async fn convert_value(value: Value) -> BuiltinResult<(PolyInput, bool)> {
     match value {
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_value(&Value::GpuTensor(handle.clone()))?;
-            let (input, _) = convert_value(gathered)?;
+            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
+                .await
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+            let (input, _) = convert_value(gathered).await?;
             Ok((input, true))
         }
         Value::Tensor(tensor) => convert_tensor(tensor).map(|input| (input, false)),
@@ -153,11 +164,13 @@ fn convert_value(value: Value) -> Result<(PolyInput, bool), String> {
             },
             false,
         )),
-        other => Err(format!("deconv: unsupported input type {other:?}")),
+        other => Err(runtime_error_for(format!(
+            "deconv: unsupported input type {other:?}"
+        ))),
     }
 }
 
-fn convert_tensor(tensor: Tensor) -> Result<PolyInput, String> {
+fn convert_tensor(tensor: Tensor) -> BuiltinResult<PolyInput> {
     let Tensor {
         data, rows, cols, ..
     } = tensor;
@@ -168,7 +181,7 @@ fn convert_tensor(tensor: Tensor) -> Result<PolyInput, String> {
     Ok(PolyInput { data, hint })
 }
 
-fn convert_complex_tensor(tensor: ComplexTensor) -> Result<PolyInput, String> {
+fn convert_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<PolyInput> {
     let ComplexTensor {
         data, rows, cols, ..
     } = tensor;
@@ -182,7 +195,7 @@ fn convert_complex_tensor(tensor: ComplexTensor) -> Result<PolyInput, String> {
     Ok(PolyInput { data, hint })
 }
 
-fn convert_logical_array(array: LogicalArray) -> Result<PolyInput, String> {
+fn convert_logical_array(array: LogicalArray) -> BuiltinResult<PolyInput> {
     let hint = classify_orientation(
         array.shape.first().copied().unwrap_or(0),
         array.shape.get(1).copied().unwrap_or(0),
@@ -197,9 +210,11 @@ fn convert_logical_array(array: LogicalArray) -> Result<PolyInput, String> {
     Ok(PolyInput { data, hint })
 }
 
-fn ensure_vector(hint: OrientationHint) -> Result<(), String> {
+fn ensure_vector(hint: OrientationHint) -> BuiltinResult<()> {
     if matches!(hint, OrientationHint::General) {
-        Err("deconv: inputs must be scalars, row vectors, or column vectors".to_string())
+        Err(runtime_error_for(
+            "deconv: inputs must be scalars, row vectors, or column vectors",
+        ))
     } else {
         Ok(())
     }
@@ -232,14 +247,16 @@ type PolyDivision = (Vec<Complex<f64>>, Vec<Complex<f64>>);
 fn polynomial_division(
     numerator: &[Complex<f64>],
     denominator: &[Complex<f64>],
-) -> Result<PolyDivision, String> {
+) -> BuiltinResult<PolyDivision> {
     if denominator.is_empty() {
-        return Err("denominator must not be empty".to_string());
+        return Err(runtime_error_for("denominator must not be empty"));
     }
 
     let (den_trim, _) = trim_leading_zeros(denominator);
     if den_trim.is_empty() {
-        return Err("denominator must contain at least one non-zero coefficient".to_string());
+        return Err(runtime_error_for(
+            "denominator must contain at least one non-zero coefficient",
+        ));
     }
 
     let (num_trim, num_all_zero) = trim_leading_zeros(numerator);
@@ -254,7 +271,9 @@ fn polynomial_division(
 
     let divisor_lead = den_trim[0];
     if is_close_zero(&divisor_lead) {
-        return Err("denominator leading coefficient underflowed to zero".to_string());
+        return Err(runtime_error_for(
+            "denominator leading coefficient underflowed to zero",
+        ));
     }
 
     let q_len = num_trim.len() - den_trim.len() + 1;
@@ -322,7 +341,7 @@ fn convert_output(
     data: Vec<Complex<f64>>,
     orientation: Orientation,
     prefer_gpu: bool,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     if data.is_empty() {
         return match orientation {
             Orientation::Row => finalize_real(vec![], vec![1, 0], prefer_gpu),
@@ -346,15 +365,16 @@ fn convert_output(
         Ok(Value::Complex(re, im))
     } else {
         let complex_data: Vec<(f64, f64)> = data.into_iter().map(|c| (c.re, c.im)).collect();
-        let tensor = ComplexTensor::new(complex_data, shape)
-            .map_err(|e| format!("deconv: failed to build complex tensor: {e}"))?;
+        let tensor = ComplexTensor::new(complex_data, shape).map_err(|e| {
+            runtime_error_for(format!("deconv: failed to build complex tensor: {e}"))
+        })?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
 
-fn finalize_real(data: Vec<f64>, shape: Vec<usize>, prefer_gpu: bool) -> Result<Value, String> {
+fn finalize_real(data: Vec<f64>, shape: Vec<usize>, prefer_gpu: bool) -> BuiltinResult<Value> {
     let tensor = Tensor::new(data, shape.clone())
-        .map_err(|e| format!("deconv: failed to build tensor: {e}"))?;
+        .map_err(|e| runtime_error_for(format!("deconv: failed to build tensor: {e}")))?;
     if prefer_gpu {
         #[cfg(all(test, feature = "wgpu"))]
         {
@@ -379,9 +399,18 @@ fn finalize_real(data: Vec<f64>, shape: Vec<usize>, prefer_gpu: bool) -> Result<
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
+
+    fn error_message(error: RuntimeError) -> String {
+        error.message().to_string()
+    }
+
+    fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<DeconvEval> {
+        block_on(super::evaluate(numerator, denominator))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -501,7 +530,9 @@ pub(crate) mod tests {
     fn deconv_denominator_zero_error() {
         let numerator = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let denominator = Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap();
-        let err = deconv_builtin(Value::Tensor(numerator), Value::Tensor(denominator)).unwrap_err();
+        let err = error_message(
+            deconv_builtin(Value::Tensor(numerator), Value::Tensor(denominator)).unwrap_err(),
+        );
         assert!(err.contains("denominator"));
     }
 
@@ -510,7 +541,9 @@ pub(crate) mod tests {
     fn deconv_rejects_matrix_inputs() {
         let numerator = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let denominator = Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap();
-        let err = deconv_builtin(Value::Tensor(numerator), Value::Tensor(denominator)).unwrap_err();
+        let err = error_message(
+            deconv_builtin(Value::Tensor(numerator), Value::Tensor(denominator)).unwrap_err(),
+        );
         assert!(err.contains("vectors"));
     }
 
@@ -637,5 +670,9 @@ pub(crate) mod tests {
             out[idx] += v;
         }
         out
+    }
+
+    fn deconv_builtin(numerator: Value, denominator: Value) -> BuiltinResult<Value> {
+        block_on(super::deconv_builtin(numerator, denominator))
     }
 }

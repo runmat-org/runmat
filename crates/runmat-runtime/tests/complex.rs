@@ -1,6 +1,7 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 // Complex numbers end-to-end tests
+use futures::executor::block_on;
 use runmat_builtins::Value;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -15,14 +16,14 @@ fn complex_scalar_arithmetic() {
     } else {
         panic!("expected complex");
     }
-    let m = runmat_runtime::elementwise_mul(&a, &b).unwrap();
+    let m = block_on(runmat_runtime::elementwise_mul(&a, &b)).unwrap();
     if let Value::Complex(re, im) = m {
         assert!((re - (3.0 * 1.5 - 2.0 * (-4.0))).abs() < 1e-12);
         assert!((im - (3.0 * (-4.0) + 2.0 * 1.5)).abs() < 1e-12);
     } else {
         panic!("expected complex");
     }
-    let d = runmat_runtime::elementwise_div(&a, &b).unwrap();
+    let d = block_on(runmat_runtime::elementwise_div(&a, &b)).unwrap();
     if let Value::Complex(re, im) = d {
         assert!(re.is_finite());
         assert!(im.is_finite());
@@ -42,14 +43,14 @@ fn complex_scalar_with_real() {
     } else {
         panic!();
     }
-    let m = runmat_runtime::elementwise_mul(&a, &Value::Num(2.0)).unwrap();
+    let m = block_on(runmat_runtime::elementwise_mul(&a, &Value::Num(2.0))).unwrap();
     if let Value::Complex(re, im) = m {
         assert!((re - 4.0).abs() < 1e-12);
         assert!((im + 2.0).abs() < 1e-12);
     } else {
         panic!();
     }
-    let d = runmat_runtime::elementwise_div(&Value::Num(5.0), &a).unwrap();
+    let d = block_on(runmat_runtime::elementwise_div(&Value::Num(5.0), &a)).unwrap();
     if let Value::Complex(re, im) = d {
         assert!(re.is_finite());
         assert!(im.is_finite());
@@ -85,10 +86,10 @@ fn complex_matmul_and_transpose() {
         ComplexTensor::new_2d(vec![(1.0, 1.0), (0.0, -1.0), (2.0, 0.0), (1.0, 0.5)], 2, 2).unwrap();
     let b = ComplexTensor::new_2d(vec![(-1.0, 0.0), (3.0, 0.5), (0.0, 2.0), (1.0, -1.0)], 2, 2)
         .unwrap();
-    let v = runmat_runtime::matrix::value_matmul(
+    let v = futures::executor::block_on(runmat_runtime::matrix::value_matmul(
         &Value::ComplexTensor(a.clone()),
         &Value::ComplexTensor(b.clone()),
-    )
+    ))
     .unwrap();
     if let Value::ComplexTensor(m) = v {
         assert_eq!(m.rows, 2);
@@ -96,9 +97,11 @@ fn complex_matmul_and_transpose() {
     }
     // real * complex
     let r = Tensor::new_2d(vec![1.0, 2.0, 0.0, 1.0], 2, 2).unwrap();
-    let v2 =
-        runmat_runtime::matrix::value_matmul(&Value::Tensor(r), &Value::ComplexTensor(b.clone()))
-            .unwrap();
+    let v2 = futures::executor::block_on(runmat_runtime::matrix::value_matmul(
+        &Value::Tensor(r),
+        &Value::ComplexTensor(b.clone()),
+    ))
+    .unwrap();
     if let Value::ComplexTensor(m) = v2 {
         assert_eq!(m.rows, 2);
         assert_eq!(m.cols, 2);

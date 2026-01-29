@@ -11,6 +11,7 @@ use runmat_accelerate_api::{
     ImageNormalizeDescriptor, PowerStepEpilogue, ProviderPrecision, ReductionFlavor,
 };
 use runmat_builtins::{NumericDType, Value};
+use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use runmat_runtime::gather_if_needed;
 use runmat_time::Instant;
 use std::sync::OnceLock;
@@ -253,12 +254,9 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
             return Err(anyhow!("fusion: zero-length execution not supported"));
         }
     }
+    output_shape = normalize_scalar_shape(&output_shape);
     let mut timer = FusionStageTimer::new("elementwise", request.plan.index, len);
-    let scalar_shape: Vec<usize> = if output_shape.is_empty() {
-        vec![1]
-    } else {
-        vec![1; output_shape.len()]
-    };
+    let scalar_shape = normalize_scalar_shape(&vec![1; output_shape.len()]);
     let mut prepared = Vec::with_capacity(request.inputs.len());
     let mut temp_scalars: Vec<Vec<f64>> = Vec::new();
     let scalar_dtype = scalar_upload_dtype(provider);
@@ -390,13 +388,9 @@ pub fn execute_reduction(
     if len == 0 {
         return Err(anyhow!("fusion: zero-length execution not supported"));
     }
-    let scalar_shape: Vec<usize> = {
+    let scalar_shape = {
         let constant_shape = request.plan.constant_shape(len);
-        if constant_shape.is_empty() {
-            vec![1]
-        } else {
-            vec![1; constant_shape.len()]
-        }
+        normalize_scalar_shape(&vec![1; constant_shape.len()])
     };
     let mut timer = FusionStageTimer::new("reduction", request.plan.index, len);
     let mut prepared = Vec::with_capacity(request.inputs.len());
@@ -532,7 +526,7 @@ pub fn execute_reduction(
     Ok(Value::GpuTensor(output))
 }
 
-pub fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Result<Value> {
+pub async fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Result<Value> {
     crate::ensure_residency_hooks();
     if request.plan.group.kind != FusionKind::CenteredGram {
         return Err(anyhow!("unsupported fusion kind"));
@@ -565,7 +559,9 @@ pub fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Result<Valu
         has_weight_vector: false,
     };
 
-    let output = provider.covariance(&matrix_handle, None, None, &options)?;
+    let output = provider
+        .covariance(&matrix_handle, None, None, &options)
+        .await?;
 
     if let Some(temp) = owned_matrix {
         let _ = provider.free(&temp);
@@ -575,7 +571,7 @@ pub fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Result<Valu
     Ok(Value::GpuTensor(output))
 }
 
-pub fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -> Result<Value> {
+pub async fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -> Result<Value> {
     crate::ensure_residency_hooks();
     if request.plan.group.kind != FusionKind::PowerStepNormalize {
         return Err(anyhow!("unsupported fusion kind"));
@@ -616,7 +612,9 @@ pub fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -> Resu
     let (rhs_handle, rhs_owned) = ensure_gpu_tensor(provider, rhs_value)?;
 
     let desc = PowerStepEpilogue { epsilon };
-    let output = provider.matmul_power_step(&lhs_handle, &rhs_handle, &desc)?;
+    let output = provider
+        .matmul_power_step(&lhs_handle, &rhs_handle, &desc)
+        .await?;
 
     if let Some(temp) = lhs_owned {
         let _ = provider.free(&temp);
@@ -629,7 +627,7 @@ pub fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -> Resu
     Ok(Value::GpuTensor(output))
 }
 
-pub fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result<Value> {
+pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result<Value> {
     crate::ensure_residency_hooks();
     if request.plan.group.kind != FusionKind::ExplainedVariance {
         return Err(anyhow!("unsupported fusion kind"));
@@ -667,7 +665,7 @@ pub fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result
             "[explained] initial Q shape {:?}, G shape {:?}",
             q_handle.shape, g_handle.shape
         );
-        if let Ok(info) = provider.download(&q_handle) {
+        if let Ok(info) = provider.download(&q_handle).await {
             println!(
                 "[explained] Q (sample) len={} first=[{:?}]",
                 info.data.len(),
@@ -694,7 +692,7 @@ pub fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result
         return Err(anyhow!("explained variance: G shape mismatch"));
     }
 
-    let mut tmp = provider.matmul(&q_handle, &g_handle)?;
+    let mut tmp = provider.matmul(&q_handle, &g_handle).await?;
     let tmp_shape = tmp.shape.clone();
     if tmp_shape.len() < 2 {
         return Err(anyhow!("explained variance: intermediate must be 2-D"));
@@ -718,7 +716,7 @@ pub fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result
     transposed_shape.swap(0, 1);
     let q_transposed_view = provider.reshape(&q_handle, &transposed_shape)?;
 
-    tmp = provider.matmul(&q_transposed_view, &g_handle)?;
+    tmp = provider.matmul(&q_transposed_view, &g_handle).await?;
 
     if debug_explained {
         println!(
@@ -730,7 +728,7 @@ pub fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result
     // Restore Q's original shape before the second multiplication.
     q_handle = provider.reshape(&q_handle, &q_shape)?;
 
-    let product = provider.matmul(&tmp, &q_handle)?;
+    let product = provider.matmul(&tmp, &q_handle).await?;
 
     if debug_explained {
         println!("[explained] product shape {:?}", product.shape);
@@ -744,13 +742,13 @@ pub fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result
     };
 
     if debug_explained {
-        if let Ok(host) = provider.download(&tmp) {
+        if let Ok(host) = provider.download(&tmp).await {
             println!("tmp runtime shape {:?} data {:?}", host.shape, host.data);
         }
-        if let Ok(host) = provider.download(&product) {
+        if let Ok(host) = provider.download(&product).await {
             println!("prod runtime shape {:?} data {:?}", host.shape, host.data);
         }
-        if let Ok(host) = provider.download(&diag) {
+        if let Ok(host) = provider.download(&diag).await {
             println!("diag runtime shape {:?} data {:?}", host.shape, host.data);
         }
     }
@@ -768,7 +766,7 @@ pub fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result
     Ok(Value::GpuTensor(diag))
 }
 
-pub fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Result<Value> {
+pub async fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Result<Value> {
     crate::ensure_residency_hooks();
     if request.plan.group.kind != FusionKind::ImageNormalize {
         return Err(anyhow!("unsupported fusion kind"));
@@ -837,11 +835,11 @@ pub fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Result<Va
         bias,
         gamma,
     };
-    if log::log_enabled!(log::Level::Debug) {
-        log::debug!("execute_image_normalize: desc {:?}", desc);
+    if log::log_enabled!(log::Level::Trace) {
+        log::trace!("execute_image_normalize: desc {:?}", desc);
     }
 
-    let output = provider.image_normalize(&input_handle, &desc)?;
+    let output = provider.image_normalize(&input_handle, &desc).await?;
 
     if let Some(temp) = input_owned {
         provider.free(&temp).ok();
@@ -851,7 +849,7 @@ pub fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Result<Va
     Ok(Value::GpuTensor(output))
 }
 
-pub fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Result<Value> {
+pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Result<Value> {
     crate::ensure_residency_hooks();
     if request.plan.group.kind != crate::fusion::FusionKind::MatmulEpilogue {
         return Err(anyhow!("unsupported fusion kind"));
@@ -1076,7 +1074,7 @@ pub fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Result<Va
         diag_handle = Some((vid, handle));
     }
 
-    let out = prov.matmul_epilogue(&a, &b, &ep)?;
+    let out = prov.matmul_epilogue(&a, &b, &ep).await?;
     for h in owned {
         let _ = prov.free(&h);
     }

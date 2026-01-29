@@ -45,19 +45,24 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::array::introspection::isempty"
 )]
-fn isempty_builtin(value: Value) -> Result<Value, String> {
-    let is_empty = value_is_empty(&value);
+async fn isempty_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    let is_empty = value_is_empty(&value).await?;
     Ok(Value::Bool(is_empty))
 }
 
-fn value_is_empty(value: &Value) -> bool {
-    value_numel(value) == 0
+async fn value_is_empty(value: &Value) -> crate::BuiltinResult<bool> {
+    Ok(value_numel(value).await? == 0)
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+
+    fn isempty_builtin(value: Value) -> crate::BuiltinResult<Value> {
+        block_on(super::isempty_builtin(value))
+    }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_builtins::{CellArray, CharArray, Tensor};

@@ -38,6 +38,8 @@ export type {
 } from "./fusion-plan.js";
 
 export type LanguageCompatMode = "matlab" | "strict";
+type RunMatPresetLogLevel = "trace" | "debug" | "info" | "warn" | "error";
+export type RunMatLogLevel = RunMatPresetLogLevel | (string & Record<never, never>);
 
 export type WasmInitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -68,6 +70,8 @@ export interface RunMatInitOptions {
   enableGpu?: boolean;
   enableJit?: boolean;
   verbose?: boolean;
+  logLevel?: RunMatLogLevel;
+  gpuBufferPoolMaxPerKey?: number;
   telemetryConsent?: boolean;
   telemetryId?: string;
   wgpuPowerPreference?: "auto" | "high-performance" | "low-power";
@@ -78,6 +82,8 @@ export interface RunMatInitOptions {
   scatterTargetPoints?: number;
   surfaceVertexBudget?: number;
   emitFusionPlan?: boolean;
+  callstackLimit?: number;
+  errorNamespace?: string;
   language?: {
     compat?: LanguageCompatMode;
   };
@@ -182,6 +188,7 @@ export interface TraceEvent {
   tid?: number;
   traceId?: string;
   spanId?: string;
+  parentSpanId?: string;
   args?: Record<string, unknown>;
 }
 
@@ -203,16 +210,6 @@ export type ResumeInputValue = ResumeInputScalar | ResumeInputPayload;
 
 export type InputHandlerResult = ResumeInputValue | Promise<ResumeInputValue>;
 export type InputHandler = (request: InputRequest) => InputHandlerResult;
-
-export interface PendingStdinRequest {
-  id: string;
-  request: {
-    prompt: string;
-    kind: "line" | "keyPress";
-    echo: boolean;
-  };
-  waitingMs: number;
-}
 
 export interface AxesInfo {
   handle: number;
@@ -253,7 +250,7 @@ export interface ExecuteResult {
   valueText?: string;
   valueJson?: unknown;
   typeInfo?: string;
-  error?: string;
+  error?: RunMatErrorDetails;
   executionTimeMs: number;
   usedJit: boolean;
   stdout: StdoutEntry[];
@@ -263,7 +260,45 @@ export interface ExecuteResult {
   stdinEvents: StdinEventLog[];
   profiling?: ProfilingSummary;
   fusionPlan?: FusionPlanSnapshot;
-  stdinRequested?: PendingStdinRequest;
+}
+
+export type RunMatErrorKind = "syntax" | "semantic" | "compile" | "runtime";
+
+export interface RunMatErrorSpan {
+  start: number;
+  end: number;
+  line: number;
+  column: number;
+}
+
+export interface RunMatErrorDetails {
+  kind: RunMatErrorKind;
+  message: string;
+  identifier?: string;
+  diagnostic: string;
+  span?: RunMatErrorSpan;
+  callstack: string[];
+  callstackElided?: number;
+}
+
+export class RunMatExecutionError extends Error {
+  readonly kind: RunMatErrorKind;
+  readonly identifier?: string;
+  readonly diagnostic: string;
+  readonly span?: RunMatErrorSpan;
+  readonly callstack: string[];
+  readonly callstackElided?: number;
+
+  constructor(details: RunMatErrorDetails) {
+    super(details.message);
+    this.name = "RunMatExecutionError";
+    this.kind = details.kind;
+    this.identifier = details.identifier;
+    this.diagnostic = details.diagnostic;
+    this.span = details.span;
+    this.callstack = details.callstack;
+    this.callstackElided = details.callstackElided;
+  }
 }
 
 export type WorkspaceResidency = "cpu" | "gpu" | "unknown";
@@ -298,8 +333,14 @@ export type WorkspaceMaterializeSelector =
       previewToken?: string;
     };
 
+export interface MaterializeSliceOptions {
+  start: number[];
+  shape: number[];
+}
+
 export interface MaterializeVariableOptions {
   limit?: number;
+  slice?: MaterializeSliceOptions;
 }
 
 export interface MaterializedVariable {
@@ -399,8 +440,6 @@ export interface RunMatSessionHandle {
   cancelExecution(): void;
   cancelPendingRequests(): void;
   setInputHandler(handler: InputHandler | null): Promise<void>;
-  resumeInput(requestId: string, value: ResumeInputValue): Promise<ExecuteResult>;
-  pendingStdinRequests(): Promise<PendingStdinRequest[]>;
   materializeVariable(
     selector: WorkspaceMaterializeSelector,
     options?: MaterializeVariableOptions
@@ -417,6 +456,8 @@ interface NativeInitOptions {
   enableGpu?: boolean;
   enableJit?: boolean;
   verbose?: boolean;
+  logLevel?: RunMatLogLevel;
+  gpuBufferPoolMaxPerKey?: number;
   telemetryConsent?: boolean;
   telemetryId?: string;
   wgpuPowerPreference?: string;
@@ -424,11 +465,13 @@ interface NativeInitOptions {
   scatterTargetPoints?: number;
   surfaceVertexBudget?: number;
   emitFusionPlan?: boolean;
+  callstackLimit?: number;
+  errorNamespace?: string;
   languageCompat?: LanguageCompatMode;
 }
 
 interface RunMatNativeSession {
-  execute(source: string): ExecuteResult;
+  execute(source: string): Promise<ExecuteResult>;
   resetSession(): void;
   stats(): SessionStats;
   clearWorkspace(): void;
@@ -440,8 +483,6 @@ interface RunMatNativeSession {
   cancelExecution?: () => void;
   cancelPendingRequests?: () => void;
   setInputHandler?: (handler: InputHandler | null) => void;
-  resumeInput?: (requestId: string, value: ResumeInputWireValue) => ExecuteResult;
-  pendingStdinRequests?: () => PendingStdinRequest[];
   materializeVariable?: (
     selector: WorkspaceMaterializeSelectorWire,
     options?: MaterializeVariableOptionsWire
@@ -449,12 +490,6 @@ interface RunMatNativeSession {
   setFusionPlanEnabled?: (enabled: boolean) => void;
   setLanguageCompat?: (mode: LanguageCompatMode) => void;
   fusionPlanForSource?: (source: string) => FusionPlanSnapshot | null;
-}
-
-interface ResumeInputWireValue {
-  kind?: "line" | "keyPress";
-  value?: string;
-  error?: string;
 }
 
 type WorkspaceMaterializeSelectorWire =
@@ -467,19 +502,24 @@ type WorkspaceMaterializeSelectorWire =
 
 interface MaterializeVariableOptionsWire {
   limit?: number;
+  slice?: {
+    start: number[];
+    shape: number[];
+  };
 }
 
 interface RunMatNativeModule {
   default: (module?: WasmInitInput | Promise<WasmInitInput>) => Promise<unknown>;
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
   registerFsProvider?: (provider: RunMatFilesystemProvider) => void;
-  registerPlotCanvas?: (canvas: HTMLCanvasElement) => Promise<void>;
-  deregisterPlotCanvas?: () => void;
   plotRendererReady?: () => boolean;
-  registerFigureCanvas?: (handle: number, canvas: HTMLCanvasElement) => Promise<void>;
-  resizeFigureCanvas?: (handle: number, width: number, height: number) => void;
   renderCurrentFigureScene?: (handle: number) => void;
-  deregisterFigureCanvas?: (handle: number) => void;
+  createPlotSurface?: (canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<number>;
+  destroyPlotSurface?: (surfaceId: number) => void;
+  resizePlotSurface?: (surfaceId: number, width: number, height: number) => void;
+  bindSurfaceToFigure?: (surfaceId: number, handle: number) => void;
+  presentSurface?: (surfaceId: number) => void;
+  presentFigureOnSurface?: (surfaceId: number, handle: number) => void;
   onFigureEvent?: (callback: ((event: FigureEvent) => void) | null) => void;
   newFigureHandle?: () => number;
   selectFigure?: (handle: number) => void;
@@ -494,10 +534,9 @@ interface RunMatNativeModule {
   unsubscribeStdout?: (id: number) => void;
   subscribeRuntimeLog?: (listener: (entry: RuntimeLogEntry) => void) => number;
   unsubscribeRuntimeLog?: (id: number) => void;
+  setLogFilter?: (filter: string) => void;
   subscribeTraceEvents?: (listener: (entries: TraceEvent[]) => void) => number;
   unsubscribeTraceEvents?: (id: number) => void;
-  resumeInput?: (requestId: string, value: ResumeInputWireValue) => ExecuteResult;
-  pendingStdinRequests?: () => PendingStdinRequest[];
 }
 
 let loadPromise: Promise<RunMatNativeModule> | null = null;
@@ -538,10 +577,11 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     native.registerFsProvider(fsProvider);
   }
   if (options.plotCanvas) {
-    if (typeof native.registerPlotCanvas !== "function") {
-      throw new Error("The loaded runmat-wasm module does not support WebGPU plotting yet.");
+    if (typeof native.createPlotSurface !== "function") {
+      throw new Error("The loaded runmat-wasm module does not support WebGPU plotting surfaces yet.");
     }
-    await native.registerPlotCanvas(options.plotCanvas);
+    // Create a surface for the provided canvas. The caller is responsible for binding/presenting.
+    await native.createPlotSurface(options.plotCanvas);
   }
   const supportsWebGpu = typeof navigator !== "undefined" && typeof (navigator as any).gpu !== "undefined";
   const hasExplicitEnableFlag = Object.prototype.hasOwnProperty.call(options, "enableGpu");
@@ -569,6 +609,8 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     enableGpu: effectiveEnableGpu,
     enableJit: options.enableJit ?? false,
     verbose: options.verbose ?? false,
+    logLevel: options.logLevel,
+    gpuBufferPoolMaxPerKey: options.gpuBufferPoolMaxPerKey,
     telemetryConsent: options.telemetryConsent ?? true,
     telemetryId: options.telemetryId,
     wgpuPowerPreference: options.wgpuPowerPreference ?? "auto",
@@ -576,17 +618,11 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     scatterTargetPoints: options.scatterTargetPoints,
     surfaceVertexBudget: options.surfaceVertexBudget,
     emitFusionPlan: options.emitFusionPlan ?? false,
+    callstackLimit: options.callstackLimit,
+    errorNamespace: options.errorNamespace,
     languageCompat: options.language?.compat
   });
   return new WebRunMatSession(session);
-}
-
-export async function attachPlotCanvas(canvas: HTMLCanvasElement): Promise<void> {
-  const native = await loadNativeModule();
-  if (typeof native.registerPlotCanvas !== "function") {
-    throw new Error("The loaded runmat-wasm module does not support WebGPU plotting yet.");
-  }
-  await native.registerPlotCanvas(canvas);
 }
 
 export async function plotRendererReady(): Promise<boolean> {
@@ -597,36 +633,46 @@ export async function plotRendererReady(): Promise<boolean> {
   return native.plotRendererReady();
 }
 
-export async function registerFigureCanvas(handle: number, canvas: HTMLCanvasElement): Promise<void> {
+export async function createPlotSurface(canvas: HTMLCanvasElement | OffscreenCanvas): Promise<number> {
   const native = await loadNativeModule();
-  if (typeof native.registerFigureCanvas !== "function") {
-    throw new Error("The loaded runmat-wasm module does not support figure-specific canvases yet.");
-  }
-  await native.registerFigureCanvas(handle, canvas);
+  requireNativeFunction(native, "createPlotSurface");
+  return native.createPlotSurface(canvas);
 }
 
-export async function resizeFigureCanvas(handle: number, widthPx: number, heightPx: number): Promise<void> {
+export async function destroyPlotSurface(surfaceId: number): Promise<void> {
   const native = await loadNativeModule();
-  requireNativeFunction(native, "resizeFigureCanvas");
-  native.resizeFigureCanvas(handle, widthPx, heightPx);
+  requireNativeFunction(native, "destroyPlotSurface");
+  native.destroyPlotSurface(surfaceId);
+}
+
+export async function resizePlotSurface(surfaceId: number, widthPx: number, heightPx: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "resizePlotSurface");
+  native.resizePlotSurface(surfaceId, widthPx, heightPx);
+}
+
+export async function bindSurfaceToFigure(surfaceId: number, handle: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "bindSurfaceToFigure");
+  native.bindSurfaceToFigure(surfaceId, handle);
+}
+
+export async function presentSurface(surfaceId: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "presentSurface");
+  native.presentSurface(surfaceId);
+}
+
+export async function presentFigureOnSurface(surfaceId: number, handle: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "presentFigureOnSurface");
+  native.presentFigureOnSurface(surfaceId, handle);
 }
 
 export async function renderCurrentFigureScene(handle: number): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "renderCurrentFigureScene");
   native.renderCurrentFigureScene(handle);
-}
-
-export async function deregisterPlotCanvas(): Promise<void> {
-  const native = await loadNativeModule();
-  requireNativeFunction(native, "deregisterPlotCanvas");
-  native.deregisterPlotCanvas();
-}
-
-export async function deregisterFigureCanvas(handle: number): Promise<void> {
-  const native = await loadNativeModule();
-  requireNativeFunction(native, "deregisterFigureCanvas");
-  native.deregisterFigureCanvas(handle);
 }
 
 export async function onFigureEvent(listener: FigureEventListener | null): Promise<void> {
@@ -659,6 +705,12 @@ export async function unsubscribeRuntimeLog(id: number): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "unsubscribeRuntimeLog");
   native.unsubscribeRuntimeLog(id);
+}
+
+export async function setLogFilter(filter: string): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "setLogFilter");
+  native.setLogFilter(filter);
 }
 
 export async function subscribeTraceEvents(listener: TraceEventListener): Promise<number> {
@@ -782,7 +834,11 @@ class WebRunMatSession implements RunMatSessionHandle {
 
   async execute(source: string): Promise<ExecuteResult> {
     this.ensureActive();
-    return this.native.execute(source);
+    try {
+      return await this.native.execute(source);
+    } catch (error) {
+      throw coerceRunMatError(error);
+    }
   }
 
   async resetSession(): Promise<void> {
@@ -862,21 +918,6 @@ class WebRunMatSession implements RunMatSessionHandle {
     this.native.setInputHandler(handler ? (request: InputRequest) => handler(request) : null);
   }
 
-  async resumeInput(requestId: string, value: ResumeInputValue): Promise<ExecuteResult> {
-    this.ensureActive();
-    requireNativeFunction(this.native, "resumeInput");
-    const payload = normalizeResumeInputValue(value);
-    return this.native.resumeInput(requestId, payload);
-  }
-
-  async pendingStdinRequests(): Promise<PendingStdinRequest[]> {
-    this.ensureActive();
-    if (typeof this.native.pendingStdinRequests !== "function") {
-      return [];
-    }
-    return this.native.pendingStdinRequests();
-  }
-
   async materializeVariable(
     selector: WorkspaceMaterializeSelector,
     options?: MaterializeVariableOptions
@@ -908,7 +949,11 @@ class WebRunMatSession implements RunMatSessionHandle {
     if (typeof this.native.fusionPlanForSource !== "function") {
       throw new Error("The loaded runmat-wasm module does not expose fusionPlanForSource yet.");
     }
-    return this.native.fusionPlanForSource(source) ?? null;
+    try {
+      return this.native.fusionPlanForSource(source) ?? null;
+    } catch (error) {
+      throw coerceRunMatError(error);
+    }
   }
 }
 
@@ -937,14 +982,68 @@ function requireNativeFunction<T, K extends keyof T>(
 }
 
 type FigureErrorPayload = {
-  code?: string;
-  message?: string;
-  handle?: number;
-  rows?: number;
+    code?: string;
+    message?: string;
+    handle?: number;
+    rows?: number;
   cols?: number;
   index?: number;
   details?: string;
 };
+
+type RunMatErrorPayload = {
+  kind: RunMatErrorKind;
+  message: string;
+  identifier?: string;
+  diagnostic: string;
+  span?: RunMatErrorSpan;
+  callstack?: string[];
+  callstackElided?: number;
+};
+
+function isRunMatErrorPayload(value: unknown): value is RunMatErrorPayload {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const payload = value as RunMatErrorPayload;
+  return (
+    typeof payload.kind === "string" &&
+    typeof payload.message === "string" &&
+    typeof payload.diagnostic === "string"
+  );
+}
+
+function coerceRunMatError(value: unknown): RunMatExecutionError {
+  if (isRunMatErrorPayload(value)) {
+    return new RunMatExecutionError({
+      kind: value.kind,
+      message: value.message,
+      identifier: value.identifier,
+      diagnostic: value.diagnostic,
+      span: value.span,
+      callstack: value.callstack ?? [],
+      callstackElided: value.callstackElided
+    });
+  }
+  if (value instanceof RunMatExecutionError) {
+    return value;
+  }
+  if (value instanceof Error) {
+    return new RunMatExecutionError({
+      kind: "runtime",
+      message: value.message,
+      diagnostic: value.message,
+      callstack: []
+    });
+  }
+  const message = String(value ?? "RunMat execution failed");
+  return new RunMatExecutionError({
+    kind: "runtime",
+    message,
+    diagnostic: message,
+    callstack: []
+  });
+}
 
 function isFigureErrorPayload(value: unknown): value is FigureErrorPayload {
   return (
@@ -1126,23 +1225,6 @@ function toUint8Array(data: Uint8Array | ArrayBuffer | ArrayBufferView): Uint8Ar
   throw new Error("Unsupported snapshot buffer type");
 }
 
-function normalizeResumeInputValue(input: ResumeInputValue): ResumeInputWireValue {
-  if (isResumeInputPayload(input)) {
-    if (typeof input.error === "string") {
-      return { error: input.error };
-    }
-    if (input.kind === "keyPress") {
-      return { kind: "keyPress" };
-    }
-    const raw = input.value ?? input.line;
-    return { kind: "line", value: coerceResumeValue(raw) };
-  }
-  if (input === null || input === undefined) {
-    return { kind: "line", value: "" };
-  }
-  return { kind: "line", value: String(input) };
-}
-
 function normalizeMaterializeSelector(
   selector: WorkspaceMaterializeSelector
 ): WorkspaceMaterializeSelectorWire {
@@ -1182,37 +1264,42 @@ function normalizeMaterializeOptions(
       payload.limit = limit;
     }
   }
+  if (options.slice) {
+    const start = normalizeSliceVector(options.slice.start, false);
+    const shape = normalizeSliceVector(options.slice.shape, true);
+    if (start && shape) {
+      payload.slice = { start, shape };
+    }
+  }
   return payload;
 }
 
-function coerceResumeValue(value: string | number | boolean | undefined): string {
-  if (value === undefined) {
-    return "";
+function normalizeSliceVector(values?: number[], requirePositive = false): number[] | undefined {
+  if (!Array.isArray(values) || values.length === 0) {
+    return undefined;
   }
-  return String(value);
-}
-
-function isResumeInputPayload(value: ResumeInputValue): value is ResumeInputPayload {
-  if (value === null || value === undefined) {
-    return false;
+  const normalized: number[] = [];
+  for (const raw of values) {
+    if (typeof raw !== "number" || !Number.isFinite(raw)) {
+      return undefined;
+    }
+    const base = Math.floor(raw);
+    if (requirePositive) {
+      if (base <= 0) {
+        return undefined;
+      }
+      normalized.push(base);
+    } else {
+      normalized.push(Math.max(0, base));
+    }
   }
-  if (typeof value !== "object") {
-    return false;
-  }
-  const payload = value as Record<string, unknown>;
-  return (
-    "value" in payload ||
-    "line" in payload ||
-    "kind" in payload ||
-    "error" in payload
-  );
+  return normalized;
 }
 
 export const __internals = {
   resolveSnapshotSource,
   fetchSnapshotFromUrl,
   coerceFigureError,
-  normalizeResumeInputValue,
   workspaceHover: workspaceHoverInternals as unknown as Record<string, unknown>,
   setNativeModuleOverride(module: RunMatNativeModule | RunMatNativeSession | null): void {
     nativeModuleOverride = module;

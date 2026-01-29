@@ -5,6 +5,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+
 use runmat_builtins::{IntValue, StructValue, Value};
 use runmat_macros::runtime_builtin;
 
@@ -43,11 +44,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     examples = "disp(gpuInfo())",
     builtin_path = "crate::builtins::acceleration::gpu::gpuinfo"
 )]
-fn gpu_info_builtin() -> Result<Value, String> {
+async fn gpu_info_builtin() -> crate::BuiltinResult<Value> {
     match active_device_struct() {
         Ok(info) => Ok(Value::String(format_summary(Some(&info)))),
-        Err(err) if err == gpudevice::ERR_NO_PROVIDER => Ok(Value::String(format_summary(None))),
-        Err(err) => Err(err.to_string()),
+        Err(err) if err.message() == gpudevice::ERR_NO_PROVIDER => {
+            Ok(Value::String(format_summary(None)))
+        }
+        Err(err) => Err(err),
     }
 }
 
@@ -97,15 +100,20 @@ fn escape_single_quotes(text: &str) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
+
+    fn call() -> crate::BuiltinResult<Value> {
+        block_on(gpu_info_builtin())
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[allow(non_snake_case)]
     fn gpuInfo_with_provider_formats_summary() {
         test_support::with_test_provider(|_| {
-            let value = gpu_info_builtin().expect("gpuInfo");
+            let value = call().expect("gpuInfo");
             match value {
                 Value::String(text) => {
                     assert!(text.starts_with("GPU["), "unexpected prefix: {text}");
@@ -211,7 +219,7 @@ pub(crate) mod tests {
             }
         };
 
-        let value = gpu_info_builtin().expect("gpuInfo");
+        let value = call().expect("gpuInfo");
         match value {
             Value::String(text) => {
                 assert!(text.starts_with("GPU["), "unexpected prefix: {text}");

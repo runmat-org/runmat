@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
 };
 use crate::console::{record_console_output, ConsoleStream};
 use crate::warning_store;
+use crate::{build_runtime_error, RuntimeError};
 use tracing;
 
 const DEFAULT_IDENTIFIER: &str = "MATLAB:warning";
@@ -59,6 +60,28 @@ where
     func(&mut guard)
 }
 
+fn warning_flow(identifier: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("warning")
+        .with_identifier(normalize_identifier(identifier))
+        .build()
+}
+
+fn warning_default_error(message: impl Into<String>) -> RuntimeError {
+    warning_flow(DEFAULT_IDENTIFIER, message)
+}
+
+fn remap_warning_flow<F>(err: RuntimeError, identifier: &str, message: F) -> RuntimeError
+where
+    F: FnOnce(&crate::RuntimeError) -> String,
+{
+    build_runtime_error(message(&err))
+        .with_builtin("warning")
+        .with_identifier(normalize_identifier(identifier))
+        .with_source(err)
+        .build()
+}
+
 #[runtime_builtin(
     name = "warning",
     category = "diagnostics",
@@ -69,7 +92,7 @@ where
     suppress_auto_output = true,
     builtin_path = "crate::builtins::diagnostics::warning"
 )]
-fn warning_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn warning_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         return handle_query_default();
     }
@@ -80,26 +103,27 @@ fn warning_builtin(args: Vec<Value>) -> Result<Value, String> {
     match first {
         Value::Struct(_) | Value::Cell(_) => {
             if !rest.is_empty() {
-                return Err("warning: state restoration accepts a single argument".to_string());
+                return Err(warning_default_error(
+                    "warning: state restoration accepts a single argument",
+                ));
             }
             apply_state_value(first)?;
             Ok(Value::Num(0.0))
         }
         Value::MException(mex) => {
             if !rest.is_empty() {
-                return Err(
-                    "warning: additional arguments are not allowed when passing an MException"
-                        .to_string(),
-                );
+                return Err(warning_default_error(
+                    "warning: additional arguments are not allowed when passing an MException",
+                ));
             }
-            reissue_exception(mex)
+            Ok(reissue_exception(mex)?)
         }
         _ => {
             let first_string = value_to_string("warning", first)?;
             if let Some(command) = parse_command(&first_string) {
                 return handle_command(command, rest);
             }
-            handle_message_call(None, first_string, rest)
+            Ok(handle_message_call(None, first_string, rest)?)
         }
     }
 }
@@ -108,7 +132,7 @@ fn handle_message_call(
     explicit_identifier: Option<String>,
     first_string: String,
     rest: &[Value],
-) -> Result<Value, String> {
+) -> crate::BuiltinResult<Value> {
     if let Some(identifier) = explicit_identifier {
         return emit_warning(&identifier, &first_string, rest);
     }
@@ -124,9 +148,11 @@ fn handle_message_call(
     }
 }
 
-fn emit_warning(identifier_raw: &str, fmt: &str, args: &[Value]) -> Result<Value, String> {
+fn emit_warning(identifier_raw: &str, fmt: &str, args: &[Value]) -> crate::BuiltinResult<Value> {
     let identifier = normalize_identifier(identifier_raw);
-    let message = format_variadic(fmt, args)?;
+    let message = format_variadic(fmt, args).map_err(|flow| {
+        remap_warning_flow(flow, DEFAULT_IDENTIFIER, |err| err.message().to_string())
+    })?;
 
     let action = with_manager(|mgr| {
         let action = mgr.action_for(&identifier);
@@ -145,7 +171,7 @@ fn emit_warning(identifier_raw: &str, fmt: &str, args: &[Value]) -> Result<Value
         }
         WarningAction::AsError => {
             warning_store::push(&identifier, &message);
-            Err(build_error(&identifier, &message))
+            Err(warning_flow(&identifier, message))
         }
     }
 }
@@ -181,18 +207,20 @@ fn emit_stderr_line(line: String) {
     record_console_output(ConsoleStream::Stderr, line);
 }
 
-fn reissue_exception(mex: &runmat_builtins::MException) -> Result<Value, String> {
+fn reissue_exception(mex: &runmat_builtins::MException) -> crate::BuiltinResult<Value> {
     let identifier = normalize_identifier(&mex.identifier);
     emit_warning(&identifier, &mex.message, &[])
 }
 
-fn handle_command(command: Command, rest: &[Value]) -> Result<Value, String> {
+fn handle_command(command: Command, rest: &[Value]) -> crate::BuiltinResult<Value> {
     match command {
         Command::SetMode(mode) => set_mode_command(mode, rest),
         Command::Default => default_command(rest),
         Command::Reset => {
             if !rest.is_empty() {
-                return Err("warning: 'reset' does not accept additional arguments".to_string());
+                return Err(warning_default_error(
+                    "warning: 'reset' does not accept additional arguments",
+                ));
             }
             with_manager(WarningManager::reset);
             Ok(Value::Num(0.0))
@@ -203,13 +231,15 @@ fn handle_command(command: Command, rest: &[Value]) -> Result<Value, String> {
     }
 }
 
-fn set_mode_command(mode: WarningMode, rest: &[Value]) -> Result<Value, String> {
+fn set_mode_command(mode: WarningMode, rest: &[Value]) -> crate::BuiltinResult<Value> {
     let identifier = if rest.is_empty() {
         "all".to_string()
     } else if rest.len() == 1 {
         value_to_string("warning", &rest[0])?
     } else {
-        return Err("warning: too many input arguments for state change".to_string());
+        return Err(warning_default_error(
+            "warning: too many input arguments for state change",
+        ));
     };
 
     let trimmed = identifier.trim();
@@ -225,7 +255,9 @@ fn set_mode_command(mode: WarningMode, rest: &[Value]) -> Result<Value, String> 
     if trimmed.eq_ignore_ascii_case("last") {
         let last_identifier = with_manager(|mgr| mgr.last_warning.clone());
         let Some((identifier, _)) = last_identifier else {
-            return Err("warning: there is no last warning identifier to target".to_string());
+            return Err(warning_default_error(
+                "warning: there is no last warning identifier to target",
+            ));
         };
         return set_mode_for_identifier(mode, &identifier);
     }
@@ -238,7 +270,7 @@ fn set_mode_command(mode: WarningMode, rest: &[Value]) -> Result<Value, String> 
     set_mode_for_identifier(mode, &normalized)
 }
 
-fn set_mode_for_identifier(mode: WarningMode, identifier: &str) -> Result<Value, String> {
+fn set_mode_for_identifier(mode: WarningMode, identifier: &str) -> crate::BuiltinResult<Value> {
     with_manager(|mgr| {
         let previous = mgr.lookup_mode(identifier);
         let value = Value::Struct(mgr.state_struct_for(identifier, previous));
@@ -247,7 +279,7 @@ fn set_mode_for_identifier(mode: WarningMode, identifier: &str) -> Result<Value,
     })
 }
 
-fn reset_identifier_to_default(identifier: &str) -> Result<Value, String> {
+fn reset_identifier_to_default(identifier: &str) -> crate::BuiltinResult<Value> {
     with_manager(|mgr| {
         let previous = mgr.lookup_mode(identifier);
         let value = Value::Struct(mgr.state_struct_for(identifier, previous));
@@ -256,12 +288,12 @@ fn reset_identifier_to_default(identifier: &str) -> Result<Value, String> {
     })
 }
 
-fn set_mode_for_special_mode(mode: WarningMode, mode_name: &str) -> Result<Value, String> {
+fn set_mode_for_special_mode(mode: WarningMode, mode_name: &str) -> crate::BuiltinResult<Value> {
     let mode_lower = mode_name.trim().to_ascii_lowercase();
     if !matches!(mode, WarningMode::On | WarningMode::Off) {
-        return Err(format!(
+        return Err(warning_default_error(format!(
             "warning: only 'on' or 'off' are valid states for '{mode_lower}'"
-        ));
+        )));
     }
 
     with_manager(|mgr| {
@@ -274,10 +306,10 @@ fn set_mode_for_special_mode(mode: WarningMode, mode_name: &str) -> Result<Value
             mgr.verbose_enabled = matches!(mode, WarningMode::On);
             prev
         } else {
-            return Err(format!(
+            return Err(warning_default_error(format!(
                 "warning: unknown mode '{}'; expected 'backtrace' or 'verbose'",
                 mode_name
-            ));
+            )));
         };
 
         let previous_state = if previous_enabled { "on" } else { "off" };
@@ -286,7 +318,7 @@ fn set_mode_for_special_mode(mode: WarningMode, mode_name: &str) -> Result<Value
     })
 }
 
-fn default_command(rest: &[Value]) -> Result<Value, String> {
+fn default_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
     match rest.len() {
         0 => {
             let snapshot = with_manager(|mgr| {
@@ -324,23 +356,26 @@ fn default_command(rest: &[Value]) -> Result<Value, String> {
             if trimmed.eq_ignore_ascii_case("last") {
                 let last_identifier = with_manager(|mgr| mgr.last_warning.clone());
                 let Some((identifier, _)) = last_identifier else {
-                    return Err(
-                        "warning: there is no last warning identifier to reset to default"
-                            .to_string(),
-                    );
+                    return Err(warning_default_error(
+                        "warning: there is no last warning identifier to reset to default",
+                    ));
                 };
                 return reset_identifier_to_default(&identifier);
             }
             let normalized = normalize_identifier(trimmed);
             reset_identifier_to_default(&normalized)
         }
-        _ => Err("warning: 'default' accepts zero or one identifier argument".to_string()),
+        _ => Err(warning_default_error(
+            "warning: 'default' accepts zero or one identifier argument",
+        )),
     }
 }
 
-fn query_command(rest: &[Value]) -> Result<Value, String> {
+fn query_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("warning: 'query' accepts at most one identifier argument".to_string());
+        return Err(warning_default_error(
+            "warning: 'query' accepts at most one identifier argument",
+        ));
     }
 
     let target = if rest.is_empty() {
@@ -354,8 +389,9 @@ fn query_command(rest: &[Value]) -> Result<Value, String> {
             let snapshot = mgr.snapshot();
             let rows = snapshot.len();
             let entries: Vec<Value> = snapshot.into_iter().map(Value::Struct).collect();
-            let cell = CellArray::new(entries, rows, 1)
-                .map_err(|e| format!("warning: failed to assemble query cell: {e}"))?;
+            let cell = CellArray::new(entries, rows, 1).map_err(|e| {
+                warning_default_error(format!("warning: failed to assemble query cell: {e}"))
+            })?;
             Ok(Value::Cell(cell))
         } else if target.trim().eq_ignore_ascii_case("last") {
             if let Some((identifier, message)) = mgr.last_warning.clone() {
@@ -391,9 +427,11 @@ fn query_command(rest: &[Value]) -> Result<Value, String> {
     })
 }
 
-fn status_command(rest: &[Value]) -> Result<Value, String> {
+fn status_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
-        return Err("warning: 'status' does not accept additional arguments".to_string());
+        return Err(warning_default_error(
+            "warning: 'status' does not accept additional arguments",
+        ));
     }
     let value = query_command(&[])?;
     match &value {
@@ -434,7 +472,7 @@ fn status_command(rest: &[Value]) -> Result<Value, String> {
     Ok(value)
 }
 
-fn backtrace_command(rest: &[Value]) -> Result<Value, String> {
+fn backtrace_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
     match rest.len() {
         0 => {
             let state = with_manager(|mgr| if mgr.backtrace_enabled { "on" } else { "off" });
@@ -446,22 +484,24 @@ fn backtrace_command(rest: &[Value]) -> Result<Value, String> {
                 "on" => with_manager(|mgr| mgr.backtrace_enabled = true),
                 "off" => with_manager(|mgr| mgr.backtrace_enabled = false),
                 other => {
-                    return Err(format!(
+                    return Err(warning_default_error(format!(
                         "warning: backtrace mode must be 'on' or 'off', got '{other}'"
-                    ))
+                    )))
                 }
             }
             Ok(Value::Num(0.0))
         }
-        _ => Err("warning: 'backtrace' accepts zero or one argument".to_string()),
+        _ => Err(warning_default_error(
+            "warning: 'backtrace' accepts zero or one argument",
+        )),
     }
 }
 
-fn handle_query_default() -> Result<Value, String> {
+fn handle_query_default() -> crate::BuiltinResult<Value> {
     query_command(&[])
 }
 
-fn apply_state_value(value: &Value) -> Result<(), String> {
+fn apply_state_value(value: &Value) -> crate::BuiltinResult<()> {
     match value {
         Value::Struct(st) => apply_state_struct(st),
         Value::Cell(cell) => {
@@ -471,21 +511,19 @@ fn apply_state_value(value: &Value) -> Result<(), String> {
             }
             Ok(())
         }
-        other => Err(format!(
+        other => Err(warning_default_error(format!(
             "warning: expected a struct or cell array of structs, got {other:?}"
-        )),
+        ))),
     }
 }
 
-fn apply_state_struct(st: &StructValue) -> Result<(), String> {
-    let identifier_value = st
-        .fields
-        .get("identifier")
-        .ok_or_else(|| "warning: state struct must contain an 'identifier' field".to_string())?;
-    let state_value = st
-        .fields
-        .get("state")
-        .ok_or_else(|| "warning: state struct must contain a 'state' field".to_string())?;
+fn apply_state_struct(st: &StructValue) -> crate::BuiltinResult<()> {
+    let identifier_value = st.fields.get("identifier").ok_or_else(|| {
+        warning_default_error("warning: state struct must contain an 'identifier' field")
+    })?;
+    let state_value = st.fields.get("state").ok_or_else(|| {
+        warning_default_error("warning: state struct must contain a 'state' field")
+    })?;
     let identifier_raw = value_to_string("warning", identifier_value)?;
     let state_raw = value_to_string("warning", state_value)?;
     let identifier_trimmed = identifier_raw.trim();
@@ -493,33 +531,51 @@ fn apply_state_struct(st: &StructValue) -> Result<(), String> {
         if let Some(mode) = parse_mode_keyword(&state_raw) {
             with_manager(|mgr| mgr.set_global_mode(mode));
         } else {
-            return Err(format!("warning: unknown state '{}'", state_raw));
+            return Err(warning_default_error(format!(
+                "warning: unknown state '{}'",
+                state_raw
+            )));
         }
     } else if identifier_trimmed.eq_ignore_ascii_case("backtrace") {
         let state = state_raw.trim().to_ascii_lowercase();
         match state.as_str() {
             "on" => with_manager(|mgr| mgr.backtrace_enabled = true),
             "off" | "default" => with_manager(|mgr| mgr.backtrace_enabled = false),
-            other => return Err(format!("warning: unknown backtrace state '{}'", other)),
+            other => {
+                return Err(warning_default_error(format!(
+                    "warning: unknown backtrace state '{}'",
+                    other
+                )))
+            }
         }
     } else if identifier_trimmed.eq_ignore_ascii_case("verbose") {
         let state = state_raw.trim().to_ascii_lowercase();
         match state.as_str() {
             "on" => with_manager(|mgr| mgr.verbose_enabled = true),
             "off" | "default" => with_manager(|mgr| mgr.verbose_enabled = false),
-            other => return Err(format!("warning: unknown verbose state '{}'", other)),
+            other => {
+                return Err(warning_default_error(format!(
+                    "warning: unknown verbose state '{}'",
+                    other
+                )))
+            }
         }
     } else if identifier_trimmed.eq_ignore_ascii_case("last") {
         let last_identifier = with_manager(|mgr| mgr.last_warning.clone());
         let Some((identifier, _)) = last_identifier else {
-            return Err("warning: there is no last warning identifier to apply state".to_string());
+            return Err(warning_default_error(
+                "warning: there is no last warning identifier to apply state",
+            ));
         };
         if state_raw.trim().eq_ignore_ascii_case("default") {
             with_manager(|mgr| mgr.clear_identifier(&identifier));
         } else if let Some(mode) = parse_mode_keyword(&state_raw) {
             with_manager(|mgr| mgr.set_identifier_mode(&identifier, mode));
         } else {
-            return Err(format!("warning: unknown state '{}'", state_raw));
+            return Err(warning_default_error(format!(
+                "warning: unknown state '{}'",
+                state_raw
+            )));
         }
     } else if state_raw.trim().eq_ignore_ascii_case("default") {
         let normalized = normalize_identifier(identifier_trimmed);
@@ -528,7 +584,10 @@ fn apply_state_struct(st: &StructValue) -> Result<(), String> {
         let normalized = normalize_identifier(identifier_trimmed);
         with_manager(|mgr| mgr.set_identifier_mode(&normalized, mode));
     } else {
-        return Err(format!("warning: unknown state '{}'", state_raw));
+        return Err(warning_default_error(format!(
+            "warning: unknown state '{}'",
+            state_raw
+        )));
     }
     Ok(())
 }
@@ -753,15 +812,22 @@ impl WarningManager {
     }
 }
 
-fn value_to_string(context: &str, value: &Value) -> Result<String, String> {
+fn value_to_string(context: &str, value: &Value) -> crate::BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        Value::CharArray(_) => Err(format!("{context}: expected scalar char array")),
-        Value::StringArray(_) => Err(format!("{context}: expected scalar string")),
-        other => String::try_from(other)
-            .map_err(|_| format!("{context}: expected string-like argument, got {other:?}")),
+        Value::CharArray(_) => Err(warning_default_error(format!(
+            "{context}: expected scalar char array"
+        ))),
+        Value::StringArray(_) => Err(warning_default_error(format!(
+            "{context}: expected scalar string"
+        ))),
+        other => String::try_from(other).map_err(|_| {
+            warning_default_error(format!(
+                "{context}: expected string-like argument, got {other:?}"
+            ))
+        }),
     }
 }
 
@@ -786,10 +852,6 @@ fn normalize_identifier(raw: &str) -> String {
     }
 }
 
-fn build_error(identifier: &str, message: &str) -> String {
-    format!("{}: {}", identifier, message)
-}
-
 fn state_struct(identifier: &str, state: &str) -> StructValue {
     let mut st = StructValue::new();
     st.fields.insert(
@@ -805,12 +867,12 @@ fn state_struct_value(identifier: &str, state: &str) -> Value {
     Value::Struct(state_struct(identifier, state))
 }
 
-fn structs_to_cell(structs: Vec<StructValue>) -> Result<Value, String> {
+fn structs_to_cell(structs: Vec<StructValue>) -> crate::BuiltinResult<Value> {
     let rows = structs.len();
     let values: Vec<Value> = structs.into_iter().map(Value::Struct).collect();
     CellArray::new(values, rows, 1)
         .map(Value::Cell)
-        .map_err(|e| format!("warning: failed to assemble state cell: {e}"))
+        .map_err(|e| warning_default_error(format!("warning: failed to assemble state cell: {e}")))
 }
 
 #[cfg(test)]
@@ -818,6 +880,10 @@ pub(crate) mod tests {
     use super::*;
 
     static TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
+        err
+    }
 
     fn reset_manager() {
         with_manager(WarningManager::reset);
@@ -936,8 +1002,10 @@ pub(crate) mod tests {
         let previous =
             warning_builtin(vec![Value::from("error"), Value::from("all")]).expect("state change");
         assert_state_struct(&previous, "all", "on");
-        let err = warning_builtin(vec![Value::from("Promoted")]).expect_err("should error");
-        assert_eq!(err, "MATLAB:warning: Promoted");
+        let err =
+            unwrap_error(warning_builtin(vec![Value::from("Promoted")]).expect_err("should error"));
+        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.message(), "Promoted");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1014,11 +1082,15 @@ pub(crate) mod tests {
     fn special_mode_rejects_invalid_state() {
         let _guard = TEST_LOCK.lock().unwrap();
         reset_manager();
-        let err = warning_builtin(vec![Value::from("once"), Value::from("backtrace")])
-            .expect_err("invalid state");
+        let err = unwrap_error(
+            warning_builtin(vec![Value::from("once"), Value::from("backtrace")])
+                .expect_err("invalid state"),
+        );
+        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
         assert!(
-            err.contains("only 'on' or 'off'"),
-            "unexpected error message: {err}"
+            err.message().contains("only 'on' or 'off'"),
+            "unexpected error message: {}",
+            err.message()
         );
     }
 
@@ -1027,11 +1099,15 @@ pub(crate) mod tests {
     fn set_mode_last_requires_identifier() {
         let _guard = TEST_LOCK.lock().unwrap();
         reset_manager();
-        let err = warning_builtin(vec![Value::from("off"), Value::from("last")])
-            .expect_err("missing last");
+        let err = unwrap_error(
+            warning_builtin(vec![Value::from("off"), Value::from("last")])
+                .expect_err("missing last"),
+        );
+        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
         assert!(
-            err.contains("no last warning identifier"),
-            "unexpected error: {err}"
+            err.message().contains("no last warning identifier"),
+            "unexpected error: {}",
+            err.message()
         );
         warning_builtin(vec![Value::from("Hello!")]).expect("emit warning");
         let previous =

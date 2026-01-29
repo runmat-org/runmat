@@ -43,8 +43,8 @@ fn cpu_matmul_f32(a: &[f32], ar: usize, ac: usize, b: &[f32], br: usize, bc: usi
 }
 
 #[cfg(feature = "wgpu")]
-#[test]
-fn matmul_small_k_threshold() {
+#[tokio::test]
+async fn matmul_small_k_threshold() {
     let _guard = TEST_MUTEX.lock().unwrap();
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
     let p = runmat_accelerate_api::provider().expect("provider");
@@ -77,8 +77,8 @@ fn matmul_small_k_threshold() {
             shape: &[k, n],
         })
         .expect("upload B");
-    let hc = p.matmul(&ha, &hb).expect("matmul");
-    let host = p.download(&hc).expect("download");
+    let hc = p.matmul(&ha, &hb).await.expect("matmul");
+    let host = p.download(&hc).await.expect("download");
     assert_eq!(host.shape, vec![m, n]);
 
     let expected = cpu_matmul(&a, m, k, &b, k, n);
@@ -96,8 +96,8 @@ fn matmul_small_k_threshold() {
 }
 
 #[cfg(feature = "wgpu")]
-#[test]
-fn matmul_small_k_exact_threshold() {
+#[tokio::test]
+async fn matmul_small_k_exact_threshold() {
     let _guard = TEST_MUTEX.lock().unwrap();
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
     let p = runmat_accelerate_api::provider().expect("provider");
@@ -130,8 +130,8 @@ fn matmul_small_k_exact_threshold() {
             shape: &[k, n],
         })
         .expect("upload B");
-    let hc = p.matmul(&ha, &hb).expect("matmul");
-    let host = p.download(&hc).expect("download");
+    let hc = p.matmul(&ha, &hb).await.expect("matmul");
+    let host = p.download(&hc).await.expect("download");
     assert_eq!(host.shape, vec![m, n]);
 
     let expected = cpu_matmul(&a, m, k, &b, k, n);
@@ -149,8 +149,8 @@ fn matmul_small_k_exact_threshold() {
 }
 
 #[cfg(feature = "wgpu")]
-#[test]
-fn matmul_vec4_f32_matches_cpu() {
+#[tokio::test]
+async fn matmul_vec4_f32_matches_cpu() {
     let _guard = TEST_MUTEX.lock().unwrap();
     std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
@@ -196,8 +196,8 @@ fn matmul_vec4_f32_matches_cpu() {
             shape: &[k, n],
         })
         .expect("upload B");
-    let hc = p.matmul(&ha, &hb).expect("matmul");
-    let host = p.download(&hc).expect("download");
+    let hc = p.matmul(&ha, &hb).await.expect("matmul");
+    let host = p.download(&hc).await.expect("download");
     assert_eq!(host.shape, vec![m, n]);
 
     let expected = cpu_matmul_f32(&a, m, k, &b, k, n);

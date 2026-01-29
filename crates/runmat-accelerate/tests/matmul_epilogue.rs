@@ -20,8 +20,8 @@ fn cpu_matmul(a: &[f64], ar: usize, ac: usize, b: &[f64], br: usize, bc: usize) 
 }
 
 #[cfg(feature = "wgpu")]
-#[test]
-fn matmul_epilogue_row_col_alpha_beta() {
+#[tokio::test]
+async fn matmul_epilogue_row_col_alpha_beta() {
     // Force f64 unless device requires f32; we only use provider APIs
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
     let p = runmat_accelerate_api::provider().expect("provider");
@@ -77,8 +77,11 @@ fn matmul_epilogue_row_col_alpha_beta() {
     ep.row_op = ScaleOp::Multiply;
     ep.col_op = ScaleOp::Multiply;
 
-    let hc = p.matmul_epilogue(&ha, &hb, &ep).expect("matmul_epilogue");
-    let host = p.download(&hc).expect("download");
+    let hc = p
+        .matmul_epilogue(&ha, &hb, &ep)
+        .await
+        .expect("matmul_epilogue");
+    let host = p.download(&hc).await.expect("download");
     assert_eq!(host.shape, vec![ar, bc]);
 
     // CPU reference: (alpha * (A*B) + beta) .* row .* col
@@ -106,8 +109,8 @@ fn matmul_epilogue_row_col_alpha_beta() {
 }
 
 #[cfg(feature = "wgpu")]
-#[test]
-fn matmul_epilogue_col_divide() {
+#[tokio::test]
+async fn matmul_epilogue_col_divide() {
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
     let p = runmat_accelerate_api::provider().expect("provider");
 
@@ -144,8 +147,11 @@ fn matmul_epilogue_col_divide() {
     ep.col_scale = Some(hcol.clone());
     ep.col_op = runmat_accelerate_api::ScaleOp::Divide;
 
-    let hc = p.matmul_epilogue(&ha, &hb, &ep).expect("matmul_epilogue");
-    let host = p.download(&hc).expect("download");
+    let hc = p
+        .matmul_epilogue(&ha, &hb, &ep)
+        .await
+        .expect("matmul_epilogue");
+    let host = p.download(&hc).await.expect("download");
     // Expected: identity matmul gives A, then divide each column by denom
     let expected = [a[0] / 2.0, a[1] / 2.0, a[2] / 4.0, a[3] / 4.0];
     for (got, want) in host.data.iter().zip(expected.iter()) {
@@ -154,8 +160,8 @@ fn matmul_epilogue_col_divide() {
 }
 
 #[cfg(feature = "wgpu")]
-#[test]
-fn matmul_epilogue_clamp_pow() {
+#[tokio::test]
+async fn matmul_epilogue_clamp_pow() {
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
     let p = runmat_accelerate_api::provider().expect("provider");
 
@@ -182,8 +188,11 @@ fn matmul_epilogue_clamp_pow() {
     ep.clamp_max = Some(10.0);
     ep.pow_exponent = Some(2.0);
 
-    let hc = p.matmul_epilogue(&ha, &hb, &ep).expect("matmul_epilogue");
-    let host = p.download(&hc).expect("download");
+    let hc = p
+        .matmul_epilogue(&ha, &hb, &ep)
+        .await
+        .expect("matmul_epilogue");
+    let host = p.download(&hc).await.expect("download");
     assert_eq!(host.shape, vec![2, 2]);
 
     // CPU reference: pow(clamp(matmul, [4,10]), 2)

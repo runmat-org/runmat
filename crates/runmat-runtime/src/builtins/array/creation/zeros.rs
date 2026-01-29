@@ -1,16 +1,17 @@
 //! MATLAB-compatible `zeros` builtin with GPU-aware semantics.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
-use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{ComplexTensor, LogicalArray, Value};
 use runmat_macros::runtime_builtin;
 use std::sync::OnceLock;
 
+use crate::build_runtime_error;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionExprContext,
     FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
     ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{shape::normalize_scalar_shape, tensor};
 use runmat_builtins::NumericDType;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::zeros")]
@@ -31,6 +32,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Allocates device zeros when providers expose dedicated hooks; otherwise falls back to host upload.",
 };
+
+fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
+    build_runtime_error(message).with_builtin("zeros").build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::zeros")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -62,9 +67,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::zeros"
 )]
-fn zeros_builtin(rest: Vec<Value>) -> Result<Value, String> {
-    let parsed = ParsedZeros::parse(rest)?;
-    build_output(parsed)
+async fn zeros_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let parsed = ParsedZeros::parse(rest).await?;
+    build_output(parsed).await
 }
 
 struct ParsedZeros {
@@ -84,7 +89,7 @@ enum OutputTemplate {
 }
 
 impl ParsedZeros {
-    fn parse(args: Vec<Value>) -> Result<Self, String> {
+    async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
         let mut shape_source: Option<Vec<usize>> = None;
@@ -99,15 +104,17 @@ impl ParsedZeros {
                 match keyword.as_str() {
                     "like" => {
                         if like_proto.is_some() {
-                            return Err("zeros: multiple 'like' specifications are not supported"
-                                .to_string());
+                            return Err(builtin_error(
+                                "zeros: multiple 'like' specifications are not supported",
+                            ));
                         }
                         if class_override.is_some() {
-                            return Err("zeros: cannot combine 'like' with other class specifiers"
-                                .to_string());
+                            return Err(builtin_error(
+                                "zeros: cannot combine 'like' with other class specifiers",
+                            ));
                         }
                         let Some(proto) = args.get(idx + 1).cloned() else {
-                            return Err("zeros: expected prototype after 'like'".to_string());
+                            return Err(builtin_error("zeros: expected prototype after 'like'"));
                         };
                         like_proto = Some(proto.clone());
                         if shape_source.is_none() && !saw_dims_arg {
@@ -118,7 +125,9 @@ impl ParsedZeros {
                     }
                     "logical" => {
                         if like_proto.is_some() {
-                            return Err("zeros: cannot combine 'like' with 'logical'".to_string());
+                            return Err(builtin_error(
+                                "zeros: cannot combine 'like' with 'logical'",
+                            ));
                         }
                         class_override = Some(OutputTemplate::Logical);
                         idx += 1;
@@ -126,7 +135,9 @@ impl ParsedZeros {
                     }
                     "double" => {
                         if like_proto.is_some() {
-                            return Err("zeros: cannot combine 'like' with 'double'".to_string());
+                            return Err(builtin_error(
+                                "zeros: cannot combine 'like' with 'double'",
+                            ));
                         }
                         class_override = Some(OutputTemplate::Double);
                         idx += 1;
@@ -134,19 +145,24 @@ impl ParsedZeros {
                     }
                     "single" => {
                         if like_proto.is_some() {
-                            return Err("zeros: cannot combine 'like' with 'single'".to_string());
+                            return Err(builtin_error(
+                                "zeros: cannot combine 'like' with 'single'",
+                            ));
                         }
                         class_override = Some(OutputTemplate::Single);
                         idx += 1;
                         continue;
                     }
                     other => {
-                        return Err(format!("zeros: unrecognised option '{other}'"));
+                        return Err(builtin_error(format!(
+                            "zeros: unrecognised option '{other}'"
+                        )));
                     }
                 }
             }
 
-            if let Some(parsed_dims) = extract_dims(&arg)? {
+            if let Some(parsed_dims) = extract_dims(&arg).await? {
+                tracing::trace!("zeros: parsed dimension arguments {:?}", parsed_dims);
                 saw_dims_arg = true;
                 if dims.is_empty() {
                     dims = parsed_dims;
@@ -156,6 +172,11 @@ impl ParsedZeros {
                 idx += 1;
                 continue;
             }
+
+            tracing::debug!(
+                arg_type = value_tag(&arg),
+                "zeros: argument did not parse as dimensions"
+            );
 
             if shape_source.is_none() {
                 shape_source = Some(shape_from_value(&arg)?);
@@ -175,10 +196,20 @@ impl ParsedZeros {
                 dims
             }
         } else if let Some(shape) = shape_source {
+            tracing::warn!(
+                shape = ?shape,
+                "zeros: falling back to shape source; no dimension arguments parsed"
+            );
             shape
         } else {
             vec![1, 1]
         };
+
+        tracing::trace!(
+            "zeros: resolved output shape {:?} (saw_dims_arg={})",
+            shape,
+            saw_dims_arg
+        );
 
         let template = if let Some(proto) = like_proto {
             OutputTemplate::Like(proto)
@@ -194,16 +225,41 @@ impl ParsedZeros {
     }
 }
 
-fn build_output(parsed: ParsedZeros) -> Result<Value, String> {
+async fn build_output(parsed: ParsedZeros) -> crate::BuiltinResult<Value> {
     match parsed.template {
         OutputTemplate::Double => zeros_double(&parsed.shape),
         OutputTemplate::Single => zeros_single(&parsed.shape),
         OutputTemplate::Logical => zeros_logical(&parsed.shape),
-        OutputTemplate::Like(proto) => zeros_like(&proto, &parsed.shape),
+        OutputTemplate::Like(proto) => zeros_like(&proto, &parsed.shape).await,
     }
 }
 
-fn zeros_double(shape: &[usize]) -> Result<Value, String> {
+fn value_tag(value: &Value) -> &'static str {
+    match value {
+        Value::Num(_) => "Num",
+        Value::Int(_) => "Int",
+        Value::Bool(_) => "Bool",
+        Value::Tensor(_) => "Tensor",
+        Value::LogicalArray(_) => "LogicalArray",
+        Value::GpuTensor(_) => "GpuTensor",
+        Value::Complex(_, _) => "Complex",
+        Value::ComplexTensor(_) => "ComplexTensor",
+        Value::String(_) => "String",
+        Value::StringArray(_) => "StringArray",
+        Value::CharArray(_) => "CharArray",
+        Value::Cell(_) => "Cell",
+        Value::Struct(_) => "Struct",
+        Value::Object(_) => "Object",
+        Value::HandleObject(_) => "HandleObject",
+        Value::Listener(_) => "Listener",
+        Value::FunctionHandle(_) => "FunctionHandle",
+        Value::Closure(_) => "Closure",
+        Value::ClassRef(_) => "ClassRef",
+        Value::MException(_) => "MException",
+    }
+}
+
+fn zeros_double(shape: &[usize]) -> crate::BuiltinResult<Value> {
     if !force_host_allocation(shape) {
         if let Some(value) = zeros_gpu_alloc(shape, NumericDType::F64)? {
             return Ok(value);
@@ -213,7 +269,7 @@ fn zeros_double(shape: &[usize]) -> Result<Value, String> {
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn zeros_single(shape: &[usize]) -> Result<Value, String> {
+fn zeros_single(shape: &[usize]) -> crate::BuiltinResult<Value> {
     if !force_host_allocation(shape) {
         if let Some(value) = zeros_gpu_alloc(shape, NumericDType::F32)? {
             return Ok(value);
@@ -227,18 +283,19 @@ fn force_host_allocation(shape: &[usize]) -> bool {
     tensor::element_count(shape) <= 1
 }
 
-fn zeros_logical(shape: &[usize]) -> Result<Value, String> {
+fn zeros_logical(shape: &[usize]) -> crate::BuiltinResult<Value> {
     Ok(Value::LogicalArray(LogicalArray::zeros(shape.to_vec())))
 }
 
-fn zeros_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
+#[async_recursion::async_recursion(?Send)]
+async fn zeros_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
     match proto {
         Value::LogicalArray(_) | Value::Bool(_) => zeros_logical(shape),
         Value::ComplexTensor(_) | Value::Complex(_, _) => {
             let tensor = ComplexTensor::zeros(shape.to_vec());
             Ok(Value::ComplexTensor(tensor))
         }
-        Value::GpuTensor(handle) => zeros_like_gpu(handle, shape),
+        Value::GpuTensor(handle) => zeros_like_gpu(handle, shape).await,
         Value::Tensor(t) => match t.dtype {
             NumericDType::F32 => zeros_single(shape),
             NumericDType::F64 => zeros_double(shape),
@@ -249,7 +306,8 @@ fn zeros_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
     }
 }
 
-fn zeros_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, String> {
+#[async_recursion::async_recursion(?Send)]
+async fn zeros_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let precision =
             runmat_accelerate_api::handle_precision(handle).unwrap_or_else(|| provider.precision());
@@ -281,13 +339,14 @@ fn zeros_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, St
         log_zeros_fallback(shape, NumericDType::F32, "no-provider-like");
     }
 
-    let gathered = crate::dispatcher::gather_if_needed(&Value::GpuTensor(handle.clone()))
+    let gathered = crate::dispatcher::gather_if_needed_async(&Value::GpuTensor(handle.clone()))
+        .await
         .map_err(|e| format!("zeros: {e}"))?;
     log_zeros_fallback(shape, NumericDType::F32, "gather-fallback");
-    zeros_like(&gathered, shape)
+    zeros_like(&gathered, shape).await
 }
 
-fn zeros_gpu_alloc(shape: &[usize], dtype: NumericDType) -> Result<Option<Value>, String> {
+fn zeros_gpu_alloc(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult<Option<Value>> {
     let Some(provider) = runmat_accelerate_api::provider() else {
         log_zeros_fallback(shape, dtype, "no-provider");
         return Ok(None);
@@ -359,56 +418,26 @@ fn keyword_of(value: &Value) -> Option<String> {
     }
 }
 
-fn extract_dims(value: &Value) -> Result<Option<Vec<usize>>, String> {
-    match value {
-        Value::Int(i) => {
-            let dim = i.to_i64();
-            if dim < 0 {
-                return Err("zeros: matrix dimensions must be non-negative".to_string());
-            }
-            Ok(Some(vec![dim as usize]))
-        }
-        Value::Num(n) => parse_numeric_dimension(*n).map(|d| Some(vec![d])),
-        Value::Tensor(t) => dims_from_tensor(t),
-        Value::LogicalArray(l) => dims_from_logical(l),
-        _ => Ok(None),
-    }
-}
-
-fn parse_numeric_dimension(n: f64) -> Result<usize, String> {
-    if !n.is_finite() {
-        return Err("zeros: dimensions must be finite".to_string());
-    }
-    if n < 0.0 {
-        return Err("zeros: matrix dimensions must be non-negative".to_string());
-    }
-    let rounded = n.round();
-    if (rounded - n).abs() > f64::EPSILON {
-        return Err("zeros: dimensions must be integers".to_string());
-    }
-    Ok(rounded as usize)
-}
-
-fn dims_from_tensor(tensor: &Tensor) -> Result<Option<Vec<usize>>, String> {
-    let is_row = tensor.rows() == 1;
-    let is_column = tensor.cols() == 1;
-    let is_scalar = tensor.data.len() == 1;
-    if !(is_row || is_column || is_scalar || tensor.shape.len() == 1) {
+async fn extract_dims(value: &Value) -> crate::BuiltinResult<Option<Vec<usize>>> {
+    if matches!(value, Value::LogicalArray(_)) {
         return Ok(None);
     }
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for &v in &tensor.data {
-        match parse_numeric_dimension(v) {
-            Ok(dim) => dims.push(dim),
-            Err(_) => return Ok(None),
+    let gpu_scalar = match value {
+        Value::GpuTensor(handle) => tensor::element_count(&handle.shape) == 1,
+        _ => false,
+    };
+    match tensor::dims_from_value_async(value).await {
+        Ok(dims) => Ok(dims),
+        Err(err) => {
+            if matches!(value, Value::Tensor(_))
+                || (matches!(value, Value::GpuTensor(_)) && !gpu_scalar)
+            {
+                Ok(None)
+            } else {
+                Err(builtin_error(format!("zeros: {err}")))
+            }
         }
     }
-    Ok(Some(dims))
-}
-
-fn dims_from_logical(logical: &LogicalArray) -> Result<Option<Vec<usize>>, String> {
-    let _ = logical;
-    Ok(None)
 }
 
 fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
@@ -416,7 +445,7 @@ fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
         Value::Tensor(t) => Ok(t.shape.clone()),
         Value::ComplexTensor(t) => Ok(t.shape.clone()),
         Value::LogicalArray(l) => Ok(l.shape.clone()),
-        Value::GpuTensor(h) => Ok(h.shape.clone()),
+        Value::GpuTensor(h) => Ok(normalize_scalar_shape(&h.shape)),
         Value::CharArray(ca) => Ok(vec![ca.rows, ca.cols]),
         Value::Cell(cell) => Ok(vec![cell.rows, cell.cols]),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(vec![1, 1]),
@@ -428,11 +457,13 @@ fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+    use runmat_builtins::Tensor;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_default_scalar() {
-        let result = zeros_builtin(Vec::new()).expect("zeros");
+        let result = block_on(zeros_builtin(Vec::new())).expect("zeros");
         assert_eq!(result, Value::Num(0.0));
     }
 
@@ -440,7 +471,7 @@ pub(crate) mod tests {
     #[test]
     fn zeros_square_from_single_dimension() {
         let args = vec![Value::Num(3.0)];
-        let result = zeros_builtin(args).expect("zeros");
+        let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![3, 3]);
         assert!(tensor.data.iter().all(|&x| x == 0.0));
@@ -450,7 +481,7 @@ pub(crate) mod tests {
     #[test]
     fn zeros_rectangular_from_dims() {
         let args = vec![Value::Num(2.0), Value::Num(4.0)];
-        let result = zeros_builtin(args).expect("zeros");
+        let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 4]);
         assert_eq!(tensor.data.len(), 8);
@@ -461,7 +492,7 @@ pub(crate) mod tests {
     fn zeros_from_size_vector() {
         let size_vec = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
         let args = vec![Value::Tensor(size_vec)];
-        let result = zeros_builtin(args).expect("zeros");
+        let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 3]);
     }
@@ -470,7 +501,7 @@ pub(crate) mod tests {
     #[test]
     fn zeros_logical_output() {
         let args = vec![Value::Num(2.0), Value::Num(2.0), Value::from("logical")];
-        let result = zeros_builtin(args).expect("zeros");
+        let result = block_on(zeros_builtin(args)).expect("zeros");
         match result {
             Value::LogicalArray(logical) => {
                 assert_eq!(logical.shape, vec![2, 2]);
@@ -485,7 +516,7 @@ pub(crate) mod tests {
     fn zeros_like_tensor_infers_shape() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
-        let result = zeros_builtin(args).expect("zeros");
+        let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 2]);
         assert!(tensor.data.iter().all(|&x| x == 0.0));
@@ -499,7 +530,7 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::Complex(1.0, 2.0),
         ];
-        let result = zeros_builtin(args).expect("zeros");
+        let result = block_on(zeros_builtin(args)).expect("zeros");
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
@@ -519,7 +550,7 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::Tensor(proto),
         ];
-        let result = zeros_builtin(args).expect("zeros");
+        let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 3]);
         assert!(tensor.data.iter().all(|&x| x == 0.0));
@@ -530,7 +561,7 @@ pub(crate) mod tests {
     fn zeros_like_without_explicit_shape_uses_prototype_shape() {
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::from("like"), Value::Tensor(proto)];
-        let result = zeros_builtin(args).expect("zeros");
+        let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 2]);
         assert!(tensor.data.iter().all(|&x| x == 0.0));
@@ -540,7 +571,7 @@ pub(crate) mod tests {
     #[test]
     fn zeros_empty_input_returns_empty_matrix() {
         let empty = Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap();
-        let result = zeros_builtin(vec![Value::Tensor(empty)]).expect("zeros");
+        let result = block_on(zeros_builtin(vec![Value::Tensor(empty)])).expect("zeros");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
@@ -560,7 +591,7 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::Tensor(proto),
         ];
-        assert!(zeros_builtin(args).is_err());
+        assert!(block_on(zeros_builtin(args)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -579,7 +610,7 @@ pub(crate) mod tests {
                 Value::from("like"),
                 Value::GpuTensor(handle),
             ];
-            let result = zeros_builtin(args).expect("zeros");
+            let result = block_on(zeros_builtin(args)).expect("zeros");
             match result {
                 Value::GpuTensor(gpu) => {
                     assert_eq!(gpu.shape, vec![2, 2]);

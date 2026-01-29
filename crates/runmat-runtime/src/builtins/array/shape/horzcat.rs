@@ -3,6 +3,8 @@
 use runmat_builtins::{IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, RuntimeError};
+
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -35,6 +37,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Concatenation materialises outputs immediately, terminating fusion pipelines.",
 };
 
+fn horzcat_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("horzcat").build()
+}
+
 #[runtime_builtin(
     name = "horzcat",
     category = "array/shape",
@@ -43,7 +49,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::shape::horzcat"
 )]
-fn horzcat_builtin(args: Vec<Value>) -> Result<Value, String> {
+async fn horzcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         return empty_double();
     }
@@ -54,17 +60,21 @@ fn horzcat_builtin(args: Vec<Value>) -> Result<Value, String> {
     let mut forwarded = Vec::with_capacity(args.len() + 1);
     forwarded.push(Value::Int(IntValue::I32(2)));
     forwarded.extend(args);
-    crate::call_builtin("cat", &forwarded).map_err(adapt_cat_error)
+    match crate::call_builtin_async("cat", &forwarded).await {
+        Ok(value) => Ok(value),
+        Err(err) => Err(adapt_cat_error(err)),
+    }
 }
 
-fn empty_double() -> Result<Value, String> {
+fn empty_double() -> crate::BuiltinResult<Value> {
     Tensor::new(Vec::new(), vec![0, 0])
         .map(Value::Tensor)
-        .map_err(|e| format!("horzcat: {e}"))
+        .map_err(|e| horzcat_error(format!("horzcat: {e}")))
 }
 
-fn adapt_cat_error(message: String) -> String {
-    if let Some(rest) = message.strip_prefix("cat:") {
+fn adapt_cat_error(mut error: RuntimeError) -> RuntimeError {
+    let message = error.message.clone();
+    let adjusted = if let Some(rest) = message.strip_prefix("cat:") {
         format!("horzcat:{rest}")
     } else if let Some(idx) = message.find("cat:") {
         let rest = &message[idx + 4..];
@@ -73,12 +83,20 @@ fn adapt_cat_error(message: String) -> String {
         message
     } else {
         format!("horzcat: {message}")
-    }
+    };
+    error.message = adjusted;
+    error.context = error.context.with_builtin("horzcat");
+    error
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn horzcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::horzcat_builtin(args))
+    }
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor};
 

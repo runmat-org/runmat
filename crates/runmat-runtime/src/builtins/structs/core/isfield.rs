@@ -8,6 +8,8 @@ use runmat_builtins::{CellArray, LogicalArray, StructValue, Value};
 use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::isfield")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isfield",
@@ -35,6 +37,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a fusion barrier because it inspects struct metadata on the host.",
 };
 
+fn isfield_flow(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("isfield").build()
+}
+
 #[runtime_builtin(
     name = "isfield",
     category = "structs/core",
@@ -42,7 +48,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "isfield,struct,field existence",
     builtin_path = "crate::builtins::structs::core::isfield"
 )]
-fn isfield_builtin(target: Value, names: Value) -> Result<Value, String> {
+async fn isfield_builtin(target: Value, names: Value) -> BuiltinResult<Value> {
     let context = classify_struct(&target)?;
     let parsed = parse_field_names(names)?;
     match context {
@@ -59,7 +65,7 @@ enum StructContext<'a> {
     NonStruct,
 }
 
-fn classify_struct<'a>(value: &'a Value) -> Result<StructContext<'a>, String> {
+fn classify_struct<'a>(value: &'a Value) -> BuiltinResult<StructContext<'a>> {
     match value {
         Value::Struct(st) => Ok(StructContext::Struct(st)),
         Value::Cell(cell) => {
@@ -88,7 +94,7 @@ enum ParsedNames {
     },
 }
 
-fn parse_field_names(names: Value) -> Result<ParsedNames, String> {
+fn parse_field_names(names: Value) -> BuiltinResult<ParsedNames> {
     match names {
         Value::String(s) => Ok(ParsedNames::Scalar(s)),
         Value::CharArray(ca) => {
@@ -117,7 +123,7 @@ fn parse_field_names(names: Value) -> Result<ParsedNames, String> {
     }
 }
 
-fn try_single_field_name(value: &Value) -> Result<Option<String>, String> {
+fn try_single_field_name(value: &Value) -> BuiltinResult<Option<String>> {
     match value {
         Value::String(s) => Ok(Some(s.clone())),
         Value::CharArray(ca) => {
@@ -138,7 +144,7 @@ fn try_single_field_name(value: &Value) -> Result<Option<String>, String> {
     }
 }
 
-fn evaluate_scalar(struct_value: &StructValue, names: ParsedNames) -> Result<Value, String> {
+fn evaluate_scalar(struct_value: &StructValue, names: ParsedNames) -> BuiltinResult<Value> {
     match names {
         ParsedNames::Scalar(name) => Ok(Value::Bool(struct_value.fields.contains_key(&name))),
         ParsedNames::Array { names, shape } => {
@@ -150,13 +156,14 @@ fn evaluate_scalar(struct_value: &StructValue, names: ParsedNames) -> Result<Val
                     0
                 });
             }
-            let logical = LogicalArray::new(bits, shape).map_err(|e| format!("isfield: {e}"))?;
+            let logical = LogicalArray::new(bits, shape)
+                .map_err(|e| isfield_flow(format!("isfield: {e}")))?;
             Ok(Value::LogicalArray(logical))
         }
     }
 }
 
-fn evaluate_struct_array(cell: &CellArray, names: ParsedNames) -> Result<Value, String> {
+fn evaluate_struct_array(cell: &CellArray, names: ParsedNames) -> BuiltinResult<Value> {
     let fields = struct_array_field_intersection(cell)?;
     match names {
         ParsedNames::Scalar(name) => Ok(Value::Bool(fields.contains(&name))),
@@ -165,24 +172,25 @@ fn evaluate_struct_array(cell: &CellArray, names: ParsedNames) -> Result<Value, 
             for name in names {
                 bits.push(if fields.contains(&name) { 1 } else { 0 });
             }
-            let logical = LogicalArray::new(bits, shape).map_err(|e| format!("isfield: {e}"))?;
+            let logical = LogicalArray::new(bits, shape)
+                .map_err(|e| isfield_flow(format!("isfield: {e}")))?;
             Ok(Value::LogicalArray(logical))
         }
     }
 }
 
-fn evaluate_non_struct(names: ParsedNames) -> Result<Value, String> {
+fn evaluate_non_struct(names: ParsedNames) -> BuiltinResult<Value> {
     match names {
         ParsedNames::Scalar(_) => Ok(Value::Bool(false)),
         ParsedNames::Array { names, shape } => {
             let logical = LogicalArray::new(vec![0; names.len()], shape)
-                .map_err(|e| format!("isfield: {e}"))?;
+                .map_err(|e| isfield_flow(format!("isfield: {e}")))?;
             Ok(Value::LogicalArray(logical))
         }
     }
 }
 
-fn struct_array_field_intersection(cell: &CellArray) -> Result<HashSet<String>, String> {
+fn struct_array_field_intersection(cell: &CellArray) -> BuiltinResult<HashSet<String>> {
     if cell.data.is_empty() {
         return Ok(HashSet::new());
     }
@@ -190,14 +198,18 @@ fn struct_array_field_intersection(cell: &CellArray) -> Result<HashSet<String>, 
     let mut iter = cell.data.iter();
     let first = unsafe { &*iter.next().unwrap().as_raw() };
     let Value::Struct(first_struct) = first else {
-        return Err("isfield: struct array elements must be structs".to_string());
+        return Err(isfield_flow(
+            "isfield: struct array elements must be structs",
+        ));
     };
     let mut fields: HashSet<String> = first_struct.fields.keys().cloned().collect();
 
     for handle in iter {
         let value = unsafe { &*handle.as_raw() };
         let Value::Struct(struct_value) = value else {
-            return Err("isfield: struct array elements must be structs".to_string());
+            return Err(isfield_flow(
+                "isfield: struct array elements must be structs",
+            ));
         };
         fields.retain(|name| struct_value.fields.contains_key(name));
         if fields.is_empty() {
@@ -208,7 +220,7 @@ fn struct_array_field_intersection(cell: &CellArray) -> Result<HashSet<String>, 
     Ok(fields)
 }
 
-fn collect_cell_names(cell: &CellArray) -> Result<Vec<String>, String> {
+fn collect_cell_names(cell: &CellArray) -> BuiltinResult<Vec<String>> {
     let total = cell.data.len();
     if total == 0 {
         return Ok(Vec::new());
@@ -263,7 +275,7 @@ fn column_major_coordinates(mut index: usize, shape: &[usize]) -> Vec<usize> {
     coords
 }
 
-fn value_to_field_name(value: &Value) -> Result<String, String> {
+fn value_to_field_name(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::CharArray(ca) => {
@@ -280,15 +292,16 @@ fn value_to_field_name(value: &Value) -> Result<String, String> {
                 Err(field_name_type_error())
             }
         }
-        other => Err(format!(
+        other => Err(isfield_flow(format!(
             "isfield: cell array elements must be character vectors or strings (got {other:?})"
-        )),
+        ))),
     }
 }
 
-fn field_name_type_error() -> String {
-    "isfield: field names must be strings, string arrays, or cell arrays of character vectors"
-        .to_string()
+fn field_name_type_error() -> RuntimeError {
+    isfield_flow(
+        "isfield: field names must be strings, string arrays, or cell arrays of character vectors",
+    )
 }
 
 #[cfg(test)]
@@ -296,17 +309,25 @@ pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{CellArray, CharArray, StringArray, StructValue};
 
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
+    }
+
+    fn run_isfield(target: Value, names: Value) -> BuiltinResult<Value> {
+        futures::executor::block_on(isfield_builtin(target, names))
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfield_scalar_struct_single_name() {
         let mut st = StructValue::new();
         st.fields.insert("name".to_string(), Value::from("Ada"));
         assert_eq!(
-            isfield_builtin(Value::Struct(st.clone()), Value::from("name")).unwrap(),
+            run_isfield(Value::Struct(st.clone()), Value::from("name")).unwrap(),
             Value::Bool(true)
         );
         assert_eq!(
-            isfield_builtin(Value::Struct(st), Value::from("score")).unwrap(),
+            run_isfield(Value::Struct(st), Value::from("score")).unwrap(),
             Value::Bool(false)
         );
     }
@@ -317,7 +338,7 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.fields.insert("alpha".into(), Value::Num(1.0));
         let chars = CharArray::new("alpha".chars().collect(), 1, 5).unwrap();
-        let result = isfield_builtin(Value::Struct(st), Value::CharArray(chars)).unwrap();
+        let result = run_isfield(Value::Struct(st), Value::CharArray(chars)).unwrap();
         assert_eq!(result, Value::Bool(true));
     }
 
@@ -338,7 +359,7 @@ pub(crate) mod tests {
             2,
         )
         .unwrap();
-        let result = isfield_builtin(Value::Struct(st), Value::Cell(names)).expect("isfield");
+        let result = run_isfield(Value::Struct(st), Value::Cell(names)).expect("isfield");
         let expected = LogicalArray::new(vec![1, 1, 0, 0], vec![2, 2]).expect("logical array");
         assert_eq!(result, Value::LogicalArray(expected));
     }
@@ -360,7 +381,7 @@ pub(crate) mod tests {
             3,
         )
         .unwrap();
-        let result = isfield_builtin(Value::Struct(st), Value::Cell(cell)).unwrap();
+        let result = run_isfield(Value::Struct(st), Value::Cell(cell)).unwrap();
         let expected = LogicalArray::new(vec![1, 1, 0], vec![1, 3]).unwrap();
         assert_eq!(result, Value::LogicalArray(expected));
     }
@@ -384,18 +405,18 @@ pub(crate) mod tests {
         .unwrap();
 
         let res_id =
-            isfield_builtin(Value::Cell(struct_array.clone()), Value::from("id")).expect("isfield");
+            run_isfield(Value::Cell(struct_array.clone()), Value::from("id")).expect("isfield");
         assert_eq!(res_id, Value::Bool(false));
 
         let res_name =
-            isfield_builtin(Value::Cell(struct_array), Value::from("name")).expect("isfield");
+            run_isfield(Value::Cell(struct_array), Value::from("name")).expect("isfield");
         assert_eq!(res_name, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfield_non_struct_returns_false() {
-        let result = isfield_builtin(Value::Num(5.0), Value::from("field")).unwrap();
+        let result = run_isfield(Value::Num(5.0), Value::from("field")).unwrap();
         assert_eq!(result, Value::Bool(false));
     }
 
@@ -406,7 +427,7 @@ pub(crate) mod tests {
         st.fields.insert("alpha".into(), Value::Num(1.0));
         st.fields.insert("beta".into(), Value::Num(2.0));
         let names = StringArray::new(vec!["alpha".into(), "gamma".into()], vec![2, 1]).unwrap();
-        let result = isfield_builtin(Value::Struct(st), Value::StringArray(names)).unwrap();
+        let result = run_isfield(Value::Struct(st), Value::StringArray(names)).unwrap();
         let expected = LogicalArray::new(vec![1, 0], vec![2, 1]).expect("logical array");
         assert_eq!(result, Value::LogicalArray(expected));
     }
@@ -416,7 +437,7 @@ pub(crate) mod tests {
     fn isfield_invalid_name_type_errors() {
         let mut st = StructValue::new();
         st.fields.insert("alpha".into(), Value::Num(1.0));
-        let err = isfield_builtin(Value::Struct(st), Value::from(5_i32)).unwrap_err();
+        let err = error_message(run_isfield(Value::Struct(st), Value::from(5_i32)).unwrap_err());
         assert!(err.contains("field names must be strings"));
     }
 
@@ -426,7 +447,8 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.fields.insert("alpha".into(), Value::Num(1.0));
         let matrix = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
-        let err = isfield_builtin(Value::Struct(st), Value::CharArray(matrix)).unwrap_err();
+        let err =
+            error_message(run_isfield(Value::Struct(st), Value::CharArray(matrix)).unwrap_err());
         assert!(err.contains("field names must be strings"));
     }
 }
