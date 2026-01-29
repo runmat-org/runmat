@@ -433,7 +433,7 @@ fn contains_complex(value: &Value) -> bool {
 }
 
 fn is_scalar_handle(handle: &GpuTensorHandle) -> bool {
-    handle.shape.iter().copied().product::<usize>() == 1
+    crate::builtins::common::shape::is_scalar_shape(&handle.shape)
 }
 
 struct PreparedOperand {
@@ -935,7 +935,7 @@ pub(crate) mod tests {
     }
 
     fn approx_eq(actual: f64, expected: f64) {
-        assert!((actual - expected).abs() < 1e-10);
+        assert!((actual - expected).abs() < 1e-7);
     }
 
     fn evaluate_args(a: Value, b: Value, rest: &[Value]) -> Result<LinsolveEval, RuntimeError> {

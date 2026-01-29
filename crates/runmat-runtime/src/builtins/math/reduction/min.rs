@@ -328,7 +328,9 @@ async fn parse_dimension_value(value: &Value) -> BuiltinResult<Option<DimSelecti
             .map(|dim| dim.map(DimSelection::Dim)),
         Value::Tensor(t) => parse_dimension_tensor(value, &t.shape).await,
         Value::LogicalArray(logical) => parse_dimension_tensor(value, &logical.shape).await,
-        Value::GpuTensor(handle) => parse_dimension_tensor(value, &handle.shape).await,
+        Value::GpuTensor(_) => Err(min_error(
+            "min: dimension arguments must reside on the host",
+        )),
         _ => Ok(None),
     }
 }
@@ -417,17 +419,27 @@ async fn reduction_min_gpu(
         }
     }
     if args.nan_mode == ReductionNaN::Omit {
+        log::trace!("min: gpu path disabled (nan_mode=omit)");
         return Ok(None);
     }
     if args.comparison != ComparisonMethod::Auto {
+        log::trace!("min: gpu path disabled (comparison != auto)");
         return Ok(None);
     }
     if args.linear_index {
+        log::trace!("min: gpu path disabled (linear_index=true)");
         return Ok(None);
     }
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
-        None => return Ok(None),
+        None => {
+            log::trace!(
+                "min: gpu path unavailable (provider() is None) handle_shape={:?} device_id={}",
+                handle.shape,
+                handle.device_id
+            );
+            return Ok(None);
+        }
     };
     let target_dim = match args.selection {
         DimSelection::Auto => default_dimension_from_shape(&handle.shape),
@@ -450,12 +462,22 @@ async fn reduction_min_gpu(
     if zero_based >= handle.shape.len() {
         return Ok(None);
     }
+    log::trace!(
+        "min: attempting reduce_min_dim dim={} (zero_based={}) shape={:?} device_id={}",
+        target_dim,
+        zero_based,
+        handle.shape,
+        handle.device_id
+    );
     match provider.reduce_min_dim(&handle, zero_based).await {
         Ok(ReduceDimResult { values, indices }) => Ok(Some(MinEvaluation {
             values: Value::GpuTensor(values),
             indices: Value::GpuTensor(indices),
         })),
-        Err(_) => Ok(None),
+        Err(err) => {
+            log::trace!("min: reduce_min_dim failed: {err}");
+            Ok(None)
+        }
     }
 }
 
@@ -1576,6 +1598,7 @@ fn choose_complex_elementwise(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]

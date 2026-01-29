@@ -19,6 +19,7 @@ use once_cell::sync::{Lazy, OnceCell};
 use runmat_accelerate_api::{AccelProvider, ApiDeviceInfo, HostTensorView, ProviderPrecision};
 use runmat_builtins::{builtin_functions, AccelTag, Tensor, Value};
 use runmat_runtime::gather_if_needed_async;
+use runmat_runtime::builtins::common::spec::{builtin_residency_policy, ResidencyPolicy};
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_CPU_ELEM_PER_ELEM: f64 = 1.0e-7;
@@ -1108,7 +1109,20 @@ impl NativeAutoOffload {
         }
         if let Some(policy) = builtin_policy(name) {
             if policy.is_sink {
-                return gather_args(args).await;
+                clear_sink_inputs(args);
+                if should_gather_sink_args(name) {
+                    trace!(
+                        "auto-offload: prepare_builtin(name={:?}) is_sink=true residency=GatherImmediately -> gathering {} arg(s)",
+                        name,
+                        args.len()
+                    );
+                    return gather_args(args).await;
+                }
+                trace!(
+                    "auto-offload: prepare_builtin(name={:?}) is_sink=true residency!=GatherImmediately -> no gather (fusion barrier only)",
+                    name
+                );
+                return Ok(args.to_vec());
             }
 
             let mut processed = args.to_vec();
@@ -1236,17 +1250,67 @@ fn is_empty_placeholder_value(value: &Value) -> bool {
 
 async fn gather_args(args: &[Value]) -> Result<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
+    for (idx, value) in args.iter().enumerate() {
+        if let Value::GpuTensor(handle) = value {
+            trace!(
+                "auto-offload: gather_args arg[{}]=GpuTensor device_id={} buffer_id={} shape={:?}",
+                idx,
+                handle.device_id,
+                handle.buffer_id,
+                handle.shape
+            );
+        } else {
+            trace!("auto-offload: gather_args arg[{}]={:?}", idx, value_kind(value));
+        }
+        let gathered = gather_if_needed_async(value).await.map_err(|e| anyhow!(e))?;
+        trace!(
+            "auto-offload: gather_args arg[{}] -> {:?}",
+            idx,
+            value_kind(&gathered)
+        );
+        out.push(gathered);
+    }
+    Ok(out)
+}
+
+fn clear_sink_inputs(args: &[Value]) {
     for value in args {
         if let Value::GpuTensor(handle) = value {
             fusion_residency::clear(handle);
         }
-        out.push(
-            gather_if_needed_async(value)
-                .await
-                .map_err(|e| anyhow!(e))?,
-        );
     }
-    Ok(out)
+}
+
+fn should_gather_sink_args(name: &str) -> bool {
+    matches!(
+        builtin_residency_policy(name),
+        Some(ResidencyPolicy::GatherImmediately) | None
+    )
+}
+
+fn value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::GpuTensor(_) => "GpuTensor",
+        Value::Tensor(_) => "Tensor",
+        Value::Num(_) => "Num",
+        Value::Int(_) => "Int",
+        Value::Bool(_) => "Bool",
+        Value::LogicalArray(_) => "LogicalArray",
+        Value::CharArray(_) => "CharArray",
+        Value::String(_) => "String",
+        Value::StringArray(_) => "StringArray",
+        Value::Cell(_) => "Cell",
+        Value::Struct(_) => "Struct",
+        Value::Object(_) => "Object",
+        Value::HandleObject(_) => "HandleObject",
+        Value::FunctionHandle(_) => "FunctionHandle",
+        Value::Closure(_) => "Closure",
+        Value::ClassRef(_) => "ClassRef",
+        Value::Complex(_, _) => "Complex",
+        Value::ComplexTensor(_) => "ComplexTensor",
+        Value::Listener(_) => "Listener",
+        Value::MException(_) => "MException",
+    }
 }
 
 #[cfg(test)]
@@ -1972,7 +2036,20 @@ pub fn promote_unary(op: UnaryOp, value: &Value) -> Result<Value> {
 pub async fn prepare_builtin_args(name: &str, args: &[Value]) -> Result<Vec<Value>> {
     if let Some(policy) = builtin_policy(name) {
         if policy.is_sink {
-            return gather_args(args).await;
+            clear_sink_inputs(args);
+            if should_gather_sink_args(name) {
+                trace!(
+                    "auto-offload: prepare_builtin_args(name={:?}) is_sink=true residency=GatherImmediately -> gathering {} arg(s)",
+                    name,
+                    args.len()
+                );
+                return gather_args(args).await;
+            }
+            trace!(
+                "auto-offload: prepare_builtin_args(name={:?}) is_sink=true residency!=GatherImmediately -> no gather (fusion barrier only)",
+                name
+            );
+            return Ok(args.to_vec());
         }
     }
     if !auto_enabled() {

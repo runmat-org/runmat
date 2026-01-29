@@ -3,7 +3,7 @@ pub const F32: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 const VERTICES_PER_INVOCATION: u32 = 4u;
 
 struct VertexRaw {
-    data: array<f32, 12u>;
+    data: array<f32, 12u>,
 };
 
 struct ContourParams {
@@ -194,7 +194,7 @@ pub const F64: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 const VERTICES_PER_INVOCATION: u32 = 4u;
 
 struct VertexRaw {
-    data: array<f32, 12u>;
+    data: array<f32, 12u>,
 };
 
 struct ContourParams {

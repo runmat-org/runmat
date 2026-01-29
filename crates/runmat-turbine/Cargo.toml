@@ -20,6 +20,7 @@ log = { workspace = true }
 tracing = "0.1"
 thiserror = { workspace = true }
 libm = "0.2"
+stacker = "0.1"
 runmat-ignition = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-runtime = { workspace = true, features = ["plot-core"] }

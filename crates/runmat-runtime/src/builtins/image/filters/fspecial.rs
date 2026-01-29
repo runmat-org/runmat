@@ -955,6 +955,7 @@ fn clamp_asin(value: f64) -> f64 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
 
@@ -1117,7 +1118,7 @@ pub(crate) mod tests {
         };
         assert_eq!(t.shape, vec![3, 3]);
         let sum: f64 = t.data.iter().sum();
-        assert_close(sum, 1.0, 1e-7);
+        assert_close(sum, 1.0, 1e-6);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

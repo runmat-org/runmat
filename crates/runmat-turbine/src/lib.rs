@@ -24,7 +24,6 @@ use runmat_runtime::{build_runtime_error, RuntimeError};
 use std::cell::Cell;
 use std::ffi::CStr;
 use std::future::Future;
-use std::pin::Pin;
 use std::task::Context;
 
 use target_lexicon::Triple;
@@ -41,20 +40,22 @@ pub use compiler::*;
 pub use jit_memory::*;
 pub use profiler::HotspotProfiler;
 
-fn run_immediate<F: Future>(mut future: F) -> Result<F::Output> {
-    let waker = noop_waker();
-    let mut context = Context::from_waker(&waker);
-    let mut future = unsafe { Pin::new_unchecked(&mut future) };
-    loop {
-        match future.as_mut().poll(&mut context) {
-            std::task::Poll::Ready(output) => return Ok(output),
-            std::task::Poll::Pending => {
-                return Err(execution_error(
-                    "async interpreter yielded unexpectedly in sync JIT path",
-                ))
+fn run_immediate<F: Future>(future: F) -> Result<F::Output> {
+    stacker::grow(16 * 1024 * 1024, || {
+        let waker = noop_waker();
+        let mut context = Context::from_waker(&waker);
+        let mut future = Box::pin(future);
+        loop {
+            match future.as_mut().poll(&mut context) {
+                std::task::Poll::Ready(output) => return Ok(output),
+                std::task::Poll::Pending => {
+                    return Err(execution_error(
+                        "async interpreter yielded unexpectedly in sync JIT path",
+                    ))
+                }
             }
         }
-    }
+    })
 }
 
 struct RuntimeContext {

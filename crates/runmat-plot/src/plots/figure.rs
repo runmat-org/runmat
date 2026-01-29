@@ -3,7 +3,7 @@
 //! This module provides the `Figure` struct that manages multiple plots in a single
 //! coordinate system, handling overlays, legends, and proper rendering order.
 
-use crate::core::{BoundingBox, RenderData};
+use crate::core::{BoundingBox, GpuPackContext, RenderData};
 use crate::plots::surface::ColorMap;
 use crate::plots::{
     AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, ImagePlot, LinePlot, PieChart,
@@ -510,6 +510,14 @@ impl Figure {
         &mut self,
         viewport_px: Option<(u32, u32)>,
     ) -> Vec<RenderData> {
+        self.render_data_with_viewport_and_gpu(viewport_px, None)
+    }
+
+    pub fn render_data_with_viewport_and_gpu(
+        &mut self,
+        viewport_px: Option<(u32, u32)>,
+        gpu: Option<&GpuPackContext<'_>>,
+    ) -> Vec<RenderData> {
         let mut out = Vec::new();
         for p in self.plots.iter_mut() {
             if !p.is_visible() {
@@ -524,7 +532,7 @@ impl Figure {
 
             match p {
                 PlotElement::Line(plot) => {
-                    out.push(plot.render_data_with_viewport(viewport_px));
+                    out.push(plot.render_data_with_viewport_gpu(viewport_px, gpu));
                     if let Some(marker_data) = plot.marker_render_data() {
                         out.push(marker_data);
                     }

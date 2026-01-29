@@ -4,10 +4,12 @@ use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
 use crate::plots::line::LineStyle;
 use glam::Vec4;
+use log::trace;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 /// Inputs required to pack line vertices directly on the GPU.
+#[derive(Debug, Clone)]
 pub struct LineGpuInputs {
     pub x_buffer: Arc<wgpu::Buffer>,
     pub y_buffer: Arc<wgpu::Buffer>,
@@ -18,7 +20,10 @@ pub struct LineGpuInputs {
 /// Parameters describing how the GPU vertices should be generated.
 pub struct LineGpuParams {
     pub color: Vec4,
-    pub line_width: f32,
+    /// Half-width in *data units* used to extrude thick line triangles.
+    pub half_width_data: f32,
+    /// Whether to emit thick triangles (6 verts/segment) instead of thin LineList.
+    pub thick: bool,
     pub line_style: LineStyle,
     pub marker_size: f32,
 }
@@ -28,9 +33,9 @@ pub struct LineGpuParams {
 struct LineSegmentUniforms {
     color: [f32; 4],
     count: u32,
-    line_width: f32,
+    half_width_data: f32,
     line_style: u32,
-    _pad: u32,
+    thick: u32,
 }
 
 #[repr(C)]
@@ -56,9 +61,17 @@ pub fn pack_vertices_from_xy(
     if segments == 0 {
         return Err("plot: unable to construct segments from degenerate input".to_string());
     }
-    let thick = params.line_width > 1.0;
+    let thick = params.thick;
     let vertices_per_segment = if thick { 6u64 } else { 2u64 };
     let max_vertices = segments as u64 * vertices_per_segment;
+    trace!(
+        target: "runmat_plot",
+        "line-pack-kernel: dispatch segments={} thick={} max_vertices={} half_width_data={}",
+        segments,
+        thick,
+        max_vertices,
+        params.half_width_data
+    );
 
     let workgroup_size = tuning::effective_workgroup_size();
     let shader = compile_shader(device, workgroup_size, inputs.scalar);
@@ -161,9 +174,9 @@ pub fn pack_vertices_from_xy(
     let uniforms = LineSegmentUniforms {
         color: params.color.to_array(),
         count: inputs.len,
-        line_width: params.line_width.max(0.0),
+        half_width_data: params.half_width_data.max(0.0),
         line_style: line_style_code(params.line_style),
-        _pad: 0,
+        thick: if thick { 1 } else { 0 },
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("line-pack-uniforms"),

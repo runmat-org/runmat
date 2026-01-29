@@ -238,7 +238,11 @@ impl PlotRenderer {
             self.wgpu_renderer.surface_config.height.max(1),
         );
         self.last_scene_viewport_px = Some(viewport_px);
-        let render_data_list = figure.render_data_with_viewport(Some(viewport_px));
+        let gpu = crate::core::GpuPackContext {
+            device: &self.wgpu_renderer.device,
+            queue: &self.wgpu_renderer.queue,
+        };
+        let render_data_list = figure.render_data_with_viewport_and_gpu(Some(viewport_px), Some(&gpu));
         let axes_map: Vec<usize> = figure.plot_axes_indices().to_vec();
         let (rows, cols) = figure.axes_grid();
 
@@ -312,6 +316,13 @@ impl PlotRenderer {
 
         for node in self.scene.get_visible_nodes() {
             if let Some(render_data) = &node.render_data {
+                if let Some(bounds) = render_data.bounds.as_ref() {
+                    min_x = min_x.min(bounds.min.x as f64);
+                    max_x = max_x.max(bounds.max.x as f64);
+                    min_y = min_y.min(bounds.min.y as f64);
+                    max_y = max_y.max(bounds.max.y as f64);
+                    continue;
+                }
                 for vertex in &render_data.vertices {
                     let x = vertex.position[0] as f64;
                     let y = vertex.position[1] as f64;

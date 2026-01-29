@@ -142,15 +142,23 @@ fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
 }
 
 fn scalar_power_value(lhs: &Value, rhs: &Value) -> Option<Value> {
+    let base_is_complex = matches!(lhs, Value::Complex(_, _) | Value::ComplexTensor(_));
+    let exp_is_complex = matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_));
     let base = scalar_complex_value(lhs).or_else(|| scalar_real_value(lhs).map(|v| (v, 0.0)))?;
     let exp = scalar_complex_value(rhs).or_else(|| scalar_real_value(rhs).map(|v| (v, 0.0)))?;
     let (br, bi) = base;
     let (er, ei) = exp;
-    if bi != 0.0 || ei != 0.0 {
+    if base_is_complex || exp_is_complex || bi != 0.0 || ei != 0.0 {
         let (re, im) = complex_pow_scalar(br, bi, er, ei);
         return Some(Value::Complex(re, im));
     }
-    Some(Value::Num(br.powf(er)))
+    let pow = br.powf(er);
+    if pow.is_nan() {
+        let (re, im) = complex_pow_scalar(br, 0.0, er, 0.0);
+        Some(Value::Complex(re, im))
+    } else {
+        Some(Value::Num(pow))
+    }
 }
 
 fn power_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {

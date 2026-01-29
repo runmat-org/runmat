@@ -3,8 +3,8 @@ pub const F32: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 const VERTICES_PER_CELL: u32 = 6u;
 
 struct VertexRaw {
-    data: array<f32, 12u>;
-}
+    data: array<f32, 12u>,
+};
 
 struct ContourFillParams {
     base_z: f32,
@@ -15,7 +15,7 @@ struct ContourFillParams {
     level_count: u32,
     cell_count: u32,
     _pad: u32,
-}
+};
 
 @group(0) @binding(0)
 var<storage, read> buf_x: array<f32>;
@@ -143,8 +143,8 @@ pub const F64: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 const VERTICES_PER_CELL: u32 = 6u;
 
 struct VertexRaw {
-    data: array<f32, 12u>;
-}
+    data: array<f32, 12u>,
+};
 
 struct ContourFillParams {
     base_z: f32,
@@ -155,7 +155,7 @@ struct ContourFillParams {
     level_count: u32,
     cell_count: u32,
     _pad: u32,
-}
+};
 
 @group(0) @binding(0)
 var<storage, read> buf_x: array<f32>;

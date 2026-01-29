@@ -1,7 +1,7 @@
 pub const F32: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 
 struct VertexRaw {
-    data: array<f32, 12u>;
+    data: array<f32, 12u>,
 };
 
 struct ScatterParams {
@@ -19,7 +19,7 @@ struct IndirectArgs {
     instance_count: u32,
     first_vertex: u32,
     first_instance: u32,
-}
+};
 
 @group(0) @binding(0)
 var<storage, read> buf_x: array<f32>;
@@ -98,7 +98,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 pub const F64: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 
 struct VertexRaw {
-    data: array<f32, 12u>;
+    data: array<f32, 12u>,
 };
 
 struct ScatterParams {
@@ -116,7 +116,7 @@ struct IndirectArgs {
     instance_count: u32,
     first_vertex: u32,
     first_instance: u32,
-}
+};
 
 @group(0) @binding(0)
 var<storage, read> buf_x: array<f64>;

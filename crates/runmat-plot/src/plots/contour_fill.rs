@@ -81,6 +81,7 @@ impl ContourFillPlot {
             vertices,
             indices: None,
             gpu_vertices,
+            bounds: None,
             material,
             draw_calls: vec![draw_call],
             image: None,

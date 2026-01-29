@@ -1,15 +1,15 @@
 pub const F32: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 
 struct VertexRaw {
-    data: array<f32, 12u>;
+    data: array<f32, 12u>,
 };
 
 struct LineParams {
     color: vec4<f32>,
     count: u32,
-    line_width: f32,
+    half_width_data: f32,
     line_style: u32,
-    _pad: u32,
+    thick: u32,
 };
 
 struct IndirectArgs {
@@ -86,7 +86,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    let thick = params.line_width > 1.0;
+    let thick = params.thick != 0u;
     if (!thick) {
         let base = atomicAdd(&(indirect.vertex_count), 2u);
         write_vertex(base + 0u, p0, params.color);
@@ -94,7 +94,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    var half_width = params.line_width * 0.5;
+    var half_width = params.half_width_data;
     if (half_width < 0.0001) {
         half_width = 0.0001;
     }
@@ -119,15 +119,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 pub const F64: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 
 struct VertexRaw {
-    data: array<f32, 12u>;
+    data: array<f32, 12u>,
 };
 
 struct LineParams {
     color: vec4<f32>,
     count: u32,
-    line_width: f32,
+    half_width_data: f32,
     line_style: u32,
-    _pad: u32,
+    thick: u32,
 };
 
 struct IndirectArgs {
@@ -204,7 +204,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    let thick = params.line_width > 1.0;
+    let thick = params.thick != 0u;
     if (!thick) {
         let base = atomicAdd(&(indirect.vertex_count), 2u);
         write_vertex(base + 0u, p0, params.color);
@@ -212,7 +212,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    var half_width = params.line_width * 0.5;
+    var half_width = params.half_width_data;
     if (half_width < 0.0001) {
         half_width = 0.0001;
     }
@@ -237,7 +237,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 pub const MARKER_F32: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 
 struct VertexRaw {
-    data: array<f32, 12u>;
+    data: array<f32, 12u>,
 };
 
 struct MarkerParams {
@@ -300,7 +300,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 pub const MARKER_F64: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 
 struct VertexRaw {
-    data: array<f32, 12u>;
+    data: array<f32, 12u>,
 };
 
 struct MarkerParams {

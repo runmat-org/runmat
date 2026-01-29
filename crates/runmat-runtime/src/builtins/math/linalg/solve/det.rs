@@ -480,6 +480,7 @@ fn permutation_sign(permutation: &[usize]) -> f64 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use futures::executor::block_on;

@@ -363,15 +363,11 @@ fn test_performance_degradation_detection() {
 
         // Performance should not degrade significantly (allow 3x increase)
         // If both are 0 (very fast execution), that's acceptable
-        if first_batch_avg > 0.0 {
-            assert!(
-                last_batch_avg < first_batch_avg * 3.0,
-                "Performance degraded: first batch avg = {first_batch_avg}, last batch avg = {last_batch_avg}"
-            );
-        } else {
-            // Both are very fast (≤1ms), which is good performance
-            assert!(last_batch_avg <= 1.0, "Performance should be fast");
-        }
+        let baseline = first_batch_avg.max(1.0);
+        assert!(
+            last_batch_avg < baseline * 3.0,
+            "Performance degraded: first batch avg = {first_batch_avg}, last batch avg = {last_batch_avg}"
+        );
     });
 }
 

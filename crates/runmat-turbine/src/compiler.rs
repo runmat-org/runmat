@@ -297,9 +297,7 @@ impl BytecodeCompiler {
                         // Ignore; VM manages globals/persistents
                     }
                     Instr::EmitStackTop { .. } | Instr::EmitVar { .. } => {
-                        return Err(execution_error(
-                            "Console emission not supported in JIT; use interpreter".to_string(),
-                        ));
+                        // Ignore console emission in JIT mode.
                     }
                     Instr::LoadConst(val) => {
                         let const_val = builder.ins().f64const(*val);

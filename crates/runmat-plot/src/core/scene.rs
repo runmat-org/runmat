@@ -47,6 +47,10 @@ pub struct RenderData {
     pub vertices: Vec<Vertex>,
     pub indices: Option<Vec<u32>>,
     pub gpu_vertices: Option<GpuVertexBuffer>,
+    /// Data-space bounds for this render item (used for camera fitting / direct mapping).
+    ///
+    /// GPU-backed plots often have `vertices=[]`, so bounds must be carried explicitly.
+    pub bounds: Option<BoundingBox>,
     pub material: Material,
     pub draw_calls: Vec<DrawCall>,
     /// Optional image payload for textured rendering

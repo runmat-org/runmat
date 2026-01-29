@@ -182,6 +182,7 @@ impl<'window> PlotWindow<'window> {
             vertices,
             indices: None,
             gpu_vertices: None,
+            bounds: None,
             material: crate::core::Material::default(),
             draw_calls: vec![crate::core::DrawCall {
                 vertex_offset: 0,

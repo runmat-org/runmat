@@ -1,10 +1,9 @@
 //! MATLAB-compatible `plot` builtin.
 
-use log::warn;
+use log::trace;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
-use runmat_plot::core::PipelineType;
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::{LineGpuStyle, LinePlot, LineStyle};
 
@@ -122,20 +121,47 @@ pub async fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Builti
             ..
         } = plan;
 
+        let x_kind = match &data.x {
+            LineInput::Host(_) => "Host",
+            LineInput::Gpu(_) => "Gpu",
+        };
+        let y_kind = match &data.y {
+            LineInput::Host(_) => "Host",
+            LineInput::Gpu(_) => "Gpu",
+        };
+        let gpu_pair = data.gpu_handles().map(|(x, y)| {
+            format!(
+                "x(device_id={}, buffer_id={}, shape={:?}) y(device_id={}, buffer_id={}, shape={:?})",
+                x.device_id, x.buffer_id, x.shape, y.device_id, y.buffer_id, y.shape
+            )
+        });
+        trace!(
+            "plot: series={} requires_cpu={} inputs=({}, {}) gpu_pair={}",
+            series_idx + 1,
+            requires_cpu,
+            x_kind,
+            y_kind,
+            gpu_pair
+                .as_deref()
+                .unwrap_or("<none: at least one input not GPU-resident>")
+        );
+
         if !requires_cpu {
             if let Some((x_gpu, y_gpu)) = data.gpu_handles() {
                 match build_line_gpu_plot_async(x_gpu, y_gpu, &label, &appearance).await {
                     Ok(line_plot) => {
+                        trace!("plot: series={} used GPU path", series_idx + 1);
                         plots.push(line_plot);
                         continue;
                     }
                     Err(err) => {
-                        warn!("plot GPU path unavailable: {err}");
+                        trace!("plot: series={} GPU path unavailable: {err}", series_idx + 1);
                     }
                 }
             }
         }
 
+        trace!("plot: series={} falling back to CPU gather path", series_idx + 1);
         let (x_tensor, y_tensor) = data.into_tensors_async("plot").await?;
         let (x_vals, y_vals) = numeric_pair(x_tensor, y_tensor, "plot")?;
         plots.push(build_line_plot(x_vals, y_vals, &label, &appearance)?);
@@ -325,13 +351,64 @@ async fn build_line_gpu_plot_async(
     label: &str,
     appearance: &LineAppearance,
 ) -> BuiltinResult<LinePlot> {
-    let context = runmat_plot::shared_wgpu_context()
+    let api_provider_present = runmat_accelerate_api::provider().is_some();
+    let api_provider_for_x_present = runmat_accelerate_api::provider_for_handle(x).is_some();
+    let api_provider_for_y_present = runmat_accelerate_api::provider_for_handle(y).is_some();
+    let shared_ctx = runmat_plot::shared_wgpu_context();
+    trace!(
+        "plot-gpu: attempt label={label:?} x(device_id={}, buffer_id={}, shape={:?}) y(device_id={}, buffer_id={}, shape={:?}) shared_ctx_present={} api_provider_present={} api_provider_for_x_present={} api_provider_for_y_present={}",
+        x.device_id,
+        x.buffer_id,
+        x.shape,
+        y.device_id,
+        y.buffer_id,
+        y.shape,
+        shared_ctx.is_some(),
+        api_provider_present,
+        api_provider_for_x_present,
+        api_provider_for_y_present
+    );
+    let context = shared_ctx
         .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot: plotting GPU context unavailable"))?;
 
-    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
-        .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot: unable to export GPU X data"))?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
-        .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot: unable to export GPU Y data"))?;
+    let x_ref = match runmat_accelerate_api::export_wgpu_buffer(x) {
+        Some(buf) => {
+            trace!(
+                "plot-gpu: export_wgpu_buffer(X) ok len={} element_size={} precision={:?}",
+                buf.len, buf.element_size, buf.precision
+            );
+            buf
+        }
+        None => {
+            trace!(
+                "plot-gpu: export_wgpu_buffer(X) FAILED (api_provider_present={} api_provider_for_x_present={} x_device_id={})",
+                api_provider_present, api_provider_for_x_present, x.device_id
+            );
+            return Err(plotting_error(
+                BUILTIN_NAME,
+                "plot: unable to export GPU X data",
+            ));
+        }
+    };
+    let y_ref = match runmat_accelerate_api::export_wgpu_buffer(y) {
+        Some(buf) => {
+            trace!(
+                "plot-gpu: export_wgpu_buffer(Y) ok len={} element_size={} precision={:?}",
+                buf.len, buf.element_size, buf.precision
+            );
+            buf
+        }
+        None => {
+            trace!(
+                "plot-gpu: export_wgpu_buffer(Y) FAILED (api_provider_present={} api_provider_for_y_present={} y_device_id={})",
+                api_provider_present, api_provider_for_y_present, y.device_id
+            );
+            return Err(plotting_error(
+                BUILTIN_NAME,
+                "plot: unable to export GPU Y data",
+            ));
+        }
+    };
 
     if x_ref.len < 2 {
         return Err(plot_err("inputs must contain at least two elements"));
@@ -352,31 +429,13 @@ async fn build_line_gpu_plot_async(
         len: len_u32,
         scalar,
     };
-    let params = runmat_plot::gpu::line::LineGpuParams {
-        color: appearance.color,
-        line_width: appearance.line_width,
-        line_style: appearance.line_style,
-        marker_size: DEFAULT_LINE_MARKER_SIZE,
-    };
     let marker_meta = marker_metadata_from_appearance(appearance);
-
-    let gpu_vertices = runmat_plot::gpu::line::pack_vertices_from_xy(
-        &context.device,
-        &context.queue,
-        &inputs,
-        &params,
-    )
-    .map_err(|e| {
-        plotting_error(
-            BUILTIN_NAME,
-            format!("plot: failed to build GPU vertices: {e}"),
-        )
-    })?;
 
     let marker_gpu_vertices = if let Some(marker) = marker_meta.as_ref() {
         let marker_params = runmat_plot::gpu::line::LineGpuParams {
             color: marker.face_color,
-            line_width: 1.0,
+            half_width_data: 0.0,
+            thick: false,
             line_style: LineStyle::Solid,
             marker_size: marker.size.max(1.0),
         };
@@ -405,19 +464,7 @@ async fn build_line_gpu_plot_async(
         line_style: appearance.line_style,
         marker: marker_meta.clone(),
     };
-    let pipeline = if appearance.line_width > 1.0 {
-        PipelineType::Triangles
-    } else {
-        PipelineType::Lines
-    };
-    let mut plot = LinePlot::from_gpu_buffer(
-        gpu_vertices,
-        x_ref.len,
-        gpu_style,
-        bounds,
-        pipeline,
-        marker_gpu_vertices,
-    );
+    let mut plot = LinePlot::from_gpu_xy(inputs, gpu_style, bounds, marker_gpu_vertices);
     plot = plot.with_label(label);
     Ok(plot)
 }

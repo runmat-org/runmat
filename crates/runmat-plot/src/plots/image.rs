@@ -90,6 +90,7 @@ impl ImagePlot {
                     vertices: Vec::new(),
                     indices: None,
                     gpu_vertices: None,
+                    bounds: None,
                     material: Material::default(),
                     draw_calls: Vec::new(),
                     image: None,
@@ -181,6 +182,7 @@ impl ImagePlot {
             vertices,
             indices: Some(indices),
             gpu_vertices: None,
+            bounds: None,
             material,
             draw_calls: vec![draw_call],
             image: Some(ImageData::Rgba8 {

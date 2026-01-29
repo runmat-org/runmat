@@ -786,10 +786,26 @@ pub async fn wasm_render_figure_image(
 #[cfg(target_arch = "wasm32")]
 fn shared_webgpu_context() -> Option<SharedWgpuContext> {
     if let Some(ctx) = runmat_plot::shared_wgpu_context() {
+        log::debug!("plot-web: shared_webgpu_context: using existing runmat_plot shared context");
         return Some(ctx);
     }
 
-    let handle = runmat_accelerate_api::export_context(AccelContextKind::Plotting)?;
+    let api_provider_present = runmat_accelerate_api::provider().is_some();
+    log::debug!(
+        "plot-web: shared_webgpu_context: no plot context installed yet (api_provider_present={})",
+        api_provider_present
+    );
+
+    let handle = match runmat_accelerate_api::export_context(AccelContextKind::Plotting) {
+        Some(handle) => handle,
+        None => {
+            log::debug!(
+                "plot-web: shared_webgpu_context: export_context(Plotting) returned None (api_provider_present={})",
+                api_provider_present
+            );
+            return None;
+        }
+    };
     match handle {
         AccelContextHandle::Wgpu(ctx) => {
             let shared = SharedWgpuContext {
@@ -801,6 +817,7 @@ fn shared_webgpu_context() -> Option<SharedWgpuContext> {
                 limits: ctx.limits,
                 features: ctx.features,
             };
+            log::debug!("plot-web: shared_webgpu_context: installed shared context from accelerate provider (adapter={:?})", shared.adapter_info);
             runmat_plot::install_shared_wgpu_context(shared.clone());
             Some(shared)
         }
