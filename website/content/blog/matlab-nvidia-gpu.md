@@ -318,9 +318,14 @@ acc2 = sum(sin(X) .* X + 0.5, 'all');
 
 ### **3) Precision choices (single vs double)**
 
-A lot of GPU acceleration "just works" once the workload is large and in single. `double` can be necessary, but performance depends more heavily on the specific GPU's FP64 capability and memory bandwidth.
+Precision should be driven by two things: what your **calculation actually needs**, and what your **GPU path supports**.
 
-The practical takeaway: if you're testing whether GPU acceleration is working, start with `single` unless you have a reason not to.
+**What the backends support.** Not every GPU abstraction offers full double-precision (FP64). For example, Metal (Apple’s GPU API) provides strong FP32 support but no FP64. So on Apple Silicon you face a tradeoff: use single precision and keep GPU acceleration, or use double and run that work on the CPU. In MATLAB with an NVIDIA GPU, the Parallel Computing Toolbox supports both single and double; performance on double then depends on the GPU’s FP64 capability and memory bandwidth.
+
+**What you need.** For many workloads, [single precision (FP32) is enough](https://en.wikipedia.org/wiki/Single-precision_floating-point_format)—you get plenty of significant digits for a wide range of scientific and numerical tasks. When your problem genuinely requires double (e.g. certain accumulations or legacy requirements), you accept that some or all of that work may run on the CPU, depending on the stack.
+
+**RunMat today.** The current RunMat GPU path (via wgpu and its backends) has formal support for FP32 on device; FP64 math is executed on the CPU. So to use the GPU in RunMat, you need to use single-precision data. Support for double precision on device may evolve as we add or integrate providers that support it.
+**Practical takeaway:** If you’re testing whether GPU acceleration is working, start with `single` unless you have a clear reason to need `double`.
 
 ### **4) Hidden sync points (printing, plotting, inspection)**
 
@@ -341,7 +346,7 @@ But the cost curve changes. You're now managing:
 - deployment environments (developer laptops vs CI vs servers),
 - debugging and profiling at the kernel level.
 
-If you enjoy debugging kernels and managing toolchains, this can be rewarding work. If you don't, it can become a time sink that pulls focus from your actual problem.
+If you enjoy debugging kernels and managing toolchains, this can be rewarding work. If you don't, it can become a time sink that pulls focus from your actual problem. For those who do want to go this route, MathWorks documents the workflow: [Run CUDA or PTX Code on GPU](https://www.mathworks.com/help/parallel-computing/run-cuda-or-ptx-code-on-gpu.html).
 
 This is exactly why an automatic approach is compelling. If your workload is already dense array math, the runtime can often handle the GPU-friendly parts without you writing kernels or manually managing device arrays.
 
@@ -366,7 +371,7 @@ If a script is slower than expected, the first thing to do is usually structural
 
 - Make the arrays larger (or batch multiple problems together)
 - Remove mid-pipeline printing/plotting
-- Keep data in `single` for initial GPU testing
+- Ensure your data is in single precision
 - Avoid reshaping the program into thousands of tiny steps
 
 ---
@@ -374,6 +379,8 @@ If a script is slower than expected, the first thing to do is usually structural
 ## **Quick checks: "am I actually using the GPU?"**
 
 A fast way to sanity-check GPU execution is to compare the same calculation at a size where GPUs should win (millions of elements). Don't obsess over one run; warm-up and overhead are real.
+
+In MATLAB you need explicit `gpuArray` to run on GPU; the snippet below shows CPU (plain `x`) vs GPU (`gpuArray(x)`). In RunMat, the same math without `gpuArray` would be eligible for automatic GPU offload when thresholds are met.
 
 Here's a simple CPU vs GPU pattern on the MATLAB side:
 
@@ -428,7 +435,7 @@ That's not every real workload, but it's a reliable way to see whether the GPU p
 
 **Why is my GPU slower than my CPU?**
 
-Most often: the arrays are too small, you're doing many tiny steps, or you're transferring/synchronizing frequently (e.g., `gather` or printing in a loop). Fix it by batching into larger arrays and calling `gather` only once at the end.
+Using the GPU requires copying data to GPU-accessible memory and setting up and launching parallel work on GPU cores. Running on GPU is faster only when that extra cost—copy, orchestration, and any copy back to the host—is outweighed by the speedup from parallel execution. In some cases, like small arrays, the time to copy and orchestrate is longer than the operation would take on the CPU. Practically, most often the slowdown is because the arrays are too small, you're doing many tiny steps, or you're transferring/synchronizing frequently (e.g., `gather` or printing in a loop). Fix it by batching into larger arrays and calling `gather` only once at the end.
 
 **What GPU do I need for MATLAB?**
 
@@ -440,7 +447,7 @@ Not with the official toolbox. MATLAB's `gpuArray` is built on CUDA, which NVIDI
 
 **How much faster is GPU vs CPU for MATLAB?**
 
-For large, vectorized workloads (millions of elements, elementwise ops and reductions), expect roughly 10–100× speedups when the code is GPU-shaped. For small arrays or fragmented work, GPU can be the same speed or slower. Use the decision flowchart earlier in this guide to check fit.
+It depends on whether the math lends itself to GPU: workloads that are mostly large, vectorized matrix/array math (elementwise ops, reductions, big matmuls) can see speedups of many orders of magnitude—10×, 100×, or far more when the work is GPU-shaped (e.g. training or running an LLM on CPU would take an eternity; on GPU it can be real-time). There's no fixed upper bound. For small arrays or fragmented work, GPU can be the same speed or slower. Use the decision flowchart earlier in this guide to check fit.
 
 **What is GPU fusion and why does it matter?**
 
@@ -452,7 +459,7 @@ In MATLAB, no—the toolbox is required for `gpuArray` and GPU-enabled functions
 
 **Should I use single or double?**
 
-Use what your numerics require. For GPU acceleration, `single` is usually the best first test: it's faster and uses half the memory. `double` is still correct when you need it; performance then depends more on your GPU's FP64 capability and memory bandwidth.
+It's a tradeoff between **precision and cost**. Double precision (FP64) lets you represent a number like π to about 16 decimal places; single (FP32) to about 7. The cost of higher precision includes **memory** (doubles use twice the memory of singles) and **where that math can run**: not every GPU path supports FP64 (e.g. Metal doesn't; in RunMat today, FP64 runs on the CPU). So use single unless your numerics actually need the extra precision—then accept the memory and, where relevant, CPU execution or a GPU with strong FP64 support.
 
 **Do I need to rewrite everything for GPU?**
 
