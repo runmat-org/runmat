@@ -46,45 +46,45 @@
   "examples": [
     {
       "description": "Stacking matrices by adding rows",
-      "input": "A = [1 2; 3 4];\nB = [5 6; 7 8];\nC = vertcat(A, B);",
+      "input": "A = [1 2; 3 4];\nB = [5 6; 7 8];\nC = vertcat(A, B)",
       "output": "C =\n     1     2\n     3     4\n     5     6\n     7     8"
     },
     {
       "description": "Building a column vector from scalars",
-      "input": "col = vertcat(1, 2, 3, 4);",
+      "input": "col = vertcat(1, 2, 3, 4)",
       "output": "col =\n     1\n     2\n     3\n     4"
     },
     {
       "description": "Combining character arrays into taller text blocks",
-      "input": "top = ['RunMat'];\nbottom = ['Rocks!'];\nbanner = vertcat(top, bottom);"
+      "input": "top = ['RunMat'];\nbottom = ['Rocks!'];\nbanner = vertcat(top, bottom)"
     },
     {
       "description": "Joining string arrays into multi-row tables",
-      "input": "header = [\"Name\" \"Score\"];\nrows = [\"Alice\" \"98\"; \"Bob\" \"92\"];\ntable = vertcat(header, rows);"
+      "input": "header = [\"Name\" \"Score\"];\nrows = [\"Alice\" \"98\"; \"Bob\" \"92\"];\ntable = vertcat(header, rows)"
     },
     {
       "description": "Preserving logical masks when stacking",
-      "input": "mask1 = logical([1 0 1]);\nmask2 = logical([0 1 0]);\nstacked = vertcat(mask1, mask2);"
+      "input": "mask1 = logical([1 0 1]);\nmask2 = logical([0 1 0]);\nstacked = vertcat(mask1, mask2)"
     },
     {
       "description": "Extending cell arrays downwards",
-      "input": "row1 = {1, \"low\"};\nrow2 = {2, \"high\"};\ngrid = vertcat(row1, row2);"
+      "input": "row1 = {1, \"low\"};\nrow2 = {2, \"high\"};\ngrid = vertcat(row1, row2)"
     },
     {
       "description": "Keeping gpuArray inputs resident on the device",
-      "input": "G1 = gpuArray(rand(128, 256));\nG2 = gpuArray(rand(64, 256));\nstacked = vertcat(G1, G2);"
+      "input": "G1 = gpuArray(rand(128, 256));\nG2 = gpuArray(rand(64, 256));\nstacked = vertcat(G1, G2)"
     },
     {
       "description": "Requesting GPU output with the `'like'` prototype",
-      "input": "proto = gpuArray.zeros(1, 3);\nresult = vertcat([1 2 3], [4 5 6], \"like\", proto);"
+      "input": "proto = gpuArray.zeros(1, 3);\nresult = vertcat([1 2 3], [4 5 6], \"like\", proto)"
     },
     {
       "description": "Working with empty rows without surprises",
-      "input": "empty = zeros(0, 3);\ncombo = vertcat(empty, empty);"
+      "input": "empty = zeros(0, 3);\ncombo = vertcat(empty, empty)"
     },
     {
       "description": "Stacking complex matrices preserves imaginary parts",
-      "input": "z1 = complex([1 2], [3 4]);\nz2 = complex([5 6], [7 8]);\njoined = vertcat(z1, z2);"
+      "input": "z1 = complex([1 2], [3 4]);\nz2 = complex([5 6], [7 8]);\njoined = vertcat(z1, z2)"
     }
   ],
   "faqs": [],

@@ -39,7 +39,7 @@
   "examples": [
     {
       "description": "",
-      "input": "plot(0:0.1:2*pi, sin(0:0.1:2*pi));\nplot(time, amplitude);"
+      "input": "plot(0:0.1:2*pi, sin(0:0.1:2*pi));\nplot(time, amplitude)"
     }
   ],
   "faqs": [],

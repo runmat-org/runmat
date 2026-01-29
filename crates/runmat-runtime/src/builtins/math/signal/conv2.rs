@@ -93,15 +93,21 @@ enum Conv2Mode {
 }
 
 fn try_conv2_gpu(a: &Value, b: &Value, mode: Conv2Mode) -> BuiltinResult<Option<Value>> {
-    let provider = match runmat_accelerate_api::provider() {
-        Some(p) => p,
-        None => return Ok(None),
-    };
-
     let (lhs, rhs) = match (a, b) {
         (Value::GpuTensor(lhs), Value::GpuTensor(rhs)) => (lhs, rhs),
         _ => return Ok(None),
     };
+
+    let provider = match runmat_accelerate_api::provider_for_handle(lhs) {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+    if runmat_accelerate_api::provider_for_handle(rhs)
+        .map(|p| !std::ptr::eq(p, provider))
+        .unwrap_or(true)
+    {
+        return Ok(None);
+    }
 
     #[cfg(all(test, feature = "wgpu"))]
     {
@@ -345,18 +351,20 @@ fn conv2_matrices(a: &Matrix, b: &Matrix, mode: Conv2Mode) -> Matrix {
         return empty_result(a, b, mode);
     }
 
-    let rows = a.rows + b.rows - 1;
-    let cols = a.cols + b.cols - 1;
+    let flipped = flip_kernel(b);
+
+    let rows = a.rows + flipped.rows - 1;
+    let cols = a.cols + flipped.cols - 1;
     let mut full = Matrix::zeros(rows, cols);
 
     for ac in 0..a.cols {
         for ar in 0..a.rows {
             let aval = a.get(ar, ac);
-            for bc in 0..b.cols {
+            for bc in 0..flipped.cols {
                 let out_c = ac + bc;
-                for br in 0..b.rows {
+                for br in 0..flipped.rows {
                     let out_r = ar + br;
-                    let bval = b.get(br, bc);
+                    let bval = flipped.get(br, bc);
                     full.add_assign(out_r, out_c, aval * bval);
                 }
             }
@@ -369,20 +377,36 @@ fn conv2_matrices(a: &Matrix, b: &Matrix, mode: Conv2Mode) -> Matrix {
             if a.is_empty() {
                 return Matrix::zeros(a.rows, a.cols);
             }
-            let row_start = (b.rows - 1) / 2;
-            let col_start = (b.cols - 1) / 2;
+            let row_start = (flipped.rows - 1) / 2;
+            let col_start = (flipped.cols - 1) / 2;
             full.slice(row_start, row_start + a.rows, col_start, col_start + a.cols)
         }
         Conv2Mode::Valid => {
-            if a.rows < b.rows || a.cols < b.cols {
+            if a.rows < flipped.rows || a.cols < flipped.cols {
                 return Matrix::zeros(0, 0);
             }
-            let rows = a.rows - b.rows + 1;
-            let cols = a.cols - b.cols + 1;
-            let row_start = b.rows - 1;
-            let col_start = b.cols - 1;
+            let rows = a.rows - flipped.rows + 1;
+            let cols = a.cols - flipped.cols + 1;
+            let row_start = flipped.rows - 1;
+            let col_start = flipped.cols - 1;
             full.slice(row_start, row_start + rows, col_start, col_start + cols)
         }
+    }
+}
+
+fn flip_kernel(kernel: &Matrix) -> Matrix {
+    let mut data = vec![Complex::new(0.0, 0.0); kernel.rows * kernel.cols];
+    for r in 0..kernel.rows {
+        for c in 0..kernel.cols {
+            let src_r = kernel.rows - 1 - r;
+            let src_c = kernel.cols - 1 - c;
+            data[c * kernel.rows + r] = kernel.get(src_r, src_c);
+        }
+    }
+    Matrix {
+        rows: kernel.rows,
+        cols: kernel.cols,
+        data,
     }
 }
 

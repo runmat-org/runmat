@@ -168,9 +168,15 @@ fn acos_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
     let mut complex_data = Vec::with_capacity(len);
 
     for &v in &tensor.data {
-        let result = Complex64::new(v, 0.0).acos();
-        let re = zero_small(result.re);
-        let im = zero_small(result.im);
+        let (re, im) = if v > 1.0 + DOMAIN_TOL {
+            (0.0, -v.acosh())
+        } else if v < -1.0 - DOMAIN_TOL {
+            (std::f64::consts::PI, (-v).acosh())
+        } else {
+            (v.acos(), 0.0)
+        };
+        let re = zero_small(re);
+        let im = zero_small(im);
         if im.abs() > ZERO_EPS {
             requires_complex = true;
         }

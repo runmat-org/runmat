@@ -43,32 +43,32 @@
   "examples": [
     {
       "description": "Compare Two Strings Ignoring Case",
-      "input": "tf = strcmpi(\"RunMat\", \"runmat\");",
+      "input": "tf = strcmpi(\"RunMat\", \"runmat\")",
       "output": "tf = logical\n   1"
     },
     {
       "description": "Find Case-Insensitive Matches Inside a String Array",
-      "input": "colors = [\"Red\" \"GREEN\" \"blue\"];\nmask = strcmpi(colors, \"green\");",
+      "input": "colors = [\"Red\" \"GREEN\" \"blue\"];\nmask = strcmpi(colors, \"green\")",
       "output": "mask = 1\u00d73 logical array\n   0   1   0"
     },
     {
       "description": "Compare Character Array Rows Without Case Sensitivity",
-      "input": "animals = char(\"Cat\", \"DOG\", \"cat\");\ntf = strcmpi(animals, \"cAt\");",
+      "input": "animals = char(\"Cat\", \"DOG\", \"cat\");\ntf = strcmpi(animals, \"cAt\")",
       "output": "tf = 3\u00d71 logical array\n   1\n   0\n   1"
     },
     {
       "description": "Compare Cell Arrays Of Character Vectors Case-Insensitively",
-      "input": "C1 = {'north', 'East', 'SOUTH'};\nC2 = {'NORTH', 'east', 'west'};\ntf = strcmpi(C1, C2);",
+      "input": "C1 = {'north', 'East', 'SOUTH'};\nC2 = {'NORTH', 'east', 'west'};\ntf = strcmpi(C1, C2)",
       "output": "tf = 1\u00d73 logical array\n   1   1   0"
     },
     {
       "description": "Broadcast A String Scalar Against A Character Matrix",
-      "input": "patterns = char(\"alpha\", \"BETA\");\ntf = strcmpi(patterns, [\"ALPHA\" \"beta\"]);",
+      "input": "patterns = char(\"alpha\", \"BETA\");\ntf = strcmpi(patterns, [\"ALPHA\" \"beta\"])",
       "output": "tf = 2\u00d72 logical array\n   1   0\n   0   1"
     },
     {
       "description": "Handle Missing Strings In Case-Insensitive Comparisons",
-      "input": "values = [\"Active\" missing];\nmask = strcmpi(values, \"active\");",
+      "input": "values = [\"Active\" missing];\nmask = strcmpi(values, \"active\")",
       "output": "mask = 1\u00d72 logical array\n   1   0"
     }
   ],

@@ -664,6 +664,9 @@ fn format_type_info(value: &Value) -> String {
             // MATLAB displays string arrays as m x n string array; for test's purpose, we classify scalar string arrays as "string"
             if sa.shape == vec![1, 1] {
                 "string".to_string()
+            } else if sa.shape.len() > 2 {
+                let dims: Vec<String> = sa.shape.iter().map(|d| d.to_string()).collect();
+                format!("{} string array", dims.join("x"))
             } else {
                 format!("{}x{} string array", sa.rows(), sa.cols())
             }

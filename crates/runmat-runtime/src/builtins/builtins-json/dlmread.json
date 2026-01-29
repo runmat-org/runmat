@@ -45,37 +45,37 @@
   "examples": [
     {
       "description": "Reading comma-delimited data by default",
-      "input": "writematrix([1 2 3; 4 5 6], \"samples.csv\");\nM = dlmread(\"samples.csv\");\ndelete(\"samples.csv\");",
+      "input": "writematrix([1 2 3; 4 5 6], \"samples.csv\");\nM = dlmread(\"samples.csv\")\ndelete(\"samples.csv\");",
       "output": "M =\n     1     2     3\n     4     5     6"
     },
     {
       "description": "Importing semicolon-separated values",
-      "input": "fid = fopen(\"scores.txt\", \"w\");\nfprintf(fid, \"1;2;3\\n4;5;6\\n\");\nfclose(fid);\n\nM = dlmread(\"scores.txt\", \";\");\ndelete(\"scores.txt\");",
+      "input": "fid = fopen(\"scores.txt\", \"w\");\nfprintf(fid, \"1;2;3\\n4;5;6\\n\");\nfclose(fid);\n\nM = dlmread(\"scores.txt\", \";\")\ndelete(\"scores.txt\");",
       "output": "M =\n     1     2     3\n     4     5     6"
     },
     {
       "description": "Using tab characters as the delimiter",
-      "input": "fid = fopen(\"tabs.txt\", \"w\");\nfprintf(fid, \"10\\t11\\t12\\n13\\t14\\t15\\n\");\nfclose(fid);\n\nM = dlmread(\"tabs.txt\", \"\\t\");\ndelete(\"tabs.txt\");",
+      "input": "fid = fopen(\"tabs.txt\", \"w\");\nfprintf(fid, \"10\\t11\\t12\\n13\\t14\\t15\\n\");\nfclose(fid);\n\nM = dlmread(\"tabs.txt\", \"\\t\")\ndelete(\"tabs.txt\");",
       "output": "M =\n    10    11    12\n    13    14    15"
     },
     {
       "description": "Skipping a header row and column (zero-based offsets)",
-      "input": "fid = fopen(\"with_header.txt\", \"w\");\nfprintf(fid, \"Label,Jan,Feb\\nalpha,1,2\\nbeta,3,4\\n\");\nfclose(fid);\n\nM = dlmread(\"with_header.txt\", \",\", 1, 1);\ndelete(\"with_header.txt\");",
+      "input": "fid = fopen(\"with_header.txt\", \"w\");\nfprintf(fid, \"Label,Jan,Feb\\nalpha,1,2\\nbeta,3,4\\n\");\nfclose(fid);\n\nM = dlmread(\"with_header.txt\", \",\", 1, 1)\ndelete(\"with_header.txt\");",
       "output": "M =\n     1     2\n     3     4"
     },
     {
       "description": "Extracting a rectangular range",
-      "input": "fid = fopen(\"block.txt\", \"w\");\nfprintf(fid, \"10,11,12,13\\n14,15,16,17\\n18,19,20,21\\n\");\nfclose(fid);\n\nsub = dlmread(\"block.txt\", \",\", [1 1 2 3]);\ndelete(\"block.txt\");",
+      "input": "fid = fopen(\"block.txt\", \"w\");\nfprintf(fid, \"10,11,12,13\\n14,15,16,17\\n18,19,20,21\\n\");\nfclose(fid);\n\nsub = dlmread(\"block.txt\", \",\", [1 1 2 3])\ndelete(\"block.txt\");",
       "output": "sub =\n    15    16    17\n    19    20    21"
     },
     {
       "description": "Treating empty fields as zeros",
-      "input": "fid = fopen(\"blanks.txt\", \"w\");\nfprintf(fid, \"1,,3\\n,5,\\n7,8,\\n\");\nfclose(fid);\n\nM = dlmread(\"blanks.txt\");\ndelete(\"blanks.txt\");",
+      "input": "fid = fopen(\"blanks.txt\", \"w\");\nfprintf(fid, \"1,,3\\n,5,\\n7,8,\\n\");\nfclose(fid);\n\nM = dlmread(\"blanks.txt\")\ndelete(\"blanks.txt\");",
       "output": "M =\n     1     0     3\n     0     5     0\n     7     8     0"
     },
     {
       "description": "Using a numeric ASCII code for the delimiter",
-      "input": "fid = fopen(\"pipe.txt\", \"w\");\nfprintf(fid, \"5|6|7\\n8|9|10\\n\");\nfclose(fid);\n\nM = dlmread(\"pipe.txt\", double('|'));\ndelete(\"pipe.txt\");",
+      "input": "fid = fopen(\"pipe.txt\", \"w\");\nfprintf(fid, \"5|6|7\\n8|9|10\\n\");\nfclose(fid);\n\nM = dlmread(\"pipe.txt\", double('|'))\ndelete(\"pipe.txt\");",
       "output": "M =\n     5     6     7\n     8     9    10"
     }
   ],

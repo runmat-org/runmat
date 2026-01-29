@@ -47,32 +47,32 @@
   "examples": [
     {
       "description": "Computing the polar angle of a point",
-      "input": "theta = atan2(4, 3);",
+      "input": "theta = atan2(4, 3)",
       "output": "theta = 0.9273"
     },
     {
       "description": "Determining quadrants for a vector of coordinates",
-      "input": "Y = [-1 0 1];\nX = [-1 -1 -1];\nangles = atan2(Y, X);",
+      "input": "Y = [-1 0 1];\nX = [-1 -1 -1];\nangles = atan2(Y, X)",
       "output": "angles = [-2.3562 -3.1416 2.3562]"
     },
     {
       "description": "Broadcasting a scalar denominator across a matrix",
-      "input": "A = [1 2 3; 4 5 6];\nangles = atan2(A, 2);",
+      "input": "A = [1 2 3; 4 5 6];\nangles = atan2(A, 2)",
       "output": "angles =\n    0.4636    0.7854    0.9828\n    1.1071    1.1903    1.2490"
     },
     {
       "description": "Handling zero numerators and signed zeros",
-      "input": "theta = atan2([0 -0], [-2 0]);",
+      "input": "theta = atan2([0 -0], [-2 0])",
       "output": "theta = [pi 0]"
     },
     {
       "description": "Executing `atan2` on the GPU",
-      "input": "Gy = gpuArray([1 1; -1 -1]);\nGx = gpuArray([1 -1; 1 -1]);\nangles_gpu = atan2(Gy, Gx);\nangles = gather(angles_gpu);",
+      "input": "Gy = gpuArray([1 1; -1 -1]);\nGx = gpuArray([1 -1; 1 -1]);\nangles_gpu = atan2(Gy, Gx);\nangles = gather(angles_gpu)",
       "output": "angles =\n    0.7854    2.3562\n   -0.7854   -2.3562"
     },
     {
       "description": "Converting character data to angles",
-      "input": "theta = atan2('A', 100);",
+      "input": "theta = atan2('A', 100)",
       "output": "theta = 0.5720"
     }
   ],

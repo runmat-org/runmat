@@ -238,6 +238,7 @@ impl FsProvider for JsFsProvider {
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         let mut initial = Vec::new();
         let mut exists = false;
+        let mut dirty = false;
 
         if flags.read || (!flags.create && !flags.create_new) || flags.append {
             match self.funcs.read_file(path) {
@@ -261,6 +262,7 @@ impl FsProvider for JsFsProvider {
 
         if flags.create && !exists {
             exists = true;
+            dirty = true;
         }
 
         if !exists && !flags.create {
@@ -272,6 +274,7 @@ impl FsProvider for JsFsProvider {
 
         if flags.truncate {
             initial.clear();
+            dirty = true;
         }
 
         let cursor = if flags.append { initial.len() } else { 0 };
@@ -284,7 +287,7 @@ impl FsProvider for JsFsProvider {
             can_read: flags.read,
             can_write: flags.write || flags.append,
             append: flags.append,
-            dirty: false,
+            dirty,
         };
         #[allow(clippy::arc_with_non_send_sync)]
         let inner = Arc::new(Mutex::new(inner));

@@ -40,35 +40,35 @@
   "examples": [
     {
       "description": "Checking that all elements are nonzero",
-      "input": "A = [1 2 3];\nassert(all(A));"
+      "input": "A = [1 2 3];\nassert(all(A))"
     },
     {
       "description": "Verifying array bounds during development",
-      "input": "idx = 12;\nassert(idx >= 1 && idx <= numel(signal), ...\n       \"Index %d is outside [1, %d].\", idx, numel(signal));"
+      "input": "idx = 12;\nassert(idx >= 1 && idx <= numel(signal), ...\n       \"Index %d is outside [1, %d].\", idx, numel(signal))"
     },
     {
       "description": "Attaching a custom identifier for tooling",
-      "input": "assert(det(M) ~= 0, \"runmat:demo:singularMatrix\", ...\n       \"Matrix must be nonsingular (determinant is zero).\");"
+      "input": "assert(det(M) ~= 0, \"runmat:demo:singularMatrix\", ...\n       \"Matrix must be nonsingular (determinant is zero).\")"
     },
     {
       "description": "Guarding GPU computations without manual gathering",
-      "input": "G = gpuArray(rand(1024, 1));\nassert(all(G > 0), \"All entries must be positive.\");"
+      "input": "G = gpuArray(rand(1024, 1));\nassert(all(G > 0), \"All entries must be positive.\")"
     },
     {
       "description": "Converting NaN checks into assertion failures",
-      "input": "avg = mean(samples);\nassert(~isnan(avg), \"Average must be finite.\");"
+      "input": "avg = mean(samples);\nassert(~isnan(avg), \"Average must be finite.\")"
     },
     {
       "description": "Ensuring structure fields exist before use",
-      "input": "assert(isfield(cfg, \"rate\"), ...\n       \"runmat:config:missingField\", ...\n       \"Configuration missing required field '%s'.\", \"rate\");"
+      "input": "assert(isfield(cfg, \"rate\"), ...\n       \"runmat:config:missingField\", ...\n       \"Configuration missing required field '%s'.\", \"rate\")"
     },
     {
       "description": "Detecting invalid enumeration values early",
-      "input": "valid = [\"nearest\", \"linear\", \"spline\"];\nassert(any(mode == valid), ...\n       \"Invalid interpolation mode '%s'.\", mode);"
+      "input": "valid = [\"nearest\", \"linear\", \"spline\"];\nassert(any(mode == valid), ...\n       \"Invalid interpolation mode '%s'.\", mode)"
     },
     {
       "description": "Validating dimensions before expensive work",
-      "input": "assert(size(A, 2) == size(B, 1), ...\n       \"runmat:demo:dimensionMismatch\", ...\n       \"Inner dimensions must agree (size(A,2)=%d, size(B,1)=%d).\", ...\n       size(A, 2), size(B, 1));"
+      "input": "assert(size(A, 2) == size(B, 1), ...\n       \"runmat:demo:dimensionMismatch\", ...\n       \"Inner dimensions must agree (size(A,2)=%d, size(B,1)=%d).\", ...\n       size(A, 2), size(B, 1))"
     }
   ],
   "faqs": [

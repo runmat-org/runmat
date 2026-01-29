@@ -43,8 +43,8 @@
   "examples": [
     {
       "description": "Read A Single Environment Variable",
-      "input": "homeFolder = getenv(\"HOME\");\ndisp(homeFolder);",
-      "output": "homeFolder =\n    \"C:\\Users\\alex\""
+      "input": "homeFolder = getenv(\"HOME\");\ndisp(homeFolder)",
+      "output": "homeFolder =\n    \"/Users/alex\""
     },
     {
       "description": "Handle Missing Environment Variables",
@@ -53,22 +53,22 @@
     },
     {
       "description": "Fetch Multiple Variables With A String Array",
-      "input": "vars = getenv([\"PATH\", \"SHELL\"]);\ndisp(vars);",
+      "input": "vars = getenv([\"PATH\", \"SHELL\"]);\ndisp(vars)",
       "output": "vars = 1x2 string\n    \"/usr/local/bin:/usr/bin:...\"    \"/bin/zsh\""
     },
     {
       "description": "Use A Cell Array Of Character Vectors",
-      "input": "cells = getenv({'HOME', 'PATH'});\ndisp(cells{1});",
-      "output": "cells =\n  1x2 cell array\n    {'/Users/alex'}    {'/usr/local/bin:/usr/bin:...'}"
+      "input": "cells = getenv({'HOME', 'PATH'});\ndisp(cells{1})",
+      "output": "/Users/alex"
     },
     {
       "description": "Inspect All Environment Variables",
-      "input": "env = getenv();\ndisp(env.USER);",
+      "input": "env = getenv();\ndisp(env.USER)",
       "output": "env =\n  struct with fields:\n    HOME: '/Users/alex'\n    PATH: '/usr/local/bin:/usr/bin:...'\n    USER: 'alex'"
     },
     {
       "description": "Cache The Environment For Repeated Access",
-      "input": "env = getenv();\nresultsFolder = fullfile(env.HOME, \"results\");",
+      "input": "env = getenv();\nresultsFolder = fullfile(env.HOME, \"results\")",
       "output": "resultsFolder =\n    \"/Users/alex/results\""
     }
   ],

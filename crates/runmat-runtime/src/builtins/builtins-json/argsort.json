@@ -45,37 +45,37 @@
   "examples": [
     {
       "description": "Getting indices that sort a vector",
-      "input": "A = [4; 1; 3];\nidx = argsort(A);",
+      "input": "A = [4; 1; 3];\nidx = argsort(A)",
       "output": "idx =\n     2\n     3\n     1"
     },
     {
       "description": "Reordering data with the permutation indices",
-      "input": "A = [3 9 1 5];\nidx = argsort(A);\nsorted = A(idx);",
+      "input": "A = [3 9 1 5];\nidx = argsort(A);\nsorted = A(idx)",
       "output": "sorted =\n     1     3     5     9"
     },
     {
       "description": "Sorting along a specific dimension",
-      "input": "A = [1 6 4; 2 3 5];\nidx = argsort(A, 2);",
+      "input": "A = [1 6 4; 2 3 5];\nidx = argsort(A, 2)",
       "output": "idx =\n     1     3     2\n     1     2     3"
     },
     {
       "description": "Descending order permutations",
-      "input": "A = [10 4 7 9];\nidx = argsort(A, 'descend');",
+      "input": "A = [10 4 7 9];\nidx = argsort(A, 'descend')",
       "output": "idx =\n     1     4     3     2"
     },
     {
       "description": "Using `ComparisonMethod` to sort by magnitude",
-      "input": "A = [-8 -1 3 -2];\nidx = argsort(A, 'ComparisonMethod', 'abs');",
+      "input": "A = [-8 -1 3 -2];\nidx = argsort(A, 'ComparisonMethod', 'abs')",
       "output": "idx =\n     2     4     3     1"
     },
     {
       "description": "Handling NaN values during permutation",
-      "input": "A = [NaN 4 1 2];\nidx = argsort(A);",
+      "input": "A = [NaN 4 1 2];\nidx = argsort(A)",
       "output": "idx =\n     3     4     2     1"
     },
     {
       "description": "Argsort on GPU tensors falls back gracefully",
-      "input": "G = gpuArray(randn(5, 1));\nidx = argsort(G);"
+      "input": "G = gpuArray(randn(5, 1));\nidx = argsort(G)"
     }
   ],
   "faqs": [

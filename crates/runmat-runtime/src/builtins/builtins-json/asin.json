@@ -43,32 +43,32 @@
   "examples": [
     {
       "description": "Inverse sine of a scalar angle",
-      "input": "y = asin(0.5);",
+      "input": "y = asin(0.5)",
       "output": "y = 0.5236"
     },
     {
       "description": "Inverse sine of values greater than one (complex output)",
-      "input": "z = asin(1.2);",
+      "input": "z = asin(1.2)",
       "output": "z = 1.5708 - 0.6224i"
     },
     {
       "description": "Compute arcsine of every element in a matrix",
-      "input": "A = [0 -0.5 0.75; 1 0.25 -0.8];\nY = asin(A);",
+      "input": "A = [0 -0.5 0.75; 1 0.25 -0.8];\nY = asin(A)",
       "output": "Y =\n    0          -0.5236    0.8481\n    1.5708      0.2527   -0.9273"
     },
     {
       "description": "Handling logical input with automatic double promotion",
-      "input": "mask = logical([0 1 1 0]);\nangles = asin(mask);",
+      "input": "mask = logical([0 1 1 0]);\nangles = asin(mask)",
       "output": "angles = [0 1.5708 1.5708 0]"
     },
     {
       "description": "Computing `asin` on a GPU array and keeping the result on device",
-      "input": "G = gpuArray(linspace(-1, 1, 5));\nresult_gpu = asin(G);\nresult = gather(result_gpu);",
+      "input": "G = gpuArray(linspace(-1, 1, 5));\nresult_gpu = asin(G);\nresult = gather(result_gpu)",
       "output": "result = [-1.5708 -0.7854 0 0.7854 1.5708]"
     },
     {
       "description": "Evaluating inverse sine of complex numbers",
-      "input": "vals = [1+2i, -0.5+0.75i];\nw = asin(vals);",
+      "input": "vals = [1+2i, -0.5+0.75i];\nw = asin(vals)",
       "output": "w =\n   0.4271 + 1.5286i\n  -0.4829 + 0.7676i"
     }
   ],

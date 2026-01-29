@@ -3,12 +3,24 @@
 //! This module provides language-compatible matrix concatenation operations.
 //! Supports both horizontal concatenation [A, B] and vertical concatenation [A; B].
 
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{CharArray, Tensor, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 fn concat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).build()
+}
+
+fn char_array_from_f64(value: f64) -> BuiltinResult<CharArray> {
+    if !value.is_finite() || value.fract() != 0.0 {
+        return Err(concat_error("char concat: expected integer code point"));
+    }
+    if value < 0.0 || value > u32::MAX as f64 {
+        return Err(concat_error("char concat: code point out of range"));
+    }
+    let code = value as u32;
+    let ch = char::from_u32(code).ok_or_else(|| concat_error("char concat: invalid code point"))?;
+    CharArray::new(vec![ch], 1, 1).map_err(concat_error)
 }
 
 /// Horizontally concatenate two matrices [A, B]
@@ -94,12 +106,10 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
     }
 
     // If any operand is a string or string array, perform string-array concatenation
-    let has_str = values.iter().any(|v| {
-        matches!(
-            v,
-            Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
-        )
-    });
+    let has_str = values
+        .iter()
+        .any(|v| matches!(v, Value::String(_) | Value::StringArray(_)));
+    let has_char = values.iter().any(|v| matches!(v, Value::CharArray(_)));
     if has_str {
         // Normalize all to string-arrays, then horizontal concat by columns
         // Determine row count: if any is string array, its rows; if string scalar or numeric scalar, rows=1
@@ -218,6 +228,75 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
         return Ok(Value::StringArray(sa));
     }
 
+    if has_char {
+        let mut rows: Option<usize> = None;
+        let mut cols_total = 0usize;
+        let mut blocks: Vec<CharArray> = Vec::new();
+        for v in values {
+            match v {
+                Value::CharArray(ca) => {
+                    if ca.rows == 0 && ca.cols == 0 {
+                        continue;
+                    }
+                    if rows.is_none() {
+                        rows = Some(ca.rows);
+                    } else if rows != Some(ca.rows) {
+                        return Err(concat_error("char hcat: row mismatch"));
+                    }
+                    cols_total += ca.cols;
+                    blocks.push(ca.clone());
+                }
+                Value::Num(n) => {
+                    let ca = char_array_from_f64(*n)?;
+                    if rows.is_none() {
+                        rows = Some(1);
+                    } else if rows != Some(1) {
+                        return Err(concat_error("char hcat: row mismatch"));
+                    }
+                    cols_total += 1;
+                    blocks.push(ca);
+                }
+                Value::Int(i) => {
+                    let ca = char_array_from_f64(i.to_f64())?;
+                    if rows.is_none() {
+                        rows = Some(1);
+                    } else if rows != Some(1) {
+                        return Err(concat_error("char hcat: row mismatch"));
+                    }
+                    cols_total += 1;
+                    blocks.push(ca);
+                }
+                Value::Bool(flag) => {
+                    let ca = char_array_from_f64(if *flag { 1.0 } else { 0.0 })?;
+                    if rows.is_none() {
+                        rows = Some(1);
+                    } else if rows != Some(1) {
+                        return Err(concat_error("char hcat: row mismatch"));
+                    }
+                    cols_total += 1;
+                    blocks.push(ca);
+                }
+                _ => {
+                    return Err(concat_error(format!(
+                        "Cannot concatenate value of type {v:?} with char array"
+                    )))
+                }
+            }
+        }
+        let rows = rows.unwrap_or(0);
+        let mut data: Vec<char> = Vec::with_capacity(rows * cols_total);
+        for r in 0..rows {
+            for block in &blocks {
+                for c in 0..block.cols {
+                    data.push(block.data[r * block.cols + c]);
+                }
+            }
+        }
+        let ca = CharArray::new(data, rows, cols_total)
+            .map_err(|e| concat_error(format!("char hcat: {e}")))?;
+        return Ok(Value::CharArray(ca));
+    }
+
     // Convert all scalars to 1x1 matrices for uniform processing
     let mut matrices = Vec::new();
     let mut _total_cols = 0;
@@ -304,12 +383,10 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
     }
 
     // If any operand is a string or string array, perform string-array vertical concatenation by stacking rows
-    let has_str = values.iter().any(|v| {
-        matches!(
-            v,
-            Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
-        )
-    });
+    let has_str = values
+        .iter()
+        .any(|v| matches!(v, Value::String(_) | Value::StringArray(_)));
+    let has_char = values.iter().any(|v| matches!(v, Value::CharArray(_)));
     if has_str {
         // Normalize to string-arrays; for scalars, treat as 1x1
         let mut cols: Option<usize> = None;
@@ -409,6 +486,75 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
         let sa = runmat_builtins::StringArray::new(data, vec![rows_total, cols])
             .map_err(|e| concat_error(format!("string vcat: {e}")))?;
         return Ok(Value::StringArray(sa));
+    }
+
+    if has_char {
+        let mut cols: Option<usize> = None;
+        let mut rows_total = 0usize;
+        let mut blocks: Vec<CharArray> = Vec::new();
+        for v in values {
+            match v {
+                Value::CharArray(ca) => {
+                    if ca.rows == 0 && ca.cols == 0 {
+                        continue;
+                    }
+                    if cols.is_none() {
+                        cols = Some(ca.cols);
+                    } else if cols != Some(ca.cols) {
+                        return Err(concat_error("char vcat: column mismatch"));
+                    }
+                    rows_total += ca.rows;
+                    blocks.push(ca.clone());
+                }
+                Value::Num(n) => {
+                    let ca = char_array_from_f64(*n)?;
+                    if cols.is_none() {
+                        cols = Some(1);
+                    } else if cols != Some(1) {
+                        return Err(concat_error("char vcat: column mismatch"));
+                    }
+                    rows_total += 1;
+                    blocks.push(ca);
+                }
+                Value::Int(i) => {
+                    let ca = char_array_from_f64(i.to_f64())?;
+                    if cols.is_none() {
+                        cols = Some(1);
+                    } else if cols != Some(1) {
+                        return Err(concat_error("char vcat: column mismatch"));
+                    }
+                    rows_total += 1;
+                    blocks.push(ca);
+                }
+                Value::Bool(flag) => {
+                    let ca = char_array_from_f64(if *flag { 1.0 } else { 0.0 })?;
+                    if cols.is_none() {
+                        cols = Some(1);
+                    } else if cols != Some(1) {
+                        return Err(concat_error("char vcat: column mismatch"));
+                    }
+                    rows_total += 1;
+                    blocks.push(ca);
+                }
+                _ => {
+                    return Err(concat_error(format!(
+                        "Cannot concatenate value of type {v:?} with char array"
+                    )))
+                }
+            }
+        }
+        let cols = cols.unwrap_or(0);
+        let mut data: Vec<char> = Vec::with_capacity(rows_total * cols);
+        for block in &blocks {
+            for r in 0..block.rows {
+                for c in 0..cols {
+                    data.push(block.data[r * block.cols + c]);
+                }
+            }
+        }
+        let ca = CharArray::new(data, rows_total, cols)
+            .map_err(|e| concat_error(format!("char vcat: {e}")))?;
+        return Ok(Value::CharArray(ca));
     }
 
     // Convert all scalars to 1x1 matrices for uniform processing

@@ -34,7 +34,7 @@
   "examples": [
     {
       "description": "Pausing for a fixed duration",
-      "input": "tic;\npause(0.05);     % wait 50 milliseconds\nelapsed = toc;"
+      "input": "tic;\npause(0.05);     % wait 50 milliseconds\nelapsed = toc"
     },
     {
       "description": "Waiting for user input mid-script",

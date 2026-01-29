@@ -47,27 +47,27 @@
   "examples": [
     {
       "description": "Combining Two Numeric Vectors",
-      "input": "A = [5 7 1];\nB = [3 1 1];\n[C, IA, IB] = union(A, B);",
+      "input": "A = [5 7 1];\nB = [3 1 1];\n[C, IA, IB] = union(A, B)",
       "output": "C =\n     1\n     3\n     5\n     7\nIA =\n     3\n     1\n     2\nIB =\n     1"
     },
     {
       "description": "Preserving Input Order with `'stable'`",
-      "input": "A = [5 7 1];\nB = [3 2 4];\nC = union(A, B, 'stable');",
+      "input": "A = [5 7 1];\nB = [3 2 4];\nC = union(A, B, 'stable')",
       "output": "C =\n     5\n     7\n     1\n     3\n     2\n     4"
     },
     {
       "description": "Union of Matrix Rows",
-      "input": "A = [1 2; 3 4; 1 2];\nB = [3 4; 5 6];\n[C, IA, IB] = union(A, B, 'rows');",
+      "input": "A = [1 2; 3 4; 1 2];\nB = [3 4; 5 6];\n[C, IA, IB] = union(A, B, 'rows')",
       "output": "C =\n     1     2\n     3     4\n     5     6\nIA =\n     1\n     2\nIB =\n     2"
     },
     {
       "description": "Working with Character Arrays",
-      "input": "A = ['m','z'; 'm','a'];\nB = ['a','x'; 'm','a'];\nunion(A, B);",
+      "input": "A = ['m','z'; 'm','a'];\nB = ['a','x'; 'm','a'];\nunion(A, B)",
       "output": "ans =\n  4x1 char array\n    a\n    m\n    x\n    z"
     },
     {
       "description": "Union on GPU Data",
-      "input": "G = gpuArray([1 4 2 5]);\nH = gpuArray([2 6]);\n[C, IA, IB] = union(G, H);",
+      "input": "G = gpuArray([1 4 2 5]);\nH = gpuArray([2 6]);\n[C, IA, IB] = union(G, H)",
       "output": "C =\n     1\n     2\n     4\n     5\n     6\nIA =\n     1\n     3\n     4\nIB =\n     2"
     }
   ],

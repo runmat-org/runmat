@@ -54,27 +54,27 @@
     },
     {
       "description": "Factorial across a vector of non-negative integers",
-      "input": "vals = factorial([0 1 3 5]);",
+      "input": "vals = factorial([0 1 3 5])",
       "output": "vals = [1 1 6 120]"
     },
     {
       "description": "Detecting invalid non-integer inputs",
-      "input": "result = factorial([2.5 -1 4]);",
+      "input": "result = factorial([2.5 -1 4])",
       "output": "result = [NaN NaN 24]"
     },
     {
       "description": "Handling large inputs that overflow to infinity",
-      "input": "big = factorial(171);",
+      "input": "big = factorial(171)",
       "output": "big = Inf"
     },
     {
       "description": "Using factorial with `gpuArray` inputs",
-      "input": "G = gpuArray(uint16([3 4 5]));\nR = factorial(G);\nhost = gather(R);",
+      "input": "G = gpuArray(uint16([3 4 5]));\nR = factorial(G);\nhost = gather(R)",
       "output": "host = [6 24 120]"
     },
     {
       "description": "Keeping results on the GPU with `'like'`",
-      "input": "proto = gpuArray.zeros(1, 1, 'single');\ndeviceResult = factorial([3 4], 'like', proto);\ngathered = gather(deviceResult);",
+      "input": "proto = gpuArray.zeros(1, 1, 'single');\ndeviceResult = factorial([3 4], 'like', proto);\ngathered = gather(deviceResult)",
       "output": "gathered =\n  1x2 single\n     6    24"
     }
   ],

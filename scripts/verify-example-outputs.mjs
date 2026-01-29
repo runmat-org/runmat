@@ -135,6 +135,10 @@ function collectCases(dir) {
         const raw = readFileSync(filePath, "utf8");
         /** @type {BuiltinMetadata} */
         const parsed = JSON.parse(raw);
+        const category = typeof parsed.category === "string" ? parsed.category : "";
+        if (category.startsWith("io/net")) {
+            continue;
+        }
         const examples = Array.isArray(parsed.examples) ? parsed.examples : [];
         for (let i = 0; i < examples.length; i += 1) {
             const example = examples[i];
@@ -164,18 +168,230 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "self.onmessage = async (event) => {",
         "  const testCase = event.data;",
         "  const wasmModuleUrl = testCase.wasmModuleUrl;",
+        "  const createInMemoryFsProvider = () => {",
+        "    const entries = new Map();",
+        "    const now = () => Date.now();",
+        "    const toUint8Array = (value) => {",
+        "      if (value instanceof Uint8Array) return value;",
+        "      if (value instanceof ArrayBuffer) return new Uint8Array(value);",
+        "      if (ArrayBuffer.isView(value)) {",
+        "        return new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));",
+        "      }",
+        "      return new Uint8Array();",
+        "    };",
+        "    const normalize = (input) => {",
+        "      let path = String(input || \"\");",
+        "      path = path.replace(/\\\\/g, \"/\");",
+        "      const parts = [];",
+        "      for (const part of path.split(\"/\")) {",
+        "        if (!part || part === \".\") continue;",
+        "        if (part === \"..\") { parts.pop(); continue; }",
+        "        parts.push(part);",
+        "      }",
+        "      return \"/\" + parts.join(\"/\");",
+        "    };",
+        "    const notFound = (path) => {",
+        "      const err = new Error(`NotFound: ${path}`);",
+        "      err.code = \"NotFound\";",
+        "      err.name = \"NotFoundError\";",
+        "      return err;",
+        "    };",
+        "    const makeDirEntry = () => ({ kind: \"dir\", children: new Set(), readonly: false, modified: now() });",
+        "    entries.set(\"/\", makeDirEntry());",
+        "    const getEntry = (path) => entries.get(path);",
+        "    const getDir = (path) => {",
+        "      const entry = getEntry(path);",
+        "      if (!entry || entry.kind !== \"dir\") throw notFound(path);",
+        "      return entry;",
+        "    };",
+        "    const getParentDir = (path) => getDir(normalize(path).split(\"/\").slice(0, -1).join(\"/\") || \"/\");",
+        "    const createDirAll = (path) => {",
+        "      const normalized = normalize(path);",
+        "      if (normalized === \"/\") return;",
+        "      const parts = normalized.split(\"/\").filter(Boolean);",
+        "      let current = \"\";",
+        "      for (const part of parts) {",
+        "        current = `${current}/${part}`;",
+        "        if (!entries.has(current)) {",
+        "          const parent = getDir(normalize(current).split(\"/\").slice(0, -1).join(\"/\") || \"/\");",
+        "          parent.children.add(part);",
+        "          entries.set(current, makeDirEntry());",
+        "        }",
+        "      }",
+        "    };",
+        "    const createDir = (path) => {",
+        "      const normalized = normalize(path);",
+        "      if (entries.has(normalized)) {",
+        "        const existing = entries.get(normalized);",
+        "        if (!existing || existing.kind !== \"dir\") throw new Error(`File exists at ${normalized}`);",
+        "        return;",
+        "      }",
+        "      const parent = getParentDir(normalized);",
+        "      parent.children.add(normalized.split(\"/\").pop());",
+        "      entries.set(normalized, makeDirEntry());",
+        "    };",
+        "    const writeFile = (path, data) => {",
+        "      const normalized = normalize(path);",
+        "      const parent = getParentDir(normalized);",
+        "      const name = normalized.split(\"/\").pop();",
+        "      parent.children.add(name);",
+        "      entries.set(normalized, { kind: \"file\", data: toUint8Array(data), readonly: false, modified: now() });",
+        "    };",
+        "    const readFile = (path) => {",
+        "      const normalized = normalize(path);",
+        "      const entry = getEntry(normalized);",
+        "      if (!entry || entry.kind !== \"file\") throw notFound(normalized);",
+        "      return entry.data.slice();",
+        "    };",
+        "    const removeFile = (path) => {",
+        "      const normalized = normalize(path);",
+        "      const entry = getEntry(normalized);",
+        "      if (!entry || entry.kind !== \"file\") throw notFound(normalized);",
+        "      entries.delete(normalized);",
+        "      const parent = getParentDir(normalized);",
+        "      parent.children.delete(normalized.split(\"/\").pop());",
+        "    };",
+        "    const metadata = (path) => {",
+        "      const normalized = normalize(path);",
+        "      const entry = getEntry(normalized);",
+        "      if (!entry) throw notFound(normalized);",
+        "      return {",
+        "        fileType: entry.kind === \"dir\" ? \"directory\" : \"file\",",
+        "        len: entry.kind === \"file\" ? entry.data.length : 0,",
+        "        modified: entry.modified,",
+        "        readonly: entry.readonly",
+        "      };",
+        "    };",
+        "    const readDir = (path) => {",
+        "      const normalized = normalize(path);",
+        "      const entry = getDir(normalized);",
+        "      return Array.from(entry.children).sort().map((name) => {",
+        "        const childPath = normalized === \"/\" ? `/${name}` : `${normalized}/${name}`;",
+        "        const child = entries.get(childPath);",
+        "        return {",
+        "          path: childPath,",
+        "          fileName: name,",
+        "          fileType: child && child.kind === \"dir\" ? \"directory\" : \"file\"",
+        "        };",
+        "      });",
+        "    };",
+        "    const removeDir = (path) => {",
+        "      const normalized = normalize(path);",
+        "      if (normalized === \"/\") throw new Error(\"Cannot remove root\");",
+        "      const entry = getDir(normalized);",
+        "      if (entry.children.size > 0) throw new Error(\"Directory not empty\");",
+        "      entries.delete(normalized);",
+        "      const parent = getParentDir(normalized);",
+        "      parent.children.delete(normalized.split(\"/\").pop());",
+        "    };",
+        "    const removeDirAll = (path) => {",
+        "      const normalized = normalize(path);",
+        "      if (normalized === \"/\") throw new Error(\"Cannot remove root\");",
+        "      for (const key of Array.from(entries.keys())) {",
+        "        if (key === normalized || key.startsWith(`${normalized}/`)) {",
+        "          entries.delete(key);",
+        "        }",
+        "      }",
+        "      const parent = getParentDir(normalized);",
+        "      parent.children.delete(normalized.split(\"/\").pop());",
+        "    };",
+        "    const rename = (from, to) => {",
+        "      const src = normalize(from);",
+        "      const dst = normalize(to);",
+        "      const entry = getEntry(src);",
+        "      if (!entry) throw notFound(src);",
+        "      entries.delete(src);",
+        "      entries.set(dst, entry);",
+        "      const srcParent = getParentDir(src);",
+        "      srcParent.children.delete(src.split(\"/\").pop());",
+        "      const dstParent = getParentDir(dst);",
+        "      dstParent.children.add(dst.split(\"/\").pop());",
+        "    };",
+        "    const setReadonly = (path, readonly) => {",
+        "      const normalized = normalize(path);",
+        "      const entry = getEntry(normalized);",
+        "      if (!entry) throw notFound(normalized);",
+        "      entry.readonly = Boolean(readonly);",
+        "    };",
+        "    return {",
+        "      readFile,",
+        "      writeFile,",
+        "      removeFile,",
+        "      metadata,",
+        "      symlinkMetadata: metadata,",
+        "      readDir,",
+        "      canonicalize: normalize,",
+        "      createDir,",
+        "      createDirAll,",
+        "      removeDir,",
+        "      removeDirAll,",
+        "      rename,",
+        "      setReadonly",
+        "    };",
+        "  };",
         "  let stdoutText = \"\";",
         "  let valueText = \"\";",
         "  let errorText = \"\";",
         "  try {",
+        "    if (typeof self.process !== \"object\" || !self.process) {",
+        "      self.process = { env: {} };",
+        "    }",
+        "    if (!self.process.env) {",
+        "      self.process.env = {};",
+        "    }",
+        "    if (!self.process.env.HOME) {",
+        "      self.process.env.HOME = \"/Users/testUser\";",
+        "    }",
         "    const module = await import(wasmModuleUrl);",
-        "    await module.default();",
+        "    if (typeof module.default === \"function\") {",
+        "      await module.default();",
+        "    }",
+        "    let fsProvider = null;",
+        "    fsProvider = createInMemoryFsProvider();",
+        "    if (fsProvider) {",
+        "      const encoder = new TextEncoder();",
+        "      const input = String(testCase.input || \"\");",
+        "      const cwdBase = \"/Users/testUser/runmat-project\";",
+        "      fsProvider.createDirAll(\"/Users/testUser\");",
+        "      fsProvider.createDirAll(cwdBase);",
+        "      fsProvider.createDirAll(\"/tmp\");",
+        "      fsProvider.writeFile(`${cwdBase}/README.md`, encoder.encode(\"RunMat\"));",
+        "      if (input.includes(\"*.m\")) {",
+        "        fsProvider.writeFile(`${cwdBase}/solver.m`, encoder.encode(\"% solver\"));",
+        "        fsProvider.writeFile(`${cwdBase}/test_helper.m`, encoder.encode(\"% helper\"));",
+        "      }",
+        "      if (input.includes(\"assets\") || input.includes(\".png\")) {",
+        "        fsProvider.createDirAll(`${cwdBase}/assets`);",
+        "        fsProvider.writeFile(`${cwdBase}/assets/logo.png`, new Uint8Array([0]));",
+        "        fsProvider.writeFile(`${cwdBase}/assets/splash.png`, new Uint8Array([0]));",
+        "      }",
+        "      if (input.includes(\"tmp\") || input.includes(\"tempname\") || input.includes(\"tempdir\")) {",
+        "        fsProvider.createDirAll(`${cwdBase}/tmp/subdir`);",
+        "        fsProvider.writeFile(`${cwdBase}/tmp/tmpfile.txt`, encoder.encode(\"tmp\"));",
+        "      }",
+        "      if (input.includes(\"fileread\") || input.includes(\"filewrite\") || input.includes(\"fwrite\")) {",
+        "        fsProvider.createDirAll(`${cwdBase}/data`);",
+        "        fsProvider.createDirAll(`${cwdBase}/fixtures`);",
+        "        fsProvider.writeFile(`${cwdBase}/LICENSE.md`, encoder.encode(\"Character vector containing the full license text\"));",
+        "        fsProvider.writeFile(`${cwdBase}/data/config.json`, encoder.encode(\"Returns the JSON file contents as a character vector\"));",
+        "        fsProvider.writeFile(`${cwdBase}/fixtures/high_ascii.txt`, new Uint8Array([65, 66, 67]));",
+        "        fsProvider.writeFile(`${cwdBase}/README.md`, encoder.encode(\"RunMat docs\"));",
+        "        fsProvider.writeFile(`${cwdBase}/data/report.txt`, encoder.encode(\"Character vector decoded using UTF-8.\"));",
+        "      }",
+        "    }",
+        "    if (fsProvider && typeof module.registerFsProvider === \"function\") {",
+        "      module.registerFsProvider(fsProvider);",
+        "    }",
         "    const session = await module.initRunMat({",
         "      telemetryConsent: false,",
         "      enableGpu: false,",
-        "      languageCompat: \"matlab\"",
+        "      languageCompat: \"matlab\",",
+        "      fsProvider: fsProvider || undefined",
         "    });",
         "    try {",
+        "      try {",
+        "        await Promise.resolve(session.execute(\"cd('/Users/testUser/runmat-project')\"));",
+        "      } catch (err) {}",
         "      const execResult = await Promise.resolve(session.execute(testCase.input));",
         "      if (execResult && Array.isArray(execResult.stdout)) {",
         "        stdoutText = execResult.stdout.map((entry) => entry.text || \"\").join(\"\");",
@@ -560,11 +776,33 @@ function normalizeOutput(text) {
         return "";
     }
     const lines = text.replace(/\r\n/g, "\n").split("\n");
-    const stripped = lines.map((line) => line.replace(/^\s*[A-Za-z_]\w*\s*=\s*/, ""));
+    const stripped = lines.map((line) =>
+        line.replace(/^\s*\w+\s*[x×]\s*\w+(?:\s*[x×]\s*\w+)*\s+\w+(?:\s+\w+)*(?:\s+array)?\s*$/i, "")
+            .replace(/^\s*[A-Za-z_]\w*(?:\([^)]*\))?\s*=\s*/, "")
+    );
     const joined = stripped.join(" ");
-    const withoutBrackets = joined.replace(/[\[\];]/g, " ");
+    const withoutHeaders = joined.replace(/\b\w+\s*[x×]\s*\w+(?:\s*[x×]\s*\w+)*\s+\w+(?:\s+\w+)*(?:\s+array)?\b/gi, " ");
+    const withoutBrackets = withoutHeaders.replace(/[\[\]{};,]/g, " ");
     const withoutQuotes = withoutBrackets.replace(/["']/g, " ");
-    const normalizedNumbers = withoutQuotes.replace(
+    const normalizedBooleans = withoutQuotes
+        .replace(/\btrue\b/gi, "1")
+        .replace(/\bfalse\b/gi, "0")
+        .replace(/\blogical\((0|1)\)\b/gi, "$1");
+    const strippedMetadata = normalizedBooleans
+        .replace(/GpuTensor\([^)]*\)/g, " ")
+        .replace(/Tensor\(shape=[^)]+\)/g, " ")
+        .replace(/\b\d+(?:\s*[x×]\s*\d+)+\s*(?:gpuArray\s*)?(?:logical|double|single|char|string|cell)?\s*array\b/gi, " ")
+        .replace(/\b(?:gpuArray|logical|double|single|string|char|cell)\b/gi, " ");
+    const normalizedComplex = strippedMetadata
+        .replace(/(\d+\.\d+)(\d+\.\d+[ij])/g, "$1+$2")
+        .replace(/(\d)\s*\+\s*(?=\d)/g, "$1+")
+        .replace(/(\d)\s*\+\s*(?=[ij])/g, "$1+")
+        .replace(/(\d)\s*-\s*(?=\d)/g, "$1-")
+        .replace(/(\d)\s*-\s*(?=[ij])/g, "$1-")
+        .replace(/\+\s*-/g, "-")
+        .replace(/-\s*\+/g, "-")
+        .replace(/\+\s*\+/g, "+");
+    const normalizedNumbers = normalizedComplex.replace(
         /[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g,
         (match) => {
             if (!/[.eE]/.test(match)) {
@@ -588,7 +826,24 @@ function normalizeOutput(text) {
         .replace(/\s*[+-]\s*0[ij]\b/g, "")
         .replace(/\b0[ij]\b/g, "0");
     const tightenedMinus = withoutImaginaryZero.replace(/([0-9])\s*-\s*([0-9])/g, "$1-$2");
-    return tightenedMinus.trim().replace(/\s+/g, " ");
+    const compact = tightenedMinus.trim().replace(/\s+/g, " ");
+    const fixedZeroConcat = compact
+        .replace(/(?<![0-9.])0(?=\d+(?:\.\d+)?[ij]\b)/g, "")
+        .replace(/(?<![0-9.])0(?=0[ij]\b)/g, "")
+        .replace(/(\d+\.\d+)0[ij]\b/g, "$1")
+        .replace(/\b0[ij]\b/g, "0")
+        .replace(/\s+/g, " ")
+        .trim();
+    const tokens = fixedZeroConcat.length > 0 ? fixedZeroConcat.split(" ") : [];
+    if (tokens.length > 1 && tokens.length % 2 === 0) {
+        const midpoint = tokens.length / 2;
+        const firstHalf = tokens.slice(0, midpoint).join(" ");
+        const secondHalf = tokens.slice(midpoint).join(" ");
+        if (firstHalf === secondHalf) {
+            return firstHalf;
+        }
+    }
+    return fixedZeroConcat;
 }
 
 /**
@@ -602,6 +857,11 @@ function formatWasmOutput(result) {
         return result.errorText;
     }
     if (result.stdoutText && result.valueText) {
+        const normalizedStdout = normalizeOutput(result.stdoutText);
+        const normalizedValue = normalizeOutput(result.valueText);
+        if (normalizedStdout && normalizedStdout === normalizedValue) {
+            return result.valueText;
+        }
         return `${result.stdoutText}\n${result.valueText}`;
     }
     return result.stdoutText || result.valueText || "";

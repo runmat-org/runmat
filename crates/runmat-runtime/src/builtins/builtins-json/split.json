@@ -43,37 +43,37 @@
   "examples": [
     {
       "description": "Split A String On Whitespace",
-      "input": "txt = \"RunMat Accelerate Planner\";\npieces = split(txt);",
+      "input": "txt = \"RunMat Accelerate Planner\";\npieces = split(txt)",
       "output": "pieces = 1\u00d73 string\n    \"RunMat\"    \"Accelerate\"    \"Planner\""
     },
     {
       "description": "Split A String Using A Custom Delimiter",
-      "input": "csv = \"alpha,beta,gamma\";\ntokens = split(csv, \",\");",
+      "input": "csv = \"alpha,beta,gamma\";\ntokens = split(csv, \",\")",
       "output": "tokens = 1\u00d73 string\n    \"alpha\"    \"beta\"    \"gamma\""
     },
     {
       "description": "Include Delimiters In The Output",
-      "input": "expr = \"A+B-C\";\nsegments = split(expr, [\"+\", \"-\"], \"IncludeDelimiters\", true);",
+      "input": "expr = \"A+B-C\";\nsegments = split(expr, [\"+\", \"-\"], \"IncludeDelimiters\", true)",
       "output": "segments = 1\u00d75 string\n    \"A\"    \"+\"    \"B\"    \"-\"    \"C\""
     },
     {
       "description": "Preserve Empty Segments When CollapseDelimiters Is False",
-      "input": "values = \"one,,three,\";\nparts = split(values, \",\", \"CollapseDelimiters\", false);",
+      "input": "values = \"one,,three,\";\nparts = split(values, \",\", \"CollapseDelimiters\", false)",
       "output": "parts = 1\u00d74 string\n    \"one\"    \"\"    \"three\"    \"\""
     },
     {
       "description": "Split Each Row Of A Character Array",
-      "input": "rows = char(\"GPU Accelerate\", \"Ignition Interpreter\");\nresult = split(rows);",
+      "input": "rows = char(\"GPU Accelerate\", \"Ignition Interpreter\");\nresult = split(rows)",
       "output": "result = 2\u00d72 string\n    \"GPU\"          \"Accelerate\"\n    \"Ignition\"     \"Interpreter\""
     },
     {
       "description": "Split Elements Of A Cell Array",
-      "input": "C = {'RunMat Snapshot'; \"Fusion Planner\"};\nout = split(C, \" \");",
+      "input": "C = {'RunMat Snapshot'; \"Fusion Planner\"};\nout = split(C, \" \")",
       "output": "out = 2\u00d72 string\n    \"RunMat\"    \"Snapshot\"\n    \"Fusion\"    \"Planner\""
     },
     {
       "description": "Handle Missing String Inputs",
-      "input": "names = [\"RunMat\", \"<missing>\", \"Accelerate Engine\"];\nsplit_names = split(names);",
+      "input": "names = [\"RunMat\", \"<missing>\", \"Accelerate Engine\"];\nsplit_names = split(names)",
       "output": "split_names = 3\u00d72 string\n    \"RunMat\"        \"<missing>\"\n    \"<missing>\"     \"<missing>\"\n    \"Accelerate\"    \"Engine\""
     }
   ],

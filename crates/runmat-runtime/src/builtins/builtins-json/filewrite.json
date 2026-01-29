@@ -44,33 +44,33 @@
   "examples": [
     {
       "description": "Write Text To A New File",
-      "input": "bytes = filewrite(\"notes.txt\", \"Hello, RunMat!\");",
-      "output": "bytes = 15   % Number of UTF-8 bytes written"
+      "input": "bytes = filewrite(\"notes.txt\", \"Hello, RunMat!\")",
+      "output": "bytes = 14"
     },
     {
       "description": "Append Text Without Overwriting",
-      "input": "filewrite(\"log.txt\", \"First line\\n\");\nfilewrite(\"log.txt\", \"Second line\\n\", 'WriteMode', 'append');",
-      "output": "% log.txt now contains two lines of text"
+      "input": "filewrite(\"log.txt\", \"First line\\n\");\nbytes = filewrite(\"log.txt\", \"Second line\\n\", 'WriteMode', 'append')",
+      "output": "bytes = 12"
     },
     {
       "description": "Specify A Particular Encoding",
-      "input": "filewrite(\"latin1.txt\", \"Espa\\u00F1a\", 'Encoding', 'latin1');",
-      "output": "% File encoded in ISO-8859-1 with the \u00f1 preserved"
+      "input": "bytes = filewrite(\"latin1.txt\", \"Espa\\u00F1a\", 'Encoding', 'latin1')",
+      "output": "bytes = 6"
     },
     {
       "description": "Write Raw Bytes From A Numeric Array",
-      "input": "payload = uint8([1 2 3 255]);\nfilewrite(\"data.bin\", payload, 'Encoding', 'raw');",
-      "output": "% Binary file containing four bytes: 01 02 03 FF"
+      "input": "payload = uint8([1 2 3 255]);\nbytes = filewrite(\"data.bin\", payload, 'Encoding', 'raw')",
+      "output": "bytes = 4"
     },
     {
       "description": "Export A String Array As Newline-Separated Text",
-      "input": "lines = [\"alpha\", \"beta\", \"gamma\"];\nfilewrite(\"items.txt\", lines);",
-      "output": "% items.txt contains the three entries, each on its own line"
+      "input": "lines = [\"alpha\", \"beta\", \"gamma\"];\nbytes = filewrite(\"items.txt\", lines)",
+      "output": "bytes = 16"
     },
     {
       "description": "Handle Invalid ASCII Characters",
       "input": "try\n    filewrite(\"ascii.txt\", \"caf\u00e9\", 'Encoding', 'ascii');\ncatch err\n    disp(err.message);\nend",
-      "output": "% Prints:\n%   filewrite: character '\u00e9' (U+00E9) cannot be encoded as ASCII"
+      "output": "filewrite: character '\u00e9' (U+00E9) cannot be encoded as ASCII"
     }
   ],
   "faqs": [

@@ -89,11 +89,16 @@ async fn csvread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         .map_err(map_control_flow)?;
     let options = parse_arguments(&rest).await?;
     let resolved = resolve_path(&gathered_path)?;
-    let (rows, max_cols) = read_csv_rows(&resolved)?;
+    let (rows, max_cols, skipped_rows) = read_csv_rows(&resolved, &options)?;
+    let start_row = if options.range.is_none() {
+        options.start_row.saturating_sub(skipped_rows)
+    } else {
+        options.start_row
+    };
     let subset = if let Some(range) = options.range {
         apply_range(&rows, max_cols, &range, 0.0)
     } else {
-        apply_offsets(&rows, max_cols, options.start_row, options.start_col, 0.0)
+        apply_offsets(&rows, max_cols, start_row, options.start_col, 0.0)
     };
     let tensor = rows_to_tensor(subset.rows, subset.row_count, subset.col_count, 0.0)?;
     Ok(Value::Tensor(tensor))
@@ -208,7 +213,10 @@ fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
     Ok(Path::new(&expanded).to_path_buf())
 }
 
-fn read_csv_rows(path: &Path) -> BuiltinResult<(Vec<Vec<f64>>, usize)> {
+fn read_csv_rows(
+    path: &Path,
+    options: &CsvReadOptions,
+) -> BuiltinResult<(Vec<Vec<f64>>, usize, usize)> {
     let file = File::open(path).map_err(|err| {
         csvread_error_with_source(
             format!("csvread: unable to open '{}': {err}", path.display()),
@@ -220,6 +228,7 @@ fn read_csv_rows(path: &Path) -> BuiltinResult<(Vec<Vec<f64>>, usize)> {
     let mut rows = Vec::new();
     let mut max_cols = 0usize;
     let mut line_index = 0usize;
+    let mut skipped_rows = 0usize;
 
     loop {
         buffer.clear();
@@ -244,12 +253,19 @@ fn read_csv_rows(path: &Path) -> BuiltinResult<(Vec<Vec<f64>>, usize)> {
         } else if buffer.ends_with('\r') {
             buffer.pop();
         }
+        if options.range.is_none()
+            && options.start_row > 0
+            && line_index <= options.start_row
+        {
+            skipped_rows += 1;
+            continue;
+        }
         let parsed = parse_csv_row(&buffer, line_index)?;
         max_cols = max_cols.max(parsed.len());
         rows.push(parsed);
     }
 
-    Ok((rows, max_cols))
+    Ok((rows, max_cols, skipped_rows))
 }
 
 fn parse_csv_row(line: &str, line_index: usize) -> BuiltinResult<Vec<f64>> {
@@ -273,7 +289,7 @@ fn parse_csv_row(line: &str, line_index: usize) -> BuiltinResult<Vec<f64>> {
             "-inf" => f64::NEG_INFINITY,
             _ => unwrapped.parse::<f64>().map_err(|_| {
                 csvread_error(format!(
-                    "csvread: nonnumeric token '{}' at row {}, column {}",
+                    "csvread: nonnumeric token {} at row {} column {}",
                     unwrapped,
                     line_index,
                     col_index + 1

@@ -78,7 +78,7 @@ pub use blas::*;
 #[cfg(feature = "blas-lapack")]
 pub use lapack::*;
 
-pub(crate) fn make_cell_with_shape(values: Vec<Value>, shape: Vec<usize>) -> Result<Value, String> {
+pub fn make_cell_with_shape(values: Vec<Value>, shape: Vec<usize>) -> Result<Value, String> {
     let handles: Vec<GcPtr<Value>> = values
         .into_iter()
         .map(|v| runmat_gc::gc_allocate(v).expect("gc alloc"))

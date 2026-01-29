@@ -46,42 +46,42 @@
   "examples": [
     {
       "description": "Computing the full convolution of two row vectors",
-      "input": "a = [1 2 3];\nb = [1 1 1];\nc = conv(a, b);",
+      "input": "a = [1 2 3];\nb = [1 1 1];\nc = conv(a, b)",
       "output": "c = [1 3 6 5 3];"
     },
     {
       "description": "Keeping the same length as the first input",
-      "input": "kernel = [1 0 -1];\nsignal = [3 4 5 6 7];\nedge = conv(signal, kernel, 'same');",
+      "input": "kernel = [1 0 -1];\nsignal = [3 4 5 6 7];\nedge = conv(signal, kernel, 'same')",
       "output": "edge = [4 2 2 2 -6];"
     },
     {
       "description": "Valid convolution without zero padding",
-      "input": "weights = [1 2 3 4];\nwindow = [1 1 1];\nvalid = conv(weights, window, 'valid');",
+      "input": "weights = [1 2 3 4];\nwindow = [1 1 1];\nvalid = conv(weights, window, 'valid')",
       "output": "valid = [6 9];"
     },
     {
       "description": "Convolving column vectors",
-      "input": "a = (1:3)';\nb = [2; 0; -2];\nc = conv(a, b);",
+      "input": "a = (1:3)';\nb = [2; 0; -2];\nc = conv(a, b)",
       "output": "c =\n     2\n     4\n     4\n     -4\n     -6"
     },
     {
       "description": "Multiplying polynomials using convolution",
-      "input": "p = [1 3 3 1];    % (x + 1)^3 coefficients\nq = [1 -1];       % (x - 1)\ncoeff = conv(p, q);",
+      "input": "p = [1 3 3 1];    % (x + 1)^3 coefficients\nq = [1 -1];       % (x - 1)\ncoeff = conv(p, q)",
       "output": "coeff = [1 2 0 -2 -1];"
     },
     {
       "description": "Complex-valued convolution",
-      "input": "t = 0:3;\nsig = exp(1i * pi/4 * t);\nfilt = [1 2i];\nresp = conv(sig, filt);",
-      "output": "resp =\n   1.0000 + 1.0000i   1.4142 + 2.4142i   0.0000 + 3.4142i  -1.4142 + 2.4142i  -1.0000 + 1.0000i"
+      "input": "t = 0:3;\nsig = exp(1i * pi/4 * t);\nfilt = [1 2i];\nresp = conv(sig, filt)",
+      "output": "resp =\n   1.0000   0.7071 + 2.7071i  -1.4142 + 2.4142i  -2.7071 + 0.7071i  -1.4142 - 1.4142i"
     },
     {
       "description": "Scaling a signal by a scalar",
-      "input": "s = [4 5 6];\ny = conv(2, s);",
+      "input": "s = [4 5 6];\ny = conv(2, s)",
       "output": "y = [8 10 12];"
     },
     {
       "description": "Using gpuArray inputs with automatic host fallback",
-      "input": "g = gpuArray([1 2 3 4]);\nh = gpuArray([1 0 -1]);\nedge = conv(g, h, 'same');\nresult = gather(edge);"
+      "input": "g = gpuArray([1 2 3 4]);\nh = gpuArray([1 0 -1]);\nedge = conv(g, h, 'same');\nresult = gather(edge)"
     }
   ],
   "faqs": [

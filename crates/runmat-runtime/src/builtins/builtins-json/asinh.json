@@ -42,32 +42,32 @@
   "examples": [
     {
       "description": "Inverse hyperbolic sine of a scalar",
-      "input": "y = asinh(0.5);",
+      "input": "y = asinh(0.5)",
       "output": "y = 0.4812"
     },
     {
       "description": "Applying `asinh` to every element of a vector",
-      "input": "x = linspace(-2, 2, 5);\ny = asinh(x);",
+      "input": "x = linspace(-2, 2, 5);\ny = asinh(x)",
       "output": "y = [-1.4436 -0.9624 0 0.9624 1.4436]"
     },
     {
       "description": "Evaluating `asinh` on a matrix",
-      "input": "A = [0 -0.5 1.0; 1.5 -2.0 3.0];\nB = asinh(A);",
+      "input": "A = [0 -0.5 1.0; 1.5 -2.0 3.0];\nB = asinh(A)",
       "output": "B =\n         0   -0.4812    0.8814\n    1.1948   -1.4436    1.8184"
     },
     {
       "description": "Computing `asinh` on GPU data",
-      "input": "G = gpuArray([0.25 0.5; 0.75 1.0]);\nresult_gpu = asinh(G);\nresult = gather(result_gpu);",
+      "input": "G = gpuArray([0.25 0.5; 0.75 1.0]);\nresult_gpu = asinh(G);\nresult = gather(result_gpu)",
       "output": "result = [0.2470 0.4812; 0.6931 0.8814]"
     },
     {
       "description": "Handling complex arguments with `asinh`",
-      "input": "z = [1 + 2i, -0.5 + 0.75i];\nw = asinh(z);",
+      "input": "z = [1 + 2i, -0.5 + 0.75i];\nw = asinh(z)",
       "output": "w =\n   1.4694 + 1.0634i\n  -0.4306 + 0.5770i"
     },
     {
       "description": "Using `asinh` inside fused GPU expressions",
-      "input": "G = gpuArray(rand(1024, 1));\nY = sinh(G) + asinh(G);"
+      "input": "G = gpuArray(rand(1024, 1));\nY = sinh(G) + asinh(G)"
     }
   ],
   "faqs": [

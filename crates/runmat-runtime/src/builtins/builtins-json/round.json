@@ -44,27 +44,27 @@
   "examples": [
     {
       "description": "Rounding values to the nearest integers",
-      "input": "X = [-3.5 -2.2 -0.5 0 0.5 1.7];\nY = round(X);",
+      "input": "X = [-3.5 -2.2 -0.5 0 0.5 1.7];\nY = round(X)",
       "output": "Y = [-4 -2 -1 0 1 2];"
     },
     {
       "description": "Rounding to a fixed number of decimal places",
-      "input": "temps = [21.456 19.995 22.501];\nrounded = round(temps, 2);",
+      "input": "temps = [21.456 19.995 22.501];\nrounded = round(temps, 2)",
       "output": "rounded = [21.46 20.00 22.50];"
     },
     {
       "description": "Rounding to negative powers of ten",
-      "input": "counts = [1234 5678 91011];\nrounded = round(counts, -2);",
+      "input": "counts = [1234 5678 91011];\nrounded = round(counts, -2)",
       "output": "rounded = [1200 5700 91000];"
     },
     {
       "description": "Rounding to significant digits",
-      "input": "measurements = [0.001234 12.3456 98765];\nsig3 = round(measurements, 3, 'significant');",
+      "input": "measurements = [0.001234 12.3456 98765];\nsig3 = round(measurements, 3, 'significant')",
       "output": "sig3 = [0.00123 12.3 98800];"
     },
     {
       "description": "Rounding GPU tensors and gathering the results",
-      "input": "G = gpuArray(linspace(-2.5, 2.5, 6));\nrounded = round(G);\nhostValues = gather(rounded);",
+      "input": "G = gpuArray(linspace(-2.5, 2.5, 6));\nrounded = round(G);\nhostValues = gather(rounded)",
       "output": "hostValues = [-3 -2 -1 1 2 3];"
     }
   ],

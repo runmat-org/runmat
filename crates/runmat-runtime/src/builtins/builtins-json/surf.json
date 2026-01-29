@@ -28,7 +28,7 @@
   "tested": {
     "unit": "builtins::plotting::surf::tests"
   },
-  "description": "`surf(X, Y, Z)` draws a shaded surface where `X` and `Y` provide axis coordinates and `Z` provides heights. RunMat expects `X` and `Y` to be vectors defining the grid axes (rows × columns), and `Z` to contain `numel(X) * numel(Y)` elements stored in column-major order, matching MATLAB tensors. When `Z` is a single-precision gpuArray and the shared WebGPU renderer is active, the surface geometry stays on the device and feeds a compute shader that emits renderer-ready vertices.",
+  "description": "`surf(X, Y, Z)` draws a shaded surface where `X` and `Y` provide axis coordinates and `Z` provides heights. RunMat expects `X` and `Y` to be vectors defining the grid axes (rows \u00d7 columns), and `Z` to contain `numel(X) * numel(Y)` elements stored in column-major order, matching MATLAB tensors. When `Z` is a single-precision gpuArray and the shared WebGPU renderer is active, the surface geometry stays on the device and feeds a compute shader that emits renderer-ready vertices.",
   "behaviors": [
     "Axis vectors must be non-empty and `Z` must contain exactly `length(X) * length(Y)` elements.",
     "Single-precision gpuArray height maps stream directly into the renderer; other precisions gather to host memory before plotting.",
@@ -37,7 +37,7 @@
   "examples": [
     {
       "description": "",
-      "input": "x = linspace(-2, 2, 50);\ny = linspace(-2, 2, 50);\nz = meshgrid(x, y);\nsurf(x, y, sin(x)' * cos(y));"
+      "input": "x = linspace(-2, 2, 50);\ny = linspace(-2, 2, 50);\nz = meshgrid(x, y);\nsurf(x, y, sin(x)' * cos(y))"
     }
   ],
   "faqs": [],

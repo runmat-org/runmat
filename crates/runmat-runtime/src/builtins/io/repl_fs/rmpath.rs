@@ -15,7 +15,6 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 use runmat_filesystem as vfs;
 use std::collections::HashSet;
-use std::env;
 use std::path::{Component, Path, PathBuf};
 
 const ERROR_ARG_TYPE: &str =
@@ -161,7 +160,7 @@ async fn collect_strings(value: &Value, output: &mut Vec<String>) -> BuiltinResu
         }
         Value::Cell(cell) => {
             for ptr in &cell.data {
-                let inner = (*ptr).clone();
+                let inner = (**ptr).clone();
                 let gathered = gather_if_needed_async(&inner)
                     .await
                     .map_err(map_control_flow)?;
@@ -228,7 +227,7 @@ fn remove_directory(segments: &mut Vec<String>, raw: &str) -> BuiltinResult<bool
     let joined = if path.is_absolute() {
         path.to_path_buf()
     } else {
-        env::current_dir()
+        vfs::current_dir()
             .map_err(|_| rmpath_error("rmpath: unable to resolve current directory"))?
             .join(path)
     };

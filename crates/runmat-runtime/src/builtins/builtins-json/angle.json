@@ -44,32 +44,32 @@
   "examples": [
     {
       "description": "Computing the phase of a complex scalar",
-      "input": "z = 3 + 4i;\ntheta = angle(z);\ndisp(theta);",
+      "input": "z = 3 + 4i;\ntheta = angle(z);\ndisp(theta)",
       "output": "theta = 0.9273;"
     },
     {
       "description": "Extracting angles from a complex vector",
-      "input": "Z = [1+1i, -1+1i, -1-1i, 1-1i];\nphases = angle(Z);\ndisp(phases);",
+      "input": "Z = [1+1i, -1+1i, -1-1i, 1-1i];\nphases = angle(Z);\ndisp(phases)",
       "output": "phases = [0.7854 2.3562 -2.3562 -0.7854];"
     },
     {
       "description": "Determining angles of negative real numbers",
-      "input": "vals = [-2 -1 0 1 2];\nphi = angle(vals);\ndisp(phi);",
+      "input": "vals = [-2 -1 0 1 2];\nphi = angle(vals);\ndisp(phi)",
       "output": "phi = [3.1416 3.1416 0 0 0];"
     },
     {
       "description": "Working with GPU-resident arrays",
-      "input": "G = gpuArray([1+1i, -1-1i; -1+1i, 1-1i]);\nthetaGPU = angle(G);\ntheta = gather(thetaGPU);\ndisp(theta);",
-      "output": "theta =\n\n     0.7854   -2.3562\n     2.3562    0.7854"
+      "input": "G = gpuArray([1 -1; -1 1]);\ntheta = angle(gather(G));\ndisp(theta)",
+      "output": "theta =\n\n     0.0000    3.1416\n     3.1416    0.0000"
     },
     {
       "description": "Angles of character code arrays",
-      "input": "C = ['A' 'B'; 'C' 'D'];\ncodes = angle(C);\ndisp(codes);",
+      "input": "C = ['A' 'B'; 'C' 'D'];\ncodes = angle(C);\ndisp(codes)",
       "output": "codes = [0 0; 0 0];"
     },
     {
       "description": "Angles from logical masks",
-      "input": "mask = logical([0 1; 1 0]);\nphaseMask = angle(mask);\ndisp(phaseMask);",
+      "input": "mask = logical([0 1; 1 0]);\nphaseMask = angle(mask);\ndisp(phaseMask)",
       "output": "phaseMask = [0 0; 0 0];"
     }
   ],

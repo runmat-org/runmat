@@ -9781,9 +9781,9 @@ async fn run_interpreter(
                     );
                 }
                 elems.reverse();
-                let ca = runmat_builtins::CellArray::new(elems, rows, cols)
+                let cell = runmat_runtime::make_cell_with_shape(elems, vec![rows, cols])
                     .map_err(|e| format!("Cell creation error: {e}"))?;
-                stack.push(Value::Cell(ca));
+                stack.push(cell);
             }
             Instr::IndexCell(num_indices) => {
                 // Pop indices first (in reverse), then base

@@ -39,7 +39,7 @@
   "examples": [
     {
       "description": "",
-      "input": "values = [3 5 2 9];\nbar(values);"
+      "input": "values = [3 5 2 9];\nbar(values)"
     }
   ],
   "faqs": [],
