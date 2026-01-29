@@ -12,8 +12,8 @@ export async function generateStaticParams() {
   return builtins.map((b) => ({ slug: b.slug }));
 }
 
-export default function Image({ params }: { params: { slug: string } }) {
-  const { slug } = params;
+export default async function Image({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
   const { title, subtitle } = builtinOgTitleSubtitle(slug);
   return createOgResponse({ title, subtitle });
 }

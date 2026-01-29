@@ -1,6 +1,18 @@
 # Development Roadmap
 
-This document serves as the evolving roadmap for **RunMat** to track the progress of the project towards the 1.0 release. 
+This document serves as the evolving roadmap for **RunMat** to track the progress of the project towards the 1.0 release.
+
+## Vision
+
+RunMat is a fast, local-first MATLAB-compatible runtime. Same syntax engineers have used for decades, with a modern stack underneath: Rust, a JIT compiler, and automatic GPU acceleration. We're building the foundation first—a runtime engineers can adopt without workflow changes or procurement headaches—with richer tooling and assistance for math and physics work to follow.
+
+## Current Shape
+
+- **CLI** — Install and run `runmat` in the terminal; REPL, script execution, Jupyter kernel.
+- **Browser** — No-install sandbox at [runmat.org/sandbox](https://runmat.org/sandbox); full IDE experience, local execution in the browser via WebAssembly/WebGPU.
+- **Desktop app** — In development; will offer a native-style experience, local project management, and optional integrations.
+
+## Towards 1.0
 
 The core language and runtime are complete. The major remaining items are:
 

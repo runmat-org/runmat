@@ -1,13 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 
 import type { BenchmarkShowcaseSlide } from "@/lib/marketing-benchmarks";
-import { Button } from "@/components/ui/button";
 
 import BenchmarkShowcaseCarousel from "./BenchmarkShowcaseCarousel";
 import BenchmarkTicker from "./BenchmarkTicker";
+import { HeroTabs } from "@/components/HeroTabs";
 
 interface HeroBenchmarkClientProps {
   slides: BenchmarkShowcaseSlide[];
@@ -94,23 +93,7 @@ export default function HeroBenchmarkClient({ slides }: HeroBenchmarkClientProps
               RunMat automatically fuses operations and intelligently
               routes between CPU/GPU. Write math in MATLAB syntax, and RunMat will run it blazing fast.
             </p>
-            <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
-              <Button
-                size="lg"
-                asChild
-                className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200"
-              >
-                <Link href="/download">Download Beta</Link>
-              </Button>
-              <Button
-                variant="outline"
-                size="lg"
-                asChild
-                className="h-12 px-8 text-base bg-[#0E1B1E] dark:bg-[#0E1B1E] border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100"
-              >
-                <Link href="/docs/getting-started">Get Started</Link>
-              </Button>
-            </div>
+            <HeroTabs />
           </div>
 
           <BenchmarkShowcaseCarousel

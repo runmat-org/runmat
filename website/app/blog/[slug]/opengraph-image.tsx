@@ -28,8 +28,9 @@ function getFrontmatter(slug: string): BlogFrontmatter | null {
   }
 }
 
-export default function Image({ params }: { params: { slug: string } }) {
-  const fm = getFrontmatter(params.slug);
+export default async function Image({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const fm = getFrontmatter(slug);
   const title = fm?.title ?? 'RunMat Blog';
   const subtitle = fm?.description ?? 'Latest updates and insights from the RunMat team';
   const imageUrl = fm?.image && (fm.image.startsWith('http://') || fm.image.startsWith('https://') || fm.image.startsWith('/'))

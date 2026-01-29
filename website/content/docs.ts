@@ -90,6 +90,17 @@ export const docsTree: DocsNode[] = [
           ogDescription: "Deep dive into RunMat's V8-inspired execution model, GC, runtime, and plotting subsystems.",
         },
       },
+      {
+        title: "Filesystem",
+        slug: ["filesystem"],
+        file: "docs/FILESYSTEM.md",
+        seo: {
+          description: "RunMat filesystem strategy across CLI, browser, and desktop environments.",
+          keywords: ["filesystem", "storage", "sandbox", "WASM", "runtime"],
+          ogTitle: "RunMat Filesystem Strategy",
+          ogDescription: "How RunMat unifies filesystem access across native and browser runtimes.",
+        },
+      },
       { title: "Lexer", slug: ["internals", "lexer"], file: "crates/runmat-lexer/README.md", seo: { description: "Tokenizer for MATLAB/Octave with contextual apostrophe and section markers.", keywords: ["lexer", "tokens", "logos", "MATLAB"] } },
       { title: "Parser", slug: ["internals", "parser"], file: "crates/runmat-parser/README.md", seo: { description: "Precedence-based parser for MATLAB/Octave with statements, OOP, and command-form.", keywords: ["parser", "AST", "MATLAB", "Octave"] } },
       { title: "HIR", slug: ["internals", "hir"], file: "crates/runmat-hir/README.md", seo: { description: "High-level IR with flow-sensitive inference and class/import validations.", keywords: ["HIR", "type inference", "SSA", "MATLAB"] } },

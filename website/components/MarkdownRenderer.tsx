@@ -271,6 +271,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
                   code={code} 
                   size="sm" 
                   className="bg-code-surface/80 backdrop-blur-sm"
+                  source="markdown-code-block"
                 />
               </div>
             )}
