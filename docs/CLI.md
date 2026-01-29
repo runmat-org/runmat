@@ -6,6 +6,8 @@ offers: first-class subcommands, rich help, environment-variable integration,
 snapshot management, a built-in benchmarker, a Jupyter kernel, and deep control
 over the JIT compiler and garbage collector.
 
+**Try RunMat without installing:** the [browser sandbox](https://runmat.org/sandbox) runs in your browser with no CLI. For installation and CLI vs browser paths, see [Getting Started](/docs/getting-started).
+
 Read this end-to-end once, then use it as a reference.
 
 ## Quick start
@@ -42,6 +44,7 @@ Global options apply to all commands. Commands offer task-oriented workflows.
 
 ## Global options
 
+- `--version`, `-V`: print RunMat version and exit (use `runmat version --detailed` for component breakdown).
 - `--debug` (env: `RUNMAT_DEBUG`): enable debug logging.
 - `--log-level <error|warn|info|debug|trace>` (env: `RUNMAT_LOG_LEVEL`, default: `warn`).
 - `--timeout <secs>` (env: `RUNMAT_TIMEOUT`, default: `300`): execution timeout.
@@ -162,16 +165,30 @@ Show acceleration provider information: device name/backend, fused pipeline cach
 hits/misses, last warmup duration, and reduction defaults (two-pass threshold and workgroup size).
 
 ```sh
-runmat accel-info
+runmat accel-info [--json] [--reset]
 ```
+
+- `--json`: output provider information and telemetry as JSON.
+- `--reset`: reset provider telemetry counters after printing.
 
 Notes:
 - When built without the `wgpu` feature, the command reports that no GPU provider
   is available.
 - Reduction defaults can be overridden at runtime via environment variables
   (see below).
- - Warmup duration reflects the provider's most recent warmup pass (including on-disk cache precompile),
-   when available.
+- Warmup duration reflects the provider's most recent warmup pass (including on-disk cache precompile),
+  when available.
+
+### accel-calibrate
+Apply auto-offload calibration from benchmark-suite telemetry results. Available when RunMat is built with the `wgpu` feature.
+
+```sh
+runmat accel-calibrate <suite-results.json> [--dry-run] [--json]
+```
+
+- `<suite-results.json>`: path to suite results JSON produced by the benchmark harness.
+- `--dry-run`: preview updates without persisting the calibration cache.
+- `--json`: emit calibration outcome as JSON.
 
 ### gc
 Garbage collection utilities.

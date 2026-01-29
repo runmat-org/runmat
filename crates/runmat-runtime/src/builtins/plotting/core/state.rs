@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 use super::common::{default_figure, ERR_PLOTTING_UNAVAILABLE};
+#[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
 use super::engine::render_figure;
 use super::{plotting_error, plotting_error_with_source};
 
@@ -500,7 +501,22 @@ pub fn current_hold_enabled() -> bool {
     let handle = reg.current;
     // Ensure a default figure exists even if nothing has rendered yet (common on wasm/web).
     let state = get_state_mut(&mut reg, handle);
-    *state.hold_per_axes.get(&state.active_axes).unwrap_or(&false)
+    *state
+        .hold_per_axes
+        .get(&state.active_axes)
+        .unwrap_or(&false)
+}
+
+/// Reset hold state for all figures/axes.
+///
+/// In the IDE, we want re-running code to behave like a fresh plotting run unless the code
+/// explicitly enables `hold on` again. Without this, a prior `hold on` will cause subsequent
+/// runs to keep appending to the same axes (surprising for typical "Run" workflows).
+pub fn reset_hold_state_for_run() {
+    let mut reg = registry();
+    for state in reg.figures.values_mut() {
+        state.hold_per_axes.clear();
+    }
 }
 
 pub fn figure_handles() -> Vec<FigureHandle> {
@@ -662,9 +678,21 @@ where
         return Err(plotting_error(builtin, ERR_PLOTTING_UNAVAILABLE));
     }
 
-    let rendered = render_figure(handle, figure_clone)
-        .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
-    Ok(format!("Figure {} updated: {rendered}", handle.as_u32()))
+    // On Web/WASM we deliberately decouple "mutate figure state" from "present pixels".
+    // The host coalesces figure events and presents on a frame cadence, and `drawnow()` /
+    // `pause()` provide explicit "flush" boundaries for scripts.
+    #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+    {
+        let _ = figure_clone;
+        Ok(format!("Figure {} updated", handle.as_u32()))
+    }
+
+    #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
+    {
+        let rendered = render_figure(handle, figure_clone)
+            .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
+        Ok(format!("Figure {} updated: {rendered}", handle.as_u32()))
+    }
 }
 
 /// Monotonic revision counter that increments on each successful mutation of the figure.

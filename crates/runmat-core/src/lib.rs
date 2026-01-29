@@ -7,12 +7,12 @@ use tracing::{debug, info, info_span, warn};
 
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_accelerate_api::provider as accel_provider;
+use runmat_accelerate_api::{provider_for_handle, ProviderPrecision};
 use runmat_hir::{LoweringContext, LoweringResult, SemanticError, SourceId};
 use runmat_ignition::CompileError;
 use runmat_lexer::{tokenize_detailed, Token as LexToken};
 pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions, SyntaxError};
-use runmat_runtime::builtins::common::gpu_helpers;
 use runmat_runtime::warning_store::RuntimeWarning;
 use runmat_runtime::{build_runtime_error, RuntimeError};
 #[cfg(target_arch = "wasm32")]
@@ -73,8 +73,6 @@ pub struct RunMatSession {
     interrupt_flag: Arc<AtomicBool>,
     /// Tracks whether an execution is currently active.
     is_executing: bool,
-    /// Optional session-level input handler supplied by the host.
-    input_handler: Option<SharedInputHandler>,
     /// Optional async input handler (Phase 2). When set, stdin interactions are awaited
     /// internally by `ExecuteFuture` rather than being surfaced as "pending requests".
     async_input_handler: Option<SharedAsyncInputHandler>,
@@ -242,13 +240,6 @@ pub enum InputResponse {
     Line(String),
     KeyPress,
 }
-
-#[derive(Debug, Clone)]
-pub enum InputHandlerAction {
-    Respond(Result<InputResponse, String>),
-}
-
-type SharedInputHandler = Arc<dyn Fn(&InputRequest) -> InputHandlerAction + Send + Sync>;
 
 type SharedAsyncInputHandler = Arc<
     dyn Fn(InputRequest) -> Pin<Box<dyn Future<Output = Result<InputResponse, String>> + 'static>>
@@ -441,6 +432,125 @@ fn column_major_index(shape: &[usize], coords: &[usize]) -> usize {
         stride *= *dim_len;
     }
     idx
+}
+
+fn visit_slice_coords<F: FnMut(&[usize])>(
+    full_shape: &[usize],
+    slice: &WorkspaceSliceOptions,
+    axis: usize,
+    coords: &mut [usize],
+    f: &mut F,
+) {
+    if axis == full_shape.len() {
+        f(coords);
+        return;
+    }
+    let start = slice.start.get(axis).copied().unwrap_or(0);
+    let count = slice.shape.get(axis).copied().unwrap_or(1);
+    for offset in 0..count {
+        coords[axis] = start + offset;
+        visit_slice_coords(full_shape, slice, axis + 1, coords, f);
+    }
+}
+
+fn gpu_dtype_label(handle: &runmat_accelerate_api::GpuTensorHandle) -> Option<&'static str> {
+    let precision = runmat_accelerate_api::handle_precision(handle)
+        .unwrap_or(runmat_accelerate_api::ProviderPrecision::F64);
+    match precision {
+        ProviderPrecision::F32 => Some("single"),
+        ProviderPrecision::F64 => Some("double"),
+    }
+}
+
+fn gpu_size_bytes(handle: &runmat_accelerate_api::GpuTensorHandle) -> Option<u64> {
+    let precision = runmat_accelerate_api::handle_precision(handle)
+        .unwrap_or(runmat_accelerate_api::ProviderPrecision::F64);
+    let element_size = match precision {
+        ProviderPrecision::F32 => 4u64,
+        ProviderPrecision::F64 => 8u64,
+    };
+    let elements: u64 = handle
+        .shape
+        .iter()
+        .try_fold(1u64, |acc, &d| acc.checked_mul(d as u64))?;
+    elements.checked_mul(element_size)
+}
+
+async fn gather_gpu_preview_values(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    full_shape: &[usize],
+    options: &WorkspaceMaterializeOptions,
+) -> Result<Option<(Vec<f64>, bool)>> {
+    if full_shape.is_empty() || full_shape.contains(&0) {
+        return Ok(None);
+    }
+    let total_elements = full_shape.iter().product::<usize>();
+    if total_elements == 0 {
+        return Ok(None);
+    }
+
+    let provider = provider_for_handle(handle)
+        .ok_or_else(|| anyhow::anyhow!("No acceleration provider registered for GPU tensor"))?;
+
+    // Determine which indices to gather.
+    let (indices, output_shape, truncated) = if let Some(slice) = options
+        .slice
+        .as_ref()
+        .and_then(|slice| slice.sanitized(full_shape))
+    {
+        let slice_elements = slice.shape.iter().product::<usize>();
+        let requested = slice_elements.min(options.max_elements.max(1));
+        let mut indices: Vec<u32> = Vec::with_capacity(requested);
+        let mut coords = vec![0usize; full_shape.len()];
+        let mut produced = 0usize;
+        let mut push_idx = |coords: &[usize]| {
+            if produced >= requested {
+                return;
+            }
+            let idx = column_major_index(full_shape, coords);
+            if idx <= u32::MAX as usize {
+                indices.push(idx as u32);
+                produced += 1;
+            }
+        };
+        visit_slice_coords(full_shape, &slice, 0, &mut coords, &mut push_idx);
+        let truncated = requested < slice_elements;
+        let output_shape = if !truncated && indices.len() == slice_elements {
+            slice.shape
+        } else {
+            vec![indices.len().max(1), 1]
+        };
+        (indices, output_shape, truncated)
+    } else {
+        let count = total_elements.min(options.max_elements.max(1));
+        let mut indices: Vec<u32> = Vec::with_capacity(count);
+        for idx in 0..count {
+            if idx > u32::MAX as usize {
+                break;
+            }
+            indices.push(idx as u32);
+        }
+        let len = indices.len();
+        let truncated = total_elements > len;
+        (indices, vec![len.max(1), 1], truncated)
+    };
+
+    if indices.is_empty() {
+        return Ok(None);
+    }
+
+    // Gather a small GPU tensor, then download it.
+    let gathered = provider
+        .gather_linear(handle, &indices, &output_shape)
+        .map_err(|e| anyhow::anyhow!("gpu preview gather_linear: {e}"))?;
+    let host = provider
+        .download(&gathered)
+        .await
+        .map_err(|e| anyhow::anyhow!("gpu preview download: {e}"))?;
+    // Best-effort cleanup.
+    let _ = provider.free(&gathered);
+
+    Ok(Some((host.data, truncated)))
 }
 
 #[derive(Debug, Clone, Default)]
@@ -708,7 +818,6 @@ impl RunMatSession {
             snapshot,
             interrupt_flag: Arc::new(AtomicBool::new(false)),
             is_executing: false,
-            input_handler: None,
             async_input_handler: None,
             callstack_limit: runmat_ignition::DEFAULT_CALLSTACK_LIMIT,
             error_namespace: runmat_ignition::DEFAULT_ERROR_NAMESPACE.to_string(),
@@ -750,12 +859,14 @@ impl RunMatSession {
         use log::{info, warn};
 
         info!("No snapshot provided; building stdlib snapshot inside wasm runtime");
-        let mut config = SnapshotConfig::default();
-        config.compression_enabled = false;
-        config.validation_enabled = false;
-        config.memory_mapping_enabled = false;
-        config.parallel_loading = false;
-        config.progress_reporting = false;
+        let config = SnapshotConfig {
+            compression_enabled: false,
+            validation_enabled: false,
+            memory_mapping_enabled: false,
+            parallel_loading: false,
+            progress_reporting: false,
+            ..Default::default()
+        };
 
         match SnapshotBuilder::new(config).build() {
             Ok(snapshot) => {
@@ -786,19 +897,6 @@ impl RunMatSession {
             .load_from_bytes(bytes)
             .map_err(|e| anyhow::anyhow!("Failed to load snapshot: {}", e))?;
         Ok(snapshot)
-    }
-
-    /// Install a session-scoped handler for stdin-style interaction prompts.
-    pub fn install_input_handler<F>(&mut self, handler: F)
-    where
-        F: Fn(&InputRequest) -> InputHandlerAction + Send + Sync + 'static,
-    {
-        self.input_handler = Some(Arc::new(handler));
-    }
-
-    /// Remove any previously installed stdin handler.
-    pub fn clear_input_handler(&mut self) {
-        self.input_handler = None;
     }
 
     /// Install an async stdin handler (Phase 2). This is the preferred input path for
@@ -837,99 +935,14 @@ impl RunMatSession {
         self.telemetry_client_id = cid;
     }
 
-    fn build_runtime_input_handler(
-        &self,
-        stdin_events: Arc<Mutex<Vec<StdinEvent>>>,
-    ) -> Arc<
-        dyn for<'a> Fn(
-                runmat_runtime::interaction::InteractionPrompt<'a>,
-            ) -> runmat_runtime::interaction::InteractionDecision
-            + Send
-            + Sync,
-    > {
-        let session_handler = self.input_handler.clone();
-        Arc::new(move |prompt| {
-            if matches!(
-                prompt.kind,
-                runmat_runtime::interaction::InteractionKind::GpuMapRead
-            ) {
-                return runmat_runtime::interaction::InteractionDecision::Respond(Err(
-                    "gpu map read pending is not supported by input handlers".to_string(),
-                ));
-            }
-            let request_kind = match prompt.kind {
-                runmat_runtime::interaction::InteractionKind::Line { echo } => {
-                    InputRequestKind::Line { echo }
-                }
-                runmat_runtime::interaction::InteractionKind::KeyPress => {
-                    InputRequestKind::KeyPress
-                }
-                runmat_runtime::interaction::InteractionKind::GpuMapRead => {
-                    InputRequestKind::KeyPress
-                }
-            };
-            let request = InputRequest {
-                prompt: prompt.prompt.to_string(),
-                kind: request_kind,
-            };
-            let (event_kind, echo_flag) = match &request.kind {
-                InputRequestKind::Line { echo } => (StdinEventKind::Line, *echo),
-                InputRequestKind::KeyPress => (StdinEventKind::KeyPress, false),
-            };
-            let mut event = StdinEvent {
-                prompt: request.prompt.clone(),
-                kind: event_kind,
-                echo: echo_flag,
-                value: None,
-                error: None,
-            };
-            let action = if let Some(handler) = &session_handler {
-                handler(&request)
-            } else {
-                match &request.kind {
-                    InputRequestKind::Line { echo } => InputHandlerAction::Respond(
-                        runmat_runtime::interaction::default_read_line(&request.prompt, *echo)
-                            .map(InputResponse::Line),
-                    ),
-                    InputRequestKind::KeyPress => InputHandlerAction::Respond(
-                        runmat_runtime::interaction::default_wait_for_key(&request.prompt)
-                            .map(|_| InputResponse::KeyPress),
-                    ),
-                }
-            };
-            match action {
-                InputHandlerAction::Respond(result) => {
-                    let mapped = result
-                        .inspect_err(|err| {
-                            event.error = Some(err.clone());
-                            if let Ok(mut guard) = stdin_events.lock() {
-                                guard.push(event.clone());
-                            }
-                        })
-                        .map(|resp| match resp {
-                            InputResponse::Line(value) => {
-                                event.value = Some(value.clone());
-                                if let Ok(mut guard) = stdin_events.lock() {
-                                    guard.push(event);
-                                }
-                                runmat_runtime::interaction::InteractionResponse::Line(value)
-                            }
-                            InputResponse::KeyPress => {
-                                if let Ok(mut guard) = stdin_events.lock() {
-                                    guard.push(event);
-                                }
-                                runmat_runtime::interaction::InteractionResponse::KeyPress
-                            }
-                        });
-                    runmat_runtime::interaction::InteractionDecision::Respond(mapped)
-                }
-            }
-        })
-    }
-
     /// Request cooperative cancellation for the currently running execution.
     pub fn cancel_execution(&self) {
         self.interrupt_flag.store(true, Ordering::Relaxed);
+    }
+
+    /// Shared interrupt flag used by the VM to implement cooperative cancellation.
+    pub fn interrupt_handle(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.interrupt_flag)
     }
 
     /// Get snapshot information
@@ -1058,12 +1071,93 @@ impl RunMatSession {
         self.stats.total_executions += 1;
         let debug_trace = std::env::var("RUNMAT_DEBUG_REPL").is_ok();
         let stdin_events: Arc<Mutex<Vec<StdinEvent>>> = Arc::new(Mutex::new(Vec::new()));
-        let runtime_handler = self.build_runtime_input_handler(Arc::clone(&stdin_events));
-        let _input_guard = runmat_runtime::interaction::replace_handler(Some(runtime_handler));
+        let host_async_handler = self.async_input_handler.clone();
+        let stdin_events_async = Arc::clone(&stdin_events);
+        let runtime_async_handler: Arc<runmat_runtime::interaction::AsyncInteractionHandler> =
+            Arc::new(
+                move |prompt: runmat_runtime::interaction::InteractionPromptOwned| {
+                    let request_kind = match prompt.kind {
+                        runmat_runtime::interaction::InteractionKind::Line { echo } => {
+                            InputRequestKind::Line { echo }
+                        }
+                        runmat_runtime::interaction::InteractionKind::KeyPress => {
+                            InputRequestKind::KeyPress
+                        }
+                    };
+                    let request = InputRequest {
+                        prompt: prompt.prompt,
+                        kind: request_kind,
+                    };
+                    let (event_kind, echo_flag) = match &request.kind {
+                        InputRequestKind::Line { echo } => (StdinEventKind::Line, *echo),
+                        InputRequestKind::KeyPress => (StdinEventKind::KeyPress, false),
+                    };
+                    let mut event = StdinEvent {
+                        prompt: request.prompt.clone(),
+                        kind: event_kind,
+                        echo: echo_flag,
+                        value: None,
+                        error: None,
+                    };
+
+                    let stdin_events_async = Arc::clone(&stdin_events_async);
+                    let host_async_handler = host_async_handler.clone();
+                    Box::pin(async move {
+                        let resp: Result<InputResponse, String> =
+                            if let Some(handler) = host_async_handler {
+                                handler(request).await
+                            } else {
+                                match &request.kind {
+                                    InputRequestKind::Line { echo } => {
+                                        runmat_runtime::interaction::default_read_line(
+                                            &request.prompt,
+                                            *echo,
+                                        )
+                                        .map(InputResponse::Line)
+                                    }
+                                    InputRequestKind::KeyPress => {
+                                        runmat_runtime::interaction::default_wait_for_key(
+                                            &request.prompt,
+                                        )
+                                        .map(|_| InputResponse::KeyPress)
+                                    }
+                                }
+                            };
+
+                        let resp = resp.inspect_err(|err| {
+                            event.error = Some(err.clone());
+                            if let Ok(mut guard) = stdin_events_async.lock() {
+                                guard.push(event.clone());
+                            }
+                        })?;
+
+                        let interaction_resp = match resp {
+                            InputResponse::Line(value) => {
+                                event.value = Some(value.clone());
+                                if let Ok(mut guard) = stdin_events_async.lock() {
+                                    guard.push(event);
+                                }
+                                runmat_runtime::interaction::InteractionResponse::Line(value)
+                            }
+                            InputResponse::KeyPress => {
+                                if let Ok(mut guard) = stdin_events_async.lock() {
+                                    guard.push(event);
+                                }
+                                runmat_runtime::interaction::InteractionResponse::KeyPress
+                            }
+                        };
+                        Ok(interaction_resp)
+                    })
+                },
+            );
+        let _async_input_guard =
+            runmat_runtime::interaction::replace_async_handler(Some(runtime_async_handler));
 
         if self.verbose {
             debug!("Executing: {}", input.trim());
         }
+
+        let _source_guard = runmat_runtime::source_context::replace_current_source(Some(input));
 
         let PreparedExecution {
             ast,
@@ -1668,43 +1762,54 @@ impl RunMatSession {
         } else {
             WorkspaceResidency::Cpu
         };
-        let host_value = if is_gpu {
-            gpu_helpers::gather_value_async(&value)
-                .await
-                .map_err(|err| {
-                    anyhow::anyhow!("Failed to gather gpuArray '{name}' for preview: {err}")
-                })?
-        } else {
-            value.clone()
-        };
-
+        // For CPU values we can materialize directly. For GPU tensors, avoid downloading the
+        // entire buffer into wasm memory; gather only the requested preview/slice.
+        let host_value = value.clone();
         let value_shape_vec = value_shape(&host_value).unwrap_or_default();
         let mut preview = None;
-        if let Some(slice_opts) = options
-            .slice
-            .as_ref()
-            .and_then(|slice| slice.sanitized(&value_shape_vec))
-        {
-            let slice_elements = slice_opts.shape.iter().product::<usize>();
-            let slice_limit = slice_elements.clamp(1, MATERIALIZE_DEFAULT_LIMIT);
-            if let Some(slice_value) = slice_value_for_preview(&host_value, &slice_opts) {
-                preview = preview_numeric_values(&slice_value, slice_limit)
+        if is_gpu {
+            if let Value::GpuTensor(handle) = &value {
+                if let Some((values, truncated)) =
+                    gather_gpu_preview_values(handle, &value_shape_vec, &options).await?
+                {
+                    preview = Some(WorkspacePreview { values, truncated });
+                }
+            }
+        } else {
+            if let Some(slice_opts) = options
+                .slice
+                .as_ref()
+                .and_then(|slice| slice.sanitized(&value_shape_vec))
+            {
+                let slice_elements = slice_opts.shape.iter().product::<usize>();
+                let slice_limit = slice_elements.clamp(1, MATERIALIZE_DEFAULT_LIMIT);
+                if let Some(slice_value) = slice_value_for_preview(&host_value, &slice_opts) {
+                    preview = preview_numeric_values(&slice_value, slice_limit)
+                        .map(|(values, truncated)| WorkspacePreview { values, truncated });
+                }
+            }
+            if preview.is_none() {
+                let max_elements = options.max_elements.clamp(1, MATERIALIZE_DEFAULT_LIMIT);
+                preview = preview_numeric_values(&host_value, max_elements)
                     .map(|(values, truncated)| WorkspacePreview { values, truncated });
             }
-        }
-        if preview.is_none() {
-            let max_elements = options.max_elements.clamp(1, MATERIALIZE_DEFAULT_LIMIT);
-            preview = preview_numeric_values(&host_value, max_elements)
-                .map(|(values, truncated)| WorkspacePreview { values, truncated });
         }
         Ok(MaterializedVariable {
             name,
             class_name: matlab_class_name(&host_value),
-            dtype: numeric_dtype_label(&host_value).map(|label| label.to_string()),
+            dtype: if let Value::GpuTensor(handle) = &host_value {
+                gpu_dtype_label(handle).map(|label| label.to_string())
+            } else {
+                numeric_dtype_label(&host_value).map(|label| label.to_string())
+            },
             shape: value_shape_vec,
             is_gpu,
             residency,
-            size_bytes: approximate_size_bytes(&host_value),
+            size_bytes: if let Value::GpuTensor(handle) = &host_value {
+                gpu_size_bytes(handle)
+            } else {
+                approximate_size_bytes(&host_value)
+            },
             preview,
             value: host_value,
         })

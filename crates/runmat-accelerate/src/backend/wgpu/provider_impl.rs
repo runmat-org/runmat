@@ -26,13 +26,13 @@ use runmat_accelerate_api::{
     WgpuContextHandle,
 };
 use runmat_builtins::{Tensor, Value};
+use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use runmat_runtime::builtins::image::filters::fspecial::{
     spec_from_request as runtime_fspecial_spec_from_request, FspecialFilterSpec,
 };
 use runmat_runtime::builtins::image::filters::imfilter::{
     apply_imfilter_tensor as runtime_apply_imfilter_tensor, build_imfilter_plan,
 };
-use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use runmat_runtime::builtins::math::linalg::ops::{
     mldivide_host_real_for_provider, mrdivide_host_real_for_provider,
 };
@@ -1955,7 +1955,7 @@ impl WgpuProvider {
         #[cfg(target_arch = "wasm32")]
         {
             let _ = (staging, size_bytes);
-            return Err(anyhow!("{context}: readback requires async path on wasm"));
+            Err(anyhow!("{context}: readback requires async path on wasm"))
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -3351,9 +3351,13 @@ impl WgpuProvider {
             submission_id,
             submission_index
         );
+        // On Web/WASM, blocking `Maintain::Wait` can starve the worker event loop, preventing
+        // plot presentation and other cooperative tasks from running. Prefer non-blocking polls.
         #[cfg(target_arch = "wasm32")]
         let poll_start = Instant::now();
-        self.device.poll(wgpu::Maintain::Wait);
+        #[cfg(target_arch = "wasm32")]
+        self.device.poll(wgpu::Maintain::Poll);
+        #[cfg(target_arch = "wasm32")]
         log::trace!("wgpu submit {}: poll complete", submission_id);
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -3366,8 +3370,8 @@ impl WgpuProvider {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            log::debug!(
-                "wgpu submit {}: on_submitted_work_done not supported on wasm targets",
+            log::trace!(
+                "wgpu submit {}: on_submitted_work_done unavailable on wasm",
                 submission_id
             );
         }
@@ -16270,8 +16274,7 @@ impl AccelProvider for WgpuProvider {
             });
         encoder.copy_buffer_to_buffer(entry.buffer.as_ref(), total_bytes, &staging, 0, elem_size);
         self.submit(encoder);
-        let bytes =
-            self.map_readback_bytes_sync(staging, elem_size, "read_scalar")?;
+        let bytes = self.map_readback_bytes_sync(staging, elem_size, "read_scalar")?;
         let value = match entry.precision {
             NumericPrecision::F64 => {
                 let words: &[f64] = cast_slice(&bytes);

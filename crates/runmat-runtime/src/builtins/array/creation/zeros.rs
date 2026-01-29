@@ -162,10 +162,7 @@ impl ParsedZeros {
             }
 
             if let Some(parsed_dims) = extract_dims(&arg).await? {
-                tracing::trace!(
-                    "zeros: parsed dimension arguments {:?}",
-                    parsed_dims
-                );
+                tracing::trace!("zeros: parsed dimension arguments {:?}", parsed_dims);
                 saw_dims_arg = true;
                 if dims.is_empty() {
                     dims = parsed_dims;

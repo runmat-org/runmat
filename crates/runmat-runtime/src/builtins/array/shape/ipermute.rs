@@ -134,7 +134,6 @@ fn inverse_permutation(order: &[usize]) -> Vec<usize> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::*;
     use futures::executor::block_on;
 
     fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {

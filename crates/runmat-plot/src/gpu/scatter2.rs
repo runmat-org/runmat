@@ -486,9 +486,8 @@ mod stress_tests {
             lod_stride: stride,
         };
 
-        let gpu_vertices = pack_vertices_from_xy(&device, &queue, &inputs, &params)
-            .block_on()
-            .expect("gpu packing failed");
+        let gpu_vertices =
+            pack_vertices_from_xy(&device, &queue, &inputs, &params).expect("gpu packing failed");
         assert!(gpu_vertices.vertex_count > 0);
         assert_eq!(gpu_vertices.vertex_count, expected_vertices);
     }

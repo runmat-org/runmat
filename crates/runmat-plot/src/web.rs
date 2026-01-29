@@ -15,6 +15,11 @@ use std::sync::Arc;
 use thiserror::Error;
 use web_sys::{HtmlCanvasElement, OffscreenCanvas};
 
+#[cfg(feature = "egui-overlay")]
+use crate::overlay::plot_overlay::{OverlayConfig, OverlayMetrics, PlotOverlay};
+#[cfg(feature = "egui-overlay")]
+use egui_wgpu::ScreenDescriptor;
+
 /// Canvas handle accepted by the web renderer.
 #[derive(Clone)]
 pub enum WebCanvas {
@@ -111,6 +116,16 @@ pub struct WebRenderer {
     options: WebRendererOptions,
     msaa_texture: Option<wgpu::Texture>,
     msaa_extent: (u32, u32),
+    pixels_per_point: f32,
+    #[cfg(feature = "egui-overlay")]
+    overlay: Option<WebOverlayState>,
+}
+
+#[cfg(feature = "egui-overlay")]
+struct WebOverlayState {
+    egui_ctx: egui::Context,
+    egui_renderer: egui_wgpu::Renderer,
+    plot_overlay: PlotOverlay,
 }
 
 impl WebRenderer {
@@ -206,6 +221,20 @@ impl WebRenderer {
                 .await
                 .map_err(|err| WebRendererError::PlotInit(err.to_string()))?;
 
+        #[cfg(feature = "egui-overlay")]
+        let overlay = {
+            let egui_ctx = egui::Context::default();
+            // Match native overlay: modern dark theme + transparent panels.
+            let theme = crate::styling::ModernDarkTheme::default();
+            theme.apply_to_egui(&egui_ctx);
+            let egui_renderer = egui_wgpu::Renderer::new(&device, surface_config.format, None, 1);
+            Some(WebOverlayState {
+                egui_ctx,
+                egui_renderer,
+                plot_overlay: PlotOverlay::new(),
+            })
+        };
+
         let mut renderer = Self {
             canvas,
             surface,
@@ -222,6 +251,9 @@ impl WebRenderer {
             options,
             msaa_texture: None,
             msaa_extent: (0, 0),
+            pixels_per_point: 1.0,
+            #[cfg(feature = "egui-overlay")]
+            overlay,
         };
         renderer.sync_renderer_config();
         Ok(renderer)
@@ -247,6 +279,13 @@ impl WebRenderer {
         self.msaa_extent = (0, 0);
         self.reconfigure_surface()?;
         self.render_current_scene()
+    }
+
+    /// Update egui scaling (devicePixelRatio) used by the overlay.
+    pub fn set_pixels_per_point(&mut self, pixels_per_point: f32) {
+        if pixels_per_point.is_finite() && pixels_per_point > 0.0 {
+            self.pixels_per_point = pixels_per_point;
+        }
     }
 
     /// Render a [`Figure`] directly into the canvas.
@@ -280,34 +319,12 @@ impl WebRenderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
+        #[cfg(feature = "egui-overlay")]
+        let use_overlay = self.overlay.is_some();
+        #[cfg(not(feature = "egui-overlay"))]
+        let use_overlay = false;
+
         let requested_samples = self.render_config.msaa_samples.max(1);
-        let use_msaa = requested_samples > 1;
-        if use_msaa {
-            self.ensure_msaa_texture()?;
-        }
-
-        let msaa_view_holder = if use_msaa {
-            Some(
-                self.msaa_texture
-                    .as_ref()
-                    .expect("MSAA texture missing")
-                    .create_view(&wgpu::TextureViewDescriptor::default()),
-            )
-        } else {
-            None
-        };
-        let render_target = if let Some(msaa_view) = msaa_view_holder.as_ref() {
-            RenderTarget {
-                view: msaa_view,
-                resolve_target: Some(&frame_view),
-            }
-        } else {
-            RenderTarget {
-                view: &frame_view,
-                resolve_target: None,
-            }
-        };
-
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -318,9 +335,269 @@ impl WebRenderer {
         self.render_config.height = self.surface_config.height.max(1);
         self.render_config.msaa_samples = self.options.msaa_samples.max(1);
 
-        self.plot_renderer
-            .render(&mut encoder, render_target, &self.render_config)
-            .map_err(|err| WebRendererError::Render(err.to_string()))?;
+        if !use_overlay {
+            // Existing fast path: full-surface render (clears).
+            let use_msaa = requested_samples > 1;
+            if use_msaa {
+                self.ensure_msaa_texture()?;
+            }
+            let msaa_view_holder = if use_msaa {
+                Some(
+                    self.msaa_texture
+                        .as_ref()
+                        .expect("MSAA texture missing")
+                        .create_view(&wgpu::TextureViewDescriptor::default()),
+                )
+            } else {
+                None
+            };
+            let render_target = if let Some(msaa_view) = msaa_view_holder.as_ref() {
+                RenderTarget {
+                    view: msaa_view,
+                    resolve_target: Some(&frame_view),
+                }
+            } else {
+                RenderTarget {
+                    view: &frame_view,
+                    resolve_target: None,
+                }
+            };
+
+            self.plot_renderer
+                .render(&mut encoder, render_target, &self.render_config)
+                .map_err(|err| WebRendererError::Render(err.to_string()))?;
+        } else {
+            #[cfg(feature = "egui-overlay")]
+            {
+                // Clear background once per frame.
+                {
+                    let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("runmat-plot-web-clear"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &frame_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color {
+                                    r: self.render_config.background_color.x as f64,
+                                    g: self.render_config.background_color.y as f64,
+                                    b: self.render_config.background_color.z as f64,
+                                    a: self.render_config.background_color.w as f64,
+                                }),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+                }
+
+                let Some(overlay) = self.overlay.as_mut() else {
+                    unreachable!("use_overlay implies overlay is Some");
+                };
+
+                // Ensure bounds are current before drawing overlay (keeps axes in sync with render).
+                let _ = self.plot_renderer.calculate_data_bounds();
+
+                overlay.egui_ctx.set_pixels_per_point(self.pixels_per_point);
+                let raw_input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::new(0.0, 0.0),
+                        egui::Vec2::new(
+                            (self.surface_config.width.max(1) as f32) / self.pixels_per_point,
+                            (self.surface_config.height.max(1) as f32) / self.pixels_per_point,
+                        ),
+                    )),
+                    ..Default::default()
+                };
+
+                // Build overlay UI and capture plot area.
+                let scene_stats = self.plot_renderer.scene.statistics();
+                let mut plot_area_points: Option<egui::Rect> = None;
+                let full_output = overlay.egui_ctx.run(raw_input, |ctx| {
+                    let overlay_config = OverlayConfig {
+                        // Let the plot pipeline draw grid under data (more efficient).
+                        show_grid: false,
+                        // Toolbar is handled by the host UI in the wasm IDE.
+                        show_toolbar: false,
+                        // Make overlay text more readable in the IDE.
+                        font_scale: 1.25,
+                        show_axes: true,
+                        show_title: true,
+                        title: self
+                            .plot_renderer
+                            .overlay_title()
+                            .cloned()
+                            .or(Some("Plot".to_string())),
+                        x_label: self
+                            .plot_renderer
+                            .overlay_x_label()
+                            .cloned()
+                            .or(Some("X".to_string())),
+                        y_label: self
+                            .plot_renderer
+                            .overlay_y_label()
+                            .cloned()
+                            .or(Some("Y".to_string())),
+                        // Disable the heavyweight sidebar in IDE surfaces for now.
+                        show_sidebar: false,
+                        ..Default::default()
+                    };
+                    let overlay_metrics = OverlayMetrics {
+                        vertex_count: scene_stats.total_vertices,
+                        triangle_count: scene_stats.total_triangles,
+                        render_time_ms: 0.0,
+                        fps: 60.0,
+                    };
+                    let frame_info = overlay.plot_overlay.render(
+                        ctx,
+                        &self.plot_renderer,
+                        &overlay_config,
+                        overlay_metrics,
+                    );
+                    plot_area_points = frame_info.plot_area;
+                });
+
+                let paint_jobs = overlay
+                    .egui_ctx
+                    .tessellate(full_output.shapes, full_output.pixels_per_point);
+
+                for (id, image_delta) in &full_output.textures_delta.set {
+                    overlay.egui_renderer.update_texture(
+                        &self.device,
+                        &self.queue,
+                        *id,
+                        image_delta,
+                    );
+                }
+
+                let screen_descriptor = ScreenDescriptor {
+                    size_in_pixels: [
+                        self.surface_config.width.max(1),
+                        self.surface_config.height.max(1),
+                    ],
+                    pixels_per_point: full_output.pixels_per_point,
+                };
+
+                overlay.egui_renderer.update_buffers(
+                    &self.device,
+                    &self.queue,
+                    &mut encoder,
+                    &paint_jobs,
+                    &screen_descriptor,
+                );
+
+                // Determine plot viewport from overlay, defaulting to full canvas.
+                let ppp = self.pixels_per_point.max(0.5);
+                let (vx, vy, vw, vh) = if let Some(rect) = plot_area_points {
+                    let vx = (rect.min.x * ppp).round().max(0.0) as u32;
+                    let vy = (rect.min.y * ppp).round().max(0.0) as u32;
+                    let vw = (rect.width() * ppp).round().max(1.0) as u32;
+                    let vh = (rect.height() * ppp).round().max(1.0) as u32;
+                    (vx, vy, vw, vh)
+                } else {
+                    (
+                        0,
+                        0,
+                        self.surface_config.width.max(1),
+                        self.surface_config.height.max(1),
+                    )
+                };
+
+                // Align plot camera to the plot area aspect ratio (matching native behavior).
+                if vw > 0 && vh > 0 {
+                    self.plot_renderer
+                        .camera
+                        .update_aspect_ratio((vw as f32) / (vh as f32));
+                }
+
+                // Render plot content into the plot area viewport(s) using the camera-to-viewport path.
+                let (rows, cols) = self.plot_renderer.figure_axes_grid();
+                if rows * cols > 1 {
+                    let rect_points = plot_area_points.unwrap_or_else(|| {
+                        egui::Rect::from_min_size(
+                            egui::Pos2::new(0.0, 0.0),
+                            egui::Vec2::new(
+                                (self.surface_config.width.max(1) as f32) / ppp,
+                                (self.surface_config.height.max(1) as f32) / ppp,
+                            ),
+                        )
+                    });
+                    let rects = overlay.plot_overlay.compute_subplot_rects(
+                        rect_points,
+                        rows,
+                        cols,
+                        8.0,
+                        8.0,
+                    );
+                    let sw = self.surface_config.width as f32;
+                    let sh = self.surface_config.height as f32;
+                    let mut viewports: Vec<(u32, u32, u32, u32)> = Vec::with_capacity(rects.len());
+                    for r in rects {
+                        let rx = (r.min.x * ppp).round().max(0.0);
+                        let ry = (r.min.y * ppp).round().max(0.0);
+                        let mut rw = (r.width() * ppp).round().max(1.0);
+                        let mut rh = (r.height() * ppp).round().max(1.0);
+                        if rx + rw > sw {
+                            rw = (sw - rx).max(1.0);
+                        }
+                        if ry + rh > sh {
+                            rh = (sh - ry).max(1.0);
+                        }
+                        viewports.push((rx as u32, ry as u32, rw as u32, rh as u32));
+                    }
+                    self.plot_renderer
+                        .render_axes_to_viewports(
+                            &mut encoder,
+                            &frame_view,
+                            &viewports,
+                            requested_samples,
+                        )
+                        .map_err(|err| WebRendererError::Render(err.to_string()))?;
+                } else {
+                    let cfg = PlotRenderConfig {
+                        width: vw.max(1),
+                        height: vh.max(1),
+                        msaa_samples: requested_samples,
+                        ..Default::default()
+                    };
+                    let _ = self
+                        .plot_renderer
+                        .render_camera_to_viewport(
+                            &mut encoder,
+                            &frame_view,
+                            (vx, vy, vw, vh),
+                            &cfg,
+                        )
+                        .map_err(|err| WebRendererError::Render(err.to_string()))?;
+                }
+
+                // Render egui on top.
+                {
+                    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("runmat-plot-web-egui"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &frame_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+                    overlay
+                        .egui_renderer
+                        .render(&mut render_pass, &paint_jobs, &screen_descriptor);
+                }
+
+                for id in &full_output.textures_delta.free {
+                    overlay.egui_renderer.free_texture(id);
+                }
+            }
+        }
 
         self.queue.submit(Some(encoder.finish()));
         frame.present();
@@ -368,10 +645,8 @@ impl WebRenderer {
 
         let width = self.surface_config.width.max(1);
         let height = self.surface_config.height.max(1);
-        if let Some(_) = &self.msaa_texture {
-            if self.msaa_extent == (width, height) {
-                return Ok(());
-            }
+        if self.msaa_texture.is_some() && self.msaa_extent == (width, height) {
+            return Ok(());
         }
 
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {

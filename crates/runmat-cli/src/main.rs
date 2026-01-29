@@ -19,11 +19,15 @@ use runmat_gc::{
     gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats, GcConfig,
 };
 use runmat_hir::LoweringContext;
+use runmat_ignition::instr::Instr;
 use runmat_kernel::{ConnectionInfo, KernelConfig, KernelServer};
+use runmat_parser::ParserOptions;
 use runmat_runtime::build_runtime_error;
 use runmat_snapshot::presets::SnapshotPreset;
 use runmat_snapshot::{SnapshotBuilder, SnapshotConfig, SnapshotLoader};
 use runmat_time::Instant;
+use std::collections::HashMap;
+use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
@@ -32,10 +36,6 @@ use telemetry::{
     capture_provider_snapshot, emit_runtime_value, emit_session_start, telemetry_client_id,
     RuntimeExecutionCounters, RuntimeTelemetryRecord, TelemetryRunKind, TelemetrySessionEvent,
 };
-use runmat_ignition::instr::Instr;
-use runmat_parser::ParserOptions;
-use std::collections::HashMap;
-use std::fmt::Write as FmtWrite;
 
 fn parser_compat(mode: config::LanguageCompatMode) -> runmat_parser::CompatMode {
     match mode {
@@ -1558,7 +1558,10 @@ fn format_instr(instr: &Instr, var_names: &HashMap<usize, String>) -> String {
         Instr::StoreVar(idx) => format!("StoreVar {} ({})", idx, label(*idx)),
         Instr::LoadLocal(idx) => format!("LoadLocal {}", idx),
         Instr::StoreLocal(idx) => format!("StoreLocal {}", idx),
-        Instr::EmitVar { var_index, label: emit } => {
+        Instr::EmitVar {
+            var_index,
+            label: emit,
+        } => {
             format!("EmitVar {} ({}) {:?}", var_index, label(*var_index), emit)
         }
         Instr::EmitStackTop { label: emit } => format!("EmitStackTop {:?}", emit),

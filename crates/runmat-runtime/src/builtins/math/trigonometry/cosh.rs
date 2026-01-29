@@ -133,9 +133,9 @@ fn cosh_complex_im(re: f64, im: f64) -> f64 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
-    use crate::builtins::common::test_support;
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()

@@ -804,13 +804,6 @@ pub(crate) mod tests {
         assert_tensor_close(&pivot_cpu, &pivot_vector, 1e-12);
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
-    }
-
     fn lu_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::lu_builtin(value, rest))
     }

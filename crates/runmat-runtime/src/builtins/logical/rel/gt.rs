@@ -102,6 +102,10 @@ async fn try_gt_gpu(
 async fn gt_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let (lhs, rhs) = normalize_char_string(lhs, rhs);
 
+    if let Some(result) = scalar_gt_value(&lhs, &rhs) {
+        return result;
+    }
+
     let left = GtOperand::from_value(lhs).await?;
     let right = GtOperand::from_value(rhs).await?;
 
@@ -120,6 +124,42 @@ async fn gt_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
             IDENT_INVALID_INPUT,
         )),
     }
+}
+
+fn scalar_numeric_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(n) => Some(*n),
+        Value::Int(i) => Some(i.to_f64()),
+        Value::Bool(flag) => Some(if *flag { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
+        Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
+            Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
+        }
+        _ => None,
+    }
+}
+
+fn scalar_string_value(value: &Value) -> Option<String> {
+    match value {
+        Value::String(s) => Some(s.clone()),
+        Value::StringArray(sa) if sa.data.len() == 1 => sa.data.first().cloned(),
+        _ => None,
+    }
+}
+
+fn scalar_gt_value(lhs: &Value, rhs: &Value) -> Option<crate::BuiltinResult<Value>> {
+    let left_string = scalar_string_value(lhs);
+    let right_string = scalar_string_value(rhs);
+    if left_string.is_some() || right_string.is_some() {
+        let left = left_string?;
+        let right = right_string?;
+        return Some(Ok(Value::Bool(left > right)));
+    }
+
+    let left = scalar_numeric_value(lhs)?;
+    let right = scalar_numeric_value(rhs)?;
+    Some(Ok(Value::Bool(left > right)))
 }
 
 fn normalize_char_string(lhs: Value, rhs: Value) -> (Value, Value) {

@@ -1176,8 +1176,6 @@ pub(crate) mod tests {
     };
     use runmat_gc::gc_allocate;
 
-    use crate::builtins::common::test_support;
-
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
     }

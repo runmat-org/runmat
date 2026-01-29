@@ -25,8 +25,8 @@ fn linear_index_and_end_keyword() {
 
 #[test]
 fn logical_mask_indexing() {
-    // A([1 0 1 0]) over linearized A
-    let ast = parse("A=[1,2;3,4]; idx=[1,0,1,0]; v=A(idx);").unwrap();
+    // A(logical([1 0 1 0])) over linearized A
+    let ast = parse("A=[1,2;3,4]; idx=logical([1,0,1,0]); v=A(idx);").unwrap();
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     // MATLAB uses column-major linearization: A(:) = [1;3;2;4], mask [1 0 1 0] selects [1,2]

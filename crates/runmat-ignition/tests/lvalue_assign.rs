@@ -61,7 +61,7 @@ fn colon_slice_and_broadcast_assign() {
 #[test]
 fn logical_mask_indexing_chain() {
     // Logical mask on second column selection then assigning via chain: A(:, [true false]) = A(:,[true false])
-    let src = "A=[1,2;3,4]; mask=[1 0]; B=A(:,mask);";
+    let src = "A=[1,2;3,4]; mask=[true false]; B=A(:,mask);";
     let hir = lower(&parse(src).unwrap()).unwrap();
     let vars = execute(&hir).unwrap();
     // B should be first column [1;3]

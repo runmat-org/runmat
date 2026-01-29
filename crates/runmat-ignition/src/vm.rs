@@ -564,25 +564,15 @@ async fn indices_from_value_linear(value: &Value, total_len: usize) -> VmResult<
     match value {
         Value::Tensor(idx_t) => {
             let len = idx_t.shape.iter().product::<usize>();
-            if len == total_len {
-                let mut indices = Vec::new();
-                for (i, &val) in idx_t.data.iter().enumerate() {
-                    if val != 0.0 {
-                        indices.push(i + 1);
-                    }
+            let mut indices = Vec::with_capacity(len);
+            for &val in &idx_t.data {
+                let idx = val as isize;
+                if idx < 1 || (idx as usize) > total_len {
+                    return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                 }
-                Ok(indices)
-            } else {
-                let mut indices = Vec::with_capacity(len);
-                for &val in &idx_t.data {
-                    let idx = val as isize;
-                    if idx < 1 || (idx as usize) > total_len {
-                        return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-                    }
-                    indices.push(idx as usize);
-                }
-                Ok(indices)
+                indices.push(idx as usize);
             }
+            Ok(indices)
         }
         Value::LogicalArray(la) => {
             if la.data.len() != total_len {
@@ -607,6 +597,20 @@ async fn indices_from_value_linear(value: &Value, total_len: usize) -> VmResult<
 }
 
 async fn selector_from_value_dim(value: &Value, dim_len: usize) -> VmResult<SliceSelector> {
+    if let Value::Bool(b) = value {
+        if *b {
+            return Ok(SliceSelector::Indices(vec![1]));
+        }
+        return Ok(SliceSelector::Indices(Vec::new()));
+    }
+    if let Value::LogicalArray(la) = value {
+        if la.data.len() == 1 && is_scalar_shape(&la.shape) {
+            if la.data[0] != 0 {
+                return Ok(SliceSelector::Indices(vec![1]));
+            }
+            return Ok(SliceSelector::Indices(Vec::new()));
+        }
+    }
     if let Some(idx_val) = index_scalar_from_value(value).await? {
         if idx_val < 1 || (idx_val as usize) > dim_len {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
@@ -616,25 +620,15 @@ async fn selector_from_value_dim(value: &Value, dim_len: usize) -> VmResult<Slic
     match value {
         Value::Tensor(idx_t) => {
             let len = idx_t.shape.iter().product::<usize>();
-            if len == dim_len {
-                let mut indices = Vec::new();
-                for (i, &val) in idx_t.data.iter().enumerate() {
-                    if val != 0.0 {
-                        indices.push(i + 1);
-                    }
+            let mut indices = Vec::with_capacity(len);
+            for &val in &idx_t.data {
+                let idx = val as isize;
+                if idx < 1 || (idx as usize) > dim_len {
+                    return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                 }
-                Ok(SliceSelector::Indices(indices))
-            } else {
-                let mut indices = Vec::with_capacity(len);
-                for &val in &idx_t.data {
-                    let idx = val as isize;
-                    if idx < 1 || (idx as usize) > dim_len {
-                        return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-                    }
-                    indices.push(idx as usize);
-                }
-                Ok(SliceSelector::Indices(indices))
+                indices.push(idx as usize);
             }
+            Ok(SliceSelector::Indices(indices))
         }
         Value::LogicalArray(la) => {
             if la.data.len() != dim_len {
@@ -1578,10 +1572,7 @@ async fn run_interpreter(
         #[cfg(feature = "native-accel")]
         set_current_pc(pc);
         if runmat_runtime::interrupt::is_cancelled() {
-            return Err(mex(
-                "MATLAB:runmat:ExecutionCancelled",
-                "Execution cancelled by user",
-            ));
+            return Err(mex("ExecutionCancelled", "Execution cancelled by user"));
         }
         #[cfg(feature = "native-accel")]
         if let (Some(plan), Some(graph)) =
@@ -1598,6 +1589,67 @@ async fn run_interpreter(
                 }
                 #[cfg(feature = "native-accel")]
                 log_fusion_span_window(&plan, &bytecode, pc);
+                let span = plan.group.span.clone();
+                let mut has_barrier = false;
+                let mut stored_vars: HashSet<(bool, usize)> = HashSet::new();
+                if span.end < bytecode.instructions.len() && span.start <= span.end {
+                    for instr in &bytecode.instructions[span.start..=span.end] {
+                        if matches!(
+                            instr,
+                            Instr::StoreIndex(_)
+                                | Instr::StoreSlice(_, _, _, _)
+                                | Instr::StoreSliceEx(_, _, _, _, _)
+                                | Instr::StoreRangeEnd { .. }
+                                | Instr::StoreSlice1DRangeEnd { .. }
+                                | Instr::StoreIndexCell(_)
+                                | Instr::StoreMember(_)
+                                | Instr::StoreMemberDynamic
+                        ) {
+                            has_barrier = true;
+                            break;
+                        }
+                        match instr {
+                            Instr::StoreVar(idx) => {
+                                stored_vars.insert((false, *idx));
+                            }
+                            Instr::StoreLocal(idx) => {
+                                stored_vars.insert((true, *idx));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                if !has_barrier
+                    && !stored_vars.is_empty()
+                    && span.end + 1 < bytecode.instructions.len()
+                {
+                    for instr in &bytecode.instructions[span.end + 1..] {
+                        match instr {
+                            Instr::LoadVar(idx) => {
+                                if stored_vars.contains(&(false, *idx)) {
+                                    has_barrier = true;
+                                    break;
+                                }
+                            }
+                            Instr::LoadLocal(idx) => {
+                                if stored_vars.contains(&(true, *idx)) {
+                                    has_barrier = true;
+                                    break;
+                                }
+                            }
+                            Instr::StoreVar(idx) => {
+                                stored_vars.remove(&(false, *idx));
+                            }
+                            Instr::StoreLocal(idx) => {
+                                stored_vars.remove(&(true, *idx));
+                            }
+                            _ => {}
+                        }
+                        if stored_vars.is_empty() {
+                            break;
+                        }
+                    }
+                }
                 let _fusion_span = info_span!(
                     "fusion.execute",
                     span_start = plan.group.span.start,
@@ -1605,16 +1657,26 @@ async fn run_interpreter(
                     kind = ?plan.group.kind
                 )
                 .entered();
-                match try_execute_fusion_group(&plan, graph, &mut stack, &mut vars, &context).await
-                {
-                    Ok(result) => {
-                        stack.push(result);
-                        pc = plan.group.span.end + 1;
-                        continue;
+                if !has_barrier {
+                    match try_execute_fusion_group(&plan, graph, &mut stack, &mut vars, &context)
+                        .await
+                    {
+                        Ok(result) => {
+                            stack.push(result);
+                            pc = plan.group.span.end + 1;
+                            continue;
+                        }
+                        Err(err) => {
+                            log::debug!("fusion fallback at pc {}: {}", pc, err);
+                        }
                     }
-                    Err(err) => {
-                        log::debug!("fusion fallback at pc {}: {}", pc, err);
-                    }
+                } else if fusion_debug_enabled() {
+                    log::debug!(
+                        "fusion skip at pc {}: side-effecting instrs in span {}..{}",
+                        pc,
+                        span.start,
+                        span.end
+                    );
                 }
             }
         }
@@ -3071,6 +3133,11 @@ async fn run_interpreter(
                 }
                 args.reverse();
 
+                let _callsite_guard = runmat_runtime::callsite::push_callsite(
+                    bytecode.source_id,
+                    bytecode.call_arg_spans.get(pc).cloned().flatten(),
+                );
+
                 let prepared_primary = accel_prepare_args(&name, &args).await?;
                 match call_builtin_vm!(&name, &prepared_primary) {
                     Ok(result) => stack.push(result),
@@ -4452,6 +4519,11 @@ async fn run_interpreter(
                     );
                 }
                 args.reverse();
+
+                let _callsite_guard = runmat_runtime::callsite::push_callsite(
+                    bytecode.source_id,
+                    bytecode.call_arg_spans.get(pc).cloned().flatten(),
+                );
                 if name == "gather" {
                     let eval =
                         match runmat_runtime::builtins::acceleration::gpu::gather::evaluate(&args)
@@ -5458,15 +5530,16 @@ async fn run_interpreter(
                 #[cfg(feature = "plot-core")]
                 {
                     if name == "hist" && !args.is_empty() {
-                        let eval = match runmat_runtime::builtins::plotting::ops::hist::evaluate_async(
-                            args[0].clone(),
-                            &args[1..],
-                        )
-                        .await
-                        {
-                            Ok(eval) => eval,
-                            Err(err) => vm_bail!(err.to_string()),
-                        };
+                        let eval =
+                            match runmat_runtime::builtins::plotting::ops::hist::evaluate_async(
+                                args[0].clone(),
+                                &args[1..],
+                            )
+                            .await
+                            {
+                                Ok(eval) => eval,
+                                Err(err) => vm_bail!(err.to_string()),
+                            };
                         if let Err(err) = eval.render_plot() {
                             vm_bail!(err.to_string());
                         }
@@ -5781,7 +5854,8 @@ async fn run_interpreter(
                     let original_value = index_value.clone();
                     if matches!(index_value, Value::GpuTensor(_)) {
                         index_value =
-                            runmat_runtime::dispatcher::gather_if_needed_async(&index_value).await?;
+                            runmat_runtime::dispatcher::gather_if_needed_async(&index_value)
+                                .await?;
                     }
                     let index_val = match index_scalar_from_value(&index_value).await? {
                         Some(val) => val as f64,
@@ -5819,7 +5893,8 @@ async fn run_interpreter(
                         }
                     }
                     other => {
-                        let result = match runmat_runtime::perform_indexing(&other, &indices).await {
+                        let result = match runmat_runtime::perform_indexing(&other, &indices).await
+                        {
                             Ok(v) => v,
                             Err(e) => vm_bail!(e),
                         };
@@ -5908,23 +5983,32 @@ async fn run_interpreter(
                                         idxs = vec![i as usize];
                                     }
                                     Value::Tensor(idx_t) => {
-                                        let len = idx_t.shape.iter().product::<usize>();
-                                        if len == total {
-                                            for (i, &val) in idx_t.data.iter().enumerate() {
-                                                if val != 0.0 {
-                                                    idxs.push(i + 1);
-                                                }
+                                        for &val in &idx_t.data {
+                                            let i = val as isize;
+                                            if i < 1 || (i as usize) > total {
+                                                vm_bail!(mex(
+                                                    "IndexOutOfBounds",
+                                                    "Index out of bounds"
+                                                ));
                                             }
-                                        } else {
-                                            for &val in &idx_t.data {
-                                                let i = val as isize;
-                                                if i < 1 {
-                                                    vm_bail!(mex(
-                                                        "IndexOutOfBounds",
-                                                        "Index out of bounds"
-                                                    ));
-                                                }
-                                                idxs.push(i as usize);
+                                            idxs.push(i as usize);
+                                        }
+                                    }
+                                    Value::Bool(b) => {
+                                        if *b {
+                                            idxs = vec![1];
+                                        }
+                                    }
+                                    Value::LogicalArray(la) => {
+                                        if la.data.len() != total {
+                                            vm_bail!(mex(
+                                                "IndexShape",
+                                                "Logical mask length mismatch for linear indexing"
+                                            ));
+                                        }
+                                        for (i, &val) in la.data.iter().enumerate() {
+                                            if val != 0 {
+                                                idxs.push(i + 1);
                                             }
                                         }
                                     }
@@ -5978,31 +6062,26 @@ async fn run_interpreter(
                                             selectors.push(Sel::Scalar(idx as usize));
                                         }
                                         Value::Tensor(idx_t) => {
-                                            // Logical mask if length matches dimension
                                             let dim_len = *t.shape.get(d).unwrap_or(&1);
                                             let len = idx_t.shape.iter().product::<usize>();
-                                            if len == dim_len {
-                                                let mut indices = Vec::new();
-                                                for (i, &val) in idx_t.data.iter().enumerate() {
-                                                    if val != 0.0 {
-                                                        indices.push(i + 1);
-                                                    }
+                                            let mut indices = Vec::with_capacity(len);
+                                            for &val in &idx_t.data {
+                                                let idx = val as isize;
+                                                if idx < 1 || (idx as usize) > dim_len {
+                                                    return Err(mex(
+                                                        "IndexOutOfBounds",
+                                                        "Index out of bounds",
+                                                    ));
                                                 }
-                                                selectors.push(Sel::Indices(indices));
+                                                indices.push(idx as usize);
+                                            }
+                                            selectors.push(Sel::Indices(indices));
+                                        }
+                                        Value::Bool(b) => {
+                                            if *b {
+                                                selectors.push(Sel::Indices(vec![1]));
                                             } else {
-                                                // Treat as explicit indices (1-based)
-                                                let mut indices = Vec::with_capacity(len);
-                                                for &val in &idx_t.data {
-                                                    let idx = val as isize;
-                                                    if idx < 1 {
-                                                        return Err(mex(
-                                                            "IndexOutOfBounds",
-                                                            "Index out of bounds",
-                                                        ));
-                                                    }
-                                                    indices.push(idx as usize);
-                                                }
-                                                selectors.push(Sel::Indices(indices));
+                                                selectors.push(Sel::Indices(Vec::new()));
                                             }
                                         }
                                         Value::LogicalArray(la) => {
@@ -6552,7 +6631,8 @@ async fn run_interpreter(
                                     _ => 1.0,
                                 }
                             };
-                            let v = match runmat_runtime::perform_indexing(&other, &[idx_val]).await {
+                            let v = match runmat_runtime::perform_indexing(&other, &[idx_val]).await
+                            {
                                 Ok(v) => v,
                                 Err(_e) => vm_bail!(mex(
                                     "SliceNonTensor",
@@ -6691,9 +6771,10 @@ async fn run_interpreter(
                                         end_off: off,
                                     });
                                 } else {
-                                    let v = numeric
-                                        .get(num_iter)
-                                        .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
+                                    let v = numeric.get(num_iter).ok_or(mex(
+                                        "MissingNumericIndex",
+                                        "missing numeric index",
+                                    ))?;
                                     num_iter += 1;
                                     match v {
                                         Value::Num(n) => {
@@ -6827,10 +6908,7 @@ async fn run_interpreter(
                                     vec![total_out, 1]
                                 }
                             } else {
-                                per_dim_indices
-                                    .iter()
-                                    .map(|v| v.len().max(1))
-                                    .collect()
+                                per_dim_indices.iter().map(|v| v.len().max(1)).collect()
                             };
                             Ok((indices, output_shape))
                         })();
@@ -7050,15 +7128,10 @@ async fn run_interpreter(
                         }
                     }
                     Value::StringArray(sa) => {
-                        let selectors = build_slice_selectors(
-                            dims,
-                            colon_mask,
-                            end_mask,
-                            &numeric,
-                            &sa.shape,
-                        )
-                        .await
-                        .map_err(|e| format!("slice: {e}"))?;
+                        let selectors =
+                            build_slice_selectors(dims, colon_mask, end_mask, &numeric, &sa.shape)
+                                .await
+                                .map_err(|e| format!("slice: {e}"))?;
                         let plan = build_slice_plan(&selectors, dims, &sa.shape)
                             .map_err(|e| map_slice_plan_error("slice", e))?;
                         let result =
@@ -7196,23 +7269,32 @@ async fn run_interpreter(
                                                 idxs = vec![i as usize];
                                             }
                                             Value::Tensor(idx_t) => {
-                                                let len = idx_t.shape.iter().product::<usize>();
-                                                if len == total {
-                                                    for (i, &val) in idx_t.data.iter().enumerate() {
-                                                        if val != 0.0 {
-                                                            idxs.push(i + 1);
-                                                        }
+                                                for &val in &idx_t.data {
+                                                    let i = val as isize;
+                                                    if i < 1 || (i as usize) > total {
+                                                        vm_bail!(mex(
+                                                            "IndexOutOfBounds",
+                                                            "Index out of bounds"
+                                                        ));
                                                     }
-                                                } else {
-                                                    for &val in &idx_t.data {
-                                                        let i = val as isize;
-                                                        if i < 1 {
-                                                            vm_bail!(mex(
-                                                                "IndexOutOfBounds",
-                                                                "Index out of bounds"
-                                                            ));
-                                                        }
-                                                        idxs.push(i as usize);
+                                                    idxs.push(i as usize);
+                                                }
+                                            }
+                                            Value::Bool(b) => {
+                                                if *b {
+                                                    idxs = vec![1];
+                                                }
+                                            }
+                                            Value::LogicalArray(la) => {
+                                                if la.data.len() != total {
+                                                    vm_bail!(mex(
+                                                        "IndexShape",
+                                                        "Logical mask length mismatch for linear indexing"
+                                                    ));
+                                                }
+                                                for (i, &val) in la.data.iter().enumerate() {
+                                                    if val != 0 {
+                                                        idxs.push(i + 1);
                                                     }
                                                 }
                                             }
@@ -7271,29 +7353,24 @@ async fn run_interpreter(
                                                 Value::Tensor(idx_t) => {
                                                     let dim_len = *t2.shape.get(d).unwrap_or(&1);
                                                     let len = idx_t.shape.iter().product::<usize>();
-                                                    if len == dim_len {
-                                                        let mut indices = Vec::new();
-                                                        for (i, &val) in
-                                                            idx_t.data.iter().enumerate()
-                                                        {
-                                                            if val != 0.0 {
-                                                                indices.push(i + 1);
-                                                            }
+                                                    let mut indices = Vec::with_capacity(len);
+                                                    for &val in &idx_t.data {
+                                                        let idx = val as isize;
+                                                        if idx < 1 || (idx as usize) > dim_len {
+                                                            return Err(mex(
+                                                                "IndexOutOfBounds",
+                                                                "Index out of bounds",
+                                                            ));
                                                         }
-                                                        selectors.push(Sel::Indices(indices));
+                                                        indices.push(idx as usize);
+                                                    }
+                                                    selectors.push(Sel::Indices(indices));
+                                                }
+                                                Value::Bool(b) => {
+                                                    if *b {
+                                                        selectors.push(Sel::Indices(vec![1]));
                                                     } else {
-                                                        let mut indices = Vec::with_capacity(len);
-                                                        for &val in &idx_t.data {
-                                                            let idx = val as isize;
-                                                            if idx < 1 {
-                                                                return Err(mex(
-                                                                    "IndexOutOfBounds",
-                                                                    "Index out of bounds",
-                                                                ));
-                                                            }
-                                                            indices.push(idx as usize);
-                                                        }
-                                                        selectors.push(Sel::Indices(indices));
+                                                        selectors.push(Sel::Indices(Vec::new()));
                                                     }
                                                 }
                                                 Value::LogicalArray(la) => {
@@ -7681,9 +7758,8 @@ async fn run_interpreter(
                                 if is_colon {
                                     selectors.push(SliceSelector::Colon);
                                 } else if is_end {
-                                    selectors.push(SliceSelector::Scalar(
-                                        *t.shape.get(d).unwrap_or(&1),
-                                    ));
+                                    selectors
+                                        .push(SliceSelector::Scalar(*t.shape.get(d).unwrap_or(&1)));
                                 } else {
                                     let v = numeric.get(num_iter).ok_or(mex(
                                         "MissingNumericIndex",
@@ -7947,13 +8023,15 @@ async fn run_interpreter(
                             {
                                 if dims == 2 {
                                     if let (Some(sel0), Some(sel1)) =
-                                        (selectors.get(0), selectors.get(1))
+                                        (selectors.first(), selectors.get(1))
                                     {
                                         let rows = base_shape.first().copied().unwrap_or(1);
                                         let cols = base_shape.get(1).copied().unwrap_or(1);
                                         if let Value::GpuTensor(vh) = &rhs {
-                                            if let (SliceSelector::Colon, SliceSelector::Scalar(j)) =
-                                                (sel0, sel1)
+                                            if let (
+                                                SliceSelector::Colon,
+                                                SliceSelector::Scalar(j),
+                                            ) = (sel0, sel1)
                                             {
                                                 let j0 = *j - 1;
                                                 if j0 < cols {
@@ -7973,8 +8051,10 @@ async fn run_interpreter(
                                                     }
                                                 }
                                             }
-                                            if let (SliceSelector::Scalar(i), SliceSelector::Colon) =
-                                                (sel0, sel1)
+                                            if let (
+                                                SliceSelector::Scalar(i),
+                                                SliceSelector::Colon,
+                                            ) = (sel0, sel1)
                                             {
                                                 let i0 = *i - 1;
                                                 if i0 < rows {
@@ -8473,15 +8553,10 @@ async fn run_interpreter(
                         }
                     }
                     Value::StringArray(mut sa) => {
-                        let selectors = build_slice_selectors(
-                            dims,
-                            colon_mask,
-                            end_mask,
-                            &numeric,
-                            &sa.shape,
-                        )
-                        .await
-                        .map_err(|e| format!("slice assign: {e}"))?;
+                        let selectors =
+                            build_slice_selectors(dims, colon_mask, end_mask, &numeric, &sa.shape)
+                                .await
+                                .map_err(|e| format!("slice assign: {e}"))?;
                         let plan = build_slice_plan(&selectors, dims, &sa.shape)
                             .map_err(|e| map_slice_plan_error("slice assign", e))?;
                         if plan.indices.is_empty() {
@@ -8503,10 +8578,7 @@ async fn run_interpreter(
                     other => {
                         warn!(
                             "StoreSlice: unsupported base {:?} dims={} numeric={:?} rhs={:?}",
-                            other,
-                            dims,
-                            numeric,
-                            rhs
+                            other, dims, numeric, rhs
                         );
                         vm_bail!(
                             "Slicing assignment only supported on tensors or string arrays"
@@ -8531,9 +8603,7 @@ async fn run_interpreter(
                 numeric.reverse();
                 debug!(
                     "StoreSlice: numeric_count={} numeric={:?} rhs={:?}",
-                    numeric_count,
-                    numeric,
-                    rhs
+                    numeric_count, numeric, rhs
                 );
                 let mut base = stack
                     .pop()
@@ -8668,11 +8738,11 @@ async fn run_interpreter(
                                         ))?;
                                         num_iter += 1;
                                         let dim_len = *t.shape.get(d).unwrap_or(&1);
-                                        let selector = match selector_from_value_dim(v, dim_len).await
-                                        {
-                                            Ok(selector) => selector,
-                                            Err(err) => vm_bail!(err),
-                                        };
+                                        let selector =
+                                            match selector_from_value_dim(v, dim_len).await {
+                                                Ok(selector) => selector,
+                                                Err(err) => vm_bail!(err),
+                                            };
                                         selectors.push(selector);
                                     }
                                 }
@@ -8681,7 +8751,9 @@ async fn run_interpreter(
                                 for (d, sel) in selectors.iter().enumerate().take(dims) {
                                     let dim_len = *t.shape.get(d).unwrap_or(&1);
                                     let idxs = match sel {
-                                        SliceSelector::Colon => (1..=dim_len).collect::<Vec<usize>>(),
+                                        SliceSelector::Colon => {
+                                            (1..=dim_len).collect::<Vec<usize>>()
+                                        }
                                         SliceSelector::Scalar(i) => vec![*i],
                                         SliceSelector::Indices(v) => v.clone(),
                                     };
@@ -8805,11 +8877,7 @@ async fn run_interpreter(
                             }
                             Value::StringArray(mut sa) => {
                                 let selectors = build_slice_selectors(
-                                    dims,
-                                    colon_mask,
-                                    end_mask,
-                                    &numeric,
-                                    &sa.shape,
+                                    dims, colon_mask, end_mask, &numeric, &sa.shape,
                                 )
                                 .await
                                 .map_err(|e| format!("slice assign: {e}"))?;
@@ -8949,28 +9017,18 @@ async fn run_interpreter(
                                 Value::Tensor(idx_t) => {
                                     let dim_len = *t.shape.get(d).unwrap_or(&1);
                                     let len = idx_t.shape.iter().product::<usize>();
-                                    if len == dim_len {
-                                        let mut vi = Vec::new();
-                                        for (i, &val) in idx_t.data.iter().enumerate() {
-                                            if val != 0.0 {
-                                                vi.push(i + 1);
-                                            }
+                                    let mut vi = Vec::with_capacity(len);
+                                    for &val in &idx_t.data {
+                                        let idx = val as isize;
+                                        if idx < 1 || (idx as usize) > dim_len {
+                                            vm_bail!(mex(
+                                                "IndexOutOfBounds",
+                                                "Index out of bounds"
+                                            ));
                                         }
-                                        selectors.push(Sel::Indices(vi));
-                                    } else {
-                                        let mut vi = Vec::with_capacity(len);
-                                        for &val in &idx_t.data {
-                                            let idx = val as isize;
-                                            if idx < 1 {
-                                                vm_bail!(mex(
-                                                    "IndexOutOfBounds",
-                                                    "Index out of bounds"
-                                                ));
-                                            }
-                                            vi.push(idx as usize);
-                                        }
-                                        selectors.push(Sel::Indices(vi));
+                                        vi.push(idx as usize);
                                     }
+                                    selectors.push(Sel::Indices(vi));
                                 }
                                 _ => {
                                     vm_bail!(mex("UnsupportedIndexType", "Unsupported index type"))
@@ -9626,7 +9684,8 @@ async fn run_interpreter(
                             Ok(indices)
                         })();
                         if let Ok(indices) = attempt {
-                            let values = materialize_rhs_linear(&rhs, indices.len()).await
+                            let values = materialize_rhs_linear(&rhs, indices.len())
+                                .await
                                 .map_err(|e| format!("range assign: {e}"))?;
                             let value_shape = vec![values.len().max(1), 1];
                             let upload_result = if values.is_empty() {

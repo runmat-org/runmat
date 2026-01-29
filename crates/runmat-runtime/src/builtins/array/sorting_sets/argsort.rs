@@ -55,7 +55,6 @@ async fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
 #[cfg(test)]
 pub(crate) mod tests {
     use super::sort;
-    use super::*;
     use futures::executor::block_on;
 
     fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

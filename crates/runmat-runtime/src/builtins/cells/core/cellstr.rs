@@ -242,7 +242,6 @@ fn multi_to_linear_column_major(coords: &[usize], shape: &[usize]) -> usize {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
     use futures::executor::block_on;
 
     fn cellstr_builtin(value: Value) -> BuiltinResult<Value> {

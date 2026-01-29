@@ -448,9 +448,8 @@ mod stress_tests {
             lod_stride: stride,
         };
 
-        let gpu_vertices = pack_vertices_from_xyz(&device, &queue, &inputs, &params)
-            .block_on()
-            .expect("gpu scatter3 pack");
+        let gpu_vertices =
+            pack_vertices_from_xyz(&device, &queue, &inputs, &params).expect("gpu scatter3 pack");
         assert_eq!(gpu_vertices.vertex_count, max_points as usize);
     }
 }

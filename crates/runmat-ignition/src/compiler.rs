@@ -14,6 +14,7 @@ pub struct LoopLabels {
 pub struct Compiler {
     pub instructions: Vec<Instr>,
     pub instr_spans: Vec<runmat_hir::Span>,
+    pub call_arg_spans: Vec<Option<Vec<runmat_hir::Span>>>,
     pub var_count: usize,
     pub loop_stack: Vec<LoopLabels>,
     pub functions: HashMap<String, UserFunction>,
@@ -532,6 +533,7 @@ impl Compiler {
         Self {
             instructions: Vec::new(),
             instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
             var_count: max_var,
             loop_stack: Vec::new(),
             functions: HashMap::new(),
@@ -568,6 +570,17 @@ impl Compiler {
         self.instructions.push(instr);
         let span = self.current_span.unwrap_or_default();
         self.instr_spans.push(span);
+        self.call_arg_spans.push(None);
+        pc
+    }
+
+    fn emit_call_with_arg_spans(&mut self, instr: Instr, arg_spans: &[runmat_hir::Span]) -> usize {
+        let pc = self.emit(instr);
+        if !arg_spans.is_empty() {
+            if let Some(slot) = self.call_arg_spans.get_mut(pc) {
+                *slot = Some(arg_spans.to_vec());
+            }
+        }
         pc
     }
 
@@ -1077,7 +1090,12 @@ impl Compiler {
                                 matches!(
                                     e.kind,
                                     HirExprKind::Range(_, _, _) | HirExprKind::Tensor(_)
-                                ) || matches!(e.ty, runmat_hir::Type::Tensor { .. })
+                                ) || matches!(
+                                    e.ty,
+                                    runmat_hir::Type::Tensor { .. }
+                                        | runmat_hir::Type::Bool
+                                        | runmat_hir::Type::Logical
+                                )
                             });
                             if has_colon || has_end || has_vector || indices.len() > 2 {
                                 let mut colon_mask: u32 = 0;
@@ -1159,21 +1177,38 @@ impl Compiler {
                                                             runmat_hir::HirExprKind::End
                                                         )
                                                     {
-                                                        // Emit StoreSlice1DRangeEnd: base is already on stack
+                                                        // Emit StoreSlice1DRangeEnd: base and range params evaluated before RHS
                                                         self.compile_expr(start)?;
-                                                        let rhs_temp = self.alloc_temp();
+                                                        let mut lvalue_count = 2usize;
+                                                        let has_step = step.is_some();
                                                         if let Some(st) = step {
                                                             self.compile_expr(st)?;
-                                                            self.compile_expr(rhs)?;
-                                                            self.emit(Instr::StoreVar(rhs_temp));
-                                                            self.emit(Instr::LoadVar(rhs_temp));
-                                                            self.emit(Instr::StoreSlice1DRangeEnd { has_step: true, offset: match right.kind { runmat_hir::HirExprKind::Number(ref s) => s.parse::<i64>().unwrap_or(0), _ => 0 } });
-                                                        } else {
-                                                            self.compile_expr(rhs)?;
-                                                            self.emit(Instr::StoreVar(rhs_temp));
-                                                            self.emit(Instr::LoadVar(rhs_temp));
-                                                            self.emit(Instr::StoreSlice1DRangeEnd { has_step: false, offset: match right.kind { runmat_hir::HirExprKind::Number(ref s) => s.parse::<i64>().unwrap_or(0), _ => 0 } });
+                                                            lvalue_count += 1;
                                                         }
+                                                        let mut lvalue_temps =
+                                                            Vec::with_capacity(lvalue_count);
+                                                        for _ in 0..lvalue_count {
+                                                            let temp = self.alloc_temp();
+                                                            self.emit(Instr::StoreVar(temp));
+                                                            lvalue_temps.push(temp);
+                                                        }
+                                                        lvalue_temps.reverse();
+                                                        self.compile_expr(rhs)?;
+                                                        let rhs_temp = self.alloc_temp();
+                                                        self.emit(Instr::StoreVar(rhs_temp));
+                                                        for temp in &lvalue_temps {
+                                                            self.emit(Instr::LoadVar(*temp));
+                                                        }
+                                                        self.emit(Instr::LoadVar(rhs_temp));
+                                                        self.emit(Instr::StoreSlice1DRangeEnd {
+                                                            has_step,
+                                                            offset: match right.kind {
+                                                                runmat_hir::HirExprKind::Number(
+                                                                    ref s,
+                                                                ) => s.parse::<i64>().unwrap_or(0),
+                                                                _ => 0,
+                                                            },
+                                                        });
                                                         lowered_range_end = true;
                                                         break;
                                                     }
@@ -1252,9 +1287,24 @@ impl Compiler {
                                                 }
                                             }
                                         }
+                                        let range_value_count = range_has_step
+                                            .iter()
+                                            .map(|has_step| if *has_step { 2 } else { 1 })
+                                            .sum::<usize>();
+                                        let lvalue_count = 1 + numeric_count + range_value_count;
+                                        let mut lvalue_temps = Vec::with_capacity(lvalue_count);
+                                        for _ in 0..lvalue_count {
+                                            let temp = self.alloc_temp();
+                                            self.emit(Instr::StoreVar(temp));
+                                            lvalue_temps.push(temp);
+                                        }
+                                        lvalue_temps.reverse();
                                         self.compile_expr(rhs)?;
                                         let rhs_temp = self.alloc_temp();
                                         self.emit(Instr::StoreVar(rhs_temp));
+                                        for temp in &lvalue_temps {
+                                            self.emit(Instr::LoadVar(*temp));
+                                        }
                                         self.emit(Instr::LoadVar(rhs_temp));
                                         self.emit(Instr::StoreRangeEnd {
                                             dims: indices.len(),
@@ -1336,6 +1386,14 @@ impl Compiler {
                                                 _ => None,
                                             }
                                         }
+                                        let lvalue_count = 1 + numeric_count;
+                                        let mut lvalue_temps = Vec::with_capacity(lvalue_count);
+                                        for _ in 0..lvalue_count {
+                                            let temp = self.alloc_temp();
+                                            self.emit(Instr::StoreVar(temp));
+                                            lvalue_temps.push(temp);
+                                        }
+                                        lvalue_temps.reverse();
                                         let mut packed = false;
                                         if let HirExprKind::FuncCall(fname, fargs) = &rhs.kind {
                                             if self.functions.contains_key(fname)
@@ -1403,6 +1461,9 @@ impl Compiler {
                                         }
                                         let rhs_temp = self.alloc_temp();
                                         self.emit(Instr::StoreVar(rhs_temp));
+                                        for temp in &lvalue_temps {
+                                            self.emit(Instr::LoadVar(*temp));
+                                        }
                                         self.emit(Instr::LoadVar(rhs_temp));
                                         if end_offsets.is_empty() {
                                             self.emit(Instr::StoreSlice(
@@ -1489,9 +1550,20 @@ impl Compiler {
                                         numeric_count += 1;
                                     }
                                 }
+                                let lvalue_count = 1 + numeric_count;
+                                let mut lvalue_temps = Vec::with_capacity(lvalue_count);
+                                for _ in 0..lvalue_count {
+                                    let temp = self.alloc_temp();
+                                    self.emit(Instr::StoreVar(temp));
+                                    lvalue_temps.push(temp);
+                                }
+                                lvalue_temps.reverse();
                                 self.compile_expr(rhs)?;
                                 let rhs_temp = self.alloc_temp();
                                 self.emit(Instr::StoreVar(rhs_temp));
+                                for temp in &lvalue_temps {
+                                    self.emit(Instr::LoadVar(*temp));
+                                }
                                 self.emit(Instr::LoadVar(rhs_temp));
                                 self.emit(Instr::StoreSlice(
                                     indices.len(),
@@ -1660,16 +1732,17 @@ impl Compiler {
                 // Compile RHS once; if function call or value, arrange to extract multiple
                 match &expr.kind {
                     HirExprKind::FuncCall(name, args) => {
+                        let call_arg_spans: Vec<runmat_hir::Span> =
+                            args.iter().map(|a| a.span).collect();
                         if self.functions.contains_key(name) {
                             for arg in args {
                                 self.compile_expr(arg)?;
                             }
                             // Emit multi-call to request N outputs
-                            self.emit(Instr::CallFunctionMulti(
-                                name.clone(),
-                                args.len(),
-                                vars.len(),
-                            ));
+                            self.emit_call_with_arg_spans(
+                                Instr::CallFunctionMulti(name.clone(), args.len(), vars.len()),
+                                &call_arg_spans,
+                            );
                             // Store outputs in order
                             for (_i, var) in vars.iter().enumerate().rev() {
                                 if let Some(v) = var {
@@ -1683,11 +1756,10 @@ impl Compiler {
                             for arg in args {
                                 self.compile_expr(arg)?;
                             }
-                            self.emit(Instr::CallBuiltinMulti(
-                                name.clone(),
-                                args.len(),
-                                vars.len(),
-                            ));
+                            self.emit_call_with_arg_spans(
+                                Instr::CallBuiltinMulti(name.clone(), args.len(), vars.len()),
+                                &call_arg_spans,
+                            );
                             for (_i, var) in vars.iter().enumerate().rev() {
                                 if let Some(v) = var {
                                     self.emit(Instr::StoreVar(v.0));
@@ -1971,6 +2043,7 @@ impl Compiler {
                 }
             }
             HirExprKind::FuncCall(name, args) => {
+                let call_arg_spans: Vec<runmat_hir::Span> = args.iter().map(|a| a.span).collect();
                 // Special-case: feval(f, a1, a2, ...) compiles to VM feval to access user functions/closures
                 if name == "feval" {
                     if args.is_empty() {
@@ -2015,12 +2088,18 @@ impl Compiler {
                                 self.compile_expr(arg)?;
                             }
                         }
-                        self.emit(Instr::CallFevalExpandMulti(specs));
+                        self.emit_call_with_arg_spans(
+                            Instr::CallFevalExpandMulti(specs),
+                            &call_arg_spans,
+                        );
                     } else {
                         for arg in rest {
                             self.compile_expr(arg)?;
                         }
-                        self.emit(Instr::CallFeval(rest.len()));
+                        self.emit_call_with_arg_spans(
+                            Instr::CallFeval(rest.len()),
+                            &call_arg_spans,
+                        );
                     }
                     return Ok(());
                 }
@@ -2062,12 +2141,18 @@ impl Compiler {
                                 self.compile_expr(arg)?;
                             }
                         }
-                        self.emit(Instr::CallFunctionExpandMulti(name.clone(), specs));
+                        self.emit_call_with_arg_spans(
+                            Instr::CallFunctionExpandMulti(name.clone(), specs),
+                            &call_arg_spans,
+                        );
                     } else {
                         for arg in args {
                             self.compile_expr(arg)?;
                         }
-                        self.emit(Instr::CallFunction(name.clone(), args.len()));
+                        self.emit_call_with_arg_spans(
+                            Instr::CallFunction(name.clone(), args.len()),
+                            &call_arg_spans,
+                        );
                     }
                 } else {
                     // Existing import-based function/builtin resolution, extended with static method via Class.*
@@ -2199,7 +2284,10 @@ impl Compiler {
                                     self.compile_expr(arg)?;
                                 }
                             }
-                            self.emit(Instr::CallFunctionExpandMulti(resolved.clone(), specs));
+                            self.emit_call_with_arg_spans(
+                                Instr::CallFunctionExpandMulti(resolved.clone(), specs),
+                                &call_arg_spans,
+                            );
                             return Ok(());
                         } else {
                             // Flatten inner user-function returns into argument list for the call
@@ -2227,7 +2315,10 @@ impl Compiler {
                                 self.compile_expr(arg)?;
                                 total_argc += 1;
                             }
-                            self.emit(Instr::CallFunction(resolved.clone(), total_argc));
+                            self.emit_call_with_arg_spans(
+                                Instr::CallFunction(resolved.clone(), total_argc),
+                                &call_arg_spans,
+                            );
                             return Ok(());
                         }
                     }
@@ -2241,7 +2332,10 @@ impl Compiler {
                         for arg in args {
                             self.compile_expr(arg)?;
                         }
-                        self.emit(Instr::CallStaticMethod(cls, method, args.len()));
+                        self.emit_call_with_arg_spans(
+                            Instr::CallStaticMethod(cls, method, args.len()),
+                            &call_arg_spans,
+                        );
                         return Ok(());
                     }
                     // If multiple static candidates and no function resolved, report ambiguity
@@ -2300,7 +2394,10 @@ impl Compiler {
                                 self.compile_expr(arg)?;
                                 total_argc += 1;
                             }
-                            self.emit(Instr::CallBuiltin(resolved, total_argc));
+                            self.emit_call_with_arg_spans(
+                                Instr::CallBuiltin(resolved, total_argc),
+                                &call_arg_spans,
+                            );
                             return Ok(());
                         }
                     }
@@ -2337,12 +2434,18 @@ impl Compiler {
                                 self.compile_expr(arg)?;
                             }
                         }
-                        self.emit(Instr::CallBuiltinExpandMulti(resolved, specs));
+                        self.emit_call_with_arg_spans(
+                            Instr::CallBuiltinExpandMulti(resolved, specs),
+                            &call_arg_spans,
+                        );
                     } else {
                         for arg in args {
                             self.compile_expr(arg)?;
                         }
-                        self.emit(Instr::CallBuiltin(resolved, args.len()));
+                        self.emit_call_with_arg_spans(
+                            Instr::CallBuiltin(resolved, args.len()),
+                            &call_arg_spans,
+                        );
                     }
                     return Ok(());
                 }
@@ -2426,7 +2529,12 @@ impl Compiler {
                 let has_end = indices.iter().any(|e| matches!(e.kind, HirExprKind::End));
                 let has_vector = indices.iter().any(|e| {
                     matches!(e.kind, HirExprKind::Range(_, _, _) | HirExprKind::Tensor(_))
-                        || matches!(e.ty, runmat_hir::Type::Tensor { .. })
+                        || matches!(
+                            e.ty,
+                            runmat_hir::Type::Tensor { .. }
+                                | runmat_hir::Type::Bool
+                                | runmat_hir::Type::Logical
+                        )
                 });
                 // General case: any-dimension ranges with end arithmetic (e.g., A(:,2:2:end-1,...))
                 // We lower into IndexRangeEnd: push base, then per-range start[, step] in increasing dimension order,

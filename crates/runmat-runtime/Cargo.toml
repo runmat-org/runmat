@@ -15,6 +15,7 @@ inventory = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-macros = { workspace = true }
 runmat-async = { workspace = true }
+runmat-hir = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 runmat-plot = { workspace = true, optional = true }

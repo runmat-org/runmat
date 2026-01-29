@@ -409,13 +409,6 @@ pub(crate) mod tests {
         assert_eq!(gathered.data, vec![cpu_rank]);
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
-    }
-
     fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::rank_builtin(value, rest))
     }

@@ -16,9 +16,11 @@ use runmat_gc_api::GcPtr;
 
 pub mod dispatcher;
 
+pub mod callsite;
 pub mod console;
 pub mod interaction;
 pub mod interrupt;
+pub mod source_context;
 
 pub mod arrays;
 pub mod builtins;
@@ -59,7 +61,6 @@ pub use dispatcher::{
 };
 
 pub use runmat_macros::{register_fusion_spec, register_gpu_spec};
-
 
 // Pruned legacy re-exports; prefer builtins::* and explicit shims only
 // Transitional root-level shims for widely used helpers

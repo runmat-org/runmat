@@ -475,7 +475,11 @@ fn resolve_dims(shape: &[usize], selection: &DimSelection) -> BuiltinResult<Reso
             }
         }
         DimSelection::All => {
-            let ndims = if is_scalar_shape(shape) { 1 } else { shape.len() };
+            let ndims = if is_scalar_shape(shape) {
+                1
+            } else {
+                shape.len()
+            };
             (1..=ndims).collect()
         }
     };

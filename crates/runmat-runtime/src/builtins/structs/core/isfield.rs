@@ -309,8 +309,6 @@ pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{CellArray, CharArray, StringArray, StructValue};
 
-    use crate::builtins::common::test_support;
-
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
     }

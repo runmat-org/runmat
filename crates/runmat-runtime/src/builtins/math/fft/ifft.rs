@@ -267,14 +267,16 @@ fn complex_tensor_to_real_value(tensor: ComplexTensor, builtin: &str) -> Builtin
 
 async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     match value {
-        Value::Int(_) | Value::Num(_) => tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
-            .await
-            .map_err(ifft_error)?
-            .ok_or_else(|| {
-                ifft_error(format!(
-                    "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
-                ))
-            }),
+        Value::Int(_) | Value::Num(_) => {
+            tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
+                .await
+                .map_err(ifft_error)?
+                .ok_or_else(|| {
+                    ifft_error(format!(
+                        "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
+                    ))
+                })
+        }
         _ => Err(ifft_error(format!(
             "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
         ))),
@@ -482,8 +484,11 @@ pub(crate) mod tests {
     #[test]
     fn ifft_rejects_dimension_zero() {
         let err = error_message(
-            block_on(parse_arguments(&[Value::Num(4.0), Value::Int(IntValue::I32(0))]))
-                .unwrap_err(),
+            block_on(parse_arguments(&[
+                Value::Num(4.0),
+                Value::Int(IntValue::I32(0)),
+            ]))
+            .unwrap_err(),
         );
         assert!(err.contains("dimension must be >= 1"));
     }
@@ -522,8 +527,11 @@ pub(crate) mod tests {
     #[test]
     fn ifft_symflag_requires_final_position() {
         let err = error_message(
-            block_on(parse_arguments(&[Value::from("nonsymmetric"), Value::Num(4.0)]))
-                .unwrap_err(),
+            block_on(parse_arguments(&[
+                Value::from("nonsymmetric"),
+                Value::Num(4.0),
+            ]))
+            .unwrap_err(),
         );
         assert!(err.contains("symmetry flag must appear as the final argument"));
     }
@@ -656,8 +664,6 @@ pub(crate) mod tests {
         }
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
     fn ifft_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::ifft_builtin(value, rest))
     }

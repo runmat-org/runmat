@@ -8,6 +8,7 @@ import { DocsArticleVisibility } from "@/components/DocsArticleVisibility";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { HeadingsNav } from "@/components/HeadingsNav";
 import matter from "gray-matter";
+import { buildPageMetadata } from "@/lib/seo";
 
 // Polyfill URL.canParse for Node environments that don't support it yet (e.g., Node 18)
 const _u = URL;
@@ -87,8 +88,15 @@ export async function generateMetadata({ params }: { params: Promise<{ slug?: st
   const { slug = [] } = await params;
   const node = findNodeBySlug(slug);
   const baseTitle = node ? `${node.title} | Docs` : "Docs";
-  const base: Metadata = { title: baseTitle };
-  if (!node) return base;
+  if (!node) {
+    return buildPageMetadata({
+      title: baseTitle,
+      description: "RunMat documentation.",
+      canonicalPath: `/docs/${slug.join("/")}`,
+      ogType: "website",
+      ogImagePath: "/docs/opengraph-image",
+    });
+  }
 
   const baseUrl = "https://runmat.org";
   const path = `/docs${slug.length ? `/${slug.join("/")}` : ""}`;
@@ -103,15 +111,19 @@ export async function generateMetadata({ params }: { params: Promise<{ slug?: st
   const ogTitle = fm.ogTitle || seo?.ogTitle || title;
   const ogDescription = fm.ogDescription || seo?.ogDescription || description;
 
+  const meta = buildPageMetadata({
+    title: ogTitle ?? title,
+    description: ogDescription ?? description ?? "RunMat documentation.",
+    canonicalPath: `/docs/${slug.join("/")}`,
+    ogType: "article",
+    ogImagePath: "/docs/opengraph-image",
+  });
+
   return {
+    ...meta,
     title,
     description,
     keywords,
-    alternates: { canonical: pageUrl },
-    openGraph: (ogTitle || ogDescription)
-      ? { title: ogTitle, description: ogDescription, url: pageUrl }
-      : { url: pageUrl },
-    twitter: (ogTitle || ogDescription) ? { card: 'summary_large_image', title: ogTitle, description: ogDescription } : undefined,
   };
 }
 

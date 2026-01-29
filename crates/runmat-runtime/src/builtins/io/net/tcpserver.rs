@@ -128,9 +128,6 @@ pub(super) fn clear_registry_for_test() {
     guard.next_id = 0;
 }
 
-#[cfg(test)]
-static TCP_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::tcpserver")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tcpserver",
@@ -500,7 +497,6 @@ pub(crate) fn default_user_data() -> Value {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
     use runmat_builtins::{Tensor, Value};
     use std::net::TcpStream;
     use std::time::Duration;

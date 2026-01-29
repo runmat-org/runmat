@@ -529,7 +529,6 @@ pub(crate) mod tests {
         remove_server_for_test, tcpserver_builtin, HANDLE_ID_FIELD as SERVER_FIELD,
     };
     use super::*;
-    use crate::builtins::common::test_support;
     use runmat_builtins::Value;
     use std::net::TcpStream;
     use std::thread;
@@ -663,14 +662,6 @@ pub(crate) mod tests {
         .unwrap_err();
         assert_error_identifier(err, MESSAGE_ID_INVALID_NAME_VALUE);
         remove_server_for_test(server_id(&server_value));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let _guard = net_guard();
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

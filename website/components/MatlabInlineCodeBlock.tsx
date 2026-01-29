@@ -35,7 +35,7 @@ export default function MatlabInlineCodeBlock({
       </pre>
       {showRunButton && (
         <div className="flex justify-end w-full">
-          <TryInBrowserButton code={code} size="sm" />
+          <TryInBrowserButton code={code} size="sm" source="matlab-inline-code-block" />
         </div>
       )}
     </div>

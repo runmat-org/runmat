@@ -137,7 +137,6 @@ pub(crate) mod tests {
     use runmat_builtins::{IntValue, Tensor};
 
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, Tensor};
 
     fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::sinh_builtin(value))

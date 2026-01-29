@@ -20,6 +20,7 @@ pub fn compile(
     Ok(Bytecode {
         instructions: c.instructions,
         instr_spans: c.instr_spans,
+        call_arg_spans: c.call_arg_spans,
         source_id: None,
         var_count: c.var_count,
         functions: c.functions,

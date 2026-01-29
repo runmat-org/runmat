@@ -437,7 +437,46 @@ async fn ldivide_gpu_host_right(
     ldivide_host(divisor, Value::Tensor(numerator_host))
 }
 
+fn scalar_real_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(n) => Some(*n),
+        Value::Int(i) => Some(i.to_f64()),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
+        Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
+            Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
+        }
+        _ => None,
+    }
+}
+
+fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
+    match value {
+        Value::Complex(re, im) => Some((*re, *im)),
+        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
+        _ => None,
+    }
+}
+
+fn scalar_ldivide_value(divisor: &Value, numerator: &Value) -> Option<Value> {
+    let num = scalar_complex_value(numerator)
+        .or_else(|| scalar_real_value(numerator).map(|v| (v, 0.0)))?;
+    let div =
+        scalar_complex_value(divisor).or_else(|| scalar_real_value(divisor).map(|v| (v, 0.0)))?;
+    let (nr, ni) = num;
+    let (dr, di) = div;
+    if ni != 0.0 || di != 0.0 {
+        let quotient = Complex64::new(nr, ni) / Complex64::new(dr, di);
+        return Some(Value::Complex(quotient.re, quotient.im));
+    }
+    Some(Value::Num(nr / dr))
+}
+
 fn ldivide_host(divisor: Value, numerator: Value) -> BuiltinResult<Value> {
+    if let Some(result) = scalar_ldivide_value(&divisor, &numerator) {
+        return Ok(result);
+    }
     match (classify_operand(divisor)?, classify_operand(numerator)?) {
         (LdivideOperand::Real(div), LdivideOperand::Real(num)) => ldivide_real_real(&div, &num),
         (LdivideOperand::Complex(div), LdivideOperand::Complex(num)) => {

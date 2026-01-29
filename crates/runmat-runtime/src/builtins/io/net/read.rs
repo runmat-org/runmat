@@ -733,12 +733,4 @@ pub(crate) mod tests {
 
         remove_client_for_test(client_id(&client));
     }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let _guard = net_guard();
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
-    }
 }

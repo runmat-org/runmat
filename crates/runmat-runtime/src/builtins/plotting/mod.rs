@@ -31,6 +31,8 @@ pub(crate) mod compat_cmds;
 pub(crate) mod contour;
 #[path = "ops/contourf.rs"]
 pub(crate) mod contourf;
+#[path = "ops/drawnow.rs"]
+pub(crate) mod drawnow;
 #[path = "ops/figure.rs"]
 pub(crate) mod figure;
 #[path = "ops/gca.rs"]
@@ -65,9 +67,9 @@ pub(crate) mod surfc;
 pub use perf::{set_scatter_target_points, set_surface_vertex_budget};
 pub use state::{
     clear_figure, clone_figure, close_figure, configure_subplot, current_axes_state,
-    current_figure_handle, install_figure_observer, new_figure_handle, reset_recent_figures,
-    select_figure, set_hold, take_recent_figures, figure_handles, FigureAxesState, FigureError,
-    FigureEventKind, FigureEventView, FigureHandle, HoldMode,
+    current_figure_handle, figure_handles, install_figure_observer, new_figure_handle,
+    reset_hold_state_for_run, reset_recent_figures, select_figure, set_hold, take_recent_figures,
+    FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
 pub use web::{
     bind_surface_to_figure, detach_surface, install_surface, present_figure_on_surface,

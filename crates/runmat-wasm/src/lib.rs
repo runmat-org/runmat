@@ -18,9 +18,9 @@ use runmat_builtins::{NumericDType, ObjectInstance, StructValue, Value};
 use runmat_core::{
     matlab_class_name, value_shape, CompatMode, ExecutionProfiling, ExecutionResult,
     ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision, FusionPlanEdge, FusionPlanNode,
-    FusionPlanShader, FusionPlanSnapshot, InputHandlerAction, InputRequest, InputRequestKind,
-    InputResponse, MaterializedVariable, RunError, RunMatSession, StdinEvent, StdinEventKind,
-    WorkspaceEntry, WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview,
+    FusionPlanShader, FusionPlanSnapshot, InputRequest, InputRequestKind, InputResponse,
+    MaterializedVariable, RunError, RunMatSession, StdinEvent, StdinEventKind, WorkspaceEntry,
+    WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview,
     WorkspaceSliceOptions, WorkspaceSnapshot,
 };
 use runmat_logging::{
@@ -29,7 +29,6 @@ use runmat_logging::{
 use runmat_runtime::build_runtime_error;
 use runmat_thread_local::runmat_thread_local;
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
-use serde_wasm_bindgen;
 use std::backtrace::Backtrace;
 use tracing::{info, info_span};
 use wasm_bindgen::prelude::*;
@@ -50,22 +49,19 @@ use runmat_plot::{
 };
 #[cfg(target_arch = "wasm32")]
 use runmat_runtime::builtins::plotting::{
-    bind_surface_to_figure as runtime_bind_surface_to_figure,
-    clear_figure as runtime_clear_figure,
+    bind_surface_to_figure as runtime_bind_surface_to_figure, clear_figure as runtime_clear_figure,
     close_figure as runtime_close_figure, configure_subplot as runtime_configure_subplot,
     context as plotting_context, current_axes_state as runtime_current_axes_state,
     current_figure_handle as runtime_current_figure_handle,
-    figure_handles as runtime_figure_handles,
+    detach_surface as runtime_detach_surface, figure_handles as runtime_figure_handles,
     install_figure_observer as runtime_install_figure_observer,
-    install_surface as runtime_install_surface,
-    new_figure_handle as runtime_new_figure_handle,
+    install_surface as runtime_install_surface, new_figure_handle as runtime_new_figure_handle,
+    present_figure_on_surface as runtime_present_figure_on_surface,
+    present_surface as runtime_present_surface,
     render_current_scene as runtime_render_current_scene,
     render_figure_snapshot as runtime_render_figure_snapshot,
-    resize_surface as runtime_resize_surface,
-    detach_surface as runtime_detach_surface,
-    present_surface as runtime_present_surface,
-    present_figure_on_surface as runtime_present_figure_on_surface,
-    select_figure as runtime_select_figure,
+    reset_hold_state_for_run as runtime_reset_hold_state_for_run,
+    resize_surface as runtime_resize_surface, select_figure as runtime_select_figure,
     set_hold as runtime_set_hold, web_renderer_ready as runtime_plot_renderer_ready,
     FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
@@ -158,27 +154,25 @@ runmat_thread_local! {
     static STDOUT_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
         RefCell::new(HashMap::new());
 }
-static STDOUT_FORWARDER: OnceLock<
-    Arc<dyn Fn(&runmat_runtime::console::ConsoleEntry) + Send + Sync + 'static>,
-> = OnceLock::new();
+type StdoutForwarder = Arc<dyn Fn(&runmat_runtime::console::ConsoleEntry) + Send + Sync + 'static>;
+type RuntimeLogForwarder = Arc<dyn Fn(&runmat_logging::RuntimeLogRecord) + Send + Sync + 'static>;
+type TraceForwarder = Arc<dyn Fn(&[runmat_logging::TraceEvent]) + Send + Sync + 'static>;
+
+static STDOUT_FORWARDER: OnceLock<StdoutForwarder> = OnceLock::new();
 static STDOUT_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 runmat_thread_local! {
     static RUNTIME_LOG_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
         RefCell::new(HashMap::new());
 }
-static RUNTIME_LOG_FORWARDER: OnceLock<
-    Arc<dyn Fn(&runmat_logging::RuntimeLogRecord) + Send + Sync + 'static>,
-> = OnceLock::new();
+static RUNTIME_LOG_FORWARDER: OnceLock<RuntimeLogForwarder> = OnceLock::new();
 static RUNTIME_LOG_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 runmat_thread_local! {
     static TRACE_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
         RefCell::new(HashMap::new());
 }
-static TRACE_FORWARDER: OnceLock<
-    Arc<dyn Fn(&[runmat_logging::TraceEvent]) + Send + Sync + 'static>,
-> = OnceLock::new();
+static TRACE_FORWARDER: OnceLock<TraceForwarder> = OnceLock::new();
 static TRACE_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 static LOGGING_GUARD: OnceLock<LoggingGuard> = OnceLock::new();
 static LOG_FILTER_OVERRIDE: OnceLock<String> = OnceLock::new();
@@ -262,6 +256,7 @@ pub struct RunMatWasm {
     config: RefCell<SessionConfig>,
     gpu_status: GpuStatus,
     disposed: Cell<bool>,
+    active_interrupt: RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>,
 }
 
 #[wasm_bindgen]
@@ -281,38 +276,85 @@ impl RunMatWasm {
             .into_iter()
             .map(|handle| handle.as_u32())
             .collect();
+        // Reset hold state so a previous `hold on` doesn't cause subsequent runs to keep appending.
+        runtime_reset_hold_state_for_run();
+
+        // Ensure `cancelExecution()` can interrupt the *active* session even while we temporarily
+        // move it out of `self.session` to avoid holding a RefCell borrow across `.await`.
+        let interrupt_handle = self.session.borrow().interrupt_handle();
+        self.active_interrupt
+            .borrow_mut()
+            .replace(Arc::clone(&interrupt_handle));
+        struct ActiveInterruptGuard<'a> {
+            slot: &'a RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>,
+        }
+        impl Drop for ActiveInterruptGuard<'_> {
+            fn drop(&mut self) {
+                self.slot.borrow_mut().take();
+            }
+        }
+        let _active_interrupt_guard = ActiveInterruptGuard {
+            slot: &self.active_interrupt,
+        };
+
         // We must not hold a RefCell borrow across `.await`, so temporarily move the session out.
-        let mut slot = self.session.borrow_mut();
-        let mut session = std::mem::take(&mut *slot);
-        drop(slot);
+        let mut session = {
+            let mut slot = self.session.borrow_mut();
+            std::mem::take(&mut *slot)
+        };
 
         let exec_result = session.execute(&source).await;
         // Always restore the session, even if execution fails (e.g. parse/compile error).
         *self.session.borrow_mut() = session;
-        let result = exec_result.map_err(|err| run_error_to_js(&err, &source))?;
-
-        // When a run succeeds, close figures that existed before the run but were
-        // not touched during it. This avoids stale plots lingering across runs while preserving
-        // GPU surfaces for the figures that remain active.
-        if result.error.is_none() {
-            let touched: std::collections::HashSet<u32> =
-                result.figures_touched.iter().copied().collect();
-            for handle in figures_before {
-                if !touched.contains(&handle) {
-                    let _ = runtime_close_figure(Some(FigureHandle::from(handle)));
+        let payload = match exec_result {
+            Ok(result) => {
+                // When a run succeeds, close figures that existed before the run but were
+                // not touched during it. This avoids stale plots lingering across runs while preserving
+                // GPU surfaces for the figures that remain active.
+                if result.error.is_none() {
+                    let touched: std::collections::HashSet<u32> =
+                        result.figures_touched.iter().copied().collect();
+                    for handle in figures_before {
+                        if !touched.contains(&handle) {
+                            let _ = runtime_close_figure(Some(FigureHandle::from(handle)));
+                        }
+                    }
                 }
+                ExecutionPayload::from_result(result, &source)
             }
-        }
+            Err(err) => ExecutionPayload {
+                value_text: None,
+                value_json: None,
+                type_info: None,
+                execution_time_ms: 0,
+                used_jit: false,
+                error: Some(run_error_payload(&err, &source)),
+                stdout: Vec::new(),
+                workspace: WorkspacePayload {
+                    full: false,
+                    version: 0,
+                    values: Vec::new(),
+                },
+                figures_touched: Vec::new(),
+                warnings: Vec::new(),
+                stdin_events: Vec::new(),
+                profiling: None,
+                fusion_plan: None,
+            },
+        };
         info!(
             target = "runmat.runtime",
-            workspace_entries = result.workspace.values.len(),
-            stdout_entries = result.streams.len(),
-            figures_touched = result.figures_touched.len(),
-            used_jit = result.used_jit,
-            error = result.error.as_ref().map(|err| err.message()).unwrap_or(""),
+            workspace_entries = payload.workspace.values.len(),
+            stdout_entries = payload.stdout.len(),
+            figures_touched = payload.figures_touched.len(),
+            used_jit = payload.used_jit,
+            error = payload
+                .error
+                .as_ref()
+                .map(|err| err.message.as_str())
+                .unwrap_or(""),
             "Execution finished"
         );
-        let payload = ExecutionPayload::from_result(result, &source);
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize execution result: {err}")))
     }
@@ -334,7 +376,6 @@ impl RunMatWasm {
             self.snapshot_seed.as_deref(),
         )
         .map_err(|err| js_error(&format!("Failed to reset session: {err}")))?;
-        configure_session_input_handler(&mut session);
         session.set_telemetry_consent(consent);
         if let Some(cid) = config.telemetry_client_id.clone() {
             session.set_telemetry_client_id(Some(cid));
@@ -353,6 +394,10 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = cancelExecution)]
     pub fn cancel_execution(&self) {
+        if let Some(flag) = self.active_interrupt.borrow().as_ref() {
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            return;
+        }
         self.session.borrow().cancel_execution();
     }
 
@@ -385,23 +430,17 @@ impl RunMatWasm {
             if handler.is_null() || handler.is_undefined() {
                 set_js_stdin_handler(None);
                 let mut session = self.session.borrow_mut();
-                session.clear_input_handler();
                 session.clear_async_input_handler();
-                return Ok(());
-            }
-            let func = handler
-                .dyn_into::<js_sys::Function>()
-                .map_err(|_| js_error("setInputHandler expects a Function or null"))?;
-            set_js_stdin_handler(Some(func));
-            {
+            } else {
+                let func = handler
+                    .dyn_into::<js_sys::Function>()
+                    .map_err(|_| js_error("setInputHandler expects a Function or null"))?;
+                set_js_stdin_handler(Some(func));
                 let mut session = self.session.borrow_mut();
-                // Keep the legacy synchronous bridge (used by some builtins), but prefer the
-                // async handler for `ExecuteFuture`.
-                configure_session_input_handler(&mut session);
                 session
                     .install_async_input_handler(|req| async move { js_input_request(req).await });
             }
-            return Ok(());
+            Ok(())
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -446,17 +485,24 @@ impl RunMatWasm {
         {
             let target = parse_materialize_target(selector)?;
             let opts = parse_materialize_options(options)?;
-            let mut session = self.session.borrow_mut();
-            let value = session
-                .materialize_variable(target, opts)
-                .await
+            // We must not hold a RefCell borrow across `.await`, so temporarily move the session out.
+            let mut session = {
+                let mut slot = self.session.borrow_mut();
+                std::mem::take(&mut *slot)
+            };
+
+            let materialize_result = session.materialize_variable(target, opts).await;
+            // Always restore the session, even if materialization fails.
+            *self.session.borrow_mut() = session;
+
+            let value = materialize_result
                 .map_err(|err| js_error(&format!("materializeVariable failed: {err}")))?;
             let payload = MaterializedVariablePayload::from(value);
-            return serde_wasm_bindgen::to_value(&payload).map_err(|err| {
+            serde_wasm_bindgen::to_value(&payload).map_err(|err| {
                 js_error(&format!(
                     "Failed to serialize materialized workspace value: {err}"
                 ))
-            });
+            })
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -566,10 +612,7 @@ pub async fn register_plot_canvas(canvas: JsValue) -> Result<(), JsValue> {
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = registerFigureCanvas)]
-pub async fn register_figure_canvas(
-    handle: u32,
-    canvas: JsValue,
-) -> Result<(), JsValue> {
+pub async fn register_figure_canvas(handle: u32, canvas: JsValue) -> Result<(), JsValue> {
     let canvas = parse_web_canvas(canvas)?;
     let surface_id = PLOT_SURFACE_NEXT_ID.fetch_add(1, Ordering::Relaxed);
     install_surface_renderer(surface_id, canvas)
@@ -615,7 +658,9 @@ pub fn resize_figure_canvas(handle: u32, width: u32, height: u32) -> Result<(), 
     let Some(surface_id) = surface_id else {
         return Err(js_error("Figure canvas not registered"));
     };
-    runtime_resize_surface(surface_id, width.max(1), height.max(1)).map_err(|err| js_error(err.message()))
+    // Legacy API has no access to devicePixelRatio; assume 1.0.
+    runtime_resize_surface(surface_id, width.max(1), height.max(1), 1.0)
+        .map_err(|err| js_error(err.message()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -642,8 +687,14 @@ pub fn destroy_plot_surface(surface_id: u32) {
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = resizePlotSurface)]
-pub fn resize_plot_surface(surface_id: u32, width: u32, height: u32) -> Result<(), JsValue> {
-    runtime_resize_surface(surface_id, width.max(1), height.max(1)).map_err(|err| js_error(err.message()))
+pub fn resize_plot_surface(
+    surface_id: u32,
+    width: u32,
+    height: u32,
+    pixels_per_point: f32,
+) -> Result<(), JsValue> {
+    runtime_resize_surface(surface_id, width.max(1), height.max(1), pixels_per_point)
+        .map_err(|err| js_error(err.message()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -913,88 +964,6 @@ fn set_js_stdin_handler(handler: Option<js_sys::Function>) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn invoke_js_stdin_handler(request: &InputRequest) -> InputHandlerAction {
-    let handler = match JS_STDIN_HANDLER.with(|slot| slot.borrow().clone()) {
-        Some(func) => func,
-        None => {
-            return InputHandlerAction::Respond(Err(
-                "stdin requested but no input handler is installed".to_string(),
-            ))
-        }
-    };
-    let js_request = js_sys::Object::new();
-    if let Err(err) = Reflect::set(
-        &js_request,
-        &JsValue::from_str("prompt"),
-        &JsValue::from_str(&request.prompt),
-    ) {
-        log::warn!(
-            "stdin handler: failed to serialize prompt: {}",
-            js_value_to_string(err)
-        );
-    }
-    match request.kind {
-        InputRequestKind::Line { echo } => {
-            Reflect::set(
-                &js_request,
-                &JsValue::from_str("kind"),
-                &JsValue::from_str("line"),
-            )
-            .unwrap_or_default();
-            Reflect::set(
-                &js_request,
-                &JsValue::from_str("echo"),
-                &JsValue::from_bool(echo),
-            )
-            .unwrap_or_default();
-            let value = match handler.call1(&JsValue::NULL, &js_request) {
-                Ok(v) => v,
-                Err(err) => {
-                    return InputHandlerAction::Respond(Err(js_value_to_string(err)));
-                }
-            };
-            if value_should_pending(&value) {
-                return InputHandlerAction::Respond(Err(
-                    "stdin handler returned pending without a value".to_string(),
-                ));
-            }
-            if let Some(err) = extract_error_message(&value) {
-                return InputHandlerAction::Respond(Err(err));
-            }
-            if let Some(text) = extract_line_value(&value) {
-                return InputHandlerAction::Respond(Ok(InputResponse::Line(text)));
-            }
-            InputHandlerAction::Respond(Err(
-                "stdin handler must return a string for line input".to_string()
-            ))
-        }
-        InputRequestKind::KeyPress => {
-            Reflect::set(
-                &js_request,
-                &JsValue::from_str("kind"),
-                &JsValue::from_str("keyPress"),
-            )
-            .unwrap_or_default();
-            let value = match handler.call1(&JsValue::NULL, &js_request) {
-                Ok(v) => v,
-                Err(err) => {
-                    return InputHandlerAction::Respond(Err(js_value_to_string(err)));
-                }
-            };
-            if value_should_pending(&value) {
-                return InputHandlerAction::Respond(Err(
-                    "stdin handler returned pending without a value".to_string(),
-                ));
-            }
-            if let Some(err) = extract_error_message(&value) {
-                return InputHandlerAction::Respond(Err(err));
-            }
-            InputHandlerAction::Respond(Ok(InputResponse::KeyPress))
-        }
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
 async fn js_input_request(request: InputRequest) -> Result<InputResponse, String> {
     let handler = JS_STDIN_HANDLER.with(|slot| slot.borrow().clone());
     let Some(handler) = handler else {
@@ -1067,25 +1036,6 @@ async fn js_input_request(request: InputRequest) -> Result<InputResponse, String
 }
 
 #[cfg(target_arch = "wasm32")]
-fn value_should_pending(value: &JsValue) -> bool {
-    if value.is_null() || value.is_undefined() {
-        return true;
-    }
-    if value.is_instance_of::<js_sys::Promise>() {
-        return true;
-    }
-    if value.is_object() {
-        let obj = js_sys::Object::from(value.clone());
-        if let Ok(flag) = Reflect::get(&obj, &JsValue::from_str("pending")) {
-            if flag.as_bool().unwrap_or(false) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-#[cfg(target_arch = "wasm32")]
 fn extract_error_message(value: &JsValue) -> Option<String> {
     if !value.is_object() {
         return None;
@@ -1116,19 +1066,6 @@ fn extract_line_value(value: &JsValue) -> Option<String> {
         }
     }
     None
-}
-
-#[cfg(target_arch = "wasm32")]
-fn configure_session_input_handler(session: &mut RunMatSession) {
-    session.install_input_handler(js_input_bridge);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn configure_session_input_handler(_session: &mut RunMatSession) {}
-
-#[cfg(target_arch = "wasm32")]
-fn js_input_bridge(request: &InputRequest) -> InputHandlerAction {
-    invoke_js_stdin_handler(request)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1237,7 +1174,6 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
             format!("Failed to initialize RunMat session: {err}"),
         )
     })?;
-    configure_session_input_handler(&mut session);
     session.set_telemetry_consent(config.telemetry_consent);
     if let Some(cid) = config.telemetry_client_id.clone() {
         session.set_telemetry_client_id(Some(cid));
@@ -1286,6 +1222,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         config: RefCell::new(config),
         gpu_status,
         disposed: Cell::new(false),
+        active_interrupt: RefCell::new(None),
     })
 }
 
@@ -1333,7 +1270,7 @@ fn install_cpu_provider(config: &SessionConfig) {
 fn ensure_figure_event_bridge() {
     FIGURE_EVENT_OBSERVER.get_or_init(|| {
         let observer: Arc<dyn for<'a> Fn(FigureEventView<'a>) + Send + Sync> =
-            Arc::new(|event| emit_js_figure_event(event));
+            Arc::new(emit_js_figure_event);
         let _ = runtime_install_figure_observer(observer);
     });
 }
@@ -1341,15 +1278,14 @@ fn ensure_figure_event_bridge() {
 #[cfg(target_arch = "wasm32")]
 fn ensure_runtime_log_forwarder_installed() {
     RUNTIME_LOG_FORWARDER.get_or_init(|| {
-        let forwarder: Arc<dyn Fn(&RuntimeLogRecord) + Send + Sync> =
-            Arc::new(|record: &RuntimeLogRecord| {
-                let js_value = serde_wasm_bindgen::to_value(record).unwrap_or(JsValue::NULL);
-                RUNTIME_LOG_SUBSCRIBERS.with(|cell| {
-                    for cb in cell.borrow().values() {
-                        let _ = cb.call1(&JsValue::NULL, &js_value);
-                    }
-                });
+        let forwarder: RuntimeLogForwarder = Arc::new(|record: &RuntimeLogRecord| {
+            let js_value = serde_wasm_bindgen::to_value(record).unwrap_or(JsValue::NULL);
+            RUNTIME_LOG_SUBSCRIBERS.with(|cell| {
+                for cb in cell.borrow().values() {
+                    let _ = cb.call1(&JsValue::NULL, &js_value);
+                }
             });
+        });
         let hook = forwarder.clone();
         set_runtime_log_hook(move |rec| {
             (hook)(rec);
@@ -1363,15 +1299,14 @@ fn ensure_trace_forwarder_installed() {
     use runmat_logging::{set_trace_hook, TraceEvent};
 
     TRACE_FORWARDER.get_or_init(|| {
-        let forwarder: Arc<dyn Fn(&[TraceEvent]) + Send + Sync> =
-            Arc::new(|events: &[TraceEvent]| {
-                let js_value = serde_wasm_bindgen::to_value(events).unwrap_or(JsValue::NULL);
-                TRACE_SUBSCRIBERS.with(|cell| {
-                    for cb in cell.borrow().values() {
-                        let _ = cb.call1(&JsValue::NULL, &js_value);
-                    }
-                });
+        let forwarder: TraceForwarder = Arc::new(|events: &[TraceEvent]| {
+            let js_value = serde_wasm_bindgen::to_value(events).unwrap_or(JsValue::NULL);
+            TRACE_SUBSCRIBERS.with(|cell| {
+                for cb in cell.borrow().values() {
+                    let _ = cb.call1(&JsValue::NULL, &js_value);
+                }
             });
+        });
         let hook = forwarder.clone();
         set_trace_hook(move |events| {
             (hook)(events);
@@ -1537,8 +1472,7 @@ fn emit_js_figure_event(event: FigureEventView<'_>) {
     FIGURE_EVENT_CALLBACK.with(|slot| {
         if let Some(cb) = slot.borrow().as_ref() {
             let payload = convert_event_view(event);
-            let js_value =
-                serde_wasm_bindgen::to_value(&payload).unwrap_or_else(|_| JsValue::UNDEFINED);
+            let js_value = serde_wasm_bindgen::to_value(&payload).unwrap_or(JsValue::UNDEFINED);
             let _ = cb.call1(&JsValue::NULL, &js_value);
         }
     });
@@ -1938,12 +1872,12 @@ fn init_logging_once() {
         #[cfg(target_arch = "wasm32")]
         {
             std::panic::set_hook(Box::new(|info| {
-                let _ = web_sys::console::error_1(&JsValue::from_str(
+                web_sys::console::error_1(&JsValue::from_str(
                     "RunMat panic hook invoked; forwarding to console_error_panic_hook",
                 ));
                 console_error_panic_hook::hook(info);
                 let bt = Backtrace::force_capture();
-                let _ = web_sys::console::error_1(&JsValue::from_str(&format!(
+                web_sys::console::error_1(&JsValue::from_str(&format!(
                     "RunMat panic backtrace:\n{bt:?}"
                 )));
             }));
@@ -2508,7 +2442,7 @@ fn parse_materialize_options(value: JsValue) -> Result<WorkspaceMaterializeOptio
         })?;
     let mut opts = WorkspaceMaterializeOptions::default();
     if let Some(limit) = payload.limit {
-        opts.max_elements = limit.max(1).min(MAX_DATA_PREVIEW);
+        opts.max_elements = limit.clamp(1, MAX_DATA_PREVIEW);
     }
     if let Some(slice) = payload.slice {
         opts.slice = Some(WorkspaceSliceOptions {
@@ -2574,7 +2508,7 @@ fn value_to_json(value: &Value, depth: usize) -> JsonValue {
         }),
         Value::LogicalArray(arr) => {
             let (preview, truncated) = preview_slice(&arr.data, MAX_DATA_PREVIEW);
-            let rows = arr.shape.get(0).copied().unwrap_or(0);
+            let rows = arr.shape.first().copied().unwrap_or(0);
             let cols = arr.shape.get(1).copied().unwrap_or(0);
             json!({
                 "kind": "logical-array",
@@ -2711,7 +2645,7 @@ fn struct_to_json(st: &StructValue, depth: usize) -> JsonValue {
     }
     json!({
         "kind": "struct",
-        "fieldOrder": st.field_names().cloned().take(MAX_STRUCT_FIELDS).collect::<Vec<_>>(),
+        "fieldOrder": st.field_names().take(MAX_STRUCT_FIELDS).cloned().collect::<Vec<_>>(),
         "fields": fields,
         "totalFields": st.fields.len(),
         "truncated": truncated,
@@ -2742,7 +2676,7 @@ fn scalar_shape() -> Vec<usize> {
 }
 
 fn rows_cols_from_shape(shape: &[usize]) -> (usize, usize) {
-    let rows = shape.get(0).copied().unwrap_or(0);
+    let rows = shape.first().copied().unwrap_or(0);
     let cols = if shape.len() >= 2 {
         shape[1]
     } else if rows == 0 {

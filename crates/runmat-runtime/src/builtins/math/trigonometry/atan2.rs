@@ -96,6 +96,9 @@ async fn atan2_gpu_pair(y: GpuTensorHandle, x: GpuTensorHandle) -> BuiltinResult
 }
 
 fn atan2_host(y: Value, x: Value) -> BuiltinResult<Value> {
+    if let (Some(y_scalar), Some(x_scalar)) = (scalar_atan2_value(&y), scalar_atan2_value(&x)) {
+        return Ok(Value::Num(y_scalar.atan2(x_scalar)));
+    }
     let tensor_y = value_into_atan2_tensor(y)?;
     let tensor_x = value_into_atan2_tensor(x)?;
     compute_atan2_tensor(&tensor_y, &tensor_x)
@@ -131,6 +134,24 @@ fn value_into_atan2_tensor(value: Value) -> BuiltinResult<Tensor> {
             "atan2: internal error converting GPU tensor",
         )),
         other => tensor::value_into_tensor_for("atan2", other).map_err(runtime_error_for),
+    }
+}
+
+fn scalar_atan2_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(n) => Some(*n),
+        Value::Int(i) => Some(i.to_f64()),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
+        Value::CharArray(chars) if chars.rows * chars.cols == 1 => Some(
+            chars
+                .data
+                .first()
+                .map(|&ch| ch as u32 as f64)
+                .unwrap_or(0.0),
+        ),
+        _ => None,
     }
 }
 

@@ -4,14 +4,14 @@ use once_cell::sync::Lazy;
 use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 use std::sync::RwLock;
-use std::thread;
-use std::time::Duration;
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+#[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+use crate::builtins::plotting;
 #[cfg(not(test))]
 use crate::interaction;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -107,12 +107,12 @@ enum PauseWait {
 async fn pause_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     match args.len() {
         0 => {
-            perform_wait(PauseWait::Default)?;
+            perform_wait(PauseWait::Default).await?;
             Ok(empty_return_value())
         }
         1 => match classify_argument(&args[0]).await? {
             PauseArgument::Wait(wait) => {
-                perform_wait(wait)?;
+                perform_wait(wait).await?;
                 Ok(empty_return_value())
             }
             PauseArgument::SetState(next_state) => {
@@ -131,34 +131,97 @@ async fn pause_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
-fn perform_wait(wait: PauseWait) -> Result<(), RuntimeError> {
+async fn perform_wait(wait: PauseWait) -> Result<(), RuntimeError> {
     if !pause_enabled()? {
         return Ok(());
     }
 
+    #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+    {
+        // MATLAB semantics: `pause` gives the UI a chance to update.
+        // In RunMat Web/WASM this is an explicit flush boundary for plotting.
+        let handle = plotting::current_figure_handle();
+        let _ = plotting::render_current_scene(handle.as_u32());
+    }
+
     match wait {
-        PauseWait::Default => wait_for_key_press(),
+        PauseWait::Default => wait_for_key_press().await,
         PauseWait::Seconds(seconds) => {
             if seconds == 0.0 {
-                return Ok(());
+                // `pause(0)` is a useful yield point in simulation loops.
+                #[cfg(target_arch = "wasm32")]
+                {
+                    return wasm_sleep_seconds(0.0).await;
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    return Ok(());
+                }
             }
-            // from_secs_f64 rejects NaN/±Inf; classify_argument filters those earlier.
-            let duration = Duration::from_secs_f64(seconds);
-            thread::sleep(duration);
-            Ok(())
+            sleep_seconds(seconds).await
         }
     }
 }
 
-fn wait_for_key_press() -> Result<(), RuntimeError> {
+async fn wait_for_key_press() -> Result<(), RuntimeError> {
     #[cfg(test)]
     {
         Ok(())
     }
     #[cfg(not(test))]
     {
-        interaction::wait_for_key("")
+        interaction::wait_for_key_async("").await
     }
+}
+
+async fn sleep_seconds(seconds: f64) -> Result<(), RuntimeError> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        wasm_sleep_seconds(seconds).await
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // from_secs_f64 rejects NaN/±Inf; classify_argument filters those earlier.
+        let duration = std::time::Duration::from_secs_f64(seconds);
+        std::thread::sleep(duration);
+        Ok(())
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn wasm_sleep_seconds(seconds: f64) -> Result<(), RuntimeError> {
+    use js_sys::{Function, Promise, Reflect};
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+
+    // `pause` runs in both Window and WebWorker contexts; workers do not have `window`.
+    // Use the global `setTimeout` function instead.
+    let global = js_sys::global();
+    let set_timeout = Reflect::get(&global, &wasm_bindgen::JsValue::from_str("setTimeout"))
+        .map_err(|_| build_runtime_error("pause: setTimeout unavailable").build())?
+        .dyn_into::<Function>()
+        .map_err(|_| build_runtime_error("pause: setTimeout unavailable").build())?;
+
+    let millis = (seconds * 1000.0).max(0.0).round();
+    let millis_i32 = if millis > i32::MAX as f64 {
+        i32::MAX
+    } else {
+        millis as i32
+    };
+
+    let promise = Promise::new(&mut |resolve, _reject| {
+        let resolve: Function = resolve.unchecked_into();
+        let _ = set_timeout.call2(
+            &global,
+            &resolve.into(),
+            &wasm_bindgen::JsValue::from_f64(millis_i32 as f64),
+        );
+    });
+
+    let _ = JsFuture::from(promise)
+        .await
+        .map_err(|err| build_runtime_error(format!("pause: timer failed ({err:?})")).build())?;
+    Ok(())
 }
 
 async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {

@@ -185,6 +185,9 @@ fn pow2_char_array(ca: CharArray) -> BuiltinResult<Value> {
 }
 
 fn pow2_host_scale(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
+    if let Some(result) = scalar_pow2_value(&mantissa, &exponent) {
+        return Ok(result);
+    }
     let mantissa_array = value_into_numeric_array(mantissa, "pow2")?;
     let exponent_array = value_into_numeric_array(exponent, "pow2")?;
     let plan = BroadcastPlan::new(mantissa_array.shape(), exponent_array.shape())
@@ -245,6 +248,44 @@ fn pow2_host_scale(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
             Ok(complex_tensor_into_value(tensor))
         }
     }
+}
+
+fn scalar_real_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(n) => Some(*n),
+        Value::Int(i) => Some(i.to_f64()),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
+        Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
+            Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
+        }
+        _ => None,
+    }
+}
+
+fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
+    match value {
+        Value::Complex(re, im) => Some((*re, *im)),
+        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
+        _ => None,
+    }
+}
+
+fn scalar_pow2_value(mantissa: &Value, exponent: &Value) -> Option<Value> {
+    let base =
+        scalar_complex_value(mantissa).or_else(|| scalar_real_value(mantissa).map(|v| (v, 0.0)))?;
+    let exp =
+        scalar_complex_value(exponent).or_else(|| scalar_real_value(exponent).map(|v| (v, 0.0)))?;
+    let (mr, mi) = base;
+    let (er, ei) = exp;
+    if mi != 0.0 || ei != 0.0 {
+        let (re_pow, im_pow) = pow2_complex(er, ei);
+        let (re, im) = complex_mul(mr, mi, re_pow, im_pow);
+        return Some(Value::Complex(re, im));
+    }
+    let scale = er.exp2();
+    Some(Value::Num(mr * scale))
 }
 
 fn pow2_complex(re: f64, im: f64) -> (f64, f64) {

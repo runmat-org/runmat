@@ -386,8 +386,6 @@ pub(crate) mod tests {
     use runmat_builtins::Tensor;
     use runmat_builtins::{CellArray, CharArray, IntValue, StringArray};
 
-    use crate::builtins::common::test_support;
-
     fn run_strcat(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(strcat_builtin(rest))
     }

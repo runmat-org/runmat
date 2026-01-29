@@ -104,6 +104,9 @@ async fn hypot_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult
 }
 
 fn hypot_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if let (Some(left), Some(right)) = (scalar_hypot_value(&lhs), scalar_hypot_value(&rhs)) {
+        return Ok(Value::Num(left.hypot(right)));
+    }
     let tensor_a = value_into_hypot_tensor(lhs)?;
     let tensor_b = value_into_hypot_tensor(rhs)?;
     compute_hypot_tensor(&tensor_a, &tensor_b)
@@ -151,6 +154,24 @@ fn value_into_hypot_tensor(value: Value) -> BuiltinResult<Tensor> {
 
 fn complex_magnitude(re: f64, im: f64) -> f64 {
     re.hypot(im)
+}
+
+fn scalar_hypot_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(n) => Some(*n),
+        Value::Int(i) => Some(i.to_f64()),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
+        Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
+            Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
+        }
+        Value::Complex(re, im) => Some(complex_magnitude(*re, *im)),
+        Value::ComplexTensor(ct) if ct.data.len() == 1 => {
+            ct.data.first().map(|(re, im)| complex_magnitude(*re, *im))
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]

@@ -25,6 +25,38 @@ fn complex_pow_scalar(base_re: f64, base_im: f64, exp_re: f64, exp_im: f64) -> (
     (mag * b.cos(), mag * b.sin())
 }
 
+fn scalar_real_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(n) => Some(*n),
+        Value::Int(i) => Some(i.to_f64()),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        _ => None,
+    }
+}
+
+fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
+    match value {
+        Value::Complex(re, im) => Some((*re, *im)),
+        Value::ComplexTensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        _ => None,
+    }
+}
+
+fn scalar_power_value(base: &Value, exponent: &Value) -> Option<Value> {
+    let base_val =
+        scalar_complex_value(base).or_else(|| scalar_real_value(base).map(|v| (v, 0.0)))?;
+    let exp_val =
+        scalar_complex_value(exponent).or_else(|| scalar_real_value(exponent).map(|v| (v, 0.0)))?;
+    let (br, bi) = base_val;
+    let (er, ei) = exp_val;
+    if bi != 0.0 || ei != 0.0 {
+        let (re, im) = complex_pow_scalar(br, bi, er, ei);
+        return Some(Value::Complex(re, im));
+    }
+    Some(Value::Num(br.powf(er)))
+}
+
 async fn to_host_value(v: &Value) -> Result<Value, String> {
     match v {
         Value::GpuTensor(h) => {
@@ -433,6 +465,9 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
 /// For matrices, this is matrix exponentiation (A^n where n is integer)
 /// For scalars, this is regular exponentiation
 pub fn power(a: &Value, b: &Value) -> Result<Value, String> {
+    if let Some(result) = scalar_power_value(a, b) {
+        return Ok(result);
+    }
     match (a, b) {
         // Scalar cases - include complex
         (Value::Complex(ar, ai), Value::Complex(br, bi)) => {

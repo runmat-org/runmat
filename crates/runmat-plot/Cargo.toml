@@ -89,7 +89,10 @@ libc = "0.2"
 [features]
 default = ["static", "gui"]
 static = []  # Static image export (always enabled)
-gui = ["winit", "egui", "egui-wgpu", "egui-winit", "eframe", "rfd"]  # Interactive GUI
+# Lightweight egui overlay renderer (usable on wasm without winit).
+egui-overlay = ["egui", "egui-wgpu"]
+# Interactive GUI (native windowing + egui integration).
+gui = ["winit", "egui-overlay", "egui-winit", "eframe", "rfd"]
 jupyter = ["eframe"]  # Jupyter widget support
 web = []  # WebGL backend for web/jupyter
 

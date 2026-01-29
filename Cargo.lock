@@ -6409,6 +6409,7 @@ dependencies = [
  "runmat-filesystem",
  "runmat-gc",
  "runmat-gc-api",
+ "runmat-hir",
  "runmat-macros",
  "runmat-plot",
  "runmat-thread-local",

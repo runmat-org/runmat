@@ -336,6 +336,36 @@ pub fn lower(
     })
 }
 
+fn logical_builtin_return_type(name: &str, arg_types: &[Type]) -> Option<Type> {
+    let name = name.to_ascii_lowercase();
+    let is_logical = matches!(
+        name.as_str(),
+        "logical" | "not" | "and" | "or" | "xor" | "eq" | "ne" | "lt" | "le" | "gt" | "ge"
+    );
+    if !is_logical {
+        return None;
+    }
+    let has_array = arg_types
+        .iter()
+        .any(|t| matches!(t, Type::Tensor { .. } | Type::Logical));
+    let has_unknown = arg_types.iter().any(|t| matches!(t, Type::Unknown));
+    if has_array || has_unknown {
+        Some(Type::Logical)
+    } else {
+        Some(Type::Bool)
+    }
+}
+
+fn logical_binary_result(lhs: &Type, rhs: &Type) -> Type {
+    if matches!(lhs, Type::Tensor { .. } | Type::Logical)
+        || matches!(rhs, Type::Tensor { .. } | Type::Logical)
+    {
+        Type::Logical
+    } else {
+        Type::Bool
+    }
+}
+
 /// Infer output types for each function defined in the program using a flow-sensitive, block-structured
 /// dataflow analysis over the function body. Returns a mapping from function name to per-output types.
 pub fn infer_function_output_types(
@@ -463,11 +493,11 @@ pub fn infer_function_output_types(
                     | parser::BinOp::Less
                     | parser::BinOp::LessEqual
                     | parser::BinOp::Greater
-                    | parser::BinOp::GreaterEqual => Type::Bool,
+                    | parser::BinOp::GreaterEqual => logical_binary_result(&ta, &tb),
                     parser::BinOp::AndAnd
                     | parser::BinOp::OrOr
                     | parser::BinOp::BitAnd
-                    | parser::BinOp::BitOr => Type::Bool,
+                    | parser::BinOp::BitOr => logical_binary_result(&ta, &tb),
                     parser::BinOp::Colon => Type::tensor(),
                 }
             }
@@ -528,6 +558,13 @@ pub fn infer_function_output_types(
                 if let Some(v) = func_returns.get(name) {
                     v.first().cloned().unwrap_or(Type::Unknown)
                 } else {
+                    let arg_types: Vec<Type> = _args
+                        .iter()
+                        .map(|arg| infer_expr_type(arg, env, func_returns))
+                        .collect();
+                    if let Some(ty) = logical_builtin_return_type(name, &arg_types) {
+                        return ty;
+                    }
                     let builtins = runmat_builtins::builtin_functions();
                     if let Some(b) = builtins.iter().find(|b| b.name == *name) {
                         b.return_type.clone()
@@ -1248,11 +1285,11 @@ pub fn infer_function_variable_types(
                     | parser::BinOp::Less
                     | parser::BinOp::LessEqual
                     | parser::BinOp::Greater
-                    | parser::BinOp::GreaterEqual => Type::Bool,
+                    | parser::BinOp::GreaterEqual => logical_binary_result(&ta, &tb),
                     parser::BinOp::AndAnd
                     | parser::BinOp::OrOr
                     | parser::BinOp::BitAnd
-                    | parser::BinOp::BitOr => Type::Bool,
+                    | parser::BinOp::BitOr => logical_binary_result(&ta, &tb),
                     parser::BinOp::Colon => Type::tensor(),
                 }
             }
@@ -1319,11 +1356,17 @@ pub fn infer_function_variable_types(
                 }
             }
             K::Range(_, _, _) => Type::tensor(),
-            K::FuncCall(name, _args) => returns
-                .get(name)
-                .and_then(|v| v.first())
-                .cloned()
-                .unwrap_or_else(|| {
+            K::FuncCall(name, _args) => {
+                if let Some(v) = returns.get(name) {
+                    v.first().cloned().unwrap_or(Type::Unknown)
+                } else {
+                    let arg_types: Vec<Type> = _args
+                        .iter()
+                        .map(|arg| infer_expr_type(arg, env, returns))
+                        .collect();
+                    if let Some(ty) = logical_builtin_return_type(name, &arg_types) {
+                        return ty;
+                    }
                     if let Some(b) = runmat_builtins::builtin_functions()
                         .into_iter()
                         .find(|b| b.name == *name)
@@ -1332,7 +1375,8 @@ pub fn infer_function_variable_types(
                     } else {
                         Type::Unknown
                     }
-                }),
+                }
+            }
             K::MethodCall(_, _, _) => Type::Unknown,
             K::Member(_, _) => Type::Unknown,
             K::MemberDynamic(_, _) => Type::Unknown,
@@ -3265,6 +3309,11 @@ impl Ctx {
         if let Some(HirStmt::Function { outputs, body, .. }) = self.functions.get(func_name) {
             // Analyze the function body to infer the output type
             return self.infer_user_function_return_type(outputs, body, args);
+        }
+
+        let arg_types: Vec<Type> = args.iter().map(|arg| arg.ty.clone()).collect();
+        if let Some(ty) = logical_builtin_return_type(func_name, &arg_types) {
+            return ty;
         }
 
         // Check builtin functions using the proper signature system

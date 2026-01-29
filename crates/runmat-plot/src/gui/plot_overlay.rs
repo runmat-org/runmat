@@ -40,6 +40,12 @@ pub struct OverlayConfig {
     /// Whether to show the sidebar with controls
     pub show_sidebar: bool,
 
+    /// Whether to show the top toolbar (legend/grid/reset/save).
+    pub show_toolbar: bool,
+
+    /// Scale factor applied to overlay font sizes (1.0 = default).
+    pub font_scale: f32,
+
     /// Whether to show grid lines
     pub show_grid: bool,
 
@@ -75,6 +81,8 @@ impl Default for OverlayConfig {
     fn default() -> Self {
         Self {
             show_sidebar: true,
+            show_toolbar: true,
+            font_scale: 1.0,
             show_grid: true,
             show_axes: true,
             show_title: true,
@@ -171,38 +179,42 @@ impl PlotOverlay {
             .frame(egui::Frame::none()) // Transparent frame
             .show(ctx, |ui| {
                 // Toolbar (top-right)
-                egui::TopBottomPanel::top("plot_toolbar")
-                    .frame(egui::Frame::none())
-                    .show_inside(ui, |ui| {
-                        let padded = ui.max_rect().shrink2(egui::vec2(12.0, 6.0));
-                        self.toolbar_rect = Some(padded);
-                        ui.allocate_ui_at_rect(padded, |ui| {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 4.0);
-                                    ui.spacing_mut().button_padding = egui::vec2(8.0, 6.0);
-                                    if ui.button("Save PNG").clicked() {
-                                        self.want_save_png = true;
-                                    }
-                                    if ui.button("Save SVG").clicked() {
-                                        self.want_save_svg = true;
-                                    }
-                                    if ui.button("Reset View").clicked() {
-                                        self.want_reset_view = true;
-                                    }
-                                    let mut grid = plot_renderer.overlay_show_grid();
-                                    if ui.toggle_value(&mut grid, "Grid").changed() {
-                                        self.want_toggle_grid = Some(grid);
-                                    }
-                                    let mut legend = plot_renderer.overlay_show_legend();
-                                    if ui.toggle_value(&mut legend, "Legend").changed() {
-                                        self.want_toggle_legend = Some(legend);
-                                    }
-                                },
-                            );
+                if config.show_toolbar {
+                    egui::TopBottomPanel::top("plot_toolbar")
+                        .frame(egui::Frame::none())
+                        .show_inside(ui, |ui| {
+                            let padded = ui.max_rect().shrink2(egui::vec2(12.0, 6.0));
+                            self.toolbar_rect = Some(padded);
+                            ui.allocate_ui_at_rect(padded, |ui| {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.spacing_mut().item_spacing = egui::vec2(8.0, 4.0);
+                                        ui.spacing_mut().button_padding = egui::vec2(8.0, 6.0);
+                                        if ui.button("Save PNG").clicked() {
+                                            self.want_save_png = true;
+                                        }
+                                        if ui.button("Save SVG").clicked() {
+                                            self.want_save_svg = true;
+                                        }
+                                        if ui.button("Reset View").clicked() {
+                                            self.want_reset_view = true;
+                                        }
+                                        let mut grid = plot_renderer.overlay_show_grid();
+                                        if ui.toggle_value(&mut grid, "Grid").changed() {
+                                            self.want_toggle_grid = Some(grid);
+                                        }
+                                        let mut legend = plot_renderer.overlay_show_legend();
+                                        if ui.toggle_value(&mut legend, "Legend").changed() {
+                                            self.want_toggle_legend = Some(legend);
+                                        }
+                                    },
+                                );
+                            });
                         });
-                    });
+                } else {
+                    self.toolbar_rect = None;
+                }
                 plot_area = Some(self.render_plot_area(ui, plot_renderer, config));
             });
 
@@ -428,16 +440,16 @@ impl PlotOverlay {
         // Draw title if enabled (single global title)
         if config.show_title {
             if let Some(title) = &config.title {
-                self.draw_title(ui, centered_plot_rect, title);
+                self.draw_title(ui, centered_plot_rect, title, config.font_scale);
             }
         }
 
         // Draw axis labels
         if let Some(x_label) = &config.x_label {
-            self.draw_x_label(ui, centered_plot_rect, x_label);
+            self.draw_x_label(ui, centered_plot_rect, x_label, config.font_scale);
         }
         if let Some(y_label) = &config.y_label {
-            self.draw_y_label(ui, centered_plot_rect, y_label);
+            self.draw_y_label(ui, centered_plot_rect, y_label, config.font_scale);
         }
 
         // Draw legend if enabled and entries available
@@ -733,15 +745,17 @@ impl PlotOverlay {
         ui: &mut egui::Ui,
         plot_rect: Rect,
         plot_renderer: &PlotRenderer,
-        _config: &OverlayConfig,
+        config: &OverlayConfig,
         view_bounds_override: Option<(f64, f64, f64, f64)>,
     ) {
         if let Some(data_bounds) = view_bounds_override.or_else(|| plot_renderer.data_bounds()) {
             let (x_min, x_max, y_min, y_max) = data_bounds;
             let x_range = x_max - x_min;
             let y_range = y_max - y_min;
-            let tick_length = 6.0;
-            let label_offset = 15.0;
+            let scale = config.font_scale.max(0.75);
+            let tick_length = 6.0 * scale;
+            let label_offset = 15.0 * scale;
+            let tick_font = FontId::proportional(10.0 * scale);
 
             let x_log = plot_renderer.overlay_x_log();
             let y_log = plot_renderer.overlay_y_log();
@@ -777,7 +791,7 @@ impl PlotOverlay {
                             Pos2::new(x_screen, plot_rect.max.y + label_offset),
                             Align2::CENTER_CENTER,
                             text,
-                            FontId::proportional(10.0),
+                            tick_font.clone(),
                             Color32::from_gray(200),
                         );
                     }
@@ -804,7 +818,7 @@ impl PlotOverlay {
                             Pos2::new(plot_rect.min.x - label_offset, y_screen),
                             Align2::CENTER_CENTER,
                             text,
-                            FontId::proportional(10.0),
+                            tick_font.clone(),
                             Color32::from_gray(200),
                         );
                     }
@@ -834,7 +848,7 @@ impl PlotOverlay {
                         Pos2::new(x_screen, plot_rect.max.y + label_offset),
                         Align2::CENTER_CENTER,
                         format!("10^{}", d),
-                        FontId::proportional(10.0),
+                        tick_font.clone(),
                         Color32::from_gray(200),
                     );
                 }
@@ -855,7 +869,7 @@ impl PlotOverlay {
                         Pos2::new(x_screen, plot_rect.max.y + label_offset),
                         Align2::CENTER_CENTER,
                         plot_utils::format_tick_label(x_val),
-                        FontId::proportional(10.0),
+                        tick_font.clone(),
                         Color32::from_gray(200),
                     );
                     x_val += x_tick_interval;
@@ -883,7 +897,7 @@ impl PlotOverlay {
                         Pos2::new(plot_rect.min.x - label_offset, y_screen),
                         Align2::CENTER_CENTER,
                         format!("10^{}", d),
-                        FontId::proportional(10.0),
+                        tick_font.clone(),
                         Color32::from_gray(200),
                     );
                 }
@@ -904,7 +918,7 @@ impl PlotOverlay {
                         Pos2::new(plot_rect.min.x - label_offset, y_screen),
                         Align2::CENTER_CENTER,
                         plot_utils::format_tick_label(y_val),
-                        FontId::proportional(10.0),
+                        tick_font.clone(),
                         Color32::from_gray(200),
                     );
                     y_val += y_tick_interval;
@@ -914,34 +928,37 @@ impl PlotOverlay {
     }
 
     /// Draw plot title
-    fn draw_title(&self, ui: &mut egui::Ui, plot_rect: Rect, title: &str) {
+    fn draw_title(&self, ui: &mut egui::Ui, plot_rect: Rect, title: &str, scale: f32) {
+        let scale = scale.max(0.75);
         ui.painter().text(
-            Pos2::new(plot_rect.center().x, plot_rect.min.y - 20.0),
+            Pos2::new(plot_rect.center().x, plot_rect.min.y - 20.0 * scale),
             Align2::CENTER_CENTER,
             title,
-            FontId::proportional(16.0),
+            FontId::proportional(16.0 * scale),
             Color32::WHITE,
         );
     }
 
     /// Draw X-axis label
-    fn draw_x_label(&self, ui: &mut egui::Ui, plot_rect: Rect, label: &str) {
+    fn draw_x_label(&self, ui: &mut egui::Ui, plot_rect: Rect, label: &str, scale: f32) {
+        let scale = scale.max(0.75);
         ui.painter().text(
-            Pos2::new(plot_rect.center().x, plot_rect.max.y + 40.0),
+            Pos2::new(plot_rect.center().x, plot_rect.max.y + 40.0 * scale),
             Align2::CENTER_CENTER,
             label,
-            FontId::proportional(14.0),
+            FontId::proportional(14.0 * scale),
             Color32::WHITE,
         );
     }
 
     /// Draw Y-axis label
-    fn draw_y_label(&self, ui: &mut egui::Ui, plot_rect: Rect, label: &str) {
+    fn draw_y_label(&self, ui: &mut egui::Ui, plot_rect: Rect, label: &str, scale: f32) {
+        let scale = scale.max(0.75);
         ui.painter().text(
-            Pos2::new(plot_rect.min.x - 40.0, plot_rect.center().y),
+            Pos2::new(plot_rect.min.x - 40.0 * scale, plot_rect.center().y),
             Align2::CENTER_CENTER,
             label,
-            FontId::proportional(14.0),
+            FontId::proportional(14.0 * scale),
             Color32::WHITE,
         );
     }

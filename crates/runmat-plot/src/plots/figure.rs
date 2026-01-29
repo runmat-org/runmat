@@ -506,7 +506,10 @@ impl Figure {
     ///
     /// Some plot types (notably thick 2D lines) need a viewport hint to convert
     /// pixel-based style parameters (e.g. `LineWidth`) into data-space geometry.
-    pub fn render_data_with_viewport(&mut self, viewport_px: Option<(u32, u32)>) -> Vec<RenderData> {
+    pub fn render_data_with_viewport(
+        &mut self,
+        viewport_px: Option<(u32, u32)>,
+    ) -> Vec<RenderData> {
         let mut out = Vec::new();
         for p in self.plots.iter_mut() {
             if !p.is_visible() {

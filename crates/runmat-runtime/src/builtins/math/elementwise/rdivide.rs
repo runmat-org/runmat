@@ -430,6 +430,9 @@ async fn rdivide_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResu
 }
 
 fn rdivide_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if let Some(result) = scalar_divide_value(&lhs, &rhs) {
+        return Ok(result);
+    }
     match (classify_operand(lhs)?, classify_operand(rhs)?) {
         (RdivideOperand::Real(a), RdivideOperand::Real(b)) => rdivide_real_real(&a, &b),
         (RdivideOperand::Complex(a), RdivideOperand::Complex(b)) => rdivide_complex_complex(&a, &b),
@@ -574,6 +577,40 @@ fn extract_scalar_f64(value: &Value) -> BuiltinResult<Option<f64>> {
         )),
         _ => Ok(None),
     }
+}
+
+fn scalar_real_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(n) => Some(*n),
+        Value::Int(i) => Some(i.to_f64()),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
+        Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
+            Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
+        }
+        _ => None,
+    }
+}
+
+fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
+    match value {
+        Value::Complex(re, im) => Some((*re, *im)),
+        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
+        _ => None,
+    }
+}
+
+fn scalar_divide_value(lhs: &Value, rhs: &Value) -> Option<Value> {
+    let left = scalar_complex_value(lhs).or_else(|| scalar_real_value(lhs).map(|v| (v, 0.0)))?;
+    let right = scalar_complex_value(rhs).or_else(|| scalar_real_value(rhs).map(|v| (v, 0.0)))?;
+    let (ar, ai) = left;
+    let (br, bi) = right;
+    if ai != 0.0 || bi != 0.0 {
+        let quotient = Complex64::new(ar, ai) / Complex64::new(br, bi);
+        return Some(Value::Complex(quotient.re, quotient.im));
+    }
+    Some(Value::Num(ar / br))
 }
 
 fn is_scalar_shape(shape: &[usize]) -> bool {

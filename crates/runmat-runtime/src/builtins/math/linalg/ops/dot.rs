@@ -44,9 +44,7 @@ async fn parse_dimension_arg(value: &Value) -> Result<usize, String> {
         Value::Int(_) | Value::Num(_) => tensor::dimension_from_value_async(value, DOT_NAME, false)
             .await
             .and_then(|dim| {
-                dim.ok_or_else(|| {
-                    format!("{DOT_NAME}: dimension must be numeric, got {value:?}")
-                })
+                dim.ok_or_else(|| format!("{DOT_NAME}: dimension must be numeric, got {value:?}"))
             }),
         _ => Err(format!(
             "{DOT_NAME}: dimension must be numeric, got {value:?}"

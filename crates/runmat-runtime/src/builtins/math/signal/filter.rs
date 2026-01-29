@@ -53,14 +53,16 @@ fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
 
 async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     match value {
-        Value::Int(_) | Value::Num(_) => tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
-            .await
-            .map_err(runtime_error_for)?
-            .ok_or_else(|| {
-                runtime_error_for(format!(
-                    "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
-                ))
-            }),
+        Value::Int(_) | Value::Num(_) => {
+            tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
+                .await
+                .map_err(runtime_error_for)?
+                .ok_or_else(|| {
+                    runtime_error_for(format!(
+                        "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
+                    ))
+                })
+        }
         _ => Err(runtime_error_for(format!(
             "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
         ))),

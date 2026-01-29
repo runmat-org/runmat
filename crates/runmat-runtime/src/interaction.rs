@@ -1,6 +1,8 @@
 use once_cell::sync::OnceCell;
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
+use std::future::Future;
+use std::pin::Pin;
 
 use crate::{build_runtime_error, RuntimeError};
 #[cfg(not(target_arch = "wasm32"))]
@@ -13,8 +15,9 @@ use std::sync::{Arc, RwLock};
 
 pub use runmat_async::InteractionKind;
 
-pub struct InteractionPrompt<'a> {
-    pub prompt: &'a str,
+#[derive(Clone)]
+pub struct InteractionPromptOwned {
+    pub prompt: String,
     pub kind: InteractionKind,
 }
 
@@ -24,15 +27,13 @@ pub enum InteractionResponse {
     KeyPress,
 }
 
-#[derive(Clone)]
-pub enum InteractionDecision {
-    Respond(Result<InteractionResponse, String>),
-}
+pub type AsyncInteractionFuture =
+    Pin<Box<dyn Future<Output = Result<InteractionResponse, String>> + 'static>>;
 
-type InteractionHandler =
-    dyn for<'a> Fn(InteractionPrompt<'a>) -> InteractionDecision + Send + Sync;
+pub type AsyncInteractionHandler =
+    dyn Fn(InteractionPromptOwned) -> AsyncInteractionFuture + Send + Sync;
 
-static HANDLER: OnceCell<RwLock<Option<Arc<InteractionHandler>>>> = OnceCell::new();
+static ASYNC_HANDLER: OnceCell<RwLock<Option<Arc<AsyncInteractionHandler>>>> = OnceCell::new();
 runmat_thread_local! {
     static QUEUED_RESPONSE: RefCell<Option<Result<InteractionResponse, String>>> =
         const { RefCell::new(None) };
@@ -58,38 +59,32 @@ fn force_interactive_stdin() -> bool {
     FORCE_INTERACTIVE_STDIN.load(Ordering::Relaxed)
 }
 
-fn handler_slot() -> &'static RwLock<Option<Arc<InteractionHandler>>> {
-    HANDLER.get_or_init(|| RwLock::new(None))
+fn async_handler_slot() -> &'static RwLock<Option<Arc<AsyncInteractionHandler>>> {
+    ASYNC_HANDLER.get_or_init(|| RwLock::new(None))
 }
 
-pub struct HandlerGuard {
-    previous: Option<Arc<InteractionHandler>>,
+pub struct AsyncHandlerGuard {
+    previous: Option<Arc<AsyncInteractionHandler>>,
 }
 
-impl HandlerGuard {
-    pub fn install(handler: Option<Arc<InteractionHandler>>) -> Self {
-        let mut slot = handler_slot()
-            .write()
-            .unwrap_or_else(|_| panic!("interaction handler lock poisoned"));
-        let previous = std::mem::replace(&mut *slot, handler);
-        Self { previous }
-    }
-}
-
-impl Drop for HandlerGuard {
+impl Drop for AsyncHandlerGuard {
     fn drop(&mut self) {
-        let mut slot = handler_slot()
+        let mut slot = async_handler_slot()
             .write()
-            .unwrap_or_else(|_| panic!("interaction handler lock poisoned"));
+            .unwrap_or_else(|_| panic!("interaction async handler lock poisoned"));
         *slot = self.previous.take();
     }
 }
 
-pub fn replace_handler(handler: Option<Arc<InteractionHandler>>) -> HandlerGuard {
-    HandlerGuard::install(handler)
+pub fn replace_async_handler(handler: Option<Arc<AsyncInteractionHandler>>) -> AsyncHandlerGuard {
+    let mut slot = async_handler_slot()
+        .write()
+        .unwrap_or_else(|_| panic!("interaction async handler lock poisoned"));
+    let previous = std::mem::replace(&mut *slot, handler);
+    AsyncHandlerGuard { previous }
 }
 
-pub fn request_line(prompt: &str, echo: bool) -> Result<String, RuntimeError> {
+pub async fn request_line_async(prompt: &str, echo: bool) -> Result<String, RuntimeError> {
     if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
         return match response.map_err(|err| build_runtime_error(err).build())? {
             InteractionResponse::Line(value) => Ok(value),
@@ -98,27 +93,32 @@ pub fn request_line(prompt: &str, echo: bool) -> Result<String, RuntimeError> {
             }
         };
     }
-    if let Some(handler) = handler_slot().read().ok().and_then(|slot| slot.clone()) {
-        match handler(InteractionPrompt {
-            prompt,
+
+    if let Some(handler) = async_handler_slot()
+        .read()
+        .ok()
+        .and_then(|slot| slot.clone())
+    {
+        let owned = InteractionPromptOwned {
+            prompt: prompt.to_string(),
             kind: InteractionKind::Line { echo },
-        }) {
-            InteractionDecision::Respond(result) => {
-                match result.map_err(|err| build_runtime_error(err).build())? {
-                    InteractionResponse::Line(value) => Ok(value),
-                    InteractionResponse::KeyPress => Err(build_runtime_error(
-                        "interaction handler returned keypress for line request",
-                    )
-                    .build()),
-                }
-            }
-        }
-    } else {
-        default_read_line(prompt, echo).map_err(|err| build_runtime_error(err).build())
+        };
+        let value = handler(owned)
+            .await
+            .map_err(|err| build_runtime_error(err).build())?;
+        return match value {
+            InteractionResponse::Line(line) => Ok(line),
+            InteractionResponse::KeyPress => Err(build_runtime_error(
+                "interaction async handler returned keypress for line request",
+            )
+            .build()),
+        };
     }
+
+    default_read_line(prompt, echo).map_err(|err| build_runtime_error(err).build())
 }
 
-pub fn wait_for_key(prompt: &str) -> Result<(), RuntimeError> {
+pub async fn wait_for_key_async(prompt: &str) -> Result<(), RuntimeError> {
     if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
         return match response.map_err(|err| build_runtime_error(err).build())? {
             InteractionResponse::Line(_) => {
@@ -127,24 +127,29 @@ pub fn wait_for_key(prompt: &str) -> Result<(), RuntimeError> {
             InteractionResponse::KeyPress => Ok(()),
         };
     }
-    if let Some(handler) = handler_slot().read().ok().and_then(|slot| slot.clone()) {
-        match handler(InteractionPrompt {
-            prompt,
+
+    if let Some(handler) = async_handler_slot()
+        .read()
+        .ok()
+        .and_then(|slot| slot.clone())
+    {
+        let owned = InteractionPromptOwned {
+            prompt: prompt.to_string(),
             kind: InteractionKind::KeyPress,
-        }) {
-            InteractionDecision::Respond(result) => {
-                match result.map_err(|err| build_runtime_error(err).build())? {
-                    InteractionResponse::Line(_) => Err(build_runtime_error(
-                        "interaction handler returned line value for keypress request",
-                    )
-                    .build()),
-                    InteractionResponse::KeyPress => Ok(()),
-                }
-            }
-        }
-    } else {
-        default_wait_for_key(prompt).map_err(|err| build_runtime_error(err).build())
+        };
+        let value = handler(owned)
+            .await
+            .map_err(|err| build_runtime_error(err).build())?;
+        return match value {
+            InteractionResponse::Line(_) => Err(build_runtime_error(
+                "interaction async handler returned line value for keypress request",
+            )
+            .build()),
+            InteractionResponse::KeyPress => Ok(()),
+        };
     }
+
+    default_wait_for_key(prompt).map_err(|err| build_runtime_error(err).build())
 }
 
 pub fn default_read_line(prompt: &str, echo: bool) -> Result<String, String> {

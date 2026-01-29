@@ -155,9 +155,7 @@ impl PlotRenderer {
         Some((vertex_buffer, index_buffer))
     }
 
-    fn gpu_indirect_args<'a>(
-        render_data: &'a crate::core::RenderData,
-    ) -> Option<(&'a wgpu::Buffer, u64)> {
+    fn gpu_indirect_args(render_data: &crate::core::RenderData) -> Option<(&wgpu::Buffer, u64)> {
         render_data
             .gpu_vertices
             .as_ref()
@@ -954,41 +952,41 @@ impl PlotRenderer {
 
             // Now render all items with proper bind group setup
             for (i, (render_data, vertex_buffer, index_buffer)) in render_items.iter().enumerate() {
-            #[cfg(target_arch = "wasm32")]
-            {
-                // On wasm, "blank but drawing" is often caused by bad vertex data (NaNs/alpha=0)
-                // or using the wrong pipeline. Emit a single summary per item.
-                if log::log_enabled!(log::Level::Debug) {
-                    if let Some(v0) = render_data.vertices.first() {
-                        log::debug!(
-                            target: "runmat_plot",
-                            "wasm draw item: pipeline={:?} verts={} v0.pos=({:.3},{:.3},{:.3}) v0.color=({:.3},{:.3},{:.3},{:.3})",
-                            render_data.pipeline_type,
-                            render_data.vertices.len(),
-                            v0.position[0],
-                            v0.position[1],
-                            v0.position[2],
-                            v0.color[0],
-                            v0.color[1],
-                            v0.color[2],
-                            v0.color[3],
-                        );
-                    } else if render_data.gpu_vertices.is_some() {
-                        log::debug!(
-                            target: "runmat_plot",
-                            "wasm draw item: pipeline={:?} using gpu_vertices vertex_count={}",
-                            render_data.pipeline_type,
-                            render_data.vertex_count(),
-                        );
-                    } else {
-                        log::debug!(
-                            target: "runmat_plot",
-                            "wasm draw item: pipeline={:?} has no vertices",
-                            render_data.pipeline_type
-                        );
+                #[cfg(target_arch = "wasm32")]
+                {
+                    // On wasm, "blank but drawing" is often caused by bad vertex data (NaNs/alpha=0)
+                    // or using the wrong pipeline. Emit a single summary per item.
+                    if log::log_enabled!(log::Level::Debug) {
+                        if let Some(v0) = render_data.vertices.first() {
+                            log::debug!(
+                                target: "runmat_plot",
+                                "wasm draw item: pipeline={:?} verts={} v0.pos=({:.3},{:.3},{:.3}) v0.color=({:.3},{:.3},{:.3},{:.3})",
+                                render_data.pipeline_type,
+                                render_data.vertices.len(),
+                                v0.position[0],
+                                v0.position[1],
+                                v0.position[2],
+                                v0.color[0],
+                                v0.color[1],
+                                v0.color[2],
+                                v0.color[3],
+                            );
+                        } else if render_data.gpu_vertices.is_some() {
+                            log::debug!(
+                                target: "runmat_plot",
+                                "wasm draw item: pipeline={:?} using gpu_vertices vertex_count={}",
+                                render_data.pipeline_type,
+                                render_data.vertex_count(),
+                            );
+                        } else {
+                            log::debug!(
+                                target: "runmat_plot",
+                                "wasm draw item: pipeline={:?} has no vertices",
+                                render_data.pipeline_type
+                            );
+                        }
                     }
                 }
-            }
 
                 // Get the appropriate pipeline for this render data (pipeline ensured above)
                 if render_data.pipeline_type == crate::core::PipelineType::Textured {

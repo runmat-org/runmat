@@ -24,7 +24,6 @@ use super::style::{
     value_as_string, LineAppearance, LineStyleParseOptions, MarkerAppearance, MarkerColor,
     MarkerKind, DEFAULT_LINE_MARKER_SIZE,
 };
-use std::collections::VecDeque;
 use std::convert::TryFrom;
 
 use crate::{BuiltinResult, RuntimeError};
@@ -37,12 +36,15 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    // Plotting is a sink: it does not participate in fusion, but it *can* consume GPU-resident
+    // tensors directly (zero-copy) when the web renderer shares the provider WGPU context.
+    // Do not force implicit gathers here; that defeats GPU-resident workloads.
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Plots are rendered on the host; gpuArray inputs are gathered before rendering.",
+    notes: "Plots are rendered by the host renderer; GPU inputs may be consumed zero-copy when a shared WGPU context is installed.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::plot")]
@@ -102,7 +104,11 @@ pub async fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Builti
             };
             plan.line_style_explicit = true;
         }
-        let label = plan.label.unwrap_or_else(|| {
+        let inferred_label = plan
+            .label
+            .take()
+            .or_else(|| plan.source_y_arg_index.and_then(crate::callsite::arg_text));
+        let label = inferred_label.unwrap_or_else(|| {
             if total == 1 {
                 "Data".to_string()
             } else {
@@ -133,13 +139,11 @@ pub async fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Builti
         let (x_tensor, y_tensor) = data.into_tensors_async("plot").await?;
         let (x_vals, y_vals) = numeric_pair(x_tensor, y_tensor, "plot")?;
         plots.push(build_line_plot(x_vals, y_vals, &label, &appearance)?);
-        }
+    }
 
     let mut plots_opt = Some(plots);
     let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes_index| {
-        let plots = plots_opt
-            .take()
-            .expect("plot series consumed exactly once");
+        let plots = plots_opt.take().expect("plot series consumed exactly once");
         for plot in plots {
             figure.add_line_plot_on_axes(plot, axes_index);
         }
@@ -191,34 +195,63 @@ impl LineInput {
             Self::Host(_) => None,
         }
     }
-
 }
 
 fn parse_series_specs(
     args: Vec<Value>,
 ) -> BuiltinResult<(Vec<SeriesRenderPlan>, Option<Vec<LineStyle>>)> {
-    let mut queue: VecDeque<Value> = VecDeque::from(args);
-    if queue.is_empty() {
+    if args.is_empty() {
         return Err(plot_err("expected at least one data series"));
     }
     let mut plans = Vec::new();
     let mut line_style_order: Option<Vec<LineStyle>> = None;
     let mut inline_opts = LineStyleParseOptions::plot();
     inline_opts.forbid_leading_numeric = false;
-    while let Some(x_val) = queue.pop_front() {
+
+    let mut idx = 0usize;
+    while idx < args.len() {
+        let x_val = args[idx].clone();
+        idx += 1;
         if !is_numeric_value(&x_val) {
             return Err(plot_err(
                 "expected numeric X data before style arguments or options",
             ));
         }
-        let y_val = queue
-            .pop_front()
-            .ok_or_else(|| plot_err("expected Y argument after X data"))?;
+        if idx >= args.len() {
+            return Err(plot_err("expected Y argument after X data"));
+        }
+        let y_arg_index = idx;
+        let y_val = args[idx].clone();
+        idx += 1;
         if !is_numeric_value(&y_val) {
             return Err(plot_err("expected numeric Y argument after X data"));
         }
+
         let series_input = PlotSeriesInput::new(x_val, y_val)?;
-        let style_tokens = consume_inline_style_tokens(&mut queue)?;
+
+        let mut style_tokens = Vec::new();
+        loop {
+            let should_consume =
+                matches!(args.get(idx), Some(Value::String(_) | Value::CharArray(_)));
+            if !should_consume {
+                break;
+            }
+            let token = args[idx].clone();
+            idx += 1;
+            let token_text = value_as_string(&token)
+                .ok_or_else(|| plot_err("style tokens must be char arrays or strings"))?;
+            let lower = token_text.trim().to_ascii_lowercase();
+            style_tokens.push(token);
+
+            if looks_like_option_name(&lower) {
+                if idx >= args.len() {
+                    return Err(plot_err("name-value arguments must come in pairs"));
+                }
+                style_tokens.push(args[idx].clone());
+                idx += 1;
+            }
+        }
+
         let parsed_style = parse_line_style_args(&style_tokens, &inline_opts)?;
         if let Some(order) = parsed_style.line_style_order.clone() {
             line_style_order = Some(order);
@@ -229,6 +262,7 @@ fn parse_series_specs(
             requires_cpu: parsed_style.requires_cpu_fallback,
             line_style_explicit: parsed_style.line_style_explicit,
             label: parsed_style.label.clone(),
+            source_y_arg_index: Some(y_arg_index),
         });
     }
 
@@ -248,30 +282,6 @@ fn is_numeric_value(value: &Value) -> bool {
 
 fn plot_err(msg: impl Into<String>) -> RuntimeError {
     plotting_error(BUILTIN_NAME, format!("plot: {}", msg.into()))
-}
-
-fn consume_inline_style_tokens(queue: &mut VecDeque<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut tokens = Vec::new();
-    loop {
-        let should_consume = matches!(queue.front(), Some(Value::String(_) | Value::CharArray(_)));
-        if !should_consume {
-            break;
-        }
-
-        let token = queue.pop_front().expect("front value exists");
-        let token_text = value_as_string(&token)
-            .ok_or_else(|| plot_err("style tokens must be char arrays or strings"))?;
-        let lower = token_text.trim().to_ascii_lowercase();
-        tokens.push(token);
-
-        if looks_like_option_name(&lower) {
-            let value = queue
-                .pop_front()
-                .ok_or_else(|| plot_err("name-value arguments must come in pairs"))?;
-            tokens.push(value);
-        }
-    }
-    Ok(tokens)
 }
 
 fn apply_line_style_order(plans: &mut [SeriesRenderPlan], order: &[LineStyle]) {
@@ -425,6 +435,7 @@ struct SeriesRenderPlan {
     requires_cpu: bool,
     line_style_explicit: bool,
     label: Option<String>,
+    source_y_arg_index: Option<usize>,
 }
 
 impl PlotSeriesInput {
@@ -459,6 +470,7 @@ impl PlotSeriesInput {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use crate::builtins::plotting::{clone_figure, current_figure_handle};
     use crate::RuntimeError;
     use futures::executor::block_on;
 
@@ -509,6 +521,31 @@ pub(crate) mod tests {
         if let Err(flow) = result {
             assert_plotting_unavailable(&flow);
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn plot_builtin_infers_label_from_callsite() {
+        setup_plot_tests();
+        let source = "plot(a, b);";
+        let _source_guard = crate::source_context::replace_current_source(Some(source));
+        let spans = vec![
+            runmat_hir::Span { start: 5, end: 6 }, // "a"
+            runmat_hir::Span { start: 8, end: 9 }, // "b"
+        ];
+        let _callsite_guard = crate::callsite::push_callsite(None, Some(spans));
+
+        let _ = block_on(plot_builtin(
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Vec::new(),
+        ));
+
+        let handle = current_figure_handle();
+        let fig = clone_figure(handle).expect("figure exists");
+        let entries = fig.legend_entries();
+        assert!(!entries.is_empty(), "expected legend entries");
+        assert_eq!(entries[0].label, "b");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

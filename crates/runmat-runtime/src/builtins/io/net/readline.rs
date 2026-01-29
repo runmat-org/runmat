@@ -269,7 +269,6 @@ fn struct_field<'a>(value: &'a StructValue, name: &str) -> Option<&'a Value> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
     use crate::builtins::io::net::accept::{
         client_handle, configure_stream, insert_client, remove_client_for_test,
     };

@@ -142,12 +142,14 @@ impl ParsedRandPerm {
             }
 
             if k.is_none() {
-                k = Some(parse_size_argument(
-                    &arg,
-                    true,
-                    "randperm: K must be a non-negative integer (and <= N)",
-                )
-                .await?);
+                k = Some(
+                    parse_size_argument(
+                        &arg,
+                        true,
+                        "randperm: K must be a non-negative integer (and <= N)",
+                    )
+                    .await?,
+                );
                 idx += 1;
                 continue;
             }
@@ -260,8 +262,7 @@ async fn parse_size_argument(
         _ => false,
     };
 
-    if let Ok(Some(dim)) = tensor::dimension_from_value_async(value, "randperm", allow_zero).await
-    {
+    if let Ok(Some(dim)) = tensor::dimension_from_value_async(value, "randperm", allow_zero).await {
         return validate_size_argument(dim, allow_zero, message);
     }
 
