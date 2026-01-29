@@ -22,8 +22,10 @@ use runmat_builtins::{Type, Value};
 use runmat_ignition::{Bytecode, Instr};
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use std::cell::Cell;
+use std::env;
 use std::ffi::CStr;
 use std::future::Future;
+use std::pin::Pin;
 use std::task::Context;
 
 use target_lexicon::Triple;
@@ -40,11 +42,19 @@ pub use compiler::*;
 pub use jit_memory::*;
 pub use profiler::HotspotProfiler;
 
-fn run_immediate<F: Future>(future: F) -> Result<F::Output> {
-    stacker::grow(16 * 1024 * 1024, || {
+const JIT_FALLBACK_STACK_BYTES: usize = 16 * 1024 * 1024;
+const JIT_FALLBACK_STACK_ENV: &str = "RUNMAT_TURBINE_STACK_MB";
+
+fn run_immediate<F: Future>(mut future: Pin<Box<F>>) -> Result<F::Output> {
+    let stack_bytes = env::var(JIT_FALLBACK_STACK_ENV)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|mb| *mb > 0)
+        .map(|mb| mb.saturating_mul(1024 * 1024))
+        .unwrap_or(JIT_FALLBACK_STACK_BYTES);
+    stacker::grow(stack_bytes, || {
         let waker = noop_waker();
         let mut context = Context::from_waker(&waker);
-        let mut future = Box::pin(future);
         loop {
             match future.as_mut().poll(&mut context) {
                 std::task::Poll::Ready(output) => return Ok(output),
@@ -145,11 +155,11 @@ fn execute_user_function_isolated(
     let func_bytecode = runmat_ignition::compile(&func_program, all_functions)
         .map_err(|e| execution_error(format!("Failed to compile function: {e}")))?;
 
-    let func_result_vars = match run_immediate(runmat_ignition::interpret_with_vars(
+    let func_result_vars = match run_immediate(Box::pin(runmat_ignition::interpret_with_vars(
         &func_bytecode,
         &mut func_vars,
         Some(function_def.name.as_str()),
-    ))? {
+    )))? {
         Ok(runmat_ignition::InterpreterOutcome::Completed(values)) => Ok(values),
 
         Err(e) => Err(TurbineError::ExecutionError(e)),
@@ -532,11 +542,11 @@ impl TurbineEngine {
         debug!("Executing bytecode in Ignition interpreter mode (supports user functions)");
 
         // Use the main Ignition interpreter which has full feature support
-        match run_immediate(runmat_ignition::interpret_with_vars(
+        match run_immediate(Box::pin(runmat_ignition::interpret_with_vars(
             bytecode,
             vars,
             Some("<main>"),
-        ))? {
+        )))? {
             Ok(runmat_ignition::InterpreterOutcome::Completed(_)) => Ok((0, false)),
 
             Err(e) => Err(TurbineError::ExecutionError(e)),

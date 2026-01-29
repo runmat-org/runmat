@@ -242,7 +242,8 @@ impl PlotRenderer {
             device: &self.wgpu_renderer.device,
             queue: &self.wgpu_renderer.queue,
         };
-        let render_data_list = figure.render_data_with_viewport_and_gpu(Some(viewport_px), Some(&gpu));
+        let render_data_list =
+            figure.render_data_with_viewport_and_gpu(Some(viewport_px), Some(&gpu));
         let axes_map: Vec<usize> = figure.plot_axes_indices().to_vec();
         let (rows, cols) = figure.axes_grid();
 

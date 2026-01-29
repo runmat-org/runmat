@@ -155,13 +155,19 @@ pub async fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Builti
                         continue;
                     }
                     Err(err) => {
-                        trace!("plot: series={} GPU path unavailable: {err}", series_idx + 1);
+                        trace!(
+                            "plot: series={} GPU path unavailable: {err}",
+                            series_idx + 1
+                        );
                     }
                 }
             }
         }
 
-        trace!("plot: series={} falling back to CPU gather path", series_idx + 1);
+        trace!(
+            "plot: series={} falling back to CPU gather path",
+            series_idx + 1
+        );
         let (x_tensor, y_tensor) = data.into_tensors_async("plot").await?;
         let (x_vals, y_vals) = numeric_pair(x_tensor, y_tensor, "plot")?;
         plots.push(build_line_plot(x_vals, y_vals, &label, &appearance)?);
@@ -375,7 +381,9 @@ async fn build_line_gpu_plot_async(
         Some(buf) => {
             trace!(
                 "plot-gpu: export_wgpu_buffer(X) ok len={} element_size={} precision={:?}",
-                buf.len, buf.element_size, buf.precision
+                buf.len,
+                buf.element_size,
+                buf.precision
             );
             buf
         }
@@ -394,7 +402,9 @@ async fn build_line_gpu_plot_async(
         Some(buf) => {
             trace!(
                 "plot-gpu: export_wgpu_buffer(Y) ok len={} element_size={} precision={:?}",
-                buf.len, buf.element_size, buf.precision
+                buf.len,
+                buf.element_size,
+                buf.precision
             );
             buf
         }

@@ -1,5 +1,5 @@
 use crate::core::renderer::Vertex;
-use crate::core::scene::{DrawIndirectArgsRaw, GpuVertexBuffer};
+use crate::core::scene::GpuVertexBuffer;
 use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
 use crate::plots::line::LineStyle;
@@ -113,16 +113,6 @@ pub fn pack_vertices_from_xy(
                 binding: 3,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 4,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
                     min_binding_size: None,
@@ -155,22 +145,6 @@ pub fn pack_vertices_from_xy(
         mapped_at_creation: false,
     }));
 
-    let indirect_args = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("line-gpu-indirect-args"),
-        size: std::mem::size_of::<DrawIndirectArgsRaw>() as u64,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::INDIRECT
-            | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    }));
-    let init = DrawIndirectArgsRaw {
-        vertex_count: 0,
-        instance_count: 1,
-        first_vertex: 0,
-        first_instance: 0,
-    };
-    queue.write_buffer(&indirect_args, 0, bytemuck::bytes_of(&init));
-
     let uniforms = LineSegmentUniforms {
         color: params.color.to_array(),
         count: inputs.len,
@@ -202,10 +176,6 @@ pub fn pack_vertices_from_xy(
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: indirect_args.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
                 resource: uniform_buffer.as_entire_binding(),
             },
         ],
@@ -225,11 +195,7 @@ pub fn pack_vertices_from_xy(
         pass.dispatch_workgroups(workgroups, 1, 1);
     }
     queue.submit(Some(encoder.finish()));
-    Ok(GpuVertexBuffer::with_indirect(
-        output_buffer,
-        max_vertices as usize,
-        indirect_args,
-    ))
+    Ok(GpuVertexBuffer::new(output_buffer, max_vertices as usize))
 }
 
 fn compile_shader(

@@ -91,7 +91,9 @@ fn extract_syntax_from_behaviors(name: &str, behaviors: &[String]) -> Vec<String
         let mut rest = line.as_str();
         while let Some(start) = rest.find('`') {
             let after_start = &rest[start + 1..];
-            let Some(end) = after_start.find('`') else { break };
+            let Some(end) = after_start.find('`') else {
+                break;
+            };
             let seg = &after_start[..end];
             rest = &after_start[end + 1..];
 
@@ -109,7 +111,10 @@ fn extract_syntax_from_behaviors(name: &str, behaviors: &[String]) -> Vec<String
     out
 }
 
-fn render_builtin_hover_from_json(func: &BuiltinFunction, doc: builtins_json::BuiltinDocJson) -> String {
+fn render_builtin_hover_from_json(
+    func: &BuiltinFunction,
+    doc: builtins_json::BuiltinDocJson,
+) -> String {
     let mut out = String::new();
 
     // Header (no typed signature yet): reliably show just `name(...)`.
@@ -174,7 +179,11 @@ fn render_builtin_hover_from_json(func: &BuiltinFunction, doc: builtins_json::Bu
             // If the behavior contains hard newlines, keep it as a paragraph to avoid
             // broken list indentation in Markdown renderers.
             if normalized.contains('\n') {
-                let _ = writeln!(out, "- {}", normalized.lines().next().unwrap_or("").trim_end());
+                let _ = writeln!(
+                    out,
+                    "- {}",
+                    normalized.lines().next().unwrap_or("").trim_end()
+                );
                 for cont in normalized.lines().skip(1) {
                     let _ = writeln!(out, "  {}", cont.trim_end());
                 }
@@ -225,7 +234,10 @@ fn render_builtin_hover_from_json(func: &BuiltinFunction, doc: builtins_json::Bu
             for p in points {
                 let p_norm = normalize_markdown(p.clone());
                 // Avoid obvious duplication (gpu_behavior often repeats gpu_residency verbatim).
-                if gpu_residency_norm.as_deref().is_some_and(|r| r.trim() == p_norm.trim()) {
+                if gpu_residency_norm
+                    .as_deref()
+                    .is_some_and(|r| r.trim() == p_norm.trim())
+                {
                     continue;
                 }
                 let _ = writeln!(out, "- {p_norm}");

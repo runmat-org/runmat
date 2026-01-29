@@ -19,4 +19,3 @@ pub fn data_units_per_px(bounds: &BoundingBox, viewport_px: (u32, u32)) -> f32 {
 
     (x_range / w_px).max(y_range / h_px)
 }
-

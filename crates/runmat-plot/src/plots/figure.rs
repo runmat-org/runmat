@@ -10,6 +10,7 @@ use crate::plots::{
     QuiverPlot, Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
 };
 use glam::Vec4;
+use log::trace;
 use std::collections::HashMap;
 
 /// A figure that can contain multiple overlaid plots
@@ -532,6 +533,14 @@ impl Figure {
 
             match p {
                 PlotElement::Line(plot) => {
+                    trace!(
+                        target: "runmat_plot",
+                        "figure: render_data line viewport_px={:?} gpu_ctx_present={} gpu_line_inputs_present={} gpu_vertices_present={}",
+                        viewport_px,
+                        gpu.is_some(),
+                        plot.has_gpu_line_inputs(),
+                        plot.has_gpu_vertices()
+                    );
                     out.push(plot.render_data_with_viewport_gpu(viewport_px, gpu));
                     if let Some(marker_data) = plot.marker_render_data() {
                         out.push(marker_data);

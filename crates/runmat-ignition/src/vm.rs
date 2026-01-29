@@ -1446,7 +1446,11 @@ pub async fn interpret_with_vars(
     initial_vars: &mut [Value],
     current_function_name: Option<&str>,
 ) -> VmResult<InterpreterOutcome> {
-    let state = InterpreterState::new(bytecode.clone(), initial_vars, current_function_name);
+    let state = Box::new(InterpreterState::new(
+        bytecode.clone(),
+        initial_vars,
+        current_function_name,
+    ));
     match Box::pin(run_interpreter(state, initial_vars)).await {
         Ok(outcome) => Ok(outcome),
         Err(err) => {
@@ -1458,6 +1462,14 @@ pub async fn interpret_with_vars(
 }
 
 async fn run_interpreter(
+    state: Box<InterpreterState>,
+    initial_vars: &mut [Value],
+) -> VmResult<InterpreterOutcome> {
+    let state = *state;
+    Box::pin(run_interpreter_inner(state, initial_vars)).await
+}
+
+async fn run_interpreter_inner(
     state: InterpreterState,
     initial_vars: &mut [Value],
 ) -> VmResult<InterpreterOutcome> {

@@ -18,8 +18,8 @@ use log::{debug, info, trace, warn};
 use once_cell::sync::{Lazy, OnceCell};
 use runmat_accelerate_api::{AccelProvider, ApiDeviceInfo, HostTensorView, ProviderPrecision};
 use runmat_builtins::{builtin_functions, AccelTag, Tensor, Value};
-use runmat_runtime::gather_if_needed_async;
 use runmat_runtime::builtins::common::spec::{builtin_residency_policy, ResidencyPolicy};
+use runmat_runtime::gather_if_needed_async;
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_CPU_ELEM_PER_ELEM: f64 = 1.0e-7;
@@ -1260,9 +1260,15 @@ async fn gather_args(args: &[Value]) -> Result<Vec<Value>> {
                 handle.shape
             );
         } else {
-            trace!("auto-offload: gather_args arg[{}]={:?}", idx, value_kind(value));
+            trace!(
+                "auto-offload: gather_args arg[{}]={:?}",
+                idx,
+                value_kind(value)
+            );
         }
-        let gathered = gather_if_needed_async(value).await.map_err(|e| anyhow!(e))?;
+        let gathered = gather_if_needed_async(value)
+            .await
+            .map_err(|e| anyhow!(e))?;
         trace!(
             "auto-offload: gather_args arg[{}] -> {:?}",
             idx,

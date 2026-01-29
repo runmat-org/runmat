@@ -8,4 +8,3 @@ pub struct GpuPackContext<'a> {
     pub device: &'a Arc<wgpu::Device>,
     pub queue: &'a Arc<wgpu::Queue>,
 }
-

@@ -104,6 +104,14 @@ impl Default for LineStyle {
 }
 
 impl LinePlot {
+    pub(crate) fn has_gpu_line_inputs(&self) -> bool {
+        self.gpu_line_inputs.is_some()
+    }
+
+    pub(crate) fn has_gpu_vertices(&self) -> bool {
+        self.gpu_vertices.is_some()
+    }
+
     /// Create a new line plot with data
     pub fn new(x_data: Vec<f64>, y_data: Vec<f64>) -> Result<Self, String> {
         if x_data.len() != y_data.len() {
@@ -429,7 +437,10 @@ impl LinePlot {
         let Some(inputs) = self.gpu_line_inputs.as_ref() else {
             return Ok(());
         };
-        let bounds = self.bounds.as_ref().ok_or_else(|| "missing line bounds".to_string())?;
+        let bounds = self
+            .bounds
+            .as_ref()
+            .ok_or_else(|| "missing line bounds".to_string())?;
 
         let thick_px = self.line_width > 1.0;
         let data_per_px = crate::core::data_units_per_px(bounds, viewport_px);
@@ -457,8 +468,9 @@ impl LinePlot {
             line_style: self.line_style,
             marker_size: 1.0,
         };
-        let packed = crate::gpu::line::pack_vertices_from_xy(gpu.device, gpu.queue, inputs, &params)
-            .map_err(|e| format!("gpu line packing failed: {e}"))?;
+        let packed =
+            crate::gpu::line::pack_vertices_from_xy(gpu.device, gpu.queue, inputs, &params)
+                .map_err(|e| format!("gpu line packing failed: {e}"))?;
         trace!(
             target: "runmat_plot",
             "line-pack: complete max_vertices={} indirect_present={}",
@@ -467,6 +479,7 @@ impl LinePlot {
         );
 
         self.gpu_vertices = Some(packed);
+        self.gpu_vertex_count = Some(self.gpu_vertices.as_ref().unwrap().vertex_count);
         self.gpu_topology = Some(if thick_px {
             PipelineType::Triangles
         } else {
@@ -480,6 +493,14 @@ impl LinePlot {
         viewport_px: Option<(u32, u32)>,
         gpu: Option<&GpuPackContext<'_>>,
     ) -> RenderData {
+        trace!(
+            target: "runmat_plot",
+            "line: render_data_with_viewport_gpu viewport_px={:?} gpu_ctx_present={} gpu_line_inputs_present={} gpu_vertices_present={}",
+            viewport_px,
+            gpu.is_some(),
+            self.gpu_line_inputs.is_some(),
+            self.gpu_vertices.is_some()
+        );
         if self.gpu_line_inputs.is_some() && self.gpu_vertices.is_none() {
             if let (Some(gpu), Some(vp)) = (gpu, viewport_px) {
                 // Best-effort: if packing fails, fall through and let the caller handle

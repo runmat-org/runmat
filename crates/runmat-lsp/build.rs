@@ -10,8 +10,12 @@ fn main() {
     println!("cargo:rerun-if-changed={}", builtins_dir.display());
 
     let mut entries: Vec<(String, String)> = Vec::new(); // (lookup key, file name)
-    let read_dir = fs::read_dir(&builtins_dir)
-        .unwrap_or_else(|e| panic!("failed to read builtins-json at {}: {e}", builtins_dir.display()));
+    let read_dir = fs::read_dir(&builtins_dir).unwrap_or_else(|e| {
+        panic!(
+            "failed to read builtins-json at {}: {e}",
+            builtins_dir.display()
+        )
+    });
 
     for entry in read_dir {
         let entry = entry.expect("failed to read dir entry");
@@ -64,4 +68,3 @@ fn main() {
         )
     });
 }
-

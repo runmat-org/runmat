@@ -882,7 +882,9 @@ mod tests {
                     markup.value
                 );
                 assert!(
-                    markup.value.contains("Docs: https://runmat.org/docs/reference/builtins/"),
+                    markup
+                        .value
+                        .contains("Docs: https://runmat.org/docs/reference/builtins/"),
                     "expected docs link, got:\n{}",
                     markup.value
                 );
