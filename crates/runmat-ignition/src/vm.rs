@@ -5829,31 +5829,35 @@ async fn run_interpreter_inner(
             }
             Instr::CreateRange(has_step) => {
                 if has_step {
-                    let end: f64 = (&stack
+                    // NOTE: Do not coerce to f64 here; start/step/end may be GPU-backed scalar
+                    // tensors (e.g. loop variable `t` living on GPU). Delegate to `colon` builtin
+                    // which contains the correct scalar extraction and GPU preference semantics.
+                    let end = stack
                         .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                        .try_into()?;
-                    let step: f64 = (&stack
+                        .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                    let step = stack
                         .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                        .try_into()?;
-                    let start: f64 = (&stack
+                        .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                    let start = stack
                         .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                        .try_into()?;
-                    let range_result = runmat_runtime::create_range(start, Some(step), end).await?;
-                    stack.push(range_result);
+                        .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                    let args = vec![start, step, end];
+                    match call_builtin_vm!("colon", &args) {
+                        Ok(v) => stack.push(v),
+                        Err(e) => vm_bail!(e.to_string()),
+                    }
                 } else {
-                    let end: f64 = (&stack
+                    let end = stack
                         .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                        .try_into()?;
-                    let start: f64 = (&stack
+                        .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                    let start = stack
                         .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                        .try_into()?;
-                    let range_result = runmat_runtime::create_range(start, None, end).await?;
-                    stack.push(range_result);
+                        .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                    let args = vec![start, end];
+                    match call_builtin_vm!("colon", &args) {
+                        Ok(v) => stack.push(v),
+                        Err(e) => vm_bail!(e.to_string()),
+                    }
                 }
             }
             Instr::Index(num_indices) => {
@@ -11148,6 +11152,9 @@ fn summarize_value(i: usize, v: &Value) -> String {
     match v {
         Value::GpuTensor(h) => format!("in#{i}:GpuTensor shape={:?}", h.shape),
         Value::Tensor(t) => format!("in#{i}:Tensor shape={:?}", t.shape),
+        Value::Num(n) => format!("in#{i}:Num({n:.6})"),
+        Value::Int(n) => format!("in#{i}:Int({})", n.to_i64()),
+        Value::Bool(b) => format!("in#{i}:Bool({})", if *b { 1 } else { 0 }),
         Value::String(s) => format!("in#{i}:String({})", s),
         _ => format!("in#{i}:{}", value_kind(v)),
     }

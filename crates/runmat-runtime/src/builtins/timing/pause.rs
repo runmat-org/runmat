@@ -141,6 +141,7 @@ async fn perform_wait(wait: PauseWait) -> Result<(), RuntimeError> {
         // MATLAB semantics: `pause` gives the UI a chance to update.
         // In RunMat Web/WASM this is an explicit flush boundary for plotting.
         let handle = plotting::current_figure_handle();
+        // Present before the wait.
         let _ = plotting::render_current_scene(handle.as_u32());
     }
 
@@ -158,7 +159,16 @@ async fn perform_wait(wait: PauseWait) -> Result<(), RuntimeError> {
                     return Ok(());
                 }
             }
-            sleep_seconds(seconds).await
+            sleep_seconds(seconds).await?;
+            #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+            {
+                // Present again after the wait to ensure the compositor sees the most recent frame.
+                // Some browser/driver combinations appear to delay presentation unless we yield across
+                // a timer boundary.
+                let handle = plotting::current_figure_handle();
+                let _ = plotting::render_current_scene(handle.as_u32());
+            }
+            Ok(())
         }
     }
 }
