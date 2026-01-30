@@ -781,14 +781,17 @@ function normalizeOutput(text) {
             .replace(/^\s*[A-Za-z_]\w*(?:\([^)]*\))?\s*=\s*/, "")
     );
     const joined = stripped.join(" ");
-    const withoutHeaders = joined.replace(/\b\w+\s*[x×]\s*\w+(?:\s*[x×]\s*\w+)*\s+\w+(?:\s+\w+)*(?:\s+array)?\b/gi, " ");
+    const withoutAssignments = joined.replace(/\b[A-Za-z_]\w*(?:\([^)]*\))?\s*=\s*/g, "");
+    const withoutHeaders = withoutAssignments.replace(/\b\w+\s*[x×]\s*\w+(?:\s*[x×]\s*\w+)*\s+\w+(?:\s+\w+)*(?:\s+array)?\b/gi, " ");
     const withoutBrackets = withoutHeaders.replace(/[\[\]{};,]/g, " ");
     const withoutQuotes = withoutBrackets.replace(/["']/g, " ");
     const normalizedBooleans = withoutQuotes
         .replace(/\btrue\b/gi, "1")
         .replace(/\bfalse\b/gi, "0")
         .replace(/\blogical\((0|1)\)\b/gi, "$1");
-    const strippedMetadata = normalizedBooleans
+    const normalizedConstants = normalizedBooleans
+        .replace(/\bpi\b/gi, String(Math.PI));
+    const strippedMetadata = normalizedConstants
         .replace(/GpuTensor\([^)]*\)/g, " ")
         .replace(/Tensor\(shape=[^)]+\)/g, " ")
         .replace(/\b\d+(?:\s*[x×]\s*\d+)+\s*(?:gpuArray\s*)?(?:logical|double|single|char|string|cell)?\s*array\b/gi, " ")
