@@ -1432,13 +1432,26 @@ fn resolve_emit_label_text(
     }
 }
 
+fn rel_binary_use_builtin(a: &Value, b: &Value) -> bool {
+    !matches!(a, Value::Num(_) | Value::Int(_)) || !matches!(b, Value::Num(_) | Value::Int(_))
+}
+
 macro_rules! handle_rel_binary { ($op:tt, $name:literal, $stack:ident) => {{
     let b = $stack.pop().ok_or(mex("StackUnderflow","stack underflow"))?; let a = $stack.pop().ok_or(mex("StackUnderflow","stack underflow"))?;
     match (&a, &b) {
         (Value::Object(obj), _) => { let args = vec![Value::Object(obj.clone()), Value::String($name.to_string()), b.clone()]; match call_builtin_vm!("call_method", &args) { Ok(v) => $stack.push(v), Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; $stack.push(Value::Num(if aa $op bb {1.0}else{0.0})) } } }
         (_, Value::Object(obj)) => { let rev = match $name { "lt" => "gt", "le" => "ge", "gt" => "lt", "ge" => "le", other => other };
             let args = vec![Value::Object(obj.clone()), Value::String(rev.to_string()), a.clone()]; match call_builtin_vm!("call_method", &args) { Ok(v) => $stack.push(v), Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; $stack.push(Value::Num(if aa $op bb {1.0}else{0.0})) } } }
-        _ => { let bb: f64 = (&b).try_into()?; let aa: f64 = (&a).try_into()?; $stack.push(Value::Num(if aa $op bb {1.0}else{0.0})) }
+        _ => {
+            if rel_binary_use_builtin(&a, &b) {
+                let v = call_builtin_vm!($name, &[a.clone(), b.clone()])?;
+                $stack.push(v);
+            } else {
+                let bb: f64 = (&b).try_into()?;
+                let aa: f64 = (&a).try_into()?;
+                $stack.push(Value::Num(if aa $op bb {1.0}else{0.0}))
+            }
+        }
     }
 }}; }
 pub async fn interpret_with_vars(
@@ -2657,9 +2670,14 @@ async fn run_interpreter_inner(
                         }
                     }
                     _ => {
-                        let bb: f64 = (&b).try_into()?;
-                        let aa: f64 = (&a).try_into()?;
-                        stack.push(Value::Num(if aa <= bb { 1.0 } else { 0.0 }));
+                        if rel_binary_use_builtin(&a, &b) {
+                            let v = call_builtin_vm!("le", &[a.clone(), b.clone()])?;
+                            stack.push(v);
+                        } else {
+                            let bb: f64 = (&b).try_into()?;
+                            let aa: f64 = (&a).try_into()?;
+                            stack.push(Value::Num(if aa <= bb { 1.0 } else { 0.0 }));
+                        }
                     }
                 }
             }
@@ -2744,9 +2762,14 @@ async fn run_interpreter_inner(
                         }
                     }
                     _ => {
-                        let bb: f64 = (&b).try_into()?;
-                        let aa: f64 = (&a).try_into()?;
-                        stack.push(Value::Num(if aa >= bb { 1.0 } else { 0.0 }));
+                        if rel_binary_use_builtin(&a, &b) {
+                            let v = call_builtin_vm!("ge", &[a.clone(), b.clone()])?;
+                            stack.push(v);
+                        } else {
+                            let bb: f64 = (&b).try_into()?;
+                            let aa: f64 = (&a).try_into()?;
+                            stack.push(Value::Num(if aa >= bb { 1.0 } else { 0.0 }));
+                        }
                     }
                 }
             }

@@ -782,7 +782,10 @@ function normalizeOutput(text) {
     );
     const joined = stripped.join(" ");
     const withoutAssignments = joined.replace(/\b[A-Za-z_]\w*(?:\([^)]*\))?\s*=\s*/g, "");
-    const withoutHeaders = withoutAssignments.replace(/\b\w+\s*[x×]\s*\w+(?:\s*[x×]\s*\w+)*\s+\w+(?:\s+\w+)*(?:\s+array)?\b/gi, " ");
+    const withoutHeaders = withoutAssignments.replace(
+        /\b\w+\s*[x×]\s*\w+(?:\s*[x×]\s*\w+)*\s+(?:gpuArray\s*)?(?:sparse\s+)?(?:complex\s+)?(?:logical|double|single|char|string|cell|struct|table|categorical|datetime|duration)(?:\s+array)?\b/gi,
+        " "
+    );
     const withoutBrackets = withoutHeaders.replace(/[\[\]{};,]/g, " ");
     const withoutQuotes = withoutBrackets.replace(/["']/g, " ");
     const normalizedBooleans = withoutQuotes
