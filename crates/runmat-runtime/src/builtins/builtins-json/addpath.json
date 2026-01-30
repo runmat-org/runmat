@@ -44,42 +44,42 @@
   "examples": [
     {
       "description": "Add a single folder to the top of the search path",
-      "input": "mkdir(\"util/toolbox\");\noldPath = path();\naddpath(\"util/toolbox\");\nnewPath = path();\nfprintf('%s\\n%s\\n', oldPath, newPath)",
+      "input": "mkdir(\"util/toolbox\");\noldPath = path();\naddpath(\"util/toolbox\");\nnewPath = path();\ncount = fprintf('%s %s\\n', oldPath, newPath);",
       "output": "/Users/testUser/runmat/toolbox:/Users/testUser/runmat/user /Users/testUser/runmat-project/util/toolbox:/Users/testUser/runmat/toolbox:/Users/testUser/runmat/user"
     },
     {
       "description": "Append folders to the end of the search path",
-      "input": "mkdir(\"shared/filters\");\nmkdir(\"shared/signal\");\noldPath = path();\ndirs = [\"shared/filters\", \"shared/signal\"];\naddpath(dirs, \"-end\");\nnewPath = path();\nfprintf('%s\\n%s\\n', oldPath, newPath)",
+      "input": "mkdir(\"shared/filters\");\nmkdir(\"shared/signal\");\noldPath = path();\ndirs = [\"shared/filters\", \"shared/signal\"];\naddpath(dirs, \"-end\");\nnewPath = path();\ncount = fprintf('%s %s\\n', oldPath, newPath);",
       "output": "/Users/testUser/runmat/toolbox:/Users/testUser/runmat/user /Users/testUser/runmat/toolbox:/Users/testUser/runmat/user:/Users/testUser/runmat-project/shared/filters:/Users/testUser/runmat-project/shared/signal"
     },
     {
       "description": "Use `genpath` output to add a folder tree",
-      "input": "mkdir(\"third_party/toolchain\");\nmkdir(\"third_party/toolchain/bin\");\noldPath = path();\ntoolchain = genpath(\"third_party/toolchain\");\naddpath(toolchain);\nnewPath = path();\nfprintf('%s\\n%s\\n', oldPath, newPath)",
+      "input": "mkdir(\"third_party/toolchain\");\nmkdir(\"third_party/toolchain/bin\");\noldPath = path();\ntoolchain = genpath(\"third_party/toolchain\");\naddpath(toolchain);\nnewPath = path();\ncount = fprintf('%s %s\\n', oldPath, newPath);",
       "output": "/Users/testUser/runmat/toolbox:/Users/testUser/runmat/user /Users/testUser/runmat-project/third_party/toolchain:/Users/testUser/runmat-project/third_party/toolchain/bin:/Users/testUser/runmat/toolbox:/Users/testUser/runmat/user"
     },
     {
       "description": "Add folders from a cell array",
-      "input": "mkdir(\"src/algorithms\");\nmkdir(\"src/visualization\");\noldPath = path();\nfolders = {'src/algorithms', 'src/visualization'};\naddpath(folders{:}, \"-begin\");\nnewPath = path();\nfprintf('%s\\n%s\\n', oldPath, newPath)",
+      "input": "mkdir(\"src/algorithms\");\nmkdir(\"src/visualization\");\noldPath = path();\nfolders = [\"src/algorithms\", \"src/visualization\"];\naddpath(folders, \"-begin\");\nnewPath = path();\ncount = fprintf('%s %s\\n', oldPath, newPath);",
       "output": "/Users/testUser/runmat/toolbox:/Users/testUser/runmat/user /Users/testUser/runmat-project/src/algorithms:/Users/testUser/runmat-project/src/visualization:/Users/testUser/runmat/toolbox:/Users/testUser/runmat/user"
     },
     {
       "description": "Move an existing folder to the top of the search path",
-      "input": "mkdir(\"src/algorithms\");\noldPath = path();\naddpath(\"src/algorithms\");\nnewPath = path();\nfprintf('%s\\n%s\\n', oldPath, newPath)",
+      "input": "mkdir(\"src/algorithms\");\noldPath = path();\naddpath(\"src/algorithms\");\nnewPath = path();\ncount = fprintf('%s %s\\n', oldPath, newPath);",
       "output": "/Users/testUser/runmat/toolbox:/Users/testUser/runmat/user /Users/testUser/runmat-project/src/algorithms:/Users/testUser/runmat/toolbox:/Users/testUser/runmat/user"
     },
     {
       "description": "Accept the MATLAB `-frozen` flag",
-      "input": "mkdir(\"vendor/hardware\");\noldPath = path();\naddpath(\"vendor/hardware\", \"-frozen\");\nnewPath = path();\nfprintf('%s\\n%s\\n', oldPath, newPath)",
+      "input": "mkdir(\"vendor/hardware\");\noldPath = path();\naddpath(\"vendor/hardware\", \"-frozen\");\nnewPath = path();\ncount = fprintf('%s %s\\n', oldPath, newPath);",
       "output": "/Users/testUser/runmat/toolbox:/Users/testUser/runmat/user /Users/testUser/runmat-project/vendor/hardware:/Users/testUser/runmat/toolbox:/Users/testUser/runmat/user"
     },
     {
       "description": "Retrieve the previous path and restore it later",
-      "input": "mkdir(\"analysis/utilities\");\noldPath = path();\nold = addpath(\"analysis/utilities\");\nnewPath = path();\npath(old);\nfprintf('%s\\n%s\\n', oldPath, newPath)",
+      "input": "mkdir(\"analysis/utilities\");\noldPath = path();\nold = addpath(\"analysis/utilities\");\nnewPath = path();\npath(old);\ncount = fprintf('%s %s\\n', oldPath, newPath);",
       "output": "/Users/testUser/runmat/toolbox:/Users/testUser/runmat/user /Users/testUser/runmat-project/analysis/utilities:/Users/testUser/runmat/toolbox:/Users/testUser/runmat/user"
     },
     {
       "description": "Combine multiple options",
-      "input": "mkdir(\"contrib\");\nmkdir(\"docs/examples\");\noldPath = path();\naddpath(\"contrib\", \"docs/examples\", \"-end\", \"-frozen\");\nnewPath = path();\nfprintf('%s\\n%s\\n', oldPath, newPath)",
+      "input": "mkdir(\"contrib\");\nmkdir(\"docs/examples\");\noldPath = path();\naddpath(\"contrib\", \"docs/examples\", \"-end\", \"-frozen\");\nnewPath = path();\ncount = fprintf('%s %s\\n', oldPath, newPath);",
       "output": "/Users/testUser/runmat/toolbox:/Users/testUser/runmat/user /Users/testUser/runmat/toolbox:/Users/testUser/runmat/user:/Users/testUser/runmat-project/contrib:/Users/testUser/runmat-project/docs/examples"
     }
   ],

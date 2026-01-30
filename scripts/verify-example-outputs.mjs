@@ -834,15 +834,6 @@ function normalizeOutput(text) {
         .replace(/\b0[ij]\b/g, "0")
         .replace(/\s+/g, " ")
         .trim();
-    const tokens = fixedZeroConcat.length > 0 ? fixedZeroConcat.split(" ") : [];
-    if (tokens.length > 1 && tokens.length % 2 === 0) {
-        const midpoint = tokens.length / 2;
-        const firstHalf = tokens.slice(0, midpoint).join(" ");
-        const secondHalf = tokens.slice(midpoint).join(" ");
-        if (firstHalf === secondHalf) {
-            return firstHalf;
-        }
-    }
     return fixedZeroConcat;
 }
 

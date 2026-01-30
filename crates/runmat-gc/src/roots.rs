@@ -100,14 +100,22 @@ impl GcRoot for StackRoot {
 impl StackRoot {
     /// Recursively collect GC roots from a Value
     #[allow(clippy::only_used_in_recursion)]
-    fn collect_value_roots(&self, value: &Value, _roots: &mut Vec<GcPtr<Value>>) {
-        if let Value::Cell(cells) = value {
-            for cell_value in &cells.data {
-                self.collect_value_roots(cell_value, _roots);
+    fn collect_value_roots(&self, value: &Value, roots: &mut Vec<GcPtr<Value>>) {
+        match value {
+            Value::Cell(cells) => {
+                for cell_value in &cells.data {
+                    roots.push(cell_value.clone());
+                    let inner = unsafe { &*cell_value.as_raw() };
+                    self.collect_value_roots(inner, roots);
+                }
             }
+            Value::Struct(struct_value) => {
+                for field_value in struct_value.fields.values() {
+                    self.collect_value_roots(field_value, roots);
+                }
+            }
+            _ => {}
         }
-        // For now, we don't track individual Value objects as GC pointers
-        // This would change when we integrate with the actual GC allocation
     }
 }
 
@@ -177,11 +185,21 @@ impl GcRoot for VariableArrayRoot {
 
 impl VariableArrayRoot {
     #[allow(clippy::only_used_in_recursion)]
-    fn collect_value_roots(&self, value: &Value, _roots: &mut Vec<GcPtr<Value>>) {
-        if let Value::Cell(cells) = value {
-            for cell_value in &cells.data {
-                self.collect_value_roots(cell_value, _roots);
+    fn collect_value_roots(&self, value: &Value, roots: &mut Vec<GcPtr<Value>>) {
+        match value {
+            Value::Cell(cells) => {
+                for cell_value in &cells.data {
+                    roots.push(cell_value.clone());
+                    let inner = unsafe { &*cell_value.as_raw() };
+                    self.collect_value_roots(inner, roots);
+                }
             }
+            Value::Struct(struct_value) => {
+                for field_value in struct_value.fields.values() {
+                    self.collect_value_roots(field_value, roots);
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -234,11 +252,21 @@ impl GcRoot for GlobalRoot {
 
 impl GlobalRoot {
     #[allow(clippy::only_used_in_recursion)]
-    fn collect_value_roots(&self, value: &Value, _roots: &mut Vec<GcPtr<Value>>) {
-        if let Value::Cell(cells) = value {
-            for cell_value in &cells.data {
-                self.collect_value_roots(cell_value, _roots);
+    fn collect_value_roots(&self, value: &Value, roots: &mut Vec<GcPtr<Value>>) {
+        match value {
+            Value::Cell(cells) => {
+                for cell_value in &cells.data {
+                    roots.push(cell_value.clone());
+                    let inner = unsafe { &*cell_value.as_raw() };
+                    self.collect_value_roots(inner, roots);
+                }
             }
+            Value::Struct(struct_value) => {
+                for field_value in struct_value.fields.values() {
+                    self.collect_value_roots(field_value, roots);
+                }
+            }
+            _ => {}
         }
     }
 }

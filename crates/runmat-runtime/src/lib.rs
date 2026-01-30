@@ -12,6 +12,7 @@
 
 use crate::builtins::common::format::format_variadic;
 use runmat_builtins::Value;
+#[cfg(not(target_arch = "wasm32"))]
 use runmat_gc_api::GcPtr;
 
 pub mod dispatcher;
@@ -79,13 +80,23 @@ pub use blas::*;
 pub use lapack::*;
 
 pub fn make_cell_with_shape(values: Vec<Value>, shape: Vec<usize>) -> Result<Value, String> {
-    let handles: Vec<GcPtr<Value>> = values
-        .into_iter()
-        .map(|v| runmat_gc::gc_allocate(v).expect("gc alloc"))
-        .collect();
-    let ca = runmat_builtins::CellArray::new_handles_with_shape(handles, shape)
-        .map_err(|e| format!("Cell creation error: {e}"))?;
-    Ok(Value::Cell(ca))
+    #[cfg(target_arch = "wasm32")]
+    {
+        let ca = runmat_builtins::CellArray::new_with_shape(values, shape)
+            .map_err(|e| format!("Cell creation error: {e}"))?;
+        return Ok(Value::Cell(ca));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let handles: Vec<GcPtr<Value>> = values
+            .into_iter()
+            .map(|v| runmat_gc::gc_allocate(v).map_err(|e| format!("Cell creation error: {e}")))
+            .collect::<Result<_, _>>()?;
+        let ca = runmat_builtins::CellArray::new_handles_with_shape(handles, shape)
+            .map_err(|e| format!("Cell creation error: {e}"))?;
+        Ok(Value::Cell(ca))
+    }
 }
 
 pub(crate) fn make_cell(values: Vec<Value>, rows: usize, cols: usize) -> Result<Value, String> {

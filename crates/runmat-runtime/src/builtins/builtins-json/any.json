@@ -54,8 +54,8 @@
     },
     {
       "description": "Reducing across multiple dimensions with `vecdim`",
-      "input": "C = reshape(1:24, [3 4 2]);\nhasValues = any(C > 20, [1 2])",
-      "output": "hasValues = [0 1];"
+      "input": "C = reshape(1:24, [3 4 2]);\nhasValues = reshape(any(C > 20, [1 2]), 1, 2)",
+      "output": "0 1"
     },
     {
       "description": "Checking all elements with the `'all'` option",
@@ -69,8 +69,8 @@
     },
     {
       "description": "Running `any` on GPU arrays with automatic fallback",
-      "input": "G = gpuArray([0 1 0; 0 0 0]);\ngpuResult = any(G, 2);\nhostResult = gather(gpuResult)",
-      "output": "hostResult = [1; 0];"
+      "input": "G = gpuArray([0 1 0; 0 0 0]);\ngpuResult = any(G, 2);\nhostResult = gather(gpuResult);\ndisp(hostResult)",
+      "output": "1\n0"
     },
     {
       "description": "Evaluating `any` on character data",
