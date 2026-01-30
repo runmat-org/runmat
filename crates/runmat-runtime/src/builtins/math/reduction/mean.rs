@@ -21,8 +21,8 @@ use crate::builtins::common::{
     gpu_helpers,
     shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
     tensor,
-    type_shapes::reduce_numeric_type,
 };
+use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::dispatcher;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::mean")]

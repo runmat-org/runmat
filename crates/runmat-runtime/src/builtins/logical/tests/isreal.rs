@@ -4,10 +4,10 @@
 //! component. Unlike `isfinite`/`isnan`, it returns a single logical scalar.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::Value;
+use runmat_builtins::{Type, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::{gpu_helpers, type_shapes::bool_scalar_type};
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -58,6 +58,10 @@ async fn isreal_builtin(value: Value) -> BuiltinResult<Value> {
         Value::GpuTensor(handle) => isreal_gpu(handle).await,
         other => isreal_host(other),
     }
+}
+
+fn bool_scalar_type(_: &[Type]) -> Type {
+    Type::Bool
 }
 
 async fn isreal_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {

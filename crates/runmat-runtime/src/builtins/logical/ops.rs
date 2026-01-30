@@ -13,8 +13,8 @@ use crate::builtins::common::{
         ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
     },
     tensor,
-    type_shapes::logical_like,
 };
+use crate::builtins::logical::type_resolvers::logical_like;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 

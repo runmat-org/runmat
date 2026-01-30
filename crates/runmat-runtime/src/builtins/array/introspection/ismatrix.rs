@@ -1,11 +1,11 @@
 //! MATLAB-compatible `ismatrix` builtin with GPU-aware semantics for RunMat.
 
-use crate::builtins::common::{shape::value_dimensions, type_shapes::bool_scalar_type};
+use crate::builtins::common::shape::value_dimensions;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use runmat_builtins::Value;
+use runmat_builtins::{Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(
@@ -50,6 +50,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn ismatrix_builtin(value: Value) -> crate::BuiltinResult<Value> {
     Ok(Value::Bool(value_is_matrix(&value).await?))
+}
+
+fn bool_scalar_type(_: &[Type]) -> Type {
+    Type::Bool
 }
 
 async fn value_is_matrix(value: &Value) -> crate::BuiltinResult<bool> {

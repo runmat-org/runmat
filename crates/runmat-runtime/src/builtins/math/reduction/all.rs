@@ -9,8 +9,8 @@ use crate::builtins::common::{
     gpu_helpers,
     shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
     tensor,
-    type_shapes::reduce_logical_type,
 };
+use crate::builtins::math::reduction::type_resolvers::reduce_logical_type;
 use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Type, Value};

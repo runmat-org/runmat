@@ -4,7 +4,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::type_shapes::{cell_element_type, concat_input_shape, concat_shape};
+use crate::builtins::common::type_shapes::scalar_tensor_shape;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{IntValue, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
@@ -35,6 +35,92 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Concatenation materialises outputs immediately, terminating fusion pipelines.",
 };
+
+fn concat_input_shape(ty: &Type) -> Option<Vec<Option<usize>>> {
+    match ty {
+        Type::Tensor { shape: Some(shape) } => Some(shape.clone()),
+        Type::Logical { shape: Some(shape) } => Some(shape.clone()),
+        Type::Num | Type::Int | Type::Bool => Some(scalar_tensor_shape()),
+        _ => None,
+    }
+}
+
+fn concat_shape(shapes: &[Vec<Option<usize>>], dim_1based: usize) -> Option<Vec<Option<usize>>> {
+    if shapes.is_empty() || dim_1based == 0 {
+        return None;
+    }
+    let rank = shapes
+        .iter()
+        .map(|shape| shape.len())
+        .max()?
+        .max(dim_1based);
+    let mut padded = Vec::with_capacity(shapes.len());
+    for shape in shapes {
+        let mut current = shape.clone();
+        while current.len() < rank {
+            current.push(Some(1));
+        }
+        padded.push(current);
+    }
+
+    let mut output = vec![None; rank];
+    let dim_zero = dim_1based - 1;
+    for axis in 0..rank {
+        if axis == dim_zero {
+            let mut total: Option<usize> = Some(0);
+            for shape in &padded {
+                match (total, shape[axis]) {
+                    (Some(acc), Some(value)) => total = acc.checked_add(value),
+                    _ => {
+                        total = None;
+                        break;
+                    }
+                }
+            }
+            output[axis] = total;
+        } else {
+            let mut shared: Option<usize> = None;
+            let mut mismatch = false;
+            for shape in &padded {
+                match (shared, shape[axis]) {
+                    (None, value) => shared = value,
+                    (Some(current), Some(value)) if current == value => {}
+                    (Some(_), Some(_)) => {
+                        mismatch = true;
+                        break;
+                    }
+                    _ => {
+                        shared = None;
+                        break;
+                    }
+                }
+            }
+            output[axis] = if mismatch { None } else { shared };
+        }
+    }
+
+    let min_len = dim_1based.max(2).min(output.len());
+    while output.len() > min_len && matches!(output.last(), Some(Some(1))) {
+        output.pop();
+    }
+    Some(output)
+}
+
+fn cell_element_type(inputs: &[Type]) -> Option<Box<Type>> {
+    let mut element: Option<Type> = None;
+    for ty in inputs {
+        let Type::Cell { element_type, .. } = ty else {
+            return None;
+        };
+        match (&element, element_type.as_deref()) {
+            (None, Some(current)) => element = Some(current.clone()),
+            (Some(existing), Some(current)) if existing == current => {}
+            (Some(_), Some(_)) => return None,
+            _ => {}
+        }
+    }
+    element.map(Box::new)
+}
 
 fn concat_type_with_dim(args: &[Type], dim_1based: usize) -> Type {
     if args.is_empty() {

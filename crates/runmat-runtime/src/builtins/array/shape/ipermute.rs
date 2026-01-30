@@ -13,7 +13,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{tensor, type_shapes::permute_order_len};
+use crate::builtins::common::tensor;
+use crate::builtins::common::type_shapes::element_count_if_known;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Type, Value};
@@ -51,6 +52,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Acts as a layout barrier in fusion graphs, mirroring the behaviour of `permute`.",
 };
+
+fn permute_order_len(ty: &Type) -> Option<usize> {
+    match ty {
+        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+            element_count_if_known(shape)
+        }
+        Type::Num | Type::Int | Type::Bool => Some(1),
+        _ => None,
+    }
+}
 
 fn ipermute_type(args: &[Type]) -> Type {
     if args.len() < 2 {

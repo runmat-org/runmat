@@ -7,11 +7,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{
-    gpu_helpers,
-    tensor,
-    type_shapes::{array_shape, repmat_output_shape, repmat_reps_len},
-};
+use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::type_shapes::element_count_if_known;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
@@ -48,6 +45,55 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 fn repmat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("repmat").build()
+}
+
+fn array_shape(ty: &Type) -> Option<&[Option<usize>]> {
+    match ty {
+        Type::Tensor { shape: Some(shape) } => Some(shape.as_slice()),
+        Type::Logical { shape: Some(shape) } => Some(shape.as_slice()),
+        _ => None,
+    }
+}
+
+fn repmat_reps_len(args: &[Type]) -> Option<usize> {
+    if args.len() < 2 {
+        return None;
+    }
+    if args.len() > 2 {
+        return Some(args.len() - 1);
+    }
+    match &args[1] {
+        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+            element_count_if_known(shape)
+        }
+        Type::Num | Type::Int | Type::Bool => Some(1),
+        _ => None,
+    }
+}
+
+fn repmat_output_shape(
+    input_shape: &[Option<usize>],
+    reps_len: usize,
+) -> Option<Vec<Option<usize>>> {
+    let input_rank = input_shape.len();
+    let rank = if reps_len == 1 {
+        if input_rank == 0 {
+            return None;
+        }
+        input_rank.max(2)
+    } else {
+        input_rank.max(reps_len)
+    };
+
+    let mut output = Vec::with_capacity(rank);
+    for axis in 0..rank {
+        if axis < input_rank && input_shape[axis] == Some(0) {
+            output.push(Some(0));
+        } else {
+            output.push(None);
+        }
+    }
+    Some(output)
 }
 
 fn repmat_type(args: &[Type]) -> Type {

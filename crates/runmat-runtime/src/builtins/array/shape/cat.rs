@@ -6,7 +6,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{tensor, type_shapes::cell_element_type};
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
@@ -43,6 +43,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 fn cat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("cat").build()
+}
+
+fn cell_element_type(inputs: &[Type]) -> Option<Box<Type>> {
+    let mut element: Option<Type> = None;
+    for ty in inputs {
+        let Type::Cell { element_type, .. } = ty else {
+            return None;
+        };
+        match (&element, element_type.as_deref()) {
+            (None, Some(current)) => element = Some(current.clone()),
+            (Some(existing), Some(current)) if existing == current => {}
+            (Some(_), Some(_)) => return None,
+            _ => {}
+        }
+    }
+    element.map(Box::new)
 }
 
 fn cat_type(args: &[Type]) -> Type {

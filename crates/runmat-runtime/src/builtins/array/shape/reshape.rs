@@ -5,7 +5,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{tensor, type_shapes::reshape_rank_from_args};
+use crate::builtins::common::tensor;
+use crate::builtins::common::type_shapes::element_count_if_known;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
     CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
@@ -47,6 +48,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 fn reshape_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("reshape").build()
+}
+
+fn reshape_rank_from_args(args: &[Type]) -> Option<usize> {
+    if args.len() < 2 {
+        return None;
+    }
+    if args.len() > 2 {
+        return Some(args.len() - 1);
+    }
+    match &args[1] {
+        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+            element_count_if_known(shape)
+        }
+        Type::Num | Type::Int | Type::Bool => Some(1),
+        _ => None,
+    }
 }
 
 fn reshape_type(args: &[Type]) -> Type {

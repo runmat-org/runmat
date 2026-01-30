@@ -16,7 +16,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor, type_shapes::cumulative_numeric_type};
+use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::reduction::type_resolvers::cumulative_numeric_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::cumsum")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

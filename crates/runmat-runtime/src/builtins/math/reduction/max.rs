@@ -30,8 +30,8 @@ use crate::builtins::common::{
     gpu_helpers,
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
-    type_shapes::min_max_type,
 };
+use crate::builtins::math::reduction::type_resolvers::min_max_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::max")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

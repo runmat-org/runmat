@@ -1,6 +1,6 @@
 //! MATLAB-compatible `squeeze` builtin with GPU-aware semantics for RunMat.
 
-use crate::builtins::common::{gpu_helpers, type_shapes::squeeze_shape_options};
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -45,6 +45,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 fn squeeze_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("squeeze").build()
+}
+
+fn squeeze_shape_options(shape: &[Option<usize>]) -> Vec<Option<usize>> {
+    if shape.len() <= 2 {
+        return shape.to_vec();
+    }
+    let mut squeezed: Vec<Option<usize>> = shape
+        .iter()
+        .copied()
+        .filter(|dim| *dim != Some(1))
+        .collect();
+    if squeezed.is_empty() {
+        squeezed = vec![Some(1), Some(1)];
+    } else if squeezed.len() == 1 {
+        squeezed.push(Some(1));
+    }
+    squeezed
 }
 
 fn squeeze_type(args: &[Type]) -> Type {

@@ -10,7 +10,8 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor, type_shapes::logical_binary_type};
+use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::logical::type_resolvers::logical_binary_type;
 use crate::{build_runtime_error, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::rel::lt")]

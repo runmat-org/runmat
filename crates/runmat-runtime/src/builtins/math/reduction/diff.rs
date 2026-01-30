@@ -9,7 +9,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor, type_shapes::diff_numeric_type};
+use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::reduction::type_resolvers::diff_numeric_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "diff";
