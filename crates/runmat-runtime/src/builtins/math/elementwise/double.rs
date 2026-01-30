@@ -15,6 +15,7 @@ use crate::builtins::common::{
     },
     tensor,
 };
+use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::double")]
@@ -72,6 +73,7 @@ fn conversion_error(type_name: &str) -> RuntimeError {
     summary = "Convert scalars, arrays, logical masks, and gpuArray values to double precision.",
     keywords = "double,float64,cast,gpu",
     accel = "unary",
+    type_resolver(numeric_unary_type),
     builtin_path = "crate::builtins::math::elementwise::double"
 )]
 async fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -268,10 +270,31 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, Type};
 
     fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::double_builtin(value, rest))
+    }
+
+    #[test]
+    fn double_type_preserves_tensor_shape() {
+        let out = numeric_unary_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(3)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
+
+    #[test]
+    fn double_type_scalar_tensor_returns_num() {
+        let out = numeric_unary_type(&[Type::Tensor {
+            shape: Some(vec![Some(1), Some(1)]),
+        }]);
+        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

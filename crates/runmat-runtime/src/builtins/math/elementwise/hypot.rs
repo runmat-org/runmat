@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{
     broadcast::BroadcastPlan, gpu_helpers, map_control_flow_with_builtin, tensor,
 };
+use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::hypot")]
@@ -65,6 +66,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     summary = "Element-wise Euclidean norm sqrt(x.^2 + y.^2) with MATLAB-compatible broadcasting.",
     keywords = "hypot,euclidean norm,distance,gpu",
     accel = "binary",
+    type_resolver(numeric_binary_type),
     builtin_path = "crate::builtins::math::elementwise::hypot"
 )]
 async fn hypot_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -179,10 +181,34 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor, Value};
+    use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor, Type, Value};
 
     fn hypot_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         block_on(super::hypot_builtin(lhs, rhs))
+    }
+
+    #[test]
+    fn hypot_type_preserves_tensor_shape() {
+        let out = numeric_binary_type(&[
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            },
+        ]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
+
+    #[test]
+    fn hypot_type_scalar_returns_num() {
+        let out = numeric_binary_type(&[Type::Num, Type::Int]);
+        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
