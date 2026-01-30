@@ -496,7 +496,26 @@ impl Accelerator {
         Self { planner }
     }
 
-    pub fn elementwise_add(&self, a: &Value, b: &Value) -> anyhow::Result<Value> {
+    pub async fn elementwise_add(&self, a: &Value, b: &Value) -> anyhow::Result<Value> {
+        match (a, b) {
+            (Value::GpuTensor(ga), Value::GpuTensor(gb)) => {
+                let ha = self.gather_handle(ga).await?;
+                let hb = self.gather_handle(gb).await?;
+                self.elementwise_add_resolved(&ha, &hb)
+            }
+            (Value::GpuTensor(ga), other) => {
+                let ha = self.gather_handle(ga).await?;
+                self.elementwise_add_resolved(&ha, other)
+            }
+            (other, Value::GpuTensor(gb)) => {
+                let hb = self.gather_handle(gb).await?;
+                self.elementwise_add_resolved(other, &hb)
+            }
+            _ => self.elementwise_add_resolved(a, b),
+        }
+    }
+
+    fn elementwise_add_resolved(&self, a: &Value, b: &Value) -> anyhow::Result<Value> {
         match (a, b) {
             (Value::Tensor(ma), Value::Tensor(mb)) => match self.planner.choose_elem_add(ma, mb) {
                 ExecutionTarget::Cpu => {
@@ -515,29 +534,17 @@ impl Accelerator {
                     Ok(Value::Tensor(out))
                 }
             },
-            (Value::GpuTensor(ga), Value::GpuTensor(gb)) => {
-                // Placeholder: assume same device; in practice look up buffers by id
-                // Fallback to CPU until device registry is implemented
-                let ha = self.gather_handle(ga)?;
-                let hb = self.gather_handle(gb)?;
-                self.elementwise_add(&ha, &hb)
-            }
-            (Value::GpuTensor(ga), other) => {
-                let ha = self.gather_handle(ga)?;
-                self.elementwise_add(&ha, other)
-            }
-            (other, Value::GpuTensor(gb)) => {
-                let hb = self.gather_handle(gb)?;
-                self.elementwise_add(other, &hb)
-            }
             _ => runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()])
                 .map_err(|e| anyhow::anyhow!(e)),
         }
     }
 
-    fn gather_handle(&self, h: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<Value> {
+    async fn gather_handle(
+        &self,
+        h: &runmat_accelerate_api::GpuTensorHandle,
+    ) -> anyhow::Result<Value> {
         if let Some(p) = runmat_accelerate_api::provider() {
-            let ht = p.download(h).map_err(|e| anyhow::anyhow!(e))?;
+            let ht = p.download(h).await.map_err(|e| anyhow::anyhow!(e))?;
             let t = Tensor::new(ht.data, ht.shape).map_err(|e| anyhow::anyhow!(e))?;
             Ok(Value::Tensor(t))
         } else {

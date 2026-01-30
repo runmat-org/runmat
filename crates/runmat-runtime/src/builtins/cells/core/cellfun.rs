@@ -10,7 +10,10 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, make_cell_with_shape};
+use crate::{
+    build_runtime_error, call_builtin_async, gather_if_needed_async, make_cell_with_shape,
+    BuiltinResult, RuntimeError,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::cells::core::cellfun")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -39,6 +42,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Callback execution happens on the host; fusion planners should treat cellfun as a fusion barrier.",
 };
 
+const IDENT_INVALID_INPUT: &str = "MATLAB:cellfun:InvalidInput";
+const IDENT_UNIFORM_OUTPUT: &str = "MATLAB:cellfun:UniformOutput";
+const IDENT_FUNCTION_ERROR: &str = "MATLAB:cellfun:FunctionError";
+
+fn cellfun_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("cellfun").build()
+}
+
+fn cellfun_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("cellfun")
+        .with_identifier(identifier)
+        .build()
+}
+
 #[runtime_builtin(
     name = "cellfun",
     category = "cells/core",
@@ -47,7 +65,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "host",
     builtin_path = "crate::builtins::cells::core::cellfun"
 )]
-fn cellfun_builtin(func: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn cellfun_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let callable = Callable::from_function(func)?;
     let mut args = rest;
 
@@ -69,13 +87,19 @@ fn cellfun_builtin(func: Value, rest: Vec<Value>) -> Result<Value, String> {
                 error_handler = Some(Callable::from_function(value)?);
             }
             unknown => {
-                return Err(format!("cellfun: unknown name-value argument '{unknown}'"));
+                return Err(cellfun_error_with_identifier(
+                    format!("cellfun: unknown name-value argument '{unknown}'"),
+                    IDENT_INVALID_INPUT,
+                ));
             }
         }
     }
 
     if args.is_empty() {
-        return Err("cellfun: expected at least one cell array input".to_string());
+        return Err(cellfun_error_with_identifier(
+            "cellfun: expected at least one cell array input",
+            IDENT_INVALID_INPUT,
+        ));
     }
 
     let mut cell_inputs: Vec<CellArray> = Vec::new();
@@ -86,7 +110,10 @@ fn cellfun_builtin(func: Value, rest: Vec<Value>) -> Result<Value, String> {
         match value {
             Value::Cell(ca) if !seen_non_cell => cell_inputs.push(ca),
             Value::Cell(_) => {
-                return Err("cellfun: cell array inputs must precede extra arguments".to_string())
+                return Err(cellfun_error_with_identifier(
+                    "cellfun: cell array inputs must precede extra arguments",
+                    IDENT_INVALID_INPUT,
+                ));
             }
             other => {
                 seen_non_cell = true;
@@ -96,15 +123,21 @@ fn cellfun_builtin(func: Value, rest: Vec<Value>) -> Result<Value, String> {
     }
 
     if cell_inputs.is_empty() {
-        return Err("cellfun: expected at least one cell array input".to_string());
+        return Err(cellfun_error_with_identifier(
+            "cellfun: expected at least one cell array input",
+            IDENT_INVALID_INPUT,
+        ));
     }
 
     let reference_shape = cell_inputs[0].shape.clone();
     for (idx, ca) in cell_inputs.iter().enumerate().skip(1) {
         if ca.shape != reference_shape {
-            return Err(format!(
-                "cellfun: cell array input {} does not match the size of the first input",
-                idx + 1
+            return Err(cellfun_error_with_identifier(
+                format!(
+                    "cellfun: cell array input {} does not match the size of the first input",
+                    idx + 1
+                ),
+                IDENT_INVALID_INPUT,
             ));
         }
     }
@@ -117,6 +150,7 @@ fn cellfun_builtin(func: Value, rest: Vec<Value>) -> Result<Value, String> {
             error_handler,
             &reference_shape,
         )
+        .await
     } else {
         execute_cell(
             &callable,
@@ -125,20 +159,25 @@ fn cellfun_builtin(func: Value, rest: Vec<Value>) -> Result<Value, String> {
             error_handler,
             &reference_shape,
         )
+        .await
     }
 }
 
-fn execute_uniform(
+async fn execute_uniform(
     callable: &Callable,
     cell_inputs: &[CellArray],
     extra_args: &[Value],
     error_handler: Option<Callable>,
     shape: &[usize],
-) -> Result<Value, String> {
-    let element_count = total_len(shape)
-        .ok_or_else(|| "cellfun: cell array size exceeds platform limits".to_string())?;
+) -> BuiltinResult<Value> {
+    let element_count = total_len(shape).ok_or_else(|| {
+        cellfun_error_with_identifier(
+            "cellfun: cell array size exceeds platform limits",
+            IDENT_INVALID_INPUT,
+        )
+    })?;
 
-    let host_extra_args = prepare_extra_args(extra_args)?;
+    let host_extra_args = prepare_extra_args(extra_args).await?;
     let mut collector = UniformCollector::Pending;
     let mut cell_values: Vec<Value> = Vec::with_capacity(cell_inputs.len());
     let mut call_args: Vec<Value> = Vec::with_capacity(cell_inputs.len() + host_extra_args.len());
@@ -147,46 +186,50 @@ fn execute_uniform(
         cell_values.clear();
         for cell in cell_inputs {
             let raw = deref_cell_value(cell, linear_idx);
-            let host_value = gather_if_needed(&raw)?;
+            let host_value = gather_if_needed_async(&raw).await?;
             cell_values.push(host_value);
         }
         call_args.clear();
         call_args.extend(cell_values.iter().cloned());
         call_args.extend(host_extra_args.iter().cloned());
 
-        let result = match callable.call(&call_args) {
+        let result = match callable.call(&call_args).await {
             Ok(value) => value,
             Err(err) => {
-                let handler = error_handler
-                    .as_ref()
-                    .ok_or_else(|| format!("cellfun: {err}"))?;
+                let Some(handler) = error_handler.as_ref() else {
+                    return Err(err);
+                };
                 let err_value = make_error_struct(&err, linear_idx, shape)?;
                 let mut handler_args =
                     Vec::with_capacity(1 + cell_values.len() + host_extra_args.len());
                 handler_args.push(err_value);
                 handler_args.extend(cell_values.clone());
                 handler_args.extend(host_extra_args.iter().cloned());
-                handler.call(&handler_args)?
+                handler.call(&handler_args).await?
             }
         };
 
-        let host_value = gather_if_needed(&result)?;
+        let host_value = gather_if_needed_async(&result).await?;
         collector.push(&host_value)?;
     }
 
     collector.finish(shape)
 }
 
-fn execute_cell(
+async fn execute_cell(
     callable: &Callable,
     cell_inputs: &[CellArray],
     extra_args: &[Value],
     error_handler: Option<Callable>,
     shape: &[usize],
-) -> Result<Value, String> {
-    let element_count = total_len(shape)
-        .ok_or_else(|| "cellfun: cell array size exceeds platform limits".to_string())?;
-    let host_extra_args = prepare_extra_args(extra_args)?;
+) -> BuiltinResult<Value> {
+    let element_count = total_len(shape).ok_or_else(|| {
+        cellfun_error_with_identifier(
+            "cellfun: cell array size exceeds platform limits",
+            IDENT_INVALID_INPUT,
+        )
+    })?;
+    let host_extra_args = prepare_extra_args(extra_args).await?;
     let mut outputs: Vec<Value> = Vec::with_capacity(element_count);
     let mut cell_values: Vec<Value> = Vec::with_capacity(cell_inputs.len());
     let mut call_args: Vec<Value> = Vec::with_capacity(cell_inputs.len() + host_extra_args.len());
@@ -195,34 +238,35 @@ fn execute_cell(
         cell_values.clear();
         for cell in cell_inputs {
             let raw = deref_cell_value(cell, linear_idx);
-            let host_value = gather_if_needed(&raw)?;
+            let host_value = gather_if_needed_async(&raw).await?;
             cell_values.push(host_value);
         }
         call_args.clear();
         call_args.extend(cell_values.iter().cloned());
         call_args.extend(host_extra_args.iter().cloned());
 
-        let result = match callable.call(&call_args) {
+        let result = match callable.call(&call_args).await {
             Ok(value) => value,
             Err(err) => {
-                let handler = error_handler
-                    .as_ref()
-                    .ok_or_else(|| format!("cellfun: {err}"))?;
+                let Some(handler) = error_handler.as_ref() else {
+                    return Err(err);
+                };
                 let err_value = make_error_struct(&err, linear_idx, shape)?;
                 let mut handler_args =
                     Vec::with_capacity(1 + cell_values.len() + host_extra_args.len());
                 handler_args.push(err_value);
                 handler_args.extend(cell_values.clone());
                 handler_args.extend(host_extra_args.iter().cloned());
-                handler.call(&handler_args)?
+                handler.call(&handler_args).await?
             }
         };
 
-        let host_value = gather_if_needed(&result)?;
+        let host_value = gather_if_needed_async(&result).await?;
         outputs.push(host_value);
     }
 
     make_cell_with_shape(outputs, shape.to_vec())
+        .map_err(|e| cellfun_error(format!("cellfun: {e}")))
 }
 
 fn deref_cell_value(cell: &CellArray, index: usize) -> Value {
@@ -251,28 +295,37 @@ fn extract_string(value: &Value) -> Option<String> {
     }
 }
 
-fn prepare_extra_args(extra_args: &[Value]) -> Result<Vec<Value>, String> {
+async fn prepare_extra_args(extra_args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut host_args = Vec::with_capacity(extra_args.len());
     for arg in extra_args {
-        host_args.push(gather_if_needed(arg)?);
+        host_args.push(gather_if_needed_async(arg).await?);
     }
     Ok(host_args)
 }
 
-fn parse_uniform_output(value: Value) -> Result<bool, String> {
+fn parse_uniform_output(value: Value) -> BuiltinResult<bool> {
     match value {
         Value::Bool(b) => Ok(b),
         Value::Num(n) => Ok(n != 0.0),
         Value::Int(iv) => Ok(iv.to_f64() != 0.0),
-        Value::String(s) => parse_bool_string(&s)
-            .ok_or_else(|| "cellfun: UniformOutput must be logical true or false".to_string()),
+        Value::String(s) => parse_bool_string(&s).ok_or_else(|| {
+            cellfun_error_with_identifier(
+                "cellfun: UniformOutput must be logical true or false",
+                IDENT_UNIFORM_OUTPUT,
+            )
+        }),
         Value::CharArray(ca) if ca.rows == 1 => {
             let s: String = ca.data.iter().collect();
-            parse_bool_string(&s)
-                .ok_or_else(|| "cellfun: UniformOutput must be logical true or false".to_string())
+            parse_bool_string(&s).ok_or_else(|| {
+                cellfun_error_with_identifier(
+                    "cellfun: UniformOutput must be logical true or false",
+                    IDENT_UNIFORM_OUTPUT,
+                )
+            })
         }
-        other => Err(format!(
-            "cellfun: UniformOutput must be logical true or false, got {other:?}"
+        other => Err(cellfun_error_with_identifier(
+            format!("cellfun: UniformOutput must be logical true or false, got {other:?}"),
+            IDENT_UNIFORM_OUTPUT,
         )),
     }
 }
@@ -286,11 +339,11 @@ fn parse_bool_string(value: &str) -> Option<bool> {
 }
 
 fn make_error_struct(
-    raw_error: &str,
+    raw_error: &RuntimeError,
     linear_index: usize,
     shape: &[usize],
-) -> Result<Value, String> {
-    let (identifier, message) = split_error_message(raw_error);
+) -> BuiltinResult<Value> {
+    let (identifier, message) = error_identifier_and_message(raw_error);
     let mut st = StructValue::new();
     st.fields
         .insert("identifier".to_string(), Value::String(identifier));
@@ -299,10 +352,18 @@ fn make_error_struct(
     st.fields
         .insert("index".to_string(), Value::Num((linear_index + 1) as f64));
     let subs = linear_to_indices(linear_index, shape);
-    let subs_tensor = dims_to_row_tensor(&subs)?;
+    let subs_tensor =
+        dims_to_row_tensor(&subs).map_err(|e| cellfun_error(format!("cellfun: {e}")))?;
     st.fields
         .insert("indices".to_string(), Value::Tensor(subs_tensor));
     Ok(Value::Struct(st))
+}
+
+fn error_identifier_and_message(error: &RuntimeError) -> (String, String) {
+    if let Some(identifier) = error.identifier() {
+        return (identifier.to_string(), error.message().to_string());
+    }
+    split_error_message(error.message())
 }
 
 fn split_error_message(raw: &str) -> (String, String) {
@@ -329,10 +390,7 @@ fn split_error_message(raw: &str) -> (String, String) {
             return (trimmed.to_string(), String::new());
         }
     }
-    (
-        "MATLAB:cellfun:FunctionError".to_string(),
-        trimmed.to_string(),
-    )
+    (IDENT_FUNCTION_ERROR.to_string(), trimmed.to_string())
 }
 
 fn linear_to_indices(mut index: usize, shape: &[usize]) -> Vec<usize> {
@@ -360,15 +418,15 @@ enum Callable {
 }
 
 impl Callable {
-    fn from_function(value: Value) -> Result<Self, String> {
+    fn from_function(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::String(s) => Self::from_text(&s, true),
             Value::CharArray(ca) => {
                 if ca.rows != 1 {
-                    Err(
-                        "cellfun: function name must be a character vector or string scalar"
-                            .to_string(),
-                    )
+                    Err(cellfun_error_with_identifier(
+                        "cellfun: function name must be a character vector or string scalar",
+                        IDENT_INVALID_INPUT,
+                    ))
                 } else {
                     let text: String = ca.data.iter().collect();
                     Self::from_text(&text, true)
@@ -378,31 +436,36 @@ impl Callable {
                 if sa.data.len() == 1 {
                     Self::from_text(&sa.data[0], true)
                 } else {
-                    Err(
-                        "cellfun: function name must be a character vector or string scalar"
-                            .to_string(),
-                    )
+                    Err(cellfun_error_with_identifier(
+                        "cellfun: function name must be a character vector or string scalar",
+                        IDENT_INVALID_INPUT,
+                    ))
                 }
             }
             Value::FunctionHandle(name) => Self::from_text(&name, false),
             Value::Closure(c) => Ok(Callable::Closure(c)),
-            other => Err(format!(
-                "cellfun: expected function handle or builtin name, got {other:?}"
+            other => Err(cellfun_error_with_identifier(
+                format!("cellfun: expected function handle or builtin name, got {other:?}"),
+                IDENT_INVALID_INPUT,
             )),
         }
     }
 
-    fn from_text(text: &str, fold_case: bool) -> Result<Self, String> {
+    fn from_text(text: &str, fold_case: bool) -> BuiltinResult<Self> {
         let trimmed = text.trim();
         if trimmed.is_empty() {
-            return Err(
-                "cellfun: expected function handle or builtin name, got empty string".to_string(),
-            );
+            return Err(cellfun_error_with_identifier(
+                "cellfun: expected function handle or builtin name, got empty string",
+                IDENT_INVALID_INPUT,
+            ));
         }
         if let Some(rest) = trimmed.strip_prefix('@') {
             let name = rest.trim();
             if name.is_empty() {
-                Err("cellfun: empty function handle".to_string())
+                Err(cellfun_error_with_identifier(
+                    "cellfun: empty function handle",
+                    IDENT_INVALID_INPUT,
+                ))
             } else {
                 Ok(Callable::Builtin {
                     name: name.to_string(),
@@ -425,15 +488,15 @@ impl Callable {
         }
     }
 
-    fn call(&self, args: &[Value]) -> Result<Value, String> {
+    async fn call(&self, args: &[Value]) -> BuiltinResult<Value> {
         match self {
-            Callable::Builtin { name } => crate::call_builtin(name, args),
+            Callable::Builtin { name } => call_builtin_async(name, args).await,
             Callable::Closure(c) => {
                 let mut captures = c.captures.clone();
                 captures.extend_from_slice(args);
-                crate::call_builtin(&c.function_name, &captures)
+                call_builtin_async(&c.function_name, &captures).await
             }
-            Callable::Special(special) => special.call(args),
+            Callable::Special(special) => special.call(args).await,
         }
     }
 }
@@ -445,24 +508,38 @@ enum SpecialCallable {
 }
 
 impl SpecialCallable {
-    fn call(&self, args: &[Value]) -> Result<Value, String> {
+    async fn call(&self, args: &[Value]) -> BuiltinResult<Value> {
         match self {
             SpecialCallable::ProdOfSize => {
-                let value = args
-                    .first()
-                    .ok_or_else(|| "cellfun: prodofsize requires one input".to_string())?;
-                Ok(Value::Num(value_numel(value) as f64))
+                let value = args.first().ok_or_else(|| {
+                    cellfun_error_with_identifier(
+                        "cellfun: prodofsize requires one input",
+                        IDENT_INVALID_INPUT,
+                    )
+                })?;
+                Ok(Value::Num(value_numel(value).await? as f64))
             }
             SpecialCallable::IsClass => {
                 if args.len() < 2 {
-                    return Err("cellfun: 'isclass' requires a class name argument".to_string());
+                    return Err(cellfun_error_with_identifier(
+                        "cellfun: 'isclass' requires a class name argument",
+                        IDENT_INVALID_INPUT,
+                    ));
                 }
                 let left = args[0].clone();
-                let class_name = extract_string(&args[1])
-                    .ok_or_else(|| "cellfun: class name must be a string scalar".to_string())?;
-                let class_value = crate::call_builtin("class", &[left])?;
-                let class_str = extract_string(&class_value)
-                    .ok_or_else(|| "cellfun: failed to evaluate class name".to_string())?;
+                let class_name = extract_string(&args[1]).ok_or_else(|| {
+                    cellfun_error_with_identifier(
+                        "cellfun: class name must be a string scalar",
+                        IDENT_INVALID_INPUT,
+                    )
+                })?;
+                let class_value = call_builtin_async("class", &[left]).await?;
+                let class_str = extract_string(&class_value).ok_or_else(|| {
+                    cellfun_error_with_identifier(
+                        "cellfun: failed to evaluate class name",
+                        IDENT_FUNCTION_ERROR,
+                    )
+                })?;
                 Ok(Value::Bool(
                     class_str.eq_ignore_ascii_case(class_name.trim()),
                 ))
@@ -479,7 +556,7 @@ enum UniformCollector {
 }
 
 impl UniformCollector {
-    fn push(&mut self, value: &Value) -> Result<(), String> {
+    fn push(&mut self, value: &Value) -> BuiltinResult<()> {
         match self {
             UniformCollector::Pending => match classify_value(value)? {
                 ClassifiedValue::Logical(b) => {
@@ -553,28 +630,28 @@ impl UniformCollector {
         }
     }
 
-    fn finish(self, shape: &[usize]) -> Result<Value, String> {
+    fn finish(self, shape: &[usize]) -> BuiltinResult<Value> {
         match self {
             UniformCollector::Pending => {
                 let total = total_len(shape).unwrap_or(0);
                 let data = vec![0.0; total];
-                let tensor =
-                    Tensor::new(data, shape.to_vec()).map_err(|e| format!("cellfun: {e}"))?;
+                let tensor = Tensor::new(data, shape.to_vec())
+                    .map_err(|e| cellfun_error(format!("cellfun: {e}")))?;
                 Ok(Value::Tensor(tensor))
             }
             UniformCollector::Double(data) => {
-                let tensor =
-                    Tensor::new(data, shape.to_vec()).map_err(|e| format!("cellfun: {e}"))?;
+                let tensor = Tensor::new(data, shape.to_vec())
+                    .map_err(|e| cellfun_error(format!("cellfun: {e}")))?;
                 Ok(Value::Tensor(tensor))
             }
             UniformCollector::Logical(bits) => {
-                let logical =
-                    LogicalArray::new(bits, shape.to_vec()).map_err(|e| format!("cellfun: {e}"))?;
+                let logical = LogicalArray::new(bits, shape.to_vec())
+                    .map_err(|e| cellfun_error(format!("cellfun: {e}")))?;
                 Ok(Value::LogicalArray(logical))
             }
             UniformCollector::Complex(data) => {
                 let complex = ComplexTensor::new(data, shape.to_vec())
-                    .map_err(|e| format!("cellfun: {e}"))?;
+                    .map_err(|e| cellfun_error(format!("cellfun: {e}")))?;
                 Ok(Value::ComplexTensor(complex))
             }
         }
@@ -587,7 +664,7 @@ enum ClassifiedValue {
     Complex((f64, f64)),
 }
 
-fn classify_value(value: &Value) -> Result<ClassifiedValue, String> {
+fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
     match value {
         Value::Bool(b) => Ok(ClassifiedValue::Logical(*b)),
         Value::Num(n) => Ok(ClassifiedValue::Double(*n)),
@@ -598,9 +675,10 @@ fn classify_value(value: &Value) -> Result<ClassifiedValue, String> {
             Ok(ClassifiedValue::Logical(la.data[0] != 0))
         }
         Value::ComplexTensor(ct) if ct.data.len() == 1 => Ok(ClassifiedValue::Complex(ct.data[0])),
-        _ => Err(
-            "cellfun: callback must return scalar values when 'UniformOutput' is true".to_string(),
-        ),
+        _ => Err(cellfun_error_with_identifier(
+            "cellfun: callback must return scalar values when 'UniformOutput' is true",
+            IDENT_UNIFORM_OUTPUT,
+        )),
     }
 }
 
@@ -608,9 +686,14 @@ fn classify_value(value: &Value) -> Result<ClassifiedValue, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, StringArray};
     use std::convert::TryInto;
+
+    fn cellfun_builtin(func: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::cellfun_builtin(func, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -782,7 +865,9 @@ pub(crate) mod tests {
             1,
         )
         .expect("cell");
-        let err = cellfun_builtin(Value::String("@eye".into()), vec![cells]).unwrap_err();
+        let err = cellfun_builtin(Value::String("@eye".into()), vec![cells])
+            .unwrap_err()
+            .to_string();
         assert!(
             err.to_ascii_lowercase().contains("uniformoutput"),
             "unexpected error: {err}"
@@ -829,7 +914,8 @@ pub(crate) mod tests {
             Value::String("@__cellfun_identity".into()),
             vec![first, second],
         )
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
         assert!(
             err.to_ascii_lowercase().contains("size"),
             "expected size mismatch error, got: {err}"
@@ -982,7 +1068,11 @@ pub(crate) mod tests {
         name = "__cellfun_test_handler",
         builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]
-    fn cellfun_test_handler(seed: Value, _err: Value, rest: Vec<Value>) -> Result<Value, String> {
+    fn cellfun_test_handler(
+        seed: Value,
+        _err: Value,
+        rest: Vec<Value>,
+    ) -> crate::BuiltinResult<Value> {
         // Return the captured seed regardless of the inputs; ensure rest is present for coverage.
         let _ = rest;
         Ok(seed)
@@ -992,7 +1082,7 @@ pub(crate) mod tests {
         name = "__cellfun_add",
         builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]
-    fn cellfun_add(lhs: Value, rhs: Value) -> Result<Value, String> {
+    fn cellfun_add(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         let a: f64 = (&lhs).try_into()?;
         let b: f64 = (&rhs).try_into()?;
         Ok(Value::Num(a + b))
@@ -1002,7 +1092,7 @@ pub(crate) mod tests {
         name = "__cellfun_identity",
         builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]
-    fn cellfun_identity(value: Value) -> Result<Value, String> {
+    fn cellfun_identity(value: Value) -> crate::BuiltinResult<Value> {
         Ok(value)
     }
 }

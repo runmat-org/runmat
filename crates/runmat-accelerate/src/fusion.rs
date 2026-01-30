@@ -2852,16 +2852,16 @@ fn analyze_image_normalize(
     assigned: &HashSet<NodeId>,
 ) -> Option<ImageNormalizeMatch> {
     let pow_node = graph.node(pow_node_id)?;
-    if log::log_enabled!(log::Level::Debug) {
-        log::debug!(
+    if log::log_enabled!(log::Level::Trace) {
+        log::trace!(
             "image_normalize: inspect pow candidate node={pow_node_id:?} label={:?}",
             pow_node.label
         );
     }
     macro_rules! img_norm_fail {
         ($reason:expr) => {{
-            if log::log_enabled!(log::Level::Debug) {
-                log::debug!(
+            if log::log_enabled!(log::Level::Trace) {
+                log::trace!(
                     "image_normalize: reject node {pow_node_id:?} reason={}",
                     $reason
                 );
@@ -2882,8 +2882,8 @@ fn analyze_image_normalize(
     let mut nodes: Vec<NodeId> = vec![pow_node_id];
 
     let gamma_scalar = capture_image_scalar(graph, pow_node.inputs[1], assigned, &mut nodes)?;
-    if log::log_enabled!(log::Level::Debug) {
-        log::debug!("image_normalize: node {pow_node_id:?} gamma scalar={gamma_scalar:?}");
+    if log::log_enabled!(log::Level::Trace) {
+        log::trace!("image_normalize: node {pow_node_id:?} gamma scalar={gamma_scalar:?}");
     }
     let gamma_opt = match &gamma_scalar {
         ImageScalar::Constant(value) if approx_eq(*value, 1.0) => None,

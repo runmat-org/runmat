@@ -14,6 +14,14 @@ use runmat_builtins::{StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 use runmat_time::unix_timestamp_ns;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+const NAME: &str = "rng";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
+}
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::random::rng")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "rng",
@@ -49,7 +57,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "rng,seed,twister,shuffle,state",
     builtin_path = "crate::builtins::stats::random::rng"
 )]
-fn rng_builtin(args: Vec<Value>) -> Result<Value, String> {
+async fn rng_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.is_empty() {
         let current = random::snapshot()?;
         return snapshot_to_value(current);
@@ -71,15 +79,15 @@ enum ParsedCommand {
     Restore(RngSnapshot),
 }
 
-fn parse_command(args: &[Value]) -> Result<ParsedCommand, String> {
+fn parse_command(args: &[Value]) -> BuiltinResult<ParsedCommand> {
     match args.len() {
         1 => parse_single_arg(&args[0]),
         2 => parse_double_args(&args[0], &args[1]),
-        _ => Err("rng: invalid number of arguments".to_string()),
+        _ => Err(builtin_error("rng: invalid number of arguments")),
     }
 }
 
-fn parse_single_arg(arg: &Value) -> Result<ParsedCommand, String> {
+fn parse_single_arg(arg: &Value) -> BuiltinResult<ParsedCommand> {
     if let Some(keyword) = keyword_of(arg) {
         return parse_keyword(&keyword, None);
     }
@@ -89,7 +97,7 @@ fn parse_single_arg(arg: &Value) -> Result<ParsedCommand, String> {
     }
 }
 
-fn parse_double_args(first: &Value, second: &Value) -> Result<ParsedCommand, String> {
+fn parse_double_args(first: &Value, second: &Value) -> BuiltinResult<ParsedCommand> {
     if let Some(keyword) = keyword_of(first) {
         let generator = Some(parse_generator(second)?);
         return parse_keyword(&keyword, generator);
@@ -99,22 +107,22 @@ fn parse_double_args(first: &Value, second: &Value) -> Result<ParsedCommand, Str
     Ok(ParsedCommand::Seed(seed))
 }
 
-fn parse_keyword(keyword: &str, generator: Option<RngAlgorithm>) -> Result<ParsedCommand, String> {
+fn parse_keyword(keyword: &str, generator: Option<RngAlgorithm>) -> BuiltinResult<ParsedCommand> {
     let algo = generator.unwrap_or(RngAlgorithm::RunMatLcg);
     if algo != RngAlgorithm::RunMatLcg {
-        return Err(format!(
+        return Err(builtin_error(format!(
             "rng: generator '{}' is not supported in RunMat",
             algo.as_str()
-        ));
+        )));
     }
     match keyword {
         "default" | "twister" | "runmat-lcg" => Ok(ParsedCommand::Default),
         "shuffle" => Ok(ParsedCommand::Shuffle),
-        other => Err(format!("rng: unknown option '{other}'")),
+        other => Err(builtin_error(format!("rng: unknown option '{other}'"))),
     }
 }
 
-fn apply_command(command: ParsedCommand) -> Result<(), String> {
+fn apply_command(command: ParsedCommand) -> BuiltinResult<()> {
     match command {
         ParsedCommand::Default => {
             set_default()?;
@@ -136,7 +144,7 @@ fn apply_command(command: ParsedCommand) -> Result<(), String> {
     }
 }
 
-fn snapshot_to_value(snapshot: RngSnapshot) -> Result<Value, String> {
+fn snapshot_to_value(snapshot: RngSnapshot) -> BuiltinResult<Value> {
     let mut struct_value = StructValue::new();
     let seed_value = snapshot.seed.unwrap_or(DEFAULT_USER_SEED) as f64;
     struct_value.fields.insert(
@@ -148,25 +156,28 @@ fn snapshot_to_value(snapshot: RngSnapshot) -> Result<Value, String> {
         .insert("Seed".to_string(), Value::Num(seed_value));
     let lo = (snapshot.state & 0xFFFF_FFFF) as f64;
     let hi = (snapshot.state >> 32) as f64;
-    let tensor = Tensor::new(vec![lo, hi], vec![1, 2]).map_err(|e| format!("rng: {e}"))?;
+    let tensor =
+        Tensor::new(vec![lo, hi], vec![1, 2]).map_err(|e| builtin_error(format!("rng: {e}")))?;
     struct_value
         .fields
         .insert("State".to_string(), Value::Tensor(tensor));
     Ok(Value::Struct(struct_value))
 }
 
-fn snapshot_from_value(value: &Value) -> Result<RngSnapshot, String> {
+fn snapshot_from_value(value: &Value) -> BuiltinResult<RngSnapshot> {
     let Value::Struct(struct_value) = value else {
-        return Err("rng: expected a structure with fields Type, Seed, and State".to_string());
+        return Err(builtin_error(
+            "rng: expected a structure with fields Type, Seed, and State",
+        ));
     };
     let type_value = struct_value
         .fields
         .get("Type")
         .or_else(|| struct_value.fields.get("type"))
-        .ok_or_else(|| "rng: state struct is missing the 'Type' field".to_string())?;
+        .ok_or_else(|| builtin_error("rng: state struct is missing the 'Type' field"))?;
     let generator = match keyword_of(type_value) {
         Some(ref kw) => parse_generator_keyword(kw)?,
-        None => return Err("rng: Type field must be a string".to_string()),
+        None => return Err(builtin_error("rng: Type field must be a string")),
     };
 
     let seed_opt = struct_value
@@ -179,7 +190,7 @@ fn snapshot_from_value(value: &Value) -> Result<RngSnapshot, String> {
         .fields
         .get("State")
         .or_else(|| struct_value.fields.get("state"))
-        .ok_or_else(|| "rng: state struct is missing the 'State' field".to_string())?;
+        .ok_or_else(|| builtin_error("rng: state struct is missing the 'State' field"))?;
     let state = parse_state_scalar(state_value)?;
     Ok(RngSnapshot {
         state,
@@ -188,54 +199,60 @@ fn snapshot_from_value(value: &Value) -> Result<RngSnapshot, String> {
     })
 }
 
-fn parse_generator(value: &Value) -> Result<RngAlgorithm, String> {
+fn parse_generator(value: &Value) -> BuiltinResult<RngAlgorithm> {
     match keyword_of(value) {
         Some(keyword) => parse_generator_keyword(&keyword),
-        None => Err("rng: generator name must be a string".to_string()),
+        None => Err(builtin_error("rng: generator name must be a string")),
     }
 }
 
-fn parse_generator_keyword(keyword: &str) -> Result<RngAlgorithm, String> {
+fn parse_generator_keyword(keyword: &str) -> BuiltinResult<RngAlgorithm> {
     match keyword {
         "twister" | "default" | "runmat-lcg" => Ok(RngAlgorithm::RunMatLcg),
-        other => Err(format!("rng: generator '{other}' is not supported")),
+        other => Err(builtin_error(format!(
+            "rng: generator '{other}' is not supported"
+        ))),
     }
 }
 
-fn parse_seed_scalar(value: &Value, label: &str) -> Result<u64, String> {
+fn parse_seed_scalar(value: &Value, label: &str) -> BuiltinResult<u64> {
     match value {
         Value::Int(i) => {
             let v = i.to_i64();
             if v < 0 {
-                return Err(format!("{label}: seed must be non-negative"));
+                return Err(builtin_error(format!("{label}: seed must be non-negative")));
             }
             Ok(v as u64)
         }
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(format!("{label}: seed must be finite"));
+                return Err(builtin_error(format!("{label}: seed must be finite")));
             }
             if *n < 0.0 {
-                return Err(format!("{label}: seed must be non-negative"));
+                return Err(builtin_error(format!("{label}: seed must be non-negative")));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
-                return Err(format!("{label}: seed must be an integer"));
+                return Err(builtin_error(format!("{label}: seed must be an integer")));
             }
             if rounded > (1u64 << 53) as f64 {
-                return Err(format!("{label}: seed exceeds 53-bit integer precision"));
+                return Err(builtin_error(format!(
+                    "{label}: seed exceeds 53-bit integer precision"
+                )));
             }
             Ok(rounded as u64)
         }
         Value::Tensor(t) if t.data.len() == 1 => parse_seed_scalar(&Value::Num(t.data[0]), label),
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
-            Err(format!("{label}: expected a numeric seed"))
+            Err(builtin_error(format!("{label}: expected a numeric seed")))
         }
-        _ => Err(format!("{label}: expected a scalar numeric seed")),
+        _ => Err(builtin_error(format!(
+            "{label}: expected a scalar numeric seed"
+        ))),
     }
 }
 
-fn parse_state_scalar(value: &Value) -> Result<u64, String> {
+fn parse_state_scalar(value: &Value) -> BuiltinResult<u64> {
     match value {
         Value::Tensor(t) => match t.data.len() {
             1 => parse_state_scalar(&Value::Num(t.data[0])),
@@ -244,46 +261,50 @@ fn parse_state_scalar(value: &Value) -> Result<u64, String> {
                 let hi = parse_state_word(t.data[1], "rng: State[2]")?;
                 Ok(lo | ((hi as u64) << 32))
             }
-            _ => Err("rng: State tensor must contain one or two elements".to_string()),
+            _ => Err(builtin_error(
+                "rng: State tensor must contain one or two elements",
+            )),
         },
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err("rng: State must be finite".to_string());
+                return Err(builtin_error("rng: State must be finite"));
             }
             if *n < 0.0 {
-                return Err("rng: State must be non-negative".to_string());
+                return Err(builtin_error("rng: State must be non-negative"));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
-                return Err("rng: State must be an integer vector".to_string());
+                return Err(builtin_error("rng: State must be an integer vector"));
             }
             Ok(rounded as u64)
         }
         Value::Int(i) => {
             let v = i.to_i64();
             if v < 0 {
-                Err("rng: State must be non-negative".to_string())
+                Err(builtin_error("rng: State must be non-negative"))
             } else {
                 Ok(v as u64)
             }
         }
-        other => Err(format!("rng: unsupported State value {other:?}")),
+        other => Err(builtin_error(format!(
+            "rng: unsupported State value {other:?}"
+        ))),
     }
 }
 
-fn parse_state_word(value: f64, label: &str) -> Result<u64, String> {
+fn parse_state_word(value: f64, label: &str) -> BuiltinResult<u64> {
     if !value.is_finite() {
-        return Err(format!("{label}: must be finite"));
+        return Err(builtin_error(format!("{label}: must be finite")));
     }
     if value < 0.0 {
-        return Err(format!("{label}: must be non-negative"));
+        return Err(builtin_error(format!("{label}: must be non-negative")));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err(format!("{label}: must be an integer"));
+        return Err(builtin_error(format!("{label}: must be an integer")));
     }
     if rounded > (u32::MAX as f64) {
-        return Err(format!("{label}: exceeds uint32 precision"));
+        return Err(builtin_error(format!("{label}: exceeds uint32 precision")));
     }
     Ok(rounded as u64)
 }
@@ -317,6 +338,8 @@ fn sync_provider_state(state: u64) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
+    use crate::dispatcher::download_handle_async;
+    use futures::executor::block_on;
     use runmat_builtins::IntValue;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -326,7 +349,7 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
-        let value = rng_builtin(Vec::new()).expect("rng");
+        let value = block_on(rng_builtin(Vec::new())).expect("rng");
         let snapshot = snapshot_from_value(&value).expect("snapshot");
         assert_eq!(snapshot.state, random::default_snapshot().state);
         assert_eq!(snapshot.seed, Some(DEFAULT_USER_SEED));
@@ -340,9 +363,9 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
-        rng_builtin(vec![Value::Int(IntValue::U32(42))]).expect("rng");
+        block_on(rng_builtin(vec![Value::Int(IntValue::U32(42))])).expect("rng");
         let seq1 = random::generate_uniform(5, "rng test").expect("uniform");
-        rng_builtin(vec![Value::Int(IntValue::U32(42))]).expect("rng");
+        block_on(rng_builtin(vec![Value::Int(IntValue::U32(42))])).expect("rng");
         let seq2 = random::generate_uniform(5, "rng test").expect("uniform");
         assert_eq!(seq1, seq2);
     }
@@ -354,9 +377,9 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
-        let saved = rng_builtin(Vec::new()).expect("rng");
-        rng_builtin(vec![Value::Int(IntValue::U32(7))]).expect("rng");
-        rng_builtin(vec![saved.clone()]).expect("rng restore");
+        let saved = block_on(rng_builtin(Vec::new())).expect("rng");
+        block_on(rng_builtin(vec![Value::Int(IntValue::U32(7))])).expect("rng");
+        block_on(rng_builtin(vec![saved.clone()])).expect("rng restore");
         let current = random::snapshot().expect("snapshot");
         assert_eq!(current.state, random::default_snapshot().state);
         assert_eq!(current.seed, Some(DEFAULT_USER_SEED));
@@ -369,8 +392,8 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
-        rng_builtin(vec![Value::Int(IntValue::U32(99))]).expect("seed rng");
-        let previous = rng_builtin(vec![Value::from("default")]).expect("rng default");
+        block_on(rng_builtin(vec![Value::Int(IntValue::U32(99))])).expect("seed rng");
+        let previous = block_on(rng_builtin(vec![Value::from("default")])).expect("rng default");
         let restored = random::snapshot().expect("snapshot");
         assert_eq!(restored.state, random::default_snapshot().state);
         assert_eq!(restored.seed, Some(DEFAULT_USER_SEED));
@@ -386,11 +409,14 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
-        rng_builtin(vec![Value::Int(IntValue::U32(123))]).expect("rng seed first");
+        block_on(rng_builtin(vec![Value::Int(IntValue::U32(123))])).expect("rng seed first");
         let host_seq = random::generate_uniform(4, "twister alias host").expect("uniform");
         random::reset_rng();
-        rng_builtin(vec![Value::Int(IntValue::U32(123)), Value::from("twister")])
-            .expect("rng seed twister");
+        block_on(rng_builtin(vec![
+            Value::Int(IntValue::U32(123)),
+            Value::from("twister"),
+        ]))
+        .expect("rng seed twister");
         let alias_seq = random::generate_uniform(4, "twister alias verify").expect("uniform");
         assert_eq!(host_seq, alias_seq);
     }
@@ -402,10 +428,11 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
-        let err = rng_builtin(vec![Value::Int(IntValue::I32(-5))]).unwrap_err();
+        let err = block_on(rng_builtin(vec![Value::Int(IntValue::I32(-5))])).unwrap_err();
+        let message = err.to_string();
         assert!(
-            err.contains("seed must be non-negative"),
-            "unexpected error: {err}"
+            message.contains("seed must be non-negative"),
+            "unexpected error: {message}"
         );
     }
 
@@ -416,11 +443,16 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
-        let err = rng_builtin(vec![Value::from("default"), Value::from("philox")]).unwrap_err();
+        let err = block_on(rng_builtin(vec![
+            Value::from("default"),
+            Value::from("philox"),
+        ]))
+        .unwrap_err();
+        let message = err.to_string();
         assert!(
-            err.contains("generator 'philox' is not supported")
-                || err.contains("generator 'philox'"),
-            "unexpected error: {err}"
+            message.contains("generator 'philox' is not supported")
+                || message.contains("generator 'philox'"),
+            "unexpected error: {message}"
         );
     }
 
@@ -435,8 +467,12 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.fields.insert("Seed".to_string(), Value::Num(0.0));
         st.fields.insert("State".to_string(), Value::Tensor(tensor));
-        let err = rng_builtin(vec![Value::Struct(st)]).unwrap_err();
-        assert!(err.contains("Type"), "unexpected error message: {err}");
+        let err = block_on(rng_builtin(vec![Value::Struct(st)])).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("Type"),
+            "unexpected error message: {message}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -447,10 +483,10 @@ pub(crate) mod tests {
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
         test_support::with_test_provider(|provider| {
-            rng_builtin(vec![Value::Int(IntValue::U32(9))]).expect("rng");
+            block_on(rng_builtin(vec![Value::Int(IntValue::U32(9))])).expect("rng");
             let handle = provider.random_uniform(&[4, 1]).expect("gpu uniform");
             let host_after_gpu = random::generate_uniform(4, "rng provider sync").expect("uniform");
-            let gpu = provider.download(&handle).expect("download");
+            let gpu = block_on(download_handle_async(provider, &handle)).expect("download");
             assert_eq!(gpu.data, host_after_gpu);
         });
     }
@@ -466,12 +502,12 @@ pub(crate) mod tests {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
-        rng_builtin(vec![Value::Int(IntValue::U32(2024))]).expect("rng wgpu seed");
+        block_on(rng_builtin(vec![Value::Int(IntValue::U32(2024))])).expect("rng wgpu seed");
         let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
         let handle = provider
             .random_uniform(&[1, 6])
             .expect("wgpu random uniform");
-        let gpu = provider.download(&handle).expect("wgpu download");
+        let gpu = block_on(download_handle_async(provider, &handle)).expect("wgpu download");
         let host = random::generate_uniform(6, "rng wgpu parity").expect("host uniform sequence");
         assert_eq!(gpu.data.len(), host.len());
         for (idx, value) in gpu.data.iter().enumerate() {
@@ -499,7 +535,7 @@ pub(crate) mod tests {
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
         unsafe { std::env::set_var("RUNMAT_RNG_SHUFFLE_SEED", "12345") };
-        rng_builtin(vec![Value::from("shuffle")]).expect("rng shuffle");
+        block_on(rng_builtin(vec![Value::from("shuffle")])).expect("rng shuffle");
         unsafe { std::env::remove_var("RUNMAT_RNG_SHUFFLE_SEED") };
         let current = random::snapshot().expect("snapshot");
         assert_eq!(current.seed, Some(12345));

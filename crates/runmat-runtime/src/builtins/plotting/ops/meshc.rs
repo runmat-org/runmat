@@ -12,9 +12,12 @@ use super::contour::{
 };
 use super::mesh::build_mesh_surface;
 use super::state::{render_active_plot, PlotRenderOptions};
+
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::build_surface_gpu_plot;
 use std::sync::Arc;
+
+const BUILTIN_NAME: &str = "meshc";
 
 #[runtime_builtin(
     name = "meshc",
@@ -25,7 +28,12 @@ use std::sync::Arc;
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::meshc"
 )]
-pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result<String, String> {
+pub fn meshc_builtin(
+    x: Tensor,
+    y: Tensor,
+    z: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<String> {
     let x_axis = numeric_vector(x);
     let y_axis = numeric_vector(y);
     let mut x_axis = Some(x_axis);
@@ -51,7 +59,7 @@ pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result
         ..Default::default()
     };
     let level_spec = ContourLevelSpec::Count(default_level_count());
-    render_active_plot(opts, move |figure, axes| {
+    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let level_spec = level_spec.clone();
         let x_vec = x_axis.take().expect("meshc X consumed once");
         let y_vec = y_axis.take().expect("meshc Y consumed once");
@@ -60,12 +68,13 @@ pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result
         let style = Arc::clone(&style);
         let contour_map = style.colormap;
         if let Some(z_gpu) = z_arg.gpu_handle() {
-            match build_surface_gpu_plot(&x_vec, &y_vec, z_gpu) {
+            match build_surface_gpu_plot(BUILTIN_NAME, &x_vec, &y_vec, z_gpu) {
                 Ok(surface_gpu) => {
                     let mut surface = surface_gpu.with_wireframe(true);
                     style.apply_to_plot(&mut surface);
                     let base_z = surface.bounds().min.z;
                     match build_contour_gpu_plot(
+                        BUILTIN_NAME,
                         &x_vec,
                         &y_vec,
                         z_gpu,
@@ -79,18 +88,28 @@ pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result
                             figure.add_contour_plot_on_axes(contour, axes);
                             return Ok(());
                         }
-                        Err(err) => warn!("meshc contour GPU path unavailable: {err}"),
+                        Err(err) => {
+                            warn!("meshc contour GPU path unavailable: {err}");
+                        }
                     }
                 }
-                Err(err) => warn!("meshc surface GPU path unavailable: {err}"),
+                Err(err) => {
+                    warn!("meshc surface GPU path unavailable: {err}");
+                }
             }
         }
 
-        let grid = tensor_to_surface_grid(z_arg.into_tensor("meshc")?, x_vec.len(), y_vec.len())?;
+        let grid = tensor_to_surface_grid(
+            z_arg.into_tensor(BUILTIN_NAME)?,
+            x_vec.len(),
+            y_vec.len(),
+            BUILTIN_NAME,
+        )?;
         let mut surface = build_mesh_surface(x_vec.clone(), y_vec.clone(), grid.clone())?;
         style.apply_to_plot(&mut surface);
         let base_z = surface.bounds().min.z;
         let contour = build_contour_plot(
+            BUILTIN_NAME,
             &x_vec,
             &y_vec,
             &grid,
@@ -103,7 +122,8 @@ pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result
         figure.add_surface_plot_on_axes(surface, axes);
         figure.add_contour_plot_on_axes(contour, axes);
         Ok(())
-    })
+    })?;
+    Ok(rendered)
 }
 
 #[cfg(test)]

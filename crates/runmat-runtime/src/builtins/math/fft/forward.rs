@@ -16,7 +16,12 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{
+    gpu_helpers,
+    shape::{is_scalar_shape, normalize_scalar_shape},
+    tensor,
+};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::fft::forward")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -46,6 +51,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "FFT participates in fusion plans only as a boundary; no fused kernels are generated today.",
 };
 
+const BUILTIN_NAME: &str = "fft";
+
+fn fft_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn builtin_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(builtin).build()
+}
+
 #[runtime_builtin(
     name = "fft",
     category = "math/fft",
@@ -53,37 +70,29 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "fft,fourier transform,complex,gpu",
     builtin_path = "crate::builtins::math::fft::forward"
 )]
-fn fft_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let (length, dimension) = parse_arguments(&rest)?;
+async fn fft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let (length, dimension) = parse_arguments(&rest).await?;
     match value {
-        Value::GpuTensor(handle) => fft_gpu(handle, length, dimension),
+        Value::GpuTensor(handle) => fft_gpu(handle, length, dimension).await,
         other => fft_host(other, length, dimension),
     }
 }
 
-fn fft_host(
-    value: Value,
-    length: Option<usize>,
-    dimension: Option<usize>,
-) -> Result<Value, String> {
-    let tensor = value_to_complex_tensor(value, "fft")?;
+fn fft_host(value: Value, length: Option<usize>, dimension: Option<usize>) -> BuiltinResult<Value> {
+    let tensor = value_to_complex_tensor(value, BUILTIN_NAME)?;
     let transformed = fft_complex_tensor(tensor, length, dimension)?;
     Ok(complex_tensor_into_value(transformed))
 }
 
-fn fft_gpu(
+async fn fft_gpu(
     handle: GpuTensorHandle,
     length: Option<usize>,
     dimension: Option<usize>,
-) -> Result<Value, String> {
-    let mut shape = if handle.shape.is_empty() {
-        vec![1]
-    } else {
-        handle.shape.clone()
-    };
+) -> BuiltinResult<Value> {
+    let mut shape = normalize_scalar_shape(&handle.shape);
 
     let dim_one_based = match dimension {
-        Some(0) => return Err("fft: dimension must be >= 1".to_string()),
+        Some(0) => return Err(fft_error("fft: dimension must be >= 1")),
         Some(dim) => dim,
         None => default_dimension(&shape),
     };
@@ -96,48 +105,71 @@ fn fft_gpu(
     let target_len = length.unwrap_or(current_len);
 
     if target_len == 0 {
-        let tensor = gpu_helpers::gather_tensor(&handle)?;
-        let complex = tensor_to_complex_tensor(tensor, "fft")?;
+        let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+        let complex = tensor_to_complex_tensor(tensor, BUILTIN_NAME)?;
         let transformed = fft_complex_tensor(complex, length, dimension)?;
         return Ok(complex_tensor_into_value(transformed));
     }
 
     if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(out) = provider.fft_dim(&handle, length, dim_index) {
-            let complex = fft_download_gpu_result(provider, &out)?;
+        if let Ok(out) = provider.fft_dim(&handle, length, dim_index).await {
+            let complex = fft_download_gpu_result(provider, &out, BUILTIN_NAME).await?;
             return Ok(complex_tensor_into_value(complex));
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
-    let complex = tensor_to_complex_tensor(tensor, "fft")?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+    let complex = tensor_to_complex_tensor(tensor, BUILTIN_NAME)?;
     let transformed = fft_complex_tensor(complex, length, dimension)?;
     Ok(complex_tensor_into_value(transformed))
 }
 
-pub(super) fn fft_download_gpu_result(
+pub(super) async fn fft_download_gpu_result(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
-) -> Result<ComplexTensor, String> {
-    let host = provider.download(handle).map_err(|e| format!("fft: {e}"))?;
+    builtin: &str,
+) -> BuiltinResult<ComplexTensor> {
+    let host = download_handle_async(provider, handle)
+        .await
+        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
     provider.free(handle).ok();
     runmat_accelerate_api::clear_residency(handle);
-    host_to_complex_tensor(host, "fft")
+    host_to_complex_tensor(host, builtin)
 }
 
-fn parse_arguments(args: &[Value]) -> Result<(Option<usize>, Option<usize>), String> {
+async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
+    match value {
+        Value::Int(_) | Value::Num(_) => {
+            tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
+                .await
+                .map_err(fft_error)?
+                .ok_or_else(|| {
+                    fft_error(format!(
+                        "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
+                    ))
+                })
+        }
+        _ => Err(fft_error(format!(
+            "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
+        ))),
+    }
+}
+
+async fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<usize>)> {
     match args.len() {
         0 => Ok((None, None)),
         1 => {
-            let len = parse_length(&args[0], "fft")?;
+            let len = parse_length(&args[0], BUILTIN_NAME)?;
             Ok((len, None))
         }
         2 => {
-            let len = parse_length(&args[0], "fft")?;
-            let dim = Some(tensor::parse_dimension(&args[1], "fft")?);
+            let len = parse_length(&args[0], BUILTIN_NAME)?;
+            let dim = Some(parse_dimension_arg(&args[1]).await?);
             Ok((len, dim))
         }
-        _ => Err("fft: expected fft(X), fft(X, N), or fft(X, N, DIM)".to_string()),
+        _ => Err(fft_error(
+            "fft: expected fft(X), fft(X, N), or fft(X, N, DIM)",
+        )),
     }
 }
 
@@ -145,9 +177,9 @@ pub(super) fn fft_complex_tensor(
     mut tensor: ComplexTensor,
     length: Option<usize>,
     dimension: Option<usize>,
-) -> Result<ComplexTensor, String> {
-    if tensor.shape.is_empty() {
-        tensor.shape = vec![tensor.data.len()];
+) -> BuiltinResult<ComplexTensor> {
+    if is_scalar_shape(&tensor.shape) {
+        tensor.shape = normalize_scalar_shape(&tensor.shape);
         tensor.rows = tensor.shape.first().copied().unwrap_or(1);
         tensor.cols = tensor.shape.get(1).copied().unwrap_or(1);
     }
@@ -155,7 +187,7 @@ pub(super) fn fft_complex_tensor(
     let mut shape = tensor.shape.clone();
     let origin_rank = shape.len();
     let dim = match dimension {
-        Some(0) => return Err("fft: dimension must be >= 1".to_string()),
+        Some(0) => return Err(fft_error("fft: dimension must be >= 1")),
         Some(dim) => dim - 1,
         None => default_dimension(&shape) - 1,
     };
@@ -172,7 +204,7 @@ pub(super) fn fft_complex_tensor(
         out_shape[dim] = 0;
         trim_trailing_ones(&mut out_shape, origin_rank);
         return ComplexTensor::new(Vec::<(f64, f64)>::new(), out_shape)
-            .map_err(|e| format!("fft: {e}"));
+            .map_err(|e| fft_error(format!("fft: {e}")));
     }
 
     let inner_stride = shape[..dim]
@@ -196,7 +228,7 @@ pub(super) fn fft_complex_tensor(
         out_shape[dim] = target_len;
         trim_trailing_ones(&mut out_shape, origin_rank);
         let data = vec![(0.0, 0.0); 0];
-        return ComplexTensor::new(data, out_shape).map_err(|e| format!("fft: {e}"));
+        return ComplexTensor::new(data, out_shape).map_err(|e| fft_error(format!("fft: {e}")));
     }
 
     let output_len = target_len.saturating_mul(num_slices);
@@ -242,13 +274,14 @@ pub(super) fn fft_complex_tensor(
     trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
 
     let data = output.into_iter().map(|c| (c.re, c.im)).collect::<Vec<_>>();
-    ComplexTensor::new(data, out_shape).map_err(|e| format!("fft: {e}"))
+    ComplexTensor::new(data, out_shape).map_err(|e| fft_error(format!("fft: {e}")))
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use num_complex::Complex;
     use runmat_builtins::{ComplexTensor as HostComplexTensor, IntValue, Tensor};
     use rustfft::FftPlanner;
@@ -257,12 +290,20 @@ pub(crate) mod tests {
         (a.0 - b.0).abs() <= tol && (a.1 - b.1).abs() <= tol
     }
 
+    fn error_message(error: crate::RuntimeError) -> String {
+        error.message().to_string()
+    }
+
     fn value_as_complex_tensor(value: Value) -> HostComplexTensor {
         match value {
             Value::ComplexTensor(tensor) => tensor,
             Value::Complex(re, im) => HostComplexTensor::new(vec![(re, im)], vec![1, 1]).unwrap(),
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    fn fft_builtin_sync(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::fft_builtin(value, rest))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -332,9 +373,9 @@ pub(crate) mod tests {
     fn fft_empty_length_argument_defaults_to_input_length() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4]).unwrap();
         let baseline =
-            fft_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("baseline fft");
+            fft_builtin_sync(Value::Tensor(tensor.clone()), Vec::new()).expect("baseline fft");
         let empty = Tensor::new(Vec::<f64>::new(), vec![0]).unwrap();
-        let result = fft_builtin(
+        let result = fft_builtin_sync(
             Value::Tensor(tensor),
             vec![Value::Tensor(empty), Value::Int(IntValue::I32(1))],
         )
@@ -482,27 +523,33 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_non_numeric_length() {
-        assert!(parse_arguments(&[Value::Bool(true)]).is_err());
+        assert!(block_on(parse_arguments(&[Value::Bool(true)])).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_negative_length() {
-        let err = parse_arguments(&[Value::Num(-1.0)]).unwrap_err();
+        let err = error_message(block_on(parse_arguments(&[Value::Num(-1.0)])).unwrap_err());
         assert!(err.contains("length must be non-negative"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_fractional_length() {
-        let err = parse_arguments(&[Value::Num(1.5)]).unwrap_err();
+        let err = error_message(block_on(parse_arguments(&[Value::Num(1.5)])).unwrap_err());
         assert!(err.contains("length must be an integer"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_dimension_zero() {
-        let err = parse_arguments(&[Value::Num(4.0), Value::Int(IntValue::I32(0))]).unwrap_err();
+        let err = error_message(
+            block_on(parse_arguments(&[
+                Value::Num(4.0),
+                Value::Int(IntValue::I32(0)),
+            ]))
+            .unwrap_err(),
+        );
         assert!(err.contains("dimension must be >= 1"));
     }
 
@@ -516,8 +563,8 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let gpu = fft_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("fft");
-            let cpu = fft_builtin(Value::Tensor(tensor), Vec::new()).expect("fft");
+            let gpu = fft_builtin_sync(Value::GpuTensor(handle.clone()), Vec::new()).expect("fft");
+            let cpu = fft_builtin_sync(Value::Tensor(tensor), Vec::new()).expect("fft");
             let gpu_host = value_as_complex_tensor(gpu);
             let cpu_host = value_as_complex_tensor(cpu);
             assert_eq!(gpu_host.shape, cpu_host.shape);
@@ -542,8 +589,9 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let gpu = fft_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("gpu fft");
-            let cpu = fft_builtin(Value::Tensor(tensor_cpu), Vec::new()).expect("cpu fft");
+            let gpu =
+                fft_builtin_sync(Value::GpuTensor(handle.clone()), Vec::new()).expect("gpu fft");
+            let cpu = fft_builtin_sync(Value::Tensor(tensor_cpu), Vec::new()).expect("cpu fft");
             let gpu_ct = value_as_complex_tensor(gpu);
             let cpu_ct = value_as_complex_tensor(cpu);
             assert_eq!(gpu_ct.shape, cpu_ct.shape);

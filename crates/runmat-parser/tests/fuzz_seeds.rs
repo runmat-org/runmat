@@ -1,4 +1,5 @@
-use runmat_parser::parse;
+mod parse;
+use parse::parse;
 
 #[test]
 fn parse_various_valid_seeds() {

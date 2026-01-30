@@ -6,7 +6,9 @@ use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
 use super::handle_args::{handle_from_string, handles_from_value, parse_string};
-use super::state::{clear_figure, figure_handles, FigureHandle};
+use super::state::{clear_figure, clear_figure_with_builtin, figure_handles, FigureHandle};
+
+use crate::BuiltinResult;
 
 #[runtime_builtin(
     name = "clf",
@@ -17,21 +19,21 @@ use super::state::{clear_figure, figure_handles, FigureHandle};
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::clf"
 )]
-pub fn clf_builtin(rest: Vec<Value>) -> Result<String, String> {
+pub fn clf_builtin(rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let (action, _reset) = parse_clf_action(&rest)?;
     match action {
         ClfAction::Current => {
-            let cleared = clear_figure(None).map_err(|err| format!("clf: {err}"))?;
+            let cleared = clear_figure_with_builtin("clf", None)?;
             Ok(format!("Cleared figure {}", cleared.as_u32()))
         }
         ClfAction::Handles(handles) => {
             let ordered: BTreeSet<u32> = handles.into_iter().map(|h| h.as_u32()).collect();
             if ordered.is_empty() {
-                let cleared = clear_figure(None).map_err(|err| format!("clf: {err}"))?;
+                let cleared = clear_figure_with_builtin("clf", None)?;
                 return Ok(format!("Cleared figure {}", cleared.as_u32()));
             }
             for id in &ordered {
-                clear_figure(Some(FigureHandle::from(*id))).map_err(|err| format!("clf: {err}"))?;
+                clear_figure_with_builtin("clf", Some(FigureHandle::from(*id)))?;
             }
             if ordered.len() == 1 {
                 Ok(format!("Cleared figure {}", ordered.iter().next().unwrap()))
@@ -59,7 +61,7 @@ enum ClfAction {
     All,
 }
 
-fn parse_clf_action(args: &[Value]) -> Result<(ClfAction, bool), String> {
+fn parse_clf_action(args: &[Value]) -> BuiltinResult<(ClfAction, bool)> {
     if args.is_empty() {
         return Ok((ClfAction::Current, false));
     }

@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::{build_runtime_error, RuntimeError};
 
 const DEFAULT_IDENTIFIER: &str = "MATLAB:error";
 
@@ -40,6 +41,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Control-flow builtin; excluded from fusion planning.",
 };
 
+fn error_flow(identifier: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("error")
+        .with_identifier(normalize_identifier(identifier))
+        .build()
+}
+
+fn remap_error_flow(err: RuntimeError, identifier: &str) -> RuntimeError {
+    build_runtime_error(err.message().to_string())
+        .with_builtin("error")
+        .with_identifier(normalize_identifier(identifier))
+        .with_source(err)
+        .build()
+}
+
 #[runtime_builtin(
     name = "error",
     category = "diagnostics",
@@ -48,9 +64,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::diagnostics::error"
 )]
-fn error_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn error_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return Err(build_error(
+        return Err(error_flow(
             DEFAULT_IDENTIFIER,
             "error: missing message argument",
         ));
@@ -63,32 +79,32 @@ fn error_builtin(args: Vec<Value>) -> Result<Value, String> {
     match first {
         Value::MException(mex) => {
             if !rest.is_empty() {
-                return Err(build_error(
+                return Err(error_flow(
                     DEFAULT_IDENTIFIER,
                     "error: additional arguments are not allowed when passing an MException",
                 ));
             }
-            Err(build_error(&mex.identifier, &mex.message))
+            Err(error_flow(&mex.identifier, &mex.message))
         }
         Value::Struct(ref st) => {
             if !rest.is_empty() {
-                return Err(build_error(
+                return Err(error_flow(
                     DEFAULT_IDENTIFIER,
                     "error: additional arguments are not allowed when passing a message struct",
                 ));
             }
             let (identifier, message) = extract_struct_error_fields(st)?;
-            Err(build_error(&identifier, &message))
+            Err(error_flow(&identifier, &message))
         }
         other => handle_message_arguments(other, rest),
     }
 }
 
-fn handle_message_arguments(first: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn handle_message_arguments(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let first_string = value_to_string("error", &first)?;
 
     if rest.is_empty() {
-        return Err(build_error(DEFAULT_IDENTIFIER, &first_string));
+        return Err(error_flow(DEFAULT_IDENTIFIER, first_string));
     }
 
     let mut identifier = DEFAULT_IDENTIFIER.to_string();
@@ -109,19 +125,21 @@ fn handle_message_arguments(first: Value, rest: Vec<Value>) -> Result<Value, Str
         format_string
     } else {
         format_variadic(&format_string, format_args)
-            .map_err(|e| build_error(DEFAULT_IDENTIFIER, &e))?
+            .map_err(|flow| remap_error_flow(flow, DEFAULT_IDENTIFIER))?
     };
 
-    Err(build_error(&identifier, &message))
+    Err(error_flow(&identifier, message))
 }
 
-fn extract_struct_error_fields(struct_value: &StructValue) -> Result<(String, String), String> {
+fn extract_struct_error_fields(
+    struct_value: &StructValue,
+) -> crate::BuiltinResult<(String, String)> {
     let identifier_value = struct_value
         .fields
         .get("identifier")
         .or_else(|| struct_value.fields.get("messageid"))
         .ok_or_else(|| {
-            build_error(
+            error_flow(
                 DEFAULT_IDENTIFIER,
                 "error: message struct must contain an 'identifier' field",
             )
@@ -131,7 +149,7 @@ fn extract_struct_error_fields(struct_value: &StructValue) -> Result<(String, St
         .get("message")
         .or_else(|| struct_value.fields.get("msg"))
         .ok_or_else(|| {
-            build_error(
+            error_flow(
                 DEFAULT_IDENTIFIER,
                 "error: message struct must contain a 'message' field",
             )
@@ -142,13 +160,8 @@ fn extract_struct_error_fields(struct_value: &StructValue) -> Result<(String, St
     Ok((identifier, message))
 }
 
-fn value_to_string(context: &str, value: &Value) -> Result<String, String> {
-    String::try_from(value).map_err(|e| build_error(DEFAULT_IDENTIFIER, &format!("{context}: {e}")))
-}
-
-fn build_error(identifier: &str, message: &str) -> String {
-    let ident = normalize_identifier(identifier);
-    format!("{ident}: {message}")
+fn value_to_string(context: &str, value: &Value) -> crate::BuiltinResult<String> {
+    String::try_from(value).map_err(|e| error_flow(DEFAULT_IDENTIFIER, format!("{context}: {e}")))
 }
 
 fn normalize_identifier(raw: &str) -> String {
@@ -187,69 +200,90 @@ pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{IntValue, MException};
 
+    fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
+        err
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_requires_message() {
-        let err = error_builtin(Vec::new()).expect_err("should error");
-        assert!(err.contains("missing message"));
+        let err = unwrap_error(error_builtin(Vec::new()).expect_err("should error"));
+        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert!(err.message().contains("missing message"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn default_identifier_is_applied() {
-        let err = error_builtin(vec![Value::from("Failure!")]).expect_err("should error");
-        assert_eq!(err, "MATLAB:error: Failure!");
+        let err =
+            unwrap_error(error_builtin(vec![Value::from("Failure!")]).expect_err("should error"));
+        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.message(), "Failure!");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn custom_identifier_is_preserved() {
-        let err = error_builtin(vec![
-            Value::from("runmat:tests:badValue"),
-            Value::from("Value %d is not allowed."),
-            Value::from(5.0),
-        ])
-        .expect_err("should error");
-        assert_eq!(err, "runmat:tests:badValue: Value 5 is not allowed.");
+        let err = unwrap_error(
+            error_builtin(vec![
+                Value::from("runmat:tests:badValue"),
+                Value::from("Value %d is not allowed."),
+                Value::from(5.0),
+            ])
+            .expect_err("should error"),
+        );
+        assert_eq!(err.identifier(), Some("runmat:tests:badValue"));
+        assert_eq!(err.message(), "Value 5 is not allowed.");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn identifier_is_normalised_when_namespace_missing() {
-        let err = error_builtin(vec![
-            Value::from("missingNamespace"),
-            Value::from("Message"),
-        ])
-        .expect_err("should error");
-        assert_eq!(err, "MATLAB:missingNamespace: Message");
+        let err = unwrap_error(
+            error_builtin(vec![
+                Value::from("missingNamespace"),
+                Value::from("Message"),
+            ])
+            .expect_err("should error"),
+        );
+        assert_eq!(err.identifier(), Some("MATLAB:missingNamespace"));
+        assert_eq!(err.message(), "Message");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn format_string_with_colon_not_treated_as_identifier() {
-        let err = error_builtin(vec![
-            Value::from("Value: %d."),
-            Value::Int(IntValue::I32(7)),
-        ])
-        .expect_err("should error");
-        assert_eq!(err, "MATLAB:error: Value: 7.");
+        let err = unwrap_error(
+            error_builtin(vec![
+                Value::from("Value: %d."),
+                Value::Int(IntValue::I32(7)),
+            ])
+            .expect_err("should error"),
+        );
+        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.message(), "Value: 7.");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_accepts_mexception() {
         let mex = MException::new("MATLAB:demo:test".to_string(), "broken".to_string());
-        let err = error_builtin(vec![Value::MException(mex)]).expect_err("should error");
-        assert_eq!(err, "MATLAB:demo:test: broken");
+        let err =
+            unwrap_error(error_builtin(vec![Value::MException(mex)]).expect_err("should error"));
+        assert_eq!(err.identifier(), Some("MATLAB:demo:test"));
+        assert_eq!(err.message(), "broken");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_rejects_extra_args_after_mexception() {
         let mex = MException::new("MATLAB:demo:test".to_string(), "broken".to_string());
-        let err = error_builtin(vec![Value::MException(mex), Value::from(1.0)])
-            .expect_err("should error");
-        assert!(err.contains("additional arguments"));
+        let err = unwrap_error(
+            error_builtin(vec![Value::MException(mex), Value::from(1.0)])
+                .expect_err("should error"),
+        );
+        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert!(err.message().contains("additional arguments"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -260,8 +294,9 @@ pub(crate) mod tests {
             .insert("identifier".to_string(), Value::from("pkg:demo:failure"));
         st.fields
             .insert("message".to_string(), Value::from("Struct message."));
-        let err = error_builtin(vec![Value::Struct(st)]).expect_err("should error");
-        assert_eq!(err, "pkg:demo:failure: Struct message.");
+        let err = unwrap_error(error_builtin(vec![Value::Struct(st)]).expect_err("should error"));
+        assert_eq!(err.identifier(), Some("pkg:demo:failure"));
+        assert_eq!(err.message(), "Struct message.");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -270,7 +305,10 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.fields
             .insert("identifier".to_string(), Value::from("pkg:demo:oops"));
-        let err = error_builtin(vec![Value::Struct(st)]).expect_err("should error");
-        assert!(err.contains("message struct must contain a 'message' field"));
+        let err = unwrap_error(error_builtin(vec![Value::Struct(st)]).expect_err("should error"));
+        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert!(err
+            .message()
+            .contains("message struct must contain a 'message' field"));
     }
 }

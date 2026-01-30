@@ -6,7 +6,7 @@ use std::str::Chars;
 
 use runmat_builtins::{IntValue, LogicalArray, StringArray, Value};
 
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 /// Stateful cursor over formatting arguments.
 #[derive(Debug)]
@@ -28,14 +28,24 @@ impl<'a> ArgCursor<'a> {
         self.index
     }
 
-    fn next(&mut self) -> Result<Value, String> {
+    fn next(&mut self) -> BuiltinResult<Value> {
         if self.index >= self.args.len() {
-            return Err("sprintf: not enough input arguments for format specifier".to_string());
+            return Err(format_error(
+                "sprintf: not enough input arguments for format specifier",
+            ));
         }
         let value = self.args[self.index].clone();
         self.index += 1;
         Ok(value)
     }
+}
+
+fn format_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).build()
+}
+
+fn map_control_flow_with_context(err: RuntimeError, context: &str) -> RuntimeError {
+    crate::builtins::common::map_control_flow_with_builtin(err, context)
 }
 
 /// Result of formatting a string with the current cursor state.
@@ -74,7 +84,7 @@ struct FormatSpec {
 /// precision (including the `*` form), and honours the usual printf flags for the
 /// subset required by MATLAB builtins. It is intentionally strict: errors are
 /// reported when format specifiers cannot be satisfied by the provided arguments.
-pub fn format_variadic(fmt: &str, args: &[Value]) -> Result<String, String> {
+pub fn format_variadic(fmt: &str, args: &[Value]) -> BuiltinResult<String> {
     let mut cursor = ArgCursor::new(args);
     let step = format_variadic_with_cursor(fmt, &mut cursor)?;
     Ok(step.output)
@@ -85,11 +95,11 @@ pub fn format_variadic(fmt: &str, args: &[Value]) -> Result<String, String> {
 pub fn format_variadic_with_cursor(
     fmt: &str,
     cursor: &mut ArgCursor<'_>,
-) -> Result<FormatStepResult, String> {
+) -> BuiltinResult<FormatStepResult> {
     format_once(fmt, cursor)
 }
 
-fn format_once(fmt: &str, cursor: &mut ArgCursor<'_>) -> Result<FormatStepResult, String> {
+fn format_once(fmt: &str, cursor: &mut ArgCursor<'_>) -> BuiltinResult<FormatStepResult> {
     let mut chars = fmt.chars().peekable();
     let mut out = String::with_capacity(fmt.len());
     let mut consumed = 0usize;
@@ -118,7 +128,7 @@ fn format_once(fmt: &str, cursor: &mut ArgCursor<'_>) -> Result<FormatStepResult
     })
 }
 
-fn parse_format_spec(chars: &mut Peekable<Chars<'_>>) -> Result<FormatSpec, String> {
+fn parse_format_spec(chars: &mut Peekable<Chars<'_>>) -> BuiltinResult<FormatSpec> {
     let mut flags = FormatFlags::default();
     loop {
         match chars.peek().copied() {
@@ -175,7 +185,7 @@ fn parse_format_spec(chars: &mut Peekable<Chars<'_>>) -> Result<FormatSpec, Stri
 
     let conversion = chars
         .next()
-        .ok_or_else(|| "sprintf: incomplete format specifier".to_string())?;
+        .ok_or_else(|| format_error("sprintf: incomplete format specifier"))?;
 
     Ok(FormatSpec {
         flags,
@@ -210,7 +220,7 @@ fn parse_number(chars: &mut Peekable<Chars<'_>>) -> Option<isize> {
 fn apply_format_spec(
     spec: FormatSpec,
     cursor: &mut ArgCursor<'_>,
-) -> Result<(String, usize), String> {
+) -> BuiltinResult<(String, usize)> {
     let mut consumed = 0usize;
     let mut flags = spec.flags;
 
@@ -350,7 +360,9 @@ fn apply_format_spec(
             format_char(value, flags, width)
         }
         other => {
-            return Err(format!("sprintf: unsupported format %{other}"));
+            return Err(format_error(format!(
+                "sprintf: unsupported format %{other}"
+            )));
         }
     }?;
 
@@ -367,7 +379,7 @@ fn format_integer(
     precision: Option<isize>,
     alternate: bool,
     uppercase: bool,
-) -> Result<String, String> {
+) -> BuiltinResult<String> {
     let mut sign = String::new();
     let abs_val = value.unsigned_abs();
 
@@ -427,7 +439,7 @@ fn format_unsigned(
     precision: Option<isize>,
     alternate: bool,
     uppercase: bool,
-) -> Result<String, String> {
+) -> BuiltinResult<String> {
     if precision.is_some() {
         flags.zero_pad = false;
     }
@@ -471,7 +483,7 @@ fn format_float(
     width: Option<isize>,
     precision: Option<isize>,
     alternate: bool,
-) -> Result<String, String> {
+) -> BuiltinResult<String> {
     let mut sign = String::new();
     let mut magnitude = value;
 
@@ -514,10 +526,10 @@ fn format_float(
         'E' => format!("{magnitude:.prec$E}"),
         'g' | 'G' => format_float_general(magnitude, prec, conversion.is_uppercase()),
         _ => {
-            return Err(format!(
+            return Err(format_error(format!(
                 "sprintf: unsupported float conversion %{}",
                 conversion
-            ))
+            )))
         }
     };
 
@@ -596,7 +608,7 @@ fn format_string(
     flags: FormatFlags,
     width: Option<isize>,
     precision: Option<isize>,
-) -> Result<String, String> {
+) -> BuiltinResult<String> {
     let mut text = value_to_string(&value)?;
     if let Some(p) = precision {
         if p >= 0 {
@@ -616,7 +628,7 @@ fn format_string(
     apply_width(String::new(), String::new(), text, flags, width, false)
 }
 
-fn format_char(value: Value, flags: FormatFlags, width: Option<isize>) -> Result<String, String> {
+fn format_char(value: Value, flags: FormatFlags, width: Option<isize>) -> BuiltinResult<String> {
     let ch = value_to_char(&value)?;
     let text = ch.to_string();
     apply_width(String::new(), String::new(), text, flags, width, false)
@@ -629,7 +641,7 @@ fn apply_width(
     flags: FormatFlags,
     width: Option<isize>,
     zero_pad: bool,
-) -> Result<String, String> {
+) -> BuiltinResult<String> {
     let mut result = String::new();
     let sign_prefix_len = sign.len() + prefix.len();
     let total_len = sign_prefix_len + digits.len();
@@ -671,23 +683,25 @@ fn apply_width(
     Ok(result)
 }
 
-fn value_to_isize(value: &Value) -> Result<isize, String> {
+fn value_to_isize(value: &Value) -> BuiltinResult<isize> {
     match value {
         Value::Int(i) => Ok(i.to_i64().clamp(isize::MIN as i64, isize::MAX as i64) as isize),
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err("sprintf: width/precision specifier must be finite".to_string());
+                return Err(format_error(
+                    "sprintf: width/precision specifier must be finite",
+                ));
             }
             Ok(n.trunc().clamp(isize::MIN as f64, isize::MAX as f64) as isize)
         }
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
-        other => Err(format!(
+        other => Err(format_error(format!(
             "sprintf: width/precision specifier expects numeric value, got {other:?}"
-        )),
+        ))),
     }
 }
 
-fn value_to_i128(value: &Value) -> Result<i128, String> {
+fn value_to_i128(value: &Value) -> BuiltinResult<i128> {
     match value {
         Value::Int(i) => Ok(match i {
             IntValue::I8(v) => i128::from(*v),
@@ -701,22 +715,26 @@ fn value_to_i128(value: &Value) -> Result<i128, String> {
         }),
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err("sprintf: numeric conversion requires finite input".to_string());
+                return Err(format_error(
+                    "sprintf: numeric conversion requires finite input",
+                ));
             }
             Ok(n.trunc().clamp(i128::MIN as f64, i128::MAX as f64) as i128)
         }
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
-        other => Err(format!("sprintf: expected numeric argument, got {other:?}")),
+        other => Err(format_error(format!(
+            "sprintf: expected numeric argument, got {other:?}"
+        ))),
     }
 }
 
-fn value_to_u128(value: &Value) -> Result<u128, String> {
+fn value_to_u128(value: &Value) -> BuiltinResult<u128> {
     match value {
         Value::Int(i) => match i {
-            IntValue::I8(v) if *v < 0 => Err("sprintf: expected non-negative value".to_string()),
-            IntValue::I16(v) if *v < 0 => Err("sprintf: expected non-negative value".to_string()),
-            IntValue::I32(v) if *v < 0 => Err("sprintf: expected non-negative value".to_string()),
-            IntValue::I64(v) if *v < 0 => Err("sprintf: expected non-negative value".to_string()),
+            IntValue::I8(v) if *v < 0 => Err(format_error("sprintf: expected non-negative value")),
+            IntValue::I16(v) if *v < 0 => Err(format_error("sprintf: expected non-negative value")),
+            IntValue::I32(v) if *v < 0 => Err(format_error("sprintf: expected non-negative value")),
+            IntValue::I64(v) if *v < 0 => Err(format_error("sprintf: expected non-negative value")),
             IntValue::I8(v) => Ok((*v) as u128),
             IntValue::I16(v) => Ok((*v) as u128),
             IntValue::I32(v) => Ok((*v) as u128),
@@ -728,30 +746,34 @@ fn value_to_u128(value: &Value) -> Result<u128, String> {
         },
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err("sprintf: numeric conversion requires finite input".to_string());
+                return Err(format_error(
+                    "sprintf: numeric conversion requires finite input",
+                ));
             }
             if *n < 0.0 {
-                return Err("sprintf: expected non-negative value".to_string());
+                return Err(format_error("sprintf: expected non-negative value"));
             }
             Ok(n.trunc().clamp(0.0, u128::MAX as f64) as u128)
         }
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
-        other => Err(format!(
+        other => Err(format_error(format!(
             "sprintf: expected non-negative numeric value, got {other:?}"
-        )),
+        ))),
     }
 }
 
-fn value_to_f64(value: &Value) -> Result<f64, String> {
+fn value_to_f64(value: &Value) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        other => Err(format!("sprintf: expected numeric value, got {other:?}")),
+        other => Err(format_error(format!(
+            "sprintf: expected numeric value, got {other:?}"
+        ))),
     }
 }
 
-fn value_to_string(value: &Value) -> Result<String, String> {
+fn value_to_string(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::CharArray(ca) => {
@@ -766,42 +788,43 @@ fn value_to_string(value: &Value) -> Result<String, String> {
         Value::Int(i) => Ok(i.to_i64().to_string()),
         Value::Bool(b) => Ok(if *b { "true" } else { "false" }.to_string()),
         Value::Complex(re, im) => Ok(Value::Complex(*re, *im).to_string()),
-        other => Err(format!(
+        other => Err(format_error(format!(
             "sprintf: expected text or scalar value for %s conversion, got {other:?}"
-        )),
+        ))),
     }
 }
 
-fn value_to_char(value: &Value) -> Result<char, String> {
+fn value_to_char(value: &Value) -> BuiltinResult<char> {
     match value {
-        Value::String(s) => s
-            .chars()
-            .next()
-            .ok_or_else(|| "sprintf: %c conversion requires non-empty character input".to_string()),
+        Value::String(s) => s.chars().next().ok_or_else(|| {
+            format_error("sprintf: %c conversion requires non-empty character input")
+        }),
         Value::CharArray(ca) => ca
             .data
             .first()
             .copied()
-            .ok_or_else(|| "sprintf: %c conversion requires non-empty char input".to_string()),
+            .ok_or_else(|| format_error("sprintf: %c conversion requires non-empty char input")),
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err("sprintf: %c conversion needs finite numeric value".to_string());
+                return Err(format_error(
+                    "sprintf: %c conversion needs finite numeric value",
+                ));
             }
             let code = n.trunc() as u32;
             std::char::from_u32(code)
-                .ok_or_else(|| "sprintf: numeric value outside valid character range".to_string())
+                .ok_or_else(|| format_error("sprintf: numeric value outside valid character range"))
         }
         Value::Int(i) => {
             let code = i.to_i64();
             if code < 0 {
-                return Err("sprintf: negative value for %c conversion".to_string());
+                return Err(format_error("sprintf: negative value for %c conversion"));
             }
             std::char::from_u32(code as u32)
-                .ok_or_else(|| "sprintf: numeric value outside valid character range".to_string())
+                .ok_or_else(|| format_error("sprintf: numeric value outside valid character range"))
         }
-        other => Err(format!(
+        other => Err(format_error(format!(
             "sprintf: %c conversion expects character data, got {other:?}"
-        )),
+        ))),
     }
 }
 
@@ -830,26 +853,26 @@ fn to_base_string(mut value: u128, base: u32, uppercase: bool) -> String {
 
 /// Extract a printf-style format string from a MATLAB value, validating that it
 /// is a character row vector or string scalar.
-pub fn extract_format_string(value: &Value, context: &str) -> Result<String, String> {
+pub fn extract_format_string(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::CharArray(ca) => {
             if ca.rows != 1 {
-                return Err(format!(
+                return Err(format_error(format!(
                     "{context}: formatSpec must be a character row vector or string scalar"
-                ));
+                )));
             }
             Ok(ca.data.iter().collect())
         }
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(format!(
+        _ => Err(format_error(format!(
             "{context}: formatSpec must be a character row vector or string scalar"
-        )),
+        ))),
     }
 }
 
 /// Decode MATLAB-compatible escape sequences within a format specification.
-pub fn decode_escape_sequences(context: &str, input: &str) -> Result<String, String> {
+pub fn decode_escape_sequences(context: &str, input: &str) -> BuiltinResult<String> {
     let mut result = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
     while let Some(ch) = chars.next() {
@@ -884,14 +907,15 @@ pub fn decode_escape_sequences(context: &str, input: &str) -> Result<String, Str
                     result.push('\\');
                     result.push('x');
                 } else {
-                    let value = u32::from_str_radix(&hex, 16)
-                        .map_err(|_| format!("{context}: invalid hexadecimal escape \\x{hex}"))?;
+                    let value = u32::from_str_radix(&hex, 16).map_err(|_| {
+                        format_error(format!("{context}: invalid hexadecimal escape \\x{hex}"))
+                    })?;
                     if let Some(chr) = char::from_u32(value) {
                         result.push(chr);
                     } else {
-                        return Err(format!(
+                        return Err(format_error(format!(
                             "{context}: \\x{hex} escape outside valid Unicode range"
-                        ));
+                        )));
                     }
                 }
             }
@@ -906,14 +930,15 @@ pub fn decode_escape_sequences(context: &str, input: &str) -> Result<String, Str
                         _ => break,
                     }
                 }
-                let value = u32::from_str_radix(&oct, 8)
-                    .map_err(|_| format!("{context}: invalid octal escape \\{oct}"))?;
+                let value = u32::from_str_radix(&oct, 8).map_err(|_| {
+                    format_error(format!("{context}: invalid octal escape \\{oct}"))
+                })?;
                 if let Some(chr) = char::from_u32(value) {
                     result.push(chr);
                 } else {
-                    return Err(format!(
+                    return Err(format_error(format!(
                         "{context}: \\{oct} escape outside valid Unicode range"
-                    ));
+                    )));
                 }
             }
             other => {
@@ -928,16 +953,19 @@ pub fn decode_escape_sequences(context: &str, input: &str) -> Result<String, Str
 /// Flatten MATLAB argument values into a linear vector suitable for repeated
 /// printf-style formatting. Arrays are traversed in column-major order and GPU
 /// tensors are gathered back to the host.
-pub fn flatten_arguments(args: &[Value], context: &str) -> Result<Vec<Value>, String> {
+pub async fn flatten_arguments(args: &[Value], context: &str) -> BuiltinResult<Vec<Value>> {
     let mut flattened = Vec::new();
     for value in args {
-        let gathered = gather_if_needed(value).map_err(|e| format!("{context}: {e}"))?;
-        flatten_value(gathered, &mut flattened, context)?;
+        let gathered = gather_if_needed_async(value)
+            .await
+            .map_err(|flow| map_control_flow_with_context(flow, context))?;
+        flatten_value(gathered, &mut flattened, context).await?;
     }
     Ok(flattened)
 }
 
-fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> Result<(), String> {
+#[async_recursion::async_recursion(?Send)]
+async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> BuiltinResult<()> {
     match value {
         Value::Num(_)
         | Value::Int(_)
@@ -984,16 +1012,18 @@ fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> Result
                 for row in 0..cell.rows {
                     let idx = row * cell.cols + col;
                     let inner = (*cell.data[idx]).clone();
-                    let gathered =
-                        gather_if_needed(&inner).map_err(|e| format!("{context}: {e}"))?;
-                    flatten_value(gathered, output, context)?;
+                    let gathered = gather_if_needed_async(&inner)
+                        .await
+                        .map_err(|flow| map_control_flow_with_context(flow, context))?;
+                    flatten_value(gathered, output, context).await?;
                 }
             }
         }
         Value::GpuTensor(handle) => {
-            let gathered = gather_if_needed(&Value::GpuTensor(handle))
-                .map_err(|e| format!("{context}: {e}"))?;
-            flatten_value(gathered, output, context)?;
+            let gathered = gather_if_needed_async(&Value::GpuTensor(handle))
+                .await
+                .map_err(|flow| map_control_flow_with_context(flow, context))?;
+            flatten_value(gathered, output, context).await?;
         }
         Value::MException(_)
         | Value::HandleObject(_)
@@ -1003,7 +1033,9 @@ fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> Result
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_) => {
-            return Err(format!("{context}: unsupported argument type"));
+            return Err(format_error(format!(
+                "{context}: unsupported argument type"
+            )));
         }
     }
     Ok(())

@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -48,6 +49,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Flip is a data-reordering boundary; fusion planner treats it as a residency-preserving barrier.",
 };
 
+fn flip_error_for(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(builtin).build()
+}
+
 #[runtime_builtin(
     name = "flip",
     category = "array/shape",
@@ -56,59 +61,65 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::flip"
 )]
-fn flip_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("flip: too many input arguments".to_string());
+        return Err(flip_error_for("flip", "flip: too many input arguments"));
     }
     let spec = parse_flip_spec(&rest)?;
     match value {
         Value::Tensor(tensor) => {
             let dims = resolve_dims(&spec, &tensor.shape);
-            flip_tensor(tensor, &dims).map(tensor::tensor_into_value)
+            Ok(flip_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::LogicalArray(array) => {
             let dims = resolve_dims(&spec, &array.shape);
-            flip_logical_array(array, &dims).map(Value::LogicalArray)
+            Ok(flip_logical_array(array, &dims).map(Value::LogicalArray)?)
         }
         Value::ComplexTensor(ct) => {
             let dims = resolve_dims(&spec, &ct.shape);
-            flip_complex_tensor(ct, &dims).map(Value::ComplexTensor)
+            Ok(flip_complex_tensor(ct, &dims).map(Value::ComplexTensor)?)
         }
         Value::Complex(re, im) => {
-            let tensor =
-                ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| format!("flip: {e}"))?;
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
+                .map_err(|e| flip_error_for("flip", format!("flip: {e}")))?;
             let dims = resolve_dims(&spec, &tensor.shape);
-            flip_complex_tensor(tensor, &dims).map(complex_tensor_into_value)
+            Ok(flip_complex_tensor(tensor, &dims).map(complex_tensor_into_value)?)
         }
         Value::StringArray(strings) => {
             let dims = resolve_dims(&spec, &strings.shape);
-            flip_string_array(strings, &dims).map(Value::StringArray)
+            Ok(flip_string_array(strings, &dims).map(Value::StringArray)?)
         }
         Value::CharArray(chars) => {
             let dims = resolve_dims(&spec, &[chars.rows, chars.cols]);
-            flip_char_array(chars, &dims).map(Value::CharArray)
+            Ok(flip_char_array(chars, &dims).map(Value::CharArray)?)
         }
         Value::String(scalar) => Ok(Value::String(scalar)),
         Value::Num(n) => {
-            let tensor = tensor::value_into_tensor_for("flip", Value::Num(n))?;
+            let tensor = tensor::value_into_tensor_for("flip", Value::Num(n))
+                .map_err(|e| flip_error_for("flip", e))?;
             let dims = resolve_dims(&spec, &tensor.shape);
-            flip_tensor(tensor, &dims).map(tensor::tensor_into_value)
+            Ok(flip_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::Int(i) => {
-            let tensor = tensor::value_into_tensor_for("flip", Value::Int(i))?;
+            let tensor = tensor::value_into_tensor_for("flip", Value::Int(i))
+                .map_err(|e| flip_error_for("flip", e))?;
             let dims = resolve_dims(&spec, &tensor.shape);
-            flip_tensor(tensor, &dims).map(tensor::tensor_into_value)
+            Ok(flip_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::Bool(flag) => {
-            let tensor = tensor::value_into_tensor_for("flip", Value::Bool(flag))?;
+            let tensor = tensor::value_into_tensor_for("flip", Value::Bool(flag))
+                .map_err(|e| flip_error_for("flip", e))?;
             let dims = resolve_dims(&spec, &tensor.shape);
-            flip_tensor(tensor, &dims).map(tensor::tensor_into_value)
+            Ok(flip_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => {
             let dims = resolve_dims(&spec, &handle.shape);
-            flip_gpu(handle, &dims)
+            Ok(flip_gpu(handle, &dims).await?)
         }
-        Value::Cell(_) => Err("flip: cell arrays are not yet supported".to_string()),
+        Value::Cell(_) => Err(flip_error_for(
+            "flip",
+            "flip: cell arrays are not yet supported",
+        )),
         Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::Struct(_)
@@ -116,7 +127,7 @@ fn flip_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("flip: unsupported input type".to_string()),
+        | Value::MException(_) => Err(flip_error_for("flip", "flip: unsupported input type")),
     }
 }
 
@@ -126,7 +137,7 @@ enum FlipSpec {
     Dims(Vec<usize>),
 }
 
-fn parse_flip_spec(args: &[Value]) -> Result<FlipSpec, String> {
+fn parse_flip_spec(args: &[Value]) -> crate::BuiltinResult<FlipSpec> {
     match args.len() {
         0 => Ok(FlipSpec::Default),
         1 => {
@@ -140,7 +151,7 @@ fn parse_flip_spec(args: &[Value]) -> Result<FlipSpec, String> {
     }
 }
 
-fn parse_direction(value: &Value) -> Result<Option<Vec<usize>>, String> {
+fn parse_direction(value: &Value) -> crate::BuiltinResult<Option<Vec<usize>>> {
     let text_opt = match value {
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
             tensor::value_to_string(value)
@@ -156,7 +167,10 @@ fn parse_direction(value: &Value) -> Result<Option<Vec<usize>>, String> {
             "vertical" | "up-down" | "updown" | "ud" | "down-up" => vec![1],
             "both" => vec![1, 2],
             other => {
-                return Err(format!("flip: unknown direction '{other}'"));
+                return Err(flip_error_for(
+                    "flip",
+                    format!("flip: unknown direction '{other}'"),
+                ));
             }
         };
         return Ok(Some(dims));
@@ -164,53 +178,75 @@ fn parse_direction(value: &Value) -> Result<Option<Vec<usize>>, String> {
     Ok(None)
 }
 
-fn parse_dims_value(value: &Value) -> Result<Vec<usize>, String> {
+fn parse_dims_value(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
     match value {
         Value::Tensor(t) => parse_dims_tensor(t),
         Value::LogicalArray(la) => {
-            let tensor = tensor::logical_to_tensor(la)
-                .map_err(|e| format!("flip: unable to parse dimension vector: {e}"))?;
+            let tensor = tensor::logical_to_tensor(la).map_err(|e| {
+                flip_error_for(
+                    "flip",
+                    format!("flip: unable to parse dimension vector: {e}"),
+                )
+            })?;
             parse_dims_tensor(&tensor)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
-            let dim = tensor::parse_dimension(value, "flip")?;
+            let dim =
+                tensor::parse_dimension(value, "flip").map_err(|e| flip_error_for("flip", e))?;
             Ok(vec![dim])
         }
-        Value::GpuTensor(_) => Err(
-            "flip: dimension argument must be specified on the host (numeric or string)"
-                .to_string(),
-        ),
+        Value::GpuTensor(_) => Err(flip_error_for(
+            "flip",
+            "flip: dimension argument must be specified on the host (numeric or string)",
+        )),
         Value::StringArray(sa) => {
             if sa.data.len() == 1 {
                 let tmp = Value::StringArray(sa.clone());
                 parse_direction(&tmp)?
-                    .ok_or_else(|| "flip: dimension vector must be numeric".to_string())
+                    .ok_or_else(|| flip_error_for("flip", "flip: dimension vector must be numeric"))
             } else {
-                Err("flip: dimension vector must be numeric".to_string())
+                Err(flip_error_for(
+                    "flip",
+                    "flip: dimension vector must be numeric",
+                ))
             }
         }
-        Value::String(_) | Value::CharArray(_) => {
-            parse_direction(value)?.ok_or_else(|| "flip: unknown direction string".to_string())
-        }
-        _ => Err("flip: dimension vector must be numeric or a direction string".to_string()),
+        Value::String(_) | Value::CharArray(_) => parse_direction(value)?
+            .ok_or_else(|| flip_error_for("flip", "flip: unknown direction string")),
+        _ => Err(flip_error_for(
+            "flip",
+            "flip: dimension vector must be numeric or a direction string",
+        )),
     }
 }
 
-fn parse_dims_tensor(tensor: &Tensor) -> Result<Vec<usize>, String> {
+fn parse_dims_tensor(tensor: &Tensor) -> crate::BuiltinResult<Vec<usize>> {
     if !is_vector(&tensor.shape) {
-        return Err("flip: dimension vector must be a row or column vector".to_string());
+        return Err(flip_error_for(
+            "flip",
+            "flip: dimension vector must be a row or column vector",
+        ));
     }
     let mut dims = Vec::with_capacity(tensor.data.len());
     for entry in &tensor.data {
         if !entry.is_finite() {
-            return Err("flip: dimension indices must be finite".to_string());
+            return Err(flip_error_for(
+                "flip",
+                "flip: dimension indices must be finite",
+            ));
         }
         let rounded = entry.round();
         if (rounded - entry).abs() > f64::EPSILON {
-            return Err("flip: dimension indices must be integers".to_string());
+            return Err(flip_error_for(
+                "flip",
+                "flip: dimension indices must be integers",
+            ));
         }
         if rounded < 1.0 {
-            return Err("flip: dimension indices must be >= 1".to_string());
+            return Err(flip_error_for(
+                "flip",
+                "flip: dimension indices must be >= 1",
+            ));
         }
         dims.push(rounded as usize);
     }
@@ -246,45 +282,92 @@ fn default_flip_dim(shape: &[usize]) -> usize {
     1
 }
 
-pub(crate) fn flip_tensor(tensor: Tensor, dims: &[usize]) -> Result<Tensor, String> {
+pub(crate) fn flip_tensor(tensor: Tensor, dims: &[usize]) -> crate::BuiltinResult<Tensor> {
+    flip_tensor_with("flip", tensor, dims)
+}
+
+pub(crate) fn flip_tensor_with(
+    builtin: &'static str,
+    tensor: Tensor,
+    dims: &[usize],
+) -> crate::BuiltinResult<Tensor> {
     if tensor.data.is_empty() || dims.is_empty() {
         return Ok(tensor);
     }
-    let data = flip_generic(&tensor.data, &tensor.shape, dims)?;
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| format!("flip: {e}"))
+    let data = flip_generic(&tensor.data, &tensor.shape, dims, builtin)?;
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
 }
 
 pub(crate) fn flip_complex_tensor(
     tensor: ComplexTensor,
     dims: &[usize],
-) -> Result<ComplexTensor, String> {
+) -> crate::BuiltinResult<ComplexTensor> {
+    flip_complex_tensor_with("flip", tensor, dims)
+}
+
+pub(crate) fn flip_complex_tensor_with(
+    builtin: &'static str,
+    tensor: ComplexTensor,
+    dims: &[usize],
+) -> crate::BuiltinResult<ComplexTensor> {
     if tensor.data.is_empty() || dims.is_empty() {
         return Ok(tensor);
     }
-    let data = flip_generic(&tensor.data, &tensor.shape, dims)?;
-    ComplexTensor::new(data, tensor.shape.clone()).map_err(|e| format!("flip: {e}"))
+    let data = flip_generic(&tensor.data, &tensor.shape, dims, builtin)?;
+    ComplexTensor::new(data, tensor.shape.clone())
+        .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
 }
 
 pub(crate) fn flip_logical_array(
     array: LogicalArray,
     dims: &[usize],
-) -> Result<LogicalArray, String> {
+) -> crate::BuiltinResult<LogicalArray> {
+    flip_logical_array_with("flip", array, dims)
+}
+
+pub(crate) fn flip_logical_array_with(
+    builtin: &'static str,
+    array: LogicalArray,
+    dims: &[usize],
+) -> crate::BuiltinResult<LogicalArray> {
     if array.data.is_empty() || dims.is_empty() {
         return Ok(array);
     }
-    let data = flip_generic(&array.data, &array.shape, dims)?;
-    LogicalArray::new(data, array.shape.clone()).map_err(|e| format!("flip: {e}"))
+    let data = flip_generic(&array.data, &array.shape, dims, builtin)?;
+    LogicalArray::new(data, array.shape.clone())
+        .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
 }
 
-pub(crate) fn flip_string_array(array: StringArray, dims: &[usize]) -> Result<StringArray, String> {
+pub(crate) fn flip_string_array(
+    array: StringArray,
+    dims: &[usize],
+) -> crate::BuiltinResult<StringArray> {
+    flip_string_array_with("flip", array, dims)
+}
+
+pub(crate) fn flip_string_array_with(
+    builtin: &'static str,
+    array: StringArray,
+    dims: &[usize],
+) -> crate::BuiltinResult<StringArray> {
     if array.data.is_empty() || dims.is_empty() {
         return Ok(array);
     }
-    let data = flip_generic(&array.data, &array.shape, dims)?;
-    StringArray::new(data, array.shape.clone()).map_err(|e| format!("flip: {e}"))
+    let data = flip_generic(&array.data, &array.shape, dims, builtin)?;
+    StringArray::new(data, array.shape.clone())
+        .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
 }
 
-pub(crate) fn flip_char_array(array: CharArray, dims: &[usize]) -> Result<CharArray, String> {
+pub(crate) fn flip_char_array(array: CharArray, dims: &[usize]) -> crate::BuiltinResult<CharArray> {
+    flip_char_array_with("flip", array, dims)
+}
+
+pub(crate) fn flip_char_array_with(
+    builtin: &'static str,
+    array: CharArray,
+    dims: &[usize],
+) -> crate::BuiltinResult<CharArray> {
     if array.data.is_empty() || dims.is_empty() {
         return Ok(array);
     }
@@ -294,7 +377,10 @@ pub(crate) fn flip_char_array(array: CharArray, dims: &[usize]) -> Result<CharAr
     let mut flip_cols = false;
     for &dim in dims {
         if dim == 0 {
-            return Err("flip: dimension must be >= 1".to_string());
+            return Err(flip_error_for(
+                builtin,
+                format!("{builtin}: dimension must be >= 1"),
+            ));
         }
         match dim {
             1 => flip_rows = !flip_rows,
@@ -315,23 +401,37 @@ pub(crate) fn flip_char_array(array: CharArray, dims: &[usize]) -> Result<CharAr
             out[dest_idx] = array.data[src_idx];
         }
     }
-    CharArray::new(out, rows, cols).map_err(|e| format!("flip: {e}"))
+    CharArray::new(out, rows, cols).map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
 }
 
-pub(crate) fn flip_gpu(handle: GpuTensorHandle, dims: &[usize]) -> Result<Value, String> {
+pub(crate) async fn flip_gpu(
+    handle: GpuTensorHandle,
+    dims: &[usize],
+) -> crate::BuiltinResult<Value> {
+    flip_gpu_with("flip", handle, dims).await
+}
+
+pub(crate) async fn flip_gpu_with(
+    builtin: &'static str,
+    handle: GpuTensorHandle,
+    dims: &[usize],
+) -> crate::BuiltinResult<Value> {
     if dims.is_empty() {
         return Ok(Value::GpuTensor(handle));
     }
     if dims.contains(&0) {
-        return Err("flip: dimension indices must be >= 1".to_string());
+        return Err(flip_error_for(
+            builtin,
+            format!("{builtin}: dimension indices must be >= 1"),
+        ));
     }
     if let Some(provider) = runmat_accelerate_api::provider() {
         let zero_based: Vec<usize> = dims.iter().map(|&d| d - 1).collect();
         if let Ok(out) = provider.flip(&handle, &zero_based) {
             return Ok(Value::GpuTensor(out));
         }
-        let host_tensor = gpu_helpers::gather_tensor(&handle)?;
-        let flipped = flip_tensor(host_tensor, dims)?;
+        let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+        let flipped = flip_tensor_with(builtin, host_tensor, dims)?;
         let view = HostTensorView {
             data: &flipped.data,
             shape: &flipped.shape,
@@ -339,16 +439,24 @@ pub(crate) fn flip_gpu(handle: GpuTensorHandle, dims: &[usize]) -> Result<Value,
         provider
             .upload(&view)
             .map(Value::GpuTensor)
-            .map_err(|e| format!("flip: {e}"))
+            .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
     } else {
-        let host_tensor = gpu_helpers::gather_tensor(&handle)?;
-        flip_tensor(host_tensor, dims).map(tensor::tensor_into_value)
+        let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+        flip_tensor_with(builtin, host_tensor, dims).map(tensor::tensor_into_value)
     }
 }
 
-fn flip_generic<T: Clone>(data: &[T], shape: &[usize], dims: &[usize]) -> Result<Vec<T>, String> {
+fn flip_generic<T: Clone>(
+    data: &[T],
+    shape: &[usize],
+    dims: &[usize],
+    builtin: &'static str,
+) -> crate::BuiltinResult<Vec<T>> {
     if dims.contains(&0) {
-        return Err("flip: dimension indices must be >= 1".to_string());
+        return Err(flip_error_for(
+            builtin,
+            format!("{builtin}: dimension indices must be >= 1"),
+        ));
     }
     if data.is_empty() {
         return Ok(Vec::new());
@@ -360,7 +468,10 @@ fn flip_generic<T: Clone>(data: &[T], shape: &[usize], dims: &[usize]) -> Result
     }
     let total: usize = ext_shape.iter().product();
     if total != data.len() {
-        return Err("flip: shape does not match data length".to_string());
+        return Err(flip_error_for(
+            builtin,
+            format!("{builtin}: shape does not match data length"),
+        ));
     }
     let mut flip_flags = vec![false; ext_shape.len()];
     for &dim in dims {
@@ -424,6 +535,11 @@ pub(crate) fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::flip_builtin(value, rest))
+    }
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, Tensor};
 
@@ -598,7 +714,7 @@ pub(crate) mod tests {
         let dims = Tensor::new((1..=4).map(|v| v as f64).collect(), vec![2, 2]).unwrap();
         let err =
             flip_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect_err("flip fail");
-        assert!(err.contains("row or column vector"));
+        assert!(err.to_string().contains("row or column vector"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -620,7 +736,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = flip_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(0))])
             .expect_err("flip should fail");
-        assert!(err.contains("dimension must be >= 1"));
+        assert!(err.to_string().contains("dimension must be >= 1"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

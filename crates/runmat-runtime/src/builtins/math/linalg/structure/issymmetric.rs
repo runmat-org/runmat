@@ -1,15 +1,15 @@
 //! MATLAB-compatible `issymmetric` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, ProviderSymmetryKind};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::linalg::{matrix_dimensions_for, parse_tolerance_arg};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
@@ -42,6 +42,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Returns a host logical scalar and acts as a fusion sink.",
 };
 
+const BUILTIN_NAME: &str = "issymmetric";
+
+fn runtime_error(name: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(name).build()
+}
+
 #[runtime_builtin(
     name = "issymmetric",
     category = "math/linalg/structure",
@@ -50,19 +56,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
 )]
-fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (mode, tol) = parse_optional_args(&rest)?;
     match value {
-        Value::GpuTensor(handle) => issymmetric_gpu(handle, mode, tol),
+        Value::GpuTensor(handle) => issymmetric_gpu(handle, mode, tol).await,
         other => {
-            let matrix = MatrixInput::from_value(other)?;
+            let matrix = MatrixInput::from_value(other).await?;
             let result = evaluate_matrix(matrix, mode, tol);
             Ok(Value::Bool(result))
         }
     }
 }
 
-fn issymmetric_gpu(handle: GpuTensorHandle, mode: SymmetryMode, tol: f64) -> Result<Value, String> {
+async fn issymmetric_gpu(
+    handle: GpuTensorHandle,
+    mode: SymmetryMode,
+    tol: f64,
+) -> BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -86,8 +96,8 @@ fn issymmetric_gpu(handle: GpuTensorHandle, mode: SymmetryMode, tol: f64) -> Res
         log::debug!("issymmetric: provider path failed or panicked; falling back to host");
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
-    let matrix = MatrixInput::from_value(Value::Tensor(tensor))?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+    let matrix = MatrixInput::from_value(Value::Tensor(tensor)).await?;
     let result = evaluate_matrix(matrix, mode, tol);
     Ok(Value::Bool(result))
 }
@@ -119,37 +129,40 @@ impl MatrixData {
 }
 
 impl MatrixInput {
-    fn from_value(value: Value) -> Result<Self, String> {
+    async fn from_value(value: Value) -> BuiltinResult<Self> {
         let data = match value {
             Value::Tensor(tensor) => MatrixData::Real(tensor),
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical)?;
+                let tensor = logical_to_tensor(BUILTIN_NAME, &logical)?;
                 MatrixData::Real(tensor)
             }
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                 MatrixData::Real(tensor)
             }
             Value::ComplexTensor(tensor) => MatrixData::Complex(tensor),
             Value::Complex(re, im) => {
                 let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                    .map_err(|e| format!("issymmetric: {e}"))?;
+                    .map_err(|e| runtime_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {e}")))?;
                 MatrixData::Complex(tensor)
             }
             Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
-                let tensor = tensor::value_into_tensor_for("issymmetric", value)?;
+                let tensor = value_into_tensor_for(BUILTIN_NAME, value)?;
                 MatrixData::Real(tensor)
             }
             other => {
-                return Err(format!(
-                    "issymmetric: unsupported input type {:?}; expected numeric or logical matrix",
-                    other
+                return Err(runtime_error(
+                    BUILTIN_NAME,
+                    format!(
+                        "issymmetric: unsupported input type {:?}; expected numeric or logical matrix",
+                        other
+                    ),
                 ));
             }
         };
 
         let shape = data.shape();
-        let (rows, cols) = matrix_dimensions_for("issymmetric", shape)?;
+        let (rows, cols) = matrix_dimensions_for(BUILTIN_NAME, shape)?;
         Ok(Self { data, rows, cols })
     }
 }
@@ -164,9 +177,12 @@ fn evaluate_matrix(matrix: MatrixInput, mode: SymmetryMode, tol: f64) -> bool {
     }
 }
 
-fn parse_optional_args(args: &[Value]) -> Result<(SymmetryMode, f64), String> {
+fn parse_optional_args(args: &[Value]) -> BuiltinResult<(SymmetryMode, f64)> {
     if args.len() > 2 {
-        return Err("issymmetric: too many input arguments".to_string());
+        return Err(runtime_error(
+            BUILTIN_NAME,
+            "issymmetric: too many input arguments",
+        ));
     }
 
     let mut mode = SymmetryMode::Symmetric;
@@ -176,7 +192,10 @@ fn parse_optional_args(args: &[Value]) -> Result<(SymmetryMode, f64), String> {
     for arg in args {
         if let Some(flag) = parse_mode_flag(arg)? {
             if mode_set {
-                return Err("issymmetric: duplicate symmetry flag".to_string());
+                return Err(runtime_error(
+                    BUILTIN_NAME,
+                    "issymmetric: duplicate symmetry flag",
+                ));
             }
             mode = flag;
             mode_set = true;
@@ -184,7 +203,10 @@ fn parse_optional_args(args: &[Value]) -> Result<(SymmetryMode, f64), String> {
         }
 
         if tol.is_some() {
-            return Err("issymmetric: tolerance specified more than once".to_string());
+            return Err(runtime_error(
+                BUILTIN_NAME,
+                "issymmetric: tolerance specified more than once",
+            ));
         }
 
         let local = parse_single_tolerance(arg)?;
@@ -194,7 +216,7 @@ fn parse_optional_args(args: &[Value]) -> Result<(SymmetryMode, f64), String> {
     Ok((mode, tol.unwrap_or(0.0)))
 }
 
-fn parse_mode_flag(value: &Value) -> Result<Option<SymmetryMode>, String> {
+fn parse_mode_flag(value: &Value) -> BuiltinResult<Option<SymmetryMode>> {
     let text = match value {
         Value::String(s) => Some(s.clone()),
         Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
@@ -210,15 +232,104 @@ fn parse_mode_flag(value: &Value) -> Result<Option<SymmetryMode>, String> {
     match lowered.as_str() {
         "skew" => Ok(Some(SymmetryMode::Skew)),
         "nonskew" | "symmetric" => Ok(Some(SymmetryMode::Symmetric)),
-        other => Err(format!("issymmetric: unknown flag '{other}'")),
+        other => Err(runtime_error(
+            BUILTIN_NAME,
+            format!("issymmetric: unknown flag '{other}'"),
+        )),
     }
 }
 
-fn parse_single_tolerance(arg: &Value) -> Result<f64, String> {
-    match parse_tolerance_arg("issymmetric", std::slice::from_ref(arg))? {
-        Some(value) => Ok(value),
-        None => Err("issymmetric: tolerance must be a real scalar".to_string()),
+fn parse_single_tolerance(arg: &Value) -> BuiltinResult<f64> {
+    let value = parse_tolerance_value(BUILTIN_NAME, arg)?;
+    Ok(value)
+}
+
+fn parse_tolerance_value(name: &str, value: &Value) -> BuiltinResult<f64> {
+    let raw = match value {
+        Value::Num(n) => *n,
+        Value::Int(i) => i.to_f64(),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => t.data[0],
+        Value::Bool(b) => {
+            if *b {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        Value::LogicalArray(l) if l.len() == 1 => {
+            if l.data[0] != 0 {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        other => {
+            return Err(runtime_error(
+                name,
+                format!("{name}: tolerance must be a real scalar, got {other:?}"),
+            ))
+        }
+    };
+    if !raw.is_finite() {
+        return Err(runtime_error(
+            name,
+            format!("{name}: tolerance must be finite"),
+        ));
     }
+    if raw < 0.0 {
+        return Err(runtime_error(
+            name,
+            format!("{name}: tolerance must be >= 0"),
+        ));
+    }
+    Ok(raw)
+}
+
+fn matrix_dimensions_for(name: &str, shape: &[usize]) -> BuiltinResult<(usize, usize)> {
+    match shape.len() {
+        0 => Ok((1, 1)),
+        1 => Ok((shape[0], 1)),
+        _ => {
+            if shape.len() > 2 && shape.iter().skip(2).any(|&dim| dim != 1) {
+                Err(runtime_error(
+                    name,
+                    format!("{name}: inputs must be 2-D matrices or vectors"),
+                ))
+            } else {
+                Ok((shape[0], shape[1]))
+            }
+        }
+    }
+}
+
+fn value_into_tensor_for(name: &str, value: Value) -> BuiltinResult<Tensor> {
+    match value {
+        Value::Tensor(t) => Ok(t),
+        Value::LogicalArray(logical) => logical_to_tensor(name, &logical),
+        Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
+            .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
+        Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1])
+            .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
+        Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
+            .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
+        other => Err(runtime_error(
+            name,
+            format!(
+                "{name}: unsupported input type {:?}; expected numeric or logical values",
+                other
+            ),
+        )),
+    }
+}
+
+fn logical_to_tensor(name: &str, logical: &LogicalArray) -> BuiltinResult<Tensor> {
+    let data: Vec<f64> = logical
+        .data
+        .iter()
+        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+        .collect();
+    Tensor::new(data, logical.shape.clone())
+        .map_err(|e| runtime_error(name, format!("{name}: {e}")))
 }
 
 fn is_symmetric_real(tensor: &Tensor, mode: SymmetryMode, tol: f64) -> bool {
@@ -300,12 +411,12 @@ fn complex_within(re: f64, im: f64, ref_re: f64, ref_im: f64, tol: f64) -> bool 
     diff_r.hypot(diff_i) <= tol
 }
 
-pub fn ensure_matrix_shape(shape: &[usize]) -> Result<(usize, usize), String> {
-    matrix_dimensions_for("issymmetric", shape)
+pub fn ensure_matrix_shape(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
+    matrix_dimensions_for(BUILTIN_NAME, shape)
 }
 
-pub fn issymmetric_host_real_tensor(tensor: &Tensor, skew: bool, tol: f64) -> Result<bool, String> {
-    let (rows, cols) = matrix_dimensions_for("issymmetric", &tensor.shape)?;
+pub fn issymmetric_host_real_tensor(tensor: &Tensor, skew: bool, tol: f64) -> BuiltinResult<bool> {
+    let (rows, cols) = matrix_dimensions_for(BUILTIN_NAME, &tensor.shape)?;
     if rows != cols {
         return Ok(false);
     }
@@ -321,8 +432,8 @@ pub fn issymmetric_host_complex_tensor(
     tensor: &ComplexTensor,
     skew: bool,
     tol: f64,
-) -> Result<bool, String> {
-    let (rows, cols) = matrix_dimensions_for("issymmetric", &tensor.shape)?;
+) -> BuiltinResult<bool> {
+    let (rows, cols) = matrix_dimensions_for(BUILTIN_NAME, &tensor.shape)?;
     if rows != cols {
         return Ok(false);
     }
@@ -339,13 +450,13 @@ pub fn issymmetric_host_real_data(
     data: &[f64],
     skew: bool,
     tol: f64,
-) -> Result<bool, String> {
-    let (rows, cols) = matrix_dimensions_for("issymmetric", shape)?;
+) -> BuiltinResult<bool> {
+    let (rows, cols) = matrix_dimensions_for(BUILTIN_NAME, shape)?;
     if rows != cols {
         return Ok(false);
     }
-    let tensor =
-        Tensor::new(data.to_vec(), shape.to_vec()).map_err(|e| format!("issymmetric: {e}"))?;
+    let tensor = Tensor::new(data.to_vec(), shape.to_vec())
+        .map_err(|e| runtime_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {e}")))?;
     issymmetric_host_real_tensor(&tensor, skew, tol)
 }
 
@@ -354,13 +465,13 @@ pub fn issymmetric_host_complex_data(
     data: &[(f64, f64)],
     skew: bool,
     tol: f64,
-) -> Result<bool, String> {
-    let (rows, cols) = matrix_dimensions_for("issymmetric", shape)?;
+) -> BuiltinResult<bool> {
+    let (rows, cols) = matrix_dimensions_for(BUILTIN_NAME, shape)?;
     if rows != cols {
         return Ok(false);
     }
     let tensor = ComplexTensor::new(data.to_vec(), shape.to_vec())
-        .map_err(|e| format!("issymmetric: {e}"))?;
+        .map_err(|e| runtime_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {e}")))?;
     issymmetric_host_complex_tensor(&tensor, skew, tol)
 }
 
@@ -368,6 +479,7 @@ pub fn issymmetric_host_complex_data(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_builtins::{IntValue, LogicalArray};
@@ -450,9 +562,10 @@ pub(crate) mod tests {
     fn higher_dimensional_inputs_error() {
         let tensor = Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap();
         let err = issymmetric_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err();
+        let message = err.to_string();
         assert!(
-            err.contains("inputs must be 2-D matrices"),
-            "unexpected error message: {err}"
+            message.contains("inputs must be 2-D matrices"),
+            "unexpected error message: {message}"
         );
     }
 
@@ -481,9 +594,10 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
         let err =
             issymmetric_builtin(Value::Tensor(tensor), vec![Value::from("diagonal")]).unwrap_err();
+        let message = err.to_string();
         assert!(
-            err.contains("unknown flag"),
-            "unexpected error message: {err}"
+            message.contains("unknown flag"),
+            "unexpected error message: {message}"
         );
     }
 
@@ -496,9 +610,10 @@ pub(crate) mod tests {
             vec![Value::Num(1e-9), Value::Num(1e-6)],
         )
         .unwrap_err();
+        let message = err.to_string();
         assert!(
-            err.contains("tolerance specified more than once"),
-            "unexpected error message: {err}"
+            message.contains("tolerance specified more than once"),
+            "unexpected error message: {message}"
         );
     }
 
@@ -507,9 +622,10 @@ pub(crate) mod tests {
     fn negative_tolerance_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
         let err = issymmetric_builtin(Value::Tensor(tensor), vec![Value::Num(-1.0)]).unwrap_err();
+        let message = err.to_string();
         assert!(
-            err.contains("tolerance must be >= 0"),
-            "unexpected error message: {err}"
+            message.contains("tolerance must be >= 0"),
+            "unexpected error message: {message}"
         );
     }
 
@@ -579,5 +695,9 @@ pub(crate) mod tests {
 
         let _ = provider.free(&handle);
         let _ = provider.free(&handle_skew);
+    }
+
+    fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::issymmetric_builtin(value, rest))
     }
 }

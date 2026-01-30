@@ -1,11 +1,15 @@
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 
+use crate::build_runtime_error;
+
 /// Download a GPU tensor handle to host memory, returning a dense `Tensor`.
 ///
 /// This helper routes through the dispatcher so residency hooks and provider
 /// semantics stay consistent with the rest of the runtime.
-pub fn gather_tensor(handle: &runmat_accelerate_api::GpuTensorHandle) -> Result<Tensor, String> {
+pub async fn gather_tensor_async(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+) -> crate::BuiltinResult<Tensor> {
     // Ensure the correct provider is active for WGPU-backed handles when tests run in parallel.
     // This mirrors the guard used in test_support::gather.
     #[cfg(all(test, feature = "wgpu"))]
@@ -17,24 +21,29 @@ pub fn gather_tensor(handle: &runmat_accelerate_api::GpuTensorHandle) -> Result<
         }
     }
     let value = Value::GpuTensor(handle.clone());
-    match crate::dispatcher::gather_if_needed(&value)? {
+    let gathered = crate::dispatcher::gather_if_needed_async(&value).await?;
+    match gathered {
         Value::Tensor(t) => Ok(t),
-        Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("gather: {e}")),
+        Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
+            .map_err(|e| build_runtime_error(format!("gather: {e}")).build()),
         Value::LogicalArray(la) => {
             let data: Vec<f64> = la
                 .data
                 .iter()
                 .map(|&b| if b != 0 { 1.0 } else { 0.0 })
                 .collect();
-            Tensor::new(data, la.shape.clone()).map_err(|e| format!("gather: {e}"))
+            Tensor::new(data, la.shape.clone())
+                .map_err(|e| build_runtime_error(format!("gather: {e}")).build())
         }
-        other => Err(format!("gather: unexpected value kind {other:?}")),
+        other => {
+            Err(build_runtime_error(format!("gather: unexpected value kind {other:?}")).build())
+        }
     }
 }
 
 /// Gather an arbitrary value, returning a host-side `Value`.
-pub fn gather_value(value: &Value) -> Result<Value, String> {
-    crate::dispatcher::gather_if_needed(value)
+pub async fn gather_value_async(value: &Value) -> crate::BuiltinResult<Value> {
+    crate::dispatcher::gather_if_needed_async(value).await
 }
 
 /// Wrap a GPU tensor handle as a logical gpuArray value, recording metadata so that

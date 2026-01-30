@@ -10,6 +10,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{linalg, tensor};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
+
+const NAME: &str = "mtimes";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::mtimes")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -30,6 +33,27 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Calls the provider `matmul` hook when available; otherwise gathers inputs and executes the CPU fallback.",
 };
 
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
+    if let Some(identifier) = err.identifier() {
+        builder = builder.with_identifier(identifier.to_string());
+    }
+    if let Some(task_id) = err.context.task_id.clone() {
+        builder = builder.with_task_id(task_id);
+    }
+    if !err.context.call_stack.is_empty() {
+        builder = builder.with_call_stack(err.context.call_stack.clone());
+    }
+    if let Some(phase) = err.context.phase.clone() {
+        builder = builder.with_phase(phase);
+    }
+    builder.with_source(err).build()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::ops::mtimes")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mtimes",
@@ -49,18 +73,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "matmul",
     builtin_path = "crate::builtins::math::linalg::ops::mtimes"
 )]
-fn mtimes_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
-    mtimes_eval(&lhs, &rhs)
+async fn mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    mtimes_eval(&lhs, &rhs).await
 }
 
-pub(crate) fn mtimes_eval(lhs: &Value, rhs: &Value) -> Result<Value, String> {
-    if let Some(result) = try_gpu_matmul(lhs, rhs)? {
+pub(crate) async fn mtimes_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
+    if let Some(result) = try_gpu_matmul(lhs, rhs).await? {
         return Ok(result);
     }
-    mtimes_cpu(lhs.clone(), rhs.clone())
+    mtimes_cpu(lhs.clone(), rhs.clone()).await
 }
 
-fn try_gpu_matmul(lhs: &Value, rhs: &Value) -> Result<Option<Value>, String> {
+async fn try_gpu_matmul(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),
@@ -74,7 +98,7 @@ fn try_gpu_matmul(lhs: &Value, rhs: &Value) -> Result<Option<Value>, String> {
         return Ok(None);
     }
 
-    if let Some(result) = try_gpu_scalar_mul(provider, lhs, rhs)? {
+    if let Some(result) = try_gpu_scalar_mul(provider, lhs, rhs).await? {
         return Ok(Some(result));
     }
 
@@ -90,7 +114,10 @@ fn try_gpu_matmul(lhs: &Value, rhs: &Value) -> Result<Option<Value>, String> {
         }
     };
 
-    match provider.matmul(lhs_operand.handle(), rhs_operand.handle()) {
+    match provider
+        .matmul(lhs_operand.handle(), rhs_operand.handle())
+        .await
+    {
         Ok(handle) => {
             release_operand(provider, &mut lhs_operand);
             release_operand(provider, &mut rhs_operand);
@@ -104,12 +131,12 @@ fn try_gpu_matmul(lhs: &Value, rhs: &Value) -> Result<Option<Value>, String> {
     }
 }
 
-fn try_gpu_scalar_mul(
+async fn try_gpu_scalar_mul(
     provider: &'static dyn AccelProvider,
     lhs: &Value,
     rhs: &Value,
-) -> Result<Option<Value>, String> {
-    if let Some(scalar) = real_scalar_value(provider, lhs)? {
+) -> BuiltinResult<Option<Value>> {
+    if let Some(scalar) = real_scalar_value(provider, lhs).await? {
         if let Some(mut operand) = prepare_gpu_operand(rhs, provider)? {
             let result = provider.scalar_mul(operand.handle(), scalar);
             release_operand(provider, &mut operand);
@@ -120,7 +147,7 @@ fn try_gpu_scalar_mul(
         }
     }
 
-    if let Some(scalar) = real_scalar_value(provider, rhs)? {
+    if let Some(scalar) = real_scalar_value(provider, rhs).await? {
         if let Some(mut operand) = prepare_gpu_operand(lhs, provider)? {
             let result = provider.scalar_mul(operand.handle(), scalar);
             release_operand(provider, &mut operand);
@@ -134,10 +161,10 @@ fn try_gpu_scalar_mul(
     Ok(None)
 }
 
-fn real_scalar_value(
+async fn real_scalar_value(
     provider: &'static dyn AccelProvider,
     value: &Value,
-) -> Result<Option<f64>, String> {
+) -> BuiltinResult<Option<f64>> {
     match value {
         Value::Num(n) => Ok(Some(*n)),
         Value::Int(i) => Ok(Some(i.to_f64())),
@@ -147,9 +174,9 @@ fn real_scalar_value(
             Ok(Some(if logical.data[0] != 0 { 1.0 } else { 0.0 }))
         }
         Value::GpuTensor(handle) if is_scalar_handle(handle) => {
-            let host = provider
-                .download(handle)
-                .map_err(|e| format!("mtimes: {e}"))?;
+            let host = download_handle_async(provider, handle)
+                .await
+                .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
             Ok(host.data.first().copied())
         }
         _ => Ok(None),
@@ -157,32 +184,36 @@ fn real_scalar_value(
 }
 
 fn is_scalar_handle(handle: &GpuTensorHandle) -> bool {
-    let elements: usize = handle.shape.iter().copied().product();
-    elements == 1
+    crate::builtins::common::shape::is_scalar_shape(&handle.shape)
 }
 
-fn mtimes_cpu(lhs: Value, rhs: Value) -> Result<Value, String> {
+#[async_recursion::async_recursion(?Send)]
+async fn mtimes_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     use Value::*;
 
-    let lhs = crate::dispatcher::gather_if_needed(&lhs)?;
-    let rhs = crate::dispatcher::gather_if_needed(&rhs)?;
+    let lhs = crate::dispatcher::gather_if_needed_async(&lhs)
+        .await
+        .map_err(map_control_flow)?;
+    let rhs = crate::dispatcher::gather_if_needed_async(&rhs)
+        .await
+        .map_err(map_control_flow)?;
 
     match (lhs, rhs) {
         (LogicalArray(la), other) => {
-            let tensor = tensor::logical_to_tensor(&la)?;
-            mtimes_cpu(Value::Tensor(tensor), other)
+            let tensor = tensor::logical_to_tensor(&la).map_err(builtin_error)?;
+            mtimes_cpu(Value::Tensor(tensor), other).await
         }
         (other, LogicalArray(lb)) => {
-            let tensor = tensor::logical_to_tensor(&lb)?;
-            mtimes_cpu(other, Value::Tensor(tensor))
+            let tensor = tensor::logical_to_tensor(&lb).map_err(builtin_error)?;
+            mtimes_cpu(other, Value::Tensor(tensor)).await
         }
         (Bool(b), other) => {
             let scalar = if b { 1.0 } else { 0.0 };
-            mtimes_cpu(Value::Num(scalar), other)
+            mtimes_cpu(Value::Num(scalar), other).await
         }
         (other, Bool(b)) => {
             let scalar = if b { 1.0 } else { 0.0 };
-            mtimes_cpu(other, Value::Num(scalar))
+            mtimes_cpu(other, Value::Num(scalar)).await
         }
         (Complex(ar, ai), Complex(br, bi)) => Ok(Complex(ar * br - ai * bi, ar * bi + ai * br)),
         (Complex(ar, ai), Num(s)) => Ok(Complex(ar * s, ai * s)),
@@ -212,19 +243,19 @@ fn mtimes_cpu(lhs: Value, rhs: Value) -> Result<Value, String> {
             Ok(complex_tensor_into_value(tensor))
         }
         (ComplexTensor(ta), ComplexTensor(tb)) => {
-            let tensor = linalg::matmul_complex(&ta, &tb)?;
+            let tensor = linalg::matmul_complex(&ta, &tb).map_err(builtin_error)?;
             Ok(complex_tensor_into_value(tensor))
         }
         (ComplexTensor(ta), Tensor(tb)) => {
-            let tensor = linalg::matmul_complex_real(&ta, &tb)?;
+            let tensor = linalg::matmul_complex_real(&ta, &tb).map_err(builtin_error)?;
             Ok(complex_tensor_into_value(tensor))
         }
         (Tensor(ta), ComplexTensor(tb)) => {
-            let tensor = linalg::matmul_real_complex(&ta, &tb)?;
+            let tensor = linalg::matmul_real_complex(&ta, &tb).map_err(builtin_error)?;
             Ok(complex_tensor_into_value(tensor))
         }
         (Tensor(ta), Tensor(tb)) => {
-            let tensor = linalg::matmul_real(&ta, &tb)?;
+            let tensor = linalg::matmul_real(&ta, &tb).map_err(builtin_error)?;
             Ok(tensor::tensor_into_value(tensor))
         }
         (Tensor(ta), Num(s)) => Ok(tensor::tensor_into_value(linalg::scalar_mul_real(&ta, s))),
@@ -241,14 +272,14 @@ fn mtimes_cpu(lhs: Value, rhs: Value) -> Result<Value, String> {
         (Int(x), Num(y)) => Ok(Num(x.to_f64() * y)),
         (Num(x), Int(y)) => Ok(Num(x * y.to_f64())),
         (Int(x), Int(y)) => Ok(Num(x.to_f64() * y.to_f64())),
-        _ => Err("mtimes: unsupported operand types".to_string()),
+        _ => Err(builtin_error("mtimes: unsupported operand types")),
     }
 }
 
 fn prepare_gpu_operand(
     value: &Value,
     provider: &'static dyn AccelProvider,
-) -> Result<Option<PreparedOperand>, String> {
+) -> BuiltinResult<Option<PreparedOperand>> {
     match value {
         Value::GpuTensor(handle) => {
             if is_scalar_handle(handle) {
@@ -269,7 +300,7 @@ fn prepare_gpu_operand(
             if logical.data.len() == 1 {
                 Ok(None)
             } else {
-                let tensor = tensor::logical_to_tensor(logical)?;
+                let tensor = tensor::logical_to_tensor(logical).map_err(builtin_error)?;
                 let uploaded = upload_tensor(provider, &tensor)?;
                 Ok(Some(PreparedOperand::owned(uploaded)))
             }
@@ -281,12 +312,14 @@ fn prepare_gpu_operand(
 fn upload_tensor(
     provider: &'static dyn AccelProvider,
     tensor: &Tensor,
-) -> Result<GpuTensorHandle, String> {
+) -> BuiltinResult<GpuTensorHandle> {
     let view = HostTensorView {
         data: &tensor.data,
         shape: &tensor.shape,
     };
-    let handle = provider.upload(&view).map_err(|e| format!("mtimes: {e}"))?;
+    let handle = provider
+        .upload(&view)
+        .map_err(|e| builtin_error(format!("mtimes: {e}")))?;
     Ok(handle)
 }
 
@@ -330,7 +363,12 @@ impl PreparedOperand {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
+
+    fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
+        err
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -428,9 +466,9 @@ pub(crate) mod tests {
     fn inner_dimension_mismatch_errors() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![5.0, 6.0, 7.0], vec![3, 1]).unwrap();
-        let err = mtimes_builtin(Value::Tensor(a), Value::Tensor(b)).unwrap_err();
+        let err = unwrap_error(mtimes_builtin(Value::Tensor(a), Value::Tensor(b)).unwrap_err());
         assert!(
-            err.contains("Inner matrix dimensions must agree"),
+            err.message().contains("Inner matrix dimensions must agree"),
             "unexpected error message: {err}"
         );
     }
@@ -526,5 +564,9 @@ pub(crate) mod tests {
 
         assert_eq!(gathered.shape, expected.shape);
         assert_eq!(gathered.data, expected.data);
+    }
+
+    fn mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+        block_on(super::mtimes_builtin(lhs, rhs))
     }
 }

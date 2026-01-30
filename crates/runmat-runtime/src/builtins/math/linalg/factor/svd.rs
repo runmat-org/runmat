@@ -14,10 +14,13 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use nalgebra::{DMatrix, DVector};
 use num_complex::Complex64;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
+
+const BUILTIN_NAME: &str = "svd";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::svd")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -35,6 +38,24 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes:
         "GPU inputs are gathered to the host until a provider implements the reserved `svd` hook.",
 };
+
+fn svd_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn with_svd_context(mut error: RuntimeError) -> RuntimeError {
+    if error.message() == "interaction pending..." {
+        return build_runtime_error("interaction pending...")
+            .with_builtin(BUILTIN_NAME)
+            .build();
+    }
+    if error.context.builtin.is_none() {
+        error.context = error.context.with_builtin(BUILTIN_NAME);
+    }
+    error
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::factor::svd")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -56,8 +77,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::math::linalg::factor::svd"
 )]
-fn svd_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let eval = evaluate(value, &rest)?;
+async fn svd_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(value, &rest).await?;
     Ok(eval.singular_values())
 }
 
@@ -113,23 +134,25 @@ enum SigmaFormat {
     Vector,
 }
 
-pub fn evaluate(value: Value, args: &[Value]) -> Result<SvdEval, String> {
+pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<SvdEval> {
     let options = parse_options(args)?;
-    evaluate_value(value, options)
+    evaluate_value(value, options).await
 }
 
-fn evaluate_value(value: Value, options: SvdOptions) -> Result<SvdEval, String> {
+async fn evaluate_value(value: Value, options: SvdOptions) -> BuiltinResult<SvdEval> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
-            evaluate_tensor(Value::Tensor(tensor), options)
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(with_svd_context)?;
+            evaluate_tensor(Value::Tensor(tensor), options).await
         }
-        other => evaluate_tensor(other, options),
+        other => evaluate_tensor(other, options).await,
     }
 }
 
-fn evaluate_tensor(value: Value, options: SvdOptions) -> Result<SvdEval, String> {
-    match value_to_numeric_matrix(value)? {
+async fn evaluate_tensor(value: Value, options: SvdOptions) -> BuiltinResult<SvdEval> {
+    match value_to_numeric_matrix(value).await? {
         NumericMatrix::Real(matrix) => compute_svd_real(matrix, &options),
         NumericMatrix::Complex(matrix) => compute_svd_complex(matrix, &options),
     }
@@ -140,12 +163,13 @@ enum NumericMatrix {
     Complex(DMatrix<Complex64>),
 }
 
-fn value_to_numeric_matrix(value: Value) -> Result<NumericMatrix, String> {
+async fn value_to_numeric_matrix(value: Value) -> BuiltinResult<NumericMatrix> {
     match value {
         Value::Tensor(tensor) => tensor_to_matrix(&tensor).map(NumericMatrix::Real),
         Value::ComplexTensor(ct) => complex_tensor_to_matrix(&ct).map(NumericMatrix::Complex),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|err| svd_error(format!("svd: {err}")))?;
             tensor_to_matrix(&tensor).map(NumericMatrix::Real)
         }
         Value::Num(n) => Ok(NumericMatrix::Real(DMatrix::from_element(1, 1, n))),
@@ -161,27 +185,29 @@ fn value_to_numeric_matrix(value: Value) -> Result<NumericMatrix, String> {
             Complex64::new(re, im),
         ))),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(with_svd_context)?;
             tensor_to_matrix(&tensor).map(NumericMatrix::Real)
         }
-        other => Err(format!(
+        other => Err(svd_error(format!(
             "svd: unsupported input type {other:?}; expected numeric or logical values"
-        )),
+        ))),
     }
 }
 
-fn tensor_to_matrix(tensor: &Tensor) -> Result<DMatrix<f64>, String> {
+fn tensor_to_matrix(tensor: &Tensor) -> BuiltinResult<DMatrix<f64>> {
     if tensor.shape.len() > 2 {
-        return Err("svd: input must be 2-D".to_string());
+        return Err(svd_error("svd: input must be 2-D"));
     }
     let rows = tensor.rows();
     let cols = tensor.cols();
     Ok(DMatrix::from_column_slice(rows, cols, &tensor.data))
 }
 
-fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> Result<DMatrix<Complex64>, String> {
+fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> BuiltinResult<DMatrix<Complex64>> {
     if tensor.shape.len() > 2 {
-        return Err("svd: input must be 2-D".to_string());
+        return Err(svd_error("svd: input must be 2-D"));
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
@@ -192,10 +218,10 @@ fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> Result<DMatrix<Complex64>
     Ok(DMatrix::from_column_slice(rows, cols, &data))
 }
 
-fn parse_options(args: &[Value]) -> Result<SvdOptions, String> {
+fn parse_options(args: &[Value]) -> BuiltinResult<SvdOptions> {
     let mut opts = SvdOptions::default();
     if args.len() > 2 {
-        return Err("svd: too many option arguments".to_string());
+        return Err(svd_error("svd: too many option arguments"));
     }
     for arg in args {
         match arg {
@@ -203,7 +229,9 @@ fn parse_options(args: &[Value]) -> Result<SvdOptions, String> {
                 if i.to_i64() == 0 {
                     opts.econ = true;
                 } else {
-                    return Err("svd: numeric option must be 0 to request economy size".to_string());
+                    return Err(svd_error(
+                        "svd: numeric option must be 0 to request economy size",
+                    ));
                 }
                 continue;
             }
@@ -211,7 +239,9 @@ fn parse_options(args: &[Value]) -> Result<SvdOptions, String> {
                 if *n == 0.0 {
                     opts.econ = true;
                 } else {
-                    return Err("svd: numeric option must be 0 to request economy size".to_string());
+                    return Err(svd_error(
+                        "svd: numeric option must be 0 to request economy size",
+                    ));
                 }
                 continue;
             }
@@ -228,29 +258,26 @@ fn parse_options(args: &[Value]) -> Result<SvdOptions, String> {
                 "vector" => opts.sigma_format = SigmaFormat::Vector,
                 "matrix" => opts.sigma_format = SigmaFormat::Matrix,
                 other => {
-                    return Err(format!("svd: unknown option '{other}'"));
+                    return Err(svd_error(format!("svd: unknown option '{other}'")));
                 }
             }
             continue;
         }
-        return Err(format!(
+        return Err(svd_error(format!(
             "svd: expected option strings ('econ','vector','matrix') or the numeric value 0, got {arg:?}"
-        ));
+        )));
     }
     Ok(opts)
 }
 
-fn compute_svd_real(matrix: DMatrix<f64>, options: &SvdOptions) -> Result<SvdEval, String> {
+fn compute_svd_real(matrix: DMatrix<f64>, options: &SvdOptions) -> BuiltinResult<SvdEval> {
     let (mut u, mut singular_values, mut v) = factorize(matrix)?;
     ensure_descending(&mut u, &mut singular_values, &mut v);
     let (u, v) = shape_factors_real(u, v, singular_values.len(), options.econ);
     assemble_eval_real(&u, &v, &singular_values, options)
 }
 
-fn compute_svd_complex(
-    matrix: DMatrix<Complex64>,
-    options: &SvdOptions,
-) -> Result<SvdEval, String> {
+fn compute_svd_complex(matrix: DMatrix<Complex64>, options: &SvdOptions) -> BuiltinResult<SvdEval> {
     let (mut u, mut singular_values, mut v) = factorize(matrix)?;
     ensure_descending(&mut u, &mut singular_values, &mut v);
     let (u, v) = shape_factors_complex(u, v, singular_values.len(), options.econ);
@@ -265,7 +292,7 @@ type FactorizationResult<T> = (
 
 fn factorize<T: nalgebra::ComplexField>(
     matrix: DMatrix<T>,
-) -> Result<FactorizationResult<T>, String> {
+) -> BuiltinResult<FactorizationResult<T>> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
     if rows == 0 || cols == 0 {
@@ -278,10 +305,10 @@ fn factorize<T: nalgebra::ComplexField>(
     let svd = nalgebra::linalg::SVD::new(matrix, true, true);
     let u = svd
         .u
-        .ok_or_else(|| "svd: failed to compute left singular vectors".to_string())?;
+        .ok_or_else(|| svd_error("svd: failed to compute left singular vectors"))?;
     let v_t = svd
         .v_t
-        .ok_or_else(|| "svd: failed to compute right singular vectors".to_string())?;
+        .ok_or_else(|| svd_error("svd: failed to compute right singular vectors"))?;
     let singular_values = svd.singular_values;
     let u = u.resize(rows, singular_values.len(), T::zero());
     let v = v_t.adjoint().resize(cols, singular_values.len(), T::zero());
@@ -373,7 +400,7 @@ fn assemble_eval_real(
     v: &DMatrix<f64>,
     singular_values: &DVector<f64>,
     options: &SvdOptions,
-) -> Result<SvdEval, String> {
+) -> BuiltinResult<SvdEval> {
     let diag = singular_values.as_slice().to_vec();
     let (s_rows, s_cols) = sigma_shape(u.nrows(), v.nrows(), diag.len(), options.econ);
     let sigma_matrix = diag_matrix_value(&diag, s_rows, s_cols)?;
@@ -398,7 +425,7 @@ fn assemble_eval_complex(
     v: &DMatrix<Complex64>,
     singular_values: &DVector<f64>,
     options: &SvdOptions,
-) -> Result<SvdEval, String> {
+) -> BuiltinResult<SvdEval> {
     let diag = singular_values.as_slice().to_vec();
     let (s_rows, s_cols) = sigma_shape(u.nrows(), v.nrows(), diag.len(), options.econ);
     let sigma_matrix = diag_matrix_value(&diag, s_rows, s_cols)?;
@@ -430,19 +457,22 @@ fn sigma_shape(m: usize, n: usize, diag_len: usize, econ: bool) -> (usize, usize
     }
 }
 
-fn singular_vector_value(values: &[f64]) -> Result<Value, String> {
+fn singular_vector_value(values: &[f64]) -> BuiltinResult<Value> {
     if values.is_empty() {
-        let tensor = Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("svd: {e}"))?;
+        let tensor =
+            Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| svd_error(format!("svd: {e}")))?;
         return Ok(Value::Tensor(tensor));
     }
     let rows = values.len();
-    let tensor = Tensor::new(values.to_vec(), vec![rows, 1]).map_err(|e| format!("svd: {e}"))?;
+    let tensor =
+        Tensor::new(values.to_vec(), vec![rows, 1]).map_err(|e| svd_error(format!("svd: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn diag_matrix_value(values: &[f64], rows: usize, cols: usize) -> Result<Value, String> {
+fn diag_matrix_value(values: &[f64], rows: usize, cols: usize) -> BuiltinResult<Value> {
     if rows == 0 || cols == 0 {
-        let tensor = Tensor::new(Vec::new(), vec![rows, cols]).map_err(|e| format!("svd: {e}"))?;
+        let tensor = Tensor::new(Vec::new(), vec![rows, cols])
+            .map_err(|e| svd_error(format!("svd: {e}")))?;
         return Ok(Value::Tensor(tensor));
     }
     let mut data = vec![0.0; rows * cols];
@@ -450,26 +480,26 @@ fn diag_matrix_value(values: &[f64], rows: usize, cols: usize) -> Result<Value, 
     for i in 0..diag_len.min(rows.min(cols)) {
         data[i + i * rows] = values[i];
     }
-    let tensor = Tensor::new(data, vec![rows, cols]).map_err(|e| format!("svd: {e}"))?;
+    let tensor = Tensor::new(data, vec![rows, cols]).map_err(|e| svd_error(format!("svd: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
-fn matrix_real_to_value(matrix: &DMatrix<f64>) -> Result<Value, String> {
+fn matrix_real_to_value(matrix: &DMatrix<f64>) -> BuiltinResult<Value> {
     let tensor = Tensor::new(
         matrix.as_slice().to_vec(),
         vec![matrix.nrows(), matrix.ncols()],
     )
-    .map_err(|e| format!("svd: {e}"))?;
+    .map_err(|e| svd_error(format!("svd: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
-fn matrix_complex_to_value(matrix: &DMatrix<Complex64>) -> Result<Value, String> {
+fn matrix_complex_to_value(matrix: &DMatrix<Complex64>) -> BuiltinResult<Value> {
     let mut data = Vec::with_capacity(matrix.nrows() * matrix.ncols());
     for value in matrix.iter() {
         data.push((value.re, value.im));
     }
     let tensor = ComplexTensor::new(data, vec![matrix.nrows(), matrix.ncols()])
-        .map_err(|e| format!("svd: {e}"))?;
+        .map_err(|e| svd_error(format!("svd: {e}")))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
@@ -594,8 +624,11 @@ fn extend_orthonormal_complex(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use nalgebra::DMatrix;
-    use runmat_builtins::{LogicalArray, Tensor};
+    use futures::executor::block_on;
+    use runmat_builtins::LogicalArray;
+    fn error_message(err: RuntimeError) -> String {
+        err.message().to_string()
+    }
 
     fn tensor_from_value(value: Value) -> Tensor {
         match value {
@@ -770,7 +803,8 @@ pub(crate) mod tests {
     #[test]
     fn svd_invalid_option_errors() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
-        let err = evaluate(Value::Tensor(matrix), &[Value::from("bogus")]).unwrap_err();
+        let err =
+            error_message(evaluate(Value::Tensor(matrix), &[Value::from("bogus")]).unwrap_err());
         assert!(err.contains("unknown option"));
     }
 
@@ -778,15 +812,17 @@ pub(crate) mod tests {
     #[test]
     fn svd_too_many_option_arguments_errors() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
-        let err = evaluate(
-            Value::Tensor(matrix),
-            &[
-                Value::from("econ"),
-                Value::from("vector"),
-                Value::from("matrix"),
-            ],
-        )
-        .unwrap_err();
+        let err = error_message(
+            evaluate(
+                Value::Tensor(matrix),
+                &[
+                    Value::from("econ"),
+                    Value::from("vector"),
+                    Value::from("matrix"),
+                ],
+            )
+            .unwrap_err(),
+        );
         assert!(err.contains("too many option arguments"));
     }
 
@@ -794,7 +830,7 @@ pub(crate) mod tests {
     #[test]
     fn svd_numeric_nonzero_option_errors() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
-        let err = evaluate(Value::Tensor(matrix), &[Value::Num(1.0)]).unwrap_err();
+        let err = error_message(evaluate(Value::Tensor(matrix), &[Value::Num(1.0)]).unwrap_err());
         assert!(
             err.contains("numeric option must be 0"),
             "unexpected error: {err}"
@@ -822,7 +858,7 @@ pub(crate) mod tests {
     #[test]
     fn svd_three_dimensional_input_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2, 1]).expect("tensor");
-        let err = evaluate(Value::Tensor(tensor), &[]).unwrap_err();
+        let err = error_message(evaluate(Value::Tensor(tensor), &[]).unwrap_err());
         assert!(err.contains("must be 2-D"));
     }
 
@@ -938,5 +974,13 @@ pub(crate) mod tests {
             Value::Tensor(t) => assert!((t.data[0] - expected).abs() < 1e-10),
             other => panic!("unexpected output {other:?}"),
         }
+    }
+
+    fn svd_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::svd_builtin(value, rest))
+    }
+
+    fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<SvdEval> {
+        block_on(super::evaluate(value, args))
     }
 }

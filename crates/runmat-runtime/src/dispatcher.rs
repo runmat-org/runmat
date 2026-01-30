@@ -1,6 +1,6 @@
+use crate::{build_runtime_error, make_cell_with_shape, new_object_builtin, RuntimeError};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorOwned};
 use runmat_builtins::{builtin_functions, LogicalArray, NumericDType, Tensor, Value};
-
-use crate::{interaction, make_cell_with_shape, new_object_builtin};
 
 /// Return `true` when the passed value is a GPU-resident tensor handle.
 pub fn is_gpu_value(value: &Value) -> bool {
@@ -20,76 +20,113 @@ pub fn value_contains_gpu(value: &Value) -> bool {
 
 /// Convert GPU-resident values to host tensors when an acceleration provider exists.
 /// Non-GPU inputs are passed through unchanged.
-pub fn gather_if_needed(value: &Value) -> Result<Value, String> {
-    match value {
-        Value::GpuTensor(handle) => {
-            // In parallel test runs, ensure the WGPU provider is reasserted for WGPU handles.
-            #[cfg(all(test, feature = "wgpu"))]
-            {
-                if handle.device_id != 0 {
-                    let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+pub async fn gather_if_needed_async(value: &Value) -> Result<Value, RuntimeError> {
+    gather_if_needed_async_impl(value).await
+}
+
+pub async fn download_handle_async(
+    provider: &dyn AccelProvider,
+    handle: &GpuTensorHandle,
+) -> anyhow::Result<HostTensorOwned> {
+    provider.download(handle).await
+}
+
+fn gather_if_needed_async_impl<'a>(
+    value: &'a Value,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + 'a>> {
+    Box::pin(async move {
+        match value {
+            Value::GpuTensor(handle) => {
+                // In parallel test runs, ensure the WGPU provider is reasserted for WGPU handles.
+                #[cfg(all(test, feature = "wgpu"))]
+                {
+                    if handle.device_id != 0 {
+                        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                         runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
                     );
-                }
-            }
-            let provider = runmat_accelerate_api::provider_for_handle(handle)
-                .ok_or_else(|| "gather: no acceleration provider registered".to_string())?;
-            let is_logical = runmat_accelerate_api::handle_is_logical(handle);
-            let host = provider.download(handle).map_err(|e| e.to_string())?;
-            runmat_accelerate_api::clear_residency(handle);
-            let runmat_accelerate_api::HostTensorOwned { data, shape } = host;
-            if is_logical {
-                let bits: Vec<u8> = data.iter().map(|&v| if v != 0.0 { 1 } else { 0 }).collect();
-                let logical = LogicalArray::new(bits, shape).map_err(|e| e.to_string())?;
-                Ok(Value::LogicalArray(logical))
-            } else {
-                let mut data = data;
-                let precision = runmat_accelerate_api::handle_precision(handle)
-                    .unwrap_or_else(|| provider.precision());
-                if matches!(precision, runmat_accelerate_api::ProviderPrecision::F32) {
-                    for value in &mut data {
-                        *value = (*value as f32) as f64;
                     }
                 }
-                let dtype = match precision {
-                    runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
-                    runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
-                };
-                let tensor =
-                    Tensor::new_with_dtype(data, shape, dtype).map_err(|e| e.to_string())?;
-                Ok(Value::Tensor(tensor))
+                let provider =
+                    runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
+                        build_runtime_error("gather: no acceleration provider registered").build()
+                    })?;
+                let is_logical = runmat_accelerate_api::handle_is_logical(handle);
+                let host = download_handle_async(provider, handle)
+                    .await
+                    .map_err(|err| build_runtime_error(format!("gather: {err}")).build())?;
+                runmat_accelerate_api::clear_residency(handle);
+                let runmat_accelerate_api::HostTensorOwned { data, shape } = host;
+                if is_logical {
+                    let bits: Vec<u8> =
+                        data.iter().map(|&v| if v != 0.0 { 1 } else { 0 }).collect();
+                    let logical = LogicalArray::new(bits, shape)
+                        .map_err(|e| build_runtime_error(format!("gather: {e}")).build())?;
+                    Ok(Value::LogicalArray(logical))
+                } else {
+                    let mut data = data;
+                    let precision = runmat_accelerate_api::handle_precision(handle)
+                        .unwrap_or_else(|| provider.precision());
+                    if matches!(precision, runmat_accelerate_api::ProviderPrecision::F32) {
+                        for value in &mut data {
+                            *value = (*value as f32) as f64;
+                        }
+                    }
+                    let dtype = match precision {
+                        runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
+                        runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
+                    };
+                    let tensor = Tensor::new_with_dtype(data, shape, dtype)
+                        .map_err(|e| build_runtime_error(format!("gather: {e}")).build())?;
+                    Ok(Value::Tensor(tensor))
+                }
             }
-        }
-        Value::Cell(ca) => {
-            let mut gathered = Vec::with_capacity(ca.data.len());
-            for ptr in &ca.data {
-                gathered.push(gather_if_needed(ptr)?);
+            Value::Cell(ca) => {
+                let mut gathered = Vec::with_capacity(ca.data.len());
+                for ptr in &ca.data {
+                    gathered.push(gather_if_needed_async_impl(ptr).await?);
+                }
+                make_cell_with_shape(gathered, ca.shape.clone())
+                    .map_err(|err| build_runtime_error(format!("gather: {err}")).build())
             }
-            make_cell_with_shape(gathered, ca.shape.clone())
-        }
-        Value::Struct(sv) => {
-            let mut gathered = sv.clone();
-            for value in gathered.fields.values_mut() {
-                let updated = gather_if_needed(value)?;
-                *value = updated;
+            Value::Struct(sv) => {
+                let mut gathered = sv.clone();
+                for value in gathered.fields.values_mut() {
+                    let updated = gather_if_needed_async_impl(value).await?;
+                    *value = updated;
+                }
+                Ok(Value::Struct(gathered))
             }
-            Ok(Value::Struct(gathered))
-        }
-        Value::Object(obj) => {
-            let mut cloned = obj.clone();
-            for value in cloned.properties.values_mut() {
-                *value = gather_if_needed(value)?;
+            Value::Object(obj) => {
+                let mut cloned = obj.clone();
+                for value in cloned.properties.values_mut() {
+                    *value = gather_if_needed_async_impl(value).await?;
+                }
+                Ok(Value::Object(cloned))
             }
-            Ok(Value::Object(cloned))
+            other => Ok(other.clone()),
         }
-        other => Ok(other.clone()),
-    }
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeError> {
+    futures::executor::block_on(gather_if_needed_async(value))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn gather_if_needed(_value: &Value) -> Result<Value, RuntimeError> {
+    Err(build_runtime_error("gather: synchronous gather is unavailable on wasm").build())
 }
 
 /// Call a registered language builtin by name.
 /// Supports function overloading by trying different argument patterns.
 /// Returns an error if no builtin with that name and compatible arguments is found.
-pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
+pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+    futures::executor::block_on(call_builtin_async(name, args))
+}
+
+#[async_recursion::async_recursion(?Send)]
+pub async fn call_builtin_async(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
     let mut matching_builtins = Vec::new();
 
     // Collect all builtins with the matching name
@@ -105,15 +142,14 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
             // Prefer explicit constructor method with the same name as class (static)
             if let Some(ctor) = cls.methods.get(name) {
                 // Dispatch to constructor builtin; pass args through
-                return call_builtin(&ctor.function_name, args);
+                return call_builtin_async(&ctor.function_name, args).await;
             }
             // Otherwise default-construct object
-            return new_object_builtin(name.to_string());
+            return new_object_builtin(name.to_string()).await;
         }
-        return Err(format!(
-            "{}: Undefined function: {name}",
-            "MATLAB:UndefinedFunction"
-        ));
+        return Err(build_runtime_error(format!("Undefined function: {name}"))
+            .with_identifier("MATLAB:UndefinedFunction")
+            .build());
     }
 
     // Partition into no-category (tests/legacy shims) and categorized (library) builtins.
@@ -129,14 +165,14 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
 
     // Try each builtin until one succeeds. Within each group, prefer later-registered
     // implementations to allow overrides when names collide.
-    let mut last_error = String::new();
+    let mut last_error = RuntimeError::new("unknown error");
     for builtin in no_category
         .into_iter()
         .rev()
         .chain(categorized.into_iter().rev())
     {
         let f = builtin.implementation;
-        match (f)(args) {
+        match (f)(args).await {
             Ok(mut result) => {
                 // Normalize certain logical scalar results to numeric 0/1 for
                 // compatibility with legacy expectations in dispatcher tests
@@ -149,12 +185,9 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
                 return Ok(result);
             }
             Err(err) => {
-                if err == interaction::PENDING_INTERACTION_ERR {
-                    return Err(err);
-                }
                 if should_retry_with_gpu_gather(&err, args) {
-                    match gather_args_for_retry(args) {
-                        Ok(Some(gathered_args)) => match (f)(&gathered_args) {
+                    match gather_args_for_retry_async(args).await {
+                        Ok(Some(gathered_args)) => match (f)(&gathered_args).await {
                             Ok(result) => return Ok(result),
                             Err(retry_err) => last_error = retry_err,
                         },
@@ -169,28 +202,29 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
     }
 
     // If none succeeded, return the last error
-    Err(format!(
+    Err(build_runtime_error(format!(
         "No matching overload for `{}` with {} args: {}",
         name,
         args.len(),
-        last_error
+        last_error.message()
     ))
+    .build())
 }
 
-fn should_retry_with_gpu_gather(err: &str, args: &[Value]) -> bool {
+fn should_retry_with_gpu_gather(err: &RuntimeError, args: &[Value]) -> bool {
     if !args.iter().any(value_contains_gpu) {
         return false;
     }
-    let lowered = err.to_ascii_lowercase();
+    let lowered = err.message().to_ascii_lowercase();
     lowered.contains("gpu")
 }
 
-fn gather_args_for_retry(args: &[Value]) -> Result<Option<Vec<Value>>, String> {
+async fn gather_args_for_retry_async(args: &[Value]) -> Result<Option<Vec<Value>>, RuntimeError> {
     let mut gathered_any = false;
     let mut gathered_args = Vec::with_capacity(args.len());
     for arg in args {
         if value_contains_gpu(arg) {
-            gathered_args.push(gather_if_needed(arg)?);
+            gathered_args.push(gather_if_needed_async(arg).await?);
             gathered_any = true;
         } else {
             gathered_args.push(arg.clone());

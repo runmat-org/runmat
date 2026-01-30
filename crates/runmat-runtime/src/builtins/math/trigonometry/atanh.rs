@@ -14,7 +14,9 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
+const BUILTIN_NAME: &str = "atanh";
 const ZERO_EPS: f64 = 1.0e-12;
 const DOMAIN_EPS: f64 = 1.0e-12;
 
@@ -33,6 +35,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Keeps tensors on the device when the provider exposes unary_atanh and every element satisfies |x| ≤ 1; otherwise gathers to the host for complex promotion.",
 };
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::atanh")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -59,24 +67,24 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::atanh"
 )]
-fn atanh_builtin(value: Value) -> Result<Value, String> {
+async fn atanh_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => atanh_gpu(handle),
+        Value::GpuTensor(handle) => atanh_gpu(handle).await,
         Value::Complex(re, im) => Ok(atanh_complex_scalar(re, im)),
         Value::ComplexTensor(ct) => atanh_complex_tensor(ct),
         Value::CharArray(ca) => atanh_char_array(ca),
         Value::String(_) | Value::StringArray(_) => {
-            Err("atanh: expected numeric input".to_string())
+            Err(runtime_error_for("atanh: expected numeric input"))
         }
         other => atanh_real(other),
     }
 }
 
-fn atanh_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn atanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        match gpu_domain_is_real(provider, &handle) {
+        match gpu_domain_is_real(provider, &handle).await {
             Ok(true) => {
-                if let Ok(out) = provider.unary_atanh(&handle) {
+                if let Ok(out) = provider.unary_atanh(&handle).await {
                     return Ok(Value::GpuTensor(out));
                 }
             }
@@ -84,40 +92,45 @@ fn atanh_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
                 // fall back to host below
             }
             Err(_) => {
-                // fall back to host below
+                // Fall back to host path below.
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     atanh_tensor_real(tensor)
 }
 
-fn gpu_domain_is_real(
+async fn gpu_domain_is_real(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
-) -> Result<bool, String> {
+) -> BuiltinResult<bool> {
     let min_handle = provider
         .reduce_min(handle)
-        .map_err(|e| format!("atanh: reduce_min failed: {e}"))?;
-    let max_handle = provider.reduce_max(handle).map_err(|e| {
+        .await
+        .map_err(|e| runtime_error_for(format!("atanh: reduce_min failed: {e}")))?;
+    let max_handle = provider.reduce_max(handle).await.map_err(|e| {
         let _ = provider.free(&min_handle);
-        format!("atanh: reduce_max failed: {e}")
+        runtime_error_for(format!("atanh: reduce_max failed: {e}"))
     })?;
 
-    let min_host = match provider.download(&min_handle) {
+    let min_host = match download_handle_async(provider, &min_handle).await {
         Ok(values) => values,
         Err(err) => {
             let _ = provider.free(&min_handle);
             let _ = provider.free(&max_handle);
-            return Err(format!("atanh: reduce_min download failed: {err}"));
+            return Err(runtime_error_for(format!(
+                "atanh: reduce_min download failed: {err}"
+            )));
         }
     };
-    let max_host = match provider.download(&max_handle) {
+    let max_host = match download_handle_async(provider, &max_handle).await {
         Ok(values) => values,
         Err(err) => {
             let _ = provider.free(&min_handle);
             let _ = provider.free(&max_handle);
-            return Err(format!("atanh: reduce_max download failed: {err}"));
+            return Err(runtime_error_for(format!(
+                "atanh: reduce_max download failed: {err}"
+            )));
         }
     };
 
@@ -125,7 +138,9 @@ fn gpu_domain_is_real(
     let _ = provider.free(&max_handle);
 
     if min_host.data.is_empty() || max_host.data.is_empty() {
-        return Err("atanh: reduce_min/reduce_max returned empty result".to_string());
+        return Err(runtime_error_for(
+            "atanh: reduce_min/reduce_max returned empty result",
+        ));
     }
 
     let min_value = min_host.data.iter().copied().fold(f64::INFINITY, f64::min);
@@ -146,12 +161,12 @@ fn gpu_domain_is_real(
     Ok(true)
 }
 
-fn atanh_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("atanh", value)?;
+fn atanh_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("atanh", value).map_err(runtime_error_for)?;
     atanh_tensor_real(tensor)
 }
 
-fn atanh_tensor_real(tensor: Tensor) -> Result<Value, String> {
+fn atanh_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
     if tensor.data.is_empty() {
         return Ok(tensor::tensor_into_value(tensor));
     }
@@ -183,17 +198,17 @@ fn atanh_tensor_real(tensor: Tensor) -> Result<Value, String> {
             Ok(Value::Complex(re, im))
         } else {
             let tensor = ComplexTensor::new(complex_values, tensor.shape.clone())
-                .map_err(|e| format!("atanh: {e}"))?;
+                .map_err(|e| runtime_error_for(format!("atanh: {e}")))?;
             Ok(Value::ComplexTensor(tensor))
         }
     } else {
-        let tensor =
-            Tensor::new(real_values, tensor.shape.clone()).map_err(|e| format!("atanh: {e}"))?;
+        let tensor = Tensor::new(real_values, tensor.shape.clone())
+            .map_err(|e| runtime_error_for(format!("atanh: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     }
 }
 
-fn atanh_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn atanh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     if ct.data.is_empty() {
         return Ok(Value::ComplexTensor(ct));
     }
@@ -206,8 +221,8 @@ fn atanh_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
         let (re, im) = mapped[0];
         Ok(Value::Complex(re, im))
     } else {
-        let tensor =
-            ComplexTensor::new(mapped, ct.shape.clone()).map_err(|e| format!("atanh: {e}"))?;
+        let tensor = ComplexTensor::new(mapped, ct.shape.clone())
+            .map_err(|e| runtime_error_for(format!("atanh: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
@@ -217,14 +232,15 @@ fn atanh_complex_scalar(re: f64, im: f64) -> Value {
     Value::Complex(zero_small(result.re), zero_small(result.im))
 }
 
-fn atanh_char_array(ca: CharArray) -> Result<Value, String> {
+fn atanh_char_array(ca: CharArray) -> BuiltinResult<Value> {
     if ca.data.is_empty() {
-        let tensor =
-            Tensor::new(Vec::new(), vec![ca.rows, ca.cols]).map_err(|e| format!("atanh: {e}"))?;
+        let tensor = Tensor::new(Vec::new(), vec![ca.rows, ca.cols])
+            .map_err(|e| runtime_error_for(format!("atanh: {e}")))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("atanh: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| runtime_error_for(format!("atanh: {e}")))?;
     atanh_tensor_real(tensor)
 }
 
@@ -240,8 +256,17 @@ fn zero_small(value: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use num_complex::Complex64;
     use runmat_builtins::{CharArray, IntValue, LogicalArray};
+
+    fn atanh_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::atanh_builtin(value))
+    }
+
+    fn error_message(err: RuntimeError) -> String {
+        err.message().to_string()
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -369,7 +394,8 @@ pub(crate) mod tests {
     #[test]
     fn atanh_string_input_errors() {
         let err = atanh_builtin(Value::from("hello")).expect_err("expected error");
-        assert!(err.contains("numeric"));
+        let message = error_message(err);
+        assert!(message.contains("numeric"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -1,11 +1,18 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use anyhow::Result;
+use futures::executor::block_on;
 use runmat_builtins::Value;
-use runmat_core::{
-    InputHandlerAction, InputRequestKind, InputResponse, PendingInput, RunMatSession,
-};
+use runmat_core::{InputRequest, InputRequestKind, InputResponse, RunMatSession};
 use runmat_runtime::interaction::force_interactive_stdin_for_tests;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex, OnceLock};
+
+static TEST_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn test_mutex() -> &'static Mutex<()> {
+    TEST_MUTEX.get_or_init(|| Mutex::new(()))
+}
 
 struct InteractiveGuard;
 
@@ -36,76 +43,74 @@ fn value_as_char_row(value: &Value) -> Option<String> {
     }
 }
 
-fn expect_pending(input: &Option<PendingInput>) -> &PendingInput {
-    input.as_ref().expect("execution should suspend for stdin")
-}
-
-fn assert_line_request(kind: &InputRequestKind) {
-    match kind {
-        InputRequestKind::Line { echo } => assert!(*echo, "line prompts should echo by default"),
-        other => panic!("expected line request, got {other:?}"),
-    }
-}
-
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn input_prompts_suspend_and_resume() -> Result<()> {
+fn input_prompts_return_value() -> Result<()> {
+    let _test_guard = test_mutex().lock().unwrap();
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
-    session.install_input_handler(|_| InputHandlerAction::Pending);
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let prompts_clone = Arc::clone(&prompts);
+    session.install_async_input_handler(move |request: InputRequest| {
+        let prompts_clone = Arc::clone(&prompts_clone);
+        async move {
+            prompts_clone.lock().unwrap().push(request.prompt.clone());
+            Ok(InputResponse::Line("41".into()))
+        }
+    });
 
-    let first = session.execute("value = input('Enter value: '); value = value + 1; value;")?;
-    let pending = expect_pending(&first.stdin_requested);
-    assert_eq!(pending.request.prompt, "Enter value: ");
-    assert_line_request(&pending.request.kind);
-    assert_eq!(1, session.pending_requests().len());
-
-    let resumed = session.resume_input(pending.id, Ok(InputResponse::Line("41".into())))?;
-    assert!(resumed.stdin_requested.is_none());
-    assert!(session.pending_requests().is_empty());
-    let value = resumed.value.expect("execution should produce a value");
+    let result =
+        block_on(session.execute("value = input('Enter value: '); value = value + 1; value"))
+            .map_err(anyhow::Error::new)?;
+    let value = result.value.expect("execution should produce a value");
     assert_eq!(value_as_f64(&value), Some(42.0));
-    assert_eq!(resumed.stdin_events.len(), 1);
+    assert_eq!(result.stdin_events.len(), 1);
+    assert_eq!(prompts.lock().unwrap().as_slice(), &["Enter value: "]);
     Ok(())
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn multiple_inputs_queue_separate_requests() -> Result<()> {
+fn multiple_inputs_call_handler_in_order() -> Result<()> {
+    let _test_guard = test_mutex().lock().unwrap();
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
-    session.install_input_handler(|_| InputHandlerAction::Pending);
+    let responses = Arc::new(Mutex::new(VecDeque::from([
+        InputResponse::Line("5".into()),
+        InputResponse::Line("code-42".into()),
+    ])));
+    let responses_clone = Arc::clone(&responses);
+    session.install_async_input_handler(move |_request: InputRequest| {
+        let responses_clone = Arc::clone(&responses_clone);
+        async move {
+            let response = responses_clone
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("missing queued response");
+            Ok(response)
+        }
+    });
 
-    let first =
-        session.execute("first = input('First: '); second = input('Second: ', \"s\"); second;")?;
-    let pending_a = expect_pending(&first.stdin_requested);
-    assert_eq!(pending_a.request.prompt, "First: ");
-    assert_line_request(&pending_a.request.kind);
-
-    let second = session.resume_input(pending_a.id, Ok(InputResponse::Line("5".into())))?;
-    let pending_b = expect_pending(&second.stdin_requested);
-    assert_eq!(pending_b.request.prompt, "Second: ");
-    assert_line_request(&pending_b.request.kind);
-    assert_eq!(1, session.pending_requests().len());
-
-    let final_result =
-        session.resume_input(pending_b.id, Ok(InputResponse::Line("code-42".into())))?;
-    assert!(final_result.stdin_requested.is_none());
-    assert!(session.pending_requests().is_empty());
-    let value = final_result
+    let result = block_on(
+        session.execute("first = input('First: '); second = input('Second: ', \"s\"); second"),
+    )
+    .map_err(anyhow::Error::new)?;
+    let value = result
         .value
         .expect("final execution should produce a value");
     assert_eq!(value_as_char_row(&value), Some("code-42".to_string()));
-    assert_eq!(final_result.stdin_events.len(), 2);
+    assert_eq!(result.stdin_events.len(), 2);
     Ok(())
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn char_literal_round_trips() -> Result<()> {
+    let _test_guard = test_mutex().lock().unwrap();
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
-    let result = session.execute("'s'")?;
+    let result = block_on(session.execute("'s'")).map_err(anyhow::Error::new)?;
     let value = result.value.expect("char literal should return a value");
     assert_eq!(value_as_char_row(&value), Some("s".to_string()));
     Ok(())
@@ -113,48 +118,43 @@ fn char_literal_round_trips() -> Result<()> {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn pause_without_args_suspends_and_resumes() -> Result<()> {
+fn pause_uses_keypress_handler() -> Result<()> {
+    let _test_guard = test_mutex().lock().unwrap();
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
-    session.install_input_handler(|_| InputHandlerAction::Pending);
+    let kinds = Arc::new(Mutex::new(Vec::new()));
+    let kinds_clone = Arc::clone(&kinds);
+    session.install_async_input_handler(move |request: InputRequest| {
+        let kinds_clone = Arc::clone(&kinds_clone);
+        async move {
+            kinds_clone.lock().unwrap().push(request.kind.clone());
+            Ok(InputResponse::KeyPress)
+        }
+    });
 
-    let first = session.execute("pause; value = 1; value;")?;
-    let pending = expect_pending(&first.stdin_requested);
-    assert!(matches!(pending.request.kind, InputRequestKind::KeyPress));
-    assert_eq!(1, session.pending_requests().len());
-
-    let resumed = session.resume_input(pending.id, Ok(InputResponse::KeyPress))?;
-    assert!(resumed.stdin_requested.is_none());
-    assert!(session.pending_requests().is_empty());
-    let value = resumed.value.expect("execution should produce a value");
+    let result =
+        block_on(session.execute("pause; value = 1; value")).map_err(anyhow::Error::new)?;
+    let value = result.value.expect("execution should produce a value");
     assert_eq!(value_as_f64(&value), Some(1.0));
-    assert_eq!(resumed.stdin_events.len(), 1);
+    assert_eq!(result.stdin_events.len(), 1);
+    assert!(matches!(
+        kinds.lock().unwrap().as_slice(),
+        [InputRequestKind::KeyPress]
+    ));
     Ok(())
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn multiple_pauses_queue_separate_requests() -> Result<()> {
+fn pending_handler_returns_error() -> Result<()> {
+    let _test_guard = test_mutex().lock().unwrap();
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
-    session.install_input_handler(|_| InputHandlerAction::Pending);
+    session.install_async_input_handler(|_request: InputRequest| async move {
+        Err("input handler is unavailable".to_string())
+    });
 
-    let first = session.execute("pause; pause; 7;")?;
-    let pending_a = expect_pending(&first.stdin_requested);
-    assert!(matches!(pending_a.request.kind, InputRequestKind::KeyPress));
-
-    let second = session.resume_input(pending_a.id, Ok(InputResponse::KeyPress))?;
-    let pending_b = expect_pending(&second.stdin_requested);
-    assert!(matches!(pending_b.request.kind, InputRequestKind::KeyPress));
-    assert_eq!(1, session.pending_requests().len());
-
-    let final_result = session.resume_input(pending_b.id, Ok(InputResponse::KeyPress))?;
-    assert!(final_result.stdin_requested.is_none());
-    assert!(session.pending_requests().is_empty());
-    let value = final_result
-        .value
-        .expect("final execution should produce a value");
-    assert_eq!(value_as_f64(&value), Some(7.0));
-    assert_eq!(final_result.stdin_events.len(), 2);
+    let result = block_on(session.execute("pause; value = 1; value"));
+    assert!(result.is_err() || result.as_ref().is_ok_and(|res| res.error.is_some()));
     Ok(())
 }

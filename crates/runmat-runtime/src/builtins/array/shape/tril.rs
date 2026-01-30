@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -44,6 +45,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Triangular masking is not currently fused; fusion planner treats tril nodes as boundaries.",
 };
 
+fn tril_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("tril").build()
+}
+
 #[runtime_builtin(
     name = "tril",
     category = "array/shape",
@@ -52,48 +57,50 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::tril"
 )]
-fn tril_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("tril: too many input arguments".to_string());
+        return Err(tril_error("tril: too many input arguments"));
     }
-    let offset = parse_diagonal_offset(&rest)?;
+    let offset = parse_diagonal_offset(&rest).await?;
     match value {
-        Value::Tensor(tensor) => tril_tensor(tensor, offset).map(tensor::tensor_into_value),
-        Value::LogicalArray(array) => tril_logical_array(array, offset).map(Value::LogicalArray),
+        Value::Tensor(tensor) => Ok(tril_tensor(tensor, offset).map(tensor::tensor_into_value)?),
+        Value::LogicalArray(array) => {
+            Ok(tril_logical_array(array, offset).map(Value::LogicalArray)?)
+        }
         Value::ComplexTensor(tensor) => {
-            tril_complex_tensor(tensor, offset).map(Value::ComplexTensor)
+            Ok(tril_complex_tensor(tensor, offset).map(Value::ComplexTensor)?)
         }
         Value::Complex(re, im) => {
-            let tensor =
-                ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| format!("tril: {e}"))?;
-            tril_complex_tensor(tensor, offset).map(complex_tensor_into_value)
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
+                .map_err(|e| tril_error(format!("tril: {e}")))?;
+            Ok(tril_complex_tensor(tensor, offset).map(complex_tensor_into_value)?)
         }
-        Value::Num(n) => tril_tensor(
-            tensor::value_into_tensor_for("tril", Value::Num(n))?,
-            offset,
-        )
-        .map(tensor::tensor_into_value),
-        Value::Int(i) => tril_tensor(
-            tensor::value_into_tensor_for("tril", Value::Int(i.clone()))?,
-            offset,
-        )
-        .map(tensor::tensor_into_value),
-        Value::Bool(flag) => tril_tensor(
-            tensor::value_into_tensor_for("tril", Value::Bool(flag))?,
-            offset,
-        )
-        .map(tensor::tensor_into_value),
+        Value::Num(n) => {
+            let tensor =
+                tensor::value_into_tensor_for("tril", Value::Num(n)).map_err(|e| tril_error(e))?;
+            Ok(tril_tensor(tensor, offset).map(tensor::tensor_into_value)?)
+        }
+        Value::Int(i) => {
+            let tensor = tensor::value_into_tensor_for("tril", Value::Int(i.clone()))
+                .map_err(|e| tril_error(e))?;
+            Ok(tril_tensor(tensor, offset).map(tensor::tensor_into_value)?)
+        }
+        Value::Bool(flag) => {
+            let tensor = tensor::value_into_tensor_for("tril", Value::Bool(flag))
+                .map_err(|e| tril_error(e))?;
+            Ok(tril_tensor(tensor, offset).map(tensor::tensor_into_value)?)
+        }
         Value::CharArray(chars) => {
             let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
             let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
-                .map_err(|e| format!("tril: {e}"))?;
-            tril_tensor(tensor, offset).map(tensor::tensor_into_value)
+                .map_err(|e| tril_error(format!("tril: {e}")))?;
+            Ok(tril_tensor(tensor, offset).map(tensor::tensor_into_value)?)
         }
-        Value::GpuTensor(handle) => tril_gpu(handle, offset),
+        Value::GpuTensor(handle) => Ok(tril_gpu(handle, offset).await?),
         Value::String(_) | Value::StringArray(_) => {
-            Err("tril: string arrays are not supported".to_string())
+            Err(tril_error("tril: string arrays are not supported"))
         }
-        Value::Cell(_) => Err("tril: cell arrays are not supported".to_string()),
+        Value::Cell(_) => Err(tril_error("tril: cell arrays are not supported")),
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
@@ -101,29 +108,34 @@ fn tril_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("tril: unsupported input type".to_string()),
+        | Value::MException(_) => Err(tril_error("tril: unsupported input type")),
     }
 }
 
-fn parse_diagonal_offset(args: &[Value]) -> Result<isize, String> {
+async fn parse_diagonal_offset(args: &[Value]) -> crate::BuiltinResult<isize> {
     if args.is_empty() {
         return Ok(0);
     }
-    let gathered =
-        crate::dispatcher::gather_if_needed(&args[0]).map_err(|e| format!("tril: {e}"))?;
+    let gathered = crate::dispatcher::gather_if_needed_async(&args[0])
+        .await
+        .map_err(|e| tril_error(format!("tril: {e}")))?;
     scalar_to_isize(&gathered, "tril")
 }
 
-fn scalar_to_isize(value: &Value, name: &str) -> Result<isize, String> {
+fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
     match value {
         Value::Int(i) => Ok(i.to_i64() as isize),
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(format!("{name}: diagonal offset must be finite"));
+                return Err(tril_error(format!(
+                    "{name}: diagonal offset must be finite"
+                )));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
-                return Err(format!("{name}: diagonal offset must be an integer"));
+                return Err(tril_error(format!(
+                    "{name}: diagonal offset must be an integer"
+                )));
             }
             Ok(rounded as isize)
         }
@@ -132,28 +144,34 @@ fn scalar_to_isize(value: &Value, name: &str) -> Result<isize, String> {
             scalar_to_isize(&Value::Num(val), name)
         }
         Value::Bool(flag) => Ok(if *flag { 1 } else { 0 }),
-        other => Err(format!(
+        other => Err(tril_error(format!(
             "{name}: diagonal offset must be a scalar numeric value, got {other:?}"
-        )),
+        ))),
     }
 }
 
-fn tril_tensor(mut tensor: Tensor, offset: isize) -> Result<Tensor, String> {
+fn tril_tensor(mut tensor: Tensor, offset: isize) -> crate::BuiltinResult<Tensor> {
     apply_tril_inplace(&mut tensor.data, &tensor.shape, offset, 0.0)?;
     Ok(tensor)
 }
 
-fn tril_logical_array(mut array: LogicalArray, offset: isize) -> Result<LogicalArray, String> {
+fn tril_logical_array(
+    mut array: LogicalArray,
+    offset: isize,
+) -> crate::BuiltinResult<LogicalArray> {
     apply_tril_inplace(&mut array.data, &array.shape, offset, 0u8)?;
     Ok(array)
 }
 
-fn tril_complex_tensor(mut tensor: ComplexTensor, offset: isize) -> Result<ComplexTensor, String> {
+fn tril_complex_tensor(
+    mut tensor: ComplexTensor,
+    offset: isize,
+) -> crate::BuiltinResult<ComplexTensor> {
     apply_tril_inplace(&mut tensor.data, &tensor.shape, offset, (0.0, 0.0))?;
     Ok(tensor)
 }
 
-fn tril_gpu(handle: GpuTensorHandle, offset: isize) -> Result<Value, String> {
+async fn tril_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -163,13 +181,13 @@ fn tril_gpu(handle: GpuTensorHandle, offset: isize) -> Result<Value, String> {
         }
     }
     if let Some(provider) = runmat_accelerate_api::provider() {
-        match provider.tril(&handle, offset) {
+        match provider.tril(&handle, offset).await {
             Ok(out) => return Ok(Value::GpuTensor(out)),
             Err(_) => {
                 // Fall through to gather path.
             }
         }
-        let tensor = gpu_helpers::gather_tensor(&handle)?;
+        let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         let result = tril_tensor(tensor, offset)?;
         let view = HostTensorView {
             data: &result.data,
@@ -177,11 +195,11 @@ fn tril_gpu(handle: GpuTensorHandle, offset: isize) -> Result<Value, String> {
         };
         let uploaded = provider
             .upload(&view)
-            .map_err(|e| format!("tril: failed to upload fallback result: {e}"))?;
+            .map_err(|e| tril_error(format!("tril: failed to upload fallback result: {e}")))?;
         Ok(Value::GpuTensor(uploaded))
     } else {
-        let tensor = gpu_helpers::gather_tensor(&handle)?;
-        tril_tensor(tensor, offset).map(tensor::tensor_into_value)
+        let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+        Ok(tril_tensor(tensor, offset).map(tensor::tensor_into_value)?)
     }
 }
 
@@ -190,7 +208,7 @@ fn apply_tril_inplace<T>(
     shape: &[usize],
     offset: isize,
     zero: T,
-) -> Result<(), String>
+) -> crate::BuiltinResult<()>
 where
     T: Clone,
 {
@@ -210,9 +228,9 @@ where
     }
     let expected = plane
         .checked_mul(pages)
-        .ok_or_else(|| "tril: dimension product overflow".to_string())?;
+        .ok_or_else(|| tril_error("tril: dimension product overflow"))?;
     if expected != data.len() {
-        return Err("tril: tensor data length mismatch".to_string());
+        return Err(tril_error("tril: tensor data length mismatch"));
     }
     for page in 0..pages {
         let base = page * plane;
@@ -234,6 +252,11 @@ where
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::tril_builtin(value, rest))
+    }
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
 
@@ -361,7 +384,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .expect("upload");
-        let gpu = tril_gpu(handle, -1).expect("gpu tril");
+        let gpu = block_on(super::tril_gpu(handle, -1)).expect("gpu tril");
         let gathered = test_support::gather(gpu).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
         assert_eq!(gathered.data, cpu.data);

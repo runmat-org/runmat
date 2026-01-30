@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "inv";
 
@@ -29,6 +30,32 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Providers may implement a native inverse; the reference WGPU backend gathers to the host implementation and re-uploads the result.",
 };
+
+fn builtin_error(message: String) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    if err.message() == "interaction pending..." {
+        return build_runtime_error("interaction pending...")
+            .with_builtin(NAME)
+            .build();
+    }
+    let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
+    if let Some(identifier) = err.identifier() {
+        builder = builder.with_identifier(identifier.to_string());
+    }
+    if let Some(task_id) = err.context.task_id.clone() {
+        builder = builder.with_task_id(task_id);
+    }
+    if !err.context.call_stack.is_empty() {
+        builder = builder.with_call_stack(err.context.call_stack.clone());
+    }
+    if let Some(phase) = err.context.phase.clone() {
+        builder = builder.with_phase(phase);
+    }
+    builder.with_source(err).build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::solve::inv")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -49,32 +76,33 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "inv",
     builtin_path = "crate::builtins::math::linalg::solve::inv"
 )]
-fn inv_builtin(value: Value) -> Result<Value, String> {
+async fn inv_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => inv_gpu(handle),
+        Value::GpuTensor(handle) => inv_gpu(handle).await,
         Value::ComplexTensor(tensor) => inv_complex_value(tensor),
         Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("{NAME}: {e}"))?;
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(builtin_error)?;
             inv_complex_value(tensor)
         }
         other => {
-            let tensor = tensor::value_into_tensor_for(NAME, other)?;
+            let tensor = tensor::value_into_tensor_for(NAME, other).map_err(builtin_error)?;
             inv_real_value(tensor)
         }
     }
 }
 
-fn inv_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let options = ProviderInvOptions::default();
-        match provider.inv(&handle, options) {
+        match provider.inv(&handle, options).await {
             Ok(result) => return Ok(Value::GpuTensor(result)),
             Err(_) => {
                 // Fall back to host implementation and attempt to re-upload.
             }
         }
-        let gathered = gpu_helpers::gather_tensor(&handle)?;
+        let gathered = gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(map_control_flow)?;
         let inv = inv_real_tensor(&gathered)?;
         if let Ok(uploaded) = provider.upload(&runmat_accelerate_api::HostTensorView {
             data: &inv.data,
@@ -85,17 +113,19 @@ fn inv_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
         return Ok(tensor::tensor_into_value(inv));
     }
 
-    let gathered = gpu_helpers::gather_tensor(&handle)?;
+    let gathered = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(map_control_flow)?;
     let inv = inv_real_tensor(&gathered)?;
     Ok(tensor::tensor_into_value(inv))
 }
 
-fn inv_real_value(tensor: Tensor) -> Result<Value, String> {
+fn inv_real_value(tensor: Tensor) -> BuiltinResult<Value> {
     let inv = inv_real_tensor(&tensor)?;
     Ok(tensor::tensor_into_value(inv))
 }
 
-fn inv_complex_value(tensor: ComplexTensor) -> Result<Value, String> {
+fn inv_complex_value(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let inv = inv_complex_tensor(&tensor)?;
     if inv.data.len() == 1 {
         let (re, im) = inv.data[0];
@@ -105,36 +135,50 @@ fn inv_complex_value(tensor: ComplexTensor) -> Result<Value, String> {
     }
 }
 
-fn inv_real_tensor(matrix: &Tensor) -> Result<Tensor, String> {
+fn inv_real_tensor(matrix: &Tensor) -> BuiltinResult<Tensor> {
+    inv_real_tensor_impl(matrix)
+}
+
+fn inv_complex_tensor(matrix: &ComplexTensor) -> BuiltinResult<ComplexTensor> {
+    inv_complex_tensor_impl(matrix)
+}
+
+fn inv_real_tensor_impl(matrix: &Tensor) -> BuiltinResult<Tensor> {
     let (rows, cols) = matrix_dimensions(matrix.shape.as_slice())?;
     if rows == 0 && cols == 0 {
-        return Tensor::new(Vec::new(), matrix.shape.clone()).map_err(|e| format!("{NAME}: {e}"));
+        return Tensor::new(Vec::new(), matrix.shape.clone())
+            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     if rows != cols {
-        return Err(format!("{NAME}: input must be a square matrix."));
+        return Err(builtin_error(format!(
+            "{NAME}: input must be a square matrix."
+        )));
     }
     if rows == 0 || cols == 0 {
-        return Tensor::new(Vec::new(), matrix.shape.clone()).map_err(|e| format!("{NAME}: {e}"));
+        return Tensor::new(Vec::new(), matrix.shape.clone())
+            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     let dm = DMatrix::from_column_slice(rows, cols, &matrix.data);
-    let inverse = dm
-        .try_inverse()
-        .ok_or_else(|| format!("{NAME}: matrix is singular to working precision."))?;
+    let inverse = dm.try_inverse().ok_or_else(|| {
+        builtin_error(format!("{NAME}: matrix is singular to working precision."))
+    })?;
     matrix_to_tensor(NAME, inverse, &matrix.shape)
 }
 
-fn inv_complex_tensor(matrix: &ComplexTensor) -> Result<ComplexTensor, String> {
+fn inv_complex_tensor_impl(matrix: &ComplexTensor) -> BuiltinResult<ComplexTensor> {
     let (rows, cols) = matrix_dimensions(matrix.shape.as_slice())?;
     if rows == 0 && cols == 0 {
         return ComplexTensor::new(Vec::new(), matrix.shape.clone())
-            .map_err(|e| format!("{NAME}: {e}"));
+            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     if rows != cols {
-        return Err(format!("{NAME}: input must be a square matrix."));
+        return Err(builtin_error(format!(
+            "{NAME}: input must be a square matrix."
+        )));
     }
     if rows == 0 || cols == 0 {
         return ComplexTensor::new(Vec::new(), matrix.shape.clone())
-            .map_err(|e| format!("{NAME}: {e}"));
+            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     let data: Vec<Complex64> = matrix
         .data
@@ -142,25 +186,29 @@ fn inv_complex_tensor(matrix: &ComplexTensor) -> Result<ComplexTensor, String> {
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
     let dm = DMatrix::from_column_slice(rows, cols, &data);
-    let inverse = dm
-        .try_inverse()
-        .ok_or_else(|| format!("{NAME}: matrix is singular to working precision."))?;
+    let inverse = dm.try_inverse().ok_or_else(|| {
+        builtin_error(format!("{NAME}: matrix is singular to working precision."))
+    })?;
     matrix_to_complex_tensor(NAME, inverse, &matrix.shape)
 }
 
-fn matrix_dimensions(shape: &[usize]) -> Result<(usize, usize), String> {
+fn matrix_dimensions(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
     match shape.len() {
         0 => Ok((1, 1)),
         1 => {
             if shape[0] == 1 {
                 Ok((1, 1))
             } else {
-                Err(format!("{NAME}: input must be a square matrix."))
+                Err(builtin_error(format!(
+                    "{NAME}: input must be a square matrix."
+                )))
             }
         }
         _ => {
             if shape.len() > 2 && shape.iter().skip(2).any(|&dim| dim != 1) {
-                Err(format!("{NAME}: inputs must be 2-D matrices."))
+                Err(builtin_error(format!(
+                    "{NAME}: inputs must be 2-D matrices."
+                )))
             } else {
                 Ok((shape[0], shape[1]))
             }
@@ -168,37 +216,40 @@ fn matrix_dimensions(shape: &[usize]) -> Result<(usize, usize), String> {
     }
 }
 
-fn matrix_to_tensor(label: &str, matrix: DMatrix<f64>, shape: &[usize]) -> Result<Tensor, String> {
+fn matrix_to_tensor(label: &str, matrix: DMatrix<f64>, shape: &[usize]) -> BuiltinResult<Tensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
     debug_assert_eq!(rows * cols, matrix.len());
-    Tensor::new(matrix.as_slice().to_vec(), shape.to_vec()).map_err(|e| format!("{label}: {e}"))
+    Tensor::new(matrix.as_slice().to_vec(), shape.to_vec())
+        .map_err(|e| builtin_error(format!("{label}: {e}")))
 }
 
 fn matrix_to_complex_tensor(
     label: &str,
     matrix: DMatrix<Complex64>,
     shape: &[usize],
-) -> Result<ComplexTensor, String> {
+) -> BuiltinResult<ComplexTensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
     let data: Vec<(f64, f64)> = matrix.as_slice().iter().map(|c| (c.re, c.im)).collect();
     debug_assert_eq!(rows * cols, matrix.len());
-    ComplexTensor::new(data, shape.to_vec()).map_err(|e| format!("{label}: {e}"))
+    ComplexTensor::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("{label}: {e}")))
 }
 
 /// Host helper used by acceleration providers that delegate `inv` back to the CPU path.
-pub fn inv_host_real_for_provider(matrix: &Tensor) -> Result<Tensor, String> {
-    inv_real_tensor(matrix)
+pub fn inv_host_real_for_provider(matrix: &Tensor) -> BuiltinResult<Tensor> {
+    inv_real_tensor_impl(matrix)
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use nalgebra::DMatrix;
-    use num_complex::Complex64;
-    use runmat_builtins::{IntValue, Tensor, Value};
+    use futures::executor::block_on;
+    use runmat_builtins::IntValue;
+    fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
+        err
+    }
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
@@ -319,24 +370,24 @@ pub(crate) mod tests {
     #[test]
     fn inv_rejects_higher_rank_tensor() {
         let tensor = Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap();
-        let err = inv_builtin(Value::Tensor(tensor)).unwrap_err();
-        assert!(err.contains("2-D"), "{err}");
+        let err = unwrap_error(inv_builtin(Value::Tensor(tensor)).unwrap_err());
+        assert!(err.message().contains("2-D"), "{err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_non_square_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
-        let err = inv_builtin(Value::Tensor(tensor)).unwrap_err();
-        assert!(err.contains("square matrix"), "{err}");
+        let err = unwrap_error(inv_builtin(Value::Tensor(tensor)).unwrap_err());
+        assert!(err.message().contains("square matrix"), "{err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_singular_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
-        let err = inv_builtin(Value::Tensor(tensor)).unwrap_err();
-        assert!(err.contains("singular"), "{err}");
+        let err = unwrap_error(inv_builtin(Value::Tensor(tensor)).unwrap_err());
+        assert!(err.message().contains("singular"), "{err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -396,5 +447,9 @@ pub(crate) mod tests {
         for (a, b) in gathered.data.iter().zip(cpu.data.iter()) {
             assert!((*a - *b).abs() < tol, "expected {b}, got {a}");
         }
+    }
+
+    fn inv_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::inv_builtin(value))
     }
 }

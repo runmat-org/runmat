@@ -17,6 +17,7 @@ use crate::compression::{CompressionConfig, CompressionEngine};
 use crate::format::*;
 use crate::validation::SnapshotValidator;
 use crate::*;
+use runmat_hir::LoweringContext;
 
 /// Snapshot builder with progressive enhancement
 pub struct SnapshotBuilder {
@@ -609,8 +610,9 @@ impl SnapshotBuilder {
     /// Compile source to HIR
     fn compile_to_hir(&self, source: &str) -> Result<runmat_hir::HirProgram> {
         let ast = runmat_parser::parse(source).map_err(|e| anyhow::anyhow!(e))?;
-        let hir = runmat_hir::lower(&ast).map_err(|e| anyhow::anyhow!(e))?;
-        Ok(hir)
+        let hir =
+            runmat_hir::lower(&ast, &LoweringContext::empty()).map_err(|e| anyhow::anyhow!(e))?;
+        Ok(hir.hir)
     }
 
     /// Extract type information from HIR
@@ -664,7 +666,7 @@ impl SnapshotBuilder {
 
         // Compile HIR functions to bytecode
         for (name, hir) in &hir_cache.functions {
-            match runmat_ignition::compile(hir) {
+            match runmat_ignition::compile(hir, &HashMap::new()) {
                 Ok(bytecode) => {
                     stdlib_bytecode.insert(name.clone(), bytecode);
 
@@ -727,7 +729,7 @@ impl SnapshotBuilder {
     /// Create bytecode for sequence
     fn create_sequence_bytecode(&self, source: &str) -> runmat_ignition::Bytecode {
         match self.compile_to_hir(source) {
-            Ok(hir) => runmat_ignition::compile(&hir)
+            Ok(hir) => runmat_ignition::compile(&hir, &HashMap::new())
                 .unwrap_or_else(|_| runmat_ignition::Bytecode::empty()),
             Err(_) => runmat_ignition::Bytecode::empty(),
         }
@@ -1214,6 +1216,10 @@ mod tests {
         let config = SnapshotConfig::default();
         let builder = SnapshotBuilder::new(config);
 
+        fn test_builtin(_args: &[runmat_builtins::Value]) -> runmat_builtins::BuiltinFuture {
+            Box::pin(async { Ok(runmat_builtins::Value::Num(0.0)) })
+        }
+
         let builtin = runmat_builtins::BuiltinFunction::new(
             "matmul",
             "Test builtin function",
@@ -1222,7 +1228,7 @@ mod tests {
             "",
             vec![],
             runmat_builtins::Type::Num,
-            |_| Ok(runmat_builtins::Value::Num(0.0)),
+            test_builtin,
             &[],
             false,
             false,

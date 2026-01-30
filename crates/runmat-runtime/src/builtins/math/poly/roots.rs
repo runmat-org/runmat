@@ -15,9 +15,11 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const LEADING_ZERO_TOL: f64 = 1.0e-12;
 const RESULT_ZERO_TOL: f64 = 1.0e-10;
+const BUILTIN_NAME: &str = "roots";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::roots")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -34,6 +36,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Companion matrix eigenvalue solve executes on the host; providers currently fall back to the CPU implementation.",
 };
+
+fn roots_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::roots")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -54,8 +62,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::math::poly::roots"
 )]
-fn roots_builtin(coefficients: Value) -> Result<Value, String> {
-    let coeffs = coefficients_to_complex(coefficients)?;
+async fn roots_builtin(coefficients: Value) -> crate::BuiltinResult<Value> {
+    let coeffs = coefficients_to_complex(coefficients).await?;
     let trimmed = trim_leading_zeros(coeffs);
     if trimmed.is_empty() || trimmed.len() == 1 {
         return empty_column();
@@ -64,39 +72,40 @@ fn roots_builtin(coefficients: Value) -> Result<Value, String> {
     roots_to_value(&roots)
 }
 
-fn coefficients_to_complex(value: Value) -> Result<Vec<Complex64>, String> {
+async fn coefficients_to_complex(value: Value) -> BuiltinResult<Vec<Complex64>> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             tensor_to_complex(tensor)
         }
         Value::Tensor(tensor) => tensor_to_complex(tensor),
         Value::ComplexTensor(tensor) => complex_tensor_to_vec(tensor),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(roots_error)?;
             tensor_to_complex(tensor)
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("roots: {e}"))?;
+            let tensor =
+                Tensor::new(vec![n], vec![1, 1]).map_err(|e| roots_error(format!("roots: {e}")))?;
             tensor_to_complex(tensor)
         }
         Value::Int(i) => {
-            let tensor =
-                Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| format!("roots: {e}"))?;
+            let tensor = Tensor::new(vec![i.to_f64()], vec![1, 1])
+                .map_err(|e| roots_error(format!("roots: {e}")))?;
             tensor_to_complex(tensor)
         }
         Value::Bool(b) => {
             let tensor = Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|e| format!("roots: {e}"))?;
+                .map_err(|e| roots_error(format!("roots: {e}")))?;
             tensor_to_complex(tensor)
         }
-        other => Err(format!(
+        other => Err(roots_error(format!(
             "roots: expected a numeric vector of polynomial coefficients, got {other:?}"
-        )),
+        ))),
     }
 }
 
-fn tensor_to_complex(tensor: Tensor) -> Result<Vec<Complex64>, String> {
+fn tensor_to_complex(tensor: Tensor) -> BuiltinResult<Vec<Complex64>> {
     ensure_vector_shape("roots", &tensor.shape)?;
     Ok(tensor
         .data
@@ -105,7 +114,7 @@ fn tensor_to_complex(tensor: Tensor) -> Result<Vec<Complex64>, String> {
         .collect())
 }
 
-fn complex_tensor_to_vec(tensor: ComplexTensor) -> Result<Vec<Complex64>, String> {
+fn complex_tensor_to_vec(tensor: ComplexTensor) -> BuiltinResult<Vec<Complex64>> {
     ensure_vector_shape("roots", &tensor.shape)?;
     Ok(tensor
         .data
@@ -114,7 +123,7 @@ fn complex_tensor_to_vec(tensor: ComplexTensor) -> Result<Vec<Complex64>, String
         .collect())
 }
 
-fn ensure_vector_shape(name: &str, shape: &[usize]) -> Result<(), String> {
+fn ensure_vector_shape(name: &str, shape: &[usize]) -> BuiltinResult<()> {
     let is_vector = match shape.len() {
         0 => true,
         1 => true,
@@ -122,10 +131,10 @@ fn ensure_vector_shape(name: &str, shape: &[usize]) -> Result<(), String> {
         _ => shape.iter().filter(|&&dim| dim > 1).count() <= 1,
     };
     if !is_vector {
-        return Err(format!(
+        return Err(roots_error(format!(
             "{name}: coefficients must be a vector (row or column), got shape {:?}",
             shape
-        ));
+        )));
     }
     Ok(())
 }
@@ -147,7 +156,7 @@ fn trim_leading_zeros(mut coeffs: Vec<Complex64>) -> Vec<Complex64> {
     coeffs.split_off(first_nonzero)
 }
 
-fn solve_roots(coeffs: &[Complex64]) -> Result<Vec<Complex64>, String> {
+fn solve_roots(coeffs: &[Complex64]) -> BuiltinResult<Vec<Complex64>> {
     if coeffs.len() <= 1 {
         return Ok(Vec::new());
     }
@@ -155,7 +164,9 @@ fn solve_roots(coeffs: &[Complex64]) -> Result<Vec<Complex64>, String> {
         let a = coeffs[0];
         let b = coeffs[1];
         if a.norm() <= LEADING_ZERO_TOL {
-            return Err("roots: leading coefficient must be non-zero after trimming".to_string());
+            return Err(roots_error(
+                "roots: leading coefficient must be non-zero after trimming",
+            ));
         }
         return Ok(vec![-b / a]);
     }
@@ -166,7 +177,9 @@ fn solve_roots(coeffs: &[Complex64]) -> Result<Vec<Complex64>, String> {
     }
     let leading = coeffs[0];
     if leading.norm() <= LEADING_ZERO_TOL {
-        return Err("roots: leading coefficient must be non-zero after trimming".to_string());
+        return Err(roots_error(
+            "roots: leading coefficient must be non-zero after trimming",
+        ));
     }
 
     let mut companion = DMatrix::<Complex64>::zeros(degree, degree);
@@ -183,7 +196,7 @@ fn solve_roots(coeffs: &[Complex64]) -> Result<Vec<Complex64>, String> {
     }
 
     let eigenvalues = companion.clone().eigenvalues().ok_or_else(|| {
-        "roots: failed to compute eigenvalues of the companion matrix".to_string()
+        roots_error("roots: failed to compute eigenvalues of the companion matrix")
     })?;
     Ok(eigenvalues.iter().map(|&z| canonicalize_root(z)).collect())
 }
@@ -228,7 +241,7 @@ fn canonicalize_root(z: Complex64) -> Complex64 {
     Complex64::new(real, imag)
 }
 
-fn roots_to_value(roots: &[Complex64]) -> Result<Value, String> {
+fn roots_to_value(roots: &[Complex64]) -> BuiltinResult<Value> {
     if roots.is_empty() {
         return empty_column();
     }
@@ -240,18 +253,20 @@ fn roots_to_value(roots: &[Complex64]) -> Result<Value, String> {
         for &root in roots {
             data.push(root.re);
         }
-        let tensor = Tensor::new(data, vec![roots.len(), 1]).map_err(|e| format!("roots: {e}"))?;
+        let tensor = Tensor::new(data, vec![roots.len(), 1])
+            .map_err(|e| roots_error(format!("roots: {e}")))?;
         Ok(Value::Tensor(tensor))
     } else {
         let data: Vec<(f64, f64)> = roots.iter().map(|z| (z.re, z.im)).collect();
-        let tensor =
-            ComplexTensor::new(data, vec![roots.len(), 1]).map_err(|e| format!("roots: {e}"))?;
+        let tensor = ComplexTensor::new(data, vec![roots.len(), 1])
+            .map_err(|e| roots_error(format!("roots: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
 
-fn empty_column() -> Result<Value, String> {
-    let tensor = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| format!("roots: {e}"))?;
+fn empty_column() -> BuiltinResult<Value> {
+    let tensor =
+        Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| roots_error(format!("roots: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -259,8 +274,17 @@ fn empty_column() -> Result<Value, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{ComplexTensor, LogicalArray, Tensor};
+
+    fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
+        assert!(
+            err.message().contains(needle),
+            "expected error containing '{needle}', got '{}'",
+            err.message()
+        );
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -388,7 +412,7 @@ pub(crate) mod tests {
     fn roots_rejects_non_vector_input() {
         let coeffs = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
         let err = roots_builtin(Value::Tensor(coeffs)).expect_err("expected vector-shape error");
-        assert!(err.to_lowercase().contains("vector"));
+        assert_error_contains(err, "vector");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -437,5 +461,9 @@ pub(crate) mod tests {
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
+    }
+
+    fn roots_builtin(coefficients: Value) -> BuiltinResult<Value> {
+        block_on(super::roots_builtin(coefficients))
     }
 }

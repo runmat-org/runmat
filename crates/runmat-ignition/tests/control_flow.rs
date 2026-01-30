@@ -1,7 +1,9 @@
-use runmat_hir::lower;
-use runmat_ignition::execute;
+mod test_helpers;
+
 use runmat_parser::parse;
 use std::convert::TryInto;
+use test_helpers::execute;
+use test_helpers::lower;
 
 #[test]
 fn break_and_continue() {
@@ -138,7 +140,7 @@ fn undefined_variable_raises_mex() {
     let ast = parse("y = x + 1;").unwrap();
     let hir = lower(&ast);
     let err = hir.err().unwrap();
-    assert!(err.contains("MATLAB:UndefinedVariable"));
+    assert_eq!(err.identifier.as_deref(), Some("MATLAB:UndefinedVariable"));
 }
 
 #[test]
@@ -226,7 +228,7 @@ fn too_many_inputs_mex() {
     "#;
     let hir = lower(&parse(src).unwrap()).unwrap();
     let err = execute(&hir).err().unwrap();
-    assert!(err.contains("MATLAB:TooManyInputs"));
+    assert_eq!(err.identifier(), Some("MATLAB:TooManyInputs"));
 }
 
 #[test]
@@ -239,7 +241,7 @@ fn too_many_outputs_mex() {
     "#;
     let hir = lower(&parse(src).unwrap()).unwrap();
     let err = execute(&hir).err().unwrap();
-    assert!(err.contains("MATLAB:TooManyOutputs"));
+    assert_eq!(err.identifier(), Some("MATLAB:TooManyOutputs"));
 }
 
 #[test]
@@ -252,7 +254,7 @@ fn varargout_mismatch_mex() {
     "#;
     let hir = lower(&parse(src).unwrap()).unwrap();
     let err = execute(&hir).err().unwrap();
-    assert!(err.contains("MATLAB:VarargoutMismatch"));
+    assert_eq!(err.identifier(), Some("MATLAB:VarargoutMismatch"));
 }
 
 #[test]
@@ -260,7 +262,7 @@ fn slice_non_tensor_mex() {
     let src = "x = 5; y = x(1,1);";
     let hir = lower(&parse(src).unwrap()).unwrap();
     let err = execute(&hir).err().unwrap();
-    assert!(err.contains("MATLAB:SliceNonTensor"));
+    assert_eq!(err.identifier(), Some("MATLAB:SliceNonTensor"));
 }
 
 #[test]
@@ -269,10 +271,10 @@ fn index_step_zero_mex() {
     let hir = lower(&parse(src).unwrap()).unwrap();
     let err = execute(&hir).err().unwrap();
     assert!(
-        err.contains("Range step cannot be zero")
-            || err.contains("MATLAB:IndexStepZero")
-            || err.contains("dimension must be >= 1")
-            || err.contains("increment must be nonzero")
+        err.identifier() == Some("MATLAB:IndexStepZero")
+            || err.message().contains("Range step cannot be zero")
+            || err.message().contains("dimension must be >= 1")
+            || err.message().contains("increment must be nonzero")
     );
 }
 
@@ -284,5 +286,8 @@ fn unsupported_cell_index_type_mex() {
     let hir2 = lower(&parse(src2).unwrap()).unwrap();
     let err2 = execute(&hir2).err().unwrap();
     // Current runtime path attempts numeric coercion and reports conversion failure
-    assert!(err2.contains("cannot convert CharArray") || err2.contains("MATLAB:CellIndexType"));
+    assert!(
+        err2.identifier() == Some("MATLAB:CellIndexType")
+            || err2.message().contains("cannot convert CharArray")
+    );
 }

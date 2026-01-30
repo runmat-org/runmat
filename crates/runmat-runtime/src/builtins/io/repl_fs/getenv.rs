@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, make_cell};
+use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 const ERR_TOO_MANY_INPUTS: &str = "getenv: too many input arguments";
 const ERR_INVALID_TYPE: &str = "getenv: NAME must be a character vector, string scalar, string array, or cell array of character vectors";
@@ -48,6 +48,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Environment lookups break fusion graphs and always execute on the CPU.",
 };
 
+const BUILTIN_NAME: &str = "getenv";
+
+fn getenv_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "getenv",
     category = "io/repl_fs",
@@ -56,14 +75,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::repl_fs::getenv"
 )]
-fn getenv_builtin(args: Vec<Value>) -> Result<Value, String> {
+async fn getenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     match args.len() {
         0 => Ok(getenv_all()),
         1 => {
-            let gathered = gather_if_needed(&args[0]).map_err(|err| format!("getenv: {err}"))?;
-            getenv_one(gathered)
+            let gathered = gather_if_needed_async(&args[0])
+                .await
+                .map_err(map_control_flow)?;
+            getenv_one(gathered).await
         }
-        _ => Err(ERR_TOO_MANY_INPUTS.to_string()),
+        _ => Err(getenv_error(ERR_TOO_MANY_INPUTS)),
     }
 }
 
@@ -76,21 +97,24 @@ fn getenv_all() -> Value {
     Value::Struct(st)
 }
 
-fn getenv_one(value: Value) -> Result<Value, String> {
+async fn getenv_one(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::CharArray(array) => getenv_from_char_array(array),
         Value::String(s) => Ok(Value::String(read_env_string(&s))),
         Value::StringArray(sa) => getenv_from_string_array(sa),
-        Value::Cell(ca) => getenv_from_cell_array(ca),
-        _ => Err(ERR_INVALID_TYPE.to_string()),
+        Value::Cell(ca) => getenv_from_cell_array(ca).await,
+        _ => Err(getenv_error(ERR_INVALID_TYPE)),
     }
 }
 
-fn getenv_from_char_array(array: CharArray) -> Result<Value, String> {
+fn getenv_from_char_array(array: CharArray) -> BuiltinResult<Value> {
     if array.rows == 0 {
         return Ok(Value::CharArray(
-            CharArray::new(Vec::new(), 0, array.cols)
-                .map_err(|e| format!("getenv: unable to construct empty character array ({e})"))?,
+            CharArray::new(Vec::new(), 0, array.cols).map_err(|e| {
+                getenv_error(format!(
+                    "getenv: unable to construct empty character array ({e})"
+                ))
+            })?,
         ));
     }
 
@@ -105,39 +129,41 @@ fn getenv_from_char_array(array: CharArray) -> Result<Value, String> {
         rows.push(read_env_string(&char_row_to_string(&array, row)));
     }
     let result = char_array_from_rows(&rows)
-        .map_err(|err| format!("getenv: unable to build character matrix ({err})"))?;
+        .map_err(|err| getenv_error(format!("getenv: unable to build character matrix ({err})")))?;
     Ok(Value::CharArray(result))
 }
 
-fn getenv_from_string_array(array: StringArray) -> Result<Value, String> {
+fn getenv_from_string_array(array: StringArray) -> BuiltinResult<Value> {
     let mut resolved = Vec::with_capacity(array.data.len());
     for name in &array.data {
         resolved.push(read_env_string(name));
     }
-    let result =
-        StringArray::new(resolved, array.shape.clone()).map_err(|err| format!("getenv: {err}"))?;
+    let result = StringArray::new(resolved, array.shape.clone())
+        .map_err(|err| getenv_error(format!("getenv: {err}")))?;
     Ok(Value::StringArray(result))
 }
 
-fn getenv_from_cell_array(array: runmat_builtins::CellArray) -> Result<Value, String> {
+async fn getenv_from_cell_array(array: runmat_builtins::CellArray) -> BuiltinResult<Value> {
     let mut values: Vec<Value> = Vec::with_capacity(array.data.len());
     for cell in &array.data {
-        let gathered = gather_if_needed(cell).map_err(|err| format!("getenv: {err}"))?;
+        let gathered = gather_if_needed_async(cell)
+            .await
+            .map_err(map_control_flow)?;
         let resolved = match gathered {
             Value::CharArray(ca) => {
                 if ca.rows != 1 {
-                    return Err(ERR_CHAR_MATRIX_CELL.to_string());
+                    return Err(getenv_error(ERR_CHAR_MATRIX_CELL));
                 }
                 Value::CharArray(CharArray::new_row(&read_env_string(&char_row_to_string(
                     &ca, 0,
                 ))))
             }
             Value::String(s) => Value::String(read_env_string(&s)),
-            _ => return Err(ERR_CHAR_MATRIX_CELL.to_string()),
+            _ => return Err(getenv_error(ERR_CHAR_MATRIX_CELL)),
         };
         values.push(resolved);
     }
-    make_cell(values, array.rows, array.cols).map_err(|err| format!("getenv: {err}"))
+    make_cell(values, array.rows, array.cols).map_err(getenv_error)
 }
 
 fn read_env_string(name: &str) -> String {
@@ -155,9 +181,9 @@ fn char_row_to_string(array: &CharArray, row: usize) -> String {
     text
 }
 
-fn char_array_from_rows(rows: &[String]) -> Result<CharArray, String> {
+fn char_array_from_rows(rows: &[String]) -> BuiltinResult<CharArray> {
     if rows.is_empty() {
-        return CharArray::new(Vec::new(), 0, 0);
+        return CharArray::new(Vec::new(), 0, 0).map_err(getenv_error);
     }
 
     let max_cols = rows
@@ -166,7 +192,7 @@ fn char_array_from_rows(rows: &[String]) -> Result<CharArray, String> {
         .max()
         .unwrap_or(0);
     if max_cols == 0 {
-        return CharArray::new(Vec::new(), rows.len(), 0);
+        return CharArray::new(Vec::new(), rows.len(), 0).map_err(getenv_error);
     }
 
     let mut data = Vec::with_capacity(rows.len() * max_cols);
@@ -180,7 +206,7 @@ fn char_array_from_rows(rows: &[String]) -> Result<CharArray, String> {
             }
         }
     }
-    CharArray::new(data, rows.len(), max_cols)
+    CharArray::new(data, rows.len(), max_cols).map_err(getenv_error)
 }
 
 #[cfg(test)]
@@ -188,6 +214,10 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
     use runmat_builtins::{CharArray, StringArray, Value};
+
+    fn getenv_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::getenv_builtin(args))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -362,8 +392,9 @@ pub(crate) mod tests {
         .expect("cell creation");
         let err = getenv_builtin(vec![invalid_cell]).expect_err("expected error");
         assert!(
-            err.contains("cell array elements"),
-            "unexpected error message: {err}"
+            err.message().contains("cell array elements"),
+            "unexpected error message: {}",
+            err.message()
         );
     }
 
@@ -399,8 +430,9 @@ pub(crate) mod tests {
         let err =
             getenv_builtin(vec![Value::Num(std::f64::consts::PI)]).expect_err("expected error");
         assert!(
-            err.contains("NAME must be"),
-            "unexpected error message: {err}"
+            err.message().contains("NAME must be"),
+            "unexpected error message: {}",
+            err.message()
         );
     }
 
@@ -414,8 +446,9 @@ pub(crate) mod tests {
         ])
         .expect_err("expected error");
         assert!(
-            err.contains("too many input arguments"),
-            "unexpected error message: {err}"
+            err.message().contains("too many input arguments"),
+            "unexpected error message: {}",
+            err.message()
         );
     }
 }

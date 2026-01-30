@@ -63,6 +63,12 @@ pub struct RuntimeConfig {
     /// Execution timeout in seconds
     #[serde(default = "default_timeout")]
     pub timeout: u64,
+    /// Maximum number of call stack frames to record
+    #[serde(default = "default_callstack_limit")]
+    pub callstack_limit: usize,
+    /// Namespace prefix for runtime/semantic error identifiers
+    #[serde(default = "default_error_namespace")]
+    pub error_namespace: String,
     /// Enable verbose output
     #[serde(default)]
     pub verbose: bool,
@@ -573,6 +579,14 @@ pub enum LogLevel {
 fn default_timeout() -> u64 {
     300
 }
+
+fn default_callstack_limit() -> usize {
+    200
+}
+
+fn default_error_namespace() -> String {
+    "RunMat".to_string()
+}
 fn default_true() -> bool {
     true
 }
@@ -631,6 +645,8 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             timeout: default_timeout(),
+            callstack_limit: default_callstack_limit(),
+            error_namespace: default_error_namespace(),
             verbose: false,
             snapshot_path: None,
         }
@@ -696,7 +712,7 @@ impl Default for KernelConfig {
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
-            level: LogLevel::Info,
+            level: LogLevel::Warn,
             debug: false,
             file: None,
         }
@@ -930,6 +946,19 @@ impl ConfigLoader {
         if let Some(timeout) = env_value("RUNMAT_TIMEOUT", &[]) {
             if let Ok(timeout) = timeout.parse() {
                 config.runtime.timeout = timeout;
+            }
+        }
+
+        if let Some(limit) = env_value("RUNMAT_CALLSTACK_LIMIT", &[]) {
+            if let Ok(limit) = limit.parse() {
+                config.runtime.callstack_limit = limit;
+            }
+        }
+
+        if let Some(namespace) = env_value("RUNMAT_ERROR_NAMESPACE", &[]) {
+            let trimmed = namespace.trim();
+            if !trimmed.is_empty() {
+                config.runtime.error_namespace = trimmed.to_string();
             }
         }
 

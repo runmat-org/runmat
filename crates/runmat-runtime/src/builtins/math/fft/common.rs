@@ -1,26 +1,40 @@
 use crate::builtins::common::tensor;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::HostTensorOwned;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use std::collections::HashSet;
 
+fn builtin_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(builtin).build()
+}
+
 /// Parse the optional FFT length argument, returning `None` for `[]`.
-pub fn parse_length(value: &Value, builtin: &str) -> Result<Option<usize>, String> {
+pub fn parse_length(value: &Value, builtin: &str) -> BuiltinResult<Option<usize>> {
     match value {
         Value::Tensor(t) if t.data.is_empty() => Ok(None),
         Value::ComplexTensor(t) if t.data.is_empty() => Ok(None),
         Value::Tensor(t) => {
             if t.data.len() != 1 {
-                return Err(format!("{builtin}: length must be a scalar"));
+                return Err(builtin_error(
+                    builtin,
+                    format!("{builtin}: length must be a scalar"),
+                ));
             }
             parse_length_scalar(t.data[0], builtin).map(Some)
         }
         Value::ComplexTensor(t) => {
             if t.data.len() != 1 {
-                return Err(format!("{builtin}: length must be a scalar"));
+                return Err(builtin_error(
+                    builtin,
+                    format!("{builtin}: length must be a scalar"),
+                ));
             }
             let (re, im) = t.data[0];
             if im.abs() > f64::EPSILON {
-                return Err(format!("{builtin}: length must be real-valued"));
+                return Err(builtin_error(
+                    builtin,
+                    format!("{builtin}: length must be real-valued"),
+                ));
             }
             parse_length_scalar(re, builtin).map(Some)
         }
@@ -28,19 +42,26 @@ pub fn parse_length(value: &Value, builtin: &str) -> Result<Option<usize>, Strin
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 0 {
-                return Err(format!("{builtin}: length must be non-negative"));
+                return Err(builtin_error(
+                    builtin,
+                    format!("{builtin}: length must be non-negative"),
+                ));
             }
             Ok(Some(raw as usize))
         }
         Value::Complex(re, im) => {
             if im.abs() > f64::EPSILON {
-                return Err(format!("{builtin}: length must be real-valued"));
+                return Err(builtin_error(
+                    builtin,
+                    format!("{builtin}: length must be real-valued"),
+                ));
             }
             parse_length_scalar(*re, builtin).map(Some)
         }
-        Value::Bool(_) | Value::LogicalArray(_) => {
-            Err(format!("{builtin}: length must be numeric"))
-        }
+        Value::Bool(_) | Value::LogicalArray(_) => Err(builtin_error(
+            builtin,
+            format!("{builtin}: length must be numeric"),
+        )),
         Value::String(_)
         | Value::StringArray(_)
         | Value::CharArray(_)
@@ -53,61 +74,79 @@ pub fn parse_length(value: &Value, builtin: &str) -> Result<Option<usize>, Strin
         | Value::Listener(_)
         | Value::Object(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(format!("{builtin}: length must be numeric")),
+        | Value::MException(_) => Err(builtin_error(
+            builtin,
+            format!("{builtin}: length must be numeric"),
+        )),
     }
 }
 
-fn parse_length_scalar(value: f64, builtin: &str) -> Result<usize, String> {
+fn parse_length_scalar(value: f64, builtin: &str) -> BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err(format!("{builtin}: length must be finite"));
+        return Err(builtin_error(
+            builtin,
+            format!("{builtin}: length must be finite"),
+        ));
     }
     if value < 0.0 {
-        return Err(format!("{builtin}: length must be non-negative"));
+        return Err(builtin_error(
+            builtin,
+            format!("{builtin}: length must be non-negative"),
+        ));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err(format!("{builtin}: length must be an integer"));
+        return Err(builtin_error(
+            builtin,
+            format!("{builtin}: length must be an integer"),
+        ));
     }
     Ok(rounded as usize)
 }
 
 /// Convert any numeric value into a `ComplexTensor`.
-pub fn value_to_complex_tensor(value: Value, builtin: &str) -> Result<ComplexTensor, String> {
+pub fn value_to_complex_tensor(value: Value, builtin: &str) -> BuiltinResult<ComplexTensor> {
     match value {
         Value::ComplexTensor(tensor) => Ok(tensor),
         Value::Tensor(tensor) => tensor_to_complex_tensor(tensor, builtin),
-        Value::Num(n) => {
-            ComplexTensor::new(vec![(n, 0.0)], vec![1, 1]).map_err(|e| format!("{builtin}: {e}"))
-        }
+        Value::Num(n) => ComplexTensor::new(vec![(n, 0.0)], vec![1, 1])
+            .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}"))),
         Value::Int(i) => {
             let val = i.to_f64();
-            ComplexTensor::new(vec![(val, 0.0)], vec![1, 1]).map_err(|e| format!("{builtin}: {e}"))
+            ComplexTensor::new(vec![(val, 0.0)], vec![1, 1])
+                .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
         }
         Value::Bool(b) => {
             let val = if b { 1.0 } else { 0.0 };
-            ComplexTensor::new(vec![(val, 0.0)], vec![1, 1]).map_err(|e| format!("{builtin}: {e}"))
+            ComplexTensor::new(vec![(val, 0.0)], vec![1, 1])
+                .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
         }
-        Value::Complex(re, im) => {
-            ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| format!("{builtin}: {e}"))
+        Value::Complex(re, im) => ComplexTensor::new(vec![(re, im)], vec![1, 1])
+            .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}"))),
+        Value::LogicalArray(logical) => {
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
+            tensor_to_complex_tensor(tensor, builtin)
         }
-        Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical)
-            .and_then(|t| tensor_to_complex_tensor(t, builtin))
-            .map_err(|e| format!("{builtin}: {e}")),
-        other => Err(format!(
-            "{builtin}: unsupported input type {:?}; expected numeric or complex data",
-            other
+        other => Err(builtin_error(
+            builtin,
+            format!(
+                "{builtin}: unsupported input type {:?}; expected numeric or complex data",
+                other
+            ),
         )),
     }
 }
 
 /// Convert a real-valued tensor into a `ComplexTensor`.
-pub fn tensor_to_complex_tensor(tensor: Tensor, builtin: &str) -> Result<ComplexTensor, String> {
+pub fn tensor_to_complex_tensor(tensor: Tensor, builtin: &str) -> BuiltinResult<ComplexTensor> {
     let data = tensor
         .data
         .into_iter()
         .map(|re| (re, 0.0))
         .collect::<Vec<_>>();
-    ComplexTensor::new(data, tensor.shape).map_err(|e| format!("{builtin}: {e}"))
+    ComplexTensor::new(data, tensor.shape)
+        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
 }
 
 /// Convert a downloaded host tensor into a complex tensor, interpreting a trailing
@@ -115,12 +154,13 @@ pub fn tensor_to_complex_tensor(tensor: Tensor, builtin: &str) -> Result<Complex
 pub fn host_to_complex_tensor(
     host: HostTensorOwned,
     builtin: &str,
-) -> Result<ComplexTensor, String> {
+) -> BuiltinResult<ComplexTensor> {
     let HostTensorOwned { data, shape } = host;
     if shape.last() == Some(&2) {
         if data.len() % 2 != 0 {
-            return Err(format!(
-                "{builtin}: provider tensor has mismatched real/imag data"
+            return Err(builtin_error(
+                builtin,
+                format!("{builtin}: provider tensor has mismatched real/imag data"),
             ));
         }
         let mut complex_shape = shape;
@@ -132,9 +172,11 @@ pub fn host_to_complex_tensor(
         for chunk in data.chunks_exact(2) {
             complex_data.push((chunk[0], chunk[1]));
         }
-        ComplexTensor::new(complex_data, complex_shape).map_err(|e| format!("{builtin}: {e}"))
+        ComplexTensor::new(complex_data, complex_shape)
+            .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
     } else {
-        let tensor = Tensor::new(data, shape).map_err(|e| format!("{builtin}: {e}"))?;
+        let tensor = Tensor::new(data, shape)
+            .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
         tensor_to_complex_tensor(tensor, builtin)
     }
 }
@@ -233,16 +275,23 @@ fn shift_amount(size: usize, kind: ShiftKind) -> usize {
 
 /// Apply a circular shift to the provided data.
 pub fn apply_shift<T: Clone>(
+    builtin: &str,
     data: &[T],
     shape: &[usize],
     shifts: &[usize],
-) -> Result<Vec<T>, String> {
+) -> BuiltinResult<Vec<T>> {
     if shape.len() != shifts.len() {
-        return Err("shift: internal shape mismatch".to_string());
+        return Err(builtin_error(
+            builtin,
+            format!("{builtin}: internal shape mismatch"),
+        ));
     }
     let total: usize = shape.iter().product();
     if total != data.len() {
-        return Err("shift: shape does not match data length".to_string());
+        return Err(builtin_error(
+            builtin,
+            format!("{builtin}: shape does not match data length"),
+        ));
     }
     if total == 0 || shifts.iter().all(|&s| s == 0) {
         return Ok(data.to_vec());
@@ -293,7 +342,7 @@ pub fn compute_shift_dims(
     shape: &[usize],
     arg: Option<&Value>,
     builtin: &str,
-) -> Result<Vec<usize>, String> {
+) -> BuiltinResult<Vec<usize>> {
     let rank = if shape.is_empty() { 1 } else { shape.len() };
     if let Some(value) = arg {
         let dims1 = dims_from_value(value, builtin)?;
@@ -304,7 +353,10 @@ pub fn compute_shift_dims(
         let mut seen = HashSet::new();
         for dim in dims1 {
             if dim == 0 {
-                return Err(format!("{builtin}: dimension indices must be >= 1"));
+                return Err(builtin_error(
+                    builtin,
+                    format!("{builtin}: dimension indices must be >= 1"),
+                ));
             }
             let zero_based = dim - 1;
             if seen.insert(zero_based) {
@@ -317,45 +369,67 @@ pub fn compute_shift_dims(
     }
 }
 
-fn dims_from_value(value: &Value, builtin: &str) -> Result<Vec<usize>, String> {
+fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 1 {
-                return Err(format!("{builtin}: dimension indices must be >= 1"));
+                return Err(builtin_error(
+                    builtin,
+                    format!("{builtin}: dimension indices must be >= 1"),
+                ));
             }
             Ok(vec![raw as usize])
         }
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(format!("{builtin}: dimensions must be finite integers"));
+                return Err(builtin_error(
+                    builtin,
+                    format!("{builtin}: dimensions must be finite integers"),
+                ));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
-                return Err(format!("{builtin}: dimensions must be integers"));
+                return Err(builtin_error(
+                    builtin,
+                    format!("{builtin}: dimensions must be integers"),
+                ));
             }
             if rounded < 1.0 {
-                return Err(format!("{builtin}: dimension indices must be >= 1"));
+                return Err(builtin_error(
+                    builtin,
+                    format!("{builtin}: dimension indices must be >= 1"),
+                ));
             }
             Ok(vec![rounded as usize])
         }
         Value::Tensor(tensor) => {
             if !is_vector_shape(&tensor.shape) && !tensor.data.is_empty() {
-                return Err(format!(
-                    "{builtin}: dimension vectors must be row or column vectors"
+                return Err(builtin_error(
+                    builtin,
+                    format!("{builtin}: dimension vectors must be row or column vectors"),
                 ));
             }
             let mut dims = Vec::with_capacity(tensor.data.len());
             for &val in &tensor.data {
                 if !val.is_finite() {
-                    return Err(format!("{builtin}: dimensions must be finite integers"));
+                    return Err(builtin_error(
+                        builtin,
+                        format!("{builtin}: dimensions must be finite integers"),
+                    ));
                 }
                 let rounded = val.round();
                 if (rounded - val).abs() > f64::EPSILON {
-                    return Err(format!("{builtin}: dimensions must be integers"));
+                    return Err(builtin_error(
+                        builtin,
+                        format!("{builtin}: dimensions must be integers"),
+                    ));
                 }
                 if rounded < 1.0 {
-                    return Err(format!("{builtin}: dimension indices must be >= 1"));
+                    return Err(builtin_error(
+                        builtin,
+                        format!("{builtin}: dimension indices must be >= 1"),
+                    ));
                 }
                 dims.push(rounded as usize);
             }
@@ -363,8 +437,9 @@ fn dims_from_value(value: &Value, builtin: &str) -> Result<Vec<usize>, String> {
         }
         Value::LogicalArray(array) => {
             if !is_vector_shape(&array.shape) && !array.data.is_empty() {
-                return Err(format!(
-                    "{builtin}: dimension masks must be row or column vectors"
+                return Err(builtin_error(
+                    builtin,
+                    format!("{builtin}: dimension masks must be row or column vectors"),
                 ));
             }
             let mut dims = Vec::new();
@@ -375,8 +450,9 @@ fn dims_from_value(value: &Value, builtin: &str) -> Result<Vec<usize>, String> {
             }
             Ok(dims)
         }
-        Value::GpuTensor(_) => Err(format!(
-            "{builtin}: dimension specification must reside on the host"
+        Value::GpuTensor(_) => Err(builtin_error(
+            builtin,
+            format!("{builtin}: dimension specification must reside on the host"),
         )),
         Value::String(_)
         | Value::StringArray(_)
@@ -392,7 +468,10 @@ fn dims_from_value(value: &Value, builtin: &str) -> Result<Vec<usize>, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(format!("{builtin}: dimension indices must be numeric")),
+        | Value::MException(_) => Err(builtin_error(
+            builtin,
+            format!("{builtin}: dimension indices must be numeric"),
+        )),
     }
 }
 

@@ -4,13 +4,14 @@ use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strcmp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -39,6 +40,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Produces logical results on the host; not eligible for GPU fusion.",
 };
 
+#[allow(dead_code)]
+fn strcmp_flow(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("strcmp").build()
+}
+
+fn remap_strcmp_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, "strcmp")
+}
+
 #[runtime_builtin(
     name = "strcmp",
     category = "strings/core",
@@ -47,15 +57,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::strings::core::strcmp"
 )]
-fn strcmp_builtin(a: Value, b: Value) -> Result<Value, String> {
-    let a = gather_if_needed(&a).map_err(|e| format!("strcmp: {e}"))?;
-    let b = gather_if_needed(&b).map_err(|e| format!("strcmp: {e}"))?;
+async fn strcmp_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
+    let a = gather_if_needed_async(&a)
+        .await
+        .map_err(remap_strcmp_flow)?;
+    let b = gather_if_needed_async(&b)
+        .await
+        .map_err(remap_strcmp_flow)?;
     let left = TextCollection::from_argument("strcmp", a, "first argument")?;
     let right = TextCollection::from_argument("strcmp", b, "second argument")?;
     evaluate_strcmp(&left, &right)
 }
 
-fn evaluate_strcmp(left: &TextCollection, right: &TextCollection) -> Result<Value, String> {
+fn evaluate_strcmp(left: &TextCollection, right: &TextCollection) -> BuiltinResult<Value> {
     let shape = broadcast_shapes("strcmp", &left.shape, &right.shape)?;
     let total = tensor::element_count(&shape);
     if total == 0 {
@@ -80,7 +94,16 @@ fn evaluate_strcmp(left: &TextCollection, right: &TextCollection) -> Result<Valu
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::RuntimeError;
     use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray};
+
+    fn strcmp_builtin(a: Value, b: Value) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::strcmp_builtin(a, b))
+    }
+
+    fn error_message(err: RuntimeError) -> String {
+        err.message().to_string()
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -234,16 +257,19 @@ pub(crate) mod tests {
     fn strcmp_size_mismatch_error() {
         let left = StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap();
         let right = StringArray::new(vec!["a".into(), "b".into(), "c".into()], vec![3, 1]).unwrap();
-        let err = strcmp_builtin(Value::StringArray(left), Value::StringArray(right))
-            .expect_err("size mismatch");
+        let err = error_message(
+            strcmp_builtin(Value::StringArray(left), Value::StringArray(right))
+                .expect_err("size mismatch"),
+        );
         assert!(err.contains("size mismatch"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_invalid_argument_type() {
-        let err =
-            strcmp_builtin(Value::Num(1.0), Value::String("a".into())).expect_err("invalid type");
+        let err = error_message(
+            strcmp_builtin(Value::Num(1.0), Value::String("a".into())).expect_err("invalid type"),
+        );
         assert!(err.contains("first argument must be text"));
     }
 }

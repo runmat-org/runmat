@@ -21,6 +21,7 @@ runmat-core = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-accelerate = { workspace = true }
 runmat-accelerate-api = { workspace = true }
+runmat-ignition = { workspace = true }
 runmat-filesystem = { workspace = true }
 runmat-thread-local = { workspace = true }
 serde = { workspace = true }
@@ -29,9 +30,10 @@ serde-wasm-bindgen = "0.6"
 wasm-bindgen = { version = "0.2", features = ["serde-serialize"] }
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Window", "Response", "ReadableStream", "ReadableStreamDefaultReader", "HtmlCanvasElement", "console"] }
+web-sys = { version = "0.3", features = ["Window", "Response", "ReadableStream", "ReadableStreamDefaultReader", "HtmlCanvasElement", "OffscreenCanvas", "console"] }
 log = { workspace = true }
 anyhow = { workspace = true }
+miette = { workspace = true }
 console_error_panic_hook = "0.1"
 thiserror = { workspace = true }
 getrandom = { version = "0.2", features = ["js"] }
@@ -42,4 +44,4 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "regist
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 runmat-runtime = { workspace = true, features = ["plot-web"] }
-runmat-plot = { workspace = true, features = ["web"] }
+runmat-plot = { workspace = true, features = ["web", "egui-overlay"] }

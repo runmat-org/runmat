@@ -14,7 +14,9 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::dispatcher::download_handle_async;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const IMAG_EPS: f64 = 1e-12;
 
@@ -60,6 +62,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL `log(x + 1)` sequences; providers may substitute fused kernels when available.",
 };
 
+const BUILTIN_NAME: &str = "log1p";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 #[runtime_builtin(
     name = "log1p",
     category = "math/elementwise",
@@ -68,9 +78,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::log1p"
 )]
-fn log1p_builtin(value: Value) -> Result<Value, String> {
+async fn log1p_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => log1p_gpu(handle),
+        Value::GpuTensor(handle) => log1p_gpu(handle).await,
         Value::Complex(re, im) => {
             let (real, imag) = log1p_complex_parts(re, im);
             Ok(Value::Complex(real, imag))
@@ -78,55 +88,65 @@ fn log1p_builtin(value: Value) -> Result<Value, String> {
         Value::ComplexTensor(ct) => log1p_complex_tensor(ct),
         Value::CharArray(ca) => log1p_char_array(ca),
         Value::String(_) | Value::StringArray(_) => {
-            Err("log1p: expected numeric input".to_string())
+            Err(builtin_error("log1p: expected numeric input"))
         }
         other => log1p_real(other),
     }
 }
 
-fn log1p_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn log1p_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         // Fast path: try device op first; if unsupported, fall back to complex-domain check
-        if let Ok(out) = provider.unary_log1p(&handle) {
+        if let Ok(out) = provider.unary_log1p(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
-        match detect_gpu_requires_complex(provider, &handle) {
+        match detect_gpu_requires_complex(provider, &handle).await {
             Ok(true) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle)
+                    .await
+                    .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
                 return log1p_tensor(tensor);
             }
             Ok(false) => {}
-            Err(_) => {}
+            Err(err) => {
+                if err.message() == "interaction pending..." {
+                    return Err(builtin_error("interaction pending..."));
+                }
+            }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     log1p_tensor(tensor)
 }
 
-fn detect_gpu_requires_complex(
+async fn detect_gpu_requires_complex(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
-) -> Result<bool, String> {
+) -> BuiltinResult<bool> {
     let min_handle = provider
         .reduce_min(handle)
-        .map_err(|e| format!("log1p: reduce_min failed: {e}"))?;
-    let download = provider
-        .download(&min_handle)
-        .map_err(|e| format!("log1p: reduce_min download failed: {e}"));
+        .await
+        .map_err(|e| builtin_error(format!("log1p: reduce_min failed: {e}")))?;
+    let download = download_handle_async(provider, &min_handle)
+        .await
+        .map_err(|e| builtin_error(format!("log1p: reduce_min download failed: {e}")));
     let _ = provider.free(&min_handle);
     let host = download?;
     if host.data.iter().any(|&v| v.is_nan()) {
-        return Err("log1p: reduce_min result contained NaN".to_string());
+        return Err(builtin_error("log1p: reduce_min result contained NaN"));
     }
     Ok(host.data.iter().any(|&v| v < -1.0))
 }
 
-fn log1p_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("log1p", value)?;
+fn log1p_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("log1p", value)
+        .map_err(|e| builtin_error(format!("log1p: {e}")))?;
     log1p_tensor(tensor)
 }
 
-fn log1p_tensor(tensor: Tensor) -> Result<Value, String> {
+fn log1p_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let shape = tensor.shape.clone();
     let mut entries = Vec::with_capacity(tensor.data.len());
     let mut has_imag = false;
@@ -159,17 +179,18 @@ fn log1p_tensor(tensor: Tensor) -> Result<Value, String> {
             let (re, im) = entries[0];
             Ok(Value::Complex(re, im))
         } else {
-            let tensor = ComplexTensor::new(entries, shape).map_err(|e| format!("log1p: {e}"))?;
+            let tensor = ComplexTensor::new(entries, shape)
+                .map_err(|e| builtin_error(format!("log1p: {e}")))?;
             Ok(Value::ComplexTensor(tensor))
         }
     } else {
         let data: Vec<f64> = entries.into_iter().map(|(re, _)| re).collect();
-        let tensor = Tensor::new(data, shape).map_err(|e| format!("log1p: {e}"))?;
+        let tensor = Tensor::new(data, shape).map_err(|e| builtin_error(format!("log1p: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     }
 }
 
-fn log1p_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn log1p_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mut data = Vec::with_capacity(ct.data.len());
     for &(re, im) in &ct.data {
         let (mut real_part, mut imag_part) = log1p_complex_parts(re, im);
@@ -185,15 +206,16 @@ fn log1p_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
         let (re, im) = data[0];
         Ok(Value::Complex(re, im))
     } else {
-        let tensor =
-            ComplexTensor::new(data, ct.shape.clone()).map_err(|e| format!("log1p: {e}"))?;
+        let tensor = ComplexTensor::new(data, ct.shape.clone())
+            .map_err(|e| builtin_error(format!("log1p: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
 
-fn log1p_char_array(ca: CharArray) -> Result<Value, String> {
+fn log1p_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("log1p: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| builtin_error(format!("log1p: {e}")))?;
     log1p_tensor(tensor)
 }
 
@@ -213,8 +235,13 @@ fn log1p_complex_parts(re: f64, im: f64) -> (f64, f64) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{LogicalArray, Tensor};
     use std::f64::consts::PI;
+
+    fn log1p_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::log1p_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -308,7 +335,7 @@ pub(crate) mod tests {
     fn log1p_string_rejects() {
         let err = log1p_builtin(Value::from("not numeric")).expect_err("should fail");
         assert!(
-            err.contains("expected numeric input"),
+            err.message().contains("expected numeric input"),
             "unexpected error message: {err}"
         );
     }
@@ -400,7 +427,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = log1p_gpu(handle).unwrap();
+        let gpu = block_on(log1p_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {

@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const ERR_TOO_FEW_INPUTS: &str = "setenv: not enough input arguments";
 const ERR_TOO_MANY_INPUTS: &str = "setenv: too many input arguments";
@@ -53,6 +53,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Environment updates terminate fusion; metadata registered for completeness.",
 };
 
+const BUILTIN_NAME: &str = "setenv";
+
+fn setenv_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "setenv",
     category = "io/repl_fs",
@@ -62,18 +81,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::setenv"
 )]
-fn setenv_builtin(args: Vec<Value>) -> Result<Value, String> {
-    let eval = evaluate(&args)?;
+async fn setenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(&args).await?;
     Ok(eval.first_output())
 }
 
 /// Evaluate `setenv` once and expose both outputs.
-pub fn evaluate(args: &[Value]) -> Result<SetenvResult, String> {
-    let gathered = gather_arguments(args)?;
+pub async fn evaluate(args: &[Value]) -> BuiltinResult<SetenvResult> {
+    let gathered = gather_arguments(args).await?;
     match gathered.len() {
-        0 | 1 => Err(ERR_TOO_FEW_INPUTS.to_string()),
+        0 | 1 => Err(setenv_error(ERR_TOO_FEW_INPUTS)),
         2 => apply(&gathered[0], &gathered[1]),
-        _ => Err(ERR_TOO_MANY_INPUTS.to_string()),
+        _ => Err(setenv_error(ERR_TOO_MANY_INPUTS)),
     }
 }
 
@@ -117,7 +136,7 @@ impl SetenvResult {
     }
 }
 
-fn apply(name_value: &Value, value_value: &Value) -> Result<SetenvResult, String> {
+fn apply(name_value: &Value, value_value: &Value) -> BuiltinResult<SetenvResult> {
     let name = extract_scalar_text(name_value, ERR_NAME_TYPE)?;
     let value = extract_scalar_text(value_value, ERR_VALUE_TYPE)?;
 
@@ -159,20 +178,24 @@ fn update_environment(name: &str, value: &str) -> SetenvResult {
     }
 }
 
-fn gather_arguments(args: &[Value]) -> Result<Vec<Value>, String> {
+async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(|err| format!("setenv: {err}"))?);
+        out.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     Ok(out)
 }
 
-fn extract_scalar_text(value: &Value, error_message: &str) -> Result<String, String> {
+fn extract_scalar_text(value: &Value, error_message: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::CharArray(array) => {
             if array.rows != 1 {
-                return Err(error_message.to_string());
+                return Err(setenv_error(error_message));
             }
             Ok(char_row_to_string(array))
         }
@@ -180,10 +203,10 @@ fn extract_scalar_text(value: &Value, error_message: &str) -> Result<String, Str
             if array.data.len() == 1 {
                 Ok(array.data[0].clone())
             } else {
-                Err(error_message.to_string())
+                Err(setenv_error(error_message))
             }
         }
-        _ => Err(error_message.to_string()),
+        _ => Err(setenv_error(error_message)),
     }
 }
 
@@ -220,6 +243,14 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
     use runmat_builtins::{CharArray, StringArray, Value};
+
+    fn setenv_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::setenv_builtin(args))
+    }
+
+    fn evaluate(args: &[Value]) -> BuiltinResult<SetenvResult> {
+        futures::executor::block_on(super::evaluate(args))
+    }
 
     fn unique_name(suffix: &str) -> String {
         format!("RUNMAT_TEST_SETENV_{}", suffix)
@@ -323,7 +354,7 @@ pub(crate) mod tests {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         let err =
             setenv_builtin(vec![Value::Num(5.0), Value::String("value".to_string())]).unwrap_err();
-        assert_eq!(err, ERR_NAME_TYPE);
+        assert_eq!(err.message(), ERR_NAME_TYPE);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -335,7 +366,7 @@ pub(crate) mod tests {
             Value::Num(1.0),
         ])
         .unwrap_err();
-        assert_eq!(err, ERR_VALUE_TYPE);
+        assert_eq!(err.message(), ERR_VALUE_TYPE);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -372,7 +403,7 @@ pub(crate) mod tests {
             Value::String("value".to_string()),
         ])
         .unwrap_err();
-        assert_eq!(err, ERR_NAME_TYPE);
+        assert_eq!(err.message(), ERR_NAME_TYPE);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -385,7 +416,7 @@ pub(crate) mod tests {
             Value::String("value".to_string()),
         ])
         .unwrap_err();
-        assert_eq!(err, ERR_NAME_TYPE);
+        assert_eq!(err.message(), ERR_NAME_TYPE);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

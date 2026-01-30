@@ -3,9 +3,12 @@
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
+use super::plotting_error;
 use super::state::{set_hold, HoldMode};
 
-fn parse_mode(value: &Value) -> Result<HoldMode, String> {
+use crate::BuiltinResult;
+
+fn parse_mode(value: &Value) -> BuiltinResult<HoldMode> {
     match value {
         Value::CharArray(chars) => {
             let text: String = chars.data.iter().collect();
@@ -20,7 +23,7 @@ fn parse_mode(value: &Value) -> Result<HoldMode, String> {
         Value::Bool(b) => Ok(if *b { HoldMode::On } else { HoldMode::Off }),
         Value::Tensor(tensor) => {
             if tensor.data.len() != 1 {
-                return Err("hold: logical scalar expected".to_string());
+                return Err(plotting_error("hold", "hold: logical scalar expected"));
             }
             Ok(if tensor.data[0] == 0.0 {
                 HoldMode::Off
@@ -28,16 +31,16 @@ fn parse_mode(value: &Value) -> Result<HoldMode, String> {
                 HoldMode::On
             })
         }
-        _ => Err("hold: unsupported argument type".to_string()),
+        _ => Err(plotting_error("hold", "hold: unsupported argument type")),
     }
 }
 
-fn parse_mode_str(text: &str) -> Result<HoldMode, String> {
+fn parse_mode_str(text: &str) -> BuiltinResult<HoldMode> {
     match text.to_ascii_lowercase().as_str() {
         "on" | "all" => Ok(HoldMode::On),
         "off" => Ok(HoldMode::Off),
         "" => Ok(HoldMode::Toggle),
-        _ => Err("hold: expected 'on' or 'off'".to_string()),
+        _ => Err(plotting_error("hold", "hold: expected 'on' or 'off'")),
     }
 }
 
@@ -49,7 +52,7 @@ fn parse_mode_str(text: &str) -> Result<HoldMode, String> {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::hold"
 )]
-pub fn hold_builtin(rest: Vec<Value>) -> Result<String, String> {
+pub fn hold_builtin(rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let mode = if rest.is_empty() {
         HoldMode::Toggle
     } else {

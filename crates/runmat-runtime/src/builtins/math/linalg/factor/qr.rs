@@ -5,12 +5,15 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use super::lu::PivotMode;
+
+const BUILTIN_NAME: &str = "qr";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::qr")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -27,6 +30,24 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Providers may download to host and re-upload results; the bundled WGPU backend currently uses the runtime QR implementation.",
 };
+
+fn qr_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn with_qr_context(mut error: RuntimeError) -> RuntimeError {
+    if error.message() == "interaction pending..." {
+        return build_runtime_error("interaction pending...")
+            .with_builtin(BUILTIN_NAME)
+            .build();
+    }
+    if error.context.builtin.is_none() {
+        error.context = error.context.with_builtin(BUILTIN_NAME);
+    }
+    error
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::factor::qr")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -48,8 +69,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::math::linalg::factor::qr"
 )]
-fn qr_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let eval = evaluate(value, &rest)?;
+async fn qr_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(value, &rest).await?;
     Ok(eval.r())
 }
 
@@ -119,22 +140,27 @@ struct QrOptions {
 }
 
 /// Evaluate the builtin with full access to multiple outputs.
-pub fn evaluate(value: Value, args: &[Value]) -> Result<QrEval, String> {
-    let options = parse_options(args)?;
+pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<QrEval> {
+    let options = parse_options(args).await?;
     match value {
         Value::GpuTensor(handle) => {
-            if let Some(eval) = evaluate_gpu(&handle, &options)? {
+            if let Some(eval) = evaluate_gpu(&handle, &options).await? {
                 return Ok(eval);
             }
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(with_qr_context)?;
             let prefer_gpu = runmat_accelerate_api::provider().is_some();
-            evaluate_host_value(Value::Tensor(tensor), options, prefer_gpu)
+            evaluate_host_value(Value::Tensor(tensor), options, prefer_gpu).await
         }
-        other => evaluate_host_value(other, options, false),
+        other => evaluate_host_value(other, options, false).await,
     }
 }
 
-fn evaluate_gpu(handle: &GpuTensorHandle, options: &QrOptions) -> Result<Option<QrEval>, String> {
+async fn evaluate_gpu(
+    handle: &GpuTensorHandle,
+    options: &QrOptions,
+) -> BuiltinResult<Option<QrEval>> {
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),
@@ -155,7 +181,10 @@ fn evaluate_gpu(handle: &GpuTensorHandle, options: &QrOptions) -> Result<Option<
         );
     }
     if let Some((lhs, rhs)) = provider.take_matmul_sources(handle) {
-        match provider.qr_power_iter(handle, Some(&lhs), &rhs, &provider_options) {
+        match provider
+            .qr_power_iter(handle, Some(&lhs), &rhs, &provider_options)
+            .await
+        {
             Ok(Some(result)) => {
                 return Ok(Some(QrEval {
                     q: Value::GpuTensor(result.q),
@@ -174,7 +203,7 @@ fn evaluate_gpu(handle: &GpuTensorHandle, options: &QrOptions) -> Result<Option<
             }
         }
     }
-    match provider.qr(handle, provider_options) {
+    match provider.qr(handle, provider_options).await {
         Ok(result) => Ok(Some(QrEval {
             q: Value::GpuTensor(result.q),
             r: Value::GpuTensor(result.r),
@@ -187,23 +216,23 @@ fn evaluate_gpu(handle: &GpuTensorHandle, options: &QrOptions) -> Result<Option<
     }
 }
 
-fn evaluate_host_value(
+async fn evaluate_host_value(
     value: Value,
     options: QrOptions,
     prefer_gpu: bool,
-) -> Result<QrEval, String> {
-    let matrix = extract_matrix(value)?;
+) -> BuiltinResult<QrEval> {
+    let matrix = extract_matrix(value).await?;
     let components = qr_factor(matrix)?;
     assemble_eval(components, options, prefer_gpu)
 }
 
-fn parse_options(args: &[Value]) -> Result<QrOptions, String> {
+async fn parse_options(args: &[Value]) -> BuiltinResult<QrOptions> {
     if args.len() > 2 {
-        return Err("qr: too many option arguments".to_string());
+        return Err(qr_error("qr: too many option arguments"));
     }
     let mut opts = QrOptions::default();
     for arg in args {
-        if is_zero_scalar(arg) {
+        if is_zero_scalar(arg).await {
             opts.mode = QrMode::Economy;
             continue;
         }
@@ -221,16 +250,16 @@ fn parse_options(args: &[Value]) -> Result<QrOptions, String> {
                 opts.pivot = PivotMode::Matrix;
                 continue;
             }
-            return Err(format!("qr: unknown option '{text}'"));
+            return Err(qr_error(format!("qr: unknown option '{text}'")));
         }
-        return Err(
-            "qr: option must be numeric zero or a string ('econ', 'matrix', 'vector')".to_string(),
-        );
+        return Err(qr_error(
+            "qr: option must be numeric zero or a string ('econ', 'matrix', 'vector')",
+        ));
     }
     Ok(opts)
 }
 
-fn is_zero_scalar(value: &Value) -> bool {
+async fn is_zero_scalar(value: &Value) -> bool {
     match value {
         Value::Num(n) => n.abs() <= EPS_SCALAR,
         Value::Int(i) => i.to_i64() == 0,
@@ -246,7 +275,7 @@ fn is_zero_scalar(value: &Value) -> bool {
             // Best-effort: treat 1-element gpuArray with ~0 value as zero option
             if handle.shape.iter().product::<usize>() == 1 {
                 if let Some(p) = runmat_accelerate_api::provider() {
-                    if let Ok(host) = p.download(handle) {
+                    if let Ok(host) = download_handle_async(p, handle).await {
                         return host
                             .data
                             .first()
@@ -261,15 +290,14 @@ fn is_zero_scalar(value: &Value) -> bool {
     }
 }
 
-fn extract_matrix(value: Value) -> Result<ColMajorMatrix, String> {
+async fn extract_matrix(value: Value) -> BuiltinResult<ColMajorMatrix> {
     match value {
-        Value::Tensor(t) => ColMajorMatrix::from_tensor(&t).map_err(|e| format!("qr: {e}")),
-        Value::ComplexTensor(ct) => {
-            ColMajorMatrix::from_complex_tensor(&ct).map_err(|e| format!("qr: {e}"))
-        }
+        Value::Tensor(t) => ColMajorMatrix::from_tensor(&t),
+        Value::ComplexTensor(ct) => ColMajorMatrix::from_complex_tensor(&ct),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
-            ColMajorMatrix::from_tensor(&tensor).map_err(|e| format!("qr: {e}"))
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|err| qr_error(format!("qr: {err}")))?;
+            ColMajorMatrix::from_tensor(&tensor)
         }
         Value::Num(n) => Ok(ColMajorMatrix::from_scalar(Complex64::new(n, 0.0))),
         Value::Int(i) => Ok(ColMajorMatrix::from_scalar(Complex64::new(i.to_f64(), 0.0))),
@@ -278,13 +306,15 @@ fn extract_matrix(value: Value) -> Result<ColMajorMatrix, String> {
             0.0,
         ))),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
-            ColMajorMatrix::from_tensor(&tensor).map_err(|e| format!("qr: {e}"))
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(with_qr_context)?;
+            ColMajorMatrix::from_tensor(&tensor)
         }
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
-            Err("qr: expected a numeric matrix".to_string())
+            Err(qr_error("qr: expected a numeric matrix"))
         }
-        other => Err(format!("qr: unsupported input type {other:?}")),
+        other => Err(qr_error(format!("qr: unsupported input type {other:?}"))),
     }
 }
 
@@ -292,7 +322,7 @@ fn assemble_eval(
     components: QrComponents,
     options: QrOptions,
     prefer_gpu: bool,
-) -> Result<QrEval, String> {
+) -> BuiltinResult<QrEval> {
     let rows = components.reflectors.rows;
     let cols = components.reflectors.cols;
     let mut q_full = build_q(&components.reflectors, &components.taus);
@@ -340,12 +370,13 @@ fn assemble_eval(
     })
 }
 
-fn pivot_vector_to_value(pivot: &[usize]) -> Result<Value, String> {
+fn pivot_vector_to_value(pivot: &[usize]) -> BuiltinResult<Value> {
     let mut data = Vec::with_capacity(pivot.len());
     for &idx in pivot {
         data.push((idx + 1) as f64);
     }
-    let tensor = Tensor::new(data, vec![pivot.len(), 1]).map_err(|e| format!("qr: {e}"))?;
+    let tensor =
+        Tensor::new(data, vec![pivot.len(), 1]).map_err(|e| qr_error(format!("qr: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -359,11 +390,7 @@ fn perm_matrix(size: usize, perm: &[usize]) -> ColMajorMatrix {
     matrix
 }
 
-fn matrix_to_value(
-    matrix: &ColMajorMatrix,
-    label: &str,
-    prefer_gpu: bool,
-) -> Result<Value, String> {
+fn matrix_to_value(matrix: &ColMajorMatrix, label: &str, prefer_gpu: bool) -> BuiltinResult<Value> {
     let value = matrix.to_value(label)?;
     Ok(maybe_upload_value(value, prefer_gpu))
 }
@@ -395,7 +422,7 @@ struct QrComponents {
     permutation: Vec<usize>,
 }
 
-fn qr_factor(mut matrix: ColMajorMatrix) -> Result<QrComponents, String> {
+fn qr_factor(mut matrix: ColMajorMatrix) -> BuiltinResult<QrComponents> {
     let rows = matrix.rows;
     let cols = matrix.cols;
     let min_dim = rows.min(cols);
@@ -614,9 +641,9 @@ impl ColMajorMatrix {
         }
     }
 
-    fn from_tensor(tensor: &Tensor) -> Result<Self, String> {
+    fn from_tensor(tensor: &Tensor) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
-            return Err("input must be 2-D".to_string());
+            return Err(qr_error("qr: input must be 2-D"));
         }
         let rows = tensor.rows();
         let cols = tensor.cols();
@@ -630,9 +657,9 @@ impl ColMajorMatrix {
         Ok(Self { rows, cols, data })
     }
 
-    fn from_complex_tensor(tensor: &ComplexTensor) -> Result<Self, String> {
+    fn from_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
-            return Err("input must be 2-D".to_string());
+            return Err(qr_error("qr: input must be 2-D"));
         }
         let rows = tensor.rows;
         let cols = tensor.cols;
@@ -645,6 +672,31 @@ impl ColMajorMatrix {
             }
         }
         Ok(Self { rows, cols, data })
+    }
+
+    fn to_value(&self, label: &str) -> BuiltinResult<Value> {
+        if self.data.iter().all(|z| z.im.abs() <= EPS_CLEAN) {
+            let mut real_data = Vec::with_capacity(self.rows * self.cols);
+            for col in 0..self.cols {
+                for row in 0..self.rows {
+                    real_data.push(self.get(row, col).re);
+                }
+            }
+            let tensor = Tensor::new(real_data, vec![self.rows, self.cols])
+                .map_err(|e| qr_error(format!("{label}: {e}")))?;
+            Ok(Value::Tensor(tensor))
+        } else {
+            let mut complex_data = Vec::with_capacity(self.rows * self.cols);
+            for col in 0..self.cols {
+                for row in 0..self.rows {
+                    let val = self.get(row, col);
+                    complex_data.push((val.re, val.im));
+                }
+            }
+            let tensor = ComplexTensor::new(complex_data, vec![self.rows, self.cols])
+                .map_err(|e| qr_error(format!("{label}: {e}")))?;
+            Ok(Value::ComplexTensor(tensor))
+        }
     }
 
     fn get(&self, row: usize, col: usize) -> Complex64 {
@@ -671,31 +723,6 @@ impl ColMajorMatrix {
         let offset = start_row + col * self.rows;
         let len = self.rows.saturating_sub(start_row);
         &mut self.data[offset..offset.saturating_add(len)]
-    }
-
-    fn to_value(&self, label: &str) -> Result<Value, String> {
-        if self.data.iter().all(|z| z.im.abs() <= EPS_CLEAN) {
-            let mut real_data = Vec::with_capacity(self.rows * self.cols);
-            for col in 0..self.cols {
-                for row in 0..self.rows {
-                    real_data.push(self.get(row, col).re);
-                }
-            }
-            let tensor = Tensor::new(real_data, vec![self.rows, self.cols])
-                .map_err(|e| format!("{label}: {e}"))?;
-            Ok(Value::Tensor(tensor))
-        } else {
-            let mut complex_data = Vec::with_capacity(self.rows * self.cols);
-            for col in 0..self.cols {
-                for row in 0..self.rows {
-                    let val = self.get(row, col);
-                    complex_data.push((val.re, val.im));
-                }
-            }
-            let tensor = ComplexTensor::new(complex_data, vec![self.rows, self.cols])
-                .map_err(|e| format!("{label}: {e}"))?;
-            Ok(Value::ComplexTensor(tensor))
-        }
     }
 
     fn take_columns(&self, count: usize) -> ColMajorMatrix {
@@ -746,6 +773,7 @@ const EPS_CLEAN: f64 = 1.0e-12;
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::Tensor as Matrix;
 
     fn tensor_from_value(value: Value) -> Matrix {
@@ -1001,5 +1029,13 @@ pub(crate) mod tests {
         let qr_product = crate::matrix::matrix_mul(&gpu_q, &gpu_r).expect("Q*R");
         let a_matrix = Matrix::new(tensor.data.clone(), tensor.shape.clone()).unwrap();
         tensor_close(&qr_product, &a_matrix, 1e-3);
+    }
+
+    fn qr_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::qr_builtin(value, rest))
+    }
+
+    fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<QrEval> {
+        block_on(super::evaluate(value, args))
     }
 }

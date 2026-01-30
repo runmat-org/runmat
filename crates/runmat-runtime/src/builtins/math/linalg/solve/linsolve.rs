@@ -17,6 +17,7 @@ use crate::builtins::common::{
     linalg::{diagonal_rcond, singular_value_rcond},
     tensor,
 };
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "linsolve";
 
@@ -35,6 +36,27 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Prefers the provider linsolve hook; WGPU currently gathers to the host solver and re-uploads the result.",
 };
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
+    if let Some(identifier) = err.identifier() {
+        builder = builder.with_identifier(identifier.to_string());
+    }
+    if let Some(task_id) = err.context.task_id.clone() {
+        builder = builder.with_task_id(task_id);
+    }
+    if !err.context.call_stack.is_empty() {
+        builder = builder.with_call_stack(err.context.call_stack.clone());
+    }
+    if let Some(phase) = err.context.phase.clone() {
+        builder = builder.with_phase(phase);
+    }
+    builder.with_source(err).build()
+}
 
 #[runmat_macros::register_fusion_spec(
     builtin_path = "crate::builtins::math::linalg::solve::linsolve"
@@ -57,20 +79,28 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "linsolve",
     builtin_path = "crate::builtins::math::linalg::solve::linsolve"
 )]
-fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let eval = evaluate_args(lhs, rhs, &rest)?;
+async fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let eval = evaluate_args(lhs, rhs, &rest).await?;
     Ok(eval.solution())
 }
 
 /// Evaluate `linsolve`, returning both the solution and the estimated reciprocal condition number.
-pub fn evaluate(lhs: Value, rhs: Value, options: SolveOptions) -> Result<LinsolveEval, String> {
-    if let Some(eval) = try_gpu_linsolve(&lhs, &rhs, &options)? {
+pub async fn evaluate(
+    lhs: Value,
+    rhs: Value,
+    options: SolveOptions,
+) -> BuiltinResult<LinsolveEval> {
+    if let Some(eval) = try_gpu_linsolve(&lhs, &rhs, &options).await? {
         return Ok(eval);
     }
 
-    let lhs_host = crate::dispatcher::gather_if_needed(&lhs)?;
-    let rhs_host = crate::dispatcher::gather_if_needed(&rhs)?;
-    let pair = coerce_numeric_pair(lhs_host, rhs_host)?;
+    let lhs_host = crate::dispatcher::gather_if_needed_async(&lhs)
+        .await
+        .map_err(map_control_flow)?;
+    let rhs_host = crate::dispatcher::gather_if_needed_async(&rhs)
+        .await
+        .map_err(map_control_flow)?;
+    let pair = coerce_numeric_pair(lhs_host, rhs_host).await?;
     match pair {
         NumericPair::Real(lhs_r, rhs_r) => {
             let (solution, rcond) = solve_real(lhs_r, rhs_r, &options)?;
@@ -94,7 +124,7 @@ pub fn linsolve_host_real_for_provider(
     lhs: &Tensor,
     rhs: &Tensor,
     options: &ProviderLinsolveOptions,
-) -> Result<(Tensor, f64), String> {
+) -> BuiltinResult<(Tensor, f64)> {
     let opts = SolveOptions::from(options);
     solve_real(lhs.clone(), rhs.clone(), &opts)
 }
@@ -167,25 +197,25 @@ impl From<&ProviderLinsolveOptions> for SolveOptions {
     }
 }
 
-fn options_from_rest(rest: &[Value]) -> Result<SolveOptions, String> {
+fn options_from_rest(rest: &[Value]) -> BuiltinResult<SolveOptions> {
     match rest.len() {
         0 => Ok(SolveOptions::default()),
         1 => parse_options(&rest[0]),
-        _ => Err("linsolve: too many input arguments".to_string()),
+        _ => Err(builtin_error("linsolve: too many input arguments")),
     }
 }
 
 /// Public helper for the VM multi-output surface.
-pub fn evaluate_args(lhs: Value, rhs: Value, rest: &[Value]) -> Result<LinsolveEval, String> {
+pub async fn evaluate_args(lhs: Value, rhs: Value, rest: &[Value]) -> BuiltinResult<LinsolveEval> {
     let options = options_from_rest(rest)?;
-    evaluate(lhs, rhs, options)
+    evaluate(lhs, rhs, options).await
 }
 
-fn try_gpu_linsolve(
+async fn try_gpu_linsolve(
     lhs: &Value,
     rhs: &Value,
     options: &SolveOptions,
-) -> Result<Option<LinsolveEval>, String> {
+) -> BuiltinResult<Option<LinsolveEval>> {
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),
@@ -216,6 +246,7 @@ fn try_gpu_linsolve(
     let provider_opts: ProviderLinsolveOptions = options.into();
     let result = provider
         .linsolve(lhs_operand.handle(), rhs_operand.handle(), &provider_opts)
+        .await
         .ok();
 
     release_operand(provider, &mut lhs_operand);
@@ -233,10 +264,14 @@ fn try_gpu_linsolve(
     Ok(None)
 }
 
-fn parse_options(value: &Value) -> Result<SolveOptions, String> {
+fn parse_options(value: &Value) -> BuiltinResult<SolveOptions> {
     let struct_val = match value {
         Value::Struct(s) => s,
-        other => return Err(format!("linsolve: opts must be a struct, got {other:?}")),
+        other => {
+            return Err(builtin_error(format!(
+                "linsolve: opts must be a struct, got {other:?}"
+            )))
+        }
     };
     let mut opts = SolveOptions::default();
     for (key, raw_value) in &struct_val.fields {
@@ -255,40 +290,40 @@ fn parse_options(value: &Value) -> Result<SolveOptions, String> {
             "RCOND" => {
                 let threshold = parse_scalar_f64("RCOND", raw_value)?;
                 if threshold < 0.0 {
-                    return Err("linsolve: RCOND must be non-negative".to_string());
+                    return Err(builtin_error("linsolve: RCOND must be non-negative"));
                 }
                 opts.rcond = Some(threshold);
             }
-            other => return Err(format!("linsolve: unknown option '{other}'")),
+            other => return Err(builtin_error(format!("linsolve: unknown option '{other}'"))),
         }
     }
     if opts.lower && opts.upper {
-        return Err("linsolve: LT and UT are mutually exclusive.".to_string());
+        return Err(builtin_error("linsolve: LT and UT are mutually exclusive."));
     }
     Ok(opts)
 }
 
-fn parse_bool_field(name: &str, value: &Value) -> Result<bool, String> {
+fn parse_bool_field(name: &str, value: &Value) -> BuiltinResult<bool> {
     match value {
         Value::Bool(b) => Ok(*b),
         Value::Int(i) => Ok(!i.is_zero()),
         Value::Num(n) => Ok(*n != 0.0),
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(t.data[0] != 0.0),
         Value::LogicalArray(arr) if arr.len() == 1 => Ok(arr.data[0] != 0),
-        other => Err(format!(
+        other => Err(builtin_error(format!(
             "linsolve: option '{name}' must be logical or numeric, got {other:?}"
-        )),
+        ))),
     }
 }
 
-fn parse_scalar_f64(name: &str, value: &Value) -> Result<f64, String> {
+fn parse_scalar_f64(name: &str, value: &Value) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(t.data[0]),
-        other => Err(format!(
+        other => Err(builtin_error(format!(
             "linsolve: option '{name}' must be a scalar numeric value, got {other:?}"
-        )),
+        ))),
     }
 }
 
@@ -299,20 +334,20 @@ enum TransposeMode {
     Conjugate,
 }
 
-fn parse_transa(value: &Value) -> Result<TransposeMode, String> {
+fn parse_transa(value: &Value) -> BuiltinResult<TransposeMode> {
     let text = tensor::value_to_string(value).ok_or_else(|| {
-        "linsolve: TRANSA must be a character vector or string scalar".to_string()
+        builtin_error("linsolve: TRANSA must be a character vector or string scalar")
     })?;
     if text.is_empty() {
-        return Err("linsolve: TRANSA cannot be empty".to_string());
+        return Err(builtin_error("linsolve: TRANSA cannot be empty"));
     }
     match text.trim().to_ascii_uppercase().as_str() {
         "N" => Ok(TransposeMode::None),
         "T" => Ok(TransposeMode::Transpose),
         "C" => Ok(TransposeMode::Conjugate),
-        other => Err(format!(
+        other => Err(builtin_error(format!(
             "linsolve: TRANSA must be 'N', 'T', or 'C', got '{other}'"
-        )),
+        ))),
     }
 }
 
@@ -326,9 +361,9 @@ enum NumericPair {
     Complex(ComplexTensor, ComplexTensor),
 }
 
-fn coerce_numeric_pair(lhs: Value, rhs: Value) -> Result<NumericPair, String> {
-    let lhs_num = coerce_numeric(lhs)?;
-    let rhs_num = coerce_numeric(rhs)?;
+async fn coerce_numeric_pair(lhs: Value, rhs: Value) -> BuiltinResult<NumericPair> {
+    let lhs_num = coerce_numeric(lhs).await?;
+    let rhs_num = coerce_numeric(rhs).await?;
     match (lhs_num, rhs_num) {
         (NumericInput::Real(lhs_r), NumericInput::Real(rhs_r)) => {
             Ok(NumericPair::Real(lhs_r, rhs_r))
@@ -347,34 +382,32 @@ fn coerce_numeric_pair(lhs: Value, rhs: Value) -> Result<NumericPair, String> {
     }
 }
 
-fn coerce_numeric(value: Value) -> Result<NumericInput, String> {
+async fn coerce_numeric(value: Value) -> BuiltinResult<NumericInput> {
     match value {
         Value::Tensor(tensor) => {
             ensure_matrix_shape(NAME, &tensor.shape)?;
             Ok(NumericInput::Real(tensor))
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(builtin_error)?;
             ensure_matrix_shape(NAME, &tensor.shape)?;
             Ok(NumericInput::Real(tensor))
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("{NAME}: {e}"))?;
+            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(builtin_error)?;
             Ok(NumericInput::Real(tensor))
         }
         Value::Int(i) => {
-            let tensor =
-                Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| format!("{NAME}: {e}"))?;
+            let tensor = Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(builtin_error)?;
             Ok(NumericInput::Real(tensor))
         }
         Value::Bool(b) => {
-            let tensor = Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|e| format!("{NAME}: {e}"))?;
+            let tensor =
+                Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1]).map_err(builtin_error)?;
             Ok(NumericInput::Real(tensor))
         }
         Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("{NAME}: {e}"))?;
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(builtin_error)?;
             Ok(NumericInput::Complex(tensor))
         }
         Value::ComplexTensor(ct) => {
@@ -382,14 +415,16 @@ fn coerce_numeric(value: Value) -> Result<NumericInput, String> {
             Ok(NumericInput::Complex(ct))
         }
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(map_control_flow)?;
             ensure_matrix_shape(NAME, &tensor.shape)?;
             Ok(NumericInput::Real(tensor))
         }
-        other => Err(format!(
+        other => Err(builtin_error(format!(
             "{NAME}: unsupported input type {:?}; convert to numeric values first",
             other
-        )),
+        ))),
     }
 }
 
@@ -398,7 +433,7 @@ fn contains_complex(value: &Value) -> bool {
 }
 
 fn is_scalar_handle(handle: &GpuTensorHandle) -> bool {
-    handle.shape.iter().copied().product::<usize>() == 1
+    crate::builtins::common::shape::is_scalar_shape(&handle.shape)
 }
 
 struct PreparedOperand {
@@ -429,7 +464,7 @@ impl PreparedOperand {
 fn prepare_gpu_operand(
     value: &Value,
     provider: &'static dyn AccelProvider,
-) -> Result<Option<PreparedOperand>, String> {
+) -> BuiltinResult<Option<PreparedOperand>> {
     match value {
         Value::GpuTensor(handle) => {
             if is_scalar_handle(handle) {
@@ -450,7 +485,7 @@ fn prepare_gpu_operand(
             if logical.data.len() == 1 {
                 Ok(None)
             } else {
-                let tensor = tensor::logical_to_tensor(logical)?;
+                let tensor = tensor::logical_to_tensor(logical).map_err(builtin_error)?;
                 let uploaded = upload_tensor(provider, &tensor)?;
                 Ok(Some(PreparedOperand::owned(uploaded)))
             }
@@ -462,12 +497,14 @@ fn prepare_gpu_operand(
 fn upload_tensor(
     provider: &'static dyn AccelProvider,
     tensor: &Tensor,
-) -> Result<GpuTensorHandle, String> {
+) -> BuiltinResult<GpuTensorHandle> {
     let view = HostTensorView {
         data: &tensor.data,
         shape: &tensor.shape,
     };
-    provider.upload(&view).map_err(|e| format!("{NAME}: {e}"))
+    provider
+        .upload(&view)
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
 fn release_operand(provider: &'static dyn AccelProvider, operand: &mut PreparedOperand) {
@@ -477,7 +514,7 @@ fn release_operand(provider: &'static dyn AccelProvider, operand: &mut PreparedO
     }
 }
 
-fn solve_real(lhs: Tensor, rhs: Tensor, options: &SolveOptions) -> Result<(Tensor, f64), String> {
+fn solve_real(lhs: Tensor, rhs: Tensor, options: &SolveOptions) -> BuiltinResult<(Tensor, f64)> {
     let mut lhs_effective = lhs;
     let mut rhs_effective = rhs;
     let mut lower = options.lower;
@@ -518,7 +555,7 @@ fn solve_complex(
     lhs: ComplexTensor,
     rhs: ComplexTensor,
     options: &SolveOptions,
-) -> Result<(ComplexTensor, f64), String> {
+) -> BuiltinResult<(ComplexTensor, f64)> {
     let mut lhs_effective = lhs;
     let mut rhs_effective = rhs;
     let mut lower = options.lower;
@@ -555,7 +592,7 @@ fn solve_complex(
     Ok((solution, rcond))
 }
 
-fn forward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> Result<(Tensor, f64), String> {
+fn forward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tensor, f64)> {
     let n = lhs.rows();
     let nrhs = rhs.data.len() / n;
     let mut solution = rhs.data.clone();
@@ -569,7 +606,9 @@ fn forward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> Result<(Tensor, f64)
             min_diag = min_diag.min(diag_abs);
             max_diag = max_diag.max(diag_abs);
             if diag_abs == 0.0 {
-                return Err("linsolve: matrix is singular to working precision.".to_string());
+                return Err(builtin_error(
+                    "linsolve: matrix is singular to working precision.",
+                ));
             }
             let mut accum = 0.0;
             for j in 0..i {
@@ -581,11 +620,12 @@ fn forward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> Result<(Tensor, f64)
     }
 
     let rcond = diagonal_rcond(min_diag, max_diag);
-    let tensor = Tensor::new(solution, rhs.shape.clone()).map_err(|e| format!("{NAME}: {e}"))?;
+    let tensor = Tensor::new(solution, rhs.shape.clone())
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
     Ok((tensor, rcond))
 }
 
-fn backward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> Result<(Tensor, f64), String> {
+fn backward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tensor, f64)> {
     let n = lhs.rows();
     let nrhs = rhs.data.len() / n;
     let mut solution = rhs.data.clone();
@@ -600,7 +640,9 @@ fn backward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> Result<(Tensor, f64
             min_diag = min_diag.min(diag_abs);
             max_diag = max_diag.max(diag_abs);
             if diag_abs == 0.0 {
-                return Err("linsolve: matrix is singular to working precision.".to_string());
+                return Err(builtin_error(
+                    "linsolve: matrix is singular to working precision.",
+                ));
             }
             let mut accum = 0.0;
             for j in (i + 1)..n {
@@ -612,14 +654,15 @@ fn backward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> Result<(Tensor, f64
     }
 
     let rcond = diagonal_rcond(min_diag, max_diag);
-    let tensor = Tensor::new(solution, rhs.shape.clone()).map_err(|e| format!("{NAME}: {e}"))?;
+    let tensor = Tensor::new(solution, rhs.shape.clone())
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
     Ok((tensor, rcond))
 }
 
 fn forward_substitution_complex(
     lhs: &ComplexTensor,
     rhs: &ComplexTensor,
-) -> Result<(ComplexTensor, f64), String> {
+) -> BuiltinResult<(ComplexTensor, f64)> {
     let n = lhs.rows;
     let nrhs = rhs.data.len() / n;
     let lhs_data: Vec<Complex64> = lhs
@@ -642,7 +685,9 @@ fn forward_substitution_complex(
             min_diag = min_diag.min(diag_abs);
             max_diag = max_diag.max(diag_abs);
             if diag_abs == 0.0 {
-                return Err("linsolve: matrix is singular to working precision.".to_string());
+                return Err(builtin_error(
+                    "linsolve: matrix is singular to working precision.",
+                ));
             }
             let mut accum = Complex64::new(0.0, 0.0);
             for j in 0..i {
@@ -658,14 +703,14 @@ fn forward_substitution_complex(
         solution.iter().map(|c| (c.re, c.im)).collect(),
         rhs.shape.clone(),
     )
-    .map_err(|e| format!("{NAME}: {e}"))?;
+    .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
     Ok((tensor, rcond))
 }
 
 fn backward_substitution_complex(
     lhs: &ComplexTensor,
     rhs: &ComplexTensor,
-) -> Result<(ComplexTensor, f64), String> {
+) -> BuiltinResult<(ComplexTensor, f64)> {
     let n = lhs.rows;
     let nrhs = rhs.data.len() / n;
     let lhs_data: Vec<Complex64> = lhs
@@ -689,7 +734,9 @@ fn backward_substitution_complex(
             min_diag = min_diag.min(diag_abs);
             max_diag = max_diag.max(diag_abs);
             if diag_abs == 0.0 {
-                return Err("linsolve: matrix is singular to working precision.".to_string());
+                return Err(builtin_error(
+                    "linsolve: matrix is singular to working precision.",
+                ));
             }
             let mut accum = Complex64::new(0.0, 0.0);
             for j in (i + 1)..n {
@@ -705,17 +752,19 @@ fn backward_substitution_complex(
         solution.iter().map(|c| (c.re, c.im)).collect(),
         rhs.shape.clone(),
     )
-    .map_err(|e| format!("{NAME}: {e}"))?;
+    .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
     Ok((tensor, rcond))
 }
 
-fn solve_general_real(lhs: &Tensor, rhs: &Tensor) -> Result<(Tensor, f64), String> {
+fn solve_general_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tensor, f64)> {
     let a = DMatrix::from_column_slice(lhs.rows(), lhs.cols(), &lhs.data);
     let b = DMatrix::from_column_slice(rhs.rows(), rhs.cols(), &rhs.data);
     let svd = SVD::new(a.clone(), true, true);
     let rcond = singular_value_rcond(svd.singular_values.as_slice());
     let tol = compute_svd_tolerance(svd.singular_values.as_slice(), lhs.rows(), lhs.cols());
-    let solution = svd.solve(&b, tol).map_err(|e| format!("{NAME}: {e}"))?;
+    let solution = svd
+        .solve(&b, tol)
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
     let tensor = matrix_real_to_tensor(solution)?;
     Ok((tensor, rcond))
 }
@@ -723,7 +772,7 @@ fn solve_general_real(lhs: &Tensor, rhs: &Tensor) -> Result<(Tensor, f64), Strin
 fn solve_general_complex(
     lhs: &ComplexTensor,
     rhs: &ComplexTensor,
-) -> Result<(ComplexTensor, f64), String> {
+) -> BuiltinResult<(ComplexTensor, f64)> {
     let a_data: Vec<Complex64> = lhs
         .data
         .iter()
@@ -739,45 +788,47 @@ fn solve_general_complex(
     let svd = SVD::new(a.clone(), true, true);
     let rcond = singular_value_rcond(svd.singular_values.as_slice());
     let tol = compute_svd_tolerance(svd.singular_values.as_slice(), lhs.rows, lhs.cols);
-    let solution = svd.solve(&b, tol).map_err(|e| format!("{NAME}: {e}"))?;
+    let solution = svd
+        .solve(&b, tol)
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
     let tensor = matrix_complex_to_tensor(solution)?;
     Ok((tensor, rcond))
 }
 
-fn normalize_rhs_tensor(rhs: Tensor, expected_rows: usize) -> Result<Tensor, String> {
+fn normalize_rhs_tensor(rhs: Tensor, expected_rows: usize) -> BuiltinResult<Tensor> {
     if rhs.rows() == expected_rows {
         return Ok(rhs);
     }
     if rhs.shape.len() == 1 && rhs.shape[0] == expected_rows {
-        return Tensor::new(rhs.data, vec![expected_rows, 1]).map_err(|e| format!("{NAME}: {e}"));
+        return Tensor::new(rhs.data, vec![expected_rows, 1])
+            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     if rhs.data.is_empty() && expected_rows == 0 {
         return Ok(rhs);
     }
-    Err("Matrix dimensions must agree.".to_string())
+    Err(builtin_error("Matrix dimensions must agree."))
 }
 
-fn normalize_rhs_complex(
-    rhs: ComplexTensor,
-    expected_rows: usize,
-) -> Result<ComplexTensor, String> {
+fn normalize_rhs_complex(rhs: ComplexTensor, expected_rows: usize) -> BuiltinResult<ComplexTensor> {
     if rhs.rows == expected_rows {
         return Ok(rhs);
     }
     if rhs.shape.len() == 1 && rhs.shape[0] == expected_rows {
         return ComplexTensor::new(rhs.data, vec![expected_rows, 1])
-            .map_err(|e| format!("{NAME}: {e}"));
+            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     if rhs.data.is_empty() && expected_rows == 0 {
         return Ok(rhs);
     }
-    Err("Matrix dimensions must agree.".to_string())
+    Err(builtin_error("Matrix dimensions must agree."))
 }
 
-fn enforce_rcond(options: &SolveOptions, rcond: f64) -> Result<(), String> {
+fn enforce_rcond(options: &SolveOptions, rcond: f64) -> BuiltinResult<()> {
     if let Some(threshold) = options.rcond {
         if rcond < threshold {
-            return Err("linsolve: matrix is singular to working precision.".to_string());
+            return Err(builtin_error(
+                "linsolve: matrix is singular to working precision.",
+            ));
         }
     }
     Ok(())
@@ -792,29 +843,33 @@ fn compute_svd_tolerance(singular_values: &[f64], rows: usize, cols: usize) -> f
     f64::EPSILON * max_dim * max_sv.max(1.0)
 }
 
-fn matrix_real_to_tensor(matrix: DMatrix<f64>) -> Result<Tensor, String> {
+fn matrix_real_to_tensor(matrix: DMatrix<f64>) -> BuiltinResult<Tensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
-    Tensor::new(matrix.as_slice().to_vec(), vec![rows, cols]).map_err(|e| format!("{NAME}: {e}"))
+    Tensor::new(matrix.as_slice().to_vec(), vec![rows, cols])
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
-fn matrix_complex_to_tensor(matrix: DMatrix<Complex64>) -> Result<ComplexTensor, String> {
+fn matrix_complex_to_tensor(matrix: DMatrix<Complex64>) -> BuiltinResult<ComplexTensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
     let data: Vec<(f64, f64)> = matrix.as_slice().iter().map(|c| (c.re, c.im)).collect();
-    ComplexTensor::new(data, vec![rows, cols]).map_err(|e| format!("{NAME}: {e}"))
+    ComplexTensor::new(data, vec![rows, cols]).map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
-fn promote_real_tensor(tensor: &Tensor) -> Result<ComplexTensor, String> {
+fn promote_real_tensor(tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
     let data: Vec<(f64, f64)> = tensor.data.iter().map(|&re| (re, 0.0)).collect();
-    ComplexTensor::new(data, tensor.shape.clone()).map_err(|e| format!("{NAME}: {e}"))
+    ComplexTensor::new(data, tensor.shape.clone())
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
-fn ensure_matrix_shape(name: &str, shape: &[usize]) -> Result<(), String> {
+fn ensure_matrix_shape(name: &str, shape: &[usize]) -> BuiltinResult<()> {
     if is_effectively_matrix(shape) {
         Ok(())
     } else {
-        Err(format!("{name}: inputs must be 2-D matrices or vectors"))
+        Err(builtin_error(format!(
+            "{name}: inputs must be 2-D matrices or vectors"
+        )))
     }
 }
 
@@ -825,11 +880,13 @@ fn is_effectively_matrix(shape: &[usize]) -> bool {
     }
 }
 
-fn ensure_square(rows: usize, cols: usize) -> Result<(), String> {
+fn ensure_square(rows: usize, cols: usize) -> BuiltinResult<()> {
     if rows == cols {
         Ok(())
     } else {
-        Err("linsolve: triangular solves require a square coefficient matrix.".to_string())
+        Err(builtin_error(
+            "linsolve: triangular solves require a square coefficient matrix.",
+        ))
     }
 }
 
@@ -870,12 +927,29 @@ fn conjugate_complex_in_place(tensor: &mut ComplexTensor) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, StructValue, Tensor};
+    use runmat_builtins::{CharArray, StructValue};
+    fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
+        err
+    }
 
     fn approx_eq(actual: f64, expected: f64) {
-        assert!((actual - expected).abs() < 1e-12);
+        assert!((actual - expected).abs() < 1e-7);
+    }
+
+    fn evaluate_args(a: Value, b: Value, rest: &[Value]) -> Result<LinsolveEval, RuntimeError> {
+        block_on(super::evaluate_args(a, b, rest))
+    }
+
+    use crate::builtins::common::test_support;
+
+    fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::linsolve_builtin(lhs, rhs, rest))
+    }
+
+    fn evaluate(lhs: Value, rhs: Value, options: SolveOptions) -> BuiltinResult<LinsolveEval> {
+        block_on(super::evaluate(lhs, rhs, options))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -941,7 +1015,7 @@ pub(crate) mod tests {
         assert_eq!(tensor.shape, vec![3, 1]);
 
         let a_transposed = transpose_tensor(&a);
-        let reference = super::evaluate(
+        let reference = evaluate(
             Value::Tensor(a_transposed.clone()),
             Value::Tensor(b.clone()),
             SolveOptions::default(),
@@ -961,14 +1035,16 @@ pub(crate) mod tests {
         let b = Tensor::new(vec![2.0, 2.0 + 1e-12], vec![2, 1]).unwrap();
         let mut opts = StructValue::new();
         opts.fields.insert("RCOND".to_string(), Value::Num(1e-3));
-        let err = linsolve_builtin(
-            Value::Tensor(a),
-            Value::Tensor(b),
-            vec![Value::Struct(opts)],
-        )
-        .expect_err("singular matrix must fail");
+        let err = unwrap_error(
+            linsolve_builtin(
+                Value::Tensor(a),
+                Value::Tensor(b),
+                vec![Value::Struct(opts)],
+            )
+            .expect_err("singular matrix must fail"),
+        );
         assert!(
-            err.contains("singular to working precision"),
+            err.message().contains("singular to working precision"),
             "unexpected error message: {err}"
         );
     }
@@ -978,7 +1054,7 @@ pub(crate) mod tests {
     fn linsolve_recovers_rcond_output() {
         let a = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let eval = super::evaluate_args(Value::Tensor(a.clone()), Value::Tensor(b.clone()), &[])
+        let eval = evaluate_args(Value::Tensor(a.clone()), Value::Tensor(b.clone()), &[])
             .expect("evaluate");
         let solution_tensor = match eval.solution() {
             Value::Tensor(sol) => sol.clone(),

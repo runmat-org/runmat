@@ -1,6 +1,7 @@
 use once_cell::sync::OnceCell;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tracing::subscriber::DefaultGuard;
 use tracing::Subscriber;
@@ -10,9 +11,15 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
 
 #[cfg(not(target_arch = "wasm32"))]
+use tracing_subscriber::reload;
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::SystemTime;
 
+const DEFAULT_LOG_FILTER: &str = "info";
+
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RuntimeLogRecord {
     pub ts: String,
     pub level: String,
@@ -27,6 +34,7 @@ pub struct RuntimeLogRecord {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TraceEvent {
     pub name: String,
     pub cat: String,
@@ -43,6 +51,8 @@ pub struct TraceEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub span_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_span_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub args: Option<JsonValue>,
 }
 
@@ -52,6 +62,11 @@ type TraceHook = Arc<dyn Fn(&[TraceEvent]) + Send + Sync>;
 static LOG_HOOK: OnceCell<LogHook> = OnceCell::new();
 static TRACE_HOOK: OnceCell<TraceHook> = OnceCell::new();
 static FALLBACK_TRACE_ID: OnceCell<String> = OnceCell::new();
+static EVENT_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
+#[cfg(not(target_arch = "wasm32"))]
+static LOG_FILTER_HANDLE: OnceCell<
+    reload::Handle<EnvFilter, tracing_subscriber::registry::Registry>,
+> = OnceCell::new();
 
 pub struct LoggingGuard {
     _guard: Option<DefaultGuard>,
@@ -62,6 +77,7 @@ pub struct LoggingOptions {
     pub enable_otlp: bool,
     pub enable_traces: bool,
     pub pid: i64,
+    pub default_filter: Option<String>,
 }
 
 pub fn set_runtime_log_hook<F>(hook: F)
@@ -82,10 +98,12 @@ pub fn init_logging(opts: LoggingOptions) -> LoggingGuard {
     // Install LogTracer so log:: macros flow into tracing
     let _ = LogTracer::init();
 
+    let fallback_filter = opts.default_filter.as_deref().unwrap_or(DEFAULT_LOG_FILTER);
+
     let env_filter = EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_from_env("RUNMAT_LOG"))
-        .or_else(|_| EnvFilter::try_new("info"))
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+        .or_else(|_| EnvFilter::try_new(fallback_filter))
+        .unwrap_or_else(|_| EnvFilter::new(fallback_filter));
 
     let build_subscriber = || {
         let bridge_layer = LogBridgeLayer;
@@ -94,10 +112,26 @@ pub fn init_logging(opts: LoggingOptions) -> LoggingGuard {
         } else {
             None
         };
-        tracing_subscriber::registry()
-            .with(env_filter.clone())
-            .with(bridge_layer)
-            .with(trace_layer.clone())
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (filter_layer, filter_handle) = reload::Layer::new(env_filter.clone());
+            if LOG_FILTER_HANDLE.get().is_none() {
+                let _ = LOG_FILTER_HANDLE.set(filter_handle.clone());
+            }
+            tracing_subscriber::registry()
+                .with(filter_layer)
+                .with(bridge_layer)
+                .with(trace_layer.clone())
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            tracing_subscriber::registry()
+                .with(env_filter.clone())
+                .with(bridge_layer)
+                .with(trace_layer.clone())
+        }
     };
 
     let subscriber = build_subscriber();
@@ -114,6 +148,20 @@ pub fn init_logging(opts: LoggingOptions) -> LoggingGuard {
     };
 
     LoggingGuard { _guard: guard }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn update_log_filter(spec: &str) -> Result<(), String> {
+    let handle = LOG_FILTER_HANDLE
+        .get()
+        .ok_or_else(|| "log filter handle not initialised".to_string())?;
+    let filter = EnvFilter::try_new(spec).map_err(|err| err.to_string())?;
+    handle.reload(filter).map_err(|err| err.to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn update_log_filter(_spec: &str) -> Result<(), String> {
+    Err("runtime log filtering is not yet supported in wasm builds".to_string())
 }
 
 struct LogBridgeLayer;
@@ -198,7 +246,8 @@ where
         let ts = now_timestamp_micros();
 
         let trace_id = current_trace_id();
-        let span_id = current_span_id();
+        let parent_span_id = current_span_id();
+        let span_id = Some(next_event_span_id());
 
         let mut visitor = JsonVisitor::default();
         event.record(&mut visitor);
@@ -220,6 +269,7 @@ where
             tid: None,
             trace_id,
             span_id,
+            parent_span_id,
             args,
         };
 
@@ -257,7 +307,10 @@ where
     let ts = now_timestamp_micros();
 
     let trace_id = current_trace_id();
-    let span_id = current_span_id();
+    let span_id = Some(span.id().clone().into_u64().to_string());
+    let parent_span_id = span
+        .parent()
+        .map(|parent| parent.id().clone().into_u64().to_string());
 
     let ev = TraceEvent {
         name: meta.name().to_string(),
@@ -269,6 +322,7 @@ where
         tid: None,
         trace_id,
         span_id,
+        parent_span_id,
         args: None,
     };
     hook(&[ev]);
@@ -325,6 +379,11 @@ fn fallback_trace_id() -> String {
             }
         })
         .clone()
+}
+
+fn next_event_span_id() -> String {
+    let id = EVENT_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("ev-{id}")
 }
 
 #[derive(Default)]
@@ -410,6 +469,7 @@ mod tests {
             enable_otlp: false,
             enable_traces: false,
             pid: 1,
+            default_filter: None,
         });
 
         info!("hello world");
@@ -433,6 +493,7 @@ mod tests {
             enable_otlp: false,
             enable_traces: true,
             pid: 1,
+            default_filter: None,
         });
 
         let span = tracing::info_span!("test_span");

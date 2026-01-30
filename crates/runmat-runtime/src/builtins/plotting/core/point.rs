@@ -1,10 +1,14 @@
+use futures::executor::block_on;
 use glam::Vec4;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 use runmat_plot::plots::surface::ColorMap;
 use std::collections::VecDeque;
 
-use crate::gather_if_needed;
+use crate::builtins::common::map_control_flow_with_builtin;
+use crate::{gather_if_needed_async, BuiltinResult};
+
+use super::plotting_error;
 
 use super::style::{
     parse_color_value, parse_line_style_args, value_as_f64, value_as_string, LineStyleParseOptions,
@@ -35,7 +39,7 @@ pub enum PointColorArg {
 }
 
 impl PointArgs {
-    pub fn parse(rest: Vec<Value>, opts: LineStyleParseOptions) -> Result<Self, String> {
+    pub fn parse(rest: Vec<Value>, opts: LineStyleParseOptions) -> BuiltinResult<Self> {
         let mut queue: VecDeque<Value> = VecDeque::from(rest);
         let mut size = PointSizeArg::Default;
         if queue.front().is_some_and(is_numeric_candidate) {
@@ -73,20 +77,22 @@ impl PointArgs {
 }
 
 impl PointSizeArg {
-    pub fn from_value(value: Value, builtin: &str) -> Result<Self, String> {
+    pub fn from_value(value: Value, builtin: &'static str) -> BuiltinResult<Self> {
         if value_is_empty(&value) {
             return Ok(Self::Default);
         }
         if is_scalar_numeric(&value) {
-            let scalar = extract_scalar_f32(&value)
-                .ok_or_else(|| format!("{builtin}: marker sizes must be numeric"))?;
+            let scalar = extract_scalar_f32(&value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: marker sizes must be numeric"))
+            })?;
             return Ok(Self::Scalar(scalar.max(0.0)));
         }
         if matches!(value, Value::Tensor(_) | Value::GpuTensor(_)) {
             return Ok(Self::Values(value));
         }
-        Err(format!(
-            "{builtin}: marker sizes must be numeric vectors or scalars"
+        Err(plotting_error(
+            builtin,
+            format!("{builtin}: marker sizes must be numeric vectors or scalars"),
         ))
     }
 
@@ -103,7 +109,7 @@ impl PointSizeArg {
 }
 
 impl PointColorArg {
-    pub fn from_value(value: Value, opts: &LineStyleParseOptions) -> Result<Self, String> {
+    pub fn from_value(value: Value, opts: &LineStyleParseOptions) -> BuiltinResult<Self> {
         if value_is_empty(&value) {
             return Ok(Self::Default);
         }
@@ -137,9 +143,12 @@ impl PointColorArg {
                 }
             }
             Value::Num(_) | Value::Int(_) | Value::Bool(_) => Ok(Self::ScalarValues(value)),
-            _ => Err(format!(
-                "{}: color arguments must be numeric arrays or color strings",
-                opts.builtin_name
+            _ => Err(plotting_error(
+                opts.builtin_name,
+                format!(
+                    "{}: color arguments must be numeric arrays or color strings",
+                    opts.builtin_name
+                ),
             )),
         }
     }
@@ -223,33 +232,51 @@ fn total_len(shape: &[usize]) -> usize {
     }
 }
 
-pub(crate) fn tensor_from_value(value: &Value, context: &str) -> Result<Tensor, String> {
+pub(crate) async fn tensor_from_value_async(
+    value: &Value,
+    context: &'static str,
+) -> BuiltinResult<Tensor> {
     match value {
         Value::Tensor(tensor) => Ok(tensor.clone()),
         Value::GpuTensor(handle) => {
             let tmp = Value::GpuTensor(handle.clone());
-            let gathered = gather_if_needed(&tmp)?;
-            Tensor::try_from(&gathered).map_err(|e| format!("{context}: {e}"))
+            let gathered = gather_if_needed_async(&tmp)
+                .await
+                .map_err(|flow| map_control_flow_with_builtin(flow, context))?;
+            Tensor::try_from(&gathered)
+                .map_err(|e| plotting_error(context, format!("{context}: {e}")))
         }
-        _ => Tensor::try_from(value).map_err(|e| format!("{context}: {e}")),
+        _ => {
+            Tensor::try_from(value).map_err(|e| plotting_error(context, format!("{context}: {e}")))
+        }
     }
+}
+
+pub(crate) fn tensor_from_value(value: &Value, context: &'static str) -> BuiltinResult<Tensor> {
+    block_on(tensor_from_value_async(value, context))
 }
 
 pub(crate) fn convert_size_vector(
     value: &Value,
     point_count: usize,
-    context: &str,
-) -> Result<Vec<f32>, String> {
+    context: &'static str,
+) -> BuiltinResult<Vec<f32>> {
     let mut tensor = tensor_from_value(value, context)?;
     if tensor.data.is_empty() {
-        return Err(format!("{context}: marker size array cannot be empty"));
+        return Err(plotting_error(
+            context,
+            format!("{context}: marker size array cannot be empty"),
+        ));
     }
     if tensor.data.len() == 1 && point_count > 1 {
         tensor.data = vec![tensor.data[0]; point_count];
     } else if point_count > 0 && tensor.data.len() != point_count {
-        return Err(format!(
-            "{context}: marker size array must have {} elements or be scalar",
-            point_count
+        return Err(plotting_error(
+            context,
+            format!(
+                "{context}: marker size array must have {} elements or be scalar",
+                point_count
+            ),
         ));
     }
     Ok(tensor.data.into_iter().map(|v| v.max(0.1) as f32).collect())
@@ -258,18 +285,24 @@ pub(crate) fn convert_size_vector(
 pub(crate) fn convert_scalar_color_values(
     value: &Value,
     point_count: usize,
-    context: &str,
-) -> Result<Vec<f64>, String> {
+    context: &'static str,
+) -> BuiltinResult<Vec<f64>> {
     let mut tensor = tensor_from_value(value, context)?;
     if tensor.data.is_empty() {
-        return Err(format!("{context}: color array cannot be empty"));
+        return Err(plotting_error(
+            context,
+            format!("{context}: color array cannot be empty"),
+        ));
     }
     if tensor.data.len() == 1 && point_count > 1 {
         tensor.data = vec![tensor.data[0]; point_count];
     } else if point_count > 0 && tensor.data.len() != point_count {
-        return Err(format!(
-            "{context}: color array must have {} elements or be scalar",
-            point_count
+        return Err(plotting_error(
+            context,
+            format!(
+                "{context}: color array must have {} elements or be scalar",
+                point_count
+            ),
         ));
     }
     Ok(tensor.data)
@@ -278,23 +311,30 @@ pub(crate) fn convert_scalar_color_values(
 pub(crate) fn convert_rgb_color_matrix(
     value: &Value,
     point_count: usize,
-    context: &str,
-) -> Result<Vec<Vec4>, String> {
+    context: &'static str,
+) -> BuiltinResult<Vec<Vec4>> {
     let tensor = tensor_from_value(value, context)?;
     if tensor.cols != 3 && tensor.cols != 4 {
-        return Err(format!(
-            "{context}: color matrices must have three (RGB) or four (RGBA) columns"
+        return Err(plotting_error(
+            context,
+            format!("{context}: color matrices must have three (RGB) or four (RGBA) columns"),
         ));
     }
     if tensor.rows == 0 {
-        return Err(format!("{context}: RGB color matrices cannot be empty"));
+        return Err(plotting_error(
+            context,
+            format!("{context}: RGB color matrices cannot be empty"),
+        ));
     }
 
     let rows = tensor.rows;
     if point_count > 0 && rows != point_count && rows != 1 {
-        return Err(format!(
-            "{context}: RGB color matrix must have {} rows or be a single color",
-            point_count
+        return Err(plotting_error(
+            context,
+            format!(
+                "{context}: RGB color matrix must have {} rows or be a single color",
+                point_count
+            ),
         ));
     }
 
@@ -378,12 +418,15 @@ pub fn map_scalar_values_to_colors(values: &[f64], colormap: ColorMap) -> (Vec<V
 pub fn validate_gpu_vector_length(
     handle: &GpuTensorHandle,
     point_count: usize,
-    context: &str,
-) -> Result<(), String> {
+    context: &'static str,
+) -> BuiltinResult<()> {
     let len = total_len(handle.shape.as_slice());
     if len != point_count {
-        return Err(format!(
-            "{context}: gpuArray inputs must contain exactly {point_count} elements (got {len})"
+        return Err(plotting_error(
+            context,
+            format!(
+                "{context}: gpuArray inputs must contain exactly {point_count} elements (got {len})"
+            ),
         ));
     }
     Ok(())
@@ -392,11 +435,12 @@ pub fn validate_gpu_vector_length(
 pub fn validate_gpu_color_matrix(
     handle: &GpuTensorHandle,
     point_count: usize,
-    context: &str,
-) -> Result<PointColorComponents, String> {
+    context: &'static str,
+) -> BuiltinResult<PointColorComponents> {
     if handle.shape.len() < 2 {
-        return Err(format!(
-            "{context}: color gpuArray inputs must be at least 2-D"
+        return Err(plotting_error(
+            context,
+            format!("{context}: color gpuArray inputs must be at least 2-D"),
         ));
     }
     let cols = handle.shape.last().copied().unwrap_or_default();
@@ -404,8 +448,11 @@ pub fn validate_gpu_color_matrix(
         3 => PointColorComponents::Rgb,
         4 => PointColorComponents::Rgba,
         _ => {
-            return Err(format!(
-                "{context}: color gpuArray inputs must have three (RGB) or four (RGBA) columns"
+            return Err(plotting_error(
+                context,
+                format!(
+                    "{context}: color gpuArray inputs must have three (RGB) or four (RGBA) columns"
+                ),
             ))
         }
     };
@@ -413,8 +460,9 @@ pub fn validate_gpu_color_matrix(
         .iter()
         .product::<usize>();
     if rows != point_count {
-        return Err(format!(
-            "{context}: color gpuArray inputs must have {point_count} rows (got {rows})"
+        return Err(plotting_error(
+            context,
+            format!("{context}: color gpuArray inputs must have {point_count} rows (got {rows})"),
         ));
     }
     Ok(components)

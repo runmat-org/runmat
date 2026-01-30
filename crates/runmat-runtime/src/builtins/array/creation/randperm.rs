@@ -1,9 +1,10 @@
 //! MATLAB-compatible `randperm` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{IntValue, Tensor, Value};
+use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::build_runtime_error;
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
@@ -33,6 +34,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses provider random_permutation(_like) hooks (WGPU implements a native kernel); falls back to host generation + upload when unavailable.",
 };
 
+fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("randperm")
+        .build()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randperm")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "randperm",
@@ -52,8 +59,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::randperm"
 )]
-fn randperm_builtin(args: Vec<Value>) -> Result<Value, String> {
-    let parsed = ParsedRandPerm::parse(args)?;
+async fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let parsed = ParsedRandPerm::parse(args).await?;
     build_output(parsed)
 }
 
@@ -70,16 +77,19 @@ enum OutputTemplate {
 }
 
 impl ParsedRandPerm {
-    fn parse(args: Vec<Value>) -> Result<Self, String> {
+    async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
         if args.is_empty() {
-            return Err("randperm: requires at least one input argument".to_string());
+            return Err(builtin_error(
+                "randperm: requires at least one input argument",
+            ));
         }
 
         let n = parse_size_argument(
             &args[0],
             true,
             "randperm: N must be a non-negative integer (and <= 2^53)",
-        )?;
+        )
+        .await?;
         if n == 0 && args.len() == 1 {
             return Ok(Self {
                 n,
@@ -98,12 +108,12 @@ impl ParsedRandPerm {
                 match keyword.as_str() {
                     "like" => {
                         if matches!(template, OutputTemplate::Like(_)) {
-                            return Err(
-                                "randperm: duplicate 'like' prototype specified".to_string()
-                            );
+                            return Err(builtin_error(
+                                "randperm: duplicate 'like' prototype specified",
+                            ));
                         }
                         let Some(proto) = args.get(idx + 1).cloned() else {
-                            return Err("randperm: expected prototype after 'like'".to_string());
+                            return Err(builtin_error("randperm: expected prototype after 'like'"));
                         };
                         template = OutputTemplate::Like(proto);
                         idx += 2;
@@ -111,81 +121,84 @@ impl ParsedRandPerm {
                     }
                     "double" => {
                         if matches!(template, OutputTemplate::Like(_)) {
-                            return Err(
-                                "randperm: cannot combine 'double' with a 'like' prototype"
-                                    .to_string(),
-                            );
+                            return Err(builtin_error(
+                                "randperm: cannot combine 'double' with a 'like' prototype",
+                            ));
                         }
                         idx += 1;
                         continue;
                     }
                     "single" => {
-                        return Err(
-                            "randperm: single precision output is not implemented yet".to_string()
-                        );
+                        return Err(builtin_error(
+                            "randperm: single precision output is not implemented yet",
+                        ));
                     }
                     other => {
-                        return Err(format!("randperm: unrecognised option '{other}'"));
+                        return Err(builtin_error(format!(
+                            "randperm: unrecognised option '{other}'"
+                        )));
                     }
                 }
             }
 
             if k.is_none() {
-                k = Some(parse_size_argument(
-                    &arg,
-                    true,
-                    "randperm: K must be a non-negative integer (and <= N)",
-                )?);
+                k = Some(
+                    parse_size_argument(
+                        &arg,
+                        true,
+                        "randperm: K must be a non-negative integer (and <= N)",
+                    )
+                    .await?,
+                );
                 idx += 1;
                 continue;
             }
 
-            return Err("randperm: too many input arguments".to_string());
+            return Err(builtin_error("randperm: too many input arguments"));
         }
 
         let k = k.unwrap_or(n);
 
         if k > n {
-            return Err("randperm: K must satisfy 0 <= K <= N".to_string());
+            return Err(builtin_error("randperm: K must satisfy 0 <= K <= N"));
         }
 
         Ok(Self { n, k, template })
     }
 }
 
-fn build_output(parsed: ParsedRandPerm) -> Result<Value, String> {
+fn build_output(parsed: ParsedRandPerm) -> crate::BuiltinResult<Value> {
     match parsed.template {
         OutputTemplate::Double => randperm_double(parsed.n, parsed.k),
         OutputTemplate::Like(proto) => randperm_like(&proto, parsed.n, parsed.k),
     }
 }
 
-fn randperm_double(n: usize, k: usize) -> Result<Value, String> {
+fn randperm_double(n: usize, k: usize) -> crate::BuiltinResult<Value> {
     let tensor = randperm_tensor(n, k)?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn randperm_like(proto: &Value, n: usize, k: usize) -> Result<Value, String> {
+fn randperm_like(proto: &Value, n: usize, k: usize) -> crate::BuiltinResult<Value> {
     match proto {
         Value::GpuTensor(handle) => randperm_gpu(handle, n, k),
         Value::Tensor(_) | Value::Num(_) | Value::Int(_) => randperm_double(n, k),
-        Value::LogicalArray(_) => Err(
-            "randperm: logical prototypes cannot represent permutation values (requires numeric output)"
-                .to_string(),
-        ),
+        Value::LogicalArray(_) => Err(builtin_error(
+            "randperm: logical prototypes cannot represent permutation values (requires numeric output)",
+        )),
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err("randperm: complex prototypes are not supported".to_string())
+            Err(builtin_error("randperm: complex prototypes are not supported"))
         }
-        Value::Bool(_) => Err("randperm: prototypes must be numeric".to_string()),
+        Value::Bool(_) => Err(builtin_error("randperm: prototypes must be numeric")),
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
-            Err("randperm: prototypes must be numeric".to_string())
+            Err(builtin_error("randperm: prototypes must be numeric"))
         }
-        Value::Cell(_) => Err("randperm: cell prototypes are not supported".to_string()),
-        other => Err(format!("randperm: unsupported prototype {other:?}")),
+        Value::Cell(_) => Err(builtin_error("randperm: cell prototypes are not supported")),
+        other => Err(builtin_error(format!("randperm: unsupported prototype {other:?}"))),
     }
 }
 
-fn randperm_gpu(handle: &GpuTensorHandle, n: usize, k: usize) -> Result<Value, String> {
+fn randperm_gpu(handle: &GpuTensorHandle, n: usize, k: usize) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(device) = provider.random_permutation_like(handle, n, k) {
             return Ok(Value::GpuTensor(device));
@@ -205,7 +218,7 @@ fn randperm_gpu(handle: &GpuTensorHandle, n: usize, k: usize) -> Result<Value, S
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn randperm_tensor(n: usize, k: usize) -> Result<Tensor, String> {
+fn randperm_tensor(n: usize, k: usize) -> crate::BuiltinResult<Tensor> {
     let mut values: Vec<f64> = if n == 0 {
         Vec::new()
     } else {
@@ -235,78 +248,77 @@ fn randperm_tensor(n: usize, k: usize) -> Result<Tensor, String> {
         values.truncate(k);
     }
 
-    Tensor::new(values, vec![1, k]).map_err(|e| format!("randperm: {e}"))
+    Tensor::new(values, vec![1, k]).map_err(|e| builtin_error(format!("randperm: {e}")))
 }
 
-fn parse_size_argument(value: &Value, allow_zero: bool, message: &str) -> Result<usize, String> {
-    match value {
-        Value::Int(i) => parse_intvalue(i, allow_zero, message),
-        Value::Num(n) => parse_numeric(*n, allow_zero, message),
-        Value::Tensor(t) => {
-            if t.data.len() != 1 {
-                return Err("randperm: size arguments must be scalar".to_string());
-            }
-            parse_numeric(t.data[0], allow_zero, message)
-        }
-        other => Err(format!(
-            "randperm: size arguments must be numeric scalars, got {other:?}"
-        )),
-    }
-}
-
-fn parse_intvalue(value: &IntValue, allow_zero: bool, message: &str) -> Result<usize, String> {
-    let raw = match value {
-        IntValue::I8(v) => *v as i128,
-        IntValue::I16(v) => *v as i128,
-        IntValue::I32(v) => *v as i128,
-        IntValue::I64(v) => *v as i128,
-        IntValue::U8(v) => *v as i128,
-        IntValue::U16(v) => *v as i128,
-        IntValue::U32(v) => *v as i128,
-        IntValue::U64(v) => *v as i128,
+async fn parse_size_argument(
+    value: &Value,
+    allow_zero: bool,
+    message: &str,
+) -> crate::BuiltinResult<usize> {
+    let is_vector = match value {
+        Value::Tensor(t) => t.data.len() != 1,
+        Value::GpuTensor(handle) => tensor::element_count(&handle.shape) != 1,
+        _ => false,
     };
-    if raw < 0 {
-        return Err(message.to_string());
+
+    if let Ok(Some(dim)) = tensor::dimension_from_value_async(value, "randperm", allow_zero).await {
+        return validate_size_argument(dim, allow_zero, message);
     }
-    if !allow_zero && raw == 0 {
-        return Err(message.to_string());
+
+    match tensor::dims_from_value_async(value).await {
+        Ok(Some(dims)) => {
+            if dims.len() != 1 {
+                return Err(builtin_error("randperm: size arguments must be scalar"));
+            }
+            validate_size_argument(dims[0], allow_zero, message)
+        }
+        Ok(None) => {
+            if is_vector {
+                Err(builtin_error("randperm: size arguments must be scalar"))
+            } else {
+                Err(builtin_error(format!(
+                    "randperm: size arguments must be numeric scalars, got {value:?}"
+                )))
+            }
+        }
+        Err(_) => {
+            if is_vector {
+                Err(builtin_error("randperm: size arguments must be scalar"))
+            } else {
+                Err(builtin_error(message))
+            }
+        }
     }
-    if raw as u128 > MAX_SAFE_INTEGER as u128 {
-        return Err("randperm: values larger than 2^53 are not supported".to_string());
-    }
-    if raw > usize::MAX as i128 {
-        return Err("randperm: input exceeds platform limits".to_string());
-    }
-    Ok(raw as usize)
 }
 
-fn parse_numeric(value: f64, allow_zero: bool, message: &str) -> Result<usize, String> {
-    if !value.is_finite() {
-        return Err(message.to_string());
+fn validate_size_argument(
+    value: usize,
+    allow_zero: bool,
+    message: &str,
+) -> crate::BuiltinResult<usize> {
+    if !allow_zero && value == 0 {
+        return Err(builtin_error(message));
     }
-    let rounded = value.round();
-    if (rounded - value).abs() > f64::EPSILON {
-        return Err(message.to_string());
+    if value as u64 > MAX_SAFE_INTEGER {
+        return Err(builtin_error(
+            "randperm: values larger than 2^53 are not supported",
+        ));
     }
-    if rounded < 0.0 {
-        return Err(message.to_string());
-    }
-    if !allow_zero && rounded == 0.0 {
-        return Err(message.to_string());
-    }
-    if rounded > MAX_SAFE_INTEGER as f64 {
-        return Err("randperm: values larger than 2^53 are not supported".to_string());
-    }
-    if rounded > usize::MAX as f64 {
-        return Err("randperm: input exceeds platform limits".to_string());
-    }
-    Ok(rounded as usize)
+    Ok(value)
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
+    #[cfg(feature = "wgpu")]
+    use crate::dispatcher::download_handle_async;
+    use futures::executor::block_on;
+
+    fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::randperm_builtin(args))
+    }
 
     fn reset_rng_clean() {
         runmat_accelerate_api::clear_provider();
@@ -392,7 +404,7 @@ pub(crate) mod tests {
     fn randperm_errors_when_k_exceeds_n() {
         let args = vec![Value::from(3), Value::from(4)];
         let err = randperm_builtin(args).unwrap_err();
-        assert!(err.contains("K must satisfy 0 <= K <= N"));
+        assert!(err.message().contains("K must satisfy 0 <= K <= N"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -400,7 +412,7 @@ pub(crate) mod tests {
     fn randperm_errors_for_negative_input() {
         let args = vec![Value::Num(-1.0)];
         let err = randperm_builtin(args).unwrap_err();
-        assert!(err.contains("N must be a non-negative integer"));
+        assert!(err.message().contains("N must be a non-negative integer"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -408,7 +420,7 @@ pub(crate) mod tests {
     fn randperm_rejects_single_precision_request() {
         let args = vec![Value::from(5), Value::from("single")];
         let err = randperm_builtin(args).unwrap_err();
-        assert!(err.contains("single precision"));
+        assert!(err.message().contains("single precision"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -477,7 +489,7 @@ pub(crate) mod tests {
     fn randperm_like_requires_prototype() {
         let args = vec![Value::from(4), Value::from("like")];
         let err = randperm_builtin(args).unwrap_err();
-        assert!(err.contains("prototype after 'like'"));
+        assert!(err.message().contains("prototype after 'like'"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -525,9 +537,8 @@ pub(crate) mod tests {
             other => panic!("expected GPU tensor result, got {other:?}"),
         };
 
-        let host = provider
-            .download(&gpu_handle)
-            .expect("download permutation");
+        let host =
+            block_on(download_handle_async(provider, &gpu_handle)).expect("download permutation");
         assert_eq!(host.shape, vec![1, 7]);
         assert_eq!(host.data.len(), 7);
 

@@ -5,6 +5,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -42,6 +43,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Squeeze only mutates metadata; fusion planner treats it as a no-op for kernel generation.",
 };
 
+fn squeeze_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("squeeze").build()
+}
+
 #[runtime_builtin(
     name = "squeeze",
     category = "array/shape",
@@ -50,23 +55,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "shape",
     builtin_path = "crate::builtins::array::shape::squeeze"
 )]
-fn squeeze_builtin(value: Value) -> Result<Value, String> {
-    squeeze_value(value)
+async fn squeeze_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    squeeze_value(value).await
 }
 
-fn squeeze_value(value: Value) -> Result<Value, String> {
+async fn squeeze_value(value: Value) -> crate::BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => squeeze_numeric_tensor(tensor).map(Value::Tensor),
         Value::ComplexTensor(ct) => squeeze_complex_tensor(ct).map(Value::ComplexTensor),
         Value::LogicalArray(logical) => squeeze_logical_array(logical).map(Value::LogicalArray),
         Value::StringArray(strings) => squeeze_string_array(strings).map(Value::StringArray),
-        Value::GpuTensor(handle) => squeeze_gpu(handle),
+        Value::GpuTensor(handle) => squeeze_gpu(handle).await,
         Value::String(_) | Value::CharArray(_) | Value::Cell(_) | Value::Struct(_) => Ok(value),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(value),
-        other => Err(format!(
+        other => Err(squeeze_error(format!(
             "squeeze: unsupported input type {}; expected numeric, logical, string, char, cell, or gpu array",
             value_kind(&other)
-        )),
+        ))),
     }
 }
 
@@ -94,41 +99,41 @@ fn value_kind(value: &Value) -> &'static str {
     }
 }
 
-fn squeeze_numeric_tensor(tensor: Tensor) -> Result<Tensor, String> {
+fn squeeze_numeric_tensor(tensor: Tensor) -> crate::BuiltinResult<Tensor> {
     let shape = squeeze_shape(&tensor.shape);
     if shape == tensor.shape {
         return Ok(tensor);
     }
-    Tensor::new(tensor.data, shape).map_err(|e| format!("squeeze: {e}"))
+    Tensor::new(tensor.data, shape).map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 
-fn squeeze_complex_tensor(ct: ComplexTensor) -> Result<ComplexTensor, String> {
+fn squeeze_complex_tensor(ct: ComplexTensor) -> crate::BuiltinResult<ComplexTensor> {
     let shape = squeeze_shape(&ct.shape);
     if shape == ct.shape {
         return Ok(ct);
     }
-    ComplexTensor::new(ct.data, shape).map_err(|e| format!("squeeze: {e}"))
+    ComplexTensor::new(ct.data, shape).map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 
-fn squeeze_logical_array(logical: LogicalArray) -> Result<LogicalArray, String> {
+fn squeeze_logical_array(logical: LogicalArray) -> crate::BuiltinResult<LogicalArray> {
     let shape = squeeze_shape(&logical.shape);
     if shape == logical.shape {
         return Ok(logical);
     }
-    LogicalArray::new(logical.data, shape).map_err(|e| format!("squeeze: {e}"))
+    LogicalArray::new(logical.data, shape).map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 
-fn squeeze_string_array(strings: StringArray) -> Result<StringArray, String> {
+fn squeeze_string_array(strings: StringArray) -> crate::BuiltinResult<StringArray> {
     let shape = squeeze_shape(&strings.shape);
     if shape == strings.shape {
         return Ok(strings);
     }
-    StringArray::new(strings.data, shape).map_err(|e| format!("squeeze: {e}"))
+    StringArray::new(strings.data, shape).map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 
-fn squeeze_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn squeeze_gpu(handle: GpuTensorHandle) -> crate::BuiltinResult<Value> {
     let shape_source = if handle.shape.is_empty() {
-        let gathered = gpu_helpers::gather_tensor(&handle)?;
+        let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
         gathered.shape
     } else {
         handle.shape.clone()
@@ -168,6 +173,13 @@ fn squeeze_shape(shape: &[usize]) -> Vec<usize> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use crate::dispatcher::download_handle_async;
+    use futures::executor::block_on;
+
+    fn squeeze_builtin(value: Value) -> crate::BuiltinResult<Value> {
+        block_on(super::squeeze_builtin(value))
+    }
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 
@@ -288,8 +300,7 @@ pub(crate) mod tests {
         };
         assert_eq!(gpu_handle.shape, vec![3, 4]);
 
-        let downloaded = provider
-            .download(&gpu_handle)
+        let downloaded = block_on(download_handle_async(provider, &gpu_handle))
             .expect("download squeezed tensor");
         assert_eq!(downloaded.shape.as_slice(), &[3, 4]);
         assert_eq!(downloaded.data.as_slice(), tensor.data.as_slice());

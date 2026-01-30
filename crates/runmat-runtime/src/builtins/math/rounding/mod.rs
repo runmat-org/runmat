@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -70,6 +71,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion generates floor(a / b) followed by a - b * q; providers may substitute specialised kernels when available.",
 };
 
+const BUILTIN_NAME: &str = "mod";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 #[runtime_builtin(
     name = "mod",
     category = "math/rounding",
@@ -78,29 +87,29 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "binary",
     builtin_path = "crate::builtins::math::rounding"
 )]
-fn mod_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
+async fn mod_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     match (lhs, rhs) {
-        (Value::GpuTensor(a), Value::GpuTensor(b)) => mod_gpu_pair(a, b),
+        (Value::GpuTensor(a), Value::GpuTensor(b)) => mod_gpu_pair(a, b).await,
         (Value::GpuTensor(a), other) => {
-            let gathered = gpu_helpers::gather_tensor(&a)?;
+            let gathered = gpu_helpers::gather_tensor_async(&a).await?;
             mod_host(Value::Tensor(gathered), other)
         }
         (other, Value::GpuTensor(b)) => {
-            let gathered = gpu_helpers::gather_tensor(&b)?;
+            let gathered = gpu_helpers::gather_tensor_async(&b).await?;
             mod_host(other, Value::Tensor(gathered))
         }
         (left, right) => mod_host(left, right),
     }
 }
 
-fn mod_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> Result<Value, String> {
+async fn mod_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<Value> {
     if a.device_id == b.device_id {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&a) {
             if a.shape == b.shape {
-                if let Ok(div) = provider.elem_div(&a, &b) {
-                    match provider.unary_floor(&div) {
-                        Ok(floored) => match provider.elem_mul(&b, &floored) {
-                            Ok(mul) => match provider.elem_sub(&a, &mul) {
+                if let Ok(div) = provider.elem_div(&a, &b).await {
+                    match provider.unary_floor(&div).await {
+                        Ok(floored) => match provider.elem_mul(&b, &floored).await {
+                            Ok(mul) => match provider.elem_sub(&a, &mul).await {
                                 Ok(out) => {
                                     let _ = provider.free(&div);
                                     let _ = provider.free(&floored);
@@ -126,26 +135,29 @@ fn mod_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> Result<Value, String>
             }
         }
     }
-    let left = gpu_helpers::gather_tensor(&a)?;
-    let right = gpu_helpers::gather_tensor(&b)?;
+    let left = gpu_helpers::gather_tensor_async(&a).await?;
+    let right = gpu_helpers::gather_tensor_async(&b).await?;
     mod_host(Value::Tensor(left), Value::Tensor(right))
 }
 
-fn mod_host(lhs: Value, rhs: Value) -> Result<Value, String> {
+fn mod_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if let Some(result) = scalar_mod_value(&lhs, &rhs) {
+        return Ok(result);
+    }
     let left = value_into_numeric_array(lhs, "mod")?;
     let right = value_into_numeric_array(rhs, "mod")?;
-    match align_numeric_arrays(left, right) {
-        Ok(NumericPair::Real(a, b)) => compute_mod_real(&a, &b),
-        Ok(NumericPair::Complex(a, b)) => compute_mod_complex(&a, &b),
-        Err(err) => Err(err),
+    match align_numeric_arrays(left, right)? {
+        NumericPair::Real(a, b) => compute_mod_real(&a, &b),
+        NumericPair::Complex(a, b) => compute_mod_complex(&a, &b),
     }
 }
 
-fn compute_mod_real(a: &Tensor, b: &Tensor) -> Result<Value, String> {
-    let plan = BroadcastPlan::new(&a.shape, &b.shape).map_err(|err| format!("mod: {err}"))?;
+fn compute_mod_real(a: &Tensor, b: &Tensor) -> BuiltinResult<Value> {
+    let plan = BroadcastPlan::new(&a.shape, &b.shape)
+        .map_err(|err| builtin_error(format!("mod: {err}")))?;
     if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| format!("mod: {e}"))?;
+            .map_err(|e| builtin_error(format!("mod: {e}")))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let mut result = vec![0.0f64; plan.len()];
@@ -154,16 +166,17 @@ fn compute_mod_real(a: &Tensor, b: &Tensor) -> Result<Value, String> {
         let bval = b.data[idx_b];
         result[out_idx] = mod_real_scalar(aval, bval);
     }
-    let tensor =
-        Tensor::new(result, plan.output_shape().to_vec()).map_err(|e| format!("mod: {e}"))?;
+    let tensor = Tensor::new(result, plan.output_shape().to_vec())
+        .map_err(|e| builtin_error(format!("mod: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn compute_mod_complex(a: &ComplexTensor, b: &ComplexTensor) -> Result<Value, String> {
-    let plan = BroadcastPlan::new(&a.shape, &b.shape).map_err(|err| format!("mod: {err}"))?;
+fn compute_mod_complex(a: &ComplexTensor, b: &ComplexTensor) -> BuiltinResult<Value> {
+    let plan = BroadcastPlan::new(&a.shape, &b.shape)
+        .map_err(|err| builtin_error(format!("mod: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| format!("mod: {e}"))?;
+            .map_err(|e| builtin_error(format!("mod: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
     let mut result = vec![(0.0f64, 0.0f64); plan.len()];
@@ -173,7 +186,7 @@ fn compute_mod_complex(a: &ComplexTensor, b: &ComplexTensor) -> Result<Value, St
         result[out_idx] = mod_complex_scalar(ar, ai, br, bi);
     }
     let tensor = ComplexTensor::new(result, plan.output_shape().to_vec())
-        .map_err(|e| format!("mod: {e}"))?;
+        .map_err(|e| builtin_error(format!("mod: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -228,6 +241,40 @@ fn mod_complex_scalar(ar: f64, ai: f64, br: f64, bi: f64) -> (f64, f64) {
     (normalize_zero(rr), normalize_zero(ri))
 }
 
+fn scalar_real_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(n) => Some(*n),
+        Value::Int(i) => Some(i.to_f64()),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
+        Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
+            Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
+        }
+        _ => None,
+    }
+}
+
+fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
+    match value {
+        Value::Complex(re, im) => Some((*re, *im)),
+        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
+        _ => None,
+    }
+}
+
+fn scalar_mod_value(lhs: &Value, rhs: &Value) -> Option<Value> {
+    let left = scalar_complex_value(lhs).or_else(|| scalar_real_value(lhs).map(|v| (v, 0.0)))?;
+    let right = scalar_complex_value(rhs).or_else(|| scalar_real_value(rhs).map(|v| (v, 0.0)))?;
+    let (ar, ai) = left;
+    let (br, bi) = right;
+    if ai != 0.0 || bi != 0.0 {
+        let (re, im) = mod_complex_scalar(ar, ai, br, bi);
+        return Some(Value::Complex(re, im));
+    }
+    Some(Value::Num(mod_real_scalar(ar, br)))
+}
+
 fn normalize_zero(value: f64) -> f64 {
     if value == -0.0 {
         0.0
@@ -257,26 +304,29 @@ fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
     }
 }
 
-fn value_into_numeric_array(value: Value, name: &str) -> Result<NumericArray, String> {
+fn value_into_numeric_array(value: Value, name: &str) -> BuiltinResult<NumericArray> {
     match value {
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("{name}: {e}"))?;
+                .map_err(|e| builtin_error(format!("{name}: {e}")))?;
             Ok(NumericArray::Complex(tensor))
         }
         Value::ComplexTensor(ct) => Ok(NumericArray::Complex(ct)),
         Value::CharArray(ca) => {
             let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
-            let tensor =
-                Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("{name}: {e}"))?;
+            let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+                .map_err(|e| builtin_error(format!("{name}: {e}")))?;
             Ok(NumericArray::Real(tensor))
         }
-        Value::String(_) | Value::StringArray(_) => {
-            Err(format!("{name}: expected numeric input, got string"))
-        }
-        Value::GpuTensor(_) => Err(format!("{name}: internal error converting GPU tensor")),
+        Value::String(_) | Value::StringArray(_) => Err(builtin_error(format!(
+            "{name}: expected numeric input, got string"
+        ))),
+        Value::GpuTensor(_) => Err(builtin_error(format!(
+            "{name}: internal error converting GPU tensor"
+        ))),
         other => {
-            let tensor = tensor::value_into_tensor_for(name, other)?;
+            let tensor =
+                tensor::value_into_tensor_for(name, other).map_err(|err| builtin_error(err))?;
             Ok(NumericArray::Real(tensor))
         }
     }
@@ -292,7 +342,7 @@ enum NumericPair {
     Complex(ComplexTensor, ComplexTensor),
 }
 
-fn align_numeric_arrays(lhs: NumericArray, rhs: NumericArray) -> Result<NumericPair, String> {
+fn align_numeric_arrays(lhs: NumericArray, rhs: NumericArray) -> BuiltinResult<NumericPair> {
     match (lhs, rhs) {
         (NumericArray::Real(a), NumericArray::Real(b)) => Ok(NumericPair::Real(a, b)),
         (left, right) => {
@@ -303,12 +353,12 @@ fn align_numeric_arrays(lhs: NumericArray, rhs: NumericArray) -> Result<NumericP
     }
 }
 
-fn into_complex(input: NumericArray) -> Result<ComplexTensor, String> {
+fn into_complex(input: NumericArray) -> BuiltinResult<ComplexTensor> {
     match input {
         NumericArray::Real(t) => {
             let Tensor { data, shape, .. } = t;
             let complex: Vec<(f64, f64)> = data.into_iter().map(|re| (re, 0.0)).collect();
-            ComplexTensor::new(complex, shape).map_err(|e| format!("mod: {e}"))
+            ComplexTensor::new(complex, shape).map_err(|e| builtin_error(format!("mod: {e}")))
         }
         NumericArray::Complex(ct) => Ok(ct),
     }
@@ -318,7 +368,21 @@ fn into_complex(input: NumericArray) -> Result<ComplexTensor, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeError;
+    use futures::executor::block_on;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor};
+
+    fn mod_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+        block_on(super::mod_builtin(lhs, rhs))
+    }
+
+    fn assert_error_contains(error: RuntimeError, needle: &str) {
+        assert!(
+            error.message().contains(needle),
+            "unexpected error: {}",
+            error.message()
+        );
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -419,7 +483,7 @@ pub(crate) mod tests {
     fn mod_string_input_errors() {
         let err = mod_builtin(Value::from("abc"), Value::Num(3.0))
             .expect_err("string inputs should error");
-        assert!(err.contains("expected numeric input"));
+        assert_error_contains(err, "expected numeric input");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -520,7 +584,7 @@ pub(crate) mod tests {
             })
             .expect("upload denom");
 
-        let gpu_value = mod_gpu_pair(numer_handle, denom_handle).expect("gpu mod");
+        let gpu_value = block_on(mod_gpu_pair(numer_handle, denom_handle)).expect("gpu mod");
         let gpu_tensor = test_support::gather(gpu_value).expect("gather gpu result");
 
         let cpu_tensor = match cpu_value {

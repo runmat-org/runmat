@@ -206,8 +206,11 @@ impl<'a> GraphBuilder<'a> {
                     self.reset_stack();
                 }
             }
+            // Control-flow breaks straight-line analysis. Invalidate both the operand stack and
+            // our variable/value cache so we don't incorrectly treat loop induction variables
+            // (e.g. `t` in `for t = 0:dt:T`) as compile-time constants inside the loop body.
             Instr::Jump(_) | Instr::JumpIfFalse(_) | Instr::Return | Instr::ReturnValue => {
-                self.reset_stack();
+                self.reset_control_flow_state();
             }
             _ => self.mark_unknown(),
         }
@@ -673,11 +676,18 @@ impl<'a> GraphBuilder<'a> {
     }
 
     fn mark_unknown(&mut self) {
-        self.reset_stack();
+        // Unknown instructions can mutate state in ways we don't model. Be conservative.
+        self.reset_control_flow_state();
     }
 
     fn reset_stack(&mut self) {
         self.stack.clear();
+    }
+
+    fn reset_control_flow_state(&mut self) {
+        self.reset_stack();
+        self.var_values.clear();
+        self.local_types.clear();
     }
 
     fn maybe_fold_builtin_constant(&mut self, name: &str, inputs: &[ValueId], out_value: ValueId) {

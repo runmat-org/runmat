@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_filesystem as fs;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fileread")]
@@ -38,6 +38,26 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Not eligible for fusion; executes as a standalone host operation.",
 };
+
+const BUILTIN_NAME: &str = "fileread";
+
+fn fileread_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let message = err.message().to_string();
+    let identifier = err.identifier().map(|value| value.to_string());
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FileEncoding {
@@ -75,121 +95,146 @@ impl FileEncoding {
     accel = "cpu",
     builtin_path = "crate::builtins::io::filetext::fileread"
 )]
-fn fileread_builtin(path: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let gathered_path = gather_if_needed(&path).map_err(|e| format!("fileread: {e}"))?;
-    let gathered_rest = gather_values(&rest)?;
+async fn fileread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let gathered_path = gather_if_needed_async(&path)
+        .await
+        .map_err(map_control_flow)?;
+    let gathered_rest = gather_values(&rest).await?;
     let encoding = parse_encoding_args(&gathered_rest)?;
     let resolved = resolve_path(&gathered_path)?;
     let bytes = read_all(&resolved)?;
     let chars = decode_bytes(bytes, encoding)?;
     let cols = chars.len();
-    let char_array = CharArray::new(chars, 1, cols).map_err(|e| format!("fileread: {e}"))?;
+    let char_array =
+        CharArray::new(chars, 1, cols).map_err(|e| fileread_error(format!("fileread: {e}")))?;
     Ok(Value::CharArray(char_array))
 }
 
-fn gather_values(values: &[Value]) -> Result<Vec<Value>, String> {
+async fn gather_values(values: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(values.len());
     for value in values {
-        out.push(gather_if_needed(value).map_err(|e| format!("fileread: {e}"))?);
+        out.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     Ok(out)
 }
 
-fn parse_encoding_args(args: &[Value]) -> Result<FileEncoding, String> {
+fn parse_encoding_args(args: &[Value]) -> BuiltinResult<FileEncoding> {
     match args.len() {
         0 => Ok(FileEncoding::Auto),
         1 => {
             if is_encoding_keyword(&args[0])? {
-                return Err("fileread: missing encoding value after 'Encoding' keyword".to_string());
+                return Err(fileread_error(
+                    "fileread: missing encoding value after 'Encoding' keyword",
+                ));
             }
             encoding_from_value(&args[0])
         }
         2 => {
             if !is_encoding_keyword(&args[0])? {
-                return Err(
-                    "fileread: expected 'Encoding' keyword before encoding value".to_string(),
-                );
+                return Err(fileread_error(
+                    "fileread: expected 'Encoding' keyword before encoding value",
+                ));
             }
             encoding_from_value(&args[1])
         }
-        _ => Err("fileread: too many input arguments".to_string()),
+        _ => Err(fileread_error("fileread: too many input arguments")),
     }
 }
 
-fn encoding_from_value(value: &Value) -> Result<FileEncoding, String> {
+fn encoding_from_value(value: &Value) -> BuiltinResult<FileEncoding> {
     let label = encoding_name(value)?;
     match FileEncoding::from_label(&label) {
         Some(enc) => Ok(enc),
         None => {
             if label.trim().is_empty() {
-                Err("fileread: encoding name must not be empty".to_string())
+                Err(fileread_error("fileread: encoding name must not be empty"))
             } else {
-                Err(format!("fileread: unsupported encoding '{}'", label))
+                Err(fileread_error(format!(
+                    "fileread: unsupported encoding '{}'",
+                    label
+                )))
             }
         }
     }
 }
 
-fn is_encoding_keyword(value: &Value) -> Result<bool, String> {
+fn is_encoding_keyword(value: &Value) -> BuiltinResult<bool> {
     let text = encoding_name(value)?;
     Ok(text.eq_ignore_ascii_case("encoding"))
 }
 
-fn encoding_name(value: &Value) -> Result<String, String> {
+fn encoding_name(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::CharArray(_) => {
-            Err("fileread: encoding name must be a 1-by-N character vector".to_string())
-        }
+        Value::CharArray(_) => Err(fileread_error(
+            "fileread: encoding name must be a 1-by-N character vector",
+        )),
         Value::StringArray(sa) => {
             if sa.data.len() == 1 {
                 Ok(sa.data[0].clone())
             } else {
-                Err("fileread: encoding inputs must be scalar string arrays".to_string())
+                Err(fileread_error(
+                    "fileread: encoding inputs must be scalar string arrays",
+                ))
             }
         }
-        other => Err(format!(
+        other => Err(fileread_error(format!(
             "fileread: expected encoding as string scalar or character vector, got {other:?}"
-        )),
+        ))),
     }
 }
 
-fn resolve_path(value: &Value) -> Result<PathBuf, String> {
+fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {
         Value::String(s) => normalize_path(s),
         Value::CharArray(ca) if ca.rows == 1 => {
             let path: String = ca.data.iter().collect();
             normalize_path(&path)
         }
-        Value::CharArray(_) => {
-            Err("fileread: expected a 1-by-N character vector for the file name".to_string())
-        }
+        Value::CharArray(_) => Err(fileread_error(
+            "fileread: expected a 1-by-N character vector for the file name",
+        )),
         Value::StringArray(sa) => {
             if sa.data.len() == 1 {
                 normalize_path(&sa.data[0])
             } else {
-                Err("fileread: string array inputs must be scalar".to_string())
+                Err(fileread_error(
+                    "fileread: string array inputs must be scalar",
+                ))
             }
         }
-        other => Err(format!(
+        other => Err(fileread_error(format!(
             "fileread: expected filename as string scalar or character vector, got {other:?}"
-        )),
+        ))),
     }
 }
 
-fn normalize_path(raw: &str) -> Result<PathBuf, String> {
+fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
     if raw.is_empty() {
-        return Err("fileread: filename must not be empty".to_string());
+        return Err(fileread_error("fileread: filename must not be empty"));
     }
     Ok(Path::new(raw).to_path_buf())
 }
 
-fn read_all(path: &Path) -> Result<Vec<u8>, String> {
-    fs::read(path).map_err(|err| format!("fileread: unable to read '{}': {}", path.display(), err))
+fn read_all(path: &Path) -> BuiltinResult<Vec<u8>> {
+    fs::read(path).map_err(|err| {
+        build_runtime_error(format!(
+            "fileread: unable to read '{}': {}",
+            path.display(),
+            err
+        ))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err)
+        .build()
+    })
 }
 
-fn decode_bytes(bytes: Vec<u8>, encoding: FileEncoding) -> Result<Vec<char>, String> {
+fn decode_bytes(bytes: Vec<u8>, encoding: FileEncoding) -> BuiltinResult<Vec<char>> {
     match encoding {
         FileEncoding::Auto => match String::from_utf8(bytes) {
             Ok(text) => Ok(text.chars().collect()),
@@ -201,7 +246,7 @@ fn decode_bytes(bytes: Vec<u8>, encoding: FileEncoding) -> Result<Vec<char>, Str
     }
 }
 
-fn decode_utf8(bytes: Vec<u8>) -> Result<Vec<char>, String> {
+fn decode_utf8(bytes: Vec<u8>) -> BuiltinResult<Vec<char>> {
     match String::from_utf8(bytes) {
         Ok(text) => Ok(text.chars().collect()),
         Err(err) => {
@@ -216,19 +261,19 @@ fn decode_utf8(bytes: Vec<u8>) -> Result<Vec<char>, String> {
                 }
                 None => format!("incomplete UTF-8 sequence at end of data (after offset {offset})"),
             };
-            Err(format!(
+            Err(fileread_error(format!(
                 "fileread: unable to decode file as UTF-8: {detail}"
-            ))
+            )))
         }
     }
 }
 
-fn decode_ascii(bytes: Vec<u8>) -> Result<Vec<char>, String> {
+fn decode_ascii(bytes: Vec<u8>) -> BuiltinResult<Vec<char>> {
     for (idx, byte) in bytes.iter().enumerate() {
         if *byte > 0x7F {
-            return Err(format!(
+            return Err(fileread_error(format!(
                 "fileread: byte 0x{byte:02X} at offset {idx} is not valid ASCII"
-            ));
+            )));
         }
     }
     Ok(bytes_to_chars(bytes))
@@ -245,6 +290,14 @@ pub(crate) mod tests {
     use runmat_time::unix_timestamp_ms;
     use std::io::Write;
 
+    fn unwrap_error_message(err: RuntimeError) -> String {
+        err.message().to_string()
+    }
+
+    fn run_fileread(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(fileread_builtin(path, rest))
+    }
+
     fn unique_path(prefix: &str) -> PathBuf {
         let millis = unix_timestamp_ms();
         let mut path = std::env::temp_dir();
@@ -260,7 +313,7 @@ pub(crate) mod tests {
         fs::write(&path, contents).expect("write sample file");
 
         let value = Value::from(path.to_string_lossy().to_string());
-        let result = fileread_builtin(value, Vec::new()).expect("fileread result");
+        let result = run_fileread(value, Vec::new()).expect("fileread result");
 
         match result {
             Value::CharArray(ca) => {
@@ -287,7 +340,7 @@ pub(crate) mod tests {
         let char_array = CharArray::new(chars, 1, len).expect("char array from path string");
         let value = Value::CharArray(char_array);
 
-        let result = fileread_builtin(value, Vec::new()).expect("fileread");
+        let result = run_fileread(value, Vec::new()).expect("fileread");
         match result {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
@@ -310,7 +363,7 @@ pub(crate) mod tests {
             .expect("string array scalar");
         let value = Value::StringArray(string_array);
 
-        let result = fileread_builtin(value, Vec::new()).expect("fileread");
+        let result = run_fileread(value, Vec::new()).expect("fileread");
         match result {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
@@ -328,7 +381,7 @@ pub(crate) mod tests {
         let path = unique_path("fileread_empty");
         fs::File::create(&path).expect("create empty file");
 
-        let result = fileread_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new())
+        let result = run_fileread(Value::from(path.to_string_lossy().to_string()), Vec::new())
             .expect("fileread");
         match result {
             Value::CharArray(ca) => {
@@ -346,8 +399,9 @@ pub(crate) mod tests {
     #[test]
     fn fileread_errors_when_file_missing() {
         let path = unique_path("fileread_missing");
-        let err = fileread_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new())
-            .expect_err("missing file should error");
+        let err = unwrap_error_message(
+            run_fileread(Value::from(path.to_string_lossy().to_string()), Vec::new()).unwrap_err(),
+        );
         assert!(
             err.contains("unable to read"),
             "unexpected error message: {err}"
@@ -362,7 +416,7 @@ pub(crate) mod tests {
         file.write_all(&[0xFF, 0x61, 0x00]).expect("write bytes");
         drop(file);
 
-        let result = fileread_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new())
+        let result = run_fileread(Value::from(path.to_string_lossy().to_string()), Vec::new())
             .expect("fileread");
         match result {
             Value::CharArray(ca) => {
@@ -382,7 +436,7 @@ pub(crate) mod tests {
         let contents = "UTF-8 ✓";
         fs::write(&path, contents).expect("write sample file");
 
-        let result = fileread_builtin(
+        let result = run_fileread(
             Value::from(path.to_string_lossy().to_string()),
             vec![Value::from("Encoding"), Value::from("utf-8")],
         )
@@ -405,7 +459,7 @@ pub(crate) mod tests {
         let bytes = [0xC0u8, 0x20, 0x41];
         fs::write(&path, bytes).expect("write latin1 data");
 
-        let result = fileread_builtin(
+        let result = run_fileread(
             Value::from(path.to_string_lossy().to_string()),
             vec![Value::from("latin1")],
         )
@@ -428,7 +482,7 @@ pub(crate) mod tests {
         let bytes = [0x01u8, 0xFF, 0x7F];
         fs::write(&path, bytes).expect("write raw bytes");
 
-        let result = fileread_builtin(
+        let result = run_fileread(
             Value::from(path.to_string_lossy().to_string()),
             vec![Value::from("raw")],
         )
@@ -450,11 +504,13 @@ pub(crate) mod tests {
         let path = unique_path("fileread_ascii_error");
         fs::write(&path, [0x41, 0x80]).expect("write bytes");
 
-        let err = fileread_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            vec![Value::from("Encoding"), Value::from("ascii")],
-        )
-        .expect_err("invalid ASCII should error");
+        let err = unwrap_error_message(
+            run_fileread(
+                Value::from(path.to_string_lossy().to_string()),
+                vec![Value::from("Encoding"), Value::from("ascii")],
+            )
+            .unwrap_err(),
+        );
         assert!(
             err.contains("not valid ASCII"),
             "unexpected error message: {err}"
@@ -469,11 +525,13 @@ pub(crate) mod tests {
         let path = unique_path("fileread_encoding_missing");
         fs::write(&path, "abc").expect("write file");
 
-        let err = fileread_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            vec![Value::from("Encoding")],
-        )
-        .expect_err("missing encoding value should error");
+        let err = unwrap_error_message(
+            run_fileread(
+                Value::from(path.to_string_lossy().to_string()),
+                vec![Value::from("Encoding")],
+            )
+            .unwrap_err(),
+        );
         assert!(
             err.contains("missing encoding value"),
             "unexpected error message: {err}"
@@ -488,15 +546,17 @@ pub(crate) mod tests {
         let path = unique_path("fileread_too_many");
         fs::write(&path, "abc").expect("write file");
 
-        let err = fileread_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            vec![
-                Value::from("Encoding"),
-                Value::from("utf-8"),
-                Value::from("extra"),
-            ],
-        )
-        .expect_err("too many arguments should error");
+        let err = unwrap_error_message(
+            run_fileread(
+                Value::from(path.to_string_lossy().to_string()),
+                vec![
+                    Value::from("Encoding"),
+                    Value::from("utf-8"),
+                    Value::from("extra"),
+                ],
+            )
+            .unwrap_err(),
+        );
         assert!(
             err.contains("too many input arguments"),
             "unexpected error message: {err}"

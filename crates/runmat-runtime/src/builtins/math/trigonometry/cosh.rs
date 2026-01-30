@@ -10,6 +10,9 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+const BUILTIN_NAME: &str = "cosh";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::cosh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -27,6 +30,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes:
         "Providers may execute cosh directly on the device; runtimes gather to the host when unary_cosh is unavailable.",
 };
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::cosh")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -53,57 +62,61 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::cosh"
 )]
-fn cosh_builtin(value: Value) -> Result<Value, String> {
+async fn cosh_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => cosh_gpu(handle),
+        Value::GpuTensor(handle) => cosh_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Complex(
             cosh_complex_re(re, im),
             cosh_complex_im(re, im),
         )),
         Value::ComplexTensor(ct) => cosh_complex_tensor(ct),
         Value::CharArray(ca) => cosh_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => Err("cosh: expected numeric input".to_string()),
+        Value::String(_) | Value::StringArray(_) => {
+            Err(runtime_error_for("cosh: expected numeric input"))
+        }
         other => cosh_real(other),
     }
 }
 
-fn cosh_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn cosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_cosh(&handle) {
+        if let Ok(out) = provider.unary_cosh(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     cosh_tensor(tensor).map(tensor::tensor_into_value)
 }
 
-fn cosh_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("cosh", value)?;
+fn cosh_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("cosh", value).map_err(runtime_error_for)?;
     cosh_tensor(tensor).map(tensor::tensor_into_value)
 }
 
-fn cosh_tensor(tensor: Tensor) -> Result<Tensor, String> {
+fn cosh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.cosh()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| format!("cosh: {e}"))
+    Tensor::new(data, tensor.shape.clone()).map_err(|e| runtime_error_for(format!("cosh: {e}")))
 }
 
-fn cosh_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn cosh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
         .data
         .iter()
         .map(|&(re, im)| (cosh_complex_re(re, im), cosh_complex_im(re, im)))
         .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(mapped, ct.shape.clone()).map_err(|e| format!("cosh: {e}"))?;
+    let tensor = ComplexTensor::new(mapped, ct.shape.clone())
+        .map_err(|e| runtime_error_for(format!("cosh: {e}")))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
-fn cosh_char_array(ca: CharArray) -> Result<Value, String> {
+fn cosh_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data
         .iter()
         .map(|&ch| (ch as u32 as f64).cosh())
         .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("cosh: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| runtime_error_for(format!("cosh: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -121,7 +134,16 @@ fn cosh_complex_im(re: f64, im: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
+
+    fn error_message(err: RuntimeError) -> String {
+        err.message().to_string()
+    }
+
+    fn cosh_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::cosh_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -213,7 +235,8 @@ pub(crate) mod tests {
     #[test]
     fn cosh_string_errors() {
         let err = cosh_builtin(Value::String("runmat".to_string())).expect_err("expected error");
-        assert!(err.contains("numeric"));
+        let message = error_message(err);
+        assert!(message.contains("numeric"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -251,7 +274,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = cosh_gpu(h).unwrap();
+        let gpu = block_on(cosh_gpu(h)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {

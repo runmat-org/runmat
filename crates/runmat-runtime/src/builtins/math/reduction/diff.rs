@@ -10,6 +10,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+const NAME: &str = "diff";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::diff")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -26,6 +29,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Providers surface finite-difference kernels through `diff_dim`; the WGPU backend keeps tensors on the device.",
 };
+
+fn diff_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::diff")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -46,7 +53,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "diff",
     builtin_path = "crate::builtins::math::reduction::diff"
 )]
-fn diff_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn diff_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (order, dim) = parse_arguments(&rest)?;
     if order == 0 {
         return Ok(value);
@@ -57,11 +64,11 @@ fn diff_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
             diff_tensor_host(tensor, order, dim).map(tensor::tensor_into_value)
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(diff_error)?;
             diff_tensor_host(tensor, order, dim).map(tensor::tensor_into_value)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
-            let tensor = tensor::value_into_tensor_for("diff", value)?;
+            let tensor = tensor::value_into_tensor_for("diff", value).map_err(diff_error)?;
             diff_tensor_host(tensor, order, dim).map(tensor::tensor_into_value)
         }
         Value::Complex(re, im) => {
@@ -77,15 +84,15 @@ fn diff_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
             diff_complex_tensor(tensor, order, dim).map(complex_tensor_into_value)
         }
         Value::CharArray(chars) => diff_char_array(chars, order, dim),
-        Value::GpuTensor(handle) => diff_gpu(handle, order, dim),
-        other => Err(format!(
+        Value::GpuTensor(handle) => diff_gpu(handle, order, dim).await,
+        other => Err(diff_error(format!(
             "diff: unsupported input type {:?}; expected numeric, logical, or character data",
             other
-        )),
+        ))),
     }
 }
 
-fn parse_arguments(args: &[Value]) -> Result<(usize, Option<usize>), String> {
+fn parse_arguments(args: &[Value]) -> BuiltinResult<(usize, Option<usize>)> {
     match args.len() {
         0 => Ok((1, None)),
         1 => {
@@ -97,11 +104,11 @@ fn parse_arguments(args: &[Value]) -> Result<(usize, Option<usize>), String> {
             let dim = parse_dimension_arg(&args[1])?;
             Ok((order, dim))
         }
-        _ => Err("diff: unsupported arguments".to_string()),
+        _ => Err(diff_error("diff: unsupported arguments")),
     }
 }
 
-fn parse_order(value: &Value) -> Result<Option<usize>, String> {
+fn parse_order(value: &Value) -> BuiltinResult<Option<usize>> {
     if is_empty_array(value) {
         return Ok(None);
     }
@@ -109,47 +116,57 @@ fn parse_order(value: &Value) -> Result<Option<usize>, String> {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 0 {
-                return Err("diff: order must be a non-negative integer scalar".to_string());
+                return Err(diff_error(
+                    "diff: order must be a non-negative integer scalar",
+                ));
             }
             Ok(Some(raw as usize))
         }
         Value::Num(n) => parse_numeric_order(*n).map(Some),
         Value::Tensor(t) if t.data.len() == 1 => parse_numeric_order(t.data[0]).map(Some),
         Value::Bool(b) => Ok(Some(if *b { 1 } else { 0 })),
-        other => Err(format!(
+        other => Err(diff_error(format!(
             "diff: order must be a non-negative integer scalar, got {:?}",
             other
-        )),
+        ))),
     }
 }
 
-fn parse_numeric_order(value: f64) -> Result<usize, String> {
+fn parse_numeric_order(value: f64) -> BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err("diff: order must be finite".to_string());
+        return Err(diff_error("diff: order must be finite"));
     }
     if value < 0.0 {
-        return Err("diff: order must be a non-negative integer scalar".to_string());
+        return Err(diff_error(
+            "diff: order must be a non-negative integer scalar",
+        ));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err("diff: order must be a non-negative integer scalar".to_string());
+        return Err(diff_error(
+            "diff: order must be a non-negative integer scalar",
+        ));
     }
     Ok(rounded as usize)
 }
 
-fn parse_dimension_arg(value: &Value) -> Result<Option<usize>, String> {
+fn parse_dimension_arg(value: &Value) -> BuiltinResult<Option<usize>> {
     if is_empty_array(value) {
         return Ok(None);
     }
     match value {
-        Value::Int(_) | Value::Num(_) => tensor::parse_dimension(value, "diff").map(Some),
+        Value::Int(_) | Value::Num(_) => tensor::parse_dimension(value, "diff")
+            .map(Some)
+            .map_err(diff_error),
         Value::Tensor(t) if t.data.len() == 1 => {
-            tensor::parse_dimension(&Value::Num(t.data[0]), "diff").map(Some)
+            tensor::parse_dimension(&Value::Num(t.data[0]), "diff")
+                .map(Some)
+                .map_err(diff_error)
         }
-        other => Err(format!(
+        other => Err(diff_error(format!(
             "diff: dimension must be a positive integer scalar, got {:?}",
             other
-        )),
+        ))),
     }
 }
 
@@ -157,10 +174,14 @@ fn is_empty_array(value: &Value) -> bool {
     matches!(value, Value::Tensor(t) if t.data.is_empty())
 }
 
-fn diff_gpu(handle: GpuTensorHandle, order: usize, dim: Option<usize>) -> Result<Value, String> {
+async fn diff_gpu(
+    handle: GpuTensorHandle,
+    order: usize,
+    dim: Option<usize>,
+) -> BuiltinResult<Value> {
     let working_dim = dim.unwrap_or_else(|| default_dimension(&handle.shape));
     if working_dim == 0 {
-        return Err("diff: dimension must be >= 1".to_string());
+        return Err(diff_error("diff: dimension must be >= 1"));
     }
 
     if let Some(provider) = runmat_accelerate_api::provider() {
@@ -170,25 +191,21 @@ fn diff_gpu(handle: GpuTensorHandle, order: usize, dim: Option<usize>) -> Result
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     diff_tensor_host(tensor, order, Some(working_dim)).map(tensor::tensor_into_value)
 }
 
-fn diff_char_array(chars: CharArray, order: usize, dim: Option<usize>) -> Result<Value, String> {
+fn diff_char_array(chars: CharArray, order: usize, dim: Option<usize>) -> BuiltinResult<Value> {
     if order == 0 {
         return Ok(Value::CharArray(chars));
     }
     let shape = vec![chars.rows, chars.cols];
     let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-    let tensor = Tensor::new(data, shape).map_err(|e| format!("diff: {e}"))?;
+    let tensor = Tensor::new(data, shape).map_err(|e| diff_error(format!("diff: {e}")))?;
     diff_tensor_host(tensor, order, dim).map(tensor::tensor_into_value)
 }
 
-pub fn diff_tensor_host(
-    tensor: Tensor,
-    order: usize,
-    dim: Option<usize>,
-) -> Result<Tensor, String> {
+pub fn diff_tensor_host(tensor: Tensor, order: usize, dim: Option<usize>) -> BuiltinResult<Tensor> {
     let mut current = tensor;
     let mut working_dim = dim.unwrap_or_else(|| default_dimension(&current.shape));
     for _ in 0..order {
@@ -208,7 +225,7 @@ fn diff_complex_tensor(
     tensor: ComplexTensor,
     order: usize,
     dim: Option<usize>,
-) -> Result<ComplexTensor, String> {
+) -> BuiltinResult<ComplexTensor> {
     let mut current = tensor;
     let mut working_dim = dim.unwrap_or_else(|| default_dimension(&current.shape));
     for _ in 0..order {
@@ -223,7 +240,7 @@ fn diff_complex_tensor(
     Ok(current)
 }
 
-fn diff_tensor_once(tensor: Tensor, dim: usize) -> Result<Tensor, String> {
+fn diff_tensor_once(tensor: Tensor, dim: usize) -> BuiltinResult<Tensor> {
     let Tensor {
         data, mut shape, ..
     } = tensor;
@@ -235,7 +252,7 @@ fn diff_tensor_once(tensor: Tensor, dim: usize) -> Result<Tensor, String> {
     let mut output_shape = shape.clone();
     if len_dim <= 1 || data.is_empty() {
         output_shape[dim_index] = output_shape[dim_index].saturating_sub(1);
-        return Tensor::new(Vec::new(), output_shape).map_err(|e| format!("diff: {e}"));
+        return Tensor::new(Vec::new(), output_shape).map_err(|e| diff_error(format!("diff: {e}")));
     }
     output_shape[dim_index] = len_dim - 1;
     let stride_before = product(&shape[..dim_index]);
@@ -254,10 +271,10 @@ fn diff_tensor_once(tensor: Tensor, dim: usize) -> Result<Tensor, String> {
         }
     }
 
-    Tensor::new(out, output_shape).map_err(|e| format!("diff: {e}"))
+    Tensor::new(out, output_shape).map_err(|e| diff_error(format!("diff: {e}")))
 }
 
-fn diff_complex_tensor_once(tensor: ComplexTensor, dim: usize) -> Result<ComplexTensor, String> {
+fn diff_complex_tensor_once(tensor: ComplexTensor, dim: usize) -> BuiltinResult<ComplexTensor> {
     let ComplexTensor {
         data, mut shape, ..
     } = tensor;
@@ -269,7 +286,8 @@ fn diff_complex_tensor_once(tensor: ComplexTensor, dim: usize) -> Result<Complex
     let mut output_shape = shape.clone();
     if len_dim <= 1 || data.is_empty() {
         output_shape[dim_index] = output_shape[dim_index].saturating_sub(1);
-        return ComplexTensor::new(Vec::new(), output_shape).map_err(|e| format!("diff: {e}"));
+        return ComplexTensor::new(Vec::new(), output_shape)
+            .map_err(|e| diff_error(format!("diff: {e}")));
     }
     output_shape[dim_index] = len_dim - 1;
     let stride_before = product(&shape[..dim_index]);
@@ -289,7 +307,7 @@ fn diff_complex_tensor_once(tensor: ComplexTensor, dim: usize) -> Result<Complex
         }
     }
 
-    ComplexTensor::new(out, output_shape).map_err(|e| format!("diff: {e}"))
+    ComplexTensor::new(out, output_shape).map_err(|e| diff_error(format!("diff: {e}")))
 }
 
 fn default_dimension(shape: &[usize]) -> usize {
@@ -319,7 +337,12 @@ fn product(dims: &[usize]) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor};
+
+    fn diff_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::diff_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -452,7 +475,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let args = vec![Value::Int(IntValue::I32(-1))];
         let err = diff_builtin(Value::Tensor(tensor), args).unwrap_err();
-        assert!(err.contains("non-negative"));
+        assert!(err.message().contains("non-negative"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -461,7 +484,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let args = vec![Value::Num(1.5)];
         let err = diff_builtin(Value::Tensor(tensor), args).unwrap_err();
-        assert!(err.contains("non-negative integer"));
+        assert!(err.message().contains("non-negative integer"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -470,7 +493,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let args = vec![Value::Int(IntValue::I32(1)), Value::Int(IntValue::I32(0))];
         let err = diff_builtin(Value::Tensor(tensor), args).unwrap_err();
-        assert!(err.contains("dimension must be >= 1"));
+        assert!(err.message().contains("dimension must be >= 1"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

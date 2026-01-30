@@ -1,32 +1,30 @@
-//! MATLAB-compatible `diag` builtin with GPU-aware semantics for RunMat.
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
-use runmat_macros::runtime_builtin;
+//! MATLAB-compatible `diag` builtin.
 
-use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_macros::runtime_builtin;
+
+const MESSAGE_ID_INVALID_INPUT: &str = "MATLAB:diag:InvalidInput";
+const MESSAGE_ID_INVALID_OFFSET: &str = "MATLAB:diag:InvalidOffset";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::diag")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "diag",
     op_kind: GpuOpKind::Custom("diag"),
-    supported_precisions: &[ScalarType::F32, ScalarType::F64],
+    supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[
-        ProviderHook::Custom("diag_from_vector"),
-        ProviderHook::Custom("diag_extract"),
-    ],
+    provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
+    residency: ResidencyPolicy::GatherImmediately,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Providers may implement custom diag hooks; runtimes fall back to a host gather + upload when unavailable.",
+    notes: "diag executes on the host and gathers GPU inputs first.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::diag")]
@@ -37,1381 +35,172 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "diag is currently not fused; fusion plans gather to host before invoking the builtin.",
+    notes: "diag is a host-only shape helper.",
 };
 
-#[derive(Clone, Copy, Debug)]
-struct MatrixDims {
-    rows: usize,
-    cols: usize,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DiagClass {
-    Double,
-    Logical,
-}
-
-#[derive(Debug, Clone)]
-struct DiagOptions {
-    offset: isize,
-    size: Option<MatrixDims>,
-    force_vector: bool,
-    class_spec: Option<DiagClass>,
-    like_proto: Option<Value>,
-}
-
-impl DiagOptions {
-    fn parse(args: Vec<Value>) -> Result<Self, String> {
-        let mut offset: Option<isize> = None;
-        let mut dims: Vec<usize> = Vec::new();
-        let mut dims_from_vector = false;
-        let mut force_vector = false;
-        let mut class_spec: Option<DiagClass> = None;
-        let mut like_proto: Option<Value> = None;
-
-        let mut idx = 0;
-        while idx < args.len() {
-            let arg = args[idx].clone();
-
-            if let Some(keyword) = keyword_of(&arg) {
-                match keyword.as_str() {
-                    "vector" => {
-                        force_vector = true;
-                        idx += 1;
-                        continue;
-                    }
-                    "like" => {
-                        if like_proto.is_some() {
-                            return Err("diag: multiple 'like' specifications are not supported"
-                                .to_string());
-                        }
-                        if class_spec.is_some() {
-                            return Err(
-                                "diag: cannot combine 'like' with class specifiers".to_string()
-                            );
-                        }
-                        let Some(proto) = args.get(idx + 1).cloned() else {
-                            return Err("diag: expected prototype after 'like'".to_string());
-                        };
-                        like_proto = Some(proto);
-                        idx += 2;
-                        continue;
-                    }
-                    "logical" => {
-                        if like_proto.is_some() {
-                            return Err("diag: cannot combine 'like' with 'logical'".to_string());
-                        }
-                        class_spec = Some(DiagClass::Logical);
-                        idx += 1;
-                        continue;
-                    }
-                    "double" => {
-                        if like_proto.is_some() {
-                            return Err("diag: cannot combine 'like' with 'double'".to_string());
-                        }
-                        class_spec = Some(DiagClass::Double);
-                        idx += 1;
-                        continue;
-                    }
-                    "single" => {
-                        return Err(
-                            "diag: single precision output is not implemented yet".to_string()
-                        );
-                    }
-                    other => {
-                        return Err(format!("diag: unrecognised option '{other}'"));
-                    }
-                }
-            }
-
-            if !dims_from_vector {
-                if let Some(vec_dims) = extract_size_vector(&arg)? {
-                    if !dims.is_empty() {
-                        return Err(
-                            "diag: multiple size specifications are not allowed".to_string()
-                        );
-                    }
-                    dims = vec_dims;
-                    dims_from_vector = true;
-                    idx += 1;
-                    continue;
-                }
-            }
-
-            if offset.is_none() {
-                if let Some(off) = try_offset_from_value(&arg)? {
-                    offset = Some(off);
-                    idx += 1;
-                    continue;
-                }
-            }
-
-            if !dims_from_vector && dims.len() < 2 {
-                if let Some(dim) = try_dimension_from_value(&arg)? {
-                    dims.push(dim);
-                    idx += 1;
-                    continue;
-                }
-            }
-
-            return Err(format!("diag: unexpected argument {arg:?}"));
-        }
-
-        if force_vector && !dims.is_empty() {
-            return Err(
-                "diag: size arguments are not compatible with the 'vector' option".to_string(),
-            );
-        }
-
-        let size = if dims.is_empty() {
-            None
-        } else {
-            if dims.len() > 2 {
-                return Err(
-                    "diag: size specification must contain at most two elements".to_string()
-                );
-            }
-            let rows = dims.first().copied().unwrap_or(0);
-            let cols = if dims.len() == 1 { rows } else { dims[1] };
-            Some(MatrixDims { rows, cols })
-        };
-
-        let offset = offset.unwrap_or(0);
-
-        Ok(Self {
-            offset,
-            size,
-            force_vector,
-            class_spec,
-            like_proto,
-        })
-    }
-}
-
-fn keyword_of(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].to_ascii_lowercase()),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            Some(ca.data.iter().collect::<String>().to_ascii_lowercase())
-        }
-        _ => None,
-    }
-}
-
-fn extract_size_vector(value: &Value) -> Result<Option<Vec<usize>>, String> {
-    match value {
-        Value::Tensor(t) => {
-            let len = t.data.len();
-            let is_vector = t.rows() == 1 || t.cols() == 1 || t.shape.len() == 1;
-            if !is_vector || len <= 1 {
-                return Ok(None);
-            }
-            let mut dims = Vec::with_capacity(len);
-            for &raw in &t.data {
-                dims.push(parse_dimension_scalar(raw)?);
-            }
-            Ok(Some(dims))
-        }
-        Value::LogicalArray(_) => Ok(None),
-        _ => Ok(None),
-    }
-}
-
-fn try_dimension_from_value(value: &Value) -> Result<Option<usize>, String> {
-    match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err("diag: size arguments must be non-negative".to_string());
-            }
-            Ok(Some(raw as usize))
-        }
-        Value::Num(n) => parse_dimension_scalar(*n).map(Some),
-        Value::Tensor(t) if t.data.len() == 1 => parse_dimension_scalar(t.data[0]).map(Some),
-        Value::LogicalArray(l) if l.data.len() == 1 => {
-            let dim = if l.data[0] != 0 { 1 } else { 0 };
-            Ok(Some(dim))
-        }
-        Value::Bool(flag) => Ok(Some(if *flag { 1 } else { 0 })),
-        _ => Ok(None),
-    }
-}
-
-fn try_offset_from_value(value: &Value) -> Result<Option<isize>, String> {
-    match value {
-        Value::Int(_) | Value::Num(_) | Value::Bool(_) => offset_from_value(value).map(Some),
-        Value::Tensor(t) if t.data.len() == 1 => offset_from_value(value).map(Some),
-        Value::LogicalArray(l) if l.data.len() == 1 => offset_from_value(value).map(Some),
-        _ => Ok(None),
-    }
-}
-
-fn parse_dimension_scalar(raw: f64) -> Result<usize, String> {
-    if !raw.is_finite() {
-        return Err("diag: size arguments must be finite".to_string());
-    }
-    if raw < 0.0 {
-        return Err("diag: size arguments must be non-negative".to_string());
-    }
-    let rounded = raw.round();
-    if (rounded - raw).abs() > f64::EPSILON {
-        return Err("diag: size arguments must be integers".to_string());
-    }
-    Ok(rounded as usize)
-}
-
-fn resolve_vector_dims(len: usize, options: &DiagOptions) -> Result<MatrixDims, String> {
-    if let Some(spec) = options.size {
-        ensure_vector_fits(len, spec, options.offset)?;
-        return Ok(spec);
-    }
-    let shift = offset_abs(options.offset);
-    let size = len
-        .checked_add(shift)
-        .ok_or_else(|| DIAG_SIZE_ERR.to_string())?;
-    Ok(MatrixDims {
-        rows: size,
-        cols: size,
-    })
-}
-
-fn ensure_vector_fits(len: usize, dims: MatrixDims, offset: isize) -> Result<(), String> {
-    if len == 0 {
-        return Ok(());
-    }
-    let diag_len = diagonal_length(dims.rows, dims.cols, offset);
-    if diag_len < len {
-        return Err("diag: size arguments are too small for the provided vector".to_string());
-    }
-    Ok(())
-}
-
-fn checked_total_len(dims: MatrixDims) -> Result<usize, String> {
-    dims.rows
-        .checked_mul(dims.cols)
-        .ok_or_else(|| DIAG_SIZE_ERR.to_string())
+fn diag_error(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier(message_id)
+        .with_builtin("diag")
+        .build()
 }
 
 #[runtime_builtin(
     name = "diag",
     category = "array/shape",
-    summary = "Create diagonal matrices from vectors or extract diagonals from matrices.",
-    keywords = "diag,diagonal,matrix,extraction,gpu",
-    accel = "shape",
+    summary = "Extract or create a diagonal from a vector or matrix.",
+    keywords = "diag,diagonal,matrix",
     builtin_path = "crate::builtins::array::shape::diag"
 )]
-fn diag_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let options = DiagOptions::parse(rest)?;
-    match value {
-        Value::Tensor(t) => diag_tensor_value(t, &options),
-        Value::ComplexTensor(ct) => diag_complex_value(ct, &options),
-        Value::Complex(re, im) => {
-            let tensor =
-                ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| format!("diag: {e}"))?;
-            diag_complex_value(tensor, &options)
-        }
-        Value::LogicalArray(logical) => diag_logical_value(logical, &options),
-        Value::CharArray(chars) => diag_char_value(chars, &options),
-        Value::GpuTensor(handle) => diag_gpu_value(handle, &options),
-        other => {
-            let tensor = tensor::value_into_tensor_for("diag", other)?;
-            diag_tensor_value(tensor, &options)
-        }
+async fn diag_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if rest.len() > 1 {
+        return Err(diag_error(
+            MESSAGE_ID_INVALID_INPUT,
+            "diag: expected at most two inputs",
+        ));
     }
-}
-
-fn offset_from_value(value: &Value) -> Result<isize, String> {
-    match value {
-        Value::Int(i) => offset_from_i64(i.to_i64()),
-        Value::Num(n) => offset_from_f64(*n),
-        Value::Tensor(t) => {
-            if t.data.len() != 1 {
-                return Err("diag: offset must be a scalar value".to_string());
-            }
-            offset_from_f64(t.data[0])
-        }
-        Value::ComplexTensor(_) | Value::Complex(_, _) => {
-            Err("diag: offset must be real-valued".to_string())
-        }
-        Value::LogicalArray(l) => {
-            if l.data.len() != 1 {
-                return Err("diag: offset must be a scalar value".to_string());
-            }
-            offset_from_i64(if l.data[0] != 0 { 1 } else { 0 })
-        }
-        Value::Bool(b) => offset_from_i64(if *b { 1 } else { 0 }),
-        Value::GpuTensor(_) => Err("diag: offset must be a host scalar value".to_string()),
-        Value::CharArray(_)
-        | Value::String(_)
-        | Value::StringArray(_)
-        | Value::Cell(_)
-        | Value::Struct(_)
-        | Value::FunctionHandle(_)
-        | Value::Closure(_)
-        | Value::Object(_)
-        | Value::HandleObject(_)
-        | Value::Listener(_)
-        | Value::ClassRef(_)
-        | Value::MException(_) => Err("diag: offset must be numeric".to_string()),
-    }
-}
-
-fn offset_from_i64(raw: i64) -> Result<isize, String> {
-    if raw < isize::MIN as i64 || raw > isize::MAX as i64 {
-        Err("diag: offset magnitude is too large".to_string())
-    } else {
-        Ok(raw as isize)
-    }
-}
-
-fn offset_from_f64(raw: f64) -> Result<isize, String> {
-    if !raw.is_finite() {
-        return Err("diag: offset must be finite".to_string());
-    }
-    let rounded = raw.round();
-    if (rounded - raw).abs() > f64::EPSILON {
-        return Err("diag: offset must be an integer".to_string());
-    }
-    if rounded < isize::MIN as f64 || rounded > isize::MAX as f64 {
-        return Err("diag: offset magnitude is too large".to_string());
-    }
-    offset_from_i64(rounded as i64)
-}
-
-const DIAG_SIZE_ERR: &str = "diag: result size exceeds limits";
-
-fn diag_tensor_value(tensor: Tensor, options: &DiagOptions) -> Result<Value, String> {
-    let Tensor {
-        data,
-        shape,
-        rows,
-        cols,
-        ..
-    } = tensor;
-    ensure_matrix_shape("diag", &shape)?;
-    if is_vector_like(rows, cols, shape.len()) {
-        if options.force_vector {
-            let len = data.len();
-            let vector =
-                Tensor::new(data.clone(), vec![len, 1]).map_err(|e| format!("diag: {e}"))?;
-            return apply_template(tensor::tensor_into_value(vector), options);
-        }
-        let dims = resolve_vector_dims(data.len(), options)?;
-        let out = diag_from_vector_real(&data, options.offset, dims)?;
-        apply_template(tensor::tensor_into_value(out), options)
-    } else {
-        if options.size.is_some() {
-            return Err(
-                "diag: size arguments are only valid when the input is a vector".to_string(),
-            );
-        }
-        let out = diag_from_matrix_real(&data, rows, cols, options.offset)?;
-        apply_template(tensor::tensor_into_value(out), options)
-    }
-}
-
-fn diag_complex_value(ct: ComplexTensor, options: &DiagOptions) -> Result<Value, String> {
-    let ComplexTensor {
-        data,
-        shape,
-        rows,
-        cols,
-    } = ct;
-    ensure_matrix_shape("diag", &shape)?;
-    if is_vector_like(rows, cols, shape.len()) {
-        if options.force_vector {
-            let len = data.len();
-            let column =
-                ComplexTensor::new(data.clone(), vec![len, 1]).map_err(|e| format!("diag: {e}"))?;
-            return apply_template(complex_tensor_into_value(column), options);
-        }
-        let dims = resolve_vector_dims(data.len(), options)?;
-        let out = diag_from_vector_complex(&data, options.offset, dims)?;
-        apply_template(complex_tensor_into_value(out), options)
-    } else {
-        if options.size.is_some() {
-            return Err(
-                "diag: size arguments are only valid when the input is a vector".to_string(),
-            );
-        }
-        let out = diag_from_matrix_complex(&data, rows, cols, options.offset)?;
-        apply_template(complex_tensor_into_value(out), options)
-    }
-}
-
-fn diag_logical_value(logical: LogicalArray, options: &DiagOptions) -> Result<Value, String> {
-    let LogicalArray { data, shape } = logical;
-    ensure_matrix_shape("diag", &shape)?;
-    let rows = shape.first().copied().unwrap_or(0);
-    let cols = shape
-        .get(1)
-        .copied()
-        .unwrap_or(if shape.len() <= 1 { 1 } else { 0 });
-    if is_vector_like(rows, cols, shape.len()) {
-        if options.force_vector {
-            let len = data.len();
-            let column =
-                LogicalArray::new(data.clone(), vec![len, 1]).map_err(|e| format!("diag: {e}"))?;
-            return apply_template(Value::LogicalArray(column), options);
-        }
-        let dims = resolve_vector_dims(data.len(), options)?;
-        let out = diag_from_vector_logical(&data, options.offset, dims)?;
-        apply_template(Value::LogicalArray(out), options)
-    } else {
-        if options.size.is_some() {
-            return Err(
-                "diag: size arguments are only valid when the input is a vector".to_string(),
-            );
-        }
-        let out = diag_from_matrix_logical(&data, rows, cols, options.offset)?;
-        apply_template(Value::LogicalArray(out), options)
-    }
-}
-
-fn diag_char_value(chars: CharArray, options: &DiagOptions) -> Result<Value, String> {
-    if options.class_spec.is_some() || options.like_proto.is_some() {
-        return Err("diag: class modifiers are not supported for character inputs".to_string());
-    }
-    let CharArray { data, rows, cols } = chars;
-    if rows == 1 || cols == 1 {
-        if options.force_vector {
-            let len = if rows == 1 { cols } else { rows };
-            let column = CharArray::new(data.clone(), len, 1).map_err(|e| format!("diag: {e}"))?;
-            return Ok(Value::CharArray(column));
-        }
-        let dims = resolve_vector_dims(data.len(), options)?;
-        let out = diag_from_vector_char(&data, rows, cols, options.offset, dims)?;
-        Ok(Value::CharArray(out))
-    } else {
-        if options.size.is_some() {
-            return Err(
-                "diag: size arguments are only valid when the input is a vector".to_string(),
-            );
-        }
-        let out = diag_from_matrix_char(&data, rows, cols, options.offset)?;
-        Ok(Value::CharArray(out))
-    }
-}
-
-fn gpu_rows_cols(shape: &[usize]) -> (usize, usize) {
-    match shape.len() {
-        0 => (1, 1),
-        1 => (shape[0], 1),
-        _ => (shape[0], shape[1]),
-    }
-}
-
-fn try_provider_diag(
-    handle: &GpuTensorHandle,
-    options: &DiagOptions,
-) -> Result<Option<GpuTensorHandle>, String> {
-    let provider = match runmat_accelerate_api::provider() {
-        Some(p) => p,
-        None => return Ok(None),
-    };
-
-    ensure_matrix_shape("diag", &handle.shape)?;
-    let (rows, cols) = gpu_rows_cols(&handle.shape);
-
-    if is_vector_like(rows, cols, handle.shape.len()) {
-        let len = handle
-            .shape
-            .iter()
-            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
-            .ok_or_else(|| DIAG_SIZE_ERR.to_string())?;
-        if len == 0 || options.force_vector || options.size.is_some() {
-            return Ok(None);
-        }
-        match provider.diag_from_vector(handle, options.offset) {
-            Ok(out) => Ok(Some(out)),
-            Err(_) => Ok(None),
-        }
-    } else {
-        let diag_len = diagonal_length(rows, cols, options.offset);
-        if diag_len == 0 {
-            return Ok(None);
-        }
-        match provider.diag_extract(handle, options.offset) {
-            Ok(out) => Ok(Some(out)),
-            Err(_) => Ok(None),
-        }
-    }
-}
-
-fn diag_gpu_value(handle: GpuTensorHandle, options: &DiagOptions) -> Result<Value, String> {
-    if let Some(device_value) = try_provider_diag(&handle, options)? {
-        return apply_template(Value::GpuTensor(device_value), options);
-    }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
-    diag_tensor_value(tensor, options)
-}
-
-fn ensure_matrix_shape(name: &str, shape: &[usize]) -> Result<(), String> {
-    if shape.len() > 2 && shape.iter().skip(2).any(|&d| d != 1) {
-        Err(format!("{name}: input must be 2-D"))
-    } else {
-        Ok(())
-    }
-}
-
-fn is_vector_like(rows: usize, cols: usize, shape_len: usize) -> bool {
-    rows == 1 || cols == 1 || shape_len <= 1
-}
-
-fn diag_from_vector_real(data: &[f64], offset: isize, dims: MatrixDims) -> Result<Tensor, String> {
-    let total = checked_total_len(dims)?;
-    let mut out = vec![0.0; total];
-    for (idx, &value) in data.iter().enumerate() {
-        let (row, col) = diagonal_target_index(idx, offset);
-        out[row + col * dims.rows] = value;
-    }
-    Tensor::new(out, vec![dims.rows, dims.cols]).map_err(|e| format!("diag: {e}"))
-}
-
-fn diag_from_matrix_real(
-    data: &[f64],
-    rows: usize,
-    cols: usize,
-    offset: isize,
-) -> Result<Tensor, String> {
-    let diag_len = diagonal_length(rows, cols, offset);
-    if diag_len == 0 {
-        return Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("diag: {e}"));
-    }
-    let mut out = Vec::with_capacity(diag_len);
-    for i in 0..diag_len {
-        let (row, col) = diagonal_source_index(i, offset);
-        let idx = row + col * rows;
-        out.push(data[idx]);
-    }
-    Tensor::new(out, vec![diag_len, 1]).map_err(|e| format!("diag: {e}"))
-}
-
-fn diag_from_vector_complex(
-    data: &[(f64, f64)],
-    offset: isize,
-    dims: MatrixDims,
-) -> Result<ComplexTensor, String> {
-    let total = checked_total_len(dims)?;
-    let mut out = vec![(0.0, 0.0); total];
-    for (idx, &(re, im)) in data.iter().enumerate() {
-        let (row, col) = diagonal_target_index(idx, offset);
-        out[row + col * dims.rows] = (re, im);
-    }
-    ComplexTensor::new(out, vec![dims.rows, dims.cols]).map_err(|e| format!("diag: {e}"))
-}
-
-fn diag_from_matrix_complex(
-    data: &[(f64, f64)],
-    rows: usize,
-    cols: usize,
-    offset: isize,
-) -> Result<ComplexTensor, String> {
-    let diag_len = diagonal_length(rows, cols, offset);
-    if diag_len == 0 {
-        return ComplexTensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("diag: {e}"));
-    }
-    let mut out = Vec::with_capacity(diag_len);
-    for i in 0..diag_len {
-        let (row, col) = diagonal_source_index(i, offset);
-        let idx = row + col * rows;
-        out.push(data[idx]);
-    }
-    ComplexTensor::new(out, vec![diag_len, 1]).map_err(|e| format!("diag: {e}"))
-}
-
-fn diag_from_vector_logical(
-    data: &[u8],
-    offset: isize,
-    dims: MatrixDims,
-) -> Result<LogicalArray, String> {
-    let total = checked_total_len(dims)?;
-    let mut out = vec![0u8; total];
-    for (idx, &value) in data.iter().enumerate() {
-        let (row, col) = diagonal_target_index(idx, offset);
-        out[row + col * dims.rows] = if value != 0 { 1 } else { 0 };
-    }
-    LogicalArray::new(out, vec![dims.rows, dims.cols]).map_err(|e| format!("diag: {e}"))
-}
-
-fn diag_from_matrix_logical(
-    data: &[u8],
-    rows: usize,
-    cols: usize,
-    offset: isize,
-) -> Result<LogicalArray, String> {
-    let diag_len = diagonal_length(rows, cols, offset);
-    if diag_len == 0 {
-        return LogicalArray::new(Vec::new(), vec![0, 0]).map_err(|e| format!("diag: {e}"));
-    }
-    let mut out = Vec::with_capacity(diag_len);
-    for i in 0..diag_len {
-        let (row, col) = diagonal_source_index(i, offset);
-        let idx = row + col * rows;
-        out.push(if data[idx] != 0 { 1 } else { 0 });
-    }
-    LogicalArray::new(out, vec![diag_len, 1]).map_err(|e| format!("diag: {e}"))
-}
-
-fn diag_from_vector_char(
-    data: &[char],
-    rows: usize,
-    cols: usize,
-    offset: isize,
-    dims: MatrixDims,
-) -> Result<CharArray, String> {
-    let len = if rows == 1 {
-        cols
-    } else if cols == 1 {
-        rows
-    } else {
-        data.len()
-    };
-    let total = checked_total_len(dims)?;
-    let mut out = vec![' '; total];
-    for idx in 0..len {
-        let ch = element_from_char_vector(data, rows, cols, idx);
-        let (row, col) = diagonal_target_index(idx, offset);
-        if row < dims.rows && col < dims.cols {
-            out[row + col * dims.rows] = ch;
-        }
-    }
-    CharArray::new(out, dims.rows, dims.cols).map_err(|e| format!("diag: {e}"))
-}
-
-fn diag_from_matrix_char(
-    data: &[char],
-    rows: usize,
-    cols: usize,
-    offset: isize,
-) -> Result<CharArray, String> {
-    let diag_len = diagonal_length(rows, cols, offset);
-    if diag_len == 0 {
-        return CharArray::new(Vec::new(), 0, 0).map_err(|e| format!("diag: {e}"));
-    }
-    let mut out = Vec::with_capacity(diag_len);
-    for i in 0..diag_len {
-        let (row, col) = diagonal_source_index(i, offset);
-        let idx = row * cols + col;
-        out.push(data[idx]);
-    }
-    CharArray::new(out, diag_len, 1).map_err(|e| format!("diag: {e}"))
-}
-
-fn element_from_char_vector(data: &[char], rows: usize, cols: usize, index: usize) -> char {
-    if rows == 1 {
-        data[index]
-    } else if cols == 1 {
-        data[index * cols]
-    } else {
-        data[index]
-    }
-}
-
-fn apply_template(value: Value, options: &DiagOptions) -> Result<Value, String> {
-    if let Some(proto) = options.like_proto.as_ref() {
-        return convert_like(proto, value);
-    }
-    if let Some(class_spec) = options.class_spec {
-        return match class_spec {
-            DiagClass::Double => convert_to_double(value),
-            DiagClass::Logical => convert_to_logical(value),
-        };
-    }
-    Ok(value)
-}
-
-fn convert_like(proto: &Value, value: Value) -> Result<Value, String> {
-    match proto {
-        Value::LogicalArray(_) | Value::Bool(_) => convert_to_logical(value),
-        Value::ComplexTensor(_) | Value::Complex(_, _) => convert_to_complex(value),
-        Value::GpuTensor(handle) => {
-            let host_value = convert_to_double(value)?;
-            convert_value_to_gpu(handle, host_value)
-        }
-        Value::Tensor(_) | Value::Num(_) | Value::Int(_) => convert_to_double(value),
-        Value::CharArray(_) => Err("diag: cannot use 'like' with character prototypes".to_string()),
-        other => {
-            let gathered =
-                crate::dispatcher::gather_if_needed(other).map_err(|e| format!("diag: {e}"))?;
-            convert_like(&gathered, value)
-        }
-    }
-}
-
-fn convert_to_double(value: Value) -> Result<Value, String> {
-    match value {
-        Value::Tensor(_) | Value::Num(_) => Ok(value),
-        Value::Int(i) => Ok(Value::Num(i.to_f64())),
-        Value::LogicalArray(array) => {
-            let tensor = tensor::logical_to_tensor(&array)?;
-            Ok(tensor::tensor_into_value(tensor))
-        }
-        Value::Bool(flag) => Ok(Value::Num(if flag { 1.0 } else { 0.0 })),
-        Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
-            convert_to_double(tensor::tensor_into_value(tensor))
-        }
-        Value::ComplexTensor(_) | Value::Complex(_, _) => {
-            Err("diag: cannot convert complex results to double precision".to_string())
-        }
-        Value::CharArray(_) => {
-            Err("diag: cannot convert character results to double precision".to_string())
-        }
-        other => Ok(other),
-    }
-}
-
-fn convert_to_logical(value: Value) -> Result<Value, String> {
-    match value {
-        Value::LogicalArray(_) | Value::Bool(_) => Ok(value),
-        Value::Num(n) => Ok(Value::Bool(n != 0.0)),
-        Value::Int(i) => Ok(Value::Bool(i.to_i64() != 0)),
-        Value::Tensor(tensor) => {
-            let mut data = Vec::with_capacity(tensor.data.len());
-            for &v in &tensor.data {
-                data.push(if v != 0.0 { 1 } else { 0 });
-            }
-            let logical =
-                LogicalArray::new(data, tensor.shape).map_err(|e| format!("diag: {e}"))?;
-            Ok(Value::LogicalArray(logical))
-        }
-        Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
-            convert_to_logical(tensor::tensor_into_value(tensor))
-        }
+    let offset = parse_offset(&rest).await?;
+    let gathered = gather_if_needed_async(&value).await?;
+    match gathered {
+        Value::Tensor(tensor) => diag_tensor_value(tensor, offset).map(Value::Tensor),
+        Value::LogicalArray(array) => diag_logical_value(array, offset).map(Value::LogicalArray),
         Value::ComplexTensor(tensor) => {
-            let mut data = Vec::with_capacity(tensor.data.len());
-            for &(re, im) in &tensor.data {
-                let is_nonzero = re != 0.0 || im != 0.0;
-                data.push(if is_nonzero { 1 } else { 0 });
-            }
-            let logical =
-                LogicalArray::new(data, tensor.shape).map_err(|e| format!("diag: {e}"))?;
-            Ok(Value::LogicalArray(logical))
+            diag_complex_value(tensor, offset).map(Value::ComplexTensor)
         }
-        Value::Complex(re, im) => Ok(Value::Bool(re != 0.0 || im != 0.0)),
-        Value::CharArray(_) => Err("diag: cannot convert character results to logical".to_string()),
-        other => Ok(other),
+        other => Err(diag_error(
+            MESSAGE_ID_INVALID_INPUT,
+            format!("diag: unsupported input {other:?}"),
+        )),
     }
 }
 
-fn convert_to_complex(value: Value) -> Result<Value, String> {
-    match value {
-        Value::ComplexTensor(_) | Value::Complex(_, _) => Ok(value),
-        Value::Num(n) => Ok(Value::Complex(n, 0.0)),
-        Value::Int(i) => Ok(Value::Complex(i.to_f64(), 0.0)),
-        Value::Tensor(tensor) => {
-            let data = tensor.data.iter().map(|&re| (re, 0.0)).collect();
-            let complex =
-                ComplexTensor::new(data, tensor.shape).map_err(|e| format!("diag: {e}"))?;
-            Ok(complex_tensor_into_value(complex))
-        }
-        Value::LogicalArray(array) => {
-            let data = array
-                .data
-                .iter()
-                .map(|&b| if b != 0 { (1.0, 0.0) } else { (0.0, 0.0) })
-                .collect();
-            let complex =
-                ComplexTensor::new(data, array.shape).map_err(|e| format!("diag: {e}"))?;
-            Ok(complex_tensor_into_value(complex))
-        }
-        Value::Bool(flag) => Ok(Value::Complex(if flag { 1.0 } else { 0.0 }, 0.0)),
-        Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
-            convert_to_complex(tensor::tensor_into_value(tensor))
-        }
-        Value::CharArray(_) => Err("diag: cannot convert character results to complex".to_string()),
-        other => Ok(other),
+async fn parse_offset(rest: &[Value]) -> BuiltinResult<isize> {
+    if rest.is_empty() {
+        return Ok(0);
     }
+    let gathered = gather_if_needed_async(&rest[0]).await?;
+    scalar_to_isize(&gathered)
 }
 
-fn convert_value_to_gpu(_proto: &GpuTensorHandle, value: Value) -> Result<Value, String> {
+fn scalar_to_isize(value: &Value) -> BuiltinResult<isize> {
     match value {
-        Value::GpuTensor(_) => Ok(value),
-        Value::Tensor(tensor) => upload_tensor_to_gpu(tensor),
+        Value::Int(i) => Ok(i.to_i64() as isize),
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("diag: {e}"))?;
-            upload_tensor_to_gpu(tensor)
+            if !n.is_finite() {
+                return Err(diag_error(
+                    MESSAGE_ID_INVALID_OFFSET,
+                    "diag: diagonal offset must be finite",
+                ));
+            }
+            let rounded = n.round();
+            if (rounded - n).abs() > f64::EPSILON {
+                return Err(diag_error(
+                    MESSAGE_ID_INVALID_OFFSET,
+                    "diag: diagonal offset must be an integer",
+                ));
+            }
+            Ok(rounded as isize)
         }
-        Value::LogicalArray(array) => {
-            let tensor = tensor::logical_to_tensor(&array)?;
-            upload_tensor_to_gpu(tensor)
-        }
-        Value::Bool(flag) => {
-            let tensor = Tensor::new(vec![if flag { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|e| format!("diag: {e}"))?;
-            upload_tensor_to_gpu(tensor)
-        }
-        other => Ok(other),
+        Value::Tensor(t) if t.data.len() == 1 => scalar_to_isize(&Value::Num(t.data[0])),
+        Value::Bool(flag) => Ok(if *flag { 1 } else { 0 }),
+        other => Err(diag_error(
+            MESSAGE_ID_INVALID_OFFSET,
+            format!("diag: diagonal offset must be a numeric scalar, got {other:?}"),
+        )),
     }
 }
 
-fn upload_tensor_to_gpu(tensor: Tensor) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        let view = HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        if let Ok(uploaded) = provider.upload(&view) {
-            return Ok(Value::GpuTensor(uploaded));
-        }
+fn diag_tensor_value(tensor: Tensor, offset: isize) -> BuiltinResult<Tensor> {
+    let (rows, cols) = matrix_dims(&tensor.shape)?;
+    if rows == 1 || cols == 1 {
+        let len = rows.max(cols);
+        let data = diag_matrix_from_vector(&tensor.data, len, offset, 0.0);
+        let size = len + offset.unsigned_abs();
+        Tensor::new(data, vec![size, size])
+            .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
+    } else {
+        let data = diag_vector_from_matrix(&tensor.data, rows, cols, offset);
+        let len = data.len();
+        Tensor::new(data, vec![len, 1])
+            .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
     }
-    Ok(tensor::tensor_into_value(tensor))
 }
 
-fn diagonal_length(rows: usize, cols: usize, offset: isize) -> usize {
-    if rows == 0 || cols == 0 {
-        return 0;
+fn diag_logical_value(array: LogicalArray, offset: isize) -> BuiltinResult<LogicalArray> {
+    let (rows, cols) = matrix_dims(&array.shape)?;
+    if rows == 1 || cols == 1 {
+        let len = rows.max(cols);
+        let data = diag_matrix_from_vector(&array.data, len, offset, 0u8);
+        let size = len + offset.unsigned_abs();
+        LogicalArray::new(data, vec![size, size])
+            .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
+    } else {
+        let diag = diag_vector_from_matrix(&array.data, rows, cols, offset);
+        let len = diag.len();
+        LogicalArray::new(diag, vec![len, 1])
+            .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
     }
-    if offset >= 0 {
-        let k = offset as usize;
-        if k >= cols {
-            0
+}
+
+fn diag_complex_value(tensor: ComplexTensor, offset: isize) -> BuiltinResult<ComplexTensor> {
+    let (rows, cols) = matrix_dims(&tensor.shape)?;
+    if rows == 1 || cols == 1 {
+        let len = rows.max(cols);
+        let data = diag_matrix_from_vector(&tensor.data, len, offset, (0.0, 0.0));
+        let size = len + offset.unsigned_abs();
+        ComplexTensor::new(data, vec![size, size])
+            .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
+    } else {
+        let diag = diag_vector_from_matrix(&tensor.data, rows, cols, offset);
+        let len = diag.len();
+        ComplexTensor::new(diag, vec![len, 1])
+            .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
+    }
+}
+
+fn matrix_dims(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
+    if shape.len() > 2 {
+        return Err(diag_error(
+            MESSAGE_ID_INVALID_INPUT,
+            "diag: only vectors and matrices are supported",
+        ));
+    }
+    let rows = *shape.get(0).unwrap_or(&1);
+    let cols = *shape.get(1).unwrap_or(&1);
+    Ok((rows, cols))
+}
+
+fn diag_matrix_from_vector<T: Copy>(data: &[T], len: usize, offset: isize, zero: T) -> Vec<T> {
+    let shift = offset.unsigned_abs();
+    let size = len + shift;
+    let mut out = vec![zero; size * size];
+    for idx in 0..len.min(data.len()) {
+        let (row, col) = if offset >= 0 {
+            (idx, idx + shift)
         } else {
-            rows.min(cols - k)
-        }
-    } else {
-        let k = (-offset) as usize;
-        if k >= rows {
-            0
-        } else {
-            (rows - k).min(cols)
-        }
-    }
-}
-
-fn diagonal_target_index(idx: usize, offset: isize) -> (usize, usize) {
-    if offset >= 0 {
-        (idx, idx + offset as usize)
-    } else {
-        let shift = (-offset) as usize;
-        (idx + shift, idx)
-    }
-}
-
-fn diagonal_source_index(idx: usize, offset: isize) -> (usize, usize) {
-    if offset >= 0 {
-        (idx, idx + offset as usize)
-    } else {
-        let shift = (-offset) as usize;
-        (idx + shift, idx)
-    }
-}
-
-fn offset_abs(offset: isize) -> usize {
-    if offset >= 0 {
-        offset as usize
-    } else {
-        let magnitude = -(offset as i128);
-        magnitude as usize
-    }
-}
-
-fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor.data.len() == 1 {
-        let (re, im) = tensor.data[0];
-        Value::Complex(re, im)
-    } else {
-        Value::ComplexTensor(tensor)
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use crate::builtins::common::test_support;
-    #[cfg(feature = "wgpu")]
-    use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
-    use runmat_builtins::{CharArray, IntValue, LogicalArray, Tensor};
-
-    #[cfg(feature = "wgpu")]
-    fn cpu_diag_tensor(tensor: Tensor, rest: Vec<Value>) -> Tensor {
-        let options = super::DiagOptions::parse(rest).expect("options");
-        let value = super::diag_tensor_value(tensor, &options).expect("diag");
-        crate::builtins::common::tensor::value_into_tensor_for("diag", value)
-            .expect("tensor conversion")
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_scalar_returns_scalar() {
-        let result = diag_builtin(Value::Num(7.0), Vec::new()).expect("diag");
-        assert_eq!(result, Value::Num(7.0));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_complex_scalar_roundtrip() {
-        let result = diag_builtin(Value::Complex(1.5, -2.25), Vec::new()).expect("diag");
-        assert_eq!(result, Value::Complex(1.5, -2.25));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_vector_positive_offset() {
-        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let result =
-            diag_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(1))]).expect("diag");
-        match result {
-            Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 3]);
-                assert_eq!(out.rows(), 3);
-                assert_eq!(out.cols(), 3);
-                assert_eq!(out.data, vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 2.0, 0.0]);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_matrix_single_element_returns_scalar() {
-        let tensor = Tensor::new(vec![42.0], vec![1, 1]).unwrap();
-        let result = diag_builtin(Value::Tensor(tensor), Vec::new()).expect("diag");
-        assert_eq!(result, Value::Num(42.0));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_vector_main_diagonal() {
-        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let result = diag_builtin(Value::Tensor(tensor), Vec::new()).expect("diag");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
-                for i in 0..3 {
-                    for j in 0..3 {
-                        let idx = i + j * 3;
-                        if i == j {
-                            assert_eq!(t.data[idx], (i + 1) as f64);
-                        } else {
-                            assert_eq!(t.data[idx], 0.0);
-                        }
-                    }
-                }
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_empty_vector_returns_empty_matrix() {
-        let tensor = Tensor::new(Vec::<f64>::new(), vec![0, 1]).unwrap();
-        let result = diag_builtin(Value::Tensor(tensor), Vec::new()).expect("diag");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_empty_vector_with_offset_expands() {
-        let tensor = Tensor::new(Vec::<f64>::new(), vec![0, 1]).unwrap();
-        let result =
-            diag_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(2))]).expect("diag");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![0.0, 0.0, 0.0, 0.0]);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_matrix_negative_offset() {
-        let tensor = Tensor::new(
-            vec![1.0, 4.0, 7.0, 2.0, 5.0, 8.0, 3.0, 6.0, 9.0],
-            vec![3, 3],
-        )
-        .unwrap();
-        let offset = Value::Int(IntValue::I32(-1));
-        let result = diag_builtin(Value::Tensor(tensor), vec![offset]).expect("diag");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
-                assert_eq!(t.data, vec![4.0, 8.0]);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_tensor_requires_two_dimensional_input() {
-        let tensor = Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap();
-        let err = diag_builtin(Value::Tensor(tensor), Vec::new()).expect_err("diag should fail");
-        assert!(err.contains("input must be 2-D"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_offset_out_of_range_returns_empty() {
-        let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let result =
-            diag_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(3))]).expect("diag");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_offset_non_integer_errors() {
-        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = diag_builtin(Value::Tensor(tensor), vec![Value::Num(1.5)]).expect_err("diag");
-        assert!(err.contains("offset must be an integer"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_offset_nan_errors() {
-        let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let err =
-            diag_builtin(Value::Tensor(tensor), vec![Value::Num(f64::NAN)]).expect_err("diag");
-        assert!(err.contains("offset must be finite"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_logical_vector_creates_square_matrix() {
-        let logical = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
-        let result = diag_builtin(Value::LogicalArray(logical), Vec::new()).expect("diag");
-        match result {
-            Value::LogicalArray(out) => {
-                assert_eq!(out.shape, vec![3, 3]);
-                for i in 0..3 {
-                    for j in 0..3 {
-                        let idx = i + j * 3;
-                        if i == j {
-                            assert_eq!(out.data[idx], if i % 2 == 0 { 1 } else { 0 });
-                        } else {
-                            assert_eq!(out.data[idx], 0);
-                        }
-                    }
-                }
-            }
-            other => panic!("expected logical array, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_logical_matrix_extracts_column() {
-        let logical = LogicalArray::new(vec![0, 1, 1, 0], vec![2, 2]).unwrap();
-        let result = diag_builtin(
-            Value::LogicalArray(logical),
-            vec![Value::Int(IntValue::I32(-1))],
-        )
-        .expect("diag");
-        match result {
-            Value::LogicalArray(out) => {
-                assert_eq!(out.shape, vec![1, 1]);
-                assert_eq!(out.data, vec![1]);
-            }
-            other => panic!("expected logical array, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_char_matrix_extracts_column() {
-        let chars = CharArray::new("abcd".chars().collect(), 2, 2).unwrap();
-        let result = diag_builtin(Value::CharArray(chars), Vec::new()).expect("diag");
-        match result {
-            Value::CharArray(out) => {
-                assert_eq!(out.rows, 2);
-                assert_eq!(out.cols, 1);
-                assert_eq!(out.data, vec!['a', 'd']);
-            }
-            other => panic!("expected char array, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_char_vector_yields_square_matrix() {
-        let chars = CharArray::new_row("az");
-        let result = diag_builtin(Value::CharArray(chars), Vec::new()).expect("diag");
-        match result {
-            Value::CharArray(out) => {
-                assert_eq!(out.rows, 2);
-                assert_eq!(out.cols, 2);
-                assert_eq!(out.data, vec!['a', ' ', ' ', 'z']);
-            }
-            other => panic!("expected char array, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_gpu_roundtrip() {
-        test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            let result = diag_builtin(Value::GpuTensor(handle), Vec::new()).expect("diag");
-            match result {
-                Value::GpuTensor(out) => {
-                    let host = provider.download(&out).expect("download");
-                    assert_eq!(host.shape, vec![3, 3]);
-                    assert_eq!(host.data, vec![1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0]);
-                }
-                Value::Tensor(t) => {
-                    // Provider may not upload; ensure host fallback is correct.
-                    assert_eq!(t.shape, vec![3, 3]);
-                }
-                other => panic!("unexpected value {other:?}"),
-            }
-        });
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_requires_numeric_offset() {
-        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = diag_builtin(Value::Tensor(tensor), vec![Value::String("two".into())])
-            .expect_err("diag should fail");
-        assert!(err.contains("unrecognised option"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_offset_from_scalar_tensor() {
-        let vector = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let offset = Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap());
-        let result = diag_builtin(Value::Tensor(vector), vec![offset]).expect("diag");
-        match result {
-            Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 3]);
-                assert_eq!(out.data, vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 2.0, 0.0]);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_vector_option_returns_column() {
-        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let result =
-            diag_builtin(Value::Tensor(tensor), vec![Value::from("vector")]).expect("diag");
-        match result {
-            Value::Tensor(column) => {
-                assert_eq!(column.shape, vec![3, 1]);
-                assert_eq!(column.data, vec![1.0, 2.0, 3.0]);
-            }
-            other => panic!("expected tensor column, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_size_vector_allocates_rectangular() {
-        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let size_vec = Tensor::new(vec![2.0, 4.0], vec![1, 2]).unwrap();
-        let result =
-            diag_builtin(Value::Tensor(tensor), vec![Value::Tensor(size_vec)]).expect("diag");
-        match result {
-            Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 4]);
-                assert_eq!(out.data, vec![1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0]);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_size_too_small_errors() {
-        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let size_vec = Tensor::new(vec![2.0, 2.0], vec![1, 2]).unwrap();
-        let err = diag_builtin(Value::Tensor(tensor), vec![Value::Tensor(size_vec)])
-            .expect_err("diag should fail");
-        assert!(err.contains("size arguments are too small"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_vector_option_disallows_size_override() {
-        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let size_vec = Tensor::new(vec![2.0, 2.0], vec![1, 2]).unwrap();
-        let err = diag_builtin(
-            Value::Tensor(tensor),
-            vec![Value::from("vector"), Value::Tensor(size_vec)],
-        )
-        .expect_err("diag should fail");
-        assert!(err.contains("not compatible with the 'vector' option"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_class_logical_yields_logical_output() {
-        let tensor = Tensor::new(vec![1.0, 0.0, 3.0], vec![3, 1]).unwrap();
-        let result =
-            diag_builtin(Value::Tensor(tensor), vec![Value::from("logical")]).expect("diag");
-        match result {
-            Value::LogicalArray(out) => {
-                assert_eq!(out.shape, vec![3, 3]);
-                assert_eq!(out.data, vec![1, 0, 0, 0, 0, 0, 0, 0, 1]);
-            }
-            other => panic!("expected logical array, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_class_double_from_logical() {
-        let logical = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
-        let result =
-            diag_builtin(Value::LogicalArray(logical), vec![Value::from("double")]).expect("diag");
-        match result {
-            Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 3]);
-                assert_eq!(out.data, vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_single_option_not_supported() {
-        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = diag_builtin(Value::Tensor(tensor), vec![Value::from("single")])
-            .expect_err("diag should fail");
-        assert!(err.contains("single precision"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_like_logical_matches_class() {
-        let tensor = Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap();
-        let proto = LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
-        let result = diag_builtin(
-            Value::Tensor(tensor),
-            vec![Value::from("like"), Value::LogicalArray(proto)],
-        )
-        .expect("diag");
-        assert!(matches!(result, Value::LogicalArray(_)));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_like_char_errors() {
-        let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let proto = CharArray::new_row("a");
-        let err = diag_builtin(
-            Value::Tensor(tensor),
-            vec![Value::from("like"), Value::CharArray(proto)],
-        )
-        .expect_err("diag should fail");
-        assert!(err.contains("character prototypes"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn diag_like_gpu_returns_gpu_value() {
-        test_support::with_test_provider(|provider| {
-            let vector = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-            let proto_host = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
-            let proto_handle = provider
-                .upload(&HostTensorView {
-                    data: &proto_host.data,
-                    shape: &proto_host.shape,
-                })
-                .expect("upload prototype");
-            let result = diag_builtin(
-                Value::Tensor(vector),
-                vec![Value::from("like"), Value::GpuTensor(proto_handle)],
-            )
-            .expect("diag");
-            match result {
-                Value::GpuTensor(handle) => {
-                    let host = provider.download(&handle).expect("download");
-                    assert_eq!(host.shape, vec![2, 2]);
-                    assert_eq!(host.data, vec![1.0, 0.0, 0.0, 2.0]);
-                }
-                other => panic!("expected gpu tensor, got {other:?}"),
-            }
-        });
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    #[cfg(feature = "wgpu")]
-    fn diag_wgpu_vector_matches_cpu() {
-        let _ =
-            wgpu_provider::register_wgpu_provider(wgpu_provider::WgpuProviderOptions::default());
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
-        let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
-        let cpu = cpu_diag_tensor(tensor.clone(), vec![Value::Int(IntValue::I32(1))]);
-        let view = HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
+            (idx + shift, idx)
         };
-        let handle = provider.upload(&view).expect("upload");
-        let gpu_value = diag_builtin(Value::GpuTensor(handle), vec![Value::Int(IntValue::I32(1))])
-            .expect("diag");
-        let gathered = test_support::gather(gpu_value).expect("gather");
-        assert_eq!(gathered.shape, cpu.shape);
-        let tol = match provider.precision() {
-            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
-            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
-        };
-        for (a, b) in gathered.data.iter().zip(cpu.data.iter()) {
-            assert!((a - b).abs() < tol, "|{} - {}| >= {}", a, b, tol);
-        }
+        out[row + col * size] = data[idx];
     }
+    out
+}
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    #[cfg(feature = "wgpu")]
-    fn diag_wgpu_extract_matches_cpu() {
-        let _ =
-            wgpu_provider::register_wgpu_provider(wgpu_provider::WgpuProviderOptions::default());
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
-        let tensor = Tensor::new(
-            vec![1.0, 4.0, 7.0, 2.0, 5.0, 8.0, 3.0, 6.0, 9.0],
-            vec![3, 3],
-        )
-        .unwrap();
-        let cpu = cpu_diag_tensor(tensor.clone(), vec![Value::Int(IntValue::I32(-1))]);
-        let view = HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        let handle = provider.upload(&view).expect("upload");
-        let gpu_value = diag_builtin(
-            Value::GpuTensor(handle),
-            vec![Value::Int(IntValue::I32(-1))],
-        )
-        .expect("diag");
-        let gathered = test_support::gather(gpu_value).expect("gather");
-        let tol = match provider.precision() {
-            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
-            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
-        };
-        assert_eq!(gathered.shape, cpu.shape);
-        for (a, b) in gathered.data.iter().zip(cpu.data.iter()) {
-            assert!((a - b).abs() < tol, "|{} - {}| >= {}", a, b, tol);
-        }
+fn diag_vector_from_matrix<T: Copy>(data: &[T], rows: usize, cols: usize, offset: isize) -> Vec<T> {
+    let shift = offset.unsigned_abs();
+    let (start_row, start_col) = if offset >= 0 {
+        (0usize, shift)
+    } else {
+        (shift, 0usize)
+    };
+    if start_row >= rows || start_col >= cols {
+        return Vec::new();
     }
+    let max_len = (rows - start_row).min(cols - start_col);
+    let mut out = Vec::with_capacity(max_len);
+    for idx in 0..max_len {
+        let row = start_row + idx;
+        let col = start_col + idx;
+        out.push(data[row + col * rows]);
+    }
+    out
 }

@@ -191,6 +191,7 @@ impl Scatter3Plot {
             vertices,
             indices: None,
             gpu_vertices: self.gpu_vertices.clone(),
+            bounds: None,
             material: Material {
                 albedo: Vec4::ONE,
                 roughness: 0.0,

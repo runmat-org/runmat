@@ -61,12 +61,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::fill"
 )]
-fn fill_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let gathered_value =
-        crate::dispatcher::gather_if_needed(&value).map_err(|e| format!("fill: {e}"))?;
+async fn fill_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let gathered_value = crate::dispatcher::gather_if_needed_async(&value)
+        .await
+        .map_err(|e| format!("fill: {e}"))?;
     let scalar = FillScalar::from_value(&gathered_value)?;
-    let parsed = ParsedFill::parse(scalar, rest)?;
-    build_output(parsed)
+    let parsed = ParsedFill::parse(scalar, rest).await?;
+    build_output(parsed).map_err(Into::into)
 }
 
 struct ParsedFill {
@@ -167,7 +168,7 @@ impl FillScalar {
 }
 
 impl ParsedFill {
-    fn parse(fill: FillScalar, args: Vec<Value>) -> Result<Self, String> {
+    async fn parse(fill: FillScalar, args: Vec<Value>) -> Result<Self, String> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
         let mut shape_source: Option<Vec<usize>> = None;
@@ -235,7 +236,7 @@ impl ParsedFill {
                 }
             }
 
-            if let Some(parsed_dims) = extract_dims(&arg, "fill")? {
+            if let Some(parsed_dims) = extract_dims(&arg, "fill").await? {
                 saw_dims_arg = true;
                 if dims.is_empty() {
                     dims = parsed_dims;
@@ -407,6 +408,7 @@ fn make_logical_array(fill: &FillScalar, shape: &[usize]) -> Result<LogicalArray
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
 
     #[cfg(feature = "wgpu")]
@@ -415,7 +417,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_scalar_defaults() {
-        let result = fill_builtin(Value::Num(5.0), Vec::new()).expect("fill");
+        let result = block_on(fill_builtin(Value::Num(5.0), Vec::new())).expect("fill");
         assert_eq!(result, Value::Num(5.0));
     }
 
@@ -423,7 +425,7 @@ pub(crate) mod tests {
     #[test]
     fn fill_square_from_single_dimension() {
         let args = vec![Value::Num(3.0)];
-        let result = fill_builtin(Value::Num(2.5), args).expect("fill");
+        let result = block_on(fill_builtin(Value::Num(2.5), args)).expect("fill");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
@@ -437,7 +439,7 @@ pub(crate) mod tests {
     #[test]
     fn fill_rectangular_dims() {
         let args = vec![Value::Num(2.0), Value::Num(4.0)];
-        let result = fill_builtin(Value::Num(-4.0), args).expect("fill");
+        let result = block_on(fill_builtin(Value::Num(-4.0), args)).expect("fill");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 4]);
@@ -451,7 +453,8 @@ pub(crate) mod tests {
     #[test]
     fn fill_size_vector() {
         let sz = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
-        let result = fill_builtin(Value::Num(10.0), vec![Value::Tensor(sz)]).expect("fill");
+        let result =
+            block_on(fill_builtin(Value::Num(10.0), vec![Value::Tensor(sz)])).expect("fill");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3, 4]);
@@ -465,7 +468,7 @@ pub(crate) mod tests {
     #[test]
     fn fill_logical_option() {
         let args = vec![Value::Num(4.0), Value::from("logical")];
-        let result = fill_builtin(Value::Num(3.0), args).expect("fill");
+        let result = block_on(fill_builtin(Value::Num(3.0), args)).expect("fill");
         match result {
             Value::LogicalArray(l) => {
                 assert_eq!(l.shape, vec![4, 4]);
@@ -479,8 +482,11 @@ pub(crate) mod tests {
     #[test]
     fn fill_like_tensor_infers_shape() {
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let result = fill_builtin(Value::Num(std::f64::consts::PI), vec![Value::Tensor(proto)])
-            .expect("fill");
+        let result = block_on(fill_builtin(
+            Value::Num(std::f64::consts::PI),
+            vec![Value::Tensor(proto)],
+        ))
+        .expect("fill");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -496,10 +502,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_like_complex() {
-        let result = fill_builtin(
+        let result = block_on(fill_builtin(
             Value::Complex(1.0, 2.0),
             vec![Value::Num(2.0), Value::from("complex")],
-        )
+        ))
         .expect("fill");
         match result {
             Value::ComplexTensor(t) => {
@@ -517,17 +523,17 @@ pub(crate) mod tests {
     #[test]
     fn fill_rejects_non_scalar_value() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let result = fill_builtin(Value::Tensor(tensor), Vec::new());
+        let result = block_on(fill_builtin(Value::Tensor(tensor), Vec::new()));
         assert!(result.is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_requires_real_for_double_output() {
-        let result = fill_builtin(
+        let result = block_on(fill_builtin(
             Value::Complex(1.0, 1.0),
             vec![Value::Num(2.0), Value::Num(2.0), Value::from("double")],
-        );
+        ));
         assert!(result.is_err());
     }
 
@@ -535,7 +541,7 @@ pub(crate) mod tests {
     #[test]
     fn fill_double_option_generates_real_array() {
         let args = vec![Value::Num(2.0), Value::Num(3.0), Value::from("double")];
-        let result = fill_builtin(Value::Num(1.5), args).expect("fill");
+        let result = block_on(fill_builtin(Value::Num(1.5), args)).expect("fill");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
@@ -550,7 +556,7 @@ pub(crate) mod tests {
     fn fill_like_infers_shape_without_dims() {
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::from("like"), Value::Tensor(proto)];
-        let result = fill_builtin(Value::Num(4.2), args).expect("fill");
+        let result = block_on(fill_builtin(Value::Num(4.2), args)).expect("fill");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -565,7 +571,7 @@ pub(crate) mod tests {
     fn fill_like_logical_prototype() {
         let logical = LogicalArray::new(vec![1], vec![1, 1]).unwrap();
         let args = vec![Value::from("like"), Value::LogicalArray(logical)];
-        let result = fill_builtin(Value::Num(0.0), args).expect("fill");
+        let result = block_on(fill_builtin(Value::Num(0.0), args)).expect("fill");
         match result {
             Value::LogicalArray(arr) => {
                 assert_eq!(arr.shape, vec![1, 1]);
@@ -578,10 +584,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_rejects_single_precision_option() {
-        let result = fill_builtin(
+        let result = block_on(fill_builtin(
             Value::Num(1.0),
             vec![Value::Num(2.0), Value::from("single")],
-        );
+        ));
         assert!(result.is_err());
     }
 
@@ -595,7 +601,7 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::Tensor(proto),
         ];
-        let result = fill_builtin(Value::Num(0.0), args);
+        let result = block_on(fill_builtin(Value::Num(0.0), args));
         assert!(result.is_err());
     }
 
@@ -615,7 +621,7 @@ pub(crate) mod tests {
                 Value::from("like"),
                 Value::GpuTensor(handle),
             ];
-            let result = fill_builtin(Value::Num(0.5), args).expect("fill");
+            let result = block_on(fill_builtin(Value::Num(0.5), args)).expect("fill");
             match result {
                 Value::GpuTensor(gpu) => {
                     assert_eq!(gpu.shape, vec![2, 2]);
@@ -666,7 +672,7 @@ pub(crate) mod tests {
             Value::GpuTensor(prototype),
         ];
         let target = 0.75;
-        let result = fill_builtin(Value::Num(target), args).expect("fill");
+        let result = block_on(fill_builtin(Value::Num(target), args)).expect("fill");
         match result {
             Value::GpuTensor(handle) => {
                 let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");

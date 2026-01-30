@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use js_sys::{Error as JsError, Reflect, Uint8Array};
 use log::warn;
+use miette::{SourceOffset, SourceSpan};
 use runmat_accelerate::{
     initialize_acceleration_provider_with, AccelPowerPreference, AccelerateInitOptions,
     AccelerateProviderPreference, AutoOffloadOptions,
@@ -17,15 +18,17 @@ use runmat_builtins::{NumericDType, ObjectInstance, StructValue, Value};
 use runmat_core::{
     matlab_class_name, value_shape, CompatMode, ExecutionProfiling, ExecutionResult,
     ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision, FusionPlanEdge, FusionPlanNode,
-    FusionPlanShader, FusionPlanSnapshot, InputHandlerAction, InputRequest, InputRequestKind,
-    InputResponse, MaterializedVariable, PendingInput, RunMatSession, StdinEvent, StdinEventKind,
-    WorkspaceEntry, WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview,
-    WorkspaceSnapshot,
+    FusionPlanShader, FusionPlanSnapshot, InputRequest, InputRequestKind, InputResponse,
+    MaterializedVariable, RunError, RunMatSession, StdinEvent, StdinEventKind, WorkspaceEntry,
+    WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview,
+    WorkspaceSliceOptions, WorkspaceSnapshot,
 };
-use runmat_logging::{init_logging, set_runtime_log_hook, LoggingOptions, RuntimeLogRecord};
+use runmat_logging::{
+    init_logging, set_runtime_log_hook, LoggingGuard, LoggingOptions, RuntimeLogRecord,
+};
+use runmat_runtime::build_runtime_error;
 use runmat_thread_local::runmat_thread_local;
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
-use serde_wasm_bindgen;
 use std::backtrace::Backtrace;
 use tracing::{info, info_span};
 use wasm_bindgen::prelude::*;
@@ -41,27 +44,24 @@ use runmat_plot::{
     event::{
         FigureEvent as PlotFigureEvent, FigureEventKind as PlotFigureEventKind, FigureSnapshot,
     },
-    web::{WebRenderer, WebRendererOptions},
+    web::{WebCanvas, WebRenderer, WebRendererOptions},
     SharedWgpuContext,
 };
 #[cfg(target_arch = "wasm32")]
-use runmat_runtime::builtins::plotting::web::{
-    detach_default_web_renderer as runtime_detach_default_renderer,
-    detach_web_renderer as runtime_detach_web_renderer,
-};
-#[cfg(target_arch = "wasm32")]
 use runmat_runtime::builtins::plotting::{
-    clear_figure as runtime_clear_figure, clone_figure as runtime_clone_figure,
+    bind_surface_to_figure as runtime_bind_surface_to_figure, clear_figure as runtime_clear_figure,
     close_figure as runtime_close_figure, configure_subplot as runtime_configure_subplot,
     context as plotting_context, current_axes_state as runtime_current_axes_state,
     current_figure_handle as runtime_current_figure_handle,
+    detach_surface as runtime_detach_surface, figure_handles as runtime_figure_handles,
     install_figure_observer as runtime_install_figure_observer,
-    install_web_renderer as runtime_install_web_renderer,
-    install_web_renderer_for_handle as runtime_install_web_renderer_for_handle,
-    new_figure_handle as runtime_new_figure_handle,
+    install_surface as runtime_install_surface, new_figure_handle as runtime_new_figure_handle,
+    present_figure_on_surface as runtime_present_figure_on_surface,
+    present_surface as runtime_present_surface,
     render_current_scene as runtime_render_current_scene,
     render_figure_snapshot as runtime_render_figure_snapshot,
-    resize_web_renderer as runtime_resize_web_renderer, select_figure as runtime_select_figure,
+    reset_hold_state_for_run as runtime_reset_hold_state_for_run,
+    resize_surface as runtime_resize_surface, select_figure as runtime_select_figure,
     set_hold as runtime_set_hold, web_renderer_ready as runtime_plot_renderer_ready,
     FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
@@ -71,6 +71,8 @@ use runmat_runtime::builtins::{
     wasm_registry,
 };
 use runmat_runtime::warning_store::RuntimeWarning;
+#[cfg(target_arch = "wasm32")]
+use runmat_runtime::RuntimeError;
 use serde::{Deserialize, Serialize};
 
 const MAX_DATA_PREVIEW: usize = 4096;
@@ -131,6 +133,14 @@ struct InitOptions {
     emit_fusion_plan: Option<bool>,
     #[serde(default)]
     language_compat: Option<String>,
+    #[serde(default)]
+    log_level: Option<String>,
+    #[serde(default)]
+    gpu_buffer_pool_max_per_key: Option<u32>,
+    #[serde(default)]
+    callstack_limit: Option<usize>,
+    #[serde(default)]
+    error_namespace: Option<String>,
 }
 
 runmat_thread_local! {
@@ -144,28 +154,36 @@ runmat_thread_local! {
     static STDOUT_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
         RefCell::new(HashMap::new());
 }
-static STDOUT_FORWARDER: OnceLock<
-    Arc<dyn Fn(&runmat_runtime::console::ConsoleEntry) + Send + Sync + 'static>,
-> = OnceLock::new();
+type StdoutForwarder = Arc<dyn Fn(&runmat_runtime::console::ConsoleEntry) + Send + Sync + 'static>;
+type RuntimeLogForwarder = Arc<dyn Fn(&runmat_logging::RuntimeLogRecord) + Send + Sync + 'static>;
+type TraceForwarder = Arc<dyn Fn(&[runmat_logging::TraceEvent]) + Send + Sync + 'static>;
+
+static STDOUT_FORWARDER: OnceLock<StdoutForwarder> = OnceLock::new();
 static STDOUT_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 runmat_thread_local! {
     static RUNTIME_LOG_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
         RefCell::new(HashMap::new());
 }
-static RUNTIME_LOG_FORWARDER: OnceLock<
-    Arc<dyn Fn(&runmat_logging::RuntimeLogRecord) + Send + Sync + 'static>,
-> = OnceLock::new();
+static RUNTIME_LOG_FORWARDER: OnceLock<RuntimeLogForwarder> = OnceLock::new();
 static RUNTIME_LOG_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 runmat_thread_local! {
     static TRACE_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
         RefCell::new(HashMap::new());
 }
-static TRACE_FORWARDER: OnceLock<
-    Arc<dyn Fn(&[runmat_logging::TraceEvent]) + Send + Sync + 'static>,
-> = OnceLock::new();
+static TRACE_FORWARDER: OnceLock<TraceForwarder> = OnceLock::new();
 static TRACE_NEXT_ID: AtomicU32 = AtomicU32::new(1);
+static LOGGING_GUARD: OnceLock<LoggingGuard> = OnceLock::new();
+static LOG_FILTER_OVERRIDE: OnceLock<String> = OnceLock::new();
+
+// Plot surface registry for web backends.
+static PLOT_SURFACE_NEXT_ID: AtomicU32 = AtomicU32::new(1);
+runmat_thread_local! {
+    // Back-compat helpers: old API keyed by handle/plot canvas, implemented on top of surface ids.
+    static LEGACY_PLOT_SURFACE_ID: RefCell<Option<u32>> = RefCell::new(None);
+    static LEGACY_FIGURE_SURFACES: RefCell<HashMap<u32, u32>> = RefCell::new(HashMap::new());
+}
 
 #[derive(Clone)]
 struct SessionConfig {
@@ -179,6 +197,9 @@ struct SessionConfig {
     auto_offload: AutoOffloadOptions,
     emit_fusion_plan: bool,
     language_compat: CompatMode,
+    gpu_buffer_pool_max_per_key: Option<u32>,
+    callstack_limit: usize,
+    error_namespace: String,
 }
 
 impl SessionConfig {
@@ -194,6 +215,14 @@ impl SessionConfig {
             auto_offload: AutoOffloadOptions::default(),
             emit_fusion_plan: opts.emit_fusion_plan.unwrap_or(false),
             language_compat: parse_language_compat(opts.language_compat.as_deref()),
+            gpu_buffer_pool_max_per_key: opts.gpu_buffer_pool_max_per_key,
+            callstack_limit: opts
+                .callstack_limit
+                .unwrap_or(runmat_ignition::DEFAULT_CALLSTACK_LIMIT),
+            error_namespace: opts
+                .error_namespace
+                .clone()
+                .unwrap_or_else(|| runmat_ignition::DEFAULT_ERROR_NAMESPACE.to_string()),
         }
     }
 
@@ -211,6 +240,13 @@ impl SessionConfig {
             auto_offload: self.auto_offload.clone(),
         }
     }
+
+    fn apply_env_overrides(&self) {
+        if let Some(max) = self.gpu_buffer_pool_max_per_key {
+            log::info!("RunMat wasm: setting RUNMAT_WGPU_POOL_MAX_PER_KEY={}", max);
+            std::env::set_var("RUNMAT_WGPU_POOL_MAX_PER_KEY", max.to_string());
+        }
+    }
 }
 
 #[wasm_bindgen]
@@ -220,12 +256,13 @@ pub struct RunMatWasm {
     config: RefCell<SessionConfig>,
     gpu_status: GpuStatus,
     disposed: Cell<bool>,
+    active_interrupt: RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>,
 }
 
 #[wasm_bindgen]
 impl RunMatWasm {
     #[wasm_bindgen(js_name = execute)]
-    pub fn execute(&self, source: String) -> Result<JsValue, JsValue> {
+    pub async fn execute(&self, source: String) -> Result<JsValue, JsValue> {
         init_logging_once();
         let exec_span = info_span!(
             "runmat.execute",
@@ -234,20 +271,90 @@ impl RunMatWasm {
         );
         let _enter = exec_span.enter();
         info!(target = "runmat.runtime", "Execution started");
-        let mut session = self.session.borrow_mut();
-        let result = session
-            .execute(&source)
-            .map_err(|err| js_error(&format!("RunMat execution failed: {err}")))?;
+        // Capture figure handles before execution so we can close stale figures after a successful run.
+        let figures_before: Vec<u32> = runtime_figure_handles()
+            .into_iter()
+            .map(|handle| handle.as_u32())
+            .collect();
+        // Reset hold state so a previous `hold on` doesn't cause subsequent runs to keep appending.
+        runtime_reset_hold_state_for_run();
+
+        // Ensure `cancelExecution()` can interrupt the *active* session even while we temporarily
+        // move it out of `self.session` to avoid holding a RefCell borrow across `.await`.
+        let interrupt_handle = self.session.borrow().interrupt_handle();
+        self.active_interrupt
+            .borrow_mut()
+            .replace(Arc::clone(&interrupt_handle));
+        struct ActiveInterruptGuard<'a> {
+            slot: &'a RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>,
+        }
+        impl Drop for ActiveInterruptGuard<'_> {
+            fn drop(&mut self) {
+                self.slot.borrow_mut().take();
+            }
+        }
+        let _active_interrupt_guard = ActiveInterruptGuard {
+            slot: &self.active_interrupt,
+        };
+
+        // We must not hold a RefCell borrow across `.await`, so temporarily move the session out.
+        let mut session = {
+            let mut slot = self.session.borrow_mut();
+            std::mem::take(&mut *slot)
+        };
+
+        let exec_result = session.execute(&source).await;
+        // Always restore the session, even if execution fails (e.g. parse/compile error).
+        *self.session.borrow_mut() = session;
+        let payload = match exec_result {
+            Ok(result) => {
+                // When a run succeeds, close figures that existed before the run but were
+                // not touched during it. This avoids stale plots lingering across runs while preserving
+                // GPU surfaces for the figures that remain active.
+                if result.error.is_none() {
+                    let touched: std::collections::HashSet<u32> =
+                        result.figures_touched.iter().copied().collect();
+                    for handle in figures_before {
+                        if !touched.contains(&handle) {
+                            let _ = runtime_close_figure(Some(FigureHandle::from(handle)));
+                        }
+                    }
+                }
+                ExecutionPayload::from_result(result, &source)
+            }
+            Err(err) => ExecutionPayload {
+                value_text: None,
+                value_json: None,
+                type_info: None,
+                execution_time_ms: 0,
+                used_jit: false,
+                error: Some(run_error_payload(&err, &source)),
+                stdout: Vec::new(),
+                workspace: WorkspacePayload {
+                    full: false,
+                    version: 0,
+                    values: Vec::new(),
+                },
+                figures_touched: Vec::new(),
+                warnings: Vec::new(),
+                stdin_events: Vec::new(),
+                profiling: None,
+                fusion_plan: None,
+            },
+        };
         info!(
             target = "runmat.runtime",
-            workspace_entries = result.workspace.values.len(),
-            stdout_entries = result.streams.len(),
-            figures_touched = result.figures_touched.len(),
-            used_jit = result.used_jit,
-            error = result.error.as_deref().unwrap_or(""),
+            workspace_entries = payload.workspace.values.len(),
+            stdout_entries = payload.stdout.len(),
+            figures_touched = payload.figures_touched.len(),
+            used_jit = payload.used_jit,
+            error = payload
+                .error
+                .as_ref()
+                .map(|err| err.message.as_str())
+                .unwrap_or(""),
             "Execution finished"
         );
-        let payload = ExecutionPayload::from(result);
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize execution result: {err}")))
     }
@@ -269,7 +376,6 @@ impl RunMatWasm {
             self.snapshot_seed.as_deref(),
         )
         .map_err(|err| js_error(&format!("Failed to reset session: {err}")))?;
-        configure_session_input_handler(&mut session);
         session.set_telemetry_consent(consent);
         if let Some(cid) = config.telemetry_client_id.clone() {
             session.set_telemetry_client_id(Some(cid));
@@ -278,6 +384,9 @@ impl RunMatWasm {
         }
         session.set_emit_fusion_plan(config.emit_fusion_plan);
         session.set_compat_mode(config.language_compat);
+        session.set_callstack_limit(config.callstack_limit);
+        session.set_error_namespace(config.error_namespace.clone());
+        session.set_source_name_override(Some("<wasm>".to_string()));
         let mut slot = self.session.borrow_mut();
         *slot = session;
         Ok(())
@@ -285,12 +394,17 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = cancelExecution)]
     pub fn cancel_execution(&self) {
+        if let Some(flag) = self.active_interrupt.borrow().as_ref() {
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            return;
+        }
         self.session.borrow().cancel_execution();
     }
 
     #[wasm_bindgen(js_name = cancelPendingRequests)]
     pub fn cancel_pending_requests(&self) {
-        self.session.borrow_mut().cancel_all_pending_requests();
+        // Phase 2: stdin + internal suspensions are awaited inside `ExecuteFuture`.
+        // Keep this API as a no-op for now to avoid breaking older hosts.
     }
 
     #[wasm_bindgen(js_name = "setLanguageCompat")]
@@ -315,14 +429,18 @@ impl RunMatWasm {
         {
             if handler.is_null() || handler.is_undefined() {
                 set_js_stdin_handler(None);
-                return Ok(());
+                let mut session = self.session.borrow_mut();
+                session.clear_async_input_handler();
+            } else {
+                let func = handler
+                    .dyn_into::<js_sys::Function>()
+                    .map_err(|_| js_error("setInputHandler expects a Function or null"))?;
+                set_js_stdin_handler(Some(func));
+                let mut session = self.session.borrow_mut();
+                session
+                    .install_async_input_handler(|req| async move { js_input_request(req).await });
             }
-            let func = handler
-                .dyn_into::<js_sys::Function>()
-                .map_err(|_| js_error("setInputHandler expects a Function or null"))?;
-            set_js_stdin_handler(Some(func));
-            configure_session_input_handler(&mut self.session.borrow_mut());
-            return Ok(());
+            Ok(())
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -333,53 +451,7 @@ impl RunMatWasm {
         }
     }
 
-    #[wasm_bindgen(js_name = resumeInput)]
-    pub fn resume_input(&self, request_id: String, value: JsValue) -> Result<JsValue, JsValue> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let uuid = Uuid::parse_str(request_id.trim())
-                .map_err(|_| js_error("resumeInput: invalid request id"))?;
-            let response = coerce_resume_payload(value)?;
-            let mut session = self.session.borrow_mut();
-            let result = session
-                .resume_input(uuid, response)
-                .map_err(|err| js_error(&format!("RunMat resumeInput failed: {err}")))?;
-            let payload = ExecutionPayload::from(result);
-            return serde_wasm_bindgen::to_value(&payload)
-                .map_err(|err| js_error(&format!("Failed to serialize execution result: {err}")));
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let _ = (request_id, value);
-            Err(js_error(
-                "resumeInput is only available when targeting wasm32",
-            ))
-        }
-    }
-
-    #[wasm_bindgen(js_name = pendingStdinRequests)]
-    pub fn pending_stdin_requests(&self) -> Result<JsValue, JsValue> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let session = self.session.borrow();
-            let pending: Vec<PendingInputPayload> = session
-                .pending_requests()
-                .into_iter()
-                .map(PendingInputPayload::from)
-                .collect();
-            return serde_wasm_bindgen::to_value(&pending).map_err(|err| {
-                js_error(&format!(
-                    "Failed to serialize pending stdin requests: {err}"
-                ))
-            });
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            Err(js_error(
-                "pendingStdinRequests is only available when targeting wasm32",
-            ))
-        }
-    }
+    // Pending/resume plumbing has been removed in favor of poll-driven `ExecuteFuture`.
 
     #[wasm_bindgen(js_name = setFusionPlanEnabled)]
     pub fn set_fusion_plan_enabled(&self, enabled: bool) {
@@ -392,10 +464,10 @@ impl RunMatWasm {
     /// Compile-only fusion plan snapshot (no execution).
     #[wasm_bindgen(js_name = fusionPlanForSource)]
     pub fn fusion_plan_for_source(&self, source: String) -> Result<JsValue, JsValue> {
-        let session = self.session.borrow();
+        let mut session = self.session.borrow_mut();
         let snapshot = session
             .compile_fusion_plan(&source)
-            .map_err(|err| js_error(&format!("Failed to compile fusion plan: {err}")))?;
+            .map_err(|err| run_error_to_js(&err, &source))?;
         match snapshot {
             Some(plan) => serde_wasm_bindgen::to_value(&FusionPlanPayload::from(plan))
                 .map_err(|err| js_error(&format!("Failed to serialize fusion plan: {err}"))),
@@ -404,7 +476,7 @@ impl RunMatWasm {
     }
 
     #[wasm_bindgen(js_name = materializeVariable)]
-    pub fn materialize_variable(
+    pub async fn materialize_variable(
         &self,
         selector: JsValue,
         options: JsValue,
@@ -413,16 +485,24 @@ impl RunMatWasm {
         {
             let target = parse_materialize_target(selector)?;
             let opts = parse_materialize_options(options)?;
-            let mut session = self.session.borrow_mut();
-            let value = session
-                .materialize_variable(target, opts)
+            // We must not hold a RefCell borrow across `.await`, so temporarily move the session out.
+            let mut session = {
+                let mut slot = self.session.borrow_mut();
+                std::mem::take(&mut *slot)
+            };
+
+            let materialize_result = session.materialize_variable(target, opts).await;
+            // Always restore the session, even if materialization fails.
+            *self.session.borrow_mut() = session;
+
+            let value = materialize_result
                 .map_err(|err| js_error(&format!("materializeVariable failed: {err}")))?;
             let payload = MaterializedVariablePayload::from(value);
-            return serde_wasm_bindgen::to_value(&payload).map_err(|err| {
+            serde_wasm_bindgen::to_value(&payload).map_err(|err| {
                 js_error(&format!(
                     "Failed to serialize materialized workspace value: {err}"
                 ))
-            });
+            })
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -487,7 +567,6 @@ impl RunMatWasm {
         {
             let mut session = self.session.borrow_mut();
             session.cancel_execution();
-            session.cancel_all_pending_requests();
             session.clear_variables();
         }
         #[cfg(target_arch = "wasm32")]
@@ -513,23 +592,30 @@ pub fn register_fs_provider(bindings: JsValue) -> Result<(), JsValue> {
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = registerPlotCanvas)]
-pub async fn register_plot_canvas(canvas: web_sys::HtmlCanvasElement) -> Result<(), JsValue> {
-    install_canvas_renderer(None, canvas).await.map_err(|err| {
-        init_error_with_details(
-            InitErrorCode::PlotCanvas,
-            "Failed to register plot canvas",
-            Some(err),
-        )
-    })
+pub async fn register_plot_canvas(canvas: JsValue) -> Result<(), JsValue> {
+    let canvas = parse_web_canvas(canvas)?;
+    let surface_id = PLOT_SURFACE_NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    install_surface_renderer(surface_id, canvas)
+        .await
+        .map_err(|err| {
+            init_error_with_details(
+                InitErrorCode::PlotCanvas,
+                "Failed to register plot canvas",
+                Some(err),
+            )
+        })?;
+    LEGACY_PLOT_SURFACE_ID.with(|slot| {
+        slot.borrow_mut().replace(surface_id);
+    });
+    Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = registerFigureCanvas)]
-pub async fn register_figure_canvas(
-    handle: u32,
-    canvas: web_sys::HtmlCanvasElement,
-) -> Result<(), JsValue> {
-    install_canvas_renderer(Some(handle), canvas)
+pub async fn register_figure_canvas(handle: u32, canvas: JsValue) -> Result<(), JsValue> {
+    let canvas = parse_web_canvas(canvas)?;
+    let surface_id = PLOT_SURFACE_NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    install_surface_renderer(surface_id, canvas)
         .await
         .map_err(|err| {
             init_error_with_details(
@@ -537,32 +623,96 @@ pub async fn register_figure_canvas(
                 "Failed to register figure canvas",
                 Some(err),
             )
-        })
+        })?;
+    runtime_bind_surface_to_figure(surface_id, handle).map_err(|err| js_error(err.message()))?;
+    LEGACY_FIGURE_SURFACES.with(|slot| {
+        slot.borrow_mut().insert(handle, surface_id);
+    });
+    // Prime immediately if the figure already exists.
+    let _ = runtime_render_current_scene(handle);
+    Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = deregisterPlotCanvas)]
 pub fn deregister_plot_canvas() {
-    runtime_detach_default_renderer();
+    let surface_id = LEGACY_PLOT_SURFACE_ID.with(|slot| slot.borrow_mut().take());
+    if let Some(id) = surface_id {
+        runtime_detach_surface(id);
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = deregisterFigureCanvas)]
 pub fn deregister_figure_canvas(handle: u32) {
-    runtime_detach_web_renderer(handle);
+    let surface_id = LEGACY_FIGURE_SURFACES.with(|slot| slot.borrow_mut().remove(&handle));
+    if let Some(id) = surface_id {
+        runtime_detach_surface(id);
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = resizeFigureCanvas)]
 pub fn resize_figure_canvas(handle: u32, width: u32, height: u32) -> Result<(), JsValue> {
-    runtime_resize_web_renderer(handle, width.max(1), height.max(1))
-        .map_err(|err| js_error(err.as_str()))
+    let surface_id = LEGACY_FIGURE_SURFACES.with(|slot| slot.borrow().get(&handle).copied());
+    let Some(surface_id) = surface_id else {
+        return Err(js_error("Figure canvas not registered"));
+    };
+    // Legacy API has no access to devicePixelRatio; assume 1.0.
+    runtime_resize_surface(surface_id, width.max(1), height.max(1), 1.0)
+        .map_err(|err| js_error(err.message()))
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = renderCurrentFigureScene)]
 pub fn render_current_figure_scene(handle: u32) -> Result<(), JsValue> {
-    runtime_render_current_scene(handle).map_err(|err| js_error(err.as_str()))
+    runtime_render_current_scene(handle).map_err(|err| js_error(err.message()))
+}
+
+// New surface-id based API.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = createPlotSurface)]
+pub async fn create_plot_surface(canvas: JsValue) -> Result<u32, JsValue> {
+    let canvas = parse_web_canvas(canvas)?;
+    let surface_id = PLOT_SURFACE_NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    install_surface_renderer(surface_id, canvas).await?;
+    Ok(surface_id)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = destroyPlotSurface)]
+pub fn destroy_plot_surface(surface_id: u32) {
+    runtime_detach_surface(surface_id);
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = resizePlotSurface)]
+pub fn resize_plot_surface(
+    surface_id: u32,
+    width: u32,
+    height: u32,
+    pixels_per_point: f32,
+) -> Result<(), JsValue> {
+    runtime_resize_surface(surface_id, width.max(1), height.max(1), pixels_per_point)
+        .map_err(|err| js_error(err.message()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = bindSurfaceToFigure)]
+pub fn bind_surface_to_figure(surface_id: u32, handle: u32) -> Result<(), JsValue> {
+    runtime_bind_surface_to_figure(surface_id, handle).map_err(|err| js_error(err.message()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = presentSurface)]
+pub fn present_surface(surface_id: u32) -> Result<(), JsValue> {
+    runtime_present_surface(surface_id).map_err(|err| js_error(err.message()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = presentFigureOnSurface)]
+pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> Result<(), JsValue> {
+    runtime_present_figure_on_surface(surface_id, handle).map_err(|err| js_error(err.message()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -629,17 +779,33 @@ pub async fn wasm_render_figure_image(
     let target = parse_optional_handle(handle)?.unwrap_or_else(runtime_current_figure_handle);
     let bytes = runtime_render_figure_snapshot(target, width.unwrap_or(0), height.unwrap_or(0))
         .await
-        .map_err(figure_error_to_js)?;
+        .map_err(runtime_flow_to_js)?;
     Ok(Uint8Array::from(bytes.as_slice()))
 }
 
 #[cfg(target_arch = "wasm32")]
 fn shared_webgpu_context() -> Option<SharedWgpuContext> {
     if let Some(ctx) = runmat_plot::shared_wgpu_context() {
+        log::debug!("plot-web: shared_webgpu_context: using existing runmat_plot shared context");
         return Some(ctx);
     }
 
-    let handle = runmat_accelerate_api::export_context(AccelContextKind::Plotting)?;
+    let api_provider_present = runmat_accelerate_api::provider().is_some();
+    log::debug!(
+        "plot-web: shared_webgpu_context: no plot context installed yet (api_provider_present={})",
+        api_provider_present
+    );
+
+    let handle = match runmat_accelerate_api::export_context(AccelContextKind::Plotting) {
+        Some(handle) => handle,
+        None => {
+            log::debug!(
+                "plot-web: shared_webgpu_context: export_context(Plotting) returned None (api_provider_present={})",
+                api_provider_present
+            );
+            return None;
+        }
+    };
     match handle {
         AccelContextHandle::Wgpu(ctx) => {
             let shared = SharedWgpuContext {
@@ -651,6 +817,7 @@ fn shared_webgpu_context() -> Option<SharedWgpuContext> {
                 limits: ctx.limits,
                 features: ctx.features,
             };
+            log::debug!("plot-web: shared_webgpu_context: installed shared context from accelerate provider (adapter={:?})", shared.adapter_info);
             runmat_plot::install_shared_wgpu_context(shared.clone());
             Some(shared)
         }
@@ -747,6 +914,21 @@ pub fn subscribe_runtime_log(_callback: JsValue) -> Result<u32, JsValue> {
 }
 
 #[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = setLogFilter)]
+pub fn set_log_filter(filter: &str) -> Result<(), JsValue> {
+    init_logging_once();
+    runmat_logging::update_log_filter(filter).map_err(|err| js_error(&err))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[wasm_bindgen(js_name = setLogFilter)]
+pub fn set_log_filter(_filter: &str) -> Result<(), JsValue> {
+    Err(js_error(
+        "setLogFilter is only available when targeting wasm32",
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = unsubscribeRuntimeLog)]
 pub fn unsubscribe_runtime_log(id: u32) {
     RUNTIME_LOG_SUBSCRIBERS.with(|cell| {
@@ -799,22 +981,20 @@ fn set_js_stdin_handler(handler: Option<js_sys::Function>) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn invoke_js_stdin_handler(request: &InputRequest) -> InputHandlerAction {
-    let handler = match JS_STDIN_HANDLER.with(|slot| slot.borrow().clone()) {
-        Some(func) => func,
-        None => return InputHandlerAction::Pending,
+async fn js_input_request(request: InputRequest) -> Result<InputResponse, String> {
+    let handler = JS_STDIN_HANDLER.with(|slot| slot.borrow().clone());
+    let Some(handler) = handler else {
+        return Err("stdin requested but no input handler is installed".to_string());
     };
+
     let js_request = js_sys::Object::new();
-    if let Err(err) = Reflect::set(
+    Reflect::set(
         &js_request,
         &JsValue::from_str("prompt"),
         &JsValue::from_str(&request.prompt),
-    ) {
-        log::warn!(
-            "stdin handler: failed to serialize prompt: {}",
-            js_value_to_string(err)
-        );
-    }
+    )
+    .map_err(js_value_to_string)?;
+
     match request.kind {
         InputRequestKind::Line { echo } => {
             Reflect::set(
@@ -829,24 +1009,6 @@ fn invoke_js_stdin_handler(request: &InputRequest) -> InputHandlerAction {
                 &JsValue::from_bool(echo),
             )
             .unwrap_or_default();
-            let value = match handler.call1(&JsValue::NULL, &js_request) {
-                Ok(v) => v,
-                Err(err) => {
-                    return InputHandlerAction::Respond(Err(js_value_to_string(err)));
-                }
-            };
-            if value_should_pending(&value) {
-                return InputHandlerAction::Pending;
-            }
-            if let Some(err) = extract_error_message(&value) {
-                return InputHandlerAction::Respond(Err(err));
-            }
-            if let Some(text) = extract_line_value(&value) {
-                return InputHandlerAction::Respond(Ok(InputResponse::Line(text)));
-            }
-            InputHandlerAction::Respond(Err(
-                "stdin handler must return a string for line input".to_string()
-            ))
         }
         InputRequestKind::KeyPress => {
             Reflect::set(
@@ -855,40 +1017,39 @@ fn invoke_js_stdin_handler(request: &InputRequest) -> InputHandlerAction {
                 &JsValue::from_str("keyPress"),
             )
             .unwrap_or_default();
-            let value = match handler.call1(&JsValue::NULL, &js_request) {
-                Ok(v) => v,
-                Err(err) => {
-                    return InputHandlerAction::Respond(Err(js_value_to_string(err)));
-                }
-            };
-            if value_should_pending(&value) {
-                return InputHandlerAction::Pending;
-            }
-            if let Some(err) = extract_error_message(&value) {
-                return InputHandlerAction::Respond(Err(err));
-            }
-            InputHandlerAction::Respond(Ok(InputResponse::KeyPress))
         }
     }
-}
 
-#[cfg(target_arch = "wasm32")]
-fn value_should_pending(value: &JsValue) -> bool {
-    if value.is_null() || value.is_undefined() {
-        return true;
-    }
+    let mut value = handler
+        .call1(&JsValue::NULL, &js_request)
+        .map_err(js_value_to_string)?;
+
     if value.is_instance_of::<js_sys::Promise>() {
-        return true;
+        value = JsFuture::from(js_sys::Promise::from(value))
+            .await
+            .map_err(js_value_to_string)?;
     }
-    if value.is_object() {
-        let obj = js_sys::Object::from(value.clone());
-        if let Ok(flag) = Reflect::get(&obj, &JsValue::from_str("pending")) {
-            if flag.as_bool().unwrap_or(false) {
-                return true;
+
+    if let Some(err) = extract_error_message(&value) {
+        return Err(err);
+    }
+
+    match request.kind {
+        InputRequestKind::Line { .. } => {
+            // Accept null/undefined as an empty line.
+            if value.is_null() || value.is_undefined() {
+                return Ok(InputResponse::Line(String::new()));
             }
+            if let Some(text) = extract_line_value(&value) {
+                return Ok(InputResponse::Line(text));
+            }
+            Err(
+                "stdin handler must return a string (or Promise of a string) for line input"
+                    .to_string(),
+            )
         }
+        InputRequestKind::KeyPress => Ok(InputResponse::KeyPress),
     }
-    false
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -925,106 +1086,61 @@ fn extract_line_value(value: &JsValue) -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn coerce_resume_payload(value: JsValue) -> Result<Result<InputResponse, String>, JsValue> {
-    if value.is_object() {
-        let obj = js_sys::Object::from(value.clone());
-        if let Ok(err) = Reflect::get(&obj, &JsValue::from_str("error")) {
-            if let Some(text) = err.as_string() {
-                return Ok(Err(text));
-            }
-        }
-        if let Ok(kind) = Reflect::get(&obj, &JsValue::from_str("kind")) {
-            if let Some(text) = kind.as_string() {
-                match text.as_str() {
-                    "keyPress" => return Ok(Ok(InputResponse::KeyPress)),
-                    "line" => {}
-                    other => {
-                        return Err(js_error(&format!(
-                        "resumeInput: unsupported kind '{other}'. Expected 'line' or 'keyPress'."
-                    )))
-                    }
-                }
-            }
-        }
-    }
-    if let Some(text) = extract_line_value(&value) {
-        return Ok(Ok(InputResponse::Line(text)));
-    }
-    if value.is_null() || value.is_undefined() {
-        return Ok(Ok(InputResponse::Line(String::new())));
-    }
-    if let Some(num) = value.as_f64() {
-        if num.is_finite() {
-            return Ok(Ok(InputResponse::Line(num.to_string())));
-        }
-    }
-    if let Some(flag) = value.as_bool() {
-        return Ok(Ok(InputResponse::Line(if flag {
-            "1".to_string()
-        } else {
-            "0".to_string()
-        })));
-    }
-    Err(js_error(
-        "resumeInput expects a string, number, boolean, or { value, kind } payload",
-    ))
-}
-
-#[cfg(target_arch = "wasm32")]
-fn configure_session_input_handler(session: &mut RunMatSession) {
-    session.install_input_handler(js_input_bridge);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn configure_session_input_handler(_session: &mut RunMatSession) {}
-
-#[cfg(target_arch = "wasm32")]
-fn js_input_bridge(request: &InputRequest) -> InputHandlerAction {
-    invoke_js_stdin_handler(request)
-}
-
-#[cfg(target_arch = "wasm32")]
-async fn install_canvas_renderer(
-    handle: Option<u32>,
-    canvas: web_sys::HtmlCanvasElement,
-) -> Result<(), JsValue> {
+async fn install_surface_renderer(surface_id: u32, canvas: WebCanvas) -> Result<(), JsValue> {
     init_logging_once();
     let options = WebRendererOptions::default();
-    let mut renderer = match shared_webgpu_context() {
+    let canvas_kind = match &canvas {
+        WebCanvas::Html(_) => "html",
+        WebCanvas::Offscreen(_) => "offscreen",
+    };
+    log::debug!(
+        "plot-web: install_surface_renderer(surface_id={surface_id}, canvas_kind={})",
+        canvas_kind
+    );
+    let renderer = match shared_webgpu_context() {
         Some(shared) => {
             WebRenderer::with_shared_context(canvas.clone(), options.clone(), shared).await
         }
         None => WebRenderer::new(canvas, options).await,
     }
     .map_err(|err| js_error(&format!("Failed to initialize plot renderer: {err}")))?;
-    match handle {
-        Some(id) => {
-            prime_renderer_with_existing_figure(id, &mut renderer);
-            runtime_detach_web_renderer(id);
-            runtime_install_web_renderer_for_handle(id, renderer)
-        }
-        .map_err(|err| js_error(&format!("Failed to register plot renderer: {err}")))?,
-        None => {
-            runtime_detach_default_renderer();
-            runtime_install_web_renderer(renderer)
-        }
-        .map_err(|err| js_error(&format!("Failed to register plot renderer: {err}")))?,
-    };
+    runtime_install_surface(surface_id, renderer)
+        .map_err(|err| js_error(&format!("Failed to register plot surface: {err}")))?;
     Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
-fn prime_renderer_with_existing_figure(handle: u32, renderer: &mut WebRenderer) {
-    let figure_handle = FigureHandle::from(handle);
-    if let Some(figure) = runtime_clone_figure(figure_handle) {
-        if let Err(err) = renderer.render_figure(figure) {
-            warn!("RunMat wasm: failed to prime WebGPU renderer for figure {handle}: {err}");
-        }
+fn parse_web_canvas(canvas: JsValue) -> Result<WebCanvas, JsValue> {
+    if canvas.is_null() || canvas.is_undefined() {
+        return Err(js_error("Canvas is required"));
     }
+    if let Ok(html) = canvas.clone().dyn_into::<web_sys::HtmlCanvasElement>() {
+        return Ok(WebCanvas::Html(html));
+    }
+    if let Ok(offscreen) = canvas.clone().dyn_into::<web_sys::OffscreenCanvas>() {
+        return Ok(WebCanvas::Offscreen(offscreen));
+    }
+    Err(js_error("Expected an HTMLCanvasElement or OffscreenCanvas"))
 }
+
+// Figure priming is handled by `presentFigureOnSurface` / `renderCurrentFigureScene` which
+// load the current figure snapshot based on the bound handle.
 
 #[wasm_bindgen(js_name = initRunMat)]
 pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
+    let mut parsed_opts: InitOptions = if options.is_null() || options.is_undefined() {
+        InitOptions::default()
+    } else {
+        serde_wasm_bindgen::from_value(options.clone()).map_err(|err| {
+            init_error(
+                InitErrorCode::InvalidOptions,
+                format!("Invalid init options: {err}"),
+            )
+        })?
+    };
+    if let Some(level) = parsed_opts.log_level.as_deref() {
+        set_log_filter_override(level);
+    }
     init_logging_once();
     #[cfg(target_arch = "wasm32")]
     ensure_getrandom_js();
@@ -1037,16 +1153,6 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
             Some(err),
         )
     })?;
-    let mut parsed_opts: InitOptions = if options.is_null() || options.is_undefined() {
-        InitOptions::default()
-    } else {
-        serde_wasm_bindgen::from_value(options.clone()).map_err(|err| {
-            init_error(
-                InitErrorCode::InvalidOptions,
-                format!("Invalid init options: {err}"),
-            )
-        })?
-    };
     #[cfg(target_arch = "wasm32")]
     {
         if !options.is_null() && !options.is_undefined() {
@@ -1068,6 +1174,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     web_sys::console::log_1(&format!("RunMat wasm: builtins registered ({builtin_count})").into());
 
     let config = SessionConfig::from_options(&parsed_opts);
+    config.apply_env_overrides();
     let snapshot_seed = resolve_snapshot_bytes(&parsed_opts).await.map_err(|err| {
         let message = js_value_to_string(err.clone());
         init_error_with_details(InitErrorCode::SnapshotResolution, message, Some(err))
@@ -1084,13 +1191,15 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
             format!("Failed to initialize RunMat session: {err}"),
         )
     })?;
-    configure_session_input_handler(&mut session);
     session.set_telemetry_consent(config.telemetry_consent);
     if let Some(cid) = config.telemetry_client_id.clone() {
         session.set_telemetry_client_id(Some(cid));
     }
     session.set_emit_fusion_plan(config.emit_fusion_plan);
     session.set_compat_mode(config.language_compat);
+    session.set_callstack_limit(config.callstack_limit);
+    session.set_error_namespace(config.error_namespace.clone());
+    session.set_source_name_override(Some("<wasm>".to_string()));
 
     let mut gpu_status = GpuStatus {
         requested: config.enable_gpu,
@@ -1107,8 +1216,9 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
                 #[cfg(target_arch = "wasm32")]
                 {
                     if let Err(err) = plotting_context::ensure_context_from_provider() {
-                        warn!("RunMat wasm: unable to install shared plotting context: {err}");
-                        gpu_status.error = Some(err.to_string());
+                        let message = err.message().to_string();
+                        warn!("RunMat wasm: unable to install shared plotting context: {message}");
+                        gpu_status.error = Some(message);
                     }
                 }
             }
@@ -1129,6 +1239,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         config: RefCell::new(config),
         gpu_status,
         disposed: Cell::new(false),
+        active_interrupt: RefCell::new(None),
     })
 }
 
@@ -1176,7 +1287,7 @@ fn install_cpu_provider(config: &SessionConfig) {
 fn ensure_figure_event_bridge() {
     FIGURE_EVENT_OBSERVER.get_or_init(|| {
         let observer: Arc<dyn for<'a> Fn(FigureEventView<'a>) + Send + Sync> =
-            Arc::new(|event| emit_js_figure_event(event));
+            Arc::new(emit_js_figure_event);
         let _ = runtime_install_figure_observer(observer);
     });
 }
@@ -1184,15 +1295,14 @@ fn ensure_figure_event_bridge() {
 #[cfg(target_arch = "wasm32")]
 fn ensure_runtime_log_forwarder_installed() {
     RUNTIME_LOG_FORWARDER.get_or_init(|| {
-        let forwarder: Arc<dyn Fn(&RuntimeLogRecord) + Send + Sync> =
-            Arc::new(|record: &RuntimeLogRecord| {
-                let js_value = serde_wasm_bindgen::to_value(record).unwrap_or(JsValue::NULL);
-                RUNTIME_LOG_SUBSCRIBERS.with(|cell| {
-                    for cb in cell.borrow().values() {
-                        let _ = cb.call1(&JsValue::NULL, &js_value);
-                    }
-                });
+        let forwarder: RuntimeLogForwarder = Arc::new(|record: &RuntimeLogRecord| {
+            let js_value = serde_wasm_bindgen::to_value(record).unwrap_or(JsValue::NULL);
+            RUNTIME_LOG_SUBSCRIBERS.with(|cell| {
+                for cb in cell.borrow().values() {
+                    let _ = cb.call1(&JsValue::NULL, &js_value);
+                }
             });
+        });
         let hook = forwarder.clone();
         set_runtime_log_hook(move |rec| {
             (hook)(rec);
@@ -1206,15 +1316,14 @@ fn ensure_trace_forwarder_installed() {
     use runmat_logging::{set_trace_hook, TraceEvent};
 
     TRACE_FORWARDER.get_or_init(|| {
-        let forwarder: Arc<dyn Fn(&[TraceEvent]) + Send + Sync> =
-            Arc::new(|events: &[TraceEvent]| {
-                let js_value = serde_wasm_bindgen::to_value(events).unwrap_or(JsValue::NULL);
-                TRACE_SUBSCRIBERS.with(|cell| {
-                    for cb in cell.borrow().values() {
-                        let _ = cb.call1(&JsValue::NULL, &js_value);
-                    }
-                });
+        let forwarder: TraceForwarder = Arc::new(|events: &[TraceEvent]| {
+            let js_value = serde_wasm_bindgen::to_value(events).unwrap_or(JsValue::NULL);
+            TRACE_SUBSCRIBERS.with(|cell| {
+                for cb in cell.borrow().values() {
+                    let _ = cb.call1(&JsValue::NULL, &js_value);
+                }
             });
+        });
         let hook = forwarder.clone();
         set_trace_hook(move |events| {
             (hook)(events);
@@ -1311,7 +1420,8 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
             "InvalidSubplotIndex"
         }
         FigureError::InvalidAxesHandle => "InvalidAxesHandle",
-        FigureError::RenderFailure(details) => {
+        FigureError::RenderFailure { source } => {
+            let details = source.to_string();
             let _ = Reflect::set(
                 &payload,
                 &JsValue::from_str("details"),
@@ -1331,6 +1441,12 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
         &JsValue::from_str(&message),
     );
     JsValue::from(payload)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn runtime_flow_to_js(err: RuntimeError) -> JsValue {
+    serde_wasm_bindgen::to_value(&runtime_error_payload(&err, None))
+        .unwrap_or_else(|_| js_error(err.message()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1362,13 +1478,18 @@ fn axes_state_to_js(state: FigureAxesState) -> JsValue {
 #[cfg(target_arch = "wasm32")]
 fn emit_js_figure_event(event: FigureEventView<'_>) {
     if let FigureEventKind::Closed = event.kind {
-        runtime_detach_web_renderer(event.handle.as_u32());
+        let handle = event.handle.as_u32();
+        // Legacy API cleanup: if a figure-specific canvas was registered via the old handle-based
+        // API, detach its surface when the figure is closed.
+        let surface_id = LEGACY_FIGURE_SURFACES.with(|slot| slot.borrow_mut().remove(&handle));
+        if let Some(id) = surface_id {
+            runtime_detach_surface(id);
+        }
     }
     FIGURE_EVENT_CALLBACK.with(|slot| {
         if let Some(cb) = slot.borrow().as_ref() {
             let payload = convert_event_view(event);
-            let js_value =
-                serde_wasm_bindgen::to_value(&payload).unwrap_or_else(|_| JsValue::UNDEFINED);
+            let js_value = serde_wasm_bindgen::to_value(&payload).unwrap_or(JsValue::UNDEFINED);
             let _ = cb.call1(&JsValue::NULL, &js_value);
         }
     });
@@ -1537,6 +1658,178 @@ fn parse_power_preference(input: Option<&str>) -> AccelPowerPreference {
     }
 }
 
+fn line_col_from_offset(source: &str, offset: usize) -> (usize, usize) {
+    let mut line = 1;
+    let mut line_start = 0;
+    for (idx, ch) in source.char_indices() {
+        if idx >= offset {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            line_start = idx + 1;
+        }
+    }
+    let col = offset.saturating_sub(line_start) + 1;
+    (line, col)
+}
+
+fn span_payload_from_source(source: &str, start: usize, end: usize) -> RunMatErrorSpanPayload {
+    let (line, column) = line_col_from_offset(source, start);
+    RunMatErrorSpanPayload {
+        start,
+        end,
+        line,
+        column,
+    }
+}
+
+fn format_run_error(err: &RunError, source: &str) -> String {
+    match err {
+        RunError::Syntax(err) => {
+            let mut message = err.message.clone();
+            if let Some(expected) = &err.expected {
+                message = format!("{message} (expected {expected})");
+            }
+            if let Some(found) = &err.found_token {
+                message = format!("{message} (found '{found}')");
+            }
+            let span = SourceSpan::new(SourceOffset::from(err.position), 1);
+            build_runtime_error(message)
+                .with_identifier("RunMat:SyntaxError")
+                .with_span(span)
+                .build()
+                .format_diagnostic_with_source(Some("<wasm>"), Some(source))
+        }
+        RunError::Semantic(err) => {
+            let span = err.span.map(|span| {
+                SourceSpan::new(
+                    SourceOffset::from(span.start),
+                    span.end.saturating_sub(span.start).max(1),
+                )
+            });
+            let mut builder = build_runtime_error(err.message.clone());
+            if let Some(identifier) = err.identifier.as_deref() {
+                builder = builder.with_identifier(identifier);
+            }
+            if let Some(span) = span {
+                builder = builder.with_span(span);
+            }
+            builder
+                .build()
+                .format_diagnostic_with_source(Some("<wasm>"), Some(source))
+        }
+        RunError::Compile(err) => {
+            let span = err.span.map(|span| {
+                SourceSpan::new(
+                    SourceOffset::from(span.start),
+                    span.end.saturating_sub(span.start).max(1),
+                )
+            });
+            let mut builder = build_runtime_error(err.message.clone());
+            if let Some(identifier) = err.identifier.as_deref() {
+                builder = builder.with_identifier(identifier);
+            }
+            if let Some(span) = span {
+                builder = builder.with_span(span);
+            }
+            builder
+                .build()
+                .format_diagnostic_with_source(Some("<wasm>"), Some(source))
+        }
+        RunError::Runtime(err) => err.format_diagnostic_with_source(Some("<wasm>"), Some(source)),
+    }
+}
+
+fn runtime_error_payload(err: &RuntimeError, source: Option<&str>) -> RunMatErrorPayload {
+    let identifier = err.identifier().map(|id| id.to_string());
+    let span = match (source, err.span.as_ref()) {
+        (Some(source), Some(span)) => {
+            let start = span.offset();
+            let end = start + span.len();
+            Some(span_payload_from_source(source, start, end))
+        }
+        _ => None,
+    };
+    let diagnostic = match source {
+        Some(source) => err.format_diagnostic_with_source(Some("<wasm>"), Some(source)),
+        None => err.format_diagnostic(),
+    };
+    let callstack = if !err.context.call_stack.is_empty() {
+        err.context.call_stack.clone()
+    } else {
+        err.context
+            .call_frames
+            .iter()
+            .map(|frame| frame.function.clone())
+            .collect()
+    };
+    RunMatErrorPayload {
+        kind: RunMatErrorKind::Runtime,
+        message: err.message().to_string(),
+        identifier,
+        diagnostic,
+        span,
+        callstack,
+        callstack_elided: err.context.call_frames_elided,
+    }
+}
+
+fn run_error_payload(err: &RunError, source: &str) -> RunMatErrorPayload {
+    let diagnostic = format_run_error(err, source);
+    match err {
+        RunError::Syntax(err) => {
+            let mut message = err.message.clone();
+            if let Some(expected) = &err.expected {
+                message = format!("{message} (expected {expected})");
+            }
+            if let Some(found) = &err.found_token {
+                message = format!("{message} (found '{found}')");
+            }
+            let span = span_payload_from_source(source, err.position, err.position + 1);
+            RunMatErrorPayload {
+                kind: RunMatErrorKind::Syntax,
+                message,
+                identifier: Some("RunMat:SyntaxError".to_string()),
+                diagnostic,
+                span: Some(span),
+                callstack: Vec::new(),
+                callstack_elided: 0,
+            }
+        }
+        RunError::Semantic(err) => RunMatErrorPayload {
+            kind: RunMatErrorKind::Semantic,
+            message: err.message.clone(),
+            identifier: err.identifier.clone(),
+            diagnostic,
+            span: err.span.map(|span| {
+                let end = span.end.max(span.start + 1);
+                span_payload_from_source(source, span.start, end)
+            }),
+            callstack: Vec::new(),
+            callstack_elided: 0,
+        },
+        RunError::Compile(err) => RunMatErrorPayload {
+            kind: RunMatErrorKind::Compile,
+            message: err.message.clone(),
+            identifier: err.identifier.clone(),
+            diagnostic,
+            span: err.span.map(|span| {
+                let end = span.end.max(span.start + 1);
+                span_payload_from_source(source, span.start, end)
+            }),
+            callstack: Vec::new(),
+            callstack_elided: 0,
+        },
+        RunError::Runtime(err) => runtime_error_payload(err, Some(source)),
+    }
+}
+
+fn run_error_to_js(err: &RunError, source: &str) -> JsValue {
+    serde_wasm_bindgen::to_value(&run_error_payload(err, source))
+        .unwrap_or_else(|_| JsValue::from_str("RunMat error"))
+}
+
 fn js_error(message: &str) -> JsValue {
     JsValue::from_str(message)
 }
@@ -1596,24 +1889,41 @@ fn init_logging_once() {
         #[cfg(target_arch = "wasm32")]
         {
             std::panic::set_hook(Box::new(|info| {
-                let _ = web_sys::console::error_1(&JsValue::from_str(
+                web_sys::console::error_1(&JsValue::from_str(
                     "RunMat panic hook invoked; forwarding to console_error_panic_hook",
                 ));
                 console_error_panic_hook::hook(info);
                 let bt = Backtrace::force_capture();
-                let _ = web_sys::console::error_1(&JsValue::from_str(&format!(
+                web_sys::console::error_1(&JsValue::from_str(&format!(
                     "RunMat panic backtrace:\n{bt:?}"
                 )));
             }));
-            let _ = init_logging(LoggingOptions {
+            let guard = init_logging(LoggingOptions {
                 enable_otlp: false,
                 enable_traces: true,
                 pid: 1,
+                default_filter: Some(
+                    LOG_FILTER_OVERRIDE
+                        .get()
+                        .cloned()
+                        .unwrap_or_else(|| "debug".to_string()),
+                ),
             });
+            let _ = LOGGING_GUARD.set(guard);
             ensure_runtime_log_forwarder_installed();
             ensure_trace_forwarder_installed();
         }
     });
+}
+
+fn set_log_filter_override(level: &str) {
+    let normalized = level.trim();
+    if normalized.is_empty() {
+        return;
+    }
+    if LOGGING_GUARD.get().is_none() {
+        let _ = LOG_FILTER_OVERRIDE.set(normalized.to_string());
+    }
 }
 
 fn js_value_to_string(value: JsValue) -> String {
@@ -1649,14 +1959,6 @@ fn install_fs_provider_value(_bindings: JsValue) -> Result<(), JsValue> {
     ))
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PendingInputPayload {
-    id: String,
-    request: InputRequestPayload,
-    waiting_ms: u64,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MaterializeSelectorPayload {
@@ -1669,33 +1971,44 @@ struct MaterializeSelectorPayload {
 #[serde(rename_all = "camelCase")]
 struct MaterializeOptionsPayload {
     limit: Option<usize>,
-    slices: Option<JsonValue>,
+    slice: Option<MaterializeSlicePayload>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MaterializeSlicePayload {
+    start: Vec<usize>,
+    shape: Vec<usize>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct InputRequestPayload {
-    prompt: String,
-    kind: &'static str,
-    echo: bool,
+enum RunMatErrorKind {
+    Syntax,
+    Semantic,
+    Compile,
+    Runtime,
 }
 
-impl From<PendingInput> for PendingInputPayload {
-    fn from(input: PendingInput) -> Self {
-        let (kind, echo) = match input.request.kind {
-            InputRequestKind::Line { echo } => ("line", echo),
-            InputRequestKind::KeyPress => ("keyPress", false),
-        };
-        Self {
-            id: input.id.to_string(),
-            request: InputRequestPayload {
-                prompt: input.request.prompt,
-                kind,
-                echo,
-            },
-            waiting_ms: input.waiting_ms,
-        }
-    }
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RunMatErrorSpanPayload {
+    start: usize,
+    end: usize,
+    line: usize,
+    column: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RunMatErrorPayload {
+    kind: RunMatErrorKind,
+    message: String,
+    identifier: Option<String>,
+    diagnostic: String,
+    span: Option<RunMatErrorSpanPayload>,
+    callstack: Vec<String>,
+    callstack_elided: usize,
 }
 
 #[derive(Serialize)]
@@ -1706,7 +2019,7 @@ struct ExecutionPayload {
     type_info: Option<String>,
     execution_time_ms: u64,
     used_jit: bool,
-    error: Option<String>,
+    error: Option<RunMatErrorPayload>,
     stdout: Vec<ConsoleStreamPayload>,
     workspace: WorkspacePayload,
     figures_touched: Vec<u32>,
@@ -1714,7 +2027,6 @@ struct ExecutionPayload {
     stdin_events: Vec<StdinEventPayload>,
     profiling: Option<ProfilingPayload>,
     fusion_plan: Option<FusionPlanPayload>,
-    stdin_requested: Option<PendingInputPayload>,
 }
 
 #[derive(Serialize)]
@@ -1724,17 +2036,21 @@ struct MemoryUsagePayload {
     pages: u32,
 }
 
-impl From<ExecutionResult> for ExecutionPayload {
-    fn from(result: ExecutionResult) -> Self {
+impl ExecutionPayload {
+    fn from_result(result: ExecutionResult, source: &str) -> Self {
         let value_text = result.value.as_ref().map(|v| v.to_string());
         let value_json = result.value.as_ref().map(|v| value_to_json(v, 0));
+        let error = result
+            .error
+            .as_ref()
+            .map(|err| runtime_error_payload(err, Some(source)));
         Self {
             value_text,
             value_json,
             type_info: result.type_info,
             execution_time_ms: result.execution_time_ms,
             used_jit: result.used_jit,
-            error: result.error,
+            error,
             stdout: result
                 .streams
                 .into_iter()
@@ -1754,7 +2070,6 @@ impl From<ExecutionResult> for ExecutionPayload {
                 .collect(),
             profiling: result.profiling.map(ProfilingPayload::from),
             fusion_plan: result.fusion_plan.map(FusionPlanPayload::from),
-            stdin_requested: result.stdin_requested.map(PendingInputPayload::from),
         }
     }
 }
@@ -2142,14 +2457,15 @@ fn parse_materialize_options(value: JsValue) -> Result<WorkspaceMaterializeOptio
                 "materializeVariable options could not be parsed: {err}"
             ))
         })?;
-    if payload.slices.is_some() {
-        return Err(js_error(
-            "materializeVariable slices are not supported yet; omit the 'slices' option",
-        ));
-    }
     let mut opts = WorkspaceMaterializeOptions::default();
     if let Some(limit) = payload.limit {
-        opts.max_elements = limit.max(1).min(MAX_DATA_PREVIEW);
+        opts.max_elements = limit.clamp(1, MAX_DATA_PREVIEW);
+    }
+    if let Some(slice) = payload.slice {
+        opts.slice = Some(WorkspaceSliceOptions {
+            start: slice.start,
+            shape: slice.shape,
+        });
     }
     Ok(opts)
 }
@@ -2209,7 +2525,7 @@ fn value_to_json(value: &Value, depth: usize) -> JsonValue {
         }),
         Value::LogicalArray(arr) => {
             let (preview, truncated) = preview_slice(&arr.data, MAX_DATA_PREVIEW);
-            let rows = arr.shape.get(0).copied().unwrap_or(0);
+            let rows = arr.shape.first().copied().unwrap_or(0);
             let cols = arr.shape.get(1).copied().unwrap_or(0);
             json!({
                 "kind": "logical-array",
@@ -2346,7 +2662,7 @@ fn struct_to_json(st: &StructValue, depth: usize) -> JsonValue {
     }
     json!({
         "kind": "struct",
-        "fieldOrder": st.field_names().cloned().take(MAX_STRUCT_FIELDS).collect::<Vec<_>>(),
+        "fieldOrder": st.field_names().take(MAX_STRUCT_FIELDS).cloned().collect::<Vec<_>>(),
         "fields": fields,
         "totalFields": st.fields.len(),
         "truncated": truncated,
@@ -2377,7 +2693,7 @@ fn scalar_shape() -> Vec<usize> {
 }
 
 fn rows_cols_from_shape(shape: &[usize]) -> (usize, usize) {
-    let rows = shape.get(0).copied().unwrap_or(0);
+    let rows = shape.first().copied().unwrap_or(0);
     let cols = if shape.len() >= 2 {
         shape[1]
     } else if rows == 0 {

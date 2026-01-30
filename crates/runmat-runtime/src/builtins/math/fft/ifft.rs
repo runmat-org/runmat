@@ -15,7 +15,13 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{
+    gpu_helpers,
+    shape::{is_scalar_shape, normalize_scalar_shape},
+    tensor,
+};
+use crate::dispatcher::download_handle_async;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::fft::ifft")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -44,6 +50,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Inverse FFT boundaries are not currently fused; fusion plans terminate before invoking `ifft`.",
 };
 
+const BUILTIN_NAME: &str = "ifft";
+
+fn ifft_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 #[runtime_builtin(
     name = "ifft",
     category = "math/fft",
@@ -51,10 +65,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "ifft,inverse fft,inverse fourier transform,symmetric,gpu",
     builtin_path = "crate::builtins::math::fft::ifft"
 )]
-fn ifft_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let (length, dimension, symmetric) = parse_arguments(&rest)?;
+async fn ifft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let (length, dimension, symmetric) = parse_arguments(&rest).await?;
     match value {
-        Value::GpuTensor(handle) => ifft_gpu(handle, length, dimension, symmetric),
+        Value::GpuTensor(handle) => ifft_gpu(handle, length, dimension, symmetric).await,
         other => ifft_host(other, length, dimension, symmetric),
     }
 }
@@ -64,32 +78,26 @@ fn ifft_host(
     length: Option<usize>,
     dimension: Option<usize>,
     symmetric: bool,
-) -> Result<Value, String> {
-    let tensor = value_to_complex_tensor(value, "ifft")?;
+) -> BuiltinResult<Value> {
+    let tensor = value_to_complex_tensor(value, BUILTIN_NAME)?;
     let transformed = ifft_complex_tensor(tensor, length, dimension)?;
     finalize_ifft_output(transformed, symmetric)
 }
 
-fn ifft_gpu(
+async fn ifft_gpu(
     handle: GpuTensorHandle,
     length: Option<usize>,
     dimension: Option<usize>,
     symmetric: bool,
-) -> Result<Value, String> {
-    let mut logical_shape = if handle.shape.is_empty() {
-        vec![1]
-    } else {
-        handle.shape.clone()
-    };
+) -> BuiltinResult<Value> {
+    let mut logical_shape = normalize_scalar_shape(&handle.shape);
     if logical_shape.last() == Some(&2) {
         logical_shape.pop();
-        if logical_shape.is_empty() {
-            logical_shape.push(1);
-        }
+        logical_shape = normalize_scalar_shape(&logical_shape);
     }
 
     let dim_one_based = match dimension {
-        Some(0) => return Err("ifft: dimension must be >= 1".to_string()),
+        Some(0) => return Err(ifft_error("ifft: dimension must be >= 1")),
         Some(dim) => dim,
         None => default_dimension(&logical_shape),
     };
@@ -104,25 +112,25 @@ fn ifft_gpu(
 
     if let Some(provider) = runmat_accelerate_api::provider() {
         if target_len != 0 {
-            if let Ok(out) = provider.ifft_dim(&handle, length, dim_index) {
-                let complex = ifft_download_gpu_result(provider, &out)?;
+            if let Ok(out) = provider.ifft_dim(&handle, length, dim_index).await {
+                let complex = ifft_download_gpu_result(provider, &out).await?;
                 return finalize_ifft_output(complex, symmetric);
             }
         }
 
-        let host = provider
-            .download(&handle)
-            .map_err(|e| format!("ifft: {e}"))?;
+        let host = download_handle_async(provider, &handle)
+            .await
+            .map_err(|e| ifft_error(format!("ifft: {e}")))?;
         runmat_accelerate_api::clear_residency(&handle);
-        let complex = host_to_complex_tensor(host, "ifft")?;
+        let complex = host_to_complex_tensor(host, BUILTIN_NAME)?;
         let transformed = ifft_complex_tensor(complex, length, dimension)?;
         return finalize_ifft_output(transformed, symmetric);
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let Tensor { data, shape, .. } = tensor;
     let host = HostTensorOwned { data, shape };
-    let complex = host_to_complex_tensor(host, "ifft")?;
+    let complex = host_to_complex_tensor(host, BUILTIN_NAME)?;
     let transformed = ifft_complex_tensor(complex, length, dimension)?;
     finalize_ifft_output(transformed, symmetric)
 }
@@ -131,17 +139,17 @@ pub(super) fn ifft_complex_tensor(
     mut tensor: ComplexTensor,
     length: Option<usize>,
     dimension: Option<usize>,
-) -> Result<ComplexTensor, String> {
-    if tensor.shape.is_empty() {
-        tensor.shape = vec![tensor.data.len()];
+) -> BuiltinResult<ComplexTensor> {
+    let origin_rank = tensor.shape.len();
+    if is_scalar_shape(&tensor.shape) {
+        tensor.shape = normalize_scalar_shape(&tensor.shape);
         tensor.rows = tensor.shape.first().copied().unwrap_or(1);
         tensor.cols = tensor.shape.get(1).copied().unwrap_or(1);
     }
 
     let mut shape = tensor.shape.clone();
-    let origin_rank = shape.len();
     let dim_index = match dimension {
-        Some(0) => return Err("ifft: dimension must be >= 1".to_string()),
+        Some(0) => return Err(ifft_error("ifft: dimension must be >= 1")),
         Some(dim) => dim - 1,
         None => default_dimension(&shape) - 1,
     };
@@ -158,7 +166,7 @@ pub(super) fn ifft_complex_tensor(
         out_shape[dim_index] = 0;
         trim_trailing_ones(&mut out_shape, origin_rank);
         return ComplexTensor::new(Vec::<(f64, f64)>::new(), out_shape)
-            .map_err(|e| format!("ifft: {e}"));
+            .map_err(|e| ifft_error(format!("ifft: {e}")));
     }
 
     let inner_stride = shape[..dim_index]
@@ -182,7 +190,7 @@ pub(super) fn ifft_complex_tensor(
         out_shape[dim_index] = target_len;
         trim_trailing_ones(&mut out_shape, origin_rank.max(dim_index + 1));
         return ComplexTensor::new(Vec::<(f64, f64)>::new(), out_shape)
-            .map_err(|e| format!("ifft: {e}"));
+            .map_err(|e| ifft_error(format!("ifft: {e}")));
     }
 
     let output_len = target_len.saturating_mul(num_slices);
@@ -227,42 +235,61 @@ pub(super) fn ifft_complex_tensor(
     trim_trailing_ones(&mut out_shape, origin_rank.max(dim_index + 1));
 
     let data = output.into_iter().map(|c| (c.re, c.im)).collect::<Vec<_>>();
-    ComplexTensor::new(data, out_shape).map_err(|e| format!("ifft: {e}"))
+    ComplexTensor::new(data, out_shape).map_err(|e| ifft_error(format!("ifft: {e}")))
 }
 
-fn finalize_ifft_output(tensor: ComplexTensor, symmetric: bool) -> Result<Value, String> {
+fn finalize_ifft_output(tensor: ComplexTensor, symmetric: bool) -> BuiltinResult<Value> {
     if symmetric {
-        complex_tensor_to_real_value(tensor, "ifft")
+        complex_tensor_to_real_value(tensor, BUILTIN_NAME)
     } else {
         Ok(complex_tensor_into_value(tensor))
     }
 }
 
-fn ifft_download_gpu_result(
+async fn ifft_download_gpu_result(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
-) -> Result<ComplexTensor, String> {
-    let host = provider
-        .download(handle)
-        .map_err(|e| format!("ifft: {e}"))?;
+) -> BuiltinResult<ComplexTensor> {
+    let host = download_handle_async(provider, handle)
+        .await
+        .map_err(|e| ifft_error(format!("ifft: {e}")))?;
     provider.free(handle).ok();
     runmat_accelerate_api::clear_residency(handle);
-    host_to_complex_tensor(host, "ifft")
+    host_to_complex_tensor(host, BUILTIN_NAME)
 }
 
-fn complex_tensor_to_real_value(tensor: ComplexTensor, builtin: &str) -> Result<Value, String> {
+fn complex_tensor_to_real_value(tensor: ComplexTensor, builtin: &str) -> BuiltinResult<Value> {
     let data = tensor.data.iter().map(|(re, _)| *re).collect::<Vec<_>>();
-    let real = Tensor::new(data, tensor.shape.clone()).map_err(|e| format!("{builtin}: {e}"))?;
+    let real = Tensor::new(data, tensor.shape.clone())
+        .map_err(|e| ifft_error(format!("{builtin}: {e}")))?;
     Ok(Value::Tensor(real))
 }
 
-fn parse_arguments(args: &[Value]) -> Result<(Option<usize>, Option<usize>, bool), String> {
+async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
+    match value {
+        Value::Int(_) | Value::Num(_) => {
+            tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
+                .await
+                .map_err(ifft_error)?
+                .ok_or_else(|| {
+                    ifft_error(format!(
+                        "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
+                    ))
+                })
+        }
+        _ => Err(ifft_error(format!(
+            "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
+        ))),
+    }
+}
+
+async fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<usize>, bool)> {
     match args.len() {
         0 => Ok((None, None, false)),
         1 => match parse_symflag(&args[0])? {
             Some(flag) => Ok((None, None, flag)),
             None => {
-                let len = parse_length(&args[0], "ifft")?;
+                let len = parse_length(&args[0], BUILTIN_NAME)?;
                 Ok((len, None, false))
             }
         },
@@ -271,15 +298,19 @@ fn parse_arguments(args: &[Value]) -> Result<(Option<usize>, Option<usize>, bool
             let second_flag = parse_symflag(&args[1])?;
             if let Some(flag) = second_flag {
                 if first_flag.is_some() {
-                    return Err("ifft: symmetry flag must appear as the final argument".to_string());
+                    return Err(ifft_error(
+                        "ifft: symmetry flag must appear as the final argument",
+                    ));
                 }
-                let len = parse_length(&args[0], "ifft")?;
+                let len = parse_length(&args[0], BUILTIN_NAME)?;
                 Ok((len, None, flag))
             } else if first_flag.is_some() {
-                Err("ifft: symmetry flag must appear as the final argument".to_string())
+                Err(ifft_error(
+                    "ifft: symmetry flag must appear as the final argument",
+                ))
             } else {
-                let len = parse_length(&args[0], "ifft")?;
-                let dim = Some(tensor::parse_dimension(&args[1], "ifft")?);
+                let len = parse_length(&args[0], BUILTIN_NAME)?;
+                let dim = Some(parse_dimension_arg(&args[1]).await?);
                 Ok((len, dim, false))
             }
         }
@@ -288,23 +319,24 @@ fn parse_arguments(args: &[Value]) -> Result<(Option<usize>, Option<usize>, bool
             let second_flag = parse_symflag(&args[1])?;
             let third_flag = parse_symflag(&args[2])?;
             let symmetry = third_flag.ok_or_else(|| {
-                "ifft: expected 'symmetric' or 'nonsymmetric' as the final argument".to_string()
+                ifft_error("ifft: expected 'symmetric' or 'nonsymmetric' as the final argument")
             })?;
             if first_flag.is_some() || second_flag.is_some() {
-                return Err("ifft: symmetry flag may only appear once at the end".to_string());
+                return Err(ifft_error(
+                    "ifft: symmetry flag may only appear once at the end",
+                ));
             }
-            let len = parse_length(&args[0], "ifft")?;
-            let dim = Some(tensor::parse_dimension(&args[1], "ifft")?);
+            let len = parse_length(&args[0], BUILTIN_NAME)?;
+            let dim = Some(parse_dimension_arg(&args[1]).await?);
             Ok((len, dim, symmetry))
         }
-        _ => Err(
-            "ifft: expected ifft(X), ifft(X, N), ifft(X, N, DIM), or ifft(X, N, DIM, symflag)"
-                .to_string(),
-        ),
+        _ => Err(ifft_error(
+            "ifft: expected ifft(X), ifft(X, N), ifft(X, N, DIM), or ifft(X, N, DIM, symflag)",
+        )),
     }
 }
 
-fn parse_symflag(value: &Value) -> Result<Option<bool>, String> {
+fn parse_symflag(value: &Value) -> BuiltinResult<Option<bool>> {
     use std::borrow::Cow;
 
     let text: Option<Cow<'_, str>> = match value {
@@ -327,7 +359,7 @@ fn parse_symflag(value: &Value) -> Result<Option<bool>, String> {
     } else if trimmed.eq_ignore_ascii_case("nonsymmetric") {
         Ok(Some(false))
     } else {
-        Err(format!("ifft: unrecognized option '{trimmed}'"))
+        Err(ifft_error(format!("ifft: unrecognized option '{trimmed}'")))
     }
 }
 
@@ -335,11 +367,16 @@ fn parse_symflag(value: &Value) -> Result<Option<bool>, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use num_complex::Complex;
     use runmat_builtins::{ComplexTensor as HostComplexTensor, IntValue};
 
     fn approx_eq((a_re, a_im): (f64, f64), (b_re, b_im): (f64, f64), tol: f64) -> bool {
         (a_re - b_re).abs() <= tol && (a_im - b_im).abs() <= tol
+    }
+
+    fn error_message(error: crate::RuntimeError) -> String {
+        error.message().to_string()
     }
 
     fn value_as_complex_tensor(value: Value) -> HostComplexTensor {
@@ -446,21 +483,29 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_rejects_dimension_zero() {
-        let err = parse_arguments(&[Value::Num(4.0), Value::Int(IntValue::I32(0))]).unwrap_err();
+        let err = error_message(
+            block_on(parse_arguments(&[
+                Value::Num(4.0),
+                Value::Int(IntValue::I32(0)),
+            ]))
+            .unwrap_err(),
+        );
         assert!(err.contains("dimension must be >= 1"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_rejects_unknown_string_option() {
-        let err = parse_arguments(&[Value::from("invalidflag")]).unwrap_err();
+        let err =
+            error_message(block_on(parse_arguments(&[Value::from("invalidflag")])).unwrap_err());
         assert!(err.contains("unrecognized option"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_accepts_nonsymmetric_flag() {
-        let (len, dim, symmetric) = parse_arguments(&[Value::from("nonsymmetric")]).expect("parse");
+        let (len, dim, symmetric) =
+            block_on(parse_arguments(&[Value::from("nonsymmetric")])).expect("parse");
         assert!(len.is_none());
         assert!(dim.is_none());
         assert!(!symmetric);
@@ -481,14 +526,21 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_symflag_requires_final_position() {
-        let err = parse_arguments(&[Value::from("nonsymmetric"), Value::Num(4.0)]).unwrap_err();
+        let err = error_message(
+            block_on(parse_arguments(&[
+                Value::from("nonsymmetric"),
+                Value::Num(4.0),
+            ]))
+            .unwrap_err(),
+        );
         assert!(err.contains("symmetry flag must appear as the final argument"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_symflag_accepts_whitespace() {
-        let (len, dim, symmetric) = parse_arguments(&[Value::from(" symmetric ")]).expect("parse");
+        let (len, dim, symmetric) =
+            block_on(parse_arguments(&[Value::from(" symmetric ")])).expect("parse");
         assert!(len.is_none());
         assert!(dim.is_none());
         assert!(symmetric);
@@ -542,8 +594,11 @@ pub(crate) mod tests {
     #[test]
     fn ifft_empty_length_with_symmetric_flag() {
         let empty = Tensor::new(Vec::new(), vec![0]).unwrap();
-        let (len, dim, symmetric) =
-            parse_arguments(&[Value::Tensor(empty), Value::from("symmetric")]).expect("parse");
+        let (len, dim, symmetric) = block_on(parse_arguments(&[
+            Value::Tensor(empty),
+            Value::from("symmetric"),
+        ]))
+        .expect("parse");
         assert!(len.is_none());
         assert!(dim.is_none());
         assert!(symmetric);
@@ -607,5 +662,9 @@ pub(crate) mod tests {
             }
             provider.free(&handle).ok();
         }
+    }
+
+    fn ifft_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::ifft_builtin(value, rest))
     }
 }

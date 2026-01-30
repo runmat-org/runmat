@@ -9,7 +9,8 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::angle")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -52,6 +53,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion assumes real-valued inputs (imaginary part zero). Complex tensors are gathered to the host until GPU complex storage lands.",
 };
 
+const BUILTIN_NAME: &str = "angle";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 #[runtime_builtin(
     name = "angle",
     category = "math/elementwise",
@@ -60,57 +69,61 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::angle"
 )]
-fn angle_builtin(value: Value) -> Result<Value, String> {
+async fn angle_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => angle_gpu(handle),
+        Value::GpuTensor(handle) => angle_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Num(angle_scalar(re, im))),
         Value::ComplexTensor(ct) => angle_complex_tensor(ct),
         Value::CharArray(ca) => angle_char_array(ca),
         Value::String(_) | Value::StringArray(_) => {
-            Err("angle: expected numeric input".to_string())
+            Err(builtin_error("angle: expected numeric input"))
         }
         other => angle_real(other),
     }
 }
 
-fn angle_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn angle_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(device_result) = provider.unary_angle(&handle) {
+        if let Ok(device_result) = provider.unary_angle(&handle).await {
             return Ok(Value::GpuTensor(device_result));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
-    angle_tensor(tensor).map(tensor::tensor_into_value)
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    Ok(tensor::tensor_into_value(angle_tensor(tensor)?))
 }
 
-fn angle_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("angle", value)?;
-    angle_tensor(tensor).map(tensor::tensor_into_value)
+fn angle_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("angle", value)
+        .map_err(|e| builtin_error(format!("angle: {e}")))?;
+    Ok(tensor::tensor_into_value(angle_tensor(tensor)?))
 }
 
-fn angle_tensor(tensor: Tensor) -> Result<Tensor, String> {
+fn angle_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let Tensor { data, shape, .. } = tensor;
     let mapped: Vec<f64> = data.into_iter().map(|re| angle_scalar(re, 0.0)).collect();
-    Tensor::new(mapped, shape).map_err(|e| format!("angle: {e}"))
+    Tensor::new(mapped, shape).map_err(|e| builtin_error(format!("angle: {e}")))
 }
 
-fn angle_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn angle_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let ComplexTensor { data, shape, .. } = ct;
     let mapped: Vec<f64> = data
         .into_iter()
         .map(|(re, im)| angle_scalar(re, im))
         .collect();
-    let tensor = Tensor::new(mapped, shape).map_err(|e| format!("angle: {e}"))?;
+    let tensor = Tensor::new(mapped, shape).map_err(|e| builtin_error(format!("angle: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn angle_char_array(ca: CharArray) -> Result<Value, String> {
+fn angle_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let CharArray { data, rows, cols } = ca;
     let mapped: Vec<f64> = data
         .into_iter()
         .map(|ch| angle_scalar(ch as u32 as f64, 0.0))
         .collect();
-    let tensor = Tensor::new(mapped, vec![rows, cols]).map_err(|e| format!("angle: {e}"))?;
+    let tensor =
+        Tensor::new(mapped, vec![rows, cols]).map_err(|e| builtin_error(format!("angle: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -123,8 +136,13 @@ fn angle_scalar(re: f64, im: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray, StringArray};
     use std::f64::consts::PI;
+
+    fn angle_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::angle_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -258,10 +276,7 @@ pub(crate) mod tests {
     #[test]
     fn angle_rejects_strings() {
         let err = angle_builtin(Value::from("hello")).unwrap_err();
-        assert!(
-            err.contains("angle: expected numeric input"),
-            "unexpected error message: {err}"
-        );
+        assert!(err.message().contains("angle: expected numeric input"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -269,10 +284,7 @@ pub(crate) mod tests {
     fn angle_rejects_string_arrays() {
         let array = StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 2]).unwrap();
         let err = angle_builtin(Value::StringArray(array)).unwrap_err();
-        assert!(
-            err.contains("angle: expected numeric input"),
-            "unexpected error message: {err}"
-        );
+        assert!(err.message().contains("angle: expected numeric input"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -292,7 +304,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = angle_gpu(handle).unwrap();
+        let gpu = block_on(angle_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (Value::Tensor(cpu), gathered) {
             (Value::Tensor(ct), gt) => {

@@ -1,59 +1,76 @@
 # Plotting in RunMat
 
-RunMat’s plotting stack is designed around the same zero-copy GPU pipeline that powers Accelerate. Every builtin in `crates/runmat-runtime/src/builtins/plotting` produces `runmat-plot` primitives, which stream tensors directly into WebGPU compute shaders when a provider-backed device is available. Figures/axes/hold/subplot state lives in `state.rs`, so MATLAB calls such as `figure(2); subplot(2,1,1); hold on` all manipulate the shared registry before rendering.
+RunMat plotting aims to be **MATLAB-familiar** while also being **GPU-first** and **event-loop friendly** (especially on Web/WASM).
+
+The core design principle is:
+
+- **Plotting builtins mutate figure state.**
+- **Presentation (rendering to a surface) is coalesced and throttled.**
+- **`drawnow()` (and `pause()`) are explicit “yield + present” boundaries.**
+
+This keeps semantics clean for modelling/physics code while unlocking smooth GPU-resident animation.
+
+## Semantics: state vs presentation
+
+### `plot`, `scatter`, `hist`, …
+
+- These builtins **update the current figure/axes state** (respecting `figure`, `gcf`, `subplot`, `hold`, etc.).
+- They emit a **figure event** (`created` / `updated` / `closed`) so the host can update its UI and schedule presentation.
+- They **do not guarantee that pixels change immediately** on Web/WASM. If a script does not yield, the browser cannot present frames.
+
+### `drawnow()`
+
+`drawnow()` is the explicit boundary that means:
+
+- **Present the latest revision** of the current figure to any bound surface(s).
+- **Yield** so the host/browser can process rendering work.
+
+This mirrors MATLAB’s idiom and gives precise control for simulation loops:
+
+```matlab
+for t = 0:dt:T
+    Y = sin(X + t);
+    plot(X, Y);
+    drawnow();
+end
+```
+
+### `pause(dt)`
+
+`pause` is treated as a modelling-friendly equivalent of “yield the UI”:
+
+- `pause(dt)` performs a **`drawnow()` first**, then waits approximately `dt` seconds (cancellable).
+- `pause(0)` is a useful idiom meaning **“draw once and yield”**.
+
+This matches MATLAB intent while remaining correct on Web/WASM targets where blocking sleeps are not allowed.
+
+## Host rendering model (Web/WASM)
+
+On Web/WASM, rendering is fundamentally cooperative:
+
+- The runtime executes in a Web Worker.
+- The plot surface is an `OffscreenCanvas` transferred once to the worker.
+- The host should treat figure events as “dirty notifications” and **present at most once per animation frame**.
+
+Practically:
+
+- On figure `updated`, enqueue the handle in a “dirty set”.
+- On the next `requestAnimationFrame`, ask the worker to render the current scene for those handles.
+
+This coalescing prevents redundant work when the runtime emits many updates per second.
 
 ## GPU-first data path
 
-- Runtime tensors that already live on a GPU provider avoid host gathers entirely: we call `runmat_accelerate_api::export_wgpu_buffer`, wrap the buffer in a `HistogramGpuInputs`/`LineGpuInputs` struct, and dispatch compute kernels in `crates/runmat-plot/src/gpu`. Each shader ships both `f32` and `f64` variants, so adapters with `SHADER_F64` consume double-precision buffers directly (others fall back to the CPU path automatically).
-- Figure lifecycle events (`FigureEvent::Created/Updated/Closed`) flow through the wasm bindings (`bindings/ts/src/index.ts`) so host shells can mount canvases per handle. Desktop shells use the same event stream to open/close winit windows without polling.
-- Performance knobs such as `RUNMAT_PLOT_SCATTER_TARGET` and `RUNMAT_PLOT_SURFACE_VERTEX_BUDGET` cap GPU work per plot, and runtime/TS helpers mirror those setters so CLIs/web hosts can tune budgets programmatically.
+Plotting is designed to avoid host round-trips when data is already on a GPU provider:
 
-## Bars and histograms with MATLAB semantics
-
-- `bar` and `hist` share the `parse_bar_style_args` helper, so MATLAB-style options (`'FaceColor'`, `'EdgeColor'`, `'FaceAlpha'`, `'BarWidth'`, `'DisplayName'`, `'stacked'`) work uniformly across CPU and GPU paths. Grouped/stacked bars keep per-series offsets/strides on-device, and histogram bins reuse the same GPU packer so name/value styles stay zero-copy.
-- `'Weights'` now flows end-to-end: `HistWeightsInput::to_gpu_weights` uploads host vectors (respecting `single`/`double`) or proxies provider buffers in place, the histogram compute shader performs float atomic adds per bin, and a follow-up pass scales by the requested normalization. Both `'probability'` and `'pdf'` modes divide by the true weighted total (and bin width for PDFs), so `hist(data,'Normalization','pdf','Weights',w)` matches MATLAB numerically even when everything stays on the GPU.
-- CPU fallbacks receive the same behaviour: weighted samples run through `build_histogram_chart`, `apply_normalization` divides by the weighted sum, and degenerate bins (all samples identical) reuse the newly-plumbed totals so probability/PDF plots remain correct.
-- `hist` mirrors MATLAB’s richer API: `[N, X] = hist(...)` now works without re-running the builtin, and the parser accepts `NumBins`, `BinWidth`, `BinLimits`, and the `'sqrt'`, `'sturges'`, or `'integers'` `BinMethod` tokens on top of the existing `'Normalization'`/`'Weights'` options. GPU execution stays zero-copy for any option set that produces uniform bin widths; non-uniform requests automatically fall back to the CPU path with the same semantics.
-
-### Example
-
-```matlab
-% Weighted probability histogram with custom styling
-data = gpuArray(randn(1, 200000));
-w = linspace(0.5, 2.0, numel(data));
-hist(data, 40, ...
-    'Weights', w, ...
-    'Normalization', 'probability', ...
-    'FaceColor', [0.15 0.5 0.8], ...
-    'EdgeColor', 'none', ...
-    'DisplayName', 'Weighted pdf');
-legend show;
-```
-
-The example calls the shared parser, keeps both the samples and weights on the provider GPU, computes weighted bin sums via `runmat-plot/src/gpu/histogram.rs`, and streams those vertices into the active figure without touching host memory. The same path also powers the multi-output `[counts, centers] = hist(...)` form and the additional `NumBins`/`BinWidth`/`BinLimits` controls when they describe uniform bins; other configurations transparently fall back to the CPU implementation.
-
-## Scatter/line markers and edge colours
-
-- `plot`, `scatter`, `scatter3`, and `stairs` now share the line/marker parser (`core::style`). Inline style strings (`plot(x1,y1,'r',x2,y2,'--')`), `'MarkerFaceColor'`, `'MarkerEdgeColor','flat'`, per-point size/colour arrays, `'LineStyleOrder'`, and `'filled'` all resolve to a `LineMarkerAppearance` structure that feeds both CPU + GPU packers.
-- Marker metadata rides the zero-copy path: scatter/line shaders read per-point colours, sizes, and edge colours so dashed/marker-heavy plots no longer trigger CPU fallbacks.
-
-### Example
-
-```matlab
-t = linspace(0, 8*pi, 2000);
-plot(t, sin(t), 'LineWidth', 2, 'Color', [0 0.6 0.2], '--');
-hold on;
-scatter(t(1:20:end), sin(t(1:20:end)), 60, ...
-    'Marker', 'o', ...
-    'MarkerFaceColor', 'flat', ...
-    'MarkerEdgeColor', 'flat', ...
-    'DisplayName', 'Samples');
-hold off;
-```
+- Runtime tensors on a GPU provider can be exported via `runmat_accelerate_api::export_wgpu_buffer`.
+- `runmat-plot` GPU packers (`crates/runmat-plot/src/gpu/**`) can then construct vertex buffers directly on-device.
+- CPU fallbacks remain available for unsupported configurations or when GPU export is unavailable.
 
 ## Where to look next
 
 - Runtime builtins: `crates/runmat-runtime/src/builtins/plotting/**`
-- GPU kernels + packers: `crates/runmat-plot/src/gpu`
-- Wasm/TS bindings: `bindings/ts/src/index.ts` + `README.md`
-- Live work tracker: `TEMP_WORK_CONTEXT.md`
+- `drawnow` + presentation hooks: `crates/runmat-runtime/src/builtins/plotting/core/web.rs`
+- Plot surface attachment (desktop/web host): `runmat-private/desktop/src/runtime/graphics/figure-canvas-adapter.ts`
+- Host scheduling of presents: `runmat-private/desktop/src/runtime/runtime-provider.tsx`
+- GPU compute backend notes: `docs/GPU_BEHAVIOR_NOTES.md`

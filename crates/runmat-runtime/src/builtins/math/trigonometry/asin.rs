@@ -17,7 +17,9 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
+const BUILTIN_NAME: &str = "asin";
 const ZERO_EPS: f64 = 1e-12;
 const DOMAIN_TOL: f64 = 1e-12;
 
@@ -36,6 +38,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Providers may execute asin in-place when inputs remain within [-1, 1]; the runtime gathers to host when complex promotion is required.",
 };
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::asin")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -62,72 +70,79 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::asin"
 )]
-fn asin_builtin(value: Value) -> Result<Value, String> {
+async fn asin_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => asin_gpu(handle),
+        Value::GpuTensor(handle) => asin_gpu(handle).await,
         Value::Complex(re, im) => Ok(asin_complex_value(re, im)),
         Value::ComplexTensor(ct) => asin_complex_tensor(ct),
         Value::CharArray(ca) => asin_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => Err("asin: expected numeric input".to_string()),
+        Value::String(_) | Value::StringArray(_) => {
+            Err(runtime_error_for("asin: expected numeric input"))
+        }
         other => asin_real(other),
     }
 }
 
-fn asin_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn asin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        match detect_gpu_requires_complex(provider, &handle) {
+        match detect_gpu_requires_complex(provider, &handle).await {
             Ok(false) => {
-                if let Ok(out) = provider.unary_asin(&handle) {
+                if let Ok(out) = provider.unary_asin(&handle).await {
                     return Ok(Value::GpuTensor(out));
                 }
             }
             Ok(true) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                 return asin_tensor_real(tensor);
             }
             Err(_) => {
-                // Fall through to host fallback.
+                // Fall back to host path below.
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     asin_tensor_real(tensor)
 }
 
-fn detect_gpu_requires_complex(
+async fn detect_gpu_requires_complex(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
-) -> Result<bool, String> {
+) -> BuiltinResult<bool> {
     let min_handle = provider
         .reduce_min(handle)
-        .map_err(|e| format!("asin: reduce_min failed: {e}"))?;
-    let max_handle = match provider.reduce_max(handle) {
+        .await
+        .map_err(|e| runtime_error_for(format!("asin: reduce_min failed: {e}")))?;
+    let max_handle = match provider.reduce_max(handle).await {
         Ok(handle) => handle,
         Err(err) => {
             let _ = provider.free(&min_handle);
-            return Err(format!("asin: reduce_max failed: {err}"));
+            return Err(runtime_error_for(format!("asin: reduce_max failed: {err}")));
         }
     };
-    let min_host = match provider.download(&min_handle) {
+    let min_host = match download_handle_async(provider, &min_handle).await {
         Ok(host) => host,
         Err(err) => {
             let _ = provider.free(&min_handle);
             let _ = provider.free(&max_handle);
-            return Err(format!("asin: reduce_min download failed: {err}"));
+            return Err(runtime_error_for(format!(
+                "asin: reduce_min download failed: {err}"
+            )));
         }
     };
-    let max_host = match provider.download(&max_handle) {
+    let max_host = match download_handle_async(provider, &max_handle).await {
         Ok(host) => host,
         Err(err) => {
             let _ = provider.free(&min_handle);
             let _ = provider.free(&max_handle);
-            return Err(format!("asin: reduce_max download failed: {err}"));
+            return Err(runtime_error_for(format!(
+                "asin: reduce_max download failed: {err}"
+            )));
         }
     };
     let _ = provider.free(&min_handle);
     let _ = provider.free(&max_handle);
     if min_host.data.iter().any(|&v| v.is_nan()) || max_host.data.iter().any(|&v| v.is_nan()) {
-        return Err("asin: reduction results contained NaN".to_string());
+        return Err(runtime_error_for("asin: reduction results contained NaN"));
     }
     let min_val = min_host.data.iter().copied().fold(f64::INFINITY, f64::min);
     let max_val = max_host
@@ -138,12 +153,12 @@ fn detect_gpu_requires_complex(
     Ok(min_val < -1.0 - DOMAIN_TOL || max_val > 1.0 + DOMAIN_TOL)
 }
 
-fn asin_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("asin", value)?;
+fn asin_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("asin", value).map_err(runtime_error_for)?;
     asin_tensor_real(tensor)
 }
 
-fn asin_tensor_real(tensor: Tensor) -> Result<Value, String> {
+fn asin_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
     let len = tensor.data.len();
     if len == 0 {
         return Ok(tensor::tensor_into_value(tensor));
@@ -169,11 +184,11 @@ fn asin_tensor_real(tensor: Tensor) -> Result<Value, String> {
             return Ok(Value::Complex(re, im));
         }
         let tensor = ComplexTensor::new(complex_data, tensor.shape.clone())
-            .map_err(|e| format!("asin: {e}"))?;
+            .map_err(|e| runtime_error_for(format!("asin: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     } else {
-        let tensor =
-            Tensor::new(real_data, tensor.shape.clone()).map_err(|e| format!("asin: {e}"))?;
+        let tensor = Tensor::new(real_data, tensor.shape.clone())
+            .map_err(|e| runtime_error_for(format!("asin: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     }
 }
@@ -183,7 +198,7 @@ fn asin_complex_value(re: f64, im: f64) -> Value {
     Value::Complex(zero_small(result.re), zero_small(result.im))
 }
 
-fn asin_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn asin_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     if ct.data.is_empty() {
         return Ok(Value::ComplexTensor(ct));
     }
@@ -196,20 +211,21 @@ fn asin_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
         let (re, im) = data[0];
         Ok(Value::Complex(re, im))
     } else {
-        let tensor =
-            ComplexTensor::new(data, ct.shape.clone()).map_err(|e| format!("asin: {e}"))?;
+        let tensor = ComplexTensor::new(data, ct.shape.clone())
+            .map_err(|e| runtime_error_for(format!("asin: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
 
-fn asin_char_array(ca: CharArray) -> Result<Value, String> {
+fn asin_char_array(ca: CharArray) -> BuiltinResult<Value> {
     if ca.data.is_empty() {
-        let tensor =
-            Tensor::new(Vec::new(), vec![ca.rows, ca.cols]).map_err(|e| format!("asin: {e}"))?;
+        let tensor = Tensor::new(Vec::new(), vec![ca.rows, ca.cols])
+            .map_err(|e| runtime_error_for(format!("asin: {e}")))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("asin: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| runtime_error_for(format!("asin: {e}")))?;
     asin_tensor_real(tensor)
 }
 
@@ -225,7 +241,16 @@ fn zero_small(value: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray};
+
+    fn asin_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::asin_builtin(value))
+    }
+
+    fn error_message(err: RuntimeError) -> String {
+        err.message().to_string()
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -305,7 +330,8 @@ pub(crate) mod tests {
     #[test]
     fn asin_string_errors() {
         let err = asin_builtin(Value::from("hello")).expect_err("asin string should error");
-        assert!(err.contains("expected numeric input"));
+        let message = error_message(err);
+        assert!(message.contains("expected numeric input"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -387,7 +413,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = asin_gpu(h).expect("asin gpu");
+        let gpu = block_on(asin_gpu(h)).expect("asin gpu");
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {

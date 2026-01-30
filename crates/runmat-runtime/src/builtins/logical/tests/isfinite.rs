@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::tests::isfinite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -51,6 +52,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fused kernels emit 0/1 masks; providers can override with native logical-isfinite implementations.",
 };
 
+const BUILTIN_NAME: &str = "isfinite";
+const IDENTIFIER_INVALID_INPUT: &str = "MATLAB:isfinite:InvalidInput";
+const IDENTIFIER_INTERNAL: &str = "RunMat:isfinite:InternalError";
+
 #[runtime_builtin(
     name = "isfinite",
     category = "logical/tests",
@@ -59,7 +64,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::tests::isfinite"
 )]
-fn isfinite_builtin(value: Value) -> Result<Value, String> {
+async fn isfinite_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             if let Some(provider) = runmat_accelerate_api::provider() {
@@ -67,29 +72,36 @@ fn isfinite_builtin(value: Value) -> Result<Value, String> {
                     return Ok(gpu_helpers::logical_gpu_value(mask));
                 }
             }
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
-            isfinite_tensor("isfinite", tensor)
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(|err| internal_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {err}")))?;
+            isfinite_tensor(BUILTIN_NAME, tensor)
         }
         other => isfinite_host(other),
     }
 }
 
-fn isfinite_host(value: Value) -> Result<Value, String> {
+fn isfinite_host(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Num(x) => Ok(Value::Bool(x.is_finite())),
         Value::Int(_) | Value::Bool(_) => Ok(Value::Bool(true)),
         Value::Complex(re, im) => Ok(Value::Bool(re.is_finite() && im.is_finite())),
-        Value::Tensor(tensor) => isfinite_tensor("isfinite", tensor),
-        Value::ComplexTensor(tensor) => isfinite_complex_tensor("isfinite", tensor),
-        Value::LogicalArray(array) => logical_full("isfinite", array.shape, true),
-        Value::CharArray(array) => logical_full("isfinite", vec![array.rows, array.cols], true),
+        Value::Tensor(tensor) => isfinite_tensor(BUILTIN_NAME, tensor),
+        Value::ComplexTensor(tensor) => isfinite_complex_tensor(BUILTIN_NAME, tensor),
+        Value::LogicalArray(array) => logical_full(BUILTIN_NAME, array.shape, true),
+        Value::CharArray(array) => logical_full(BUILTIN_NAME, vec![array.rows, array.cols], true),
         Value::String(_) => Ok(Value::Bool(false)),
-        Value::StringArray(array) => logical_full("isfinite", array.shape, false),
-        _ => Err("isfinite: expected numeric, logical, char, or string input".to_string()),
+        Value::StringArray(array) => logical_full(BUILTIN_NAME, array.shape, false),
+        _ => Err(build_runtime_error(format!(
+            "{BUILTIN_NAME}: expected numeric, logical, char, or string input"
+        ))
+        .with_identifier(IDENTIFIER_INVALID_INPUT)
+        .with_builtin(BUILTIN_NAME)
+        .build()),
     }
 }
 
-fn isfinite_tensor(name: &str, tensor: Tensor) -> Result<Value, String> {
+fn isfinite_tensor(name: &str, tensor: Tensor) -> BuiltinResult<Value> {
     let data = tensor
         .data
         .iter()
@@ -98,7 +110,7 @@ fn isfinite_tensor(name: &str, tensor: Tensor) -> Result<Value, String> {
     logical_result(name, data, tensor.shape)
 }
 
-fn isfinite_complex_tensor(name: &str, tensor: ComplexTensor) -> Result<Value, String> {
+fn isfinite_complex_tensor(name: &str, tensor: ComplexTensor) -> BuiltinResult<Value> {
     let data = tensor
         .data
         .iter()
@@ -113,25 +125,28 @@ fn isfinite_complex_tensor(name: &str, tensor: ComplexTensor) -> Result<Value, S
     logical_result(name, data, tensor.shape)
 }
 
-fn logical_full(name: &str, shape: Vec<usize>, value: bool) -> Result<Value, String> {
+fn logical_full(name: &str, shape: Vec<usize>, value: bool) -> BuiltinResult<Value> {
     let total = tensor::element_count(&shape);
     if total == 0 {
         return LogicalArray::new(Vec::new(), shape)
             .map(Value::LogicalArray)
-            .map_err(|e| format!("{name}: {e}"));
+            .map_err(|e| logical_array_error(name, e));
     }
     let fill = if value { 1u8 } else { 0u8 };
     let bits = vec![fill; total];
     logical_result(name, bits, shape)
 }
 
-fn logical_result(name: &str, bits: Vec<u8>, shape: Vec<usize>) -> Result<Value, String> {
+fn logical_result(name: &str, bits: Vec<u8>, shape: Vec<usize>) -> BuiltinResult<Value> {
     let total = tensor::element_count(&shape);
     if total != bits.len() {
-        return Err(format!(
-            "{name}: internal error, mask length {} does not match shape {:?}",
-            bits.len(),
-            shape
+        return Err(internal_error(
+            name,
+            format!(
+                "{name}: internal error, mask length {} does not match shape {:?}",
+                bits.len(),
+                shape
+            ),
         ));
     }
     if total == 1 {
@@ -139,42 +154,58 @@ fn logical_result(name: &str, bits: Vec<u8>, shape: Vec<usize>) -> Result<Value,
     } else {
         LogicalArray::new(bits, shape)
             .map(Value::LogicalArray)
-            .map_err(|e| format!("{name}: {e}"))
+            .map_err(|e| logical_array_error(name, e))
     }
+}
+
+fn logical_array_error(name: &str, err: impl std::fmt::Display) -> RuntimeError {
+    internal_error(name, format!("{name}: {err}"))
+}
+
+fn internal_error(name: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier(IDENTIFIER_INTERNAL)
+        .with_builtin(name)
+        .build()
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{CharArray, IntValue, StringArray};
+
+    fn run_isfinite(value: Value) -> BuiltinResult<Value> {
+        block_on(super::isfinite_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_scalar_true() {
-        let result = isfinite_builtin(Value::Num(42.0)).expect("isfinite");
+        let result = run_isfinite(Value::Num(42.0)).expect("isfinite");
         assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_scalar_false_for_nan() {
-        let result = isfinite_builtin(Value::Num(f64::NAN)).expect("isfinite");
+        let result = run_isfinite(Value::Num(f64::NAN)).expect("isfinite");
         assert_eq!(result, Value::Bool(false));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_scalar_false_for_inf() {
-        let result = isfinite_builtin(Value::Num(f64::INFINITY)).expect("isfinite");
+        let result = run_isfinite(Value::Num(f64::INFINITY)).expect("isfinite");
         assert_eq!(result, Value::Bool(false));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_int_and_bool_true() {
-        let int_val = isfinite_builtin(Value::Int(IntValue::I32(7))).expect("isfinite");
-        let bool_val = isfinite_builtin(Value::Bool(false)).expect("isfinite");
+        let int_val = run_isfinite(Value::Int(IntValue::I32(7))).expect("isfinite");
+        let bool_val = run_isfinite(Value::Bool(false)).expect("isfinite");
         assert_eq!(int_val, Value::Bool(true));
         assert_eq!(bool_val, Value::Bool(true));
     }
@@ -182,13 +213,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_complex_requires_both_components_finite() {
-        let finite = isfinite_builtin(Value::Complex(1.0, -2.0)).expect("isfinite");
+        let finite = run_isfinite(Value::Complex(1.0, -2.0)).expect("isfinite");
         assert_eq!(finite, Value::Bool(true));
 
-        let inf_real = isfinite_builtin(Value::Complex(f64::INFINITY, 0.0)).expect("isfinite");
+        let inf_real = run_isfinite(Value::Complex(f64::INFINITY, 0.0)).expect("isfinite");
         assert_eq!(inf_real, Value::Bool(false));
 
-        let nan_imag = isfinite_builtin(Value::Complex(0.0, f64::NAN)).expect("isfinite");
+        let nan_imag = run_isfinite(Value::Complex(0.0, f64::NAN)).expect("isfinite");
         assert_eq!(nan_imag, Value::Bool(false));
     }
 
@@ -197,7 +228,7 @@ pub(crate) mod tests {
     fn isfinite_tensor_mask() {
         let tensor =
             Tensor::new(vec![1.0, f64::NAN, f64::INFINITY, -5.0], vec![2, 2]).expect("tensor");
-        let result = isfinite_builtin(Value::Tensor(tensor)).expect("isfinite");
+        let result = run_isfinite(Value::Tensor(tensor)).expect("isfinite");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![2, 2]);
@@ -215,7 +246,7 @@ pub(crate) mod tests {
             vec![3, 1],
         )
         .unwrap();
-        let result = isfinite_builtin(Value::ComplexTensor(tensor)).expect("isfinite");
+        let result = run_isfinite(Value::ComplexTensor(tensor)).expect("isfinite");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![3, 1]);
@@ -229,7 +260,7 @@ pub(crate) mod tests {
     #[test]
     fn isfinite_logical_array_returns_ones() {
         let logical = LogicalArray::new(vec![0, 1, 0], vec![3, 1]).unwrap();
-        let result = isfinite_builtin(Value::LogicalArray(logical)).expect("isfinite");
+        let result = run_isfinite(Value::LogicalArray(logical)).expect("isfinite");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![3, 1]);
@@ -243,7 +274,7 @@ pub(crate) mod tests {
     #[test]
     fn isfinite_char_array_returns_ones() {
         let array = CharArray::new("Run".chars().collect(), 1, 3).unwrap();
-        let result = isfinite_builtin(Value::CharArray(array)).expect("isfinite");
+        let result = run_isfinite(Value::CharArray(array)).expect("isfinite");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![1, 3]);
@@ -256,7 +287,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_string_scalar_false() {
-        let result = isfinite_builtin(Value::String("42".to_string())).expect("isfinite");
+        let result = run_isfinite(Value::String("42".to_string())).expect("isfinite");
         assert_eq!(result, Value::Bool(false));
     }
 
@@ -264,7 +295,7 @@ pub(crate) mod tests {
     #[test]
     fn isfinite_string_array_returns_zeros() {
         let strings = StringArray::new(vec!["foo".into(), "bar".into()], vec![1, 2]).unwrap();
-        let result = isfinite_builtin(Value::StringArray(strings)).expect("isfinite");
+        let result = run_isfinite(Value::StringArray(strings)).expect("isfinite");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![1, 2]);
@@ -278,7 +309,7 @@ pub(crate) mod tests {
     #[test]
     fn isfinite_empty_tensor_preserves_shape() {
         let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
-        let result = isfinite_builtin(Value::Tensor(tensor)).expect("isfinite");
+        let result = run_isfinite(Value::Tensor(tensor)).expect("isfinite");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![0, 3]);
@@ -291,11 +322,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_rejects_unsupported_types() {
-        let err = isfinite_builtin(Value::FunctionHandle("foo".to_string()))
+        let err = run_isfinite(Value::FunctionHandle("foo".to_string()))
             .expect_err("isfinite should reject function handles");
         assert!(
-            err.contains("expected numeric, logical, char, or string input"),
-            "unexpected error message: {err}"
+            err.message()
+                .contains("expected numeric, logical, char, or string input"),
+            "unexpected error message: {err:?}"
         );
     }
 
@@ -309,7 +341,7 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = isfinite_builtin(Value::GpuTensor(handle)).expect("isfinite");
+            let result = run_isfinite(Value::GpuTensor(handle)).expect("isfinite");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
             assert_eq!(gathered.data, vec![1.0, 0.0, 1.0]);
@@ -334,7 +366,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .expect("upload");
-        let gpu = isfinite_builtin(Value::GpuTensor(handle)).expect("gpu path");
+        let gpu = run_isfinite(Value::GpuTensor(handle)).expect("gpu path");
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::LogicalArray(expected), Tensor { data, shape, .. }) => {

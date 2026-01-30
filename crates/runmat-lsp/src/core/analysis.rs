@@ -7,7 +7,8 @@ use lsp_types::{
     SignatureHelp,
 };
 use runmat_builtins::{self, BuiltinFunction, Constant, Type};
-use runmat_hir::{HirStmt, LoweringResult};
+use runmat_hir::{HirStmt, LoweringContext, LoweringResult, SemanticError};
+use runmat_ignition::{compile, CompileError};
 use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
 pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions};
@@ -17,18 +18,22 @@ use std::fmt::Write;
 #[derive(Clone)]
 pub struct DocumentAnalysis {
     pub tokens: Vec<SpannedToken>,
-    pub parse_error: Option<ParseErrorInfo>,
-    pub lowering_error: Option<String>,
+    pub syntax_error: Option<SyntaxErrorInfo>,
+    pub lowering_error: Option<SemanticError>,
+    pub compile_error: Option<CompileError>,
     pub semantic: Option<SemanticModel>,
 }
 
 impl DocumentAnalysis {
     pub fn status_message(&self) -> String {
         if let Some(err) = &self.lowering_error {
-            return format!("Lowering failed: {err}");
+            return format!("Lowering failed: {}", err.message);
         }
-        if let Some(pe) = &self.parse_error {
-            return format!("Parse error: {}", pe.message);
+        if let Some(se) = &self.syntax_error {
+            return format!("Syntax error: {}", se.message);
+        }
+        if let Some(err) = &self.compile_error {
+            return format!("Compile error: {}", err.message);
         }
         if let Some(sem) = &self.semantic {
             return sem.status_message.clone();
@@ -38,7 +43,7 @@ impl DocumentAnalysis {
 }
 
 #[derive(Clone)]
-pub struct ParseErrorInfo {
+pub struct SyntaxErrorInfo {
     pub message: String,
     pub position: usize,
 }
@@ -70,25 +75,35 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
     let tokens = tokenize_detailed(text);
     match parse_with_options(text, ParserOptions::new(compat)) {
         Ok(ast) => {
-            let lowering =
-                match runmat_hir::lower_with_full_context(&ast, &HashMap::new(), &HashMap::new()) {
-                    Ok(result) => result,
-                    Err(err) => {
-                        return DocumentAnalysis {
-                            tokens,
-                            parse_error: None,
-                            lowering_error: Some(err),
-                            semantic: None,
-                        };
-                    }
+            let lowering = match runmat_hir::lower(&ast, &LoweringContext::empty()) {
+                Ok(result) => result,
+                Err(err) => {
+                    return DocumentAnalysis {
+                        tokens,
+                        syntax_error: None,
+                        lowering_error: Some(err),
+                        compile_error: None,
+                        semantic: None,
+                    };
+                }
+            };
+            if let Err(err) = compile(&lowering.hir, &HashMap::new()) {
+                return DocumentAnalysis {
+                    tokens,
+                    syntax_error: None,
+                    lowering_error: None,
+                    compile_error: Some(err),
+                    semantic: None,
                 };
+            }
 
             let semantic = build_semantic_model(lowering, &tokens, text);
 
             DocumentAnalysis {
                 tokens,
-                parse_error: None,
+                syntax_error: None,
                 lowering_error: None,
+                compile_error: None,
                 semantic: Some(semantic),
             }
         }
@@ -103,11 +118,12 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
 
             DocumentAnalysis {
                 tokens,
-                parse_error: Some(ParseErrorInfo {
+                syntax_error: Some(SyntaxErrorInfo {
                     message,
                     position: err.position,
                 }),
                 lowering_error: None,
+                compile_error: None,
                 semantic: None,
             }
         }
@@ -115,14 +131,14 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
 }
 
 pub fn diagnostics_for_document(text: &str, analysis: &DocumentAnalysis) -> Vec<Diagnostic> {
-    if let Some(parse_err) = &analysis.parse_error {
+    if let Some(syntax_err) = &analysis.syntax_error {
         return vec![Diagnostic {
-            range: diagnostic_range_for_parse_error(parse_err, &analysis.tokens, text),
+            range: diagnostic_range_for_parse_error(syntax_err, &analysis.tokens, text),
             severity: Some(DiagnosticSeverity::ERROR),
             code: None,
             code_description: None,
             source: Some("runmat-parser".into()),
-            message: parse_err.message.clone(),
+            message: syntax_err.message.clone(),
             related_information: None,
             tags: None,
             data: None,
@@ -134,6 +150,9 @@ pub fn diagnostics_for_document(text: &str, analysis: &DocumentAnalysis) -> Vec<
             &analysis.tokens,
             text,
         )];
+    }
+    if let Some(compile_err) = &analysis.compile_error {
+        return vec![diagnostic_for_compile_error(compile_err, text)];
     }
     if let Some(semantic) = &analysis.semantic {
         if !semantic.status_message.is_empty() {
@@ -382,7 +401,7 @@ pub fn formatting_edits(text: &str, _analysis: &DocumentAnalysis) -> Vec<lsp_typ
 }
 
 fn diagnostic_range_for_parse_error(
-    error: &ParseErrorInfo,
+    error: &SyntaxErrorInfo,
     tokens: &[SpannedToken],
     text: &str,
 ) -> Range {
@@ -400,19 +419,61 @@ fn diagnostic_range_for_parse_error(
     }
 }
 
-fn diagnostic_for_lowering_error(error: &str, tokens: &[SpannedToken], text: &str) -> Diagnostic {
-    let message = error.to_string();
-    let undefined_var = error
-        .split(':')
-        .next_back()
-        .map(str::trim)
-        .and_then(|s| s.split_whitespace().last())
-        .map(|s| s.trim_matches(|c: char| !c.is_alphanumeric() && c != '_'));
+fn diagnostic_for_lowering_error(
+    error: &SemanticError,
+    tokens: &[SpannedToken],
+    text: &str,
+) -> Diagnostic {
+    let message = error.message.clone();
+    let range = if let Some(span) = error.span {
+        let end = span.end.max(span.start + 1);
+        TextRange {
+            start: span.start,
+            end,
+        }
+        .to_lsp_range(text)
+    } else {
+        let undefined_var = error
+            .message
+            .split(':')
+            .next_back()
+            .map(str::trim)
+            .and_then(|s| s.split_whitespace().last())
+            .map(|s| s.trim_matches(|c: char| !c.is_alphanumeric() && c != '_'));
+        if let Some(name) = undefined_var {
+            find_symbol_range(tokens, name, None)
+                .unwrap_or(TextRange { start: 0, end: 1 })
+                .to_lsp_range(text)
+        } else {
+            Range {
+                start: Position::new(0, 0),
+                end: Position::new(0, 0),
+            }
+        }
+    };
 
-    let range = if let Some(name) = undefined_var {
-        find_symbol_range(tokens, name, None)
-            .unwrap_or(TextRange { start: 0, end: 1 })
-            .to_lsp_range(text)
+    Diagnostic {
+        range,
+        severity: Some(DiagnosticSeverity::ERROR),
+        code: None,
+        code_description: None,
+        source: Some("runmat-hir".into()),
+        message,
+        related_information: None,
+        tags: None,
+        data: None,
+    }
+}
+
+fn diagnostic_for_compile_error(error: &CompileError, text: &str) -> Diagnostic {
+    let message = error.message.clone();
+    let range = if let Some(span) = error.span {
+        let end = span.end.max(span.start + 1);
+        TextRange {
+            start: span.start,
+            end,
+        }
+        .to_lsp_range(text)
     } else {
         Range {
             start: Position::new(0, 0),
@@ -425,7 +486,7 @@ fn diagnostic_for_lowering_error(error: &str, tokens: &[SpannedToken], text: &st
         severity: Some(DiagnosticSeverity::ERROR),
         code: None,
         code_description: None,
-        source: Some("runmat-hir".into()),
+        source: Some("runmat-ignition".into()),
         message,
         related_information: None,
         tags: None,
@@ -670,6 +731,7 @@ fn build_semantic_model(
             body: _,
             has_varargin: _,
             has_varargout: _,
+            ..
         } = stmt.clone()
         else {
             continue;
@@ -776,7 +838,7 @@ mod tests {
     fn hover_returns_builtin_docs() {
         let text = "plot(1, 2);";
         let analysis = analyze_document(text);
-        if let Some(err) = &analysis.parse_error {
+        if let Some(err) = &analysis.syntax_error {
             panic!(
                 "unexpected parse error at {}: {}",
                 err.position, err.message
@@ -806,6 +868,28 @@ mod tests {
             .unwrap_or_else(|| panic!("no token found at offset {offset}"));
         assert_eq!(token.lexeme, "plot", "unexpected token at hover location");
         let hover = hover_at(text, &analysis, &position);
-        assert!(hover.is_some(), "expected hover for builtin function");
+        let hover = hover.expect("expected hover for builtin function");
+        match hover.contents {
+            lsp_types::HoverContents::Markup(markup) => {
+                assert_eq!(
+                    markup.kind,
+                    lsp_types::MarkupKind::Markdown,
+                    "expected markdown hover"
+                );
+                assert!(
+                    markup.value.contains("```runmat\nplot(...)\n```"),
+                    "expected placeholder signature header, got:\n{}",
+                    markup.value
+                );
+                assert!(
+                    markup
+                        .value
+                        .contains("Docs: https://runmat.org/docs/reference/builtins/"),
+                    "expected docs link, got:\n{}",
+                    markup.value
+                );
+            }
+            other => panic!("expected Markup hover contents, got {other:?}"),
+        }
     }
 }

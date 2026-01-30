@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use runmat_filesystem as vfs;
 use std::collections::HashSet;
@@ -49,6 +49,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "IO builtins are not eligible for fusion; metadata registered for completeness.",
 };
 
+const BUILTIN_NAME: &str = "rmpath";
+
+fn rmpath_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "rmpath",
     category = "io/repl_fs",
@@ -58,35 +77,39 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::rmpath"
 )]
-fn rmpath_builtin(args: Vec<Value>) -> Result<Value, String> {
+async fn rmpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return Err(ERROR_TOO_FEW_ARGS.to_string());
+        return Err(rmpath_error(ERROR_TOO_FEW_ARGS));
     }
 
-    let gathered = gather_arguments(&args)?;
-    let directories = parse_directories(&gathered)?;
+    let gathered = gather_arguments(&args).await?;
+    let directories = parse_directories(&gathered).await?;
 
     let previous = current_path_string();
     apply_rmpath(directories)?;
     Ok(char_array_value(&previous))
 }
 
-fn gather_arguments(args: &[Value]) -> Result<Vec<Value>, String> {
+async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(|err| format!("rmpath: {err}"))?);
+        out.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     Ok(out)
 }
 
-fn parse_directories(args: &[Value]) -> Result<Vec<String>, String> {
+async fn parse_directories(args: &[Value]) -> BuiltinResult<Vec<String>> {
     let mut directories = Vec::new();
     for value in args {
-        collect_strings(value, &mut directories)?;
+        collect_strings(value, &mut directories).await?;
     }
 
     if directories.is_empty() {
-        return Err(ERROR_TOO_FEW_ARGS.to_string());
+        return Err(rmpath_error(ERROR_TOO_FEW_ARGS));
     }
 
     let mut resolved = Vec::new();
@@ -99,13 +122,14 @@ fn parse_directories(args: &[Value]) -> Result<Vec<String>, String> {
     }
 
     if resolved.is_empty() {
-        return Err(ERROR_TOO_FEW_ARGS.to_string());
+        return Err(rmpath_error(ERROR_TOO_FEW_ARGS));
     }
 
     Ok(resolved)
 }
 
-fn collect_strings(value: &Value, output: &mut Vec<String>) -> Result<(), String> {
+#[async_recursion::async_recursion(?Send)]
+async fn collect_strings(value: &Value, output: &mut Vec<String>) -> BuiltinResult<()> {
     match value {
         Value::String(text) => {
             output.push(text.clone());
@@ -138,13 +162,15 @@ fn collect_strings(value: &Value, output: &mut Vec<String>) -> Result<(), String
         Value::Cell(cell) => {
             for ptr in &cell.data {
                 let inner = (*ptr).clone();
-                let gathered = gather_if_needed(&inner).map_err(|err| format!("rmpath: {err}"))?;
-                collect_strings(&gathered, output)?;
+                let gathered = gather_if_needed_async(&inner)
+                    .await
+                    .map_err(map_control_flow)?;
+                collect_strings(&gathered, output).await?;
             }
             Ok(())
         }
-        Value::GpuTensor(_) => Err(ERROR_ARG_TYPE.to_string()),
-        _ => Err(ERROR_ARG_TYPE.to_string()),
+        Value::GpuTensor(_) => Err(rmpath_error(ERROR_ARG_TYPE)),
+        _ => Err(rmpath_error(ERROR_ARG_TYPE)),
     }
 }
 
@@ -156,7 +182,7 @@ fn split_path_list(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn apply_rmpath(directories: Vec<String>) -> Result<(), String> {
+fn apply_rmpath(directories: Vec<String>) -> BuiltinResult<()> {
     let mut segments = current_path_segments();
     let mut changed = false;
     let mut seen = HashSet::new();
@@ -189,7 +215,7 @@ fn apply_rmpath(directories: Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
-fn remove_directory(segments: &mut Vec<String>, raw: &str) -> Result<bool, String> {
+fn remove_directory(segments: &mut Vec<String>, raw: &str) -> BuiltinResult<bool> {
     let direct_identity = path_identity(raw);
     let before = segments.len();
     segments.retain(|entry| path_identity(entry) != direct_identity);
@@ -197,13 +223,13 @@ fn remove_directory(segments: &mut Vec<String>, raw: &str) -> Result<bool, Strin
         return Ok(true);
     }
 
-    let expanded = expand_user_path(raw, "rmpath")?;
+    let expanded = expand_user_path(raw, "rmpath").map_err(rmpath_error)?;
     let path = Path::new(&expanded);
     let joined = if path.is_absolute() {
         path.to_path_buf()
     } else {
         env::current_dir()
-            .map_err(|_| "rmpath: unable to resolve current directory".to_string())?
+            .map_err(|_| rmpath_error("rmpath: unable to resolve current directory"))?
             .join(path)
     };
     let normalized = normalize_pathbuf(&joined);
@@ -219,12 +245,14 @@ fn remove_directory(segments: &mut Vec<String>, raw: &str) -> Result<bool, Strin
     match vfs::metadata(&normalized) {
         Ok(meta) => {
             if !meta.is_dir() {
-                Err(format!("rmpath: '{raw}' is not a folder"))
+                Err(rmpath_error(format!("rmpath: '{raw}' is not a folder")))
             } else {
-                Err(format!("rmpath: folder '{raw}' not on search path"))
+                Err(rmpath_error(format!(
+                    "rmpath: folder '{raw}' not on search path"
+                )))
             }
         }
-        Err(_) => Err(format!("rmpath: folder '{raw}' not found")),
+        Err(_) => Err(rmpath_error(format!("rmpath: folder '{raw}' not found"))),
     }
 }
 
@@ -248,27 +276,27 @@ fn normalize_pathbuf(path: &Path) -> PathBuf {
     }
 }
 
-fn tensor_to_string(tensor: &Tensor) -> Result<String, String> {
+fn tensor_to_string(tensor: &Tensor) -> BuiltinResult<String> {
     if tensor.shape.len() > 2 {
-        return Err(ERROR_ARG_TYPE.to_string());
+        return Err(rmpath_error(ERROR_ARG_TYPE));
     }
     if tensor.rows() > 1 {
-        return Err(ERROR_ARG_TYPE.to_string());
+        return Err(rmpath_error(ERROR_ARG_TYPE));
     }
     let mut text = String::with_capacity(tensor.data.len());
     for &code in &tensor.data {
         if !code.is_finite() {
-            return Err(ERROR_ARG_TYPE.to_string());
+            return Err(rmpath_error(ERROR_ARG_TYPE));
         }
         let rounded = code.round();
         if (code - rounded).abs() > 1e-6 {
-            return Err(ERROR_ARG_TYPE.to_string());
+            return Err(rmpath_error(ERROR_ARG_TYPE));
         }
         let int_code = rounded as i64;
         if !(0..=0x10FFFF).contains(&int_code) {
-            return Err(ERROR_ARG_TYPE.to_string());
+            return Err(rmpath_error(ERROR_ARG_TYPE));
         }
-        let ch = char::from_u32(int_code as u32).ok_or_else(|| ERROR_ARG_TYPE.to_string())?;
+        let ch = char::from_u32(int_code as u32).ok_or_else(|| rmpath_error(ERROR_ARG_TYPE))?;
         text.push(ch);
     }
     Ok(text)
@@ -308,6 +336,10 @@ pub(crate) mod tests {
     use runmat_builtins::CellArray;
     use std::convert::TryFrom;
     use tempfile::tempdir;
+
+    fn rmpath_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::rmpath_builtin(args))
+    }
 
     struct PathGuard {
         previous: String,
@@ -445,7 +477,7 @@ pub(crate) mod tests {
         set_path_string("");
         let err = rmpath_builtin(vec![Value::String("this/folder/does/not/exist".into())])
             .expect_err("expected error");
-        assert!(err.contains("not found"));
+        assert!(err.message().contains("not found"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -461,7 +493,7 @@ pub(crate) mod tests {
         set_path_string("");
 
         let err = rmpath_builtin(vec![Value::String(str.clone())]).expect_err("expected error");
-        assert!(err.contains("not on search path"));
+        assert!(err.message().contains("not on search path"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

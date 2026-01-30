@@ -1,4 +1,7 @@
-use runmat_parser::{parse_simple as parse, Stmt};
+use runmat_parser::Stmt;
+
+mod parse;
+use parse::parse;
 
 fn single_stmt(src: &str) -> Stmt {
     let program = parse(src).unwrap();
@@ -15,6 +18,7 @@ fn classdef_minimal_empty() {
             name,
             super_class,
             members,
+            ..
         } => {
             assert_eq!(name, "A");
             assert!(super_class.is_none());
@@ -56,6 +60,7 @@ end
             name,
             super_class,
             members,
+            ..
         } => {
             assert_eq!(name, "MyClass");
             assert_eq!(super_class.as_deref(), Some("handle"));
@@ -139,7 +144,7 @@ classdef C
 end
 "#; // missing 'end' after properties
     let err = parse(src).unwrap_err();
-    assert!(err.contains("expected 'end'"));
+    assert!(err.message.contains("expected 'end'"));
 }
 
 #[test]

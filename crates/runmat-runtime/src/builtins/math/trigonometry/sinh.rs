@@ -10,6 +10,9 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+const BUILTIN_NAME: &str = "sinh";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::sinh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -27,6 +30,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes:
         "Providers may execute sinh directly on the device; runtimes gather to the host when unary_sinh is unavailable.",
 };
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::sinh")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -53,57 +62,61 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::sinh"
 )]
-fn sinh_builtin(value: Value) -> Result<Value, String> {
+async fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => sinh_gpu(handle),
+        Value::GpuTensor(handle) => sinh_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Complex(
             sinh_complex_re(re, im),
             sinh_complex_im(re, im),
         )),
         Value::ComplexTensor(ct) => sinh_complex_tensor(ct),
         Value::CharArray(ca) => sinh_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => Err("sinh: expected numeric input".to_string()),
+        Value::String(_) | Value::StringArray(_) => {
+            Err(runtime_error_for("sinh: expected numeric input"))
+        }
         other => sinh_real(other),
     }
 }
 
-fn sinh_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn sinh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_sinh(&handle) {
+        if let Ok(out) = provider.unary_sinh(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     sinh_tensor(tensor).map(tensor::tensor_into_value)
 }
 
-fn sinh_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("sinh", value)?;
+fn sinh_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("sinh", value).map_err(runtime_error_for)?;
     sinh_tensor(tensor).map(tensor::tensor_into_value)
 }
 
-fn sinh_tensor(tensor: Tensor) -> Result<Tensor, String> {
+fn sinh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.sinh()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| format!("sinh: {e}"))
+    Tensor::new(data, tensor.shape.clone()).map_err(|e| runtime_error_for(format!("sinh: {e}")))
 }
 
-fn sinh_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn sinh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
         .data
         .iter()
         .map(|&(re, im)| (sinh_complex_re(re, im), sinh_complex_im(re, im)))
         .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(mapped, ct.shape.clone()).map_err(|e| format!("sinh: {e}"))?;
+    let tensor = ComplexTensor::new(mapped, ct.shape.clone())
+        .map_err(|e| runtime_error_for(format!("sinh: {e}")))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
-fn sinh_char_array(ca: CharArray) -> Result<Value, String> {
+fn sinh_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data
         .iter()
         .map(|&ch| (ch as u32 as f64).sinh())
         .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("sinh: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| runtime_error_for(format!("sinh: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -120,8 +133,14 @@ fn sinh_complex_im(re: f64, im: f64) -> f64 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor};
+
+    use crate::builtins::common::test_support;
+
+    fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::sinh_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -227,7 +246,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = sinh_gpu(h).unwrap();
+        let gpu = block_on(sinh_gpu(h)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {

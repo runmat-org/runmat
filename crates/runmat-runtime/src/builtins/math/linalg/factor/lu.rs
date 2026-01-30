@@ -5,11 +5,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderLuResult};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
+
+const BUILTIN_NAME: &str = "lu";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::lu")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -26,6 +29,24 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Prefers the provider `lu` hook; automatically gathers and falls back to the CPU implementation when no provider support is registered.",
 };
+
+fn lu_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn with_lu_context(mut error: RuntimeError) -> RuntimeError {
+    if error.message() == "interaction pending..." {
+        return build_runtime_error("interaction pending...")
+            .with_builtin(BUILTIN_NAME)
+            .build();
+    }
+    if error.context.builtin.is_none() {
+        error.context = error.context.with_builtin(BUILTIN_NAME);
+    }
+    error
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::factor::lu")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -47,8 +68,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::math::linalg::factor::lu"
 )]
-fn lu_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let eval = evaluate(value, &rest)?;
+async fn lu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(value, &rest).await?;
     Ok(eval.combined())
 }
 
@@ -102,7 +123,7 @@ impl LuEval {
         self.pivot_mode
     }
 
-    fn from_components(components: LuComponents, pivot_mode: PivotMode) -> Result<Self, String> {
+    fn from_components(components: LuComponents, pivot_mode: PivotMode) -> BuiltinResult<Self> {
         let combined = matrix_to_value(&components.combined)?;
         let lower = matrix_to_value(&components.lower)?;
         let upper = matrix_to_value(&components.upper)?;
@@ -144,62 +165,70 @@ impl Default for PivotMode {
 }
 
 /// Evaluate `lu` while preserving all output forms for later extraction.
-pub fn evaluate(value: Value, args: &[Value]) -> Result<LuEval, String> {
+pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<LuEval> {
     let pivot_mode = parse_pivot_mode(args)?;
     match value {
         Value::GpuTensor(handle) => {
-            if let Some(eval) = evaluate_gpu(&handle, pivot_mode)? {
+            if let Some(eval) = evaluate_gpu(&handle, pivot_mode).await? {
                 return Ok(eval);
             }
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
-            evaluate_host_value(Value::Tensor(tensor), pivot_mode)
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(with_lu_context)?;
+            evaluate_host_value(Value::Tensor(tensor), pivot_mode).await
         }
-        other => evaluate_host_value(other, pivot_mode),
+        other => evaluate_host_value(other, pivot_mode).await,
     }
 }
 
-fn evaluate_host_value(value: Value, pivot_mode: PivotMode) -> Result<LuEval, String> {
-    let matrix = extract_matrix(value)?;
+async fn evaluate_host_value(value: Value, pivot_mode: PivotMode) -> BuiltinResult<LuEval> {
+    let matrix = extract_matrix(value).await?;
     let components = lu_factor(matrix)?;
     LuEval::from_components(components, pivot_mode)
 }
 
-fn evaluate_gpu(handle: &GpuTensorHandle, pivot_mode: PivotMode) -> Result<Option<LuEval>, String> {
+async fn evaluate_gpu(
+    handle: &GpuTensorHandle,
+    pivot_mode: PivotMode,
+) -> BuiltinResult<Option<LuEval>> {
     if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(result) = provider.lu(handle) {
+        if let Ok(result) = provider.lu(handle).await {
             return Ok(Some(LuEval::from_provider(result, pivot_mode)));
         }
     }
     Ok(None)
 }
 
-fn parse_pivot_mode(args: &[Value]) -> Result<PivotMode, String> {
+fn parse_pivot_mode(args: &[Value]) -> BuiltinResult<PivotMode> {
     if args.is_empty() {
         return Ok(PivotMode::Matrix);
     }
     if args.len() > 1 {
-        return Err("lu: too many option arguments".to_string());
+        return Err(lu_error("lu: too many option arguments"));
     }
     let Some(option) = tensor::value_to_string(&args[0]) else {
-        return Err("lu: option must be a string or character vector".to_string());
+        return Err(lu_error("lu: option must be a string or character vector"));
     };
     match option.trim().to_ascii_lowercase().as_str() {
         "matrix" => Ok(PivotMode::Matrix),
         "vector" => Ok(PivotMode::Vector),
-        other => Err(format!("lu: unknown option '{other}'")),
+        other => Err(lu_error(format!("lu: unknown option '{other}'"))),
     }
 }
 
-fn extract_matrix(value: Value) -> Result<RowMajorMatrix, String> {
+async fn extract_matrix(value: Value) -> BuiltinResult<RowMajorMatrix> {
     match value {
         Value::Tensor(t) => RowMajorMatrix::from_tensor(&t),
         Value::ComplexTensor(ct) => RowMajorMatrix::from_complex_tensor(&ct),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(with_lu_context)?;
             RowMajorMatrix::from_tensor(&tensor)
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|err| lu_error(format!("lu: {err}")))?;
             RowMajorMatrix::from_tensor(&tensor)
         }
         Value::Num(n) => Ok(RowMajorMatrix::from_scalar(Complex64::new(n, 0.0))),
@@ -209,10 +238,10 @@ fn extract_matrix(value: Value) -> Result<RowMajorMatrix, String> {
             0.0,
         ))),
         Value::Complex(re, im) => Ok(RowMajorMatrix::from_scalar(Complex64::new(re, im))),
-        Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
-            Err("lu: character data is not supported; convert to numeric values first".to_string())
-        }
-        other => Err(format!("lu: unsupported input type {:?}", other)),
+        Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => Err(lu_error(
+            "lu: character data is not supported; convert to numeric values first",
+        )),
+        other => Err(lu_error(format!("lu: unsupported input type {:?}", other))),
     }
 }
 
@@ -224,7 +253,7 @@ struct LuComponents {
     pivot_vector: Vec<f64>,
 }
 
-fn lu_factor(mut matrix: RowMajorMatrix) -> Result<LuComponents, String> {
+fn lu_factor(mut matrix: RowMajorMatrix) -> BuiltinResult<LuComponents> {
     let rows = matrix.rows;
     let cols = matrix.cols;
     let min_dim = rows.min(cols);
@@ -323,7 +352,7 @@ fn build_permutation(rows: usize, perm: &[usize]) -> RowMajorMatrix {
 
 const EPS: f64 = 1.0e-12;
 
-fn matrix_to_value(matrix: &RowMajorMatrix) -> Result<Value, String> {
+fn matrix_to_value(matrix: &RowMajorMatrix) -> BuiltinResult<Value> {
     let mut has_imag = false;
     for val in &matrix.data {
         if val.im.abs() > EPS {
@@ -341,7 +370,7 @@ fn matrix_to_value(matrix: &RowMajorMatrix) -> Result<Value, String> {
             }
         }
         let tensor = ComplexTensor::new(data, vec![matrix.rows, matrix.cols])
-            .map_err(|e| format!("lu: {e}"))?;
+            .map_err(|e| lu_error(format!("lu: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     } else {
         let mut data = Vec::with_capacity(matrix.rows * matrix.cols);
@@ -351,15 +380,16 @@ fn matrix_to_value(matrix: &RowMajorMatrix) -> Result<Value, String> {
                 data.push(matrix.data[idx].re);
             }
         }
-        let tensor =
-            Tensor::new(data, vec![matrix.rows, matrix.cols]).map_err(|e| format!("lu: {e}"))?;
+        let tensor = Tensor::new(data, vec![matrix.rows, matrix.cols])
+            .map_err(|e| lu_error(format!("lu: {e}")))?;
         Ok(Value::Tensor(tensor))
     }
 }
 
-fn pivot_vector_to_value(pivot: &[f64]) -> Result<Value, String> {
+fn pivot_vector_to_value(pivot: &[f64]) -> BuiltinResult<Value> {
     let rows = pivot.len();
-    let tensor = Tensor::new(pivot.to_vec(), vec![rows, 1]).map_err(|e| format!("lu: {e}"))?;
+    let tensor =
+        Tensor::new(pivot.to_vec(), vec![rows, 1]).map_err(|e| lu_error(format!("lu: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -395,9 +425,9 @@ impl RowMajorMatrix {
         }
     }
 
-    fn from_tensor(tensor: &Tensor) -> Result<Self, String> {
+    fn from_tensor(tensor: &Tensor) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
-            return Err("lu: input must be 2-D".to_string());
+            return Err(lu_error("lu: input must be 2-D"));
         }
         let rows = tensor.rows();
         let cols = tensor.cols();
@@ -412,9 +442,9 @@ impl RowMajorMatrix {
         Ok(Self { rows, cols, data })
     }
 
-    fn from_complex_tensor(tensor: &ComplexTensor) -> Result<Self, String> {
+    fn from_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
-            return Err("lu: input must be 2-D".to_string());
+            return Err(lu_error("lu: input must be 2-D"));
         }
         let rows = tensor.rows;
         let cols = tensor.cols;
@@ -452,7 +482,12 @@ impl RowMajorMatrix {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{ComplexTensor as CMatrix, Tensor as Matrix};
+
+    fn error_message(err: RuntimeError) -> String {
+        err.message().to_string()
+    }
 
     fn tensor_from_value(value: Value) -> Matrix {
         match value {
@@ -632,7 +667,7 @@ pub(crate) mod tests {
         let a = Matrix::new(vec![1.0], vec![1, 1]).unwrap();
         let err = match evaluate(Value::Tensor(a), &[Value::from("invalid")]) {
             Ok(_) => panic!("expected option parse failure"),
-            Err(err) => err,
+            Err(err) => error_message(err),
         };
         assert!(err.contains("unknown option"));
     }
@@ -643,7 +678,7 @@ pub(crate) mod tests {
         let a = Matrix::new(vec![1.0], vec![1, 1]).unwrap();
         let err = match evaluate(Value::Tensor(a), &[Value::Num(2.0)]) {
             Ok(_) => panic!("expected option parse failure"),
-            Err(err) => err,
+            Err(err) => error_message(err),
         };
         assert!(err.contains("unknown option"));
     }
@@ -657,7 +692,7 @@ pub(crate) mod tests {
             &[Value::from("matrix"), Value::from("vector")],
         ) {
             Ok(_) => panic!("expected option arity failure"),
-            Err(err) => err,
+            Err(err) => error_message(err),
         };
         assert!(err.contains("too many option arguments"));
     }
@@ -767,5 +802,13 @@ pub(crate) mod tests {
         let pivot_vector =
             test_support::gather(gpu_vector_eval.permutation()).expect("gather vector pivot");
         assert_tensor_close(&pivot_cpu, &pivot_vector, 1e-12);
+    }
+
+    fn lu_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::lu_builtin(value, rest))
+    }
+
+    fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<LuEval> {
+        block_on(super::evaluate(value, args))
     }
 }

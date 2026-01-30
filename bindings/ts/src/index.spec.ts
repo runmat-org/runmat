@@ -338,6 +338,28 @@ describe("initRunMat wiring", () => {
     expect(captured[0].surfaceVertexBudget).toBe(1_000_000);
   });
 
+  it("passes log level preference to native init", async () => {
+    const captured: any[] = [];
+    const native: NativeModule = {
+      default: async () => { },
+      registerFsProvider: () => { },
+      initRunMat: async (opts: any) => {
+        captured.push(opts);
+        return createMockNativeSession();
+      }
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    await initRunMat({
+      snapshot: { bytes: new Uint8Array([4]) },
+      logLevel: "trace",
+      enableGpu: false
+    });
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].logLevel).toBe("trace");
+  });
+
   it("disables GPU when navigator.gpu is unavailable", async () => {
     const captured: any[] = [];
     const native: NativeModule = {

@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const ERROR_ARG_TYPE: &str = "path: arguments must be character vectors or string scalars";
 
@@ -39,8 +39,27 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "I/O builtins are not eligible for fusion; metadata registered for completeness.",
+    notes: "I/O builtins are not eligible for fusion; metadata registered for introspection completeness.",
 };
+
+const BUILTIN_NAME: &str = "path";
+
+fn path_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
 
 #[runtime_builtin(
     name = "path",
@@ -51,13 +70,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::path"
 )]
-fn path_builtin(args: Vec<Value>) -> Result<Value, String> {
-    let gathered = gather_arguments(&args)?;
+async fn path_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let gathered = gather_arguments(&args).await?;
     match gathered.len() {
         0 => Ok(path_value()),
         1 => set_single_argument(&gathered[0]),
         2 => set_two_arguments(&gathered[0], &gathered[1]),
-        _ => Err("path: too many input arguments".to_string()),
+        _ => Err(path_error("path: too many input arguments")),
     }
 }
 
@@ -65,14 +84,14 @@ fn path_value() -> Value {
     char_array_value(&current_path_string())
 }
 
-fn set_single_argument(arg: &Value) -> Result<Value, String> {
+fn set_single_argument(arg: &Value) -> BuiltinResult<Value> {
     let previous = current_path_string();
     let new_path = extract_text(arg)?;
     set_path_string(&new_path);
     Ok(char_array_value(&previous))
 }
 
-fn set_two_arguments(first: &Value, second: &Value) -> Result<Value, String> {
+fn set_two_arguments(first: &Value, second: &Value) -> BuiltinResult<Value> {
     let previous = current_path_string();
     let path1 = extract_text(first)?;
     let path2 = extract_text(second)?;
@@ -96,62 +115,66 @@ fn combine_paths(left: &str, right: &str) -> String {
     }
 }
 
-fn extract_text(value: &Value) -> Result<String, String> {
+fn extract_text(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::StringArray(StringArray { data, .. }) => {
             if data.len() != 1 {
-                Err(ERROR_ARG_TYPE.to_string())
+                Err(path_error(ERROR_ARG_TYPE))
             } else {
                 Ok(data[0].clone())
             }
         }
         Value::CharArray(chars) => {
             if chars.rows != 1 {
-                return Err(ERROR_ARG_TYPE.to_string());
+                return Err(path_error(ERROR_ARG_TYPE));
             }
             Ok(chars.data.iter().collect())
         }
         Value::Tensor(tensor) => tensor_to_string(tensor),
-        Value::GpuTensor(_) => Err(ERROR_ARG_TYPE.to_string()),
-        _ => Err(ERROR_ARG_TYPE.to_string()),
+        Value::GpuTensor(_) => Err(path_error(ERROR_ARG_TYPE)),
+        _ => Err(path_error(ERROR_ARG_TYPE)),
     }
 }
 
-fn tensor_to_string(tensor: &Tensor) -> Result<String, String> {
+fn tensor_to_string(tensor: &Tensor) -> BuiltinResult<String> {
     if tensor.shape.len() > 2 {
-        return Err(ERROR_ARG_TYPE.to_string());
+        return Err(path_error(ERROR_ARG_TYPE));
     }
 
     let rows = tensor.rows();
     if rows > 1 {
-        return Err(ERROR_ARG_TYPE.to_string());
+        return Err(path_error(ERROR_ARG_TYPE));
     }
 
     let mut text = String::with_capacity(tensor.data.len());
     for &code in &tensor.data {
         if !code.is_finite() {
-            return Err(ERROR_ARG_TYPE.to_string());
+            return Err(path_error(ERROR_ARG_TYPE));
         }
         let rounded = code.round();
         if (code - rounded).abs() > 1e-6 {
-            return Err(ERROR_ARG_TYPE.to_string());
+            return Err(path_error(ERROR_ARG_TYPE));
         }
         let int_code = rounded as i64;
         if !(0..=0x10FFFF).contains(&int_code) {
-            return Err(ERROR_ARG_TYPE.to_string());
+            return Err(path_error(ERROR_ARG_TYPE));
         }
-        let ch = char::from_u32(int_code as u32).ok_or_else(|| ERROR_ARG_TYPE.to_string())?;
+        let ch = char::from_u32(int_code as u32).ok_or_else(|| path_error(ERROR_ARG_TYPE))?;
         text.push(ch);
     }
 
     Ok(text)
 }
 
-fn gather_arguments(args: &[Value]) -> Result<Vec<Value>, String> {
+async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(|err| format!("path: {err}"))?);
+        out.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     Ok(out)
 }
@@ -168,6 +191,10 @@ pub(crate) mod tests {
     use crate::builtins::common::path_state::set_path_string;
     use std::convert::TryFrom;
     use tempfile::tempdir;
+
+    fn path_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::path_builtin(args))
+    }
 
     struct PathGuard {
         previous: String,
@@ -300,7 +327,7 @@ pub(crate) mod tests {
 
         let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("char array");
         let err = path_builtin(vec![Value::CharArray(chars)]).expect_err("expected error");
-        assert_eq!(err, ERROR_ARG_TYPE);
+        assert_eq!(err.message(), ERROR_ARG_TYPE);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -313,7 +340,7 @@ pub(crate) mod tests {
 
         let array = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).expect("array");
         let err = path_builtin(vec![Value::StringArray(array)]).expect_err("expected error");
-        assert_eq!(err, ERROR_ARG_TYPE);
+        assert_eq!(err.message(), ERROR_ARG_TYPE);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -325,7 +352,7 @@ pub(crate) mod tests {
         let _guard = PathGuard::new();
 
         let err = path_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
-        assert!(err.contains("path: arguments"));
+        assert!(err.message().contains("path: arguments"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

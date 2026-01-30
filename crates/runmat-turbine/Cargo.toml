@@ -15,10 +15,12 @@ cranelift-module = { workspace = true }
 cranelift-codegen = { workspace = true }
 cranelift-native = { workspace = true }
 target-lexicon = { workspace = true }
+futures = "0.3"
 log = { workspace = true }
 tracing = "0.1"
 thiserror = { workspace = true }
 libm = "0.2"
+stacker = "0.1"
 runmat-ignition = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-runtime = { workspace = true, features = ["plot-core"] }

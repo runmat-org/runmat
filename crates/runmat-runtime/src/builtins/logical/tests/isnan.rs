@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::tests::isnan")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -53,6 +54,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fused kernels emit 0/1 masks; providers can override with native logical-isnan implementations.",
 };
 
+const BUILTIN_NAME: &str = "isnan";
+const IDENTIFIER_INVALID_INPUT: &str = "MATLAB:isnan:InvalidInput";
+const IDENTIFIER_INTERNAL: &str = "RunMat:isnan:InternalError";
+
 #[runtime_builtin(
     name = "isnan",
     category = "logical/tests",
@@ -61,41 +66,48 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::tests::isnan"
 )]
-fn isnan_builtin(value: Value) -> Result<Value, String> {
+async fn isnan_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
-            isnan_tensor("isnan", tensor)
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(|err| internal_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {err}")))?;
+            isnan_tensor(BUILTIN_NAME, tensor)
         }
         other => isnan_host(other),
     }
 }
 
-fn isnan_host(value: Value) -> Result<Value, String> {
+fn isnan_host(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Num(x) => Ok(Value::Bool(x.is_nan())),
         Value::Int(_) | Value::Bool(_) => Ok(Value::Bool(false)),
         Value::Complex(re, im) => Ok(Value::Bool(re.is_nan() || im.is_nan())),
-        Value::Tensor(tensor) => isnan_tensor("isnan", tensor),
-        Value::ComplexTensor(tensor) => isnan_complex_tensor("isnan", tensor),
+        Value::Tensor(tensor) => isnan_tensor(BUILTIN_NAME, tensor),
+        Value::ComplexTensor(tensor) => isnan_complex_tensor(BUILTIN_NAME, tensor),
         Value::LogicalArray(array) => {
             let LogicalArray { shape, .. } = array;
-            logical_zeros("isnan", shape)
+            logical_zeros(BUILTIN_NAME, shape)
         }
         Value::CharArray(array) => {
             let CharArray { rows, cols, .. } = array;
-            logical_zeros("isnan", vec![rows, cols])
+            logical_zeros(BUILTIN_NAME, vec![rows, cols])
         }
         Value::String(_) => Ok(Value::Bool(false)),
         Value::StringArray(array) => {
             let StringArray { shape, .. } = array;
-            logical_zeros("isnan", shape)
+            logical_zeros(BUILTIN_NAME, shape)
         }
-        _ => Err("isnan: expected numeric, logical, char, or string input".to_string()),
+        _ => Err(build_runtime_error(format!(
+            "{BUILTIN_NAME}: expected numeric, logical, char, or string input"
+        ))
+        .with_identifier(IDENTIFIER_INVALID_INPUT)
+        .with_builtin(BUILTIN_NAME)
+        .build()),
     }
 }
 
-fn isnan_tensor(name: &str, tensor: Tensor) -> Result<Value, String> {
+fn isnan_tensor(name: &str, tensor: Tensor) -> BuiltinResult<Value> {
     let data = tensor
         .data
         .iter()
@@ -104,7 +116,7 @@ fn isnan_tensor(name: &str, tensor: Tensor) -> Result<Value, String> {
     logical_result(name, data, tensor.shape)
 }
 
-fn isnan_complex_tensor(name: &str, tensor: ComplexTensor) -> Result<Value, String> {
+fn isnan_complex_tensor(name: &str, tensor: ComplexTensor) -> BuiltinResult<Value> {
     let data = tensor
         .data
         .iter()
@@ -113,24 +125,27 @@ fn isnan_complex_tensor(name: &str, tensor: ComplexTensor) -> Result<Value, Stri
     logical_result(name, data, tensor.shape)
 }
 
-fn logical_zeros(name: &str, shape: Vec<usize>) -> Result<Value, String> {
+fn logical_zeros(name: &str, shape: Vec<usize>) -> BuiltinResult<Value> {
     let total = tensor::element_count(&shape);
     if total == 0 {
         return LogicalArray::new(Vec::new(), shape)
             .map(Value::LogicalArray)
-            .map_err(|e| format!("{name}: {e}"));
+            .map_err(|e| logical_array_error(name, e));
     }
     let data = vec![0u8; total];
     logical_result(name, data, shape)
 }
 
-fn logical_result(name: &str, bits: Vec<u8>, shape: Vec<usize>) -> Result<Value, String> {
+fn logical_result(name: &str, bits: Vec<u8>, shape: Vec<usize>) -> BuiltinResult<Value> {
     let total = tensor::element_count(&shape);
     if total != bits.len() {
-        return Err(format!(
-            "{name}: internal error, mask length {} does not match shape {:?}",
-            bits.len(),
-            shape
+        return Err(internal_error(
+            name,
+            format!(
+                "{name}: internal error, mask length {} does not match shape {:?}",
+                bits.len(),
+                shape
+            ),
         ));
     }
     if total == 1 {
@@ -138,33 +153,49 @@ fn logical_result(name: &str, bits: Vec<u8>, shape: Vec<usize>) -> Result<Value,
     } else {
         LogicalArray::new(bits, shape)
             .map(Value::LogicalArray)
-            .map_err(|e| format!("{name}: {e}"))
+            .map_err(|e| logical_array_error(name, e))
     }
+}
+
+fn logical_array_error(name: &str, err: impl std::fmt::Display) -> RuntimeError {
+    internal_error(name, format!("{name}: {err}"))
+}
+
+fn internal_error(name: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier(IDENTIFIER_INTERNAL)
+        .with_builtin(name)
+        .build()
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+
+    fn run_isnan(value: Value) -> BuiltinResult<Value> {
+        block_on(super::isnan_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_scalar_nan() {
-        let result = isnan_builtin(Value::Num(f64::NAN)).expect("isnan");
+        let result = run_isnan(Value::Num(f64::NAN)).expect("isnan");
         assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_scalar_finite() {
-        let result = isnan_builtin(Value::Num(5.0)).expect("isnan");
+        let result = run_isnan(Value::Num(5.0)).expect("isnan");
         assert_eq!(result, Value::Bool(false));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_scalar_bool_false() {
-        let result = isnan_builtin(Value::Bool(true)).expect("isnan");
+        let result = run_isnan(Value::Bool(true)).expect("isnan");
         assert_eq!(result, Value::Bool(false));
     }
 
@@ -172,7 +203,7 @@ pub(crate) mod tests {
     #[test]
     fn isnan_tensor_mask() {
         let tensor = Tensor::new(vec![1.0, f64::NAN, 3.0, f64::NAN], vec![2, 2]).unwrap();
-        let result = isnan_builtin(Value::Tensor(tensor)).expect("isnan");
+        let result = run_isnan(Value::Tensor(tensor)).expect("isnan");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![2, 2]);
@@ -186,7 +217,7 @@ pub(crate) mod tests {
     #[test]
     fn isnan_logical_array_returns_zeros() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
-        let result = isnan_builtin(Value::LogicalArray(logical)).expect("isnan");
+        let result = run_isnan(Value::LogicalArray(logical)).expect("isnan");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![3, 1]);
@@ -204,7 +235,7 @@ pub(crate) mod tests {
             vec![3, 1],
         )
         .unwrap();
-        let result = isnan_builtin(Value::ComplexTensor(tensor)).expect("isnan");
+        let result = run_isnan(Value::ComplexTensor(tensor)).expect("isnan");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![3, 1]);
@@ -217,7 +248,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_string_scalar_false() {
-        let result = isnan_builtin(Value::String("NaN".to_string())).expect("isnan");
+        let result = run_isnan(Value::String("NaN".to_string())).expect("isnan");
         assert_eq!(result, Value::Bool(false));
     }
 
@@ -225,7 +256,7 @@ pub(crate) mod tests {
     #[test]
     fn isnan_string_array_returns_all_false() {
         let strings = StringArray::new(vec!["foo".into(), "bar".into()], vec![1, 2]).unwrap();
-        let result = isnan_builtin(Value::StringArray(strings)).expect("isnan");
+        let result = run_isnan(Value::StringArray(strings)).expect("isnan");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![1, 2]);
@@ -239,7 +270,7 @@ pub(crate) mod tests {
     #[test]
     fn isnan_empty_tensor_preserves_shape() {
         let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
-        let result = isnan_builtin(Value::Tensor(tensor)).expect("isnan");
+        let result = run_isnan(Value::Tensor(tensor)).expect("isnan");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![0, 3]);
@@ -252,11 +283,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_rejects_unsupported_types() {
-        let err = isnan_builtin(Value::FunctionHandle("foo".to_string()))
+        let err = run_isnan(Value::FunctionHandle("foo".to_string()))
             .expect_err("isnan should reject function handles");
         assert!(
-            err.contains("expected numeric, logical, char, or string input"),
-            "unexpected error message: {err}"
+            err.message()
+                .contains("expected numeric, logical, char, or string input"),
+            "unexpected error message: {err:?}"
         );
     }
 
@@ -264,7 +296,7 @@ pub(crate) mod tests {
     #[test]
     fn isnan_char_array_returns_zeros() {
         let array = CharArray::new("NaN".chars().collect(), 1, 3).unwrap();
-        let result = isnan_builtin(Value::CharArray(array)).expect("isnan");
+        let result = run_isnan(Value::CharArray(array)).expect("isnan");
         match result {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![1, 3]);
@@ -284,7 +316,7 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = isnan_builtin(Value::GpuTensor(handle)).expect("isnan");
+            let result = run_isnan(Value::GpuTensor(handle)).expect("isnan");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
             assert_eq!(gathered.data, vec![0.0, 1.0, 0.0]);
@@ -308,7 +340,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .expect("upload");
-        let gpu = isnan_builtin(Value::GpuTensor(handle)).expect("gpu path");
+        let gpu = run_isnan(Value::GpuTensor(handle)).expect("gpu path");
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::LogicalArray(expected), Tensor { data, shape, .. }) => {

@@ -15,6 +15,7 @@ use crate::builtins::common::{
     },
     tensor,
 };
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::double")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -51,6 +52,20 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion treats double as an identity when the execution scalar type is already float64.",
 };
 
+const BUILTIN_NAME: &str = "double";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn conversion_error(type_name: &str) -> RuntimeError {
+    builtin_error(format!(
+        "double: conversion to double from {type_name} is not possible"
+    ))
+}
+
 #[runtime_builtin(
     name = "double",
     category = "math/elementwise",
@@ -59,7 +74,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::double"
 )]
-fn double_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
     let converted = match value {
         Value::Num(n) => Ok(Value::Num(n)),
@@ -70,7 +85,7 @@ fn double_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         Value::ComplexTensor(tensor) => Ok(Value::ComplexTensor(tensor)),
         Value::LogicalArray(array) => double_from_logical(array),
         Value::CharArray(chars) => double_from_char_array(chars),
-        Value::GpuTensor(handle) => double_from_gpu(handle),
+        Value::GpuTensor(handle) => double_from_gpu(handle).await,
         Value::String(_) | Value::StringArray(_) => Err(conversion_error("string")),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
@@ -81,27 +96,28 @@ fn double_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         Value::ClassRef(_) => Err(conversion_error("meta.class")),
         Value::MException(_) => Err(conversion_error("MException")),
     }?;
-    apply_output_template(converted, &template)
+    apply_output_template(converted, &template).await
 }
 
-fn double_from_logical(array: LogicalArray) -> Result<Value, String> {
-    let tensor = tensor::logical_to_tensor(&array).map_err(|e| format!("double: {e}"))?;
-    Ok(tensor::tensor_into_value(tensor))
-}
-
-fn double_from_char_array(chars: CharArray) -> Result<Value, String> {
-    let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
+fn double_from_logical(array: LogicalArray) -> BuiltinResult<Value> {
     let tensor =
-        Tensor::new(data, vec![chars.rows, chars.cols]).map_err(|e| format!("double: {e}"))?;
+        tensor::logical_to_tensor(&array).map_err(|e| builtin_error(format!("double: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn double_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+fn double_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
+    let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
+    let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
+        .map_err(|e| builtin_error(format!("double: {e}")))?;
+    Ok(tensor::tensor_into_value(tensor))
+}
+
+async fn double_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider_for_handle(&handle);
 
     if let Some(provider) = provider {
         if provider.precision() == ProviderPrecision::F64 {
-            match provider.unary_double(&handle) {
+            match provider.unary_double(&handle).await {
                 Ok(result) => {
                     return Ok(Value::GpuTensor(result));
                 }
@@ -117,7 +133,7 @@ fn double_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     if let Some(provider) = provider {
         if provider.precision() == ProviderPrecision::F64 {
             let view = HostTensorView {
@@ -140,41 +156,36 @@ fn double_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn conversion_error(type_name: &str) -> String {
-    format!(
-        "double: conversion to double from {} is not possible",
-        type_name
-    )
-}
-
 #[derive(Clone)]
 enum OutputTemplate {
     Default,
     Like(Value),
 }
 
-fn parse_output_template(args: &[Value]) -> Result<OutputTemplate, String> {
+fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     match args.len() {
         0 => Ok(OutputTemplate::Default),
         1 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-                Err("double: expected prototype after 'like'".to_string())
+                Err(builtin_error("double: expected prototype after 'like'"))
             } else {
-                Err("double: unrecognised argument for double".to_string())
+                Err(builtin_error("double: unrecognised argument for double"))
             }
         }
         2 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
                 Ok(OutputTemplate::Like(args[1].clone()))
             } else {
-                Err("double: unsupported option; only 'like' is accepted".to_string())
+                Err(builtin_error(
+                    "double: unsupported option; only 'like' is accepted",
+                ))
             }
         }
-        _ => Err("double: too many input arguments".to_string()),
+        _ => Err(builtin_error("double: too many input arguments")),
     }
 }
 
-fn apply_output_template(value: Value, template: &OutputTemplate) -> Result<Value, String> {
+async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
     match template {
         OutputTemplate::Default => Ok(value),
         OutputTemplate::Like(proto) => match proto {
@@ -183,26 +194,27 @@ fn apply_output_template(value: Value, template: &OutputTemplate) -> Result<Valu
             | Value::Num(_)
             | Value::Int(_)
             | Value::Bool(_)
-            | Value::LogicalArray(_) => convert_to_host_like(value),
-            Value::Complex(_, _) | Value::ComplexTensor(_) => {
-                Err("double: complex prototypes for 'like' are not supported yet".to_string())
-            }
-            _ => Err(
-                "double: unsupported prototype for 'like'; provide a numeric or gpuArray prototype"
-                    .to_string(),
-            ),
+            | Value::LogicalArray(_) => convert_to_host_like(value).await,
+            Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
+                "double: complex prototypes for 'like' are not supported yet",
+            )),
+            _ => Err(builtin_error(
+                "double: unsupported prototype for 'like'; provide a numeric or gpuArray prototype",
+            )),
         },
     }
 }
 
-fn convert_to_gpu(value: Value) -> Result<Value, String> {
+fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        "double: GPU output requested via 'like' but no acceleration provider is active".to_string()
+        builtin_error(
+            "double: GPU output requested via 'like' but no acceleration provider is active",
+        )
     })?;
     if provider.precision() != ProviderPrecision::F64 {
-        return Err(
-            "double: active acceleration provider does not support float64 storage".to_string(),
-        );
+        return Err(builtin_error(
+            "double: active acceleration provider does not support float64 storage",
+        ));
     }
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
@@ -211,11 +223,14 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
                 data: &tensor.data,
                 shape: &tensor.shape,
             };
-            let handle = provider.upload(&view).map_err(|e| format!("double: {e}"))?;
+            let handle = provider
+                .upload(&view)
+                .map_err(|e| builtin_error(format!("double: {e}")))?;
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("double: {e}"))?;
+            let tensor = Tensor::new(vec![n], vec![1, 1])
+                .map_err(|e| builtin_error(format!("double: {e}")))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
@@ -224,20 +239,22 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
             let tensor = tensor::logical_to_tensor(&logical)?;
             convert_to_gpu(Value::Tensor(tensor))
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err("double: GPU prototypes for 'like' only support real numeric outputs".to_string())
-        }
-        other => Err(format!(
-            "double: unsupported result type for GPU output via 'like' ({other:?})"
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
+            "double: GPU prototypes for 'like' only support real numeric outputs",
         )),
+        other => Err(builtin_error(format!(
+            "double: unsupported result type for GPU output via 'like' ({other:?})"
+        ))),
     }
 }
 
-fn convert_to_host_like(value: Value) -> Result<Value, String> {
+async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             let proxy = Value::GpuTensor(handle);
-            gpu_helpers::gather_value(&proxy).map_err(|e| format!("double: {e}"))
+            gpu_helpers::gather_value_async(&proxy)
+                .await
+                .map_err(|e| builtin_error(format!("double: {e}")))
         }
         other => Ok(other),
     }
@@ -247,10 +264,15 @@ fn convert_to_host_like(value: Value) -> Result<Value, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::IntValue;
+
+    fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::double_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -333,10 +355,9 @@ pub(crate) mod tests {
     #[test]
     fn double_rejects_strings() {
         let err = double_builtin(Value::String("hello".into()), Vec::new()).unwrap_err();
-        assert_eq!(
-            err,
-            "double: conversion to double from string is not possible"
-        );
+        assert!(err
+            .message()
+            .contains("double: conversion to double from string is not possible"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -413,7 +434,7 @@ pub(crate) mod tests {
     fn double_like_missing_prototype_errors() {
         let err =
             double_builtin(Value::Num(1.0), vec![Value::from("like")]).expect_err("expected error");
-        assert!(err.contains("expected prototype"));
+        assert!(err.message().contains("expected prototype"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -424,7 +445,7 @@ pub(crate) mod tests {
             vec![Value::from("like"), Value::Num(0.0), Value::Num(1.0)],
         )
         .expect_err("expected error");
-        assert!(err.contains("too many input arguments"));
+        assert!(err.message().contains("too many input arguments"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
