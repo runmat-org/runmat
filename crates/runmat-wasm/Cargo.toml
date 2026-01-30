@@ -24,6 +24,7 @@ runmat-accelerate-api = { workspace = true }
 runmat-ignition = { workspace = true }
 runmat-filesystem = { workspace = true }
 runmat-thread-local = { workspace = true }
+glam = "0.24"
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde-wasm-bindgen = "0.6"

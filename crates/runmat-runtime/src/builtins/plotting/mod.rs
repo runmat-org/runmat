@@ -76,6 +76,9 @@ pub use web::{
     present_surface, render_current_scene, resize_surface, web_renderer_ready,
 };
 
+#[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+pub use web::handle_plot_surface_event;
+
 pub(crate) fn plotting_error(builtin: &str, message: impl Into<String>) -> crate::RuntimeError {
     crate::build_runtime_error(message)
         .with_builtin(builtin)

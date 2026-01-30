@@ -8,6 +8,7 @@
 #![cfg(all(target_arch = "wasm32", feature = "web"))]
 
 use crate::context::SharedWgpuContext;
+use crate::core::{camera::MouseButton as CameraMouseButton, CameraController, PlotEvent};
 use crate::core::plot_renderer::{PlotRenderConfig, PlotRenderer, RenderTarget};
 use crate::plots::Figure;
 use log::{debug, warn};
@@ -112,6 +113,7 @@ pub struct WebRenderer {
     queue: Arc<wgpu::Queue>,
     surface_config: wgpu::SurfaceConfiguration,
     plot_renderer: PlotRenderer,
+    camera_controller: CameraController,
     render_config: PlotRenderConfig,
     options: WebRendererOptions,
     msaa_texture: Option<wgpu::Texture>,
@@ -242,6 +244,7 @@ impl WebRenderer {
             queue,
             surface_config,
             plot_renderer,
+            camera_controller: CameraController::new(),
             render_config: PlotRenderConfig {
                 width,
                 height,
@@ -257,6 +260,35 @@ impl WebRenderer {
         };
         renderer.sync_renderer_config();
         Ok(renderer)
+    }
+
+    /// Apply a user interaction event (mouse/keyboard) to the renderer state.
+    /// Returns `true` when a re-render is recommended.
+    pub fn handle_event(&mut self, event: PlotEvent) -> bool {
+        match event {
+            PlotEvent::MousePress { position, button } => {
+                self.camera_controller
+                    .mouse_press(position, map_mouse_button(button));
+                true
+            }
+            PlotEvent::MouseRelease { button, .. } => {
+                self.camera_controller
+                    .mouse_release(map_mouse_button(button));
+                true
+            }
+            PlotEvent::MouseMove { position, .. } => {
+                self.camera_controller
+                    .mouse_move(position, &mut self.plot_renderer.camera);
+                true
+            }
+            PlotEvent::MouseWheel { delta } => {
+                self.camera_controller
+                    .mouse_wheel(delta, &mut self.plot_renderer.camera);
+                true
+            }
+            PlotEvent::Resize { .. } => true,
+            PlotEvent::KeyPress { .. } | PlotEvent::KeyRelease { .. } => false,
+        }
     }
 
     /// Explicitly resize the underlying surface to the provided dimensions (in
@@ -666,6 +698,14 @@ impl WebRenderer {
         self.msaa_texture = Some(texture);
         self.msaa_extent = (width, height);
         Ok(())
+    }
+}
+
+fn map_mouse_button(button: crate::core::interaction::MouseButton) -> CameraMouseButton {
+    match button {
+        crate::core::interaction::MouseButton::Left => CameraMouseButton::Left,
+        crate::core::interaction::MouseButton::Right => CameraMouseButton::Right,
+        crate::core::interaction::MouseButton::Middle => CameraMouseButton::Middle,
     }
 }
 

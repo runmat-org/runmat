@@ -62,16 +62,6 @@ fn bool_scalar_type(_: &[Type]) -> Type {
     Type::Bool
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn islogical_type_returns_bool() {
-        assert_eq!(bool_scalar_type(&[Type::Num]), Type::Bool);
-    }
-}
-
 async fn islogical_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(flag) = provider.logical_islogical(&handle) {

@@ -6561,6 +6561,7 @@ dependencies = [
  "anyhow",
  "console_error_panic_hook",
  "getrandom 0.2.16",
+ "glam",
  "js-sys",
  "log",
  "miette",

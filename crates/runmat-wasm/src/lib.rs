@@ -34,6 +34,7 @@ use tracing::{info, info_span};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
+use glam::Vec2;
 
 #[cfg(target_arch = "wasm32")]
 mod fs;
@@ -63,6 +64,7 @@ use runmat_runtime::builtins::plotting::{
     reset_hold_state_for_run as runtime_reset_hold_state_for_run,
     resize_surface as runtime_resize_surface, select_figure as runtime_select_figure,
     set_hold as runtime_set_hold, web_renderer_ready as runtime_plot_renderer_ready,
+    handle_plot_surface_event as runtime_handle_plot_surface_event,
     FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
 #[cfg(target_arch = "wasm32")]
@@ -713,6 +715,51 @@ pub fn present_surface(surface_id: u32) -> Result<(), JsValue> {
 #[wasm_bindgen(js_name = presentFigureOnSurface)]
 pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> Result<(), JsValue> {
     runtime_present_figure_on_surface(surface_id, handle).map_err(|err| js_error(err.message()))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlotSurfaceEventPayload {
+    kind: String,
+    x: f32,
+    y: f32,
+    #[serde(default)]
+    dx: f32,
+    #[serde(default)]
+    dy: f32,
+    #[serde(default)]
+    button: i32,
+    #[serde(default)]
+    wheel_delta: f32,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = handlePlotSurfaceEvent)]
+pub fn handle_plot_surface_event(surface_id: u32, event: JsValue) -> Result<(), JsValue> {
+    use runmat_plot::core::interaction::MouseButton as PlotMouseButton;
+    use runmat_plot::core::PlotEvent;
+
+    let payload: PlotSurfaceEventPayload =
+        serde_wasm_bindgen::from_value(event).map_err(|err| js_error(err.to_string()))?;
+    let position = Vec2::new(payload.x, payload.y);
+    let delta = Vec2::new(payload.dx, payload.dy);
+    let button = match payload.button {
+        2 => PlotMouseButton::Right,
+        1 => PlotMouseButton::Middle,
+        _ => PlotMouseButton::Left,
+    };
+
+    let event = match payload.kind.as_str() {
+        "mouseDown" => PlotEvent::MousePress { position, button },
+        "mouseUp" => PlotEvent::MouseRelease { position, button },
+        "mouseMove" => PlotEvent::MouseMove { position, delta },
+        "wheel" => PlotEvent::MouseWheel {
+            delta: payload.wheel_delta,
+        },
+        other => return Err(js_error(format!("Unknown plot event kind '{other}'"))),
+    };
+
+    runtime_handle_plot_surface_event(surface_id, event).map_err(|err| js_error(err.message()))
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -62,16 +62,6 @@ fn bool_scalar_type(_: &[Type]) -> Type {
     Type::Bool
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn isnumeric_type_returns_bool() {
-        assert_eq!(bool_scalar_type(&[Type::Num]), Type::Bool);
-    }
-}
-
 async fn isnumeric_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(flag) = provider.logical_islogical(&handle) {
@@ -126,12 +116,17 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
         CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntValue, Listener, LogicalArray,
-        MException, ObjectInstance, StringArray, StructValue, Tensor,
+        MException, ObjectInstance, StringArray, StructValue, Tensor, Type,
     };
     use runmat_gc_api::GcPtr;
 
     fn run_isnumeric(value: Value) -> BuiltinResult<Value> {
         block_on(super::isnumeric_builtin(value))
+    }
+
+    #[test]
+    fn isnumeric_type_returns_bool() {
+        assert_eq!(bool_scalar_type(&[Type::Num]), Type::Bool);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -20,6 +20,7 @@ pub(crate) mod wasm {
     use super::*;
     use crate::builtins::plotting::state::{clone_figure, current_figure_revision, FigureHandle};
     use log::debug;
+    use runmat_plot::core::PlotEvent;
     use runmat_plot::web::WebRenderer;
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
@@ -162,6 +163,26 @@ pub(crate) mod wasm {
         })
     }
 
+    pub(super) fn handle_surface_event_impl(surface_id: u32, event: PlotEvent) -> BuiltinResult<()> {
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            let entry = map.get_mut(&surface_id).ok_or_else(|| {
+                web_error(format!(
+                    "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
+                ))
+            })?;
+            // If no figure was ever rendered, there's nothing to manipulate.
+            // Still accept the event (no-op) so the host doesn't have to special-case.
+            let _ = entry.renderer.handle_event(event);
+            // Camera interactions should re-render immediately, without requiring a figure revision bump.
+            entry
+                .renderer
+                .render_current_scene()
+                .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+            Ok(())
+        })
+    }
+
     pub fn render_current_scene(handle: u32) -> BuiltinResult<()> {
         debug!("plot-web: render_current_scene(handle={handle})");
         // If nothing is currently bound to this handle, try to claim the lowest-id unbound
@@ -294,6 +315,14 @@ pub fn bind_surface_to_figure(surface_id: u32, handle: u32) -> BuiltinResult<()>
 
 pub fn present_surface(surface_id: u32) -> BuiltinResult<()> {
     wasm::present_surface_impl(surface_id)
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+pub fn handle_plot_surface_event(
+    surface_id: u32,
+    event: runmat_plot::core::PlotEvent,
+) -> BuiltinResult<()> {
+    wasm::handle_surface_event_impl(surface_id, event)
 }
 
 pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> BuiltinResult<()> {

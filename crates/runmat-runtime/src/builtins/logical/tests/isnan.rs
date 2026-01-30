@@ -175,6 +175,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::Type;
 
     #[test]
     fn isnan_type_returns_logical() {

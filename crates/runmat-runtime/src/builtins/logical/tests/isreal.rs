@@ -64,16 +64,6 @@ fn bool_scalar_type(_: &[Type]) -> Type {
     Type::Bool
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn isreal_type_returns_bool() {
-        assert_eq!(bool_scalar_type(&[Type::Num]), Type::Bool);
-    }
-}
-
 async fn isreal_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(flag) = provider.logical_isreal(&handle) {
@@ -130,12 +120,17 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::{
         CellArray, CharArray, Closure, ComplexTensor, HandleRef, Listener, LogicalArray,
-        MException, ObjectInstance, StructValue, Tensor,
+        MException, ObjectInstance, StructValue, Tensor, Type,
     };
     use runmat_gc_api::GcPtr;
 
     fn run_isreal(value: Value) -> BuiltinResult<Value> {
         block_on(super::isreal_builtin(value))
+    }
+
+    #[test]
+    fn isreal_type_returns_bool() {
+        assert_eq!(bool_scalar_type(&[Type::Num]), Type::Bool);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
