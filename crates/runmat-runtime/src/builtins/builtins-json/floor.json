@@ -47,42 +47,42 @@
   "examples": [
     {
       "description": "Flooring positive and negative scalars",
-      "input": "x = [-2.7, -0.3, 0, 0.8, 3.9];\ny = floor(x);",
+      "input": "x = [-2.7, -0.3, 0, 0.8, 3.9];\ny = floor(x)",
       "output": "y = [-3, -1, 0, 0, 3];"
     },
     {
       "description": "Flooring every element of a matrix",
-      "input": "A = [1.2 4.7; -3.4 5.0];\nB = floor(A);",
+      "input": "A = [1.2 4.7; -3.4 5.0];\nB = floor(A)",
       "output": "B = [1 4; -4 5];"
     },
     {
       "description": "Flooring fractions stored in a tensor",
-      "input": "t = reshape([-1.8, -0.2, 0.4, 1.9, 2.1, 3.6], [3, 2]);\nfloored = floor(t);",
+      "input": "t = reshape([-1.8, -0.2, 0.4, 1.9, 2.1, 3.6], [3, 2]);\nfloored = floor(t)",
       "output": "floored =\n    [-2  1;\n     -1  2;\n      0  3]"
     },
     {
       "description": "Flooring values to a fixed number of decimal places",
-      "input": "temps = [21.456 19.995 22.501];\nfloored = floor(temps, 2);",
+      "input": "temps = [21.456 19.995 22.501];\nfloored = floor(temps, 2)",
       "output": "floored = [21.45 19.99 22.50];"
     },
     {
       "description": "Flooring to significant digits",
-      "input": "measurements = [0.001234 12.3456 98765];\nsig2 = floor(measurements, 2, 'significant');",
+      "input": "measurements = [0.001234 12.3456 98765];\nsig2 = floor(measurements, 2, 'significant')",
       "output": "sig2 = [0.0012 12.0 98000];"
     },
     {
       "description": "Flooring complex numbers component-wise",
-      "input": "z = [1.7 + 2.1i, -0.2 - 3.9i];\nresult = floor(z);",
+      "input": "z = [1.7 + 2.1i, -0.2 - 3.9i];\nresult = floor(z)",
       "output": "result = [1 + 2i, -1 - 4i];"
     },
     {
       "description": "Keeping GPU data on device when the provider supports `unary_floor`",
-      "input": "G = gpuArray([1.8 -0.2 0.0; -1.1 2.5 -3.4]);\nfloored = floor(G);\nH = gather(floored);",
+      "input": "G = gpuArray([1.8 -0.2 0.0; -1.1 2.5 -3.4]);\nfloored = floor(G);\nH = gather(floored)",
       "output": "H =\n    [ 1 -1  0;\n     -2  2 -4]"
     },
     {
       "description": "Forcing GPU residency with a `'like'` prototype",
-      "input": "A = [1.8 -0.2; 2.7 3.4];\nproto = gpuArray(0);\nG = floor(A, 'like', proto);   % Result remains on the GPU\nresult = gather(G);",
+      "input": "A = [1.8 -0.2; 2.7 3.4];\nproto = gpuArray(0);\nG = floor(A, 'like', proto);   % Result remains on the GPU\nresult = gather(G)",
       "output": "result =\n    [ 1 -1;\n      2  3]"
     }
   ],

@@ -52,27 +52,27 @@
   "examples": [
     {
       "description": "Save a numeric matrix to a CSV file",
-      "input": "A = [1 2 3; 4 5 6];\nwritematrix(A, \"results.csv\");"
+      "input": "A = [1 2 3; 4 5 6];\nwritematrix(A, \"results.csv\")"
     },
     {
       "description": "Export data with a custom semicolon delimiter",
-      "input": "writematrix(A, \"results.dat\", 'Delimiter', ';');"
+      "input": "writematrix(A, \"results.dat\", 'Delimiter', ';')"
     },
     {
       "description": "Append additional rows to an existing report",
-      "input": "writematrix([7 8 9], \"report.txt\");\nwritematrix([10 11 12], \"report.txt\", 'WriteMode', 'append');"
+      "input": "writematrix([7 8 9], \"report.txt\");\nwritematrix([10 11 12], \"report.txt\", 'WriteMode', 'append')"
     },
     {
       "description": "Write string data with quoting disabled",
-      "input": "names = [\"Alice\" \"Bob\" \"Charlie\"];\nwritematrix(names, \"names.csv\", 'QuoteStrings', false);"
+      "input": "names = [\"Alice\" \"Bob\" \"Charlie\"];\nwritematrix(names, \"names.csv\", 'QuoteStrings', false)"
     },
     {
       "description": "Use a European decimal separator and explicit line ending",
-      "input": "vals = [12.34; 56.78];\nwritematrix(vals, \"eu.csv\", 'DecimalSeparator', ',', 'LineEnding', 'unix');"
+      "input": "vals = [12.34; 56.78];\nwritematrix(vals, \"eu.csv\", 'DecimalSeparator', ',', 'LineEnding', 'unix')"
     },
     {
       "description": "Write GPU-resident data transparently",
-      "input": "G = gpuArray(rand(2, 3));\nwritematrix(G, \"gpu_output.csv\");",
+      "input": "G = gpuArray(rand(2, 3));\nwritematrix(G, \"gpu_output.csv\")",
       "output": "% Data is gathered from the GPU automatically and written to disk as CSV."
     }
   ],

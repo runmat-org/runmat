@@ -46,12 +46,12 @@
   "examples": [
     {
       "description": "Conjugate transpose of a complex matrix",
-      "input": "Z = [1+2i 3-4i; 5+0i 6-7i];\nH = ctranspose(Z);",
+      "input": "Z = [1+2i 3-4i; 5+0i 6-7i];\nH = ctranspose(Z)",
       "output": "H =\n   1 - 2i   5 - 0i\n   3 + 4i   6 + 7i"
     },
     {
       "description": "Conjugate transpose of a real matrix equals the plain transpose",
-      "input": "A = [1 2 3; 4 5 6];\nB = ctranspose(A);",
+      "input": "A = [1 2 3; 4 5 6];\nB = ctranspose(A)",
       "output": "B =\n     1     4\n     2     5\n     3     6"
     },
     {
@@ -61,17 +61,17 @@
     },
     {
       "description": "Conjugate transpose of a complex scalar",
-      "input": "z = 2 + 3i;\nresult = ctranspose(z);",
+      "input": "z = 2 + 3i;\nresult = ctranspose(z)",
       "output": "result = 2 - 3i;"
     },
     {
       "description": "Conjugate transpose of text data preserves characters",
-      "input": "C = ['r' 'u' 'n'; 'm' 'a' 't'];\nCT = ctranspose(C);",
+      "input": "C = ['r' 'u' 'n'; 'm' 'a' 't'];\nCT = ctranspose(C)",
       "output": "CT =\n    'rm'\n    'ua'\n    'nt'"
     },
     {
       "description": "Conjugate transpose of a gpuArray without leaving the device",
-      "input": "G = gpuArray(rand(1024, 64) + 1i * rand(1024, 64));\nGT = ctranspose(G);"
+      "input": "G = gpuArray(rand(1024, 64) + 1i * rand(1024, 64));\nGT = ctranspose(G)"
     }
   ],
   "faqs": [

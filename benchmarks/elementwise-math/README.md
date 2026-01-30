@@ -6,6 +6,7 @@ image/signal pre-processing. For each vector `x` we compute:
 
 
 ```matlab:runnable
+x = randn(1000, 1, 'single');
 y0 = sin(x) .* exp(-x / single(10));
 y1 = y0 .* cos(x / 4) + single(0.25) .* (y0 .^ 2);
 y2 = tanh(y1) + single(0.1) .* y1;

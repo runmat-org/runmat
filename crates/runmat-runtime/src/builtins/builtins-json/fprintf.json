@@ -49,27 +49,27 @@
   "examples": [
     {
       "description": "Write Formatted Text To A File",
-      "input": "[fid, msg] = fopen('report.txt', 'w');\nassert(fid ~= -1, msg);\nfprintf(fid, 'Total: %d (%.2f%%)\\n', 42, 87.5);\nfclose(fid);"
+      "input": "[fid, msg] = fopen('report.txt', 'w');\nassert(fid ~= -1, msg);\nfprintf(fid, 'Total: %d (%.2f%%)\\n', 42, 87.5);\nfclose(fid)"
     },
     {
       "description": "Use Standard Output Without An Explicit File Identifier",
-      "input": "fprintf('Processing %s ...\\n', datestr(now, 0));"
+      "input": "fprintf('Processing %s ...\\n', datestr(now, 0))"
     },
     {
       "description": "Write To Standard Error Using The Stream Name",
-      "input": "fprintf('stderr', 'Warning: iteration limit reached (%d steps)\\n', iter);"
+      "input": "fprintf('stderr', 'Warning: iteration limit reached (%d steps)\\n', iter)"
     },
     {
       "description": "Format A Matrix In Column-Major Order",
-      "input": "A = [1 2 3; 4 5 6];\nfprintf('%d %d\\n', A);"
+      "input": "A = [1 2 3; 4 5 6];\nfprintf('%d %d\\n', A)"
     },
     {
       "description": "Respect File Encoding Constraints",
-      "input": "[fid, msg] = fopen('ascii.txt', 'w', 'native', 'ascii');\nif fid == -1, error(msg); end\ntry\n    fprintf(fid, 'caf\u00e9\\n');\ncatch err\n    disp(err.message);\nend\nfclose(fid);"
+      "input": "[fid, msg] = fopen('ascii.txt', 'w', 'native', 'ascii');\nif fid == -1, error(msg); end\ntry\n    fprintf(fid, 'caf\u00e9\\n');\ncatch err\n    disp(err.message);\nend\nfclose(fid)"
     },
     {
       "description": "Format GPU-Resident Data Transparently",
-      "input": "G = gpuArray([1.2 3.4 5.6]);\n[fid, msg] = fopen('gpu.txt', 'w');\nassert(fid ~= -1, msg);\nfprintf(fid, '%.1f,', G);\nfclose(fid);"
+      "input": "G = gpuArray([1.2 3.4 5.6]);\n[fid, msg] = fopen('gpu.txt', 'w');\nassert(fid ~= -1, msg);\nfprintf(fid, '%.1f,', G);\nfclose(fid)"
     }
   ],
   "faqs": [

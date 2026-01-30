@@ -44,37 +44,37 @@
   "examples": [
     {
       "description": "Computing the modulus of positive integers",
-      "input": "r = mod(17, 5);",
+      "input": "r = mod(17, 5)",
       "output": "r = 2;"
     },
     {
       "description": "Modulus with negative divisors keeps the divisor's sign",
-      "input": "values = [-7 -3 4 9];\nmods   = mod(values, -4);",
+      "input": "values = [-7 -3 4 9];\nmods   = mod(values, -4)",
       "output": "mods = [-3 -3 0 -3];"
     },
     {
       "description": "Broadcasting a scalar divisor across a matrix",
-      "input": "A = [4.5  7.1; -2.3  0.4];\nresult = mod(A, 2);",
+      "input": "A = [4.5  7.1; -2.3  0.4];\nresult = mod(A, 2)",
       "output": "result =\n    [0.5  1.1;\n     1.7  0.4]"
     },
     {
       "description": "MATLAB-compatible modulus for complex numbers",
-      "input": "z = [3 + 4i, -2 + 5i];\ndiv = 2 + 1i;\nres = mod(z, div);",
+      "input": "z = [3 + 4i, -2 + 5i];\ndiv = 2 + 1i;\nres = mod(z, div)",
       "output": "res =\n    [0.0 + 0.0i, 0.0 + 1.0i]"
     },
     {
       "description": "Handling zeros in the divisor",
-      "input": "warn = mod([2, 0, -2], [0, 0, 0]);",
+      "input": "warn = mod([2, 0, -2], [0, 0, 0])",
       "output": "warn = [NaN NaN NaN];"
     },
     {
       "description": "Using `mod` with character arrays",
-      "input": "letters = mod('ABC', 5);",
+      "input": "letters = mod('ABC', 5)",
       "output": "letters = [0 1 2];"
     },
     {
       "description": "Staying on the GPU when hooks are available",
-      "input": "G = gpuArray(-5:5);\nH = mod(G, 4);\ncpuCopy = gather(H);",
+      "input": "G = gpuArray(-5:5);\nH = mod(G, 4);\ncpuCopy = gather(H)",
       "output": "cpuCopy = [3 0 1 2 3 0 1 2 3 0 1];"
     }
   ],

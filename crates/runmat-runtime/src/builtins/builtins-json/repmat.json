@@ -44,7 +44,7 @@
   "examples": [
     {
       "description": "Tiling a matrix across rows and columns",
-      "input": "A = [1 2; 3 4];\nB = repmat(A, 2, 3);",
+      "input": "A = [1 2; 3 4];\nB = repmat(A, 2, 3)",
       "output": "B =\n     1     2     1     2     1     2\n     3     4     3     4     3     4\n     1     2     1     2     1     2\n     3     4     3     4     3     4"
     },
     {
@@ -64,12 +64,12 @@
     },
     {
       "description": "Replicating string scalars into string arrays",
-      "input": "name = \"runmat\";\nnames = repmat(name, 2, 2);",
+      "input": "name = \"runmat\";\nnames = repmat(name, 2, 2)",
       "output": "names =\n  2x2 string array\n    \"runmat\"    \"runmat\"\n    \"runmat\"    \"runmat\""
     },
     {
       "description": "Replicating data that lives on the GPU",
-      "input": "G = gpuArray(magic(3));\nT = repmat(G, [2 1]);\nresult = gather(T);"
+      "input": "G = gpuArray(magic(3));\nT = repmat(G, [2 1]);\nresult = gather(T)"
     }
   ],
   "faqs": [

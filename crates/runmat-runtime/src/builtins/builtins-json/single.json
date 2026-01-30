@@ -45,22 +45,22 @@
   "examples": [
     {
       "description": "Convert a matrix to single precision",
-      "input": "A = [1 2 3; 4 5 6];\nB = single(A);",
+      "input": "A = [1 2 3; 4 5 6];\nB = single(A)",
       "output": "B =\n  2\u00d73 single matrix\n     1     2     3\n     4     5     6"
     },
     {
       "description": "Convert a scalar double to single precision",
-      "input": "pi_single = single(pi);",
+      "input": "pi_single = single(pi)",
       "output": "pi_single =\n  single\n     3.1416"
     },
     {
       "description": "Convert complex numbers to single precision",
-      "input": "z = [1+2i, 3-4i];\nsingle_z = single(z);",
+      "input": "z = [1+2i, 3-4i];\nsingle_z = single(z)",
       "output": "single_z =\n  1\u00d72 single complex row vector\n   1.0000 + 2.0000i   3.0000 - 4.0000i"
     },
     {
       "description": "Convert a character array to single precision codes",
-      "input": "codes = single('ABC');",
+      "input": "codes = single('ABC')",
       "output": "codes =\n  1\u00d73 single row vector\n    65    66    67"
     },
     {
@@ -70,7 +70,7 @@
     },
     {
       "description": "Convert logical masks to single precision values",
-      "input": "mask = logical([0 1 0 1]);\nweights = single(mask);",
+      "input": "mask = logical([0 1 0 1]);\nweights = single(mask)",
       "output": "weights =\n  1\u00d74 single row vector\n     0     1     0     1"
     }
   ],

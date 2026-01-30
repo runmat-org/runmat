@@ -45,32 +45,32 @@
   "examples": [
     {
       "description": "Inverse hyperbolic cosine of a scalar greater than one",
-      "input": "y = acosh(1.5);",
+      "input": "y = acosh(1.5)",
       "output": "y = 0.9624"
     },
     {
       "description": "Applying `acosh` to each element of a vector",
-      "input": "x = [1 1.5 2 4];\ny = acosh(x);",
+      "input": "x = [1 1.5 2 4];\ny = acosh(x)",
       "output": "y = [0 0.9624 1.31696 2.06344]"
     },
     {
       "description": "Handling elements below one that produce complex results",
-      "input": "values = [0.5 1 2];\nz = acosh(values);",
+      "input": "values = [0.5 1 2];\nz = acosh(values)",
       "output": "z =\n   0.0000 + 1.0472i   0.0000 + 0.0000i   1.31696 + 0.0000i"
     },
     {
       "description": "Computing `acosh` on GPU-resident data when the domain stays real",
-      "input": "G = gpuArray(linspace(1, 5, 5));\nresult_gpu = acosh(G);\nresult = gather(result_gpu);",
+      "input": "G = gpuArray(linspace(1, 5, 5));\nresult_gpu = acosh(G);\nresult = gather(result_gpu)",
       "output": "result = [0 1.31696 1.76274 2.06344 2.29243]"
     },
     {
       "description": "Evaluating `acosh` for complex numbers",
-      "input": "z = [1 + 2i, -2 + 0.5i];\nw = acosh(z);",
-      "output": "w =\n   1.5286 + 1.1437i\n   1.3090 + 2.3910i"
+      "input": "z = [1 + 2i, -2 + 0.5i];\nw = acosh(z)",
+      "output": "w =\n   1.5286 + 1.1437i\n   1.3618 + 2.8638i"
     },
     {
       "description": "Working with character arrays (mix of complex and real results)",
-      "input": "C = char([0 65]);   % includes a code point below 1\nY = acosh(C);",
+      "input": "C = char([0 65]);   % includes a code point below 1\nY = acosh(C)",
       "output": "Y =\n   0.0000 + 1.5708i   4.8675 + 0.0000i"
     }
   ],

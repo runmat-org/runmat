@@ -45,12 +45,12 @@
   "examples": [
     {
       "description": "Creating a 3-by-3 identity matrix",
-      "input": "I = eye(3);",
+      "input": "I = eye(3)",
       "output": "I =\n     1     0     0\n     0     1     0\n     0     0     1"
     },
     {
       "description": "Generating a rectangular identity matrix",
-      "input": "J = eye(2, 4);",
+      "input": "J = eye(2, 4)",
       "output": "J =\n     1     0     0     0\n     0     1     0     0"
     },
     {
@@ -60,12 +60,12 @@
     },
     {
       "description": "Creating a logical identity mask",
-      "input": "mask = eye(4, 'logical');",
+      "input": "mask = eye(4, 'logical')",
       "output": "mask =\n     1     0     0     0\n     0     1     0     0\n     0     0     1     0\n     0     0     0     1"
     },
     {
       "description": "Matching type and residency with `'like'`",
-      "input": "G = gpuArray(rand(128));     % Prototype on the GPU\nI = eye(size(G, 1), 'like', G);"
+      "input": "G = gpuArray(rand(128));     % Prototype on the GPU\nI = eye(size(G, 1), 'like', G)"
     }
   ],
   "faqs": [

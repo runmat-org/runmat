@@ -43,27 +43,27 @@
   "examples": [
     {
       "description": "Converting a single matrix subscript to a linear index",
-      "input": "idx = sub2ind([3 4], 2, 3);",
+      "input": "idx = sub2ind([3 4], 2, 3)",
       "output": "idx = 8;"
     },
     {
       "description": "Mapping multiple subscripts into one-dimensional indices",
-      "input": "rows = [1; 2; 3];\ncols = [3; 3; 3];\nidx = sub2ind([3 5], rows, cols);",
+      "input": "rows = [1; 2; 3];\ncols = [3; 3; 3];\nidx = sub2ind([3 5], rows, cols)",
       "output": "idx =\n     7\n     8\n     9"
     },
     {
       "description": "Handling higher-dimensional array subscripts",
-      "input": "row = [1 1];\ncol = [2 3];\npage = [1 2];\nidx = sub2ind([2 3 4], row, col, page);",
+      "input": "row = [1 1];\ncol = [2 3];\npage = [1 2];\nidx = sub2ind([2 3 4], row, col, page)",
       "output": "idx = [3 11];"
     },
     {
       "description": "Broadcasting scalar subscripts across array inputs",
-      "input": "rows = [1 2 3];\nidx = sub2ind([3 4], rows, 4);",
+      "input": "rows = [1 2 3];\nidx = sub2ind([3 4], rows, 4)",
       "output": "idx = [10 11 12];"
     },
     {
       "description": "Retaining GPU residency for batched index conversions",
-      "input": "rows = gpuArray((1:100)');\ncols = gpuArray(ones(100, 1) * 4);\nidx = sub2ind([100 4], rows, cols);",
+      "input": "rows = gpuArray((1:100)');\ncols = gpuArray(ones(100, 1) * 4);\nidx = sub2ind([100 4], rows, cols)",
       "output": "% idx remains a gpuArray containing the column-major indices.\ndisp(gather(idx(1:5)));\n% Output:\n%    301\n%    302\n%    303\n%    304\n%    305"
     },
     {

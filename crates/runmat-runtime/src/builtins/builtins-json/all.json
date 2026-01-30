@@ -44,38 +44,38 @@
   "examples": [
     {
       "description": "Checking if every column is nonzero",
-      "input": "A = [1 2 3; 4 5 6];\ncolAllNonZero = all(A);",
+      "input": "A = [1 2 3; 4 5 6];\ncolAllNonZero = all(A)",
       "output": "colAllNonZero = [1 1 1];"
     },
     {
       "description": "Verifying that each row contains only nonzero values",
-      "input": "B = [1 0 3; 4 5 6; 0 7 8];\nrowAllNonZero = all(B, 2);",
+      "input": "B = [1 0 3; 4 5 6; 0 7 8];\nrowAllNonZero = all(B, 2)",
       "output": "rowAllNonZero = [0; 1; 0];"
     },
     {
       "description": "Collapsing multiple dimensions with `vecdim`",
-      "input": "C = reshape(1:24, [3 4 2]);\nallAlongDims = squeeze(all(C > 0, [1 2]));",
-      "output": "allAlongDims = [1 1];"
+      "input": "C = reshape(1:24, [3 4 2]);\nallAlongDims = reshape(all(C > 0, [1 2]), 1, 2)",
+      "output": "1 1"
     },
     {
       "description": "Reducing all elements to a single logical scalar",
-      "input": "D = [2 4; 6 8];\neverythingNonZero = all(D, 'all');",
+      "input": "D = [2 4; 6 8];\neverythingNonZero = all(D, 'all')",
       "output": "everythingNonZero = true;"
     },
     {
       "description": "Ignoring `NaN` values while testing slices",
-      "input": "E = [NaN 1 2; NaN 0 3];\nwithNaN = all(E);               % returns [1 0 1]\nignoringNaN = all(E, 'omitnan'); % returns [1 0 1]",
-      "output": "withNaN = [1 0 1];\nignoringNaN = [1 0 1];"
+      "input": "E = [NaN 1 2; NaN 0 3];\nwithNaN = all(E);               % returns [1 0 1]\nignoringNaN = all(E, 'omitnan'); % returns [1 0 1]\ndisp(withNaN);\ndisp(ignoringNaN)",
+      "output": "1 0 1\n1 0 1"
     },
     {
       "description": "Evaluating `all` on GPU arrays",
-      "input": "G = gpuArray([1 1 1; 1 1 1]);\ngpuResult = all(G, 2);     % RunMat returns a host logical array",
-      "output": "gpuResult = [1; 1];"
+      "input": "G = gpuArray([1 1 1; 1 1 1]);\ngpuResult = all(G, 2);     % RunMat returns a host logical array\ndisp(gpuResult)",
+      "output": "1\n1"
     },
     {
       "description": "Testing `all` with character arrays",
-      "input": "chars = ['a' 0 'c'];\nallPrintable = all(chars);",
-      "output": "allPrintable = [1 0 1];"
+      "input": "chars = ['a' 0 'c'];\nallPrintable = all(chars);\ndisp(allPrintable)",
+      "output": "0"
     }
   ],
   "faqs": [

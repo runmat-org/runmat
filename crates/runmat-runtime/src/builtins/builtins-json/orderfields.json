@@ -48,7 +48,7 @@
     },
     {
       "description": "Match the field order of another struct",
-      "input": "source = struct(\"y\", 20, \"x\", 10);\ntemplate = struct(\"x\", 0, \"y\", 0);\n[aligned, order] = orderfields(source, template);"
+      "input": "source = struct(\"y\", 20, \"x\", 10);\ntemplate = struct(\"x\", 0, \"y\", 0);\n[aligned, order] = orderfields(source, template)"
     },
     {
       "description": "Reorder fields with a cell array of names",

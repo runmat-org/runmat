@@ -39,15 +39,15 @@
   "examples": [
     {
       "description": "Measuring elapsed time since the last tic",
-      "input": "tic;\npause(0.25);\nelapsed = toc;"
+      "input": "tic;\npause(0.25);\nelapsed = toc"
     },
     {
       "description": "Using toc with an explicit tic handle",
-      "input": "token = tic;\nheavyComputation();\nelapsed = toc(token);"
+      "input": "token = tic;\nheavyComputation();\nelapsed = toc(token)"
     },
     {
       "description": "Timing nested stages with toc",
-      "input": "tic;          % Outer stopwatch\nstage1();\ninner = tic;  % Nested stopwatch\nstage2();\nstage2Time = toc(inner);\ntotalTime = toc;"
+      "input": "tic;          % Outer stopwatch\nstage1();\ninner = tic;  % Nested stopwatch\nstage2();\nstage2Time = toc(inner);\ntotalTime = toc"
     },
     {
       "description": "Printing elapsed time without capturing output",

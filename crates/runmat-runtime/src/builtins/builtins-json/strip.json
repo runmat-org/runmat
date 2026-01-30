@@ -43,32 +43,32 @@
   "examples": [
     {
       "description": "Remove Leading And Trailing Spaces From A String Scalar",
-      "input": "name = \"   RunMat   \";\nclean = strip(name);",
+      "input": "name = \"   RunMat   \";\nclean = strip(name)",
       "output": "clean = \"RunMat\""
     },
     {
       "description": "Trim Only The Right Side Of Each String",
-      "input": "labels = [\"   Alpha   \"; \"   Beta     \"; \"   Gamma    \"];\nright_stripped = strip(labels, 'right');",
+      "input": "labels = [\"   Alpha   \"; \"   Beta     \"; \"   Gamma    \"];\nright_stripped = strip(labels, 'right')",
       "output": "right_stripped = 3\u00d71 string\n    \"   Alpha\"\n    \"   Beta\"\n    \"   Gamma\""
     },
     {
       "description": "Remove Leading Zeros While Preserving Trailing Digits",
-      "input": "codes = [\"00095\"; \"00137\"; \"00420\"];\nnumeric = strip(codes, 'left', '0');",
+      "input": "codes = [\"00095\"; \"00137\"; \"00420\"];\nnumeric = strip(codes, 'left', '0')",
       "output": "numeric = 3\u00d71 string\n    \"95\"\n    \"137\"\n    \"420\""
     },
     {
       "description": "Strip Character Arrays And Preserve Rectangular Shape",
-      "input": "animals = char(\"   cat  \", \" dog\", \"cow   \");\ntrimmed = strip(animals);",
+      "input": "animals = char(\"   cat  \", \" dog\", \"cow   \");\ntrimmed = strip(animals)",
       "output": "trimmed =\n\n  3\u00d74 char array\n\n    'cat '\n    'dog '\n    'cow '"
     },
     {
       "description": "Supply Per-Element Characters To Remove",
-      "input": "metrics = [\"##pass##\", \"--warn--\", \"**fail**\"];\nper_char = [\"#\"; \"-\"; \"*\"];\nnormalized = strip(metrics, 'both', per_char);",
+      "input": "metrics = [\"##pass##\", \"--warn--\", \"**fail**\"];\nper_char = [\"#\"; \"-\"; \"*\"];\nnormalized = strip(metrics, 'both', per_char)",
       "output": "normalized = 3\u00d71 string\n    \"pass\"\n    \"warn\"\n    \"fail\""
     },
     {
       "description": "Trim Cell Array Elements With Mixed Types",
-      "input": "pieces = {'  GPU  ', \"   Accelerate\", 'RunMat   '};\nout = strip(pieces);",
+      "input": "pieces = {'  GPU  ', \"   Accelerate\", 'RunMat   '};\nout = strip(pieces)",
       "output": "out = 1\u00d73 cell array\n    {'GPU'}    {\"Accelerate\"}    {'RunMat'}"
     }
   ],

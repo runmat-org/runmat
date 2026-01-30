@@ -44,37 +44,37 @@
   "examples": [
     {
       "description": "Find all 1-based match positions in a character vector",
-      "input": "idx = regexp('abracadabra', 'a');",
+      "input": "idx = regexp('abracadabra', 'a')",
       "output": "idx =\n     1     4     6     8    11"
     },
     {
       "description": "Return matched substrings using `'match'`",
-      "input": "matches = regexp('abc123xyz', '\\d+', 'match');",
+      "input": "matches = regexp('abc123xyz', '\\d+', 'match')",
       "output": "matches =\n  1\u00d71 cell array\n    {'123'}"
     },
     {
       "description": "Extract capture tokens",
-      "input": "tokens = regexp('2024-03-14', '(\\d{4})-(\\d{2})-(\\d{2})', 'tokens');\nyear = tokens{1}{1};\nmonth = tokens{1}{2};\nday = tokens{1}{3};",
+      "input": "tokens = regexp('2024-03-14', '(\\d{4})-(\\d{2})-(\\d{2})', 'tokens');\nyear = tokens{1}{1};\nmonth = tokens{1}{2};\nday = tokens{1}{3}",
       "output": "year =\n    '2024'\nmonth =\n    '03'\nday =\n    '14'"
     },
     {
       "description": "Split a string array around commas",
-      "input": "parts = regexp([\"a,b,c\"; \"1,2,3\"], ',', 'split');",
+      "input": "parts = regexp([\"a,b,c\"; \"1,2,3\"], ',', 'split')",
       "output": "parts =\n  2\u00d71 cell array\n    {1\u00d73 cell}\n    {1\u00d73 cell}"
     },
     {
       "description": "Return only the first match with `'once'`",
-      "input": "first_idx = regexp('abababa', 'ba', 'once');",
+      "input": "first_idx = regexp('abababa', 'ba', 'once')",
       "output": "first_idx =\n     2"
     },
     {
       "description": "Work with named tokens",
-      "input": "matches = regexp('X=42; Y=7;', '(?<name>[A-Z])=(?<value>\\d+)', 'names');\nvalues = cellfun(@(s) str2double(s.value), matches);",
+      "input": "matches = regexp('X=42; Y=7;', '(?<name>[A-Z])=(?<value>\\d+)', 'names');\nvalues = cellfun(@(s) str2double(s.value), matches)",
       "output": "values =\n     42     7"
     },
     {
       "description": "Keep zero-length matches with `'emptymatch','allow'`",
-      "input": "idx = regexp('aba', 'b*', 'emptymatch', 'allow');",
+      "input": "idx = regexp('aba', 'b*', 'emptymatch', 'allow')",
       "output": "idx =\n     1     2     3     4"
     }
   ],

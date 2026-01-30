@@ -45,52 +45,52 @@
   "examples": [
     {
       "description": "Creating a 3x3 matrix of 2.5s",
-      "input": "A = fill(2.5, 3);",
+      "input": "A = fill(2.5, 3)",
       "output": "A = [2.5 2.5 2.5; 2.5 2.5 2.5; 2.5 2.5 2.5];"
     },
     {
       "description": "Filling a rectangular matrix with -4",
-      "input": "B = fill(-4, 2, 5);",
+      "input": "B = fill(-4, 2, 5)",
       "output": "B = [-4 -4 -4 -4 -4; -4 -4 -4 -4 -4];"
     },
     {
       "description": "Filling using a size vector",
-      "input": "sz = [2 3 4];\nC = fill(10, sz);",
+      "input": "sz = [2 3 4];\nC = fill(10, sz)",
       "output": "size(C)  % 2-by-3-by-4"
     },
     {
       "description": "Creating a logical mask with `fill`",
-      "input": "mask = fill(3, 4, 1, 'logical');",
+      "input": "mask = fill(3, 4, 1, 'logical')",
       "output": "mask = [1; 1; 1; 1];"
     },
     {
       "description": "Matching an existing array with `'like'`",
-      "input": "prototype = rand(2, 3, 'like', gpuArray(1));\nD = fill(pi, 2, 3, 'like', prototype);",
+      "input": "prototype = rand(2, 3, 'like', gpuArray(1));\nD = fill(pi, 2, 3, 'like', prototype)",
       "output": "D is gpuArray\ngather(D) = ones(2, 3) * pi;"
     },
     {
       "description": "Filling a complex array",
-      "input": "E = fill(1 + 2i, 2, 2, 'complex');",
+      "input": "E = fill(1 + 2i, 2, 2, 'complex')",
       "output": "E = [1+2i 1+2i; 1+2i 1+2i];"
     },
     {
       "description": "Using a prototype to infer shape automatically",
-      "input": "F = rand(4, 2);\nG = fill(7, F);",
+      "input": "F = rand(4, 2);\nG = fill(7, F)",
       "output": "isequal(size(G), [4 2])  % true"
     },
     {
       "description": "Filling an empty matrix",
-      "input": "H = fill(0, 0, 5);",
+      "input": "H = fill(0, 0, 5)",
       "output": "size(H)  % 0-by-5"
     },
     {
       "description": "Keeping GPU residency without explicit `gpuArray`",
-      "input": "A = rand(512, 512);\nJ = fill(0.5, size(A), 'like', gpuArray(A));",
+      "input": "A = rand(512, 512);\nJ = fill(0.5, size(A), 'like', gpuArray(A))",
       "output": "isa(J, 'gpuArray')  % true"
     },
     {
       "description": "Filling with boolean semantics",
-      "input": "K = fill(false, [2 2], 'logical');",
+      "input": "K = fill(false, [2 2], 'logical')",
       "output": "K = [0 0; 0 0];"
     }
   ],

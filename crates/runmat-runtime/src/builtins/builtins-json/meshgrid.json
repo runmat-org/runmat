@@ -45,30 +45,30 @@
   "examples": [
     {
       "description": "Generating a square 2-D grid from one vector",
-      "input": "x = -2:2;\n[X, Y] = meshgrid(x);",
+      "input": "x = -2:2;\n[X, Y] = meshgrid(x)",
       "output": "X =\n    -2    -1     0     1     2\n    -2    -1     0     1     2\n    -2    -1     0     1     2\n    -2    -1     0     1     2\n    -2    -1     0     1     2"
     },
     {
       "description": "Building a rectangular grid from two different vectors",
-      "input": "x = [0 0.5 1.0];\ny = [10 20];\n[X, Y] = meshgrid(x, y);",
+      "input": "x = [0 0.5 1.0];\ny = [10 20];\n[X, Y] = meshgrid(x, y)",
       "output": "X =\n         0    0.5000    1.0000\n         0    0.5000    1.0000\n\nY =\n    10    10    10\n    20    20    20"
     },
     {
       "description": "Creating a volumetric grid for 3-D plotting",
-      "input": "u = -1:1;\nv = 2:4;\nw = linspace(0, 1, 5);\n[U, V, W] = meshgrid(u, v, w);",
+      "input": "u = -1:1;\nv = 2:4;\nw = linspace(0, 1, 5);\n[U, V, W] = meshgrid(u, v, w)",
       "output": "size(U) == [3 3 5]\nsize(V) == [3 3 5]\nsize(W) == [3 3 5]"
     },
     {
       "description": "Matching an existing GPU prototype",
-      "input": "gx = gpuArray(single(linspace(-pi, pi, 4)));\ngy = gpuArray(single([-1 0 1]));\n[Xg, Yg] = meshgrid(gx, gy);"
+      "input": "gx = gpuArray(single(linspace(-pi, pi, 4)));\ngy = gpuArray(single([-1 0 1]));\n[Xg, Yg] = meshgrid(gx, gy)"
     },
     {
       "description": "Using `'like'` to copy residency from another array",
-      "input": "proto = gpuArray.zeros(1, 1, 'double');\nangles = linspace(0, 2*pi, 8);\nradius = [0 1 2];\n[X, Y] = meshgrid(angles, radius, 'like', proto);"
+      "input": "proto = gpuArray.zeros(1, 1, 'double');\nangles = linspace(0, 2*pi, 8);\nradius = [0 1 2];\n[X, Y] = meshgrid(angles, radius, 'like', proto)"
     },
     {
       "description": "Complex inputs produce complex grids automatically",
-      "input": "z = [1+1i, 2+4i];\n[Zx, Zy] = meshgrid(z);"
+      "input": "z = [1+1i, 2+4i];\n[Zx, Zy] = meshgrid(z)"
     }
   ],
   "faqs": [

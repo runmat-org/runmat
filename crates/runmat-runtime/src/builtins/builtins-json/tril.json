@@ -43,22 +43,22 @@
   "examples": [
     {
       "description": "Extracting the lower triangular part of a matrix",
-      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nL = tril(A);",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nL = tril(A)",
       "output": "L =\n     1     0     0\n     4     5     0\n     7     8     9"
     },
     {
       "description": "Keeping one super-diagonal above the main diagonal",
-      "input": "A = magic(4);\nL = tril(A, 1);",
+      "input": "A = magic(4);\nL = tril(A, 1)",
       "output": "L =\n    16     2     0     0\n     5    11    10     0\n     9     7     6    12\n     4    14    15     1"
     },
     {
       "description": "Dropping the main diagonal with a negative offset",
-      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nstrict = tril(A, -1);",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nstrict = tril(A, -1)",
       "output": "strict =\n     0     0     0\n     4     0     0\n     7     8     0"
     },
     {
       "description": "Applying `tril` to every page of a 3-D array",
-      "input": "T = reshape(1:18, [3 3 2]);\nL = tril(T);",
+      "input": "T = reshape(1:18, [3 3 2]);\nL = tril(T)",
       "output": "L(:, :, 1) =\n     1     0     0\n     4     5     0\n     7     8     9\n\nL(:, :, 2) =\n    10     0     0\n    13    14     0\n    16    17    18"
     },
     {

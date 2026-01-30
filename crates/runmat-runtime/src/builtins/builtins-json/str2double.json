@@ -42,42 +42,42 @@
   "examples": [
     {
       "description": "Convert a string scalar into a double",
-      "input": "value = str2double(\"3.14159\");",
+      "input": "value = str2double(\"3.14159\")",
       "output": "value = 3.14159"
     },
     {
       "description": "Convert every element of a string array",
-      "input": "temps = [\"12.5\" \"19.8\" \"not-a-number\"];\ndata = str2double(temps);",
+      "input": "temps = [\"12.5\" \"19.8\" \"not-a-number\"];\ndata = str2double(temps)",
       "output": "data = 1\u00d73\n   12.5000   19.8000       NaN"
     },
     {
       "description": "Parse scientific notation text",
-      "input": "result = str2double(\"6.022e23\");",
+      "input": "result = str2double(\"6.022e23\")",
       "output": "result = 6.0220e+23"
     },
     {
       "description": "Handle engineering exponents written with `D`",
-      "input": "cap = str2double(\"4.7D-9\");",
+      "input": "cap = str2double(\"4.7D-9\")",
       "output": "cap = 4.7000e-09"
     },
     {
       "description": "Convert a character array one row at a time",
-      "input": "chars = ['42   '; '  100'];\nnumbers = str2double(chars);",
+      "input": "chars = ['42   '; '  100'];\nnumbers = str2double(chars)",
       "output": "numbers = 2\u00d71\n    42\n   100"
     },
     {
       "description": "Work with cell arrays of character vectors",
-      "input": "C = {'3.14', 'NaN', '-Inf'};\nvalues = str2double(C);",
+      "input": "C = {'3.14', 'NaN', '-Inf'};\nvalues = str2double(C)",
       "output": "values = 1\u00d73\n    3.1400      NaN      -Inf"
     },
     {
       "description": "Detect invalid numeric text",
-      "input": "status = str2double(\"error42\");",
+      "input": "status = str2double(\"error42\")",
       "output": "status = NaN"
     },
     {
       "description": "Recognise special values `Inf` and `NaN`",
-      "input": "special = str2double([\"Inf\"; \"-Infinity\"; \"NaN\"]);",
+      "input": "special = str2double([\"Inf\"; \"-Infinity\"; \"NaN\"])",
       "output": "special = 3\u00d71\n     Inf\n    -Inf\n     NaN"
     }
   ],

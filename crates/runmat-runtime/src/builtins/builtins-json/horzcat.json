@@ -43,30 +43,30 @@
   "examples": [
     {
       "description": "Concatenating matrices by columns",
-      "input": "A = [1 2; 3 4];\nB = [10 20; 30 40];\nC = horzcat(A, B);",
+      "input": "A = [1 2; 3 4];\nB = [10 20; 30 40];\nC = horzcat(A, B)",
       "output": "C =\n     1     2    10    20\n     3     4    30    40"
     },
     {
       "description": "Building a row vector from scalars",
-      "input": "row = horzcat(1, 2, 3, 4);",
+      "input": "row = horzcat(1, 2, 3, 4)",
       "output": "row = [1 2 3 4];"
     },
     {
       "description": "Extending character arrays into words",
-      "input": "lhs = ['Run' ; 'GPU'];\nrhs = ['Mat' ; 'Fun'];\nwords = horzcat(lhs, rhs);",
+      "input": "lhs = ['Run' ; 'GPU'];\nrhs = ['Mat' ; 'Fun'];\nwords = horzcat(lhs, rhs)",
       "output": "words =\n    RunMat\n    GPUFun"
     },
     {
       "description": "Keeping gpuArray inputs resident on the device",
-      "input": "G1 = gpuArray(rand(256, 128));\nG2 = gpuArray(rand(256, 64));\nwide = horzcat(G1, G2);"
+      "input": "G1 = gpuArray(rand(256, 128));\nG2 = gpuArray(rand(256, 64));\nwide = horzcat(G1, G2)"
     },
     {
       "description": "Preserving empties when all inputs are empty",
-      "input": "emptyBlock = zeros(0, 3);\nresult = horzcat(emptyBlock, emptyBlock);"
+      "input": "emptyBlock = zeros(0, 3);\nresult = horzcat(emptyBlock, emptyBlock)"
     },
     {
       "description": "Matching an output prototype with the `'like'` syntax",
-      "input": "proto = gpuArray.zeros(5, 1);\ncombo = horzcat(ones(5, 1), zeros(5, 1), \"like\", proto);"
+      "input": "proto = gpuArray.zeros(5, 1);\ncombo = horzcat(ones(5, 1), zeros(5, 1), \"like\", proto)"
     }
   ],
   "faqs": [],

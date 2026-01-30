@@ -46,32 +46,32 @@
   "examples": [
     {
       "description": "Summing the elements of a matrix",
-      "input": "A = [1 2 3; 4 5 6];\ncolSums = sum(A);\nrowSums = sum(A, 2);",
+      "input": "A = [1 2 3; 4 5 6];\ncolSums = sum(A);\nrowSums = sum(A, 2)",
       "output": "colSums = [5 7 9];\nrowSums = [6; 15];"
     },
     {
       "description": "Summing across multiple dimensions",
-      "input": "B = reshape(1:24, [3 4 2]);\ncollapse = sum(B, [1 3]);",
+      "input": "B = reshape(1:24, [3 4 2]);\ncollapse = sum(B, [1 3])",
       "output": "collapse = [48 66 84 102];"
     },
     {
       "description": "Summing with NaN values ignored",
-      "input": "values = [1 NaN 3];\ntotal = sum(values, 'omitnan');",
+      "input": "values = [1 NaN 3];\ntotal = sum(values, 'omitnan')",
       "output": "total = 4;"
     },
     {
       "description": "Summing on the GPU and matching an existing prototype",
-      "input": "proto = gpuArray.zeros(1, 1, 'single');\nresult = sum(gpuArray([1 2 3]), 'all', 'like', proto);",
+      "input": "proto = gpuArray.zeros(1, 1, 'single');\nresult = sum(gpuArray([1 2 3]), 'all', 'like', proto)",
       "output": "result =\n  1x1 gpuArray  single\n     6"
     },
     {
       "description": "Summing all elements of an array into a scalar",
-      "input": "C = [1 2 3; 4 5 6];\ngrandTotal = sum(C, 'all');",
+      "input": "C = [1 2 3; 4 5 6];\ngrandTotal = sum(C, 'all')",
       "output": "grandTotal = 21;"
     },
     {
       "description": "Summing with native output type",
-      "input": "ints = int32([100 200 300]);\ntotal = sum(ints, 'native');",
+      "input": "ints = int32([100 200 300]);\ntotal = sum(ints, 'native')",
       "output": "total = int32(600);"
     }
   ],

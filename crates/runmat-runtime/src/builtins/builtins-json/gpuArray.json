@@ -52,12 +52,12 @@
   "examples": [
     {
       "description": "Moving a matrix to the GPU for elementwise work",
-      "input": "A = [1 2 3; 4 5 6];\nG = gpuArray(A);\nout = gather(sin(G));",
+      "input": "A = [1 2 3; 4 5 6];\nG = gpuArray(A);\nout = gather(sin(G))",
       "output": "out =\n  2\u00d73\n\n    0.8415    0.9093    0.1411\n   -0.7568   -0.9589   -0.2794"
     },
     {
       "description": "Uploading a scalar with dtype conversion",
-      "input": "pi_single = gpuArray(pi, 'single');\nisa(pi_single, 'gpuArray');\nclass(gather(pi_single));",
+      "input": "pi_single = gpuArray(pi, 'single');\nisa(pi_single, 'gpuArray');\nclass(gather(pi_single))",
       "output": "ans =\n  logical\n     1\n\nans =\n  single"
     },
     {

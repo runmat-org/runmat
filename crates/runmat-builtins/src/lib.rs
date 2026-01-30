@@ -541,43 +541,53 @@ impl fmt::Display for Tensor {
 
 impl fmt::Display for StringArray {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.shape.len() {
-            0 | 1 => {
-                write!(f, "[")?;
-                for (i, v) in self.data.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
+        let (rows, cols) = match self.shape.len() {
+            0 => (0, 0),
+            1 => (1, self.shape[0]),
+            _ => (self.shape[0], self.shape[1]),
+        };
+        let count = self.data.len();
+        if count == 1 && rows == 1 && cols == 1 {
+            let v = &self.data[0];
+            if v == "<missing>" {
+                return write!(f, "<missing>");
+            }
+            let escaped = v.replace('"', "\\\"");
+            return write!(f, "\"{escaped}\"");
+        }
+        if self.shape.len() > 2 {
+            let dims: Vec<String> = self.shape.iter().map(|d| d.to_string()).collect();
+            return write!(f, "{} string array", dims.join("x"));
+        }
+        write!(f, "{rows}x{cols} string array")?;
+        if rows == 0 || cols == 0 {
+            return Ok(());
+        }
+        for r in 0..rows {
+            writeln!(f)?;
+            write!(f, "  ")?;
+            for c in 0..cols {
+                if c > 0 {
+                    write!(f, "  ")?;
+                }
+                let v = &self.data[r + c * rows];
+                if v == "<missing>" {
+                    write!(f, "<missing>")?;
+                } else {
                     let escaped = v.replace('"', "\\\"");
                     write!(f, "\"{escaped}\"")?;
                 }
-                write!(f, "]")
             }
-            2 => {
-                let rows = self.rows();
-                let cols = self.cols();
-                // Display as matrix
-                for r in 0..rows {
-                    writeln!(f)?;
-                    write!(f, "  ")?; // Indent
-                    for c in 0..cols {
-                        if c > 0 {
-                            write!(f, "  ")?;
-                        }
-                        let v = &self.data[r + c * rows];
-                        let escaped = v.replace('"', "\\\"");
-                        write!(f, "\"{escaped}\"")?;
-                    }
-                }
-                Ok(())
-            }
-            _ => write!(f, "StringArray(shape={:?})", self.shape),
         }
+        Ok(())
     }
 }
 
 impl fmt::Display for LogicalArray {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.data.len() == 1 {
+            return write!(f, "{}", if self.data[0] != 0 { 1 } else { 0 });
+        }
         match self.shape.len() {
             0 => write!(f, "[]"),
             1 => {
@@ -607,7 +617,16 @@ impl fmt::Display for LogicalArray {
                 }
                 Ok(())
             }
-            _ => write!(f, "LogicalArray(shape={:?})", self.shape),
+            _ => {
+                write!(f, "[")?;
+                for (i, v) in self.data.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", if *v != 0 { 1 } else { 0 })?;
+                }
+                write!(f, "]")
+            }
         }
     }
 }
@@ -1487,30 +1506,34 @@ fn shape_rows_cols(shape: &[usize]) -> (usize, usize) {
     if shape.is_empty() {
         return (0, 0);
     }
-    let rows = shape[0];
-    let cols = if shape.len() >= 2 { shape[1] } else { 1 };
-    (rows, cols)
+    if shape.len() == 1 {
+        return (1, shape[0]);
+    }
+    (shape[0], shape[1])
 }
 
 impl fmt::Display for CellArray {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let dims: Vec<String> = self.shape.iter().map(|d| d.to_string()).collect();
         if self.shape.len() > 2 {
-            return write!(f, "CellArray(shape={:?})", self.shape);
+            return write!(f, "{} cell array", dims.join("x"));
         }
-        write!(f, "{{")?;
+        write!(f, "{}x{} cell array", self.rows, self.cols)?;
+        if self.rows == 0 || self.cols == 0 {
+            return Ok(());
+        }
         for r in 0..self.rows {
+            writeln!(f)?;
+            write!(f, "  ")?;
             for c in 0..self.cols {
                 if c > 0 {
-                    write!(f, ", ")?;
+                    write!(f, "  ")?;
                 }
-                let v = &self.data[r * self.cols + c];
-                write!(f, "{}", **v)?;
-            }
-            if r + 1 < self.rows {
-                write!(f, "; ")?;
+                let value = self.get(r, c).unwrap_or_else(|_| Value::Num(f64::NAN));
+                write!(f, "{{{value}}}")?;
             }
         }
-        write!(f, "}}")
+        Ok(())
     }
 }
 

@@ -41,27 +41,27 @@
   "examples": [
     {
       "description": "Display the current MATLAB search path",
-      "input": "p = path();\ndisp(p);",
-      "output": "/Users/alex/runmat/toolbox:/Users/alex/runmat/user   % Actual directories vary by installation"
+      "input": "p = path();\ndisp(p)",
+      "output": "/Users/alex/runmat/toolbox:/Users/alex/runmat/user"
     },
     {
       "description": "Temporarily replace the MATLAB path",
-      "input": "old = path(\"C:\\tools\\runmat-addons\");\n% ... run code that relies on the temporary path ...\npath(old);   % Restore the previous path",
+      "input": "old = path(\"/Users/alex/runmat-addons\");\n% ... run code that relies on the temporary path ...\npath(old);   % Restore the previous path",
       "output": "old =\n    '/Users/alex/runmat/toolbox:/Users/alex/runmat/user'"
     },
     {
       "description": "Append folders to the end of the search path",
-      "input": "extra = \"C:\\projects\\analysis\";\nold = path(path(), extra);",
-      "output": "path()\nans =\n    'C:\\tools\\runmat-addons;C:\\projects\\analysis'"
+      "input": "extra = \"/Users/alex/projects/analysis\";\npath(path(), extra);\npath()",
+      "output": "ans =\n    '/Users/alex/runmat/toolbox:/Users/alex/runmat/user:/Users/alex/projects/analysis'"
     },
     {
       "description": "Prepend folders ahead of the existing path",
-      "input": "extra = \"/opt/runmat/toolbox\";\nold = path(extra, path());",
-      "output": "path()\nans =\n    '/opt/runmat/toolbox:/Users/alex/runmat/toolbox:/Users/alex/runmat/user'"
+      "input": "extra = \"/opt/runmat/toolbox\";\npath(extra, path());\npath()",
+      "output": "ans =\n    '/opt/runmat/toolbox:/Users/alex/runmat/toolbox:/Users/alex/runmat/user'"
     },
     {
       "description": "Combine generated folder lists",
-      "input": "tooling = genpath(\"submodules/tooling\");\nold = path(tooling, path());",
+      "input": "tooling = genpath(\"submodules/tooling\");\nold = path(tooling, path())",
       "output": "% The directories returned by genpath now appear ahead of the previous path entries."
     }
   ],

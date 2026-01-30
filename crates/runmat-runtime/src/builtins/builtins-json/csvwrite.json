@@ -52,28 +52,28 @@
   "examples": [
     {
       "description": "Writing a numeric matrix to CSV",
-      "input": "A = [1 2 3; 4 5 6];\ncsvwrite(\"scores.csv\", A);"
+      "input": "A = [1 2 3; 4 5 6];\ncsvwrite(\"scores.csv\", A)"
     },
     {
       "description": "Starting output after a header row",
-      "input": "fid = fopen(\"with_header.csv\", \"w\");\nfprintf(fid, \"Name,Jan,Feb\\nalpha,1,2\\nbeta,3,4\\n\");\nfclose(fid);\n\ncsvwrite(\"with_header.csv\", [10 20; 30 40], 1, 0);"
+      "input": "fid = fopen(\"with_header.csv\", \"w\");\nfprintf(fid, \"Name,Jan,Feb\\nalpha,1,2\\nbeta,3,4\\n\");\nfclose(fid);\n\ncsvwrite(\"with_header.csv\", [10 20; 30 40], 1, 0)"
     },
     {
       "description": "Skipping leading columns before data",
-      "input": "B = magic(3);\ncsvwrite(\"offset_columns.csv\", B, 0, 2);"
+      "input": "B = magic(3);\ncsvwrite(\"offset_columns.csv\", B, 0, 2)"
     },
     {
       "description": "Exporting logical masks as numeric zeros and ones",
-      "input": "mask = [true false true; false true false];\ncsvwrite(\"mask.csv\", mask);"
+      "input": "mask = [true false true; false true false];\ncsvwrite(\"mask.csv\", mask)"
     },
     {
       "description": "Writing GPU-resident data without manual gather",
-      "input": "G = gpuArray(single([0.1 0.2 0.3]));\ncsvwrite(\"gpu_values.csv\", G);",
-      "output": "% Data is gathered automatically from the GPU and written to disk."
+      "input": "G = gpuArray(single([0.1 0.2 0.3]));\nbytes = csvwrite(\"gpu_values.csv\", G)",
+      "output": "bytes = 12"
     },
     {
       "description": "Persisting a scalar value for downstream tools",
-      "input": "total = sum(rand(5));\ncsvwrite(\"scalar.csv\", total);"
+      "input": "total = sum(rand(5));\ncsvwrite(\"scalar.csv\", total)"
     }
   ],
   "faqs": [

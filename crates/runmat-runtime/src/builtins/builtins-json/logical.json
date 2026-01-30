@@ -43,37 +43,37 @@
   "examples": [
     {
       "description": "Creating a logical mask from numeric data",
-      "input": "values = [0 2 -3 0];\nmask = logical(values);",
+      "input": "values = [0 2 -3 0];\nmask = logical(values)",
       "output": "mask =\n  1\u00d74 logical array\n     0     1     1     0"
     },
     {
       "description": "Building a logical mask from a matrix",
-      "input": "M = [-4 0 8; 0 1 0];\nmask = logical(M);",
+      "input": "M = [-4 0 8; 0 1 0];\nmask = logical(M)",
       "output": "mask =\n  2\u00d73 logical array\n     1     0     1\n     0     1     0"
     },
     {
       "description": "Treating NaN and Inf values as true",
-      "input": "flags = logical([NaN Inf 0]);",
+      "input": "flags = logical([NaN Inf 0])",
       "output": "flags =\n  1\u00d73 logical array\n     1     1     0"
     },
     {
       "description": "Converting complex numbers to logical scalars",
-      "input": "z = logical(3 + 4i);\nw = logical(0 + 0i);",
+      "input": "z = logical(3 + 4i);\nw = logical(0 + 0i)",
       "output": "z =\n     1\nw =\n     0"
     },
     {
       "description": "Converting character arrays to logical values",
-      "input": "chars = ['A' 0 'C'];\nmask = logical(chars);",
+      "input": "chars = ['A' 0 'C'];\nmask = logical(chars)",
       "output": "mask =\n  1\u00d73 logical array\n     1     0     1"
     },
     {
       "description": "Keeping gpuArray inputs on the device",
-      "input": "G = gpuArray([0 1 2]);\nmaskGPU = logical(G);\nhostMask = gather(maskGPU);",
+      "input": "G = gpuArray([0 1 2]);\nmaskGPU = logical(G);\nhostMask = gather(maskGPU)",
       "output": "hostMask =\n  1\u00d73 logical array\n     0     1     1"
     },
     {
       "description": "Preserving empty shapes through logical conversion",
-      "input": "emptyVec = zeros(0, 3);\nlogicalEmpty = logical(emptyVec);",
+      "input": "emptyVec = zeros(0, 3);\nlogicalEmpty = logical(emptyVec)",
       "output": "logicalEmpty =\n  0\u00d73 logical array\n     []"
     }
   ],

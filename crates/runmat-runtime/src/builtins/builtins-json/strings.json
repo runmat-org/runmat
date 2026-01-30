@@ -33,10 +33,10 @@
   },
   "description": "`strings` creates string arrays whose elements are empty string scalars (`\"\"`). It mirrors MATLAB's preallocation helper, accepting scalar, vector, or multiple dimension arguments to control the array shape.",
   "behaviors": [
-    "`strings` with no inputs returns a 1×1 string array containing `\"\"`.",
+    "`strings` with no inputs returns a 1\u00d71 string array containing `\"\"`.",
     "`strings(n)` produces an `n`-by-`n` array of empty strings. The single input must be a nonnegative integer scalar.",
-    "`strings(sz1,...,szN)` and `strings(sz)` accept nonnegative integer sizes. All specified dimensions—including trailing singletons—are preserved in the resulting array.",
-    "Setting any dimension to `0` yields an empty array whose remaining dimensions still shape the result (for example, `strings(0, 5, 3)` is a `0×5×3` string array).",
+    "`strings(sz1,...,szN)` and `strings(sz)` accept nonnegative integer sizes. All specified dimensions\u2014including trailing singletons\u2014are preserved in the resulting array.",
+    "Setting any dimension to `0` yields an empty array whose remaining dimensions still shape the result (for example, `strings(0, 5, 3)` is a `0\u00d75\u00d73` string array).",
     "`strings(___, \"missing\")` fills the allocation with the missing sentinel (`<missing>`) instead of empty strings, which is useful when you plan to replace placeholders later.",
     "`strings(___, \"like\", prototype)` or `strings(\"like\", prototype)` reuses the size of `prototype` when you omit explicit dimensions. Any provided dimensions still take precedence, and GPU prototypes are gathered before their shape is inspected.",
     "Size inputs must be finite integers. Negative, fractional, or NaN values trigger MATLAB-compatible \"Size inputs must be nonnegative integers\" errors.",
@@ -45,37 +45,37 @@
   "examples": [
     {
       "description": "Creating a square array of empty strings",
-      "input": "S = strings(4);",
+      "input": "S = strings(4)",
       "output": "S = 4x4 string\n    \"\"    \"\"    \"\"    \"\"\n    \"\"    \"\"    \"\"    \"\"\n    \"\"    \"\"    \"\"    \"\"\n    \"\"    \"\"    \"\"    \"\""
     },
     {
       "description": "Preallocating with separate dimension arguments",
-      "input": "grid = strings(2, 3, 4);",
+      "input": "grid = strings(2, 3, 4)",
       "output": "grid = 2x3x4 string\ngrid(:,:,1) =\n    \"\"    \"\"    \"\"\n    \"\"    \"\"    \"\""
     },
     {
       "description": "Cloning the size of another array",
-      "input": "A = magic(3);\nplaceholders = strings(size(A));",
+      "input": "A = magic(3);\nplaceholders = strings(size(A))",
       "output": "placeholders = 3x3 string\n    \"\"    \"\"    \"\"\n    \"\"    \"\"    \"\"\n    \"\"    \"\"    \"\""
     },
     {
       "description": "Handling zero dimensions",
-      "input": "emptyRow = strings(0, 5);",
+      "input": "emptyRow = strings(0, 5)",
       "output": "emptyRow = 0x5 string"
     },
     {
       "description": "Preserving trailing singleton dimensions",
-      "input": "column = strings(3, 1, 1, 1);\nsz = size(column);",
+      "input": "column = strings(3, 1, 1, 1);\nsz = size(column)",
       "output": "sz =\n     3     1     1     1"
     },
     {
       "description": "Filling arrays with missing string scalars",
-      "input": "placeholders = strings(2, 3, \"missing\");",
+      "input": "placeholders = strings(2, 3, \"missing\")",
       "output": "placeholders = 2x3 string\n    <missing>    <missing>    <missing>\n    <missing>    <missing>    <missing>"
     },
     {
       "description": "Matching an existing array with `'like'`",
-      "input": "proto = zeros(3, 2);\nlabels = strings(\"like\", proto);",
+      "input": "proto = zeros(3, 2);\nlabels = strings(\"like\", proto)",
       "output": "labels = 3x2 string\n    \"\"    \"\"\n    \"\"    \"\"\n    \"\"    \"\""
     },
     {
@@ -95,7 +95,7 @@
     },
     {
       "question": "How do I create missing string values (`<missing>`)?",
-      "answer": "Pass `\"missing\"` as an option— for example `strings(2, 3, \"missing\")` produces a `2×3` array filled with `<missing>` placeholders. You can still assign values later to replace the sentinel."
+      "answer": "Pass `\"missing\"` as an option\u2014 for example `strings(2, 3, \"missing\")` produces a `2\u00d73` array filled with `<missing>` placeholders. You can still assign values later to replace the sentinel."
     },
     {
       "question": "How can I reuse the size of an existing array?",
@@ -107,7 +107,7 @@
     },
     {
       "question": "How can I create a row versus column vector?",
-      "answer": "Use `strings(1, n)` for a row and `strings(n, 1)` for a column. Additional dimensions—including trailing singletons—remain part of the array shape."
+      "answer": "Use `strings(1, n)` for a row and `strings(n, 1)` for a column. Additional dimensions\u2014including trailing singletons\u2014remain part of the array shape."
     },
     {
       "question": "Can I pass non-numeric types such as structs or string arrays as size inputs?",
@@ -141,6 +141,6 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/strings.rs"
   },
   "gpu_behavior": [
-    "`strings` never allocates data on the GPU. Size arguments that reside on a GPU are automatically gathered to the host before validation, and the resulting string array always lives in host memory. `\"like\"` prototypes follow the same rule—they are gathered before their shape is inspected. No provider hooks are required, so the GPU metadata marks the builtin as a gather-only operation."
+    "`strings` never allocates data on the GPU. Size arguments that reside on a GPU are automatically gathered to the host before validation, and the resulting string array always lives in host memory. `\"like\"` prototypes follow the same rule\u2014they are gathered before their shape is inspected. No provider hooks are required, so the GPU metadata marks the builtin as a gather-only operation."
   ]
 }

@@ -44,19 +44,19 @@
   "examples": [
     {
       "description": "Displaying a simple warning",
-      "input": "warning(\"Computation took longer than expected.\");"
+      "input": "warning(\"Computation took longer than expected.\")"
     },
     {
       "description": "Emitting a warning with a custom identifier",
-      "input": "warning(\"runmat:io:deprecatedOption\", ...\n        \"Option '%s' is deprecated and will be removed in %s.\", ...\n        \"VerboseMode\", \"1.2\");"
+      "input": "warning(\"runmat:io:deprecatedOption\", ...\n        \"Option '%s' is deprecated and will be removed in %s.\", ...\n        \"VerboseMode\", \"1.2\")"
     },
     {
       "description": "Turning a specific warning off and back on",
-      "input": "warning(\"off\", \"runmat:io:deprecatedOption\");\n% ... code that triggers the warning ...\nwarning(\"on\", \"runmat:io:deprecatedOption\");"
+      "input": "warning(\"off\", \"runmat:io:deprecatedOption\");\n% ... code that triggers the warning ...\nwarning(\"on\", \"runmat:io:deprecatedOption\")"
     },
     {
       "description": "Promoting a warning to an error",
-      "input": "warning(\"error\", \"runmat:solver:illConditioned\");\n% The next call raises an error instead of printing a warning.\nwarning(\"runmat:solver:illConditioned\", ...\n        \"Condition number exceeds threshold %.2e.\", 1e12);"
+      "input": "warning(\"error\", \"runmat:solver:illConditioned\");\n% The next call raises an error instead of printing a warning.\nwarning(\"runmat:solver:illConditioned\", ...\n        \"Condition number exceeds threshold %.2e.\", 1e12)"
     },
     {
       "description": "Querying and restoring warning state",
@@ -64,7 +64,7 @@
     },
     {
       "description": "Enabling backtraces for debugging",
-      "input": "warning(\"on\", \"backtrace\");   % warning(\"backtrace\",\"on\") is equivalent\nwarning(\"runmat:demo:slowPath\", \"Inspect the call stack above for context.\");\nwarning(\"off\", \"backtrace\");"
+      "input": "warning(\"on\", \"backtrace\");   % warning(\"backtrace\",\"on\") is equivalent\nwarning(\"runmat:demo:slowPath\", \"Inspect the call stack above for context.\");\nwarning(\"off\", \"backtrace\")"
     },
     {
       "description": "Displaying verbose suppression guidance",

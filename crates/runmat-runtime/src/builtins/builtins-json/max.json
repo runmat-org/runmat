@@ -46,32 +46,32 @@
   "examples": [
     {
       "description": "Finding column-wise maxima of a matrix",
-      "input": "A = [3 1 5; 4 2 6];\n[m, idx] = max(A);",
+      "input": "A = [3 1 5; 4 2 6];\n[m, idx] = max(A)",
       "output": "m   = [4 2 6];\nidx = [2 2 2];"
     },
     {
       "description": "Reducing along the second dimension",
-      "input": "A = [3 1 5; 4 2 6];\n[m, idx] = max(A, [], 2);",
+      "input": "A = [3 1 5; 4 2 6];\n[m, idx] = max(A, [], 2)",
       "output": "m   = [5; 6];\nidx = [3; 3];"
     },
     {
       "description": "Collapsing all elements with linear indices",
-      "input": "A = reshape(1:12, [3 4]);\n[m, idx] = max(A, [], 'all');",
+      "input": "A = reshape(1:12, [3 4]);\n[m, idx] = max(A, [], 'all')",
       "output": "m   = 12;\nidx = 12;  % linear index into A(:)"
     },
     {
       "description": "Ignoring NaN values during reduction",
-      "input": "values = [NaN 4 2; 3 NaN 1];\n[m, idx] = max(values, [], 1, 'omitnan');",
+      "input": "values = [NaN 4 2; 3 NaN 1];\n[m, idx] = max(values, [], 1, 'omitnan')",
       "output": "m   = [3 4 2];\nidx = [2 1 1];"
     },
     {
       "description": "Elementwise maximum with broadcasting",
-      "input": "A = [1 4 7];\nB = [2; 3; 5];\n[C, origin] = max(A, B);",
+      "input": "A = [1 4 7];\nB = [2; 3; 5];\n[C, origin] = max(A, B)",
       "output": "C =\n     2     4     7\n     3     4     7\n     5     5     7\n\norigin =\n     2     1     1\n     2     1     1\n     2     2     1"
     },
     {
       "description": "Comparing complex values by magnitude",
-      "input": "Z = [1+2i, 2+1i, -2+2i];\nM = max(Z);                         % magnitude ordering\nR = max(Z, [], 'ComparisonMethod', 'real');",
+      "input": "Z = [1+2i, 2+1i, -2+2i];\nM = max(Z);                         % magnitude ordering\nR = max(Z, [], 'ComparisonMethod', 'real')",
       "output": "M = -2.0000 + 2.0000i\nR = 2.0000 + 1.0000i"
     }
   ],

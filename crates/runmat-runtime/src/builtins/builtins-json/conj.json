@@ -42,32 +42,32 @@
   "examples": [
     {
       "description": "Complex conjugate of a scalar value in MATLAB",
-      "input": "z = 3 + 4i;\nresult = conj(z);",
+      "input": "z = 3 + 4i;\nresult = conj(z)",
       "output": "result = 3 - 4i;"
     },
     {
       "description": "Apply conj to every element of a complex matrix",
-      "input": "Z = [1+2i, 4-3i; -5+0i, 7+8i];\nC = conj(Z);",
+      "input": "Z = [1+2i, 4-3i; -5+0i, 7+8i];\nC = conj(Z)",
       "output": "C =\n   1 - 2i   4 + 3i\n  -5 + 0i   7 - 8i"
     },
     {
       "description": "Ensure conj leaves real inputs unchanged",
-      "input": "data = [-2.5 0 9.75];\nunchanged = conj(data);",
+      "input": "data = [-2.5 0 9.75];\nunchanged = conj(data)",
       "output": "unchanged = [-2.5 0 9.75];"
     },
     {
       "description": "Use conj on logical masks converted to doubles",
-      "input": "mask = logical([0 1 0; 1 1 0]);\nnumeric = conj(mask);",
+      "input": "mask = logical([0 1 0; 1 1 0]);\nnumeric = conj(mask)",
       "output": "numeric =\n     0     1     0\n     1     1     0"
     },
     {
       "description": "Convert MATLAB char arrays to numeric codes with conj",
-      "input": "chars = 'RunMat';\ncodes = conj(chars);\noutputClass = class(codes);",
+      "input": "chars = 'RunMat';\ncodes = conj(chars);\noutputClass = class(codes)",
       "output": "codes = [82 117 110 77 97 116];\noutputClass = 'double'"
     },
     {
       "description": "Compute conjugate on GPU-resident arrays",
-      "input": "G = rand(4096, 256, \"gpuArray\");\nH = conj(G);"
+      "input": "G = rand(4096, 256, \"gpuArray\");\nH = conj(G)"
     }
   ],
   "faqs": [

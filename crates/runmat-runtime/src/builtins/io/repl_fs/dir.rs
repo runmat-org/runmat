@@ -1,5 +1,7 @@
 //! MATLAB-compatible `dir` builtin for RunMat.
 
+use runmat_filesystem as vfs;
+#[cfg(test)]
 use std::env;
 use std::ffi::OsString;
 use std::io::ErrorKind;
@@ -9,7 +11,6 @@ use std::time::SystemTime;
 use chrono::{DateTime, Duration, Local, NaiveDate};
 use glob::glob;
 use runmat_builtins::{StructValue, Value};
-use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::{
@@ -112,7 +113,7 @@ async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
 }
 
 fn list_current_directory() -> BuiltinResult<Vec<DirRecord>> {
-    let cwd = env::current_dir().map_err(|err| {
+    let cwd = vfs::current_dir().map_err(|err| {
         dir_error(format!(
             "dir: unable to determine current directory ({err})"
         ))
@@ -370,7 +371,7 @@ fn absolute_folder_string(path: &Path) -> BuiltinResult<String> {
     let joined = if path.is_absolute() {
         path.to_path_buf()
     } else {
-        env::current_dir()
+        vfs::current_dir()
             .map_err(|err| {
                 dir_error(format!(
                     "dir: unable to determine current directory ({err})"

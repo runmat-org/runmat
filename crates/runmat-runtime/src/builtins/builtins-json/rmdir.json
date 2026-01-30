@@ -45,32 +45,32 @@
   "examples": [
     {
       "description": "Remove An Empty Folder",
-      "input": "mkdir(\"scratch\");\nstatus = rmdir(\"scratch\");",
+      "input": "mkdir(\"scratch\");\nstatus = rmdir(\"scratch\")",
       "output": "status =\n     1"
     },
     {
       "description": "Remove A Folder And Its Contents",
-      "input": "mkdir(\"data/project\");\nfid = fopen(fullfile(\"data/project\", \"notes.txt\"), \"w\");\nfprintf(fid, \"Draft notes\");\nfclose(fid);\nstatus = rmdir(\"data\", \"s\");",
+      "input": "mkdir(\"data/project\");\nfid = fopen(fullfile(\"data/project\", \"notes.txt\"), \"w\");\nfprintf(fid, \"Draft notes\");\nfclose(fid);\nstatus = rmdir(\"data\", \"s\")",
       "output": "status =\n     1"
     },
     {
       "description": "Handle A Missing Folder Gracefully",
-      "input": "[status, message, messageID] = rmdir(\"not-here\");",
+      "input": "[status, message, messageID] = rmdir(\"not-here\")",
       "output": "status =\n     0\nmessage =\nFolder \"not-here\" does not exist.\nmessageID =\nMATLAB:RMDIR:DirectoryNotFound"
     },
     {
       "description": "Detect That A Folder Is Not Empty Without The 's' Flag",
-      "input": "mkdir(\"logs\");\nfid = fopen(fullfile(\"logs\", \"today.log\"), \"w\");\nfprintf(fid, \"Log entry\");\nfclose(fid);\n[status, message, messageID] = rmdir(\"logs\");",
+      "input": "mkdir(\"logs\");\nfid = fopen(fullfile(\"logs\", \"today.log\"), \"w\");\nfprintf(fid, \"Log entry\");\nfclose(fid);\n[status, message, messageID] = rmdir(\"logs\")",
       "output": "status =\n     0\nmessage =\nCannot remove folder \"logs\": directory is not empty.\nmessageID =\nMATLAB:RMDIR:DirectoryNotEmpty"
     },
     {
       "description": "Remove A Directory Specified As A String Scalar On The GPU",
-      "input": "mkdir(\"gpu-folder\");\nstatus = rmdir(gpuArray(\"gpu-folder\"));",
+      "input": "mkdir(\"gpu-folder\");\nstatus = rmdir(gpuArray(\"gpu-folder\"))",
       "output": "status =\n     1"
     },
     {
       "description": "Capture Status And Message Outputs",
-      "input": "mkdir(\"reports\");\n[status, message, messageID] = rmdir(\"reports\");",
+      "input": "mkdir(\"reports\");\n[status, message, messageID] = rmdir(\"reports\")",
       "output": "status =\n     1\nmessage =\n\nmessageID ="
     }
   ],

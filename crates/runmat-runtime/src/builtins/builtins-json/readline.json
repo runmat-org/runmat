@@ -42,7 +42,7 @@
   "examples": [
     {
       "description": "Reading a newline-terminated response from an echo server",
-      "input": "client = tcpclient(\"127.0.0.1\", 55000);\nwrite(client, \"ping\\n\");\nreply = readline(client);",
+      "input": "client = tcpclient(\"127.0.0.1\", 55000);\nwrite(client, \"ping\\n\");\nreply = readline(client)",
       "output": "reply = \"ping\""
     },
     {

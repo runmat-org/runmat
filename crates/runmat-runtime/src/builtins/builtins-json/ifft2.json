@@ -45,12 +45,12 @@
   "examples": [
     {
       "description": "Reconstructing an image patch from its 2-D spectrum",
-      "input": "F = [10  -2  0  -2;\n     -4   0  0   0];\nx = ifft2(F);",
+      "input": "F = [10  -2  0  -2;\n     -4   0  0   0];\nx = ifft2(F)",
       "output": "x =\n    1.0000    2.0000\n    3.0000    4.0000"
     },
     {
       "description": "Zero-padding before the inverse transform",
-      "input": "F = fft2([1 0; 0 1], 4, 4);\nspatial = ifft2(F, 4, 4);"
+      "input": "F = fft2([1 0; 0 1], 4, 4);\nspatial = ifft2(F, 4, 4)"
     },
     {
       "description": "Supplying transform lengths with a size vector",
@@ -58,15 +58,15 @@
     },
     {
       "description": "Forcing a real-valued result with `'symmetric'`",
-      "input": "F = fft2([1 2; 3 4]);\nrealImage = ifft2(F, 'symmetric');"
+      "input": "F = fft2([1 2; 3 4]);\nrealImage = ifft2(F, 'symmetric')"
     },
     {
       "description": "Running `ifft2` on `gpuArray` inputs",
-      "input": "G = gpuArray(fft2(peaks(64)));\nspatial = ifft2(G);\nresult = gather(spatial);"
+      "input": "G = gpuArray(fft2(peaks(64)));\nspatial = ifft2(G);\nresult = gather(spatial)"
     },
     {
       "description": "Recovering each slice of a volume",
-      "input": "spectra = fft2(rand(16, 16, 10));\nvolume = ifft2(spectra);"
+      "input": "spectra = fft2(rand(16, 16, 10));\nvolume = ifft2(spectra)"
     }
   ],
   "faqs": [

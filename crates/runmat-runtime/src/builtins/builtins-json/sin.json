@@ -44,27 +44,27 @@
   "examples": [
     {
       "description": "Computing the sine of a scalar",
-      "input": "y = sin(pi/2);",
+      "input": "y = sin(pi/2)",
       "output": "y = 1"
     },
     {
       "description": "Computing the sine of a vector",
-      "input": "angles = [0 pi/6 pi/4 pi/3];\nvalues = sin(angles);",
+      "input": "angles = [0 pi/6 pi/4 pi/3];\nvalues = sin(angles)",
       "output": "values = [0 0.5 0.7071 0.8660]"
     },
     {
       "description": "Computing the sine of a complex number",
-      "input": "z = sin(1 + 2i);",
+      "input": "z = sin(1 + 2i)",
       "output": "z = 3.1658 + 1.9596i"
     },
     {
       "description": "Computing the sine of a matrix on a GPU",
-      "input": "A = reshape(0:5, [3 2]);\nG = gpuArray(A);\nR = sin(G);\nresult = gather(R);",
+      "input": "A = reshape(0:5, [3 2]);\nG = gpuArray(A);\nR = sin(G);\nresult = gather(R)",
       "output": "result =\n         0    0.1411\n    0.8415   -0.7568\n    0.9093   -0.9589"
     },
     {
       "description": "Keeping results on the GPU with a `'like'` prototype",
-      "input": "proto = gpuArray.zeros(1, 1, 'single');\nangles = [0 pi/2];\ndeviceResult = sin(angles, 'like', proto);\ngathered = gather(deviceResult);",
+      "input": "proto = gpuArray.zeros(1, 1, 'single');\nangles = [0 pi/2];\ndeviceResult = sin(angles, 'like', proto);\ngathered = gather(deviceResult)",
       "output": "gathered =\n  1x2 single\n     0     1"
     }
   ],

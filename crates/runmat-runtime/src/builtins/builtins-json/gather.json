@@ -47,37 +47,37 @@
   "examples": [
     {
       "description": "Converting a gpuArray back to host memory",
-      "input": "G = gpuArray([1 2 3; 4 5 6]);\nH = gather(G);",
+      "input": "G = gpuArray([1 2 3; 4 5 6]);\nH = gather(G)",
       "output": "H =\n     1     2     3\n     4     5     6"
     },
     {
       "description": "Gathering data that is already on the CPU",
-      "input": "x = [10 20 30];\ny = gather(x);",
+      "input": "x = [10 20 30];\ny = gather(x)",
       "output": "y =\n    10    20    30"
     },
     {
       "description": "Preserving logical values when gathering",
-      "input": "mask = gpuArray(logical([1 0 1 0]));\nhostMask = gather(mask);",
+      "input": "mask = gpuArray(logical([1 0 1 0]));\nhostMask = gather(mask)",
       "output": "hostMask =\n  1\u00d74 logical array\n   1   0   1   0"
     },
     {
       "description": "Gathering gpuArray values stored inside a cell array",
-      "input": "C = {gpuArray([1 2]), 42};\nhostC = gather(C);",
+      "input": "C = {gpuArray([1 2]), 42};\nhostC = gather(C)",
       "output": "hostC =\n  1\u00d72 cell array\n    {[1 2]}    {[42]}"
     },
     {
       "description": "Gathering struct fields that live on the GPU",
-      "input": "S.data = gpuArray(magic(3));\nS.label = \"gpu result\";\nS_host = gather(S);",
+      "input": "S.data = gpuArray(magic(3));\nS.label = \"gpu result\";\nS_host = gather(S)",
       "output": "S_host =\n  struct with fields:\n     data: [3\u00d73 double]\n    label: \"gpu result\""
     },
     {
       "description": "Gathering multiple gpuArrays into one cell result",
-      "input": "A = gpuArray(eye(3));\nB = gpuArray(ones(3));\ncellOut = gather(A, B);",
+      "input": "A = gpuArray(eye(3));\nB = gpuArray(ones(3));\ncellOut = gather(A, B)",
       "output": "cellOut =\n  1\u00d72 cell array\n    {[3\u00d73 double]}    {[3\u00d73 double]}"
     },
     {
       "description": "Gathering results at the end of a GPU pipeline",
-      "input": "A = gpuArray(rand(1024, 1));\nB = sin(A) .* 5;\nresult = gather(B);",
+      "input": "A = gpuArray(rand(1024, 1));\nB = sin(A) .* 5;\nresult = gather(B)",
       "output": "result(1:3) =\n    4.1377\n    2.4884\n    0.1003"
     }
   ],

@@ -47,32 +47,32 @@
   "examples": [
     {
       "description": "Checking membership of numeric vectors",
-      "input": "A = [5 7 2 7];\nB = [7 9 5];\n[tf, loc] = ismember(A, B);",
+      "input": "A = [5 7 2 7];\nB = [7 9 5];\n[tf, loc] = ismember(A, B)",
       "output": "tf =\n     1     1     0     1\nloc =\n     3     1     0     1"
     },
     {
       "description": "Finding row membership in a matrix",
-      "input": "A = [1 2; 3 4; 1 2];\nB = [3 4; 5 6; 1 2];\n[tf, loc] = ismember(A, B, 'rows');",
+      "input": "A = [1 2; 3 4; 1 2];\nB = [3 4; 5 6; 1 2];\n[tf, loc] = ismember(A, B, 'rows')",
       "output": "tf =\n     1\n     1\n     1\nloc =\n     3\n     1\n     3"
     },
     {
       "description": "Locating values and retrieving the index",
-      "input": "values = [10 20 30];\nset = [30 10 40];\n[tf, loc] = ismember(values, set);",
+      "input": "values = [10 20 30];\nset = [30 10 40];\n[tf, loc] = ismember(values, set)",
       "output": "tf =\n     1     0     1\nloc =\n     2     0     1"
     },
     {
       "description": "Testing characters against a set",
-      "input": "chars = ['r','u'; 'n','m'];\nset = ['m','a'; 'r','u'];\n[tf, loc] = ismember(chars, set);",
+      "input": "chars = ['r','u'; 'n','m'];\nset = ['m','a'; 'r','u'];\n[tf, loc] = ismember(chars, set)",
       "output": "tf =\n     1     1\n     0     0\nloc =\n     3     1\n     0     0"
     },
     {
       "description": "Working with string arrays",
-      "input": "A = [\"apple\" \"pear\" \"banana\"];\nB = [\"pear\" \"orange\" \"apple\"];\n[tf, loc] = ismember(A, B);",
+      "input": "A = [\"apple\" \"pear\" \"banana\"];\nB = [\"pear\" \"orange\" \"apple\"];\n[tf, loc] = ismember(A, B)",
       "output": "tf =\n  1\u00d73 logical array\n   1   1   0\nloc =\n  1\u00d73 double\n   3   1   0"
     },
     {
       "description": "Using `ismember` with `gpuArray` inputs",
-      "input": "G = gpuArray([1 4 2 4]);\nH = gpuArray([4 5]);\n[tf, loc] = ismember(G, H);",
+      "input": "G = gpuArray([1 4 2 4]);\nH = gpuArray([4 5]);\n[tf, loc] = ismember(G, H)",
       "output": "tf =\n     0     1     0     1\nloc =\n     0     1     0     1"
     }
   ],

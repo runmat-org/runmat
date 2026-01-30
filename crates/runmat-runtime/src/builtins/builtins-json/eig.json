@@ -44,16 +44,16 @@
   "examples": [
     {
       "description": "Computing Eigenvalues of a 2x2 Matrix",
-      "input": "A = [2 1; 0 3];\nd = eig(A);",
+      "input": "A = [2 1; 0 3];\nd = eig(A)",
       "output": "d = [2; 3];"
     },
     {
       "description": "Diagonalizing a Matrix with Two Outputs",
-      "input": "A = [0 1; -2 -3];\n[V,D] = eig(A);\nrecon = V * D / V;"
+      "input": "A = [0 1; -2 -3];\n[V,D] = eig(A);\nrecon = V * D / V"
     },
     {
       "description": "Retrieving Left Eigenvectors with Three Outputs",
-      "input": "A = [4 2; 1 3];\n[V,D,W] = eig(A);\ncheck = W' * A - D * W';"
+      "input": "A = [4 2; 1 3];\n[V,D,W] = eig(A);\ncheck = W' * A - D * W'"
     },
     {
       "description": "Eigenvalues of a Complex-Valued Matrix",
@@ -61,15 +61,15 @@
     },
     {
       "description": "Eigenvalues of a Diagonal Matrix",
-      "input": "A = diag([10, -2, 7]);\nd = eig(A);"
+      "input": "A = diag([10, -2, 7]);\nd = eig(A)"
     },
     {
       "description": "Handling Repeated Eigenvalues",
-      "input": "A = [3 1 0; 0 3 0; 0 0 5];\nd = eig(A);"
+      "input": "A = [3 1 0; 0 3 0; 0 0 5];\nd = eig(A)"
     },
     {
       "description": "Using the 'nobalance' Option",
-      "input": "A = [1e6 1; 0 1e-6];\nd_balanced = eig(A);\nd_nobalance = eig(A, 'nobalance');"
+      "input": "A = [1e6 1; 0 1e-6];\nd_balanced = eig(A);\nd_nobalance = eig(A, 'nobalance')"
     },
     {
       "description": "Returning Eigenvalues as a Vector with Two Outputs",

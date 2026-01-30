@@ -42,32 +42,32 @@
   "examples": [
     {
       "description": "Extract the real part of a complex scalar",
-      "input": "z = 3 + 4i;\nr = real(z);",
+      "input": "z = 3 + 4i;\nr = real(z)",
       "output": "r = 3;"
     },
     {
       "description": "Take the real part of a complex matrix",
-      "input": "Z = [1+2i, 4-3i; -5+0i, 7+8i];\nR = real(Z);",
+      "input": "Z = [1+2i, 4-3i; -5+0i, 7+8i];\nR = real(Z)",
       "output": "R =\n     1     4\n    -5     7"
     },
     {
       "description": "Confirm that real inputs remain unchanged",
-      "input": "data = [-2.5 0 9.75];\nresult = real(data);",
+      "input": "data = [-2.5 0 9.75];\nresult = real(data)",
       "output": "result = [-2.5 0 9.75];"
     },
     {
       "description": "Convert logical masks to doubles",
-      "input": "mask = logical([0 1 0; 1 1 0]);\nnumeric = real(mask);",
+      "input": "mask = logical([0 1 0; 1 1 0]);\nnumeric = real(mask)",
       "output": "numeric =\n     0     1     0\n     1     1     0"
     },
     {
       "description": "Convert characters to numeric codes",
-      "input": "chars = 'RunMat';\ncodes = real(chars);",
+      "input": "chars = 'RunMat';\ncodes = real(chars)",
       "output": "codes = [82 117 110 77 97 116];"
     },
     {
       "description": "Keep GPU tensors device-resident when possible",
-      "input": "G = rand(4096, 512, \"gpuArray\");\nR = real(G);"
+      "input": "G = rand(4096, 512, \"gpuArray\");\nR = real(G)"
     }
   ],
   "faqs": [

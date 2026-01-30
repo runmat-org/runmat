@@ -41,32 +41,32 @@
   "examples": [
     {
       "description": "Convert a string scalar to uppercase",
-      "input": "txt = \"RunMat\";\nresult = upper(txt);",
+      "input": "txt = \"RunMat\";\nresult = upper(txt)",
       "output": "result = \"RUNMAT\""
     },
     {
       "description": "Uppercase each element of a string array",
-      "input": "labels = [\"north\" \"South\"; \"East\" \"west\"];\nuppered = upper(labels);",
+      "input": "labels = [\"north\" \"South\"; \"East\" \"west\"];\nuppered = upper(labels)",
       "output": "uppered = 2\u00d72 string\n    \"NORTH\"    \"SOUTH\"\n    \"EAST\"     \"WEST\""
     },
     {
       "description": "Uppercase character array rows while preserving shape",
-      "input": "animals = char(\"cat\", \"doge\");\nresult = upper(animals);",
+      "input": "animals = char(\"cat\", \"doge\");\nresult = upper(animals)",
       "output": "result =\n\n  2\u00d74 char array\n\n    'CAT '\n    'DOGE'"
     },
     {
       "description": "Uppercase a cell array of character vectors",
-      "input": "C = {'hello', 'World'};\nout = upper(C);",
+      "input": "C = {'hello', 'World'};\nout = upper(C)",
       "output": "out = 1\u00d72 cell array\n    {'HELLO'}    {'WORLD'}"
     },
     {
       "description": "Keep missing strings as missing",
-      "input": "vals = [\"data\", string(missing), \"gpu\"];\nconverted = upper(vals);",
+      "input": "vals = [\"data\", string(missing), \"gpu\"];\nconverted = upper(vals)",
       "output": "converted = 1\u00d73 string\n    \"DATA\"    <missing>    \"GPU\""
     },
     {
       "description": "Handle text stored on a GPU input",
-      "input": "codes = gpuArray(uint16('runmat'));\ntxt = char(gather(codes));\nresult = upper(txt);",
+      "input": "codes = gpuArray(uint16('runmat'));\ntxt = char(gather(codes));\nresult = upper(txt)",
       "output": "result = 'RUNMAT'"
     }
   ],

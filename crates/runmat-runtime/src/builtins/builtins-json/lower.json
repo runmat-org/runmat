@@ -41,32 +41,32 @@
   "examples": [
     {
       "description": "Convert A String Scalar To Lowercase",
-      "input": "txt = \"RunMat\";\nresult = lower(txt);",
+      "input": "txt = \"RunMat\";\nresult = lower(txt)",
       "output": "result = \"runmat\""
     },
     {
       "description": "Lowercase Each Element Of A String Array",
-      "input": "labels = [\"NORTH\" \"South\"; \"EaSt\" \"WEST\"];\nlowered = lower(labels);",
+      "input": "labels = [\"NORTH\" \"South\"; \"EaSt\" \"WEST\"];\nlowered = lower(labels)",
       "output": "lowered = 2\u00d72 string\n    \"north\"    \"south\"\n    \"east\"     \"west\""
     },
     {
       "description": "Lowercase Character Array Rows While Preserving Shape",
-      "input": "animals = char(\"CAT\", \"DOGE\");\nresult = lower(animals);",
+      "input": "animals = char(\"CAT\", \"DOGE\");\nresult = lower(animals)",
       "output": "result =\n\n  2\u00d74 char array\n\n    'cat '\n    'doge'"
     },
     {
       "description": "Lowercase A Cell Array Of Character Vectors",
-      "input": "C = {'HELLO', 'World'};\nout = lower(C);",
+      "input": "C = {'HELLO', 'World'};\nout = lower(C)",
       "output": "out = 1\u00d72 cell array\n    {'hello'}    {'world'}"
     },
     {
       "description": "Keep Missing Strings As Missing",
-      "input": "vals = string([\"DATA\" \"<missing>\" \"GPU\"]);\nconverted = lower(vals);",
+      "input": "vals = string([\"DATA\" \"<missing>\" \"GPU\"]);\nconverted = lower(vals)",
       "output": "converted = 1\u00d73 string\n    \"data\"    <missing>    \"gpu\""
     },
     {
       "description": "Lowercase Text Stored On A GPU Input",
-      "input": "codes = gpuArray(uint16('RUNMAT'));\ntxt = char(gather(codes));\nresult = lower(txt);",
+      "input": "codes = gpuArray(uint16('RUNMAT'));\ntxt = char(gather(codes));\nresult = lower(txt)",
       "output": "result = 'runmat'"
     }
   ],

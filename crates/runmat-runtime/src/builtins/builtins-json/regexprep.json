@@ -42,32 +42,32 @@
   "examples": [
     {
       "description": "Replacing vowels in a character vector",
-      "input": "clean = regexprep('abracadabra', '[aeiou]', 'X');",
+      "input": "clean = regexprep('abracadabra', '[aeiou]', 'X')",
       "output": "clean =\n    'XbrXcXdXbrX'"
     },
     {
       "description": "Applying multiple pattern/replacement pairs sequentially",
-      "input": "result = regexprep(\"Color: red\", {'Color', 'red'}, {'Shade', 'blue'});",
+      "input": "result = regexprep(\"Color: red\", {'Color', 'red'}, {'Shade', 'blue'})",
       "output": "result = \"Shade: blue\""
     },
     {
       "description": "Performing case-insensitive replacements",
-      "input": "names = regexprep([\"Alpha\"; \"beta\"; \"GaMmA\"], 'a', '_', 'ignorecase');",
+      "input": "names = regexprep([\"Alpha\"; \"beta\"; \"GaMmA\"], 'a', '_', 'ignorecase')",
       "output": "names =\n  3\u00d71 string array\n    \"_lph_\"\n    \"bet_\"\n    \"G__mM_\""
     },
     {
       "description": "Preserving case of the original match",
-      "input": "words = regexprep('MATLAB and matlab', 'matlab', 'runmat', 'preservecase');",
+      "input": "words = regexprep('MATLAB and matlab', 'matlab', 'runmat', 'preservecase')",
       "output": "words =\n    'RUNMAT and runmat'"
     },
     {
       "description": "Limiting replacements to the first match with `'once'`",
-      "input": "out = regexprep(\"abababa\", 'ba', 'XY', 'once');",
+      "input": "out = regexprep(\"abababa\", 'ba', 'XY', 'once')",
       "output": "out = \"aXYbaba\""
     },
     {
       "description": "Using element-wise patterns for a string array",
-      "input": "expr = [\"foo\", \"bar\"];\npat = [\"f\", \"ar\"];\nrep = [\"F\", \"AR\"];\nexact = regexprep(expr, pat, rep);",
+      "input": "expr = [\"foo\", \"bar\"];\npat = [\"f\", \"ar\"];\nrep = [\"F\", \"AR\"];\nexact = regexprep(expr, pat, rep)",
       "output": "exact = 1\u00d72 string\n    \"Foo\"    \"bAR\""
     }
   ],

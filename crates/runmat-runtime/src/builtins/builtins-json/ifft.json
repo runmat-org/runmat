@@ -46,24 +46,24 @@
   "examples": [
     {
       "description": "Reconstructing a time-domain signal from FFT bins",
-      "input": "Y = [10  -2+2i  -2  -2-2i];\nx = ifft(Y);",
+      "input": "Y = [10  -2+2i  -2  -2-2i];\nx = ifft(Y)",
       "output": "x =\n  Columns 1 through 4\n       1     2     3     4"
     },
     {
       "description": "Computing `ifft` along a specific dimension",
-      "input": "F = [10  14  18;\n     -3+3i  -3+3i  -3+3i];\nX = ifft(F, [], 1);"
+      "input": "F = [10  14  18;\n     -3+3i  -3+3i  -3+3i];\nX = ifft(F, [], 1)"
     },
     {
       "description": "Zero-padding the inverse transform",
-      "input": "F = [4 0 0 0];\nx = ifft(F, 8);"
+      "input": "F = [4 0 0 0];\nx = ifft(F, 8)"
     },
     {
       "description": "Enforcing a real result with `'symmetric'`",
-      "input": "F = fft([1 2 3 4]);\nx = ifft(F, 'symmetric');"
+      "input": "F = fft([1 2 3 4]);\nx = ifft(F, 'symmetric')"
     },
     {
       "description": "Running `ifft` on `gpuArray` inputs",
-      "input": "G = gpuArray(fft([1 0 0 0]));\nX = ifft(G);\nresult = gather(X);"
+      "input": "G = gpuArray(fft([1 0 0 0]));\nX = ifft(G);\nresult = gather(X)"
     }
   ],
   "faqs": [

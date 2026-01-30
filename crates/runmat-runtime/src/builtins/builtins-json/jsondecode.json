@@ -53,17 +53,17 @@
   "examples": [
     {
       "description": "Parsing a scalar number",
-      "input": "value = jsondecode(\"42\");",
+      "input": "value = jsondecode(\"42\")",
       "output": "value = 42"
     },
     {
       "description": "Decoding a matrix of doubles",
-      "input": "text = \"[[1,2,3],[4,5,6]]\";\nmatrix = jsondecode(text);",
+      "input": "text = \"[[1,2,3],[4,5,6]]\";\nmatrix = jsondecode(text)",
       "output": "matrix =\n     1     2     3\n     4     5     6"
     },
     {
       "description": "Converting a JSON object into a struct",
-      "input": "person = jsondecode('{\"name\":\"Ada\",\"age\":37}');\ndisp(person.name);\ndisp(person.age);",
+      "input": "person = jsondecode('{\"name\":\"Ada\",\"age\":37}');\ndisp(person.name);\ndisp(person.age)",
       "output": "Ada\n    37"
     },
     {
@@ -73,7 +73,7 @@
     },
     {
       "description": "Handling heterogeneous arrays with cell arrays",
-      "input": "text = '[\"RunMat\", 42, true]';\ndata = jsondecode(text);",
+      "input": "text = '[\"RunMat\", 42, true]';\ndata = jsondecode(text)",
       "output": "data =\n  1x3 cell array\n    {\"RunMat\"}    {[42]}    {[1]}"
     },
     {

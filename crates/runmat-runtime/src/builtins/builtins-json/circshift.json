@@ -45,12 +45,12 @@
   "examples": [
     {
       "description": "Shifting matrix rows downward by one location",
-      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nB = circshift(A, 1);",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nB = circshift(A, 1)",
       "output": "B =\n     7     8     9\n     1     2     3\n     4     5     6"
     },
     {
       "description": "Shifting columns left by two positions",
-      "input": "A = reshape(1:12, [3 4]);\nC = circshift(A, [0 -2]);",
+      "input": "A = reshape(1:12, [3 4]);\nC = circshift(A, [0 -2])",
       "output": "C =\n     7    10     1     4\n     8    11     2     5\n     9    12     3     6"
     },
     {
@@ -60,12 +60,12 @@
     },
     {
       "description": "Shifting along specific dimensions using the `dims` argument",
-      "input": "A = reshape(1:12, [3 4]);\nV = circshift(A, [2 -1], [1 2]);",
+      "input": "A = reshape(1:12, [3 4]);\nV = circshift(A, [2 -1], [1 2])",
       "output": "V =\n     6     7     8     5\n     9    10    11    12\n     3     4     1     2"
     },
     {
       "description": "Rotating a character matrix to cycle through rows and columns",
-      "input": "C = ['r','u','n'; 'm','a','t'];\nR = circshift(C, [0 1]);",
+      "input": "C = ['r','u','n'; 'm','a','t'];\nR = circshift(C, [0 1])",
       "output": "R =\n    'nru'\n    'tma'"
     },
     {

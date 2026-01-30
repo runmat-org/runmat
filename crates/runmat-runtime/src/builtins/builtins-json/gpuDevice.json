@@ -31,11 +31,11 @@
     "integration": "tests::gpu::gpu_device_returns_struct",
     "wgpu": "builtins::acceleration::gpu::gpudevice::tests::gpu_device_wgpu_reports_metadata"
   },
-  "description": "`info = gpuDevice()` queries the active accelerator provider and returns a MATLAB struct that describes the GPU (or GPU-like backend) that RunMat is currently using. The struct mirrors MathWorks MATLAB's `gpuDevice` metadata, exposing identifiers, vendor information, memory hints, and precision support so you can adapt algorithms at runtime.\n\nThe returned struct contains a subset of these fields (providers may omit ones they cannot populate):\n\n- `device_id` — zero-based identifier reported by the provider. - `index` — MATLAB-style one-based index derived from `device_id`. - `name` — human-readable adapter name. - `vendor` — provider-reported vendor or implementation name. - `backend` — backend identifier such as `inprocess` or `Vulkan` (optional). - `memory_bytes` — total device memory in bytes when known (optional). - `precision` — string describing the scalar precision used for kernels (`\"double\"` or `\"single\"`). - `supports_double` — logical flag that is `true` when double precision kernels are available.\n\nThe builtin raises `gpuDevice: no acceleration provider registered` when no provider is active.",
+  "description": "`info = gpuDevice()` queries the active accelerator provider and returns a MATLAB struct that describes the GPU (or GPU-like backend) that RunMat is currently using. The struct mirrors MathWorks MATLAB's `gpuDevice` metadata, exposing identifiers, vendor information, memory hints, and precision support so you can adapt algorithms at runtime.\n\nThe returned struct contains a subset of these fields (providers may omit ones they cannot populate):\n\n- `device_id` \u2014 zero-based identifier reported by the provider. - `index` \u2014 MATLAB-style one-based index derived from `device_id`. - `name` \u2014 human-readable adapter name. - `vendor` \u2014 provider-reported vendor or implementation name. - `backend` \u2014 backend identifier such as `inprocess` or `Vulkan` (optional). - `memory_bytes` \u2014 total device memory in bytes when known (optional). - `precision` \u2014 string describing the scalar precision used for kernels (`\"double\"` or `\"single\"`). - `supports_double` \u2014 logical flag that is `true` when double precision kernels are available.\n\nThe builtin raises `gpuDevice: no acceleration provider registered` when no provider is active.",
   "behaviors": [
     "Requires an acceleration provider that implements RunMat Accelerate's `AccelProvider` trait.",
     "Returns a struct so you can access fields with dot notation: `gpuDevice().name`.",
-    "Does not mutate GPU state or enqueue kernels—it is safe to call frequently.",
+    "Does not mutate GPU state or enqueue kernels\u2014it is safe to call frequently.",
     "Accepts a scalar device index; `gpuDevice(1)` returns the active provider, while any other index raises the MATLAB-style error `gpuDevice: GPU device with index N not available`.",
     "Requests to reset the provider using `gpuDevice('reset')` or `gpuDevice([])` currently raise `gpuDevice: reset is not supported by the active provider`.",
     "Hooks into `gpuInfo` so the string-form summary stays in sync with the struct fields."
@@ -43,12 +43,12 @@
   "examples": [
     {
       "description": "Inspecting the active GPU provider",
-      "input": "info = gpuDevice();\ndisp(info.name);",
+      "input": "info = gpuDevice();\ndisp(info.name)",
       "output": "InProcess"
     },
     {
       "description": "Displaying vendor and backend metadata",
-      "input": "info = gpuDevice();\nfprintf(\"Vendor: %s (backend: %s)\\n\", info.vendor, info.backend);",
+      "input": "info = gpuDevice();\nfprintf(\"Vendor: %s (backend: %s)\\n\", info.vendor, info.backend)",
       "output": "Vendor: RunMat (backend: inprocess)"
     },
     {
@@ -57,7 +57,7 @@
     },
     {
       "description": "Formatting a user-facing status message",
-      "input": "summary = gpuInfo();\ndisp(\"Active GPU summary:\");\ndisp(summary);",
+      "input": "summary = gpuInfo();\ndisp(\"Active GPU summary:\");\ndisp(summary)",
       "output": "Active GPU summary:\nGPU[device_id=0, index=1, name='InProcess', vendor='RunMat', backend='inprocess', precision='double', supports_double=true]"
     },
     {

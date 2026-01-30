@@ -45,27 +45,27 @@
   "examples": [
     {
       "description": "Finding linear indices of nonzero elements",
-      "input": "A = [0 4 0; 7 0 9];\nk = find(A);",
+      "input": "A = [0 4 0; 7 0 9];\nk = find(A)",
       "output": "k =\n     2\n     4\n     6"
     },
     {
       "description": "Limiting the number of matches",
-      "input": "A = [0 3 5 0 8];\nfirst_two = find(A, 2);",
+      "input": "A = [0 3 5 0 8];\nfirst_two = find(A, 2)",
       "output": "first_two =\n     2\n     3"
     },
     {
       "description": "Locating the last nonzero element",
-      "input": "A = [1 0 0 6 0 2];\nlast_index = find(A, 'last');",
+      "input": "A = [1 0 0 6 0 2];\nlast_index = find(A, 'last')",
       "output": "last_index =\n     6"
     },
     {
       "description": "Retrieving row and column subscripts",
-      "input": "A = [0 4 0; 7 0 9];\n[rows, cols] = find(A);",
+      "input": "A = [0 4 0; 7 0 9];\n[rows, cols] = find(A)",
       "output": "rows =\n     2\n     1\n     2\n\ncols =\n     1\n     2\n     3"
     },
     {
       "description": "Capturing values alongside indices (including complex inputs)",
-      "input": "Z = [0 1+2i; 0 0; 3-4i 0];\n[r, c, v] = find(Z);",
+      "input": "Z = [0 1+2i; 0 0; 3-4i 0];\n[r, c, v] = find(Z)",
       "output": "r =\n     1\n     3\n\nc =\n     1\n     1\n\nv =\n   1.0000 + 2.0000i\n   3.0000 - 4.0000i"
     }
   ],

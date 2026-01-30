@@ -51,12 +51,12 @@
     },
     {
       "description": "Preserving borders with replicate padding",
-      "input": "I = magic(3);\nH = ones(3);\nJ = imfilter(I, H, 'replicate');",
+      "input": "I = magic(3);\nH = ones(3);\nJ = imfilter(I, H, 'replicate')",
       "output": "J =\n    45    45    45\n    45    45    45\n    45    45    45"
     },
     {
       "description": "Computing the full convolution result",
-      "input": "I = [1 2; 3 4];\nH = [1 2; 3 4];\nJ = imfilter(I, H, 'full');",
+      "input": "I = [1 2; 3 4];\nH = [1 2; 3 4];\nJ = imfilter(I, H, 'full')",
       "output": "J =\n     0     0     0\n     0     4    11\n     0    14    30"
     },
     {
@@ -66,7 +66,7 @@
     },
     {
       "description": "Wrapping edges with circular padding",
-      "input": "I = [1 2; 3 4];\nH = [0 1; 1 0];\nJ = imfilter(I, H, 'circular');",
+      "input": "I = [1 2; 3 4];\nH = [0 1; 1 0];\nJ = imfilter(I, H, 'circular')",
       "output": "J =\n     5     5\n     5     5"
     }
   ],

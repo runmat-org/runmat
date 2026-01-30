@@ -45,32 +45,32 @@
   "examples": [
     {
       "description": "Drawing a single standard normal variate",
-      "input": "rng(0);\nz = randn();",
+      "input": "rng(0);\nz = randn()",
       "output": "z = 1.8179"
     },
     {
       "description": "Creating a matrix of Gaussian noise",
-      "input": "rng(0);\nE = randn(2, 3);",
+      "input": "rng(0);\nE = randn(2, 3)",
       "output": "E =\n    1.8179    0.3895    0.9838\n   -1.1645    0.4175    0.1386"
     },
     {
       "description": "Specifying dimensions with a size vector",
-      "input": "rng(0);\nshape = [2 2 2];\nT = randn(shape);",
+      "input": "rng(0);\nshape = [2 2 2];\nT = randn(shape)",
       "output": "T(:, :, 1) =\n    1.8179    0.3895\n   -1.1645    0.4175\n\nT(:, :, 2) =\n    0.9838   -1.1226\n    0.1386    2.7430"
     },
     {
       "description": "Matching an existing `gpuArray` prototype",
-      "input": "rng(0);\nG = gpuArray.zeros(512, 512);\nnoise = randn('like', G);\nstats = [mean(gather(noise(:))) std(gather(noise(:)))];",
+      "input": "rng(0);\nG = gpuArray.zeros(512, 512);\nnoise = randn('like', G);\nstats = [mean(gather(noise(:))) std(gather(noise(:)))]",
       "output": "size(noise)\nans =\n       512   512\n\nstats =\n   -0.0009    0.9986"
     },
     {
       "description": "Generating complex Gaussian samples",
-      "input": "rng(0);\nz = randn(3, 1, 'like', 1 + 1i);",
+      "input": "rng(0);\nz = randn(3, 1, 'like', 1 + 1i)",
       "output": "z =\n   1.8179 - 1.1645i\n   0.3895 + 0.4175i\n   0.9838 + 0.1386i"
     },
     {
       "description": "Producing reproducible noise for Monte Carlo tests",
-      "input": "rng(0);\nsamples = randn(1, 5);",
+      "input": "rng(0);\nsamples = randn(1, 5)",
       "output": "samples = [1.8179  -1.1645   0.3895   0.4175   0.9838]"
     }
   ],

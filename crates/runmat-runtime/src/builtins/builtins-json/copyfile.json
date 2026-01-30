@@ -47,32 +47,32 @@
   "examples": [
     {
       "description": "Copy a file into a new name in the same folder",
-      "input": "fid = fopen(\"report.txt\", \"w\"); fclose(fid);\nstatus = copyfile(\"report.txt\", \"report_backup.txt\");",
+      "input": "fid = fopen(\"report.txt\", \"w\"); fclose(fid);\nstatus = copyfile(\"report.txt\", \"report_backup.txt\")",
       "output": "status =\n     1"
     },
     {
       "description": "Copy a file into an existing destination folder",
-      "input": "mkdir(\"archive\");\nfid = fopen(\"summary.txt\", \"w\"); fclose(fid);\nstatus = copyfile(\"summary.txt\", \"archive\");",
+      "input": "mkdir(\"archive\");\nfid = fopen(\"summary.txt\", \"w\"); fclose(fid);\nstatus = copyfile(\"summary.txt\", \"archive\")",
       "output": "status =\n     1"
     },
     {
       "description": "Force overwrite an existing destination file",
-      "input": "fid = fopen(\"draft.txt\", \"w\"); fclose(fid);\nfid = fopen(\"final.txt\", \"w\"); fclose(fid);\n[status, message, messageID] = copyfile(\"draft.txt\", \"final.txt\", \"f\");",
+      "input": "fid = fopen(\"draft.txt\", \"w\"); fclose(fid);\nfid = fopen(\"final.txt\", \"w\"); fclose(fid);\n[status, message, messageID] = copyfile(\"draft.txt\", \"final.txt\", \"f\");\nstatus\nmessage\nmessageID",
       "output": "status =\n     1\nmessage =\n\nmessageID ="
     },
     {
       "description": "Copy an entire folder tree",
-      "input": "mkdir(\"data/raw\");\nfid = fopen(fullfile(\"data\", \"raw\", \"sample.dat\"), \"w\"); fclose(fid);\nstatus = copyfile(\"data\", \"data_copy\");",
+      "input": "mkdir(\"data/raw\");\nfid = fopen(fullfile(\"data\", \"raw\", \"sample.dat\"), \"w\"); fclose(fid);\nstatus = copyfile(\"data\", \"data_copy\");\nstatus",
       "output": "status =\n     1"
     },
     {
       "description": "Copy multiple files with a wildcard pattern",
-      "input": "fid = fopen(\"a.log\", \"w\"); fclose(fid);\nfid = fopen(\"b.log\", \"w\"); fclose(fid);\nmkdir(\"logs\");\nstatus = copyfile(\"*.log\", \"logs\");",
+      "input": "fid = fopen(\"a.log\", \"w\"); fclose(fid);\nfid = fopen(\"b.log\", \"w\"); fclose(fid);\nmkdir(\"logs\");\nstatus = copyfile(\"*.log\", \"logs\")",
       "output": "status =\n     1"
     },
     {
       "description": "Handle missing sources gracefully",
-      "input": "[status, message, messageID] = copyfile(\"missing.txt\", \"dest.txt\");",
+      "input": "[status, message, messageID] = copyfile(\"missing.txt\", \"dest.txt\");\nstatus\nmessage\nmessageID",
       "output": "status =\n     0\nmessage =\nSource \"missing.txt\" does not exist.\nmessageID =\nMATLAB:COPYFILE:FileDoesNotExist"
     }
   ],

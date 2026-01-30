@@ -42,37 +42,37 @@
   "examples": [
     {
       "description": "Checking if a string scalar is recognised",
-      "input": "tf = isstring(\"RunMat\");",
+      "input": "tf = isstring(\"RunMat\")",
       "output": "tf = logical(1)"
     },
     {
       "description": "Detecting string arrays with multiple elements",
-      "input": "values = [\"alpha\", \"beta\", \"gamma\"];\ntf = isstring(values);",
+      "input": "values = [\"alpha\", \"beta\", \"gamma\"];\ntf = isstring(values)",
       "output": "tf = logical(1)"
     },
     {
       "description": "Distinguishing strings from character vectors",
-      "input": "tf_string = isstring(\"hello\");\ntf_char   = isstring('hello');",
+      "input": "tf_string = isstring(\"hello\");\ntf_char   = isstring('hello')",
       "output": "tf_string = logical(1)\ntf_char   = logical(0)"
     },
     {
       "description": "Confirming that empty string arrays are still strings",
-      "input": "emptyStrs = strings(0, 2);\ntf = isstring(emptyStrs);",
+      "input": "emptyStrs = strings(0, 2);\ntf = isstring(emptyStrs)",
       "output": "tf = logical(1)"
     },
     {
       "description": "Recognising that numeric and logical arrays are not strings",
-      "input": "numbers = [1 2 3];\nmask = true(1, 3);\ntf_numbers = isstring(numbers);\ntf_mask = isstring(mask);",
+      "input": "numbers = [1 2 3];\nmask = true(1, 3);\ntf_numbers = isstring(numbers);\ntf_mask = isstring(mask)",
       "output": "tf_numbers = logical(0)\ntf_mask = logical(0)"
     },
     {
       "description": "Validating cell arrays of character vectors",
-      "input": "cells = {'a', 'b', 'c'};\ntf = isstring(cells);",
+      "input": "cells = {'a', 'b', 'c'};\ntf = isstring(cells)",
       "output": "tf = logical(0)"
     },
     {
       "description": "Inspecting gpuArray inputs without transfers",
-      "input": "G = gpuArray(ones(2, 2));\ntf = isstring(G);",
+      "input": "G = gpuArray(ones(2, 2));\ntf = isstring(G)",
       "output": "tf = logical(0)"
     },
     {

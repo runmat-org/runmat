@@ -331,6 +331,7 @@ pub fn parse_with_options(input: &str, options: ParserOptions) -> Result<Program
         pos: 0,
         input: input.to_string(),
         options,
+        in_matrix_expr: false,
     };
     parser.parse_program()
 }
@@ -376,6 +377,7 @@ struct Parser {
     pos: usize,
     input: String,
     options: ParserOptions,
+    in_matrix_expr: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -1058,6 +1060,31 @@ impl Parser {
     fn parse_add_sub(&mut self) -> Result<Expr, String> {
         let mut node = self.parse_mul_div()?;
         loop {
+            if self.in_matrix_expr
+                && matches!(self.peek_token(), Some(Token::Plus | Token::Minus))
+                && self.pos > 0
+                && !self.tokens_adjacent(self.pos - 1, self.pos)
+            {
+                let rhs_index = self.pos + 1;
+                let rhs_is_imag_literal = self
+                    .tokens
+                    .get(rhs_index)
+                    .map(|info| matches!(info.token, Token::Integer | Token::Float))
+                    .unwrap_or(false)
+                    && self
+                        .tokens
+                        .get(rhs_index + 1)
+                        .map(|info| {
+                            matches!(info.token, Token::Ident)
+                                && (info.lexeme.eq_ignore_ascii_case("i")
+                                    || info.lexeme.eq_ignore_ascii_case("j"))
+                                && self.tokens_adjacent(rhs_index, rhs_index + 1)
+                        })
+                        .unwrap_or(false);
+                if !rhs_is_imag_literal {
+                    break;
+                }
+            }
             let op = if self.consume(&Token::Plus) {
                 Some(BinOp::Add)
             } else if self.consume(&Token::Minus) {
@@ -1421,14 +1448,14 @@ impl Parser {
             }
             let mut row = Vec::new();
             // First element in the row
-            row.push(self.parse_expr()?);
+            row.push(self.parse_matrix_expr()?);
             // Accept either comma-separated or whitespace-separated elements until ';' or ']'
             loop {
                 if self.consume(&Token::Newline) {
                     continue;
                 }
                 if self.consume(&Token::Comma) {
-                    row.push(self.parse_expr()?);
+                    row.push(self.parse_matrix_expr()?);
                     continue;
                 }
                 // If next token ends the row/matrix, stop
@@ -1456,7 +1483,7 @@ impl Parser {
                         | Token::True
                         | Token::False,
                     ) => {
-                        row.push(self.parse_expr()?);
+                        row.push(self.parse_matrix_expr()?);
                     }
                     _ => {
                         break;
@@ -1473,6 +1500,14 @@ impl Parser {
         }
         self.skip_newlines();
         Ok(Expr::Tensor(rows, Span::default()))
+    }
+
+    fn parse_matrix_expr(&mut self) -> Result<Expr, String> {
+        let prior = self.in_matrix_expr;
+        self.in_matrix_expr = true;
+        let expr = self.parse_expr().map_err(|e| e.message);
+        self.in_matrix_expr = prior;
+        expr
     }
 
     fn parse_if(&mut self) -> Result<Stmt, String> {

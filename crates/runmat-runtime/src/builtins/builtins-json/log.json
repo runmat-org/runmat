@@ -44,32 +44,32 @@
   "examples": [
     {
       "description": "Natural log of a positive scalar",
-      "input": "y = log(exp(3));",
+      "input": "y = log(exp(3))",
       "output": "y = 3;"
     },
     {
       "description": "Understanding log of zero",
-      "input": "value = log(0);",
+      "input": "value = log(0)",
       "output": "value = -Inf;"
     },
     {
       "description": "Taking the logarithm of negative values",
-      "input": "data = [-1 -2 -4];\nresult = log(data);",
+      "input": "data = [-1 -2 -4];\nresult = log(data)",
       "output": "result = [0.0000 + 3.1416i, 0.6931 + 3.1416i, 1.3863 + 3.1416i];"
     },
     {
       "description": "Applying log to complex numbers",
-      "input": "z = [1+2i, -1+pi*i];\nw = log(z);",
+      "input": "z = [1+2i, -1+pi*i];\nw = log(z)",
       "output": "w = [0.8047 + 1.1071i, 1.1447 + 1.2626i];"
     },
     {
       "description": "Element-wise log on a matrix living on the GPU",
-      "input": "G = gpuArray([1 2; 4 8]);\nout = log(G);\nresult = gather(out);",
+      "input": "G = gpuArray([1 2; 4 8]);\nout = log(G);\nresult = gather(out)",
       "output": "result = [0.0000 0.6931; 1.3863 2.0794];"
     },
     {
       "description": "Logging character codes from a string",
-      "input": "C = 'ABC';\nvalues = log(C);",
+      "input": "C = 'ABC';\nvalues = log(C)",
       "output": "values = [4.1744 4.1897 4.2047];"
     }
   ],

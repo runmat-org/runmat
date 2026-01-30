@@ -44,32 +44,32 @@
   "examples": [
     {
       "description": "How to check if a complex matrix is Hermitian",
-      "input": "A = [2   1-3i; 1+3i   5];\ntf = ishermitian(A);",
+      "input": "A = [2   1-3i; 1+3i   5];\ntf = ishermitian(A)",
       "output": "tf = logical\n   1"
     },
     {
       "description": "How to determine that a real matrix is Hermitian",
-      "input": "B = [4 2 2; 2 7 3; 2 3 9];\ntf = ishermitian(B);",
+      "input": "B = [4 2 2; 2 7 3; 2 3 9];\ntf = ishermitian(B)",
       "output": "tf = logical\n   1"
     },
     {
       "description": "How to spot a matrix that is not Hermitian",
-      "input": "C = [1 2+i; 2-i 1+0.02i];\ntf = ishermitian(C);",
+      "input": "C = [1 2+i; 2-i 1+0.02i];\ntf = ishermitian(C)",
       "output": "tf = logical\n   0"
     },
     {
       "description": "How to allow numerical noise with a tolerance",
-      "input": "D = [1 1+1e-12; 1-1e-12 1];\ntf = ishermitian(D, 1e-9);",
+      "input": "D = [1 1+1e-12; 1-1e-12 1];\ntf = ishermitian(D, 1e-9)",
       "output": "tf = logical\n   1"
     },
     {
       "description": "How to test for skew-Hermitian structure",
-      "input": "S = [0 2+3i; -2+3i 0];\ntf = ishermitian(S, 'skew');",
+      "input": "S = [0 2+3i; -2+3i 0];\ntf = ishermitian(S, 'skew')",
       "output": "tf = logical\n   1"
     },
     {
       "description": "How to inspect a GPU-resident matrix",
-      "input": "G = gpuArray([3 4-2i; 4+2i 6]);\ntf = ishermitian(G);",
+      "input": "G = gpuArray([3 4-2i; 4+2i 6]);\ntf = ishermitian(G)",
       "output": "tf = logical\n   1"
     }
   ],

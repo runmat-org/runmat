@@ -43,27 +43,27 @@
   "examples": [
     {
       "description": "Check the class of a numeric scalar",
-      "input": "c = class(42);",
+      "input": "c = class(42)",
       "output": "c = \"double\""
     },
     {
       "description": "Inspect the class of a string array",
-      "input": "names = [\"Ada\", \"Grace\", \"Edsger\"];\nclass_name = class(names);",
+      "input": "names = [\"Ada\", \"Grace\", \"Edsger\"];\nclass_name = class(names)",
       "output": "class_name = \"string\""
     },
     {
       "description": "Determine whether a cell array stays typed as a cell",
-      "input": "cells = {1, \"two\", 3};\ncell_class = class(cells);",
+      "input": "cells = {1, \"two\", 3};\ncell_class = class(cells)",
       "output": "cell_class = \"cell\""
     },
     {
       "description": "Detect the class of gpuArray data without gathering",
-      "input": "G = gpuArray(rand(4));\ng_class = class(G);",
+      "input": "G = gpuArray(rand(4));\ng_class = class(G)",
       "output": "g_class = \"gpuArray\""
     },
     {
       "description": "Report the class name of a custom object",
-      "input": "P = classref(\"Point\").origin();\npoint_class = class(P);",
+      "input": "P = classref(\"Point\").origin();\npoint_class = class(P)",
       "output": "point_class = \"Point\""
     }
   ],

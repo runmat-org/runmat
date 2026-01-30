@@ -43,31 +43,31 @@
   "examples": [
     {
       "description": "Reshaping a row vector into a matrix",
-      "input": "A = 1:12;\nB = reshape(A, [3, 4]);",
+      "input": "A = 1:12;\nB = reshape(A, [3, 4])",
       "output": "B =\n    1     4     7    10\n    2     5     8    11\n    3     6     9    12"
     },
     {
       "description": "Using an automatically inferred dimension",
-      "input": "A = 1:18;\nB = reshape(A, 3, []);",
+      "input": "A = 1:18;\nB = reshape(A, 3, [])",
       "output": "size(B)  % => [3 6]"
     },
     {
       "description": "Reshaping into three dimensions",
-      "input": "A = 1:24;\nC = reshape(A, [2, 3, 4]);",
+      "input": "A = 1:24;\nC = reshape(A, [2, 3, 4])",
       "output": "size(C)  % => [2 3 4]"
     },
     {
       "description": "Reshaping logical arrays preserves type",
-      "input": "mask = logical([1 0 1 0 1 0]);\ngrid = reshape(mask, 2, 3);",
+      "input": "mask = logical([1 0 1 0 1 0]);\ngrid = reshape(mask, 2, 3)",
       "output": "grid =\n     1     1     1\n     0     0     0"
     },
     {
       "description": "Reshaping GPU data without gathering",
-      "input": "G = gpuArray(1:1000);\nH = reshape(G, 10, 100);"
+      "input": "G = gpuArray(1:1000);\nH = reshape(G, 10, 100)"
     },
     {
       "description": "Handling zero-sized dimensions",
-      "input": "E = reshape([], 0, 3);",
+      "input": "E = reshape([], 0, 3)",
       "output": "size(E)  % => [0 3]"
     }
   ],

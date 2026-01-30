@@ -46,28 +46,28 @@
   "examples": [
     {
       "description": "Check if a scalar is NaN",
-      "input": "result = isnan(NaN);",
+      "input": "result = isnan(NaN)",
       "output": "result =\n     1"
     },
     {
       "description": "Create a NaN mask for a numeric matrix",
-      "input": "A = [1 NaN 2; 3 4 NaN];\nmask = isnan(A);",
-      "output": "mask =\n  2×3 logical array\n     0     1     0\n     0     0     1"
+      "input": "A = [1 NaN 2; 3 4 NaN];\nmask = isnan(A)",
+      "output": "mask =\n  2\u00d73 logical array\n     0     1     0\n     0     0     1"
     },
     {
       "description": "Identify NaNs inside a complex array",
-      "input": "Z = [1+2i NaN+0i 3+NaNi];\nmask = isnan(Z);",
-      "output": "mask =\n  1×3 logical array\n     0     1     1"
+      "input": "Z = [1+2i NaN+0i 3+NaNi];\nmask = isnan(Z)",
+      "output": "mask =\n  1\u00d73 logical array\n     0     1     1"
     },
     {
       "description": "Use `isnan` with character data",
-      "input": "chars = ['R' 'u' 'n'];\nmask = isnan(chars);",
-      "output": "mask =\n  1×3 logical array\n     0     0     0"
+      "input": "chars = ['R' 'u' 'n'];\nmask = isnan(chars)",
+      "output": "mask =\n  1\u00d73 logical array\n     0     0     0"
     },
     {
       "description": "Run `isnan` directly on the GPU",
-      "input": "G = gpuArray([1 0/0 3]);\nmask_gpu = isnan(G);\nmask = gather(mask_gpu);",
-      "output": "mask =\n  1×3 logical array\n     0     1     0"
+      "input": "G = gpuArray([1 0/0 3]);\nmask_gpu = isnan(G);\nmask = gather(mask_gpu)",
+      "output": "mask =\n  1\u00d73 logical array\n     0     1     0"
     }
   ],
   "faqs": [

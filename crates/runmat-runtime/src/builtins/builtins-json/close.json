@@ -44,7 +44,7 @@
   "examples": [
     {
       "description": "Close a TCP client after finishing I/O",
-      "input": "client = tcpclient(\"127.0.0.1\", 50000);\nstatus = close(client);",
+      "input": "client = tcpclient(\"127.0.0.1\", 50000);\nstatus = close(client)",
       "output": "status = 1"
     },
     {
@@ -54,12 +54,12 @@
     },
     {
       "description": "Close every open TCP client",
-      "input": "tcpclient(\"localhost\", 40000);\ntcpclient(\"localhost\", 40001);\nstatus = close(\"clients\");",
+      "input": "tcpclient(\"localhost\", 40000);\ntcpclient(\"localhost\", 40001);\nstatus = close(\"clients\")",
       "output": "status = 1"
     },
     {
       "description": "Close all networking resources at once",
-      "input": "client = tcpclient(\"localhost\", 40000);\nsrv = tcpserver(\"localhost\", 0);\nstatus = close(\"all\");",
+      "input": "client = tcpclient(\"localhost\", 40000);\nsrv = tcpserver(\"localhost\", 0);\nstatus = close(\"all\")",
       "output": "status = 1"
     },
     {
@@ -69,7 +69,7 @@
     },
     {
       "description": "Close handles stored in a cell array",
-      "input": "client = tcpclient(\"localhost\", 40000);\nsrv = tcpserver(\"localhost\", 0);\nhandles = {client, srv};\nstatus = close(handles);",
+      "input": "client = tcpclient(\"localhost\", 40000);\nsrv = tcpserver(\"localhost\", 0);\nhandles = {client, srv};\nstatus = close(handles)",
       "output": "status = 1"
     }
   ],

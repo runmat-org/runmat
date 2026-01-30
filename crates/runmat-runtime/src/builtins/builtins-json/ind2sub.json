@@ -44,17 +44,17 @@
   "examples": [
     {
       "description": "Recovering row and column subscripts from a matrix index",
-      "input": "[row, col] = ind2sub([3 4], 8);",
+      "input": "[row, col] = ind2sub([3 4], 8)",
       "output": "row = 2;\ncol = 3;"
     },
     {
       "description": "Extracting multiple matrix indices at once",
-      "input": "idx = [7 8 9];\n[rows, cols] = ind2sub([3 5], idx);",
+      "input": "idx = [7 8 9];\n[rows, cols] = ind2sub([3 5], idx)",
       "output": "rows = [1 2 3];\ncols = [3 3 3];"
     },
     {
       "description": "Converting indices for a 3-D volume",
-      "input": "idx = [3 11];\n[r, c, p] = ind2sub([2 3 4], idx);",
+      "input": "idx = [3 11];\n[r, c, p] = ind2sub([2 3 4], idx)",
       "output": "r = [1 1];\nc = [2 3];\np = [1 2];"
     },
     {
@@ -69,7 +69,7 @@
     },
     {
       "description": "Validating index ranges before reshaping",
-      "input": "idx = 1:numel(A);\n[i, j] = ind2sub(size(A), idx);\nB = accumarray([i(:) j(:)], A(:));"
+      "input": "idx = 1:numel(A);\n[i, j] = ind2sub(size(A), idx);\nB = accumarray([i(:) j(:)], A(:))"
     }
   ],
   "faqs": [

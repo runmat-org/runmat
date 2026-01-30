@@ -301,7 +301,7 @@ fn infer_category(inputs: &[Value]) -> BuiltinResult<CatCategory> {
     if has_string && (has_char || has_cell || has_complex || (has_numeric && !all_logical)) {
         return Err(cat_err("cat: cannot mix string arrays with other classes"));
     }
-    if has_char && (has_cell || has_complex || (has_numeric && !all_logical) || has_string) {
+    if has_char && (has_cell || has_complex || has_string) {
         return Err(cat_err("cat: cannot mix char arrays with other classes"));
     }
     if has_cell && (has_complex || (has_numeric && !all_logical) || has_string || has_char) {
@@ -422,16 +422,36 @@ fn cat_char_arrays(dim_zero: usize, values: Vec<Value>) -> BuiltinResult<Value> 
     }
     let mut arrays = Vec::with_capacity(values.len());
     for value in values {
-        if let Value::CharArray(ca) = value {
-            arrays.push(ca);
-        } else {
-            return Err(cat_err("cat: expected char arrays"));
-        }
+        arrays.push(char_array_from_value(value)?);
     }
     match dim_zero {
         0 => concat_char_rows(arrays),
         _ => concat_char_cols(arrays),
     }
+}
+
+fn char_array_from_value(value: Value) -> BuiltinResult<CharArray> {
+    match value {
+        Value::CharArray(ca) => Ok(ca),
+        Value::Num(n) => char_array_from_f64(n),
+        Value::Int(i) => char_array_from_f64(i.to_f64()),
+        Value::Bool(flag) => char_array_from_f64(if flag { 1.0 } else { 0.0 }),
+        other => Err(cat_err(format!(
+            "cat: expected char arrays or scalar code points, got {other:?}"
+        ))),
+    }
+}
+
+fn char_array_from_f64(value: f64) -> BuiltinResult<CharArray> {
+    if !value.is_finite() || value.fract() != 0.0 {
+        return Err(cat_err("cat: expected integer code point for char concatenation"));
+    }
+    if value < 0.0 || value > u32::MAX as f64 {
+        return Err(cat_err("cat: code point out of range"));
+    }
+    let code = value as u32;
+    let ch = char::from_u32(code).ok_or_else(|| cat_err("cat: invalid code point"))?;
+    CharArray::new(vec![ch], 1, 1).map_err(|e| cat_err(format!("cat: {e}")))
 }
 
 fn concat_char_rows(arrays: Vec<CharArray>) -> BuiltinResult<Value> {

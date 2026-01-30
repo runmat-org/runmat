@@ -42,27 +42,27 @@
   "examples": [
     {
       "description": "Extracting the imaginary part of a complex scalar",
-      "input": "z = 3 + 4i;\nb = imag(z);",
+      "input": "z = 3 + 4i;\nb = imag(z)",
       "output": "b = 4;"
     },
     {
       "description": "Retrieving imaginary components of a complex matrix",
-      "input": "Z = [1+2i 4-3i; -5+0i 7+8i];\nY = imag(Z);",
+      "input": "Z = [1+2i 4-3i; -5+0i 7+8i];\nY = imag(Z)",
       "output": "Y =\n     2    -3\n     0     8"
     },
     {
       "description": "Verifying that real inputs yield zero",
-      "input": "data = [-2.5 0 9.75];\nvalues = imag(data);",
+      "input": "data = [-2.5 0 9.75];\nvalues = imag(data)",
       "output": "values = [0 0 0];"
     },
     {
       "description": "Imaginary part of logical masks",
-      "input": "mask = logical([0 1 0; 1 0 1]);\nzerosOnly = imag(mask);",
+      "input": "mask = logical([0 1 0; 1 0 1]);\nzerosOnly = imag(mask)",
       "output": "zerosOnly =\n     0     0     0\n     0     0     0"
     },
     {
       "description": "Working with GPU-resident tensors",
-      "input": "G = rand(2048, 256, \"gpuArray\");\nres = imag(G);"
+      "input": "G = rand(2048, 256, \"gpuArray\");\nres = imag(G)"
     }
   ],
   "faqs": [

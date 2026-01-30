@@ -55,19 +55,19 @@
     },
     {
       "description": "Sending JSON payloads",
-      "input": "body = struct(\"title\", \"RunMat\", \"stars\", 5);\nopts = struct(\"MediaType\", \"application/json\", \"ContentType\", \"json\");\nresp = webwrite(\"https://api.example.com/projects\", body, opts);"
+      "input": "body = struct(\"title\", \"RunMat\", \"stars\", 5);\nopts = struct(\"MediaType\", \"application/json\", \"ContentType\", \"json\");\nresp = webwrite(\"https://api.example.com/projects\", body, opts)"
     },
     {
       "description": "Uploading plain text",
-      "input": "message = \"Hello from RunMat!\";\nreply = webwrite(\"https://api.example.com/echo\", message, ...\n                 \"MediaType\", \"text/plain\", \"ContentType\", \"text\");"
+      "input": "message = \"Hello from RunMat!\";\nreply = webwrite(\"https://api.example.com/echo\", message, ...\n                 \"MediaType\", \"text/plain\", \"ContentType\", \"text\")"
     },
     {
       "description": "Uploading raw binary data",
-      "input": "bytes = uint8([1 2 3 4 5]);\nwebwrite(\"https://api.example.com/upload\", bytes, ...\n         \"ContentType\", \"binary\", \"MediaType\", \"application/octet-stream\");"
+      "input": "bytes = uint8([1 2 3 4 5]);\nwebwrite(\"https://api.example.com/upload\", bytes, ...\n         \"ContentType\", \"binary\", \"MediaType\", \"application/octet-stream\")"
     },
     {
       "description": "Supplying credentials, custom headers, and query parameters",
-      "input": "headers = struct(\"X-Client\", \"RunMat\", \"Accept\", \"application/json\");\nopts = struct(\"Username\", \"ada\", \"Password\", \"lovelace\", ...\n              \"HeaderFields\", headers, ...\n              \"QueryParameters\", struct(\"verbose\", true));\nprofile = webwrite(\"https://api.example.com/me\", struct(), opts);"
+      "input": "headers = struct(\"X-Client\", \"RunMat\", \"Accept\", \"application/json\");\nopts = struct(\"Username\", \"ada\", \"Password\", \"lovelace\", ...\n              \"HeaderFields\", headers, ...\n              \"QueryParameters\", struct(\"verbose\", true));\nprofile = webwrite(\"https://api.example.com/me\", struct(), opts)"
     }
   ],
   "faqs": [
@@ -85,7 +85,7 @@
     },
     {
       "question": "Can I post binary data?",
-      "answer": "Yes. Provide numeric tensors (`double`, integer, or logical) and set `\"ContentType\",\"binary\"` or `\"MediaType\",\"application/octet-stream\"`. Values must be in the 0–255 range."
+      "answer": "Yes. Provide numeric tensors (`double`, integer, or logical) and set `\"ContentType\",\"binary\"` or `\"MediaType\",\"application/octet-stream\"`. Values must be in the 0\u2013255 range."
     },
     {
       "question": "What controls the response decoding?",

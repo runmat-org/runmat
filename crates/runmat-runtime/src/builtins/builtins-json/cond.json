@@ -46,32 +46,32 @@
   "examples": [
     {
       "description": "Condition number of the identity matrix",
-      "input": "A = eye(3);\nk = cond(A);",
+      "input": "A = eye(3);\nk = cond(A)",
       "output": "k = 1"
     },
     {
       "description": "Diagnosing an ill-conditioned diagonal matrix",
-      "input": "D = diag([1, 1e-8]);\nk = cond(D);",
+      "input": "D = diag([1, 1e-8]);\nk = cond(D)",
       "output": "k = 1.0e+8"
     },
     {
       "description": "Condition number of a rectangular matrix (2-norm)",
-      "input": "A = [1 0; 0 1; 1 1];\nk = cond(A, 2);",
+      "input": "A = [1 0; 0 1; 1 1];\nk = cond(A, 2)",
       "output": "k = 1.7321"
     },
     {
       "description": "Using a different norm specification",
-      "input": "A = [4 -1; 2 3];\nk1 = cond(A, 1);\nkInf = cond(A, Inf);",
+      "input": "A = [4 -1; 2 3];\nk1 = cond(A, 1);\nkInf = cond(A, Inf)",
       "output": "k1   = 2.1429\nkInf = 2.1429"
     },
     {
       "description": "Complex-valued matrices",
-      "input": "A = [1+2i 0; 3i 4-1i];\nk = cond(A);",
+      "input": "A = [1+2i 0; 3i 4-1i];\nk = cond(A)",
       "output": "k = 3.0327"
     },
     {
       "description": "Empty inputs and GPU residency",
-      "input": "G = gpuArray([]);      % Empty 0x0 matrix on the GPU\nk = cond(G);           % Returns 0 and keeps residency when possible\nresult = gather(k);",
+      "input": "G = gpuArray([]);      % Empty 0x0 matrix on the GPU\nk = cond(G);           % Returns 0 and keeps residency when possible\nresult = gather(k)",
       "output": "result = 0"
     }
   ],

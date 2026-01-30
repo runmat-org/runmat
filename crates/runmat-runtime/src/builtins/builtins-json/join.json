@@ -42,37 +42,37 @@
   "examples": [
     {
       "description": "Combine Strings In Each Row Of A Matrix",
-      "input": "names = [\"Carlos\" \"Sada\"; \"Ella\" \"Olsen\"; \"Diana\" \"Lee\"];\nfullNames = join(names);",
+      "input": "names = [\"Carlos\" \"Sada\"; \"Ella\" \"Olsen\"; \"Diana\" \"Lee\"];\nfullNames = join(names)",
       "output": "fullNames = 3\u00d71 string\n    \"Carlos Sada\"\n    \"Ella Olsen\"\n    \"Diana Lee\""
     },
     {
       "description": "Insert A Custom Delimiter Between Elements",
-      "input": "labels = [\"x\" \"y\" \"z\"; \"a\" \"b\" \"c\"];\njoined = join(labels, \"-\");",
+      "input": "labels = [\"x\" \"y\" \"z\"; \"a\" \"b\" \"c\"];\njoined = join(labels, \"-\")",
       "output": "joined = 2\u00d71 string\n    \"x-y-z\"\n    \"a-b-c\""
     },
     {
       "description": "Provide A Delimiter Array That Varies Per Row",
-      "input": "str = [\"x\" \"y\" \"z\"; \"a\" \"b\" \"c\"];\ndelims = [\" + \" \" = \"; \" - \" \" = \"];\nequations = join(str, delims);",
+      "input": "str = [\"x\" \"y\" \"z\"; \"a\" \"b\" \"c\"];\ndelims = [\" + \" \" = \"; \" - \" \" = \"];\nequations = join(str, delims)",
       "output": "equations = 2\u00d71 string\n    \"x + y = z\"\n    \"a - b = c\""
     },
     {
       "description": "Join Along A Specific Dimension",
-      "input": "scores = [\"Alice\" \"Bob\"; \"92\" \"88\"; \"85\" \"90\"];\nbyColumn = join(scores, 1);",
+      "input": "scores = [\"Alice\" \"Bob\"; \"92\" \"88\"; \"85\" \"90\"];\nbyColumn = join(scores, 1)",
       "output": "byColumn = 1\u00d72 string\n    \"Alice 92 85\"    \"Bob 88 90\""
     },
     {
       "description": "Join A Cell Array Of Character Vectors",
-      "input": "C = {'GPU', 'Accelerate'; 'Ignition', 'Interpreter'};\nresult = join(C, \", \");",
+      "input": "C = {'GPU', 'Accelerate'; 'Ignition', 'Interpreter'};\nresult = join(C, \", \")",
       "output": "result = 2\u00d71 cell\n    {'GPU, Accelerate'}\n    {'Ignition, Interpreter'}"
     },
     {
       "description": "Join Using A Dimension Argument As The Second Input",
-      "input": "words = [\"RunMat\"; \"Accelerate\"; \"Planner\"];\nsentence = join(words, 1);",
+      "input": "words = [\"RunMat\"; \"Accelerate\"; \"Planner\"];\nsentence = join(words, 1)",
       "output": "sentence = \"RunMat Accelerate Planner\""
     },
     {
       "description": "Join Rows Of An Empty String Array",
-      "input": "emptyRows = strings(2, 0);\nout = join(emptyRows);",
+      "input": "emptyRows = strings(2, 0);\nout = join(emptyRows)",
       "output": "out = 2\u00d71 string\n    \"\"\n    \"\""
     }
   ],

@@ -32,11 +32,11 @@
   },
   "description": "`cellstr` converts character arrays, string arrays, or cell arrays of character vectors into a cell array whose elements are character vectors (1-by-N char arrays). Trailing spaces in character array rows are trimmed to match MATLAB behaviour.",
   "behaviors": [
-    "`cellstr(A)` with a character array `A` returns an `m × 1` cell array whose entries correspond to the rows of `A`, with trailing spaces removed from each row.",
+    "`cellstr(A)` with a character array `A` returns an `m \u00d7 1` cell array whose entries correspond to the rows of `A`, with trailing spaces removed from each row.",
     "`cellstr(S)` with a string array `S` returns a cell array of the same size; each string scalar is converted to a character vector.",
     "`cellstr(C)` with a cell array `C` normalises the contents so that every element becomes a character vector. String scalars are converted, existing character vectors are preserved, and any other type triggers an error just like MATLAB.",
     "String arrays of any dimensionality preserve their exact shape. Ordering follows MATLAB's column-major semantics so downstream indexing sees the expected elements.",
-    "Empty character arrays result in empty cell arrays (for example, `0 × n` char arrays map to `0 × 1` cells). Empty strings become `\"\"` character vectors stored in single-cell outputs.",
+    "Empty character arrays result in empty cell arrays (for example, `0 \u00d7 n` char arrays map to `0 \u00d7 1` cells). Empty strings become `\"\"` character vectors stored in single-cell outputs.",
     "Missing string scalars are rendered as the literal `'<missing>'`, matching MATLAB's textual representation.",
     "Inputs that are not text (numeric tensors, logical arrays, structs, GPU tensors, etc.) raise a MATLAB-compatible usage error.",
     "Cell elements must already be text. Any numeric, logical, or GPU value inside the cell raises an error so that downstream code never sees non-text rows."
@@ -44,22 +44,22 @@
   "examples": [
     {
       "description": "Converting a character matrix into a column cell array",
-      "input": "A = ['apple '; 'berry '; 'citrus'];\nC = cellstr(A);",
+      "input": "A = ['apple '; 'berry '; 'citrus'];\nC = cellstr(A)",
       "output": "C =\n  3x1 cell array\n    {'apple'}\n    {'berry'}\n    {'citrus'}"
     },
     {
       "description": "Removing trailing spaces automatically",
-      "input": "words = ['a   '; 'b   '; 'c   '];\nC = cellstr(words);",
+      "input": "words = ['a   '; 'b   '; 'c   '];\nC = cellstr(words)",
       "output": "C =\n  3x1 cell array\n    {'a'}\n    {'b'}\n    {'c'}"
     },
     {
       "description": "Converting a string array while preserving shape",
-      "input": "S = [\"north\" \"south\"; \"east\" \"west\"];\nC = cellstr(S);",
+      "input": "S = [\"north\" \"south\"; \"east\" \"west\"];\nC = cellstr(S)",
       "output": "C =\n  2x2 cell array\n    {'north'}    {'south'}\n    {'east'}     {'west'}"
     },
     {
       "description": "Normalising a cell array that mixes strings and character vectors",
-      "input": "C = {\"left\", 'right'};\nout = cellstr(C);",
+      "input": "C = {\"left\", 'right'};\nout = cellstr(C)",
       "output": "out =\n  1x2 cell array\n    {'left'}    {'right'}"
     },
     {
@@ -69,7 +69,7 @@
     },
     {
       "description": "Converting a single string scalar",
-      "input": "single = \"RunMat\";\nC = cellstr(single);",
+      "input": "single = \"RunMat\";\nC = cellstr(single)",
       "output": "C =\n  1x1 cell array\n    {'RunMat'}"
     },
     {
@@ -97,7 +97,7 @@
     },
     {
       "question": "How are empty inputs handled?",
-      "answer": "Empty character arrays become empty cell arrays (`0×1`). Empty string arrays return empty cell arrays matching their size. Empty strings become single cells that contain a 1×0 character vector."
+      "answer": "Empty character arrays become empty cell arrays (`0\u00d71`). Empty string arrays return empty cell arrays matching their size. Empty strings become single cells that contain a 1\u00d70 character vector."
     },
     {
       "question": "Does `cellstr` copy existing cell arrays?",

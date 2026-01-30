@@ -60,7 +60,7 @@
     },
     {
       "description": "Collapsing every dimension at once",
-      "input": "B = reshape(1:12, [3 4]);\noverall = std(B, 0, 'all');",
+      "input": "B = reshape(1:12, [3 4]);\noverall = std(B, 0, 'all')",
       "output": "overall = 3.6056;"
     },
     {
@@ -70,16 +70,16 @@
     },
     {
       "description": "Ignoring NaN values",
-      "input": "D = [1 NaN 3; 2 4 NaN];\nrowStd = std(D, 0, 2, 'omitnan');",
+      "input": "D = [1 NaN 3; 2 4 NaN];\nrowStd = std(D, 0, 2, 'omitnan')",
       "output": "rowStd = [1.4142; 1.4142];"
     },
     {
       "description": "Matching a prototype using `'like'`",
-      "input": "proto = gpuArray(single(42));\nG = gpuArray(rand(1024, 512));\nspread = std(G, 1, 'all', 'like', proto);\nanswer = gather(spread);"
+      "input": "proto = gpuArray(single(42));\nG = gpuArray(rand(1024, 512));\nspread = std(G, 1, 'all', 'like', proto);\nanswer = gather(spread)"
     },
     {
       "description": "Preserving default behaviour with an empty normalisation flag",
-      "input": "C = [1 2; 3 4];\nrowStd = std(C, [], 2);",
+      "input": "C = [1 2; 3 4];\nrowStd = std(C, [], 2)",
       "output": "rowStd = [0.7071; 0.7071];"
     }
   ],

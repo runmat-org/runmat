@@ -52,47 +52,47 @@
   "examples": [
     {
       "description": "Getting Sorted Unique Values",
-      "input": "A = [3 1 3 2];\nC = unique(A);",
+      "input": "A = [3 1 3 2];\nC = unique(A)",
       "output": "C =\n     1\n     2\n     3"
     },
     {
       "description": "Preserving Input Order with `'stable'`",
-      "input": "A = [4 2 4 1 2];\nC = unique(A, 'stable');",
+      "input": "A = [4 2 4 1 2];\nC = unique(A, 'stable')",
       "output": "C =\n     4\n     2\n     1"
     },
     {
       "description": "Returning Indices for Reconstruction",
-      "input": "A = [7 5 7 3];\n[C, IA, IC] = unique(A);\nreconstructed = C(IC);",
+      "input": "A = [7 5 7 3];\n[C, IA, IC] = unique(A);\nreconstructed = C(IC)",
       "output": "C =\n     3\n     5\n     7\nIA =\n     4\n     2\n     1\nIC =\n     3\n     2\n     3\n     1\nreconstructed =\n     7\n     5\n     7\n     3"
     },
     {
       "description": "Finding Unique Rows in a Matrix",
-      "input": "A = [1 3; 1 3; 2 4; 1 2];\n[C, IA, IC] = unique(A, 'rows');",
+      "input": "A = [1 3; 1 3; 2 4; 1 2];\n[C, IA, IC] = unique(A, 'rows')",
       "output": "C =\n     1     2\n     1     3\n     2     4\nIA =\n     4\n     1\n     3\nIC =\n     2\n     2\n     3\n     1"
     },
     {
       "description": "Selecting Last Occurrences",
-      "input": "A = [9 8 9 7 8];\n[C, IA] = unique(A, 'last');",
+      "input": "A = [9 8 9 7 8];\n[C, IA] = unique(A, 'last')",
       "output": "C =\n     7\n     8\n     9\nIA =\n     4\n     5\n     3"
     },
     {
       "description": "Working with Empty Arrays",
-      "input": "A = zeros(0, 3);\n[C, IA, IC] = unique(A, 'rows');",
+      "input": "A = zeros(0, 3);\n[C, IA, IC] = unique(A, 'rows')",
       "output": "C =\nIA =\nIC ="
     },
     {
       "description": "Using `unique` on GPU Arrays",
-      "input": "G = gpuArray([5 3 5 1]);\n[C, IA, IC] = unique(G, 'stable');",
+      "input": "G = gpuArray([5 3 5 1]);\n[C, IA, IC] = unique(G, 'stable')",
       "output": "C =\n     5\n     3\n     1\nIA =\n     1\n     2\n     4\nIC =\n     1\n     2\n     1\n     3"
     },
     {
       "description": "Unique Characters in a Char Array",
-      "input": "chars = ['m','z'; 'm','a'];\n[C, IA] = unique(chars);",
+      "input": "chars = ['m','z'; 'm','a'];\n[C, IA] = unique(chars)",
       "output": "C =\n    a\n    m\n    z\nIA =\n    4\n    1\n    3"
     },
     {
       "description": "Unique Strings with Row Deduplication",
-      "input": "S = [\"alpha\" \"beta\"; \"alpha\" \"beta\"; \"gamma\" \"beta\"];\n[C, IA, IC] = unique(S, 'rows', 'stable');",
+      "input": "S = [\"alpha\" \"beta\"; \"alpha\" \"beta\"; \"gamma\" \"beta\"];\n[C, IA, IC] = unique(S, 'rows', 'stable')",
       "output": "C =\n  2x2 string array\n    \"alpha\"    \"beta\"\n    \"gamma\"    \"beta\"\nIA =\n     1\n     3\nIC =\n     1\n     1\n     2"
     }
   ],

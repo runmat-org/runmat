@@ -42,12 +42,12 @@
   "examples": [
     {
       "description": "Close a file after writing data",
-      "input": "[fid, msg] = fopen('results.txt', 'w');\nif fid == -1\n    error('Failed to open file: %s', msg);\nend\nfprintf(fid, 'Simulation complete\\n');\nstatus = fclose(fid);",
+      "input": "[fid, msg] = fopen('results.txt', 'w');\nif fid == -1\n    error('Failed to open file: %s', msg);\nend\nfprintf(fid, 'Simulation complete\\n');\nstatus = fclose(fid)",
       "output": "status = 0;"
     },
     {
       "description": "Close all open files at once",
-      "input": "% Close every file except stdin/stdout/stderr\nstatus = fclose('all');",
+      "input": "% Close every file except stdin/stdout/stderr\nstatus = fclose('all')",
       "output": "status = 0;"
     },
     {
@@ -57,7 +57,7 @@
     },
     {
       "description": "Close multiple file identifiers together",
-      "input": "fids = fopen('all');\nstatus = fclose(fids);",
+      "input": "fids = fopen('all');\nstatus = fclose(fids)",
       "output": "status = 0;"
     },
     {
@@ -67,7 +67,7 @@
     },
     {
       "description": "Close files using the no-argument form",
-      "input": "% Equivalent to fclose('all')\nstatus = fclose();",
+      "input": "% Equivalent to fclose('all')\nstatus = fclose()",
       "output": "status = 0;"
     }
   ],

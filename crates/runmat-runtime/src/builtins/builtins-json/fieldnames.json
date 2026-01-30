@@ -42,7 +42,7 @@
   "examples": [
     {
       "description": "Listing the fields of a scalar structure",
-      "input": "s = struct(\"name\", \"Ada\", \"score\", 42);\nfields = fieldnames(s);",
+      "input": "s = struct(\"name\", \"Ada\", \"score\", 42);\nfields = fieldnames(s)",
       "output": "fields =\n    {'name'}\n    {'score'}"
     },
     {
@@ -52,22 +52,22 @@
     },
     {
       "description": "Gathering field names from a struct array",
-      "input": "people = struct(\"name\", {\"Ada\", \"Grace\"}, \"id\", {101, 102});\nfields = fieldnames(people);",
+      "input": "people = struct(\"name\", {\"Ada\", \"Grace\"}, \"id\", {101, 102});\nfields = fieldnames(people)",
       "output": "fields =\n    {'id'}\n    {'name'}"
     },
     {
       "description": "Listing the properties of an object",
-      "input": "% Save this class in Counter.m before running the example:\n% classdef Counter\n%     properties\n%         Value = 0\n%         Step  = 1\n%     end\n% end\nc = Counter;\nprops = fieldnames(c);",
+      "input": "% Save this class in Counter.m before running the example:\n% classdef Counter\n%     properties\n%         Value = 0\n%         Step  = 1\n%     end\n% end\nc = Counter;\nprops = fieldnames(c)",
       "output": "props =\n    {'Step'}\n    {'Value'}"
     },
     {
       "description": "Discovering fields inside nested structs",
-      "input": "config.database = struct(\"host\", \"db.local\", \"port\", 5432);\nnames = fieldnames(config.database);",
+      "input": "config.database = struct(\"host\", \"db.local\", \"port\", 5432);\nnames = fieldnames(config.database)",
       "output": "names =\n    {'host'}\n    {'port'}"
     },
     {
       "description": "Handling empty structs safely",
-      "input": "emptyScalar = struct();\nemptyArray = struct(\"id\", {});\nfs = fieldnames(emptyScalar);\nfa = fieldnames(emptyArray);",
+      "input": "emptyScalar = struct();\nemptyArray = struct(\"id\", {});\nfs = fieldnames(emptyScalar);\nfa = fieldnames(emptyArray)",
       "output": "fs =\n  0x1 empty cell array\n\nfa =\n  0x1 empty cell array"
     }
   ],

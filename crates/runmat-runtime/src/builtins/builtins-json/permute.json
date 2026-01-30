@@ -64,7 +64,7 @@
     },
     {
       "description": "Transposing character arrays",
-      "input": "C = ['r','u','n'; 'm','a','t'];\nCt = permute(C, [2 1]);",
+      "input": "C = ['r','u','n'; 'm','a','t'];\nCt = permute(C, [2 1])",
       "output": "Ct =\n    'rm'\n    'ua'\n    'nt'"
     },
     {

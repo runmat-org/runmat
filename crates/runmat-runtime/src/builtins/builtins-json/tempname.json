@@ -42,32 +42,32 @@
   "examples": [
     {
       "description": "Generate A Unique Temporary File Name",
-      "input": "fname = tempname();\nfprintf(\"Saving intermediate results to %s\\n\", fname);",
+      "input": "fname = tempname();\nfprintf(\"Saving intermediate results to %s\\n\", fname)",
       "output": "% Prints the unique file name inside the system temporary folder."
     },
     {
       "description": "Create A Temporary File Name In A Custom Folder",
-      "input": "logDir = fullfile(pwd(), \"logs\");\nfname = tempname(logDir);",
+      "input": "logDir = fullfile(pwd(), \"logs\");\nfname = tempname(logDir)",
       "output": "% fname starts with the logs folder and ends with a tp******** token."
     },
     {
       "description": "Append A File Extension To Tempname Results",
-      "input": "csvPath = [tempname(), \".csv\"];",
+      "input": "csvPath = [tempname(), \".csv\"]",
       "output": "% csvPath is a unique .csv file path you can pass to writematrix or fprintf."
     },
     {
       "description": "Reserve A Temporary Folder Path",
-      "input": "scratch = tempname();\nmkdir(scratch);\ncleanupObj = onCleanup(@() rmdir(scratch, \"s\"));",
+      "input": "scratch = tempname();\nmkdir(scratch);\ncleanupObj = onCleanup(@() rmdir(scratch, \"s\"))",
       "output": "% scratch now exists on disk and is removed automatically via onCleanup."
     },
     {
       "description": "Use Tempname With fopen To Write Temporary Data",
-      "input": "tmpFile = tempname();\n[fid, message] = fopen(tmpFile, \"w\");\nif fid == -1\n    error(\"Failed to open temp file: %s\", message);\nend\nfprintf(fid, \"Temporary output\\n\");\nfclose(fid);",
+      "input": "tmpFile = tempname();\n[fid, message] = fopen(tmpFile, \"w\");\nif fid == -1\n    error(\"Failed to open temp file: %s\", message);\nend\nfprintf(fid, \"Temporary output\\n\");\nfclose(fid)",
       "output": "% Creates a file, writes text, and leaves it for later processing."
     },
     {
       "description": "Combine Tempname With gpuArray Inputs",
-      "input": "folder = gpuArray(\"scratch\");\nfname = tempname(folder);",
+      "input": "folder = gpuArray(\"scratch\");\nfname = tempname(folder)",
       "output": "% RunMat gathers the string and returns a host-side character vector."
     }
   ],

@@ -41,23 +41,23 @@
   "examples": [
     {
       "description": "Computing the full QR factorization of a square matrix",
-      "input": "A = [12 -51 4; 6 167 -68; -4 24 -41];\n[Q, R] = qr(A);"
+      "input": "A = [12 -51 4; 6 167 -68; -4 24 -41];\n[Q, R] = qr(A)"
     },
     {
       "description": "Obtaining orthonormal Q and upper-triangular R for a tall matrix",
-      "input": "A = [1 2; 3 4; 5 6];\n[Q, R] = qr(A);"
+      "input": "A = [1 2; 3 4; 5 6];\n[Q, R] = qr(A)"
     },
     {
       "description": "Working with column pivoting when requesting three outputs",
-      "input": "A = [1 1 0; 1 0 1; 0 1 1];\n[Q, R, E] = qr(A);"
+      "input": "A = [1 1 0; 1 0 1; 0 1 1];\n[Q, R, E] = qr(A)"
     },
     {
       "description": "Using economy-size QR to reduce memory footprint",
-      "input": "A = randn(1000, 20);\n[Q, R] = qr(A, 0);"
+      "input": "A = randn(1000, 20);\n[Q, R] = qr(A, 0)"
     },
     {
       "description": "Receiving the permutation vector instead of a matrix",
-      "input": "A = magic(4);\n[Q, R, p] = qr(A, 'vector');"
+      "input": "A = magic(4);\n[Q, R, p] = qr(A, 'vector')"
     },
     {
       "description": "Running QR on a gpuArray input (with automatic fallback)",

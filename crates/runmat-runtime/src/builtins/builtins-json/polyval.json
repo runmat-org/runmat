@@ -47,32 +47,32 @@
   "examples": [
     {
       "description": "Evaluating a polynomial at scalar points",
-      "input": "p = [2 -3 5];   % 2x^2 - 3x + 5\ny = polyval(p, 4);",
+      "input": "p = [2 -3 5];   % 2x^2 - 3x + 5\ny = polyval(p, 4)",
       "output": "y = 21;"
     },
     {
       "description": "Evaluating across a vector of inputs",
-      "input": "p = [1 0 -2 1];\nx = linspace(-2, 2, 5);\ny = polyval(p, x);",
+      "input": "p = [1 0 -2 1];\nx = linspace(-2, 2, 5);\ny = polyval(p, x)",
       "output": "y = [ -3   2   1   0   5 ];"
     },
     {
       "description": "Evaluating a polynomial over a matrix grid",
-      "input": "[X, Y] = meshgrid(-1:1);\nZ = polyval([1 -3 2], X + Y);",
+      "input": "[X, Y] = meshgrid(-1:1);\nZ = polyval([1 -3 2], X + Y)",
       "output": "Z =\n    12     6     2\n     6     2     0\n     2     0     0"
     },
     {
       "description": "Using centering and scaling parameters from `polyfit`",
-      "input": "x = -2:2;\nnoise = 0.05 * randn(size(x));\n[p, S, mu] = polyfit(x, sin(x) + noise, 3);\ny = polyval(p, x, [], mu);",
+      "input": "x = -2:2;\nnoise = 0.05 * randn(size(x));\n[p, S, mu] = polyfit(x, sin(x) + noise, 3);\ny = polyval(p, x, [], mu)",
       "output": "% y closely matches sin(x) + noise with polynomial smoothing"
     },
     {
       "description": "Computing prediction intervals with polyfit output",
-      "input": "[p, S, mu] = polyfit((0:10)', exp((0:10)'/10), 3);\n[y, delta] = polyval(p, 5, S, mu);",
+      "input": "[p, S, mu] = polyfit((0:10)', exp((0:10)'/10), 3);\n[y, delta] = polyval(p, 5, S, mu)",
       "output": "% y is the fitted value at x = 5\n% delta is the 1\u03c3 prediction interval (standard error)"
     },
     {
       "description": "Handling complex coefficients and inputs",
-      "input": "p = [1+2i, -3, 4i];\nz = [-1+1i, 0, 1-2i];\ny = polyval(p, z);",
+      "input": "p = [1+2i, -3, 4i];\nz = [-1+1i, 0, 1-2i];\ny = polyval(p, z)",
       "output": "% Complex results that agree with MATLAB's polyval"
     },
     {

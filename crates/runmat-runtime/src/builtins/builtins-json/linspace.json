@@ -50,17 +50,17 @@
     },
     {
       "description": "Sampling 100 points when the third argument is omitted",
-      "input": "t = linspace(-pi, pi);",
+      "input": "t = linspace(-pi, pi)",
       "output": "% t is a 1x100 row vector spanning [-pi, pi]\ndisp(t(1));\ndisp(t(end));"
     },
     {
       "description": "Constructing complex breakpoints",
-      "input": "z = linspace(1+1i, -3+2i, 4);",
+      "input": "z = linspace(1+1i, -3+2i, 4)",
       "output": "z =\n   1.0000 + 1.0000i   -0.3333 + 1.3333i   -1.6667 + 1.6667i   -3.0000 + 2.0000i"
     },
     {
       "description": "Staying on the GPU automatically",
-      "input": "a = gpuArray(0);\nb = gpuArray(2*pi);\ntheta = linspace(a, b, 1024);\nwave = sin(theta);",
+      "input": "a = gpuArray(0);\nb = gpuArray(2*pi);\ntheta = linspace(a, b, 1024);\nwave = sin(theta)",
       "output": "% theta and wave remain on the GPU when an acceleration provider is active.\ndisp(gather(theta(1:5)));"
     }
   ],

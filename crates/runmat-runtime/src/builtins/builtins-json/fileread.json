@@ -43,33 +43,33 @@
   "examples": [
     {
       "description": "Read Entire File Into A Character Vector",
-      "input": "text = fileread(\"LICENSE.md\");",
-      "output": "% Character vector containing the full license text"
+      "input": "text = fileread(\"LICENSE.md\")",
+      "output": "text =\n    Character vector containing the full license text"
     },
     {
       "description": "Read A File Using A Relative Path",
-      "input": "text = fileread(\"data/config.json\");",
-      "output": "% Returns the JSON file contents as a character vector"
+      "input": "text = fileread(\"data/config.json\")",
+      "output": "text =\n    Returns the JSON file contents as a character vector"
     },
     {
       "description": "Preserve Extended ASCII Bytes",
-      "input": "bytes = fileread(\"fixtures/high_ascii.txt\");\ndouble_values = double(bytes);",
-      "output": "% double_values contains the numeric codes for every byte in the file"
+      "input": "bytes = fileread(\"fixtures/high_ascii.txt\");\ndouble_values = double(bytes)",
+      "output": "double_values =\n    65    66    67"
     },
     {
       "description": "Convert File Contents To A String Scalar",
-      "input": "raw = fileread(\"README.md\");\ndoc = string(raw);",
-      "output": "% doc is a string scalar ready for further processing"
+      "input": "raw = fileread(\"README.md\");\ndoc = string(raw)",
+      "output": "doc =\n    \"RunMat docs\""
     },
     {
       "description": "Read A File With UTF-8 Decoding Explicitly",
-      "input": "text = fileread(\"data/report.txt\", 'Encoding', 'utf-8');",
-      "output": "% Character vector decoded using UTF-8. An error is thrown if the bytes are not valid UTF-8."
+      "input": "text = fileread(\"data/report.txt\", 'Encoding', 'utf-8')",
+      "output": "text =\n    Character vector decoded using UTF-8."
     },
     {
       "description": "Handle Missing Files With Try/Catch",
       "input": "try\n    fileread(\"missing.txt\");\ncatch err\n    disp(err.message);\nend",
-      "output": "% Prints a descriptive error such as:\n% \"fileread: unable to read 'missing.txt' (No such file or directory)\""
+      "output": "fileread: unable to read 'missing.txt': readFile: not found"
     }
   ],
   "faqs": [

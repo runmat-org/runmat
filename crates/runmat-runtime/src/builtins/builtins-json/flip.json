@@ -49,27 +49,27 @@
   "examples": [
     {
       "description": "Reversing a Row Vector",
-      "input": "row = 1:5;\nrev = flip(row);",
+      "input": "row = 1:5;\nrev = flip(row)",
       "output": "rev = [5 4 3 2 1];"
     },
     {
       "description": "Reversing Matrix Rows (Vertical Flip)",
-      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nB = flip(A);",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nB = flip(A)",
       "output": "B =\n     7     8     9\n     4     5     6\n     1     2     3"
     },
     {
       "description": "Flipping Columns with the Horizontal Direction Keyword",
-      "input": "A = magic(3);\nH = flip(A, 'horizontal');",
+      "input": "A = magic(3);\nH = flip(A, 'horizontal')",
       "output": "H =\n     2     7     6\n     9     5     1\n     4     3     8"
     },
     {
       "description": "Flipping Along Multiple Dimensions",
-      "input": "T = reshape(1:8, [2 2 2]);\nF = flip(T, [1 3]);",
+      "input": "T = reshape(1:8, [2 2 2]);\nF = flip(T, [1 3])",
       "output": "F(:,:,1) =\n     3     4\n     1     2\n\nF(:,:,2) =\n     7     8\n     5     6"
     },
     {
       "description": "Flipping Character Data",
-      "input": "C = ['r','u','n'; 'm','a','t'];\nCt = flip(C, 'horizontal');",
+      "input": "C = ['r','u','n'; 'm','a','t'];\nCt = flip(C, 'horizontal')",
       "output": "Ct =\n    'nur'\n    'tam'"
     },
     {

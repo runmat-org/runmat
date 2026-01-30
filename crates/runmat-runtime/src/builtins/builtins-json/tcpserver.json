@@ -48,7 +48,7 @@
     },
     {
       "description": "Requesting an ephemeral port and inspecting the assigned value",
-      "input": "srv = tcpserver(\"0.0.0.0\", 0);\nfprintf(\"Listening on %s:%d\\n\", srv.ServerAddress, srv.ServerPort);",
+      "input": "srv = tcpserver(\"0.0.0.0\", 0);\nfprintf(\"Listening on %s:%d\\n\", srv.ServerAddress, srv.ServerPort)",
       "output": "Listening on 0.0.0.0:54873   % actual port varies by run"
     },
     {

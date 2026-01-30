@@ -56,12 +56,12 @@
     },
     {
       "description": "Computing the mean of a vector with NaN values",
-      "input": "values = [1 NaN 3];\navg = mean(values, 'omitnan');",
+      "input": "values = [1 NaN 3];\navg = mean(values, 'omitnan')",
       "output": "avg = 2;"
     },
     {
       "description": "Computing the overall mean across all elements",
-      "input": "B = reshape(1:12, [3 4]);\noverall = mean(B, 'all');",
+      "input": "B = reshape(1:12, [3 4]);\noverall = mean(B, 'all')",
       "output": "overall = 6.5;"
     },
     {
@@ -71,12 +71,12 @@
     },
     {
       "description": "Matching a prototype with `'like'`",
-      "input": "G = gpuArray(single([1 3; 5 7]));\nmu = mean(G, 'all', 'like', G);\nresult = gather(mu);",
+      "input": "G = gpuArray(single([1 3; 5 7]));\nmu = mean(G, 'all', 'like', G);\nresult = gather(mu)",
       "output": "result = single(4);"
     },
     {
       "description": "Computing the mean of a matrix on a GPU",
-      "input": "G = gpuArray([1 2 NaN; 3 4 5]);\nmeans = mean(G, 2, 'omitnan');\nresult = gather(means);",
+      "input": "G = gpuArray([1 2 NaN; 3 4 5]);\nmeans = mean(G, 2, 'omitnan');\nresult = gather(means)",
       "output": "result = [1.5; 4];"
     }
   ],

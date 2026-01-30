@@ -44,37 +44,37 @@
   "examples": [
     {
       "description": "Hyperbolic tangent of a real scalar",
-      "input": "y = tanh(1);",
+      "input": "y = tanh(1)",
       "output": "y = 0.7616"
     },
     {
       "description": "Applying `tanh` to a symmetric vector",
-      "input": "x = linspace(-2, 2, 5);\ny = tanh(x);",
+      "input": "x = linspace(-2, 2, 5);\ny = tanh(x)",
       "output": "y = [-0.9640  -0.7616         0   0.7616   0.9640]"
     },
     {
       "description": "Evaluating `tanh` on a matrix in GPU memory",
-      "input": "G = gpuArray([0    0.5; 1.0  1.5]);\nresult_gpu = tanh(G);\nresult = gather(result_gpu);",
+      "input": "G = gpuArray([0    0.5; 1.0  1.5]);\nresult_gpu = tanh(G);\nresult = gather(result_gpu)",
       "output": "result =\n         0    0.4621\n    0.7616    0.9051"
     },
     {
       "description": "Computing `tanh` for complex angles",
-      "input": "z = 0.5 + 1.0i;\nw = tanh(z);",
+      "input": "z = 0.5 + 1.0i;\nw = tanh(z)",
       "output": "w = 1.0428 + 0.8069i"
     },
     {
       "description": "Converting character codes via `tanh`",
-      "input": "c = tanh('ABC');",
+      "input": "c = tanh('ABC')",
       "output": "c = [1.0000  1.0000  1.0000]"
     },
     {
       "description": "Preserving empty array shapes",
-      "input": "E = zeros(0, 3);\nout = tanh(E);",
+      "input": "E = zeros(0, 3);\nout = tanh(E)",
       "output": "out = zeros(0, 3)"
     },
     {
       "description": "Stabilising activation functions",
-      "input": "inputs = [-3 -1 0 1 3];\nactivations = tanh(inputs / 2);",
+      "input": "inputs = [-3 -1 0 1 3];\nactivations = tanh(inputs / 2)",
       "output": "activations = [-0.9051  -0.4621         0   0.4621   0.9051]"
     }
   ],

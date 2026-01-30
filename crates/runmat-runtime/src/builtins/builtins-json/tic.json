@@ -39,11 +39,11 @@
   "examples": [
     {
       "description": "Measuring a simple loop",
-      "input": "tic;\nfor k = 1:1e5\n    sqrt(k);\nend\nelapsed = toc;"
+      "input": "tic;\nfor k = 1:1e5\n    sqrt(k);\nend\nelapsed = toc"
     },
     {
       "description": "Capturing and reusing the tic handle",
-      "input": "t = tic;\nheavyComputation();\nelapsed = toc(t);"
+      "input": "t = tic;\nheavyComputation();\nelapsed = toc(t)"
     },
     {
       "description": "Nesting timers for staged profiling",
@@ -51,7 +51,7 @@
     },
     {
       "description": "Measuring asynchronous work",
-      "input": "token = tic;\nfuture = backgroundTask();\nwait(future);\nelapsed = toc(token);"
+      "input": "token = tic;\nfuture = backgroundTask();\nwait(future);\nelapsed = toc(token)"
     },
     {
       "description": "Resetting the stopwatch after a measurement",

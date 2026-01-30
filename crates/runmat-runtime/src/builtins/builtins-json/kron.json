@@ -43,7 +43,7 @@
   "examples": [
     {
       "description": "Computing the Kronecker product of two matrices",
-      "input": "A = [1 2; 3 4];\nB = [0 5; 6 7];\nC = kron(A, B);",
+      "input": "A = [1 2; 3 4];\nB = [0 5; 6 7];\nC = kron(A, B)",
       "output": "C =\n     0     5     0    10\n     6     7    12    14\n     0    15     0    20\n    18    21    24    28"
     },
     {
@@ -53,20 +53,20 @@
     },
     {
       "description": "Scaling a matrix with a scalar using `kron`",
-      "input": "A = [1 2; 3 4];\nS = kron(2, A);",
+      "input": "A = [1 2; 3 4];\nS = kron(2, A)",
       "output": "S =\n     2     4\n     6     8"
     },
     {
       "description": "Building block-diagonal systems with `kron`",
-      "input": "I = eye(3);\nM = [1 0; 0 -1];\nblockDiag = kron(I, M);"
+      "input": "I = eye(3);\nM = [1 0; 0 -1];\nblockDiag = kron(I, M)"
     },
     {
       "description": "Kronecker product of complex matrices",
-      "input": "A = [1+2i 0; 0 3-1i];\nB = [0 1; 2 3i];\nC = kron(A, B);"
+      "input": "A = [1+2i 0; 0 3-1i];\nB = [0 1; 2 3i];\nC = kron(A, B)"
     },
     {
       "description": "Using `kron` with logical masks",
-      "input": "mask = logical([1 0; 0 1]);\ntile = kron(mask, ones(2));"
+      "input": "mask = logical([1 0; 0 1]);\ntile = kron(mask, ones(2))"
     },
     {
       "description": "Running `kron` on GPU-resident tensors",

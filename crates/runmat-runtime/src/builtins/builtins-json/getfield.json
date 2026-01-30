@@ -40,32 +40,32 @@
   "examples": [
     {
       "description": "Reading a scalar struct field",
-      "input": "stats = struct(\"mean\", 42, \"stdev\", 3.5);\nmu = getfield(stats, \"mean\");",
+      "input": "stats = struct(\"mean\", 42, \"stdev\", 3.5);\nmu = getfield(stats, \"mean\")",
       "output": "mu = 42"
     },
     {
       "description": "Navigating nested structs with multiple field names",
-      "input": "cfg = struct(\"solver\", struct(\"name\", \"cg\", \"tolerance\", 1e-6));\ntol = getfield(cfg, \"solver\", \"tolerance\");",
+      "input": "cfg = struct(\"solver\", struct(\"name\", \"cg\", \"tolerance\", 1e-6));\ntol = getfield(cfg, \"solver\", \"tolerance\")",
       "output": "tol = 1.0000e-06"
     },
     {
       "description": "Accessing an element of a struct array",
-      "input": "people = struct(\"name\", {\"Ada\", \"Grace\"}, \"id\", {101, 102});\nlastId = getfield(people, {2}, \"id\");",
+      "input": "people = struct(\"name\", {\"Ada\", \"Grace\"}, \"id\", {101, 102});\nlastId = getfield(people, {2}, \"id\")",
       "output": "lastId = 102"
     },
     {
       "description": "Reading the first element of a struct array automatically",
-      "input": "people = struct(\"name\", {\"Ada\", \"Grace\"}, \"id\", {101, 102});\nfirstName = getfield(people, \"name\");",
+      "input": "people = struct(\"name\", {\"Ada\", \"Grace\"}, \"id\", {101, 102});\nfirstName = getfield(people, \"name\")",
       "output": "firstName = \"Ada\""
     },
     {
       "description": "Using `end` to reference the last item in a field",
-      "input": "series = struct(\"values\", {1:5});\nlastValue = getfield(series, \"values\", {\"end\"});",
+      "input": "series = struct(\"values\", {1:5});\nlastValue = getfield(series, \"values\", {\"end\"})",
       "output": "lastValue = 5"
     },
     {
       "description": "Indexing into a numeric field value",
-      "input": "measurements = struct(\"values\", {[1 2 3; 4 5 6]});\nentry = getfield(measurements, \"values\", {2, 3});",
+      "input": "measurements = struct(\"values\", {[1 2 3; 4 5 6]});\nentry = getfield(measurements, \"values\", {2, 3})",
       "output": "entry = 6"
     },
     {

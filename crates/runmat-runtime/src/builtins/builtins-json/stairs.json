@@ -39,7 +39,7 @@
   "examples": [
     {
       "description": "",
-      "input": "t = 0:5;\nstairs(t, cumsum(rand(size(t))));"
+      "input": "t = 0:5;\nstairs(t, cumsum(rand(size(t))))"
     }
   ],
   "faqs": [],

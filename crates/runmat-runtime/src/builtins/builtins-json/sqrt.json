@@ -44,32 +44,32 @@
   "examples": [
     {
       "description": "Taking the square root of a positive scalar",
-      "input": "y = sqrt(9);",
+      "input": "y = sqrt(9)",
       "output": "y = 3;"
     },
     {
       "description": "Square roots of a matrix",
-      "input": "A = [1 4 9; 16 25 36];\nR = sqrt(A);",
+      "input": "A = [1 4 9; 16 25 36];\nR = sqrt(A)",
       "output": "R = [1 2 3; 4 5 6];"
     },
     {
       "description": "Square roots of negative inputs produce complex results",
-      "input": "values = [-1 -4 9];\nroots = sqrt(values);",
+      "input": "values = [-1 -4 9];\nroots = sqrt(values)",
       "output": "roots = [0.0000 + 1.0000i, 0.0000 + 2.0000i, 3.0000 + 0.0000i];"
     },
     {
       "description": "Element-wise square root on GPU data",
-      "input": "G = gpuArray([0 1; 4 9]);\nout = sqrt(G);\nresult = gather(out);",
+      "input": "G = gpuArray([0 1; 4 9]);\nout = sqrt(G);\nresult = gather(out)",
       "output": "result = [0 1; 2 3];"
     },
     {
       "description": "Square root of complex numbers",
-      "input": "z = [3 + 4i, -1 + 2i];\nw = sqrt(z);",
+      "input": "z = [3 + 4i, -1 + 2i];\nw = sqrt(z)",
       "output": "w = [2 + 1i, 0.7862 + 1.2720i];"
     },
     {
       "description": "Square root of character codes",
-      "input": "C = 'AB';\nnumericRoots = sqrt(C);",
+      "input": "C = 'AB';\nnumericRoots = sqrt(C)",
       "output": "numericRoots = [8.0623 8.2462];"
     }
   ],

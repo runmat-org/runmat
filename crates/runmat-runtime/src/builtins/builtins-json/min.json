@@ -46,32 +46,32 @@
   "examples": [
     {
       "description": "Finding column-wise minima of a matrix",
-      "input": "A = [3 1 5; 4 2 6];\n[m, idx] = min(A);",
+      "input": "A = [3 1 5; 4 2 6];\n[m, idx] = min(A)",
       "output": "m   = [3 1 5];\nidx = [1 2 1];"
     },
     {
       "description": "Reducing along the second dimension",
-      "input": "A = [3 1 5; 4 2 6];\n[m, idx] = min(A, [], 2);",
+      "input": "A = [3 1 5; 4 2 6];\n[m, idx] = min(A, [], 2)",
       "output": "m   = [1; 2];\nidx = [2; 2];"
     },
     {
       "description": "Collapsing all elements with linear indices",
-      "input": "A = reshape(1:12, [3 4]);\n[m, idx] = min(A, [], 'all');",
+      "input": "A = reshape(1:12, [3 4]);\n[m, idx] = min(A, [], 'all')",
       "output": "m   = 1;\nidx = 1;  % linear index into A(:)"
     },
     {
       "description": "Ignoring NaN values during reduction",
-      "input": "values = [NaN 4 2; 3 NaN 1];\n[m, idx] = min(values, [], 1, 'omitnan');",
+      "input": "values = [NaN 4 2; 3 NaN 1];\n[m, idx] = min(values, [], 1, 'omitnan')",
       "output": "m   = [3 4 1];\nidx = [2 1 2];"
     },
     {
       "description": "Elementwise minimum with broadcasting",
-      "input": "A = [1 4 7];\nB = [2; 3; 5];\n[C, origin] = min(A, B);",
+      "input": "A = [1 4 7];\nB = [2; 3; 5];\n[C, origin] = min(A, B)",
       "output": "C =\n     1     3     5\norigin =\n     1     2     2"
     },
     {
       "description": "Comparing complex values by magnitude",
-      "input": "Z = [1+2i, 2+1i, -2+2i];\nM = min(Z);                         % magnitude ordering\nR = min(Z, [], 'ComparisonMethod', 'real');",
+      "input": "Z = [1+2i, 2+1i, -2+2i];\nM = min(Z);                         % magnitude ordering\nR = min(Z, [], 'ComparisonMethod', 'real')",
       "output": "M = 2.0000 + 1.0000i\nR = 1.0000 + 2.0000i"
     }
   ],

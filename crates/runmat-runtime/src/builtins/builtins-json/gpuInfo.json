@@ -42,12 +42,12 @@
   "examples": [
     {
       "description": "Displaying GPU status in the REPL",
-      "input": "disp(gpuInfo());",
+      "input": "disp(gpuInfo())",
       "output": "GPU[device_id=0, index=1, name='InProcess', vendor='RunMat', backend='inprocess', precision='double', supports_double=true]"
     },
     {
       "description": "Emitting a log line before a computation",
-      "input": "fprintf(\"Running on %s\\n\", gpuInfo());",
+      "input": "fprintf(\"Running on %s\\n\", gpuInfo())",
       "output": "Running on GPU[device_id=0, index=1, name='InProcess', vendor='RunMat', backend='inprocess', precision='double', supports_double=true]"
     },
     {

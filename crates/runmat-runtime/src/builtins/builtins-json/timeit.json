@@ -38,27 +38,27 @@
   "examples": [
     {
       "description": "Timing a simple anonymous function",
-      "input": "f = @() sin(rand(1000, 1));\nt = timeit(f);"
+      "input": "f = @() sin(rand(1000, 1));\nt = timeit(f)"
     },
     {
       "description": "Comparing two implementations",
-      "input": "A = rand(1e5, 1);\nslow = @() sum(A .* A);\nfast = @() sumsq(A);\n\nslowTime = timeit(slow);\nfastTime = timeit(fast);"
+      "input": "A = rand(1e5, 1);\nslow = @() sum(A .* A);\nfast = @() sumsq(A);\n\nslowTime = timeit(slow);\nfastTime = timeit(fast)"
     },
     {
       "description": "Timing a function that returns no outputs",
-      "input": "logMessage = @() fprintf(\"Iteration complete\\n\");\nt = timeit(logMessage, 0);"
+      "input": "logMessage = @() fprintf(\"Iteration complete\\n\");\nt = timeit(logMessage, 0)"
     },
     {
       "description": "Timing a multiple-output function",
-      "input": "svdTime = timeit(@() svd(rand(256)), 3);"
+      "input": "svdTime = timeit(@() svd(rand(256)), 3)"
     },
     {
       "description": "Measuring GPU-bound work",
-      "input": "gfun = @() gather(sin(gpuArray.rand(4096, 1)));\ntgpu = timeit(gfun);"
+      "input": "gfun = @() gather(sin(gpuArray.rand(4096, 1)));\ntgpu = timeit(gfun)"
     },
     {
       "description": "Timing a preallocation helper",
-      "input": "makeMatrix = @() zeros(2048, 2048);\nt = timeit(makeMatrix);"
+      "input": "makeMatrix = @() zeros(2048, 2048);\nt = timeit(makeMatrix)"
     }
   ],
   "faqs": [

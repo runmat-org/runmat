@@ -42,32 +42,32 @@
   "examples": [
     {
       "description": "Computing first differences of a vector",
-      "input": "v = [3 4 9 15];\nd1 = diff(v);",
+      "input": "v = [3 4 9 15];\nd1 = diff(v)",
       "output": "d1 = [1 5 6];"
     },
     {
       "description": "Taking second-order differences",
-      "input": "v = [1 4 9 16 25];\nd2 = diff(v, 2);",
+      "input": "v = [1 4 9 16 25];\nd2 = diff(v, 2)",
       "output": "d2 = [2 2 2];"
     },
     {
       "description": "Selecting the working dimension explicitly",
-      "input": "A = [1 2 3; 4 5 6];\nrowDiff = diff(A, 1, 2);",
+      "input": "A = [1 2 3; 4 5 6];\nrowDiff = diff(A, 1, 2)",
       "output": "rowDiff =\n     1     1\n     1     1"
     },
     {
       "description": "Running `diff` on GPU arrays",
-      "input": "G = gpuArray([1 4 9 16]);\ngDiff = diff(G);\nresult = gather(gDiff);",
+      "input": "G = gpuArray([1 4 9 16]);\ngDiff = diff(G);\nresult = gather(gDiff)",
       "output": "result = [3 5 7];"
     },
     {
       "description": "N exceeding the dimension length returns an empty array",
-      "input": "v = (1:3)';\nemptyResult = diff(v, 5);",
+      "input": "v = (1:3)';\nemptyResult = diff(v, 5)",
       "output": "emptyResult =\n  0\u00d71 empty double column vector"
     },
     {
       "description": "Applying `diff` to character data",
-      "input": "codes = diff('ACEG');",
+      "input": "codes = diff('ACEG')",
       "output": "codes = [2 2 2];"
     }
   ],

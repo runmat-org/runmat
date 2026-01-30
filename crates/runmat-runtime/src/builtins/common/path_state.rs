@@ -8,8 +8,9 @@
 //! without losing the implicit `pwd` entry that MATLAB always prioritises.
 
 use once_cell::sync::Lazy;
-use std::env;
 use std::sync::RwLock;
+
+use crate::builtins::common::env as runtime_env;
 
 /// Platform-specific separator used when joining MATLAB path entries.
 pub const PATH_LIST_SEPARATOR: char = if cfg!(windows) { ';' } else { ':' };
@@ -31,7 +32,7 @@ impl PathState {
 fn initial_path_string() -> String {
     let mut parts = Vec::<String>::new();
     for var in ["RUNMAT_PATH", "MATLABPATH"] {
-        if let Ok(value) = env::var(var) {
+        if let Ok(value) = runtime_env::var(var) {
             parts.extend(
                 value
                     .split(PATH_LIST_SEPARATOR)
@@ -66,14 +67,26 @@ pub fn current_path_string() -> String {
         .unwrap_or_else(|poison| poison.into_inner().current.clone())
 }
 
+pub fn append_to_path(segments: &[String]) {
+    if segments.is_empty() {
+        return;
+    }
+    let mut guard = PATH_STATE
+        .write()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let mut parts = split_segments(&guard.current);
+    parts.extend(segments.iter().cloned());
+    guard.current = join_parts(&parts);
+}
+
 /// Replace the MATLAB path string for the current session. When `new_path` is
 /// empty the session path becomes empty and the `RUNMAT_PATH` environment
 /// variable is removed.
 pub fn set_path_string(new_path: &str) {
     if new_path.is_empty() {
-        env::remove_var("RUNMAT_PATH");
+        runtime_env::remove_var("RUNMAT_PATH");
     } else {
-        env::set_var("RUNMAT_PATH", new_path);
+        runtime_env::set_var("RUNMAT_PATH", new_path);
     }
 
     let mut guard = PATH_STATE

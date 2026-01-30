@@ -42,32 +42,32 @@
   "examples": [
     {
       "description": "Get The System Temporary Folder Path",
-      "input": "folder = tempdir();\ndisp(folder);",
-      "output": "C:\\Users\\alex\\AppData\\Local\\Temp\\"
+      "input": "folder = tempdir();\ndisp(folder)",
+      "output": "/tmp/"
     },
     {
       "description": "Combine `tempdir` With `tempname` To Build Unique Paths",
-      "input": "uniqueFile = fullfile(tempdir(), \"runmat-session.log\");\nfid = fopen(uniqueFile, \"w\");\nfprintf(fid, \"Temporary log created at %s\\n\", datetime);\nfclose(fid);",
+      "input": "uniqueFile = fullfile(tempdir(), \"runmat-session.log\");\nfid = fopen(uniqueFile, \"w\");\nfprintf(fid, \"Temporary log created at %s\\n\", datetime);\nfclose(fid)",
       "output": "% Creates runmat-session.log inside the system temporary folder"
     },
     {
       "description": "Create A Temporary Working Subfolder",
-      "input": "workDir = fullfile(tempdir(), \"mytask\");\nif ~exist(workDir, \"dir\")\n    mkdir(workDir);\nend\ndisp(workDir);",
+      "input": "workDir = fullfile(tempdir(), \"mytask\");\nif ~exist(workDir, \"dir\")\n    mkdir(workDir);\nend\ndisp(workDir)",
       "output": "% Prints the path to tempdir/mytask and creates the folder if needed"
     },
     {
       "description": "Verify That `tempdir` Appends A File Separator",
-      "input": "folder = tempdir();\nendsWithSeparator = folder(end) == filesep;\ndisp(endsWithSeparator);",
+      "input": "folder = tempdir();\nendsWithSeparator = folder(end) == filesep;\ndisp(endsWithSeparator)",
       "output": "     1"
     },
     {
       "description": "Use `tempdir` When Creating Temporary Zip Archives",
-      "input": "archive = fullfile(tempdir(), \"results.zip\");\nzip(archive, \"results\");\ndisp(archive);",
+      "input": "archive = fullfile(tempdir(), \"results.zip\");\nzip(archive, \"results\");\ndisp(archive)",
       "output": "% Displays the full path to results.zip inside the system temp folder"
     },
     {
       "description": "Log Temporary Folder Usage For Debugging",
-      "input": "fprintf(\"RunMat temp folder: %s\\n\", tempdir());",
+      "input": "fprintf(\"RunMat temp folder: %s\\n\", tempdir())",
       "output": "% Prints something like:\n%   RunMat temp folder: /tmp/"
     }
   ],

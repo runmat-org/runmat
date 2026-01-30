@@ -42,27 +42,27 @@
   "examples": [
     {
       "description": "Maintaining precision for tiny growth rates",
-      "input": "x = 1e-12;\ny = expm1(x);",
+      "input": "x = 1e-12;\ny = expm1(x)",
       "output": "y = 1.0000000000005e-12;"
     },
     {
       "description": "Applying expm1 to model percentage growth",
-      "input": "rates = [-0.10 -0.05 0 0.05 0.10];\nfactors = expm1(rates);",
+      "input": "rates = [-0.10 -0.05 0 0.05 0.10];\nfactors = expm1(rates)",
       "output": "factors = [-0.0952 -0.0488 0 0.0513 0.1052];"
     },
     {
       "description": "Running expm1 on GPU arrays",
-      "input": "G = gpuArray(linspace(-1, 1, 5));\nresult = expm1(G);\nout = gather(result);",
+      "input": "G = gpuArray(linspace(-1, 1, 5));\nresult = expm1(G);\nout = gather(result)",
       "output": "out = [-0.6321 -0.3935 0 0.6487 1.7183];"
     },
     {
       "description": "Using expm1 with complex numbers",
-      "input": "z = [1+1i, -1+pi*1i];\nw = expm1(z);",
+      "input": "z = [1+1i, -1+pi*1i];\nw = expm1(z)",
       "output": "w = [0.4687 + 2.2874i, -1.3679 + 0.0000i];"
     },
     {
       "description": "Applying expm1 to character data",
-      "input": "C = 'ABC';\nY = expm1(C);",
+      "input": "C = 'ABC';\nY = expm1(C)",
       "output": "Y = [1.6949e+28 4.6072e+28 1.2524e+29];"
     }
   ],

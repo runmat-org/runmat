@@ -57,7 +57,7 @@
     },
     {
       "description": "Collapsing every dimension at once",
-      "input": "B = reshape(1:12, [3 4]);\noverall = var(B, 0, 'all');",
+      "input": "B = reshape(1:12, [3 4]);\noverall = var(B, 0, 'all')",
       "output": "overall = 13;"
     },
     {
@@ -67,7 +67,7 @@
     },
     {
       "description": "Ignoring NaN values",
-      "input": "D = [1 NaN 3; 2 4 NaN];\nrowVariance = var(D, 0, 2, 'omitnan');",
+      "input": "D = [1 NaN 3; 2 4 NaN];\nrowVariance = var(D, 0, 2, 'omitnan')",
       "output": "rowVariance = [2; 2];"
     },
     {
@@ -76,7 +76,7 @@
     },
     {
       "description": "Preserving default behaviour with an empty normalisation flag",
-      "input": "C = [1 2; 3 4];\nrowVariance = var(C, [], 2);",
+      "input": "C = [1 2; 3 4];\nrowVariance = var(C, [], 2)",
       "output": "rowVariance = [0.5; 0.5];"
     }
   ],

@@ -34,24 +34,24 @@
     "gpu": "builtins::math::linalg::solve::rank::tests::rank_gpu_round_trip",
     "wgpu": "builtins::math::linalg::solve::rank::tests::rank_wgpu_matches_cpu"
   },
-  "description": "`r = rank(A)` returns the numerical rank of a real or complex matrix `A`. The rank equals the number of singular values greater than a tolerance derived from the matrix size and the largest singular value. RunMat mirrors MATLAB’s logic exactly so that results agree bit-for-bit with the reference implementation.",
+  "description": "`r = rank(A)` returns the numerical rank of a real or complex matrix `A`. The rank equals the number of singular values greater than a tolerance derived from the matrix size and the largest singular value. RunMat mirrors MATLAB\u2019s logic exactly so that results agree bit-for-bit with the reference implementation.",
   "behaviors": [
     "Inputs must behave like 2-D matrices. Trailing singleton dimensions are accepted; other higher ranks result in `\"rank: inputs must be 2-D matrices or vectors\"`.",
     "The default tolerance is `tol = max(size(A)) * eps(max(s))`, where `s` are the singular values from an SVD of `A`. You can override this by supplying a second argument: `rank(A, tol)`.",
     "When you provide an explicit tolerance it must be a finite, non-negative scalar. Non-scalars, `NaN`, `Inf`, or negative values raise MATLAB-compatible errors.",
     "Logical and integer inputs are promoted to double precision before taking the SVD.",
     "`rank([])` returns `0`. Rank is always reported as a double scalar (e.g., `2.0`).",
-    "Complex inputs use a complex SVD so that conjugate transposes and magnitudes follow MATLAB’s conventions."
+    "Complex inputs use a complex SVD so that conjugate transposes and magnitudes follow MATLAB\u2019s conventions."
   ],
   "examples": [
     {
       "description": "Determining the rank of a full matrix",
-      "input": "A = [1 2; 3 4];\nrk = rank(A);",
+      "input": "A = [1 2; 3 4];\nrk = rank(A)",
       "output": "rk = 2"
     },
     {
       "description": "Detecting rank deficiency in a singular matrix",
-      "input": "B = [1 2; 2 4];\nrk = rank(B);",
+      "input": "B = [1 2; 2 4];\nrk = rank(B)",
       "output": "rk = 1"
     },
     {
@@ -60,22 +60,22 @@
     },
     {
       "description": "Computing the rank of a tall matrix",
-      "input": "A = [1 0; 0 0; 0 1];\nrk = rank(A);",
+      "input": "A = [1 0; 0 0; 0 1];\nrk = rank(A)",
       "output": "rk = 2"
     },
     {
       "description": "Evaluating the rank of a complex matrix",
-      "input": "Z = [1+1i 0; 0 2-3i];\nrk = rank(Z);",
+      "input": "Z = [1+1i 0; 0 2-3i];\nrk = rank(Z)",
       "output": "rk = 2"
     },
     {
       "description": "Checking the rank of an empty matrix",
-      "input": "E = [];\nrk = rank(E);",
+      "input": "E = [];\nrk = rank(E)",
       "output": "rk = 0"
     },
     {
       "description": "Using `rank` with `gpuArray` data",
-      "input": "G = gpuArray([1 2 3; 3 6 9; 0 1 0]);\nrk = rank(G);      % Computation stays on the GPU when the provider supports it\nrk_host = gather(rk);",
+      "input": "G = gpuArray([1 2 3; 3 6 9; 0 1 0]);\nrk = rank(G);      % Computation stays on the GPU when the provider supports it\nrk_host = gather(rk)",
       "output": "rk_host = 2"
     }
   ],
@@ -86,19 +86,19 @@
     },
     {
       "question": "What does `rank([])` return?",
-      "answer": "The rank of the empty matrix is `0`. This matches MATLAB’s convention that an empty product has neutral value."
+      "answer": "The rank of the empty matrix is `0`. This matches MATLAB\u2019s convention that an empty product has neutral value."
     },
     {
       "question": "Does `rank` return an integer or a double?",
-      "answer": "`rank` returns a double-precision scalar, mirroring MATLAB’s numeric tower. The value is always an integer-valued double."
+      "answer": "`rank` returns a double-precision scalar, mirroring MATLAB\u2019s numeric tower. The value is always an integer-valued double."
     },
     {
       "question": "How does `rank` behave for vectors or scalars?",
-      "answer": "Scalars are treated as `1×1` matrices. `rank([0])` returns `0`, while `rank([5])` returns `1`. Row or column vectors behave as matrices with one dimension equal to 1."
+      "answer": "Scalars are treated as `1\u00d71` matrices. `rank([0])` returns `0`, while `rank([5])` returns `1`. Row or column vectors behave as matrices with one dimension equal to 1."
     },
     {
       "question": "Can `rank` detect symbolic rank or exact arithmetic?",
-      "answer": "No. Like MATLAB, RunMat’s `rank` relies on floating-point SVD and is subject to the chosen tolerance. For symbolic or exact arithmetic you would use a computer algebra system."
+      "answer": "No. Like MATLAB, RunMat\u2019s `rank` relies on floating-point SVD and is subject to the chosen tolerance. For symbolic or exact arithmetic you would use a computer algebra system."
     },
     {
       "question": "Will `rank` participate in fusion or auto-offload?",
@@ -110,7 +110,7 @@
     },
     {
       "question": "What happens if the matrix contains NaNs or Infs?",
-      "answer": "Singular values involving `NaN` propagate and typically produce a rank of `0`. Infinite values yield infinite singular values and therefore produce a rank equal to the number of infinite entries above tolerance, matching MATLAB’s behaviour."
+      "answer": "Singular values involving `NaN` propagate and typically produce a rank of `0`. Infinite values yield infinite singular values and therefore produce a rank equal to the number of infinite entries above tolerance, matching MATLAB\u2019s behaviour."
     },
     {
       "question": "Does `rank` allocate large temporary buffers?",
@@ -147,8 +147,8 @@
     "label": "crates/runmat-runtime/src/builtins/math/linalg/solve/rank.rs",
     "url": "crates/runmat-runtime/src/builtins/math/linalg/solve/rank.rs"
   },
-  "gpu_residency": "RunMat’s planner automatically keeps matrices on the GPU when a provider implements the `rank` hook. If the hook is missing, the builtin transparently gathers the matrix, computes the SVD on the CPU, and uploads the scalar result so later GPU work remains resident. You can still seed residency manually with `gpuArray` for MATLAB compatibility, but it is rarely required.",
+  "gpu_residency": "RunMat\u2019s planner automatically keeps matrices on the GPU when a provider implements the `rank` hook. If the hook is missing, the builtin transparently gathers the matrix, computes the SVD on the CPU, and uploads the scalar result so later GPU work remains resident. You can still seed residency manually with `gpuArray` for MATLAB compatibility, but it is rarely required.",
   "gpu_behavior": [
-    "When a GPU acceleration provider is active, RunMat first offers the computation through the reserved `rank` provider hook. Backends that implement it can stay fully on-device and return a `gpuTensor` scalar. Providers without that hook—including today’s WGPU backend—gather the matrix to host memory, reuse the shared SVD logic, and then re-upload the scalar rank so downstream kernels continue on the GPU without user intervention. Auto-offload treats the builtin as an eager sink, so any fused producers flush before `rank` executes and residency bookkeeping remains consistent."
+    "When a GPU acceleration provider is active, RunMat first offers the computation through the reserved `rank` provider hook. Backends that implement it can stay fully on-device and return a `gpuTensor` scalar. Providers without that hook\u2014including today\u2019s WGPU backend\u2014gather the matrix to host memory, reuse the shared SVD logic, and then re-upload the scalar rank so downstream kernels continue on the GPU without user intervention. Auto-offload treats the builtin as an eager sink, so any fused producers flush before `rank` executes and residency bookkeeping remains consistent."
   ]
 }

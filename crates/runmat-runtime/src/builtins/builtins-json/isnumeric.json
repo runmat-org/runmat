@@ -43,32 +43,32 @@
   "examples": [
     {
       "description": "Checking if a scalar double is numeric",
-      "input": "tf = isnumeric(42);",
+      "input": "tf = isnumeric(42)",
       "output": "tf =\n     1"
     },
     {
       "description": "Detecting numeric matrices",
-      "input": "A = [1 2 3; 4 5 6];\ntf = isnumeric(A);",
+      "input": "A = [1 2 3; 4 5 6];\ntf = isnumeric(A)",
       "output": "tf =\n     1"
     },
     {
       "description": "Testing complex numbers for numeric storage",
-      "input": "z = 1 + 2i;\ntf = isnumeric(z);",
+      "input": "z = 1 + 2i;\ntf = isnumeric(z)",
       "output": "tf =\n     1"
     },
     {
       "description": "Logical arrays are not numeric",
-      "input": "mask = logical([1 0 1]);\ntf = isnumeric(mask);",
+      "input": "mask = logical([1 0 1]);\ntf = isnumeric(mask)",
       "output": "tf =\n     0"
     },
     {
       "description": "Character vectors and strings return false",
-      "input": "chars = ['R' 'u' 'n'];\nname = \"RunMat\";\ntf_chars = isnumeric(chars);\ntf_string = isnumeric(name);",
+      "input": "chars = ['R' 'u' 'n'];\nname = \"RunMat\";\ntf_chars = isnumeric(chars);\ntf_string = isnumeric(name)",
       "output": "tf_chars =\n     0\n\ntf_string =\n     0"
     },
     {
       "description": "Evaluating `gpuArray` inputs",
-      "input": "G = gpuArray(rand(4));\nmask = G > 0.5;\ntf_numeric = isnumeric(G);\ntf_mask = isnumeric(mask);",
+      "input": "G = gpuArray(rand(4));\nmask = G > 0.5;\ntf_numeric = isnumeric(G);\ntf_mask = isnumeric(mask)",
       "output": "tf_numeric =\n     1\n\ntf_mask =\n     0"
     }
   ],
@@ -83,7 +83,7 @@
     },
     {
       "question": "Does `isnumeric` gather GPU data back to the host?",
-      "answer": "Only when residency metadata is unavailable. Providers that expose type metadata let RunMat answer the query without host↔device transfers."
+      "answer": "Only when residency metadata is unavailable. Providers that expose type metadata let RunMat answer the query without host\u2194device transfers."
     },
     {
       "question": "Do logical masks return `true`?",

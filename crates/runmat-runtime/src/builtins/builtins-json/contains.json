@@ -42,37 +42,37 @@
   "examples": [
     {
       "description": "Check if a string contains a substring",
-      "input": "tf = contains(\"RunMat Accelerate\", \"Accelerate\");",
+      "input": "tf = contains(\"RunMat Accelerate\", \"Accelerate\")",
       "output": "tf = logical\n   1"
     },
     {
       "description": "Perform a case-insensitive search",
-      "input": "tf = contains(\"RunMat\", \"run\", 'IgnoreCase', true);",
+      "input": "tf = contains(\"RunMat\", \"run\", 'IgnoreCase', true)",
       "output": "tf = logical\n   1"
     },
     {
       "description": "Apply a scalar pattern to every element of a string array",
-      "input": "labels = [\"alpha\" \"beta\" \"gamma\"];\ntf = contains(labels, \"a\");",
+      "input": "labels = [\"alpha\" \"beta\" \"gamma\"];\ntf = contains(labels, \"a\")",
       "output": "tf = 1\u00d73 logical array\n   1   1   1"
     },
     {
       "description": "Match element-wise patterns with implicit expansion",
-      "input": "names = [\"hydrogen\"; \"helium\"; \"lithium\"];\npatterns = [\"gen\"; \"ium\"; \"iron\"];\ntf = contains(names, patterns);",
+      "input": "names = [\"hydrogen\"; \"helium\"; \"lithium\"];\npatterns = [\"gen\"; \"ium\"; \"iron\"];\ntf = contains(names, patterns)",
       "output": "tf = 3\u00d71 logical array\n   1\n   1\n   0"
     },
     {
       "description": "Search a cell array of character vectors",
-      "input": "C = {'Mercury', 'Venus', 'Mars'};\ntf = contains(C, 'us');",
+      "input": "C = {'Mercury', 'Venus', 'Mars'};\ntf = contains(C, 'us')",
       "output": "tf = 1\u00d73 logical array\n   0   1   0"
     },
     {
       "description": "Provide multiple patterns as a column vector",
-      "input": "tf = contains(\"saturn\", ['s'; 'n'; 'x']);",
+      "input": "tf = contains(\"saturn\", ['s'; 'n'; 'x'])",
       "output": "tf = 3\u00d71 logical array\n   1\n   1\n   0"
     },
     {
       "description": "Handle empty and missing text values",
-      "input": "texts = [\"\", \"<missing>\"];\ntf = contains(texts, \"\");",
+      "input": "texts = [\"\", \"<missing>\"];\ntf = contains(texts, \"\")",
       "output": "tf = 1\u00d72 logical array\n   1   0"
     }
   ],

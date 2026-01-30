@@ -50,22 +50,22 @@
     },
     {
       "description": "Obtaining a non-zero remainder",
-      "input": "[q, r] = deconv([1 4 7], [1 2]);",
+      "input": "[q, r] = deconv([1 4 7], [1 2])",
       "output": "q = [1 2];\nr = [3];"
     },
     {
       "description": "Dividing by a longer sequence",
-      "input": "[q, r] = deconv([3 5], [1 0 2]);",
+      "input": "[q, r] = deconv([3 5], [1 0 2])",
       "output": "q = 0;\nr = [3 5];"
     },
     {
       "description": "Handling leading zeros explicitly",
-      "input": "b = [0 0 1 2];\na = [0 1 1];\n[q, r] = deconv(b, a);",
+      "input": "b = [0 0 1 2];\na = [0 1 1];\n[q, r] = deconv(b, a)",
       "output": "q = [1];\nr = [1];"
     },
     {
       "description": "Complex polynomial division",
-      "input": "b = [1+2i 3-4i 2];\na = [1-i 2+i];\n[q, r] = deconv(b, a);",
+      "input": "b = [1+2i 3-4i 2];\na = [1-i 2+i];\n[q, r] = deconv(b, a)",
       "output": "q = [1+0i 1-2i];\nr = [0+0i];"
     },
     {

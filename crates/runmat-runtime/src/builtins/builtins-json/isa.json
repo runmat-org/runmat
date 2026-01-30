@@ -32,8 +32,8 @@
   },
   "description": "`isa(x, T)` returns logical `true` when the value `x` is a member of the MATLAB class or abstract category identified by `T`. Use it to branch on numeric vs integer data, handle objects, GPU arrays, function handles, and user-defined classes.",
   "behaviors": [
-    "Exact class names (such as `\"double\"`, `\"cell\"`, `\"struct\"`, `\"event.listener\"`) match the value’s dynamic class. Comparisons are case-insensitive.",
-    "Abstract categories (`\"numeric\"`, `\"float\"`, `\"integer\"`, `\"handle\"`, `\"function_handle\"`, `\"gpuArray\"`, `\"listener\"`) mirror MATLAB’s grouping rules.",
+    "Exact class names (such as `\"double\"`, `\"cell\"`, `\"struct\"`, `\"event.listener\"`) match the value\u2019s dynamic class. Comparisons are case-insensitive.",
+    "Abstract categories (`\"numeric\"`, `\"float\"`, `\"integer\"`, `\"handle\"`, `\"function_handle\"`, `\"gpuArray\"`, `\"listener\"`) mirror MATLAB\u2019s grouping rules.",
     "Logical scalars, logical arrays, and logical gpuArray masks satisfy `\"logical\"` and do not register as `\"numeric\"`. RunMat consults handle metadata rather than downloading device buffers.",
     "Handle inheritance is respected: if a class derives from `handle`, `isa(obj, \"handle\")` returns `true` even when `class(obj)` reports a subclass name.",
     "`isa` accepts either a string scalar or a character row vector as the class designator.",
@@ -42,37 +42,37 @@
   "examples": [
     {
       "description": "Checking whether a scalar is double precision",
-      "input": "tf = isa(42, \"double\");",
+      "input": "tf = isa(42, \"double\")",
       "output": "tf = logical(1)"
     },
     {
       "description": "Testing numeric arrays against the numeric category",
-      "input": "A = rand(3, 4);\nis_numeric = isa(A, \"numeric\");\nis_integer = isa(A, \"integer\");",
+      "input": "A = rand(3, 4);\nis_numeric = isa(A, \"numeric\");\nis_integer = isa(A, \"integer\")",
       "output": "is_numeric = logical(1)\nis_integer = logical(0)"
     },
     {
       "description": "Confirming that gpuArray data counts as numeric",
-      "input": "G = gpuArray(rand(1024, 1024));\ntf_numeric = isa(G, \"numeric\");\ntf_double = isa(G, \"double\");   % false — the class reports gpuArray",
+      "input": "G = gpuArray(rand(1024, 1024));\ntf_numeric = isa(G, \"numeric\");\ntf_double = isa(G, \"double\");   % false \u2014 the class reports gpuArray",
       "output": "tf_numeric = logical(1)\ntf_double = logical(0)"
     },
     {
       "description": "Determining whether a GPU mask is logical",
-      "input": "G = gpuArray(rand(5) > 0.5);\nis_mask = isa(G, \"logical\");\nis_numeric = isa(G, \"numeric\");",
+      "input": "G = gpuArray(rand(5) > 0.5);\nis_mask = isa(G, \"logical\");\nis_numeric = isa(G, \"numeric\")",
       "output": "is_mask = logical(1)\nis_numeric = logical(0)"
     },
     {
       "description": "Validating handle subclasses",
-      "input": "pt = pkg.TestHandle();          % derives from handle\ntf_handle = isa(pt, \"handle\");\ntf_exact = isa(pt, \"pkg.TestHandle\");",
+      "input": "pt = pkg.TestHandle();          % derives from handle\ntf_handle = isa(pt, \"handle\");\ntf_exact = isa(pt, \"pkg.TestHandle\")",
       "output": "tf_handle = logical(1)\ntf_exact = logical(1)"
     },
     {
       "description": "Comparing string scalars and character vectors",
-      "input": "s = \"RunMat\";\nc = 'RunMat';\ntf_string = isa(s, \"string\");\ntf_char = isa(c, \"char\");",
+      "input": "s = \"RunMat\";\nc = 'RunMat';\ntf_string = isa(s, \"string\");\ntf_char = isa(c, \"char\")",
       "output": "tf_string = logical(1)\ntf_char = logical(1)"
     },
     {
       "description": "Detecting function handles and listeners",
-      "input": "fh = @sin;\ntf_handle = isa(fh, \"function_handle\");\nlst = addlistener(TestSource, \"Changed\", @disp);\ntf_listener = isa(lst, \"listener\");",
+      "input": "fh = @sin;\ntf_handle = isa(fh, \"function_handle\");\nlst = addlistener(TestSource, \"Changed\", @disp);\ntf_listener = isa(lst, \"listener\")",
       "output": "tf_handle = logical(1)\ntf_listener = logical(1)"
     }
   ],
@@ -83,7 +83,7 @@
     },
     {
       "question": "How do I check for integer types?",
-      "answer": "Use the `\"integer\"` category. It matches MATLAB’s native integer classes (`int8`, `uint16`, and so on). For example `isa(int32(5), \"integer\")` returns `true` while `isa(5, \"integer\")` returns `false`."
+      "answer": "Use the `\"integer\"` category. It matches MATLAB\u2019s native integer classes (`int8`, `uint16`, and so on). For example `isa(int32(5), \"integer\")` returns `true` while `isa(5, \"integer\")` returns `false`."
     },
     {
       "question": "Does `isa` understand handle inheritance?",

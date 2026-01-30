@@ -50,7 +50,7 @@
     },
     {
       "description": "Scrambling the generator with the system clock",
-      "input": "rng('shuffle');\nu = rand(1, 3);",
+      "input": "rng('shuffle');\nu = rand(1, 3)",
       "output": "u =\n    0.1378    0.7086    0.8463"
     },
     {
@@ -60,7 +60,7 @@
     },
     {
       "description": "Creating deterministic permutations with `rng` and `randperm`",
-      "input": "rng(42);\np = randperm(6);\nrng(42);\nq = randperm(6);",
+      "input": "rng(42);\np = randperm(6);\nrng(42);\nq = randperm(6)",
       "output": "p =\n     6     2     1     4     3     5\n\nq =\n     6     2     1     4     3     5"
     }
   ],

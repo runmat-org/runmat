@@ -44,38 +44,38 @@
   "examples": [
     {
       "description": "Checking if any column in a matrix is nonzero",
-      "input": "A = [0 2 0; 0 0 0];\ncolHasData = any(A);",
+      "input": "A = [0 2 0; 0 0 0];\ncolHasData = any(A)",
       "output": "colHasData = [0 1 0];"
     },
     {
       "description": "Detecting whether any row contains a nonzero entry",
-      "input": "B = [0 4 0; 1 0 0; 0 0 0];\nrowHasData = any(B, 2);",
+      "input": "B = [0 4 0; 1 0 0; 0 0 0];\nrowHasData = any(B, 2)",
       "output": "rowHasData = [1; 1; 0];"
     },
     {
       "description": "Reducing across multiple dimensions with `vecdim`",
-      "input": "C = reshape(1:24, [3 4 2]);\nhasValues = any(C > 20, [1 2]);",
-      "output": "hasValues = [0 1];"
+      "input": "C = reshape(1:24, [3 4 2]);\nhasValues = reshape(any(C > 20, [1 2]), 1, 2)",
+      "output": "0 1"
     },
     {
       "description": "Checking all elements with the `'all'` option",
-      "input": "D = [0 0; 0 5];\nanyNonZero = any(D, 'all');",
+      "input": "D = [0 0; 0 5];\nanyNonZero = any(D, 'all')",
       "output": "anyNonZero = true;"
     },
     {
       "description": "Ignoring `NaN` values when probing slices",
-      "input": "E = [NaN 0 0; 0 0 0];\nwithNaN = any(E);              % returns [1 0 0]\nignoringNaN = any(E, 'omitnan'); % returns [0 0 0]",
-      "output": "withNaN = [1 0 0];\nignoringNaN = [0 0 0];"
+      "input": "E = [NaN 0 0; 0 0 0];\nwithNaN = any(E);              % returns [1 0 0]\nignoringNaN = any(E, 'omitnan'); % returns [0 0 0]\ndisp(withNaN);\ndisp(ignoringNaN)",
+      "output": "     1     0     0\n     0     0     0"
     },
     {
       "description": "Running `any` on GPU arrays with automatic fallback",
-      "input": "G = gpuArray([0 1 0; 0 0 0]);\ngpuResult = any(G, 2);\nhostResult = gather(gpuResult);",
-      "output": "hostResult = [1; 0];"
+      "input": "G = gpuArray([0 1 0; 0 0 0]);\ngpuResult = any(G, 2);\nhostResult = gather(gpuResult);\ndisp(hostResult)",
+      "output": "1\n0"
     },
     {
       "description": "Evaluating `any` on character data",
-      "input": "chars = ['a' 0 'c'];\nhasPrintable = any(chars);",
-      "output": "hasPrintable = [1 0 1];"
+      "input": "chars = ['a' 0 'c'];\nhasPrintable = any(chars)",
+      "output": "hasPrintable = 1"
     }
   ],
   "faqs": [

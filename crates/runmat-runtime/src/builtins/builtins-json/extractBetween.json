@@ -44,37 +44,37 @@
   "examples": [
     {
       "description": "Extract text between words in a string",
-      "input": "txt = \"RunMat accelerates MATLAB workloads\";\nsegment = extractBetween(txt, \"RunMat \", \" workloads\");",
+      "input": "txt = \"RunMat accelerates MATLAB workloads\";\nsegment = extractBetween(txt, \"RunMat \", \" workloads\")",
       "output": "segment = \"accelerates MATLAB\""
     },
     {
       "description": "Include boundary markers with the `'Boundaries'` option",
-      "input": "path = \"snapshots/run/fusion.mat\";\nwithMarkers = extractBetween(path, \"snapshots/\", \".mat\", \"Boundaries\", \"inclusive\");",
+      "input": "path = \"snapshots/run/fusion.mat\";\nwithMarkers = extractBetween(path, \"snapshots/\", \".mat\", \"Boundaries\", \"inclusive\")",
       "output": "withMarkers = \"snapshots/run/fusion.mat\""
     },
     {
       "description": "Use numeric positions for 1-based indexing",
-      "input": "name = \"Accelerator\";\nmiddle = extractBetween(name, 3, 7);",
+      "input": "name = \"Accelerator\";\nmiddle = extractBetween(name, 3, 7)",
       "output": "middle = \"celer\""
     },
     {
       "description": "Apply scalar text markers to each element of a string array",
-      "input": "files = [\"runmat_accel.rs\", \"runmat_gc.rs\"; \"runmat_plot.rs\", \"runmat_cli.rs\"];\nstems = extractBetween(files, \"runmat_\", \".rs\");",
+      "input": "files = [\"runmat_accel.rs\", \"runmat_gc.rs\"; \"runmat_plot.rs\", \"runmat_cli.rs\"];\nstems = extractBetween(files, \"runmat_\", \".rs\")",
       "output": "stems = 2\u00d72 string\n    \"accel\"    \"gc\"\n    \"plot\"     \"cli\""
     },
     {
       "description": "Work with character arrays while preserving row padding",
-      "input": "chars = char(\"Device<GPU>\", \"Planner<Fusion>\");\ntokens = extractBetween(chars, \"<\", \">\");",
+      "input": "chars = char(\"Device<GPU>\", \"Planner<Fusion>\");\ntokens = extractBetween(chars, \"<\", \">\")",
       "output": "tokens =\n\n  2\u00d76 char array\n\n    \"GPU   \"\n    \"Fusion\""
     },
     {
       "description": "Preserve element types in cell arrays",
-      "input": "C = {'<missing>', 'A[B]C'; \"Planner <Fusion>\", \"Device<GPU>\"};\nout = extractBetween(C, \"<\", \">\");",
+      "input": "C = {'<missing>', 'A[B]C'; \"Planner <Fusion>\", \"Device<GPU>\"};\nout = extractBetween(C, \"<\", \">\")",
       "output": "out =\n  2\u00d72 cell array\n    {'<missing>'}    {'B'}\n    {\"Fusion\"}       {\"GPU\"}"
     },
     {
       "description": "Handle missing strings without throwing errors",
-      "input": "txt = [\"<missing>\", \"Planner<GPU>\"];\ntokens = extractBetween(txt, \"<\", \">\");",
+      "input": "txt = [\"<missing>\", \"Planner<GPU>\"];\ntokens = extractBetween(txt, \"<\", \">\")",
       "output": "tokens = 1\u00d72 string\n    \"<missing>\"    \"GPU\""
     }
   ],

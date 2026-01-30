@@ -42,27 +42,27 @@
   "examples": [
     {
       "description": "Converting a 2-by-2 cell array of scalars into a matrix",
-      "input": "C = {1, 2; 3, 4};\nA = cell2mat(C);",
+      "input": "C = {1, 2; 3, 4};\nA = cell2mat(C)",
       "output": "A =\n     1     2\n     3     4"
     },
     {
       "description": "Concatenating blocks of different column widths",
-      "input": "C = {[1 2], [3 4 5]; [6 7], [8 9 10]};\nA = cell2mat(C);",
+      "input": "C = {[1 2], [3 4 5]; [6 7], [8 9 10]};\nA = cell2mat(C)",
       "output": "A =\n     1     2     3     4     5\n     6     7     8     9    10"
     },
     {
       "description": "Converting logical cell contents into a logical matrix",
-      "input": "C = {true(2,1), false(2,1)};\nM = cell2mat(C);",
+      "input": "C = {true(2,1), false(2,1)};\nM = cell2mat(C)",
       "output": "M =\n  2\u00d72 logical array\n     1     0\n     1     0"
     },
     {
       "description": "Handling complex-valued blocks",
-      "input": "C = {1+2i, [3+4i 5+6i]};\nZ = cell2mat(C);",
+      "input": "C = {1+2i, [3+4i 5+6i]};\nZ = cell2mat(C)",
       "output": "Z =\n   1.0000 + 2.0000i   3.0000 + 4.0000i   5.0000 + 6.0000i"
     },
     {
       "description": "Producing character matrices from cell arrays of character rows",
-      "input": "C = {'foo', 'bar'; 'baz', 'qux'};\nS = cell2mat(C);",
+      "input": "C = {'foo', 'bar'; 'baz', 'qux'};\nS = cell2mat(C)",
       "output": "S =\n    'foobar'\n    'bazqux'"
     },
     {

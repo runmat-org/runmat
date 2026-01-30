@@ -41,17 +41,17 @@
   "examples": [
     {
       "description": "Undoing fftshift on an even-length spectrum",
-      "input": "x = 0:7;\ny = ifftshift(x);",
+      "input": "x = 0:7;\ny = ifftshift(x)",
       "output": "y = [4 5 6 7 0 1 2 3];"
     },
     {
       "description": "Undoing fftshift on an odd-length spectrum",
-      "input": "x = 1:5;\ny = ifftshift(x);",
+      "input": "x = 1:5;\ny = ifftshift(x)",
       "output": "y = [3 4 5 1 2];"
     },
     {
       "description": "Preparing data for inverse FFT",
-      "input": "fx = fft(rand(1, 8));\ncentered = fftshift(fx);\nrestored = ifftshift(centered);\nsignal = ifft(restored);"
+      "input": "fx = fft(rand(1, 8));\ncentered = fftshift(fx);\nrestored = ifftshift(centered);\nsignal = ifft(restored)"
     },
     {
       "description": "Shifting only selected dimensions",
@@ -60,7 +60,7 @@
     },
     {
       "description": "Using ifftshift with gpuArray data",
-      "input": "G = gpuArray(0:7);\nshifted = ifftshift(G);\nhost = gather(shifted);",
+      "input": "G = gpuArray(0:7);\nshifted = ifftshift(G);\nhost = gather(shifted)",
       "output": "host = [4 5 6 7 0 1 2 3];"
     }
   ],

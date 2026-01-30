@@ -695,7 +695,9 @@ fn conv2d_full_real(
                 let out_c = sc + kc;
                 for kr in 0..kernel_rows {
                     let out_r = sr + kr;
-                    let kval = kernel[kc * kernel_rows + kr];
+                    let src_c = kernel_cols - 1 - kc;
+                    let src_r = kernel_rows - 1 - kr;
+                    let kval = kernel[src_c * kernel_rows + src_r];
                     out[out_c * full_rows + out_r] += aval * kval;
                 }
             }
