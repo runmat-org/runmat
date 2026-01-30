@@ -153,7 +153,7 @@ RunMat Desktop runs entirely in your browser using WebAssembly. When you click R
 
 ### GPU Acceleration
 
-For large arrays and intensive math, RunMat automatically fuses operations and runs them on your GPU (via WebGPU). This happens transparently—you don't need to write any special GPU code.
+For large arrays and intensive math, RunMat automatically fuses operations and runs them on your GPU (via WebGPU). This happens transparently—you don't need to write any special GPU code. (Using MATLAB with NVIDIA GPUs? See our [MATLAB on NVIDIA GPUs](/blog/matlab-nvidia-gpu) guide.)
 
 The Variables pane shows **Residency** for each variable:
 - **cpu** — data is on the CPU

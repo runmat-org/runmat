@@ -333,7 +333,7 @@ fn complex_tensor_is_scalar(tensor: &ComplexTensor) -> bool {
 }
 
 fn is_scalar_handle(handle: &GpuTensorHandle) -> bool {
-    handle.shape.iter().copied().product::<usize>() == 1
+    crate::builtins::common::shape::is_scalar_shape(&handle.shape)
 }
 
 struct PreparedOperand {

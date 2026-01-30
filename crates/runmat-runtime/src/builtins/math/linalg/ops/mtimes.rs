@@ -184,8 +184,7 @@ async fn real_scalar_value(
 }
 
 fn is_scalar_handle(handle: &GpuTensorHandle) -> bool {
-    let elements: usize = handle.shape.iter().copied().product();
-    elements == 1
+    crate::builtins::common::shape::is_scalar_shape(&handle.shape)
 }
 
 #[async_recursion::async_recursion(?Send)]

@@ -381,6 +381,7 @@ fn build_char_output(data: Vec<String>) -> BuiltinResult<Value> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_builtins::Tensor;

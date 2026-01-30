@@ -121,6 +121,7 @@ impl AreaPlot {
             material,
             draw_calls: vec![draw_call],
             gpu_vertices: None,
+            bounds: None,
             image: None,
         }
     }

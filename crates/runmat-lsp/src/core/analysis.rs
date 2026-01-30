@@ -868,6 +868,28 @@ mod tests {
             .unwrap_or_else(|| panic!("no token found at offset {offset}"));
         assert_eq!(token.lexeme, "plot", "unexpected token at hover location");
         let hover = hover_at(text, &analysis, &position);
-        assert!(hover.is_some(), "expected hover for builtin function");
+        let hover = hover.expect("expected hover for builtin function");
+        match hover.contents {
+            lsp_types::HoverContents::Markup(markup) => {
+                assert_eq!(
+                    markup.kind,
+                    lsp_types::MarkupKind::Markdown,
+                    "expected markdown hover"
+                );
+                assert!(
+                    markup.value.contains("```runmat\nplot(...)\n```"),
+                    "expected placeholder signature header, got:\n{}",
+                    markup.value
+                );
+                assert!(
+                    markup
+                        .value
+                        .contains("Docs: https://runmat.org/docs/reference/builtins/"),
+                    "expected docs link, got:\n{}",
+                    markup.value
+                );
+            }
+            other => panic!("expected Markup hover contents, got {other:?}"),
+        }
     }
 }

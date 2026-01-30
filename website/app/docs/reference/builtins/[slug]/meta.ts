@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { getBuiltinDocBySlug, formatCategoryLabel } from '@/lib/builtins';
+import { getBuiltinDocBySlug } from '@/lib/builtins';
 import { resolveOgFields } from '@/lib/og';
 import { buildPageMetadata } from '@/lib/seo';
 
@@ -20,7 +20,7 @@ export function builtinMetadataForSlug(slug: string): Metadata {
 
     const description = (builtin.description || builtin.summary || FALLBACK_DESCRIPTION).trim();
 
-    const title = `${builtin.name} | MATLAB Language Function Reference`;
+    const title = `${builtin.title} | MATLAB Language Function Reference`;
     return buildPageMetadata({
       title,
       description,

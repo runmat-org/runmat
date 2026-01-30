@@ -147,6 +147,7 @@ impl ErrorBar {
             vertices,
             indices: None,
             gpu_vertices: None,
+            bounds: None,
             material,
             draw_calls: vec![draw_call],
             image: None,

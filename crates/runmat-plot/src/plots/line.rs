@@ -3,11 +3,13 @@
 //! High-performance line plotting with GPU acceleration.
 
 use crate::core::{
-    vertex_utils, AlphaMode, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType,
-    RenderData, Vertex,
+    vertex_utils, AlphaMode, BoundingBox, DrawCall, GpuPackContext, GpuVertexBuffer, Material,
+    PipelineType, RenderData, Vertex,
 };
+use crate::gpu::line::LineGpuInputs;
 use crate::plots::scatter::MarkerStyle as ScatterMarkerStyle;
 use glam::{Vec3, Vec4};
+use log::trace;
 
 /// High-performance GPU-accelerated line plot
 #[derive(Debug, Clone)]
@@ -34,6 +36,7 @@ pub struct LinePlot {
     dirty: bool,
     gpu_vertices: Option<GpuVertexBuffer>,
     gpu_vertex_count: Option<usize>,
+    gpu_line_inputs: Option<LineGpuInputs>,
     marker_vertices: Option<Vec<Vertex>>,
     marker_gpu_vertices: Option<GpuVertexBuffer>,
     marker_dirty: bool,
@@ -101,6 +104,14 @@ impl Default for LineStyle {
 }
 
 impl LinePlot {
+    pub(crate) fn has_gpu_line_inputs(&self) -> bool {
+        self.gpu_line_inputs.is_some()
+    }
+
+    pub(crate) fn has_gpu_vertices(&self) -> bool {
+        self.gpu_vertices.is_some()
+    }
+
     /// Create a new line plot with data
     pub fn new(x_data: Vec<f64>, y_data: Vec<f64>) -> Result<Self, String> {
         if x_data.len() != y_data.len() {
@@ -131,6 +142,7 @@ impl LinePlot {
             dirty: true,
             gpu_vertices: None,
             gpu_vertex_count: None,
+            gpu_line_inputs: None,
             marker_vertices: None,
             marker_gpu_vertices: None,
             marker_dirty: true,
@@ -163,6 +175,7 @@ impl LinePlot {
             dirty: false,
             gpu_vertices: Some(buffer),
             gpu_vertex_count: Some(vertex_count),
+            gpu_line_inputs: None,
             marker_vertices: None,
             marker_gpu_vertices: marker_buffer,
             marker_dirty: true,
@@ -170,10 +183,45 @@ impl LinePlot {
         }
     }
 
+    /// Create a GPU-backed line plot from X/Y device buffers.
+    ///
+    /// Geometry is packed at render-time when a viewport size is available so that pixel-based
+    /// widths can be converted into data units.
+    pub fn from_gpu_xy(
+        inputs: LineGpuInputs,
+        style: LineGpuStyle,
+        bounds: BoundingBox,
+        marker_buffer: Option<GpuVertexBuffer>,
+    ) -> Self {
+        Self {
+            x_data: Vec::new(),
+            y_data: Vec::new(),
+            color: style.color,
+            line_width: style.line_width,
+            line_style: style.line_style,
+            line_join: LineJoin::Miter,
+            line_cap: LineCap::Butt,
+            marker: style.marker,
+            label: None,
+            visible: true,
+            vertices: None,
+            bounds: Some(bounds),
+            dirty: false,
+            gpu_vertices: None,
+            gpu_vertex_count: None,
+            gpu_line_inputs: Some(inputs),
+            marker_vertices: None,
+            marker_gpu_vertices: marker_buffer,
+            marker_dirty: true,
+            gpu_topology: None,
+        }
+    }
+
     fn invalidate_gpu_data(&mut self) {
         self.gpu_vertices = None;
         self.gpu_vertex_count = None;
         self.bounds = None;
+        self.gpu_line_inputs = None;
         self.marker_gpu_vertices = None;
         self.marker_dirty = true;
         self.gpu_topology = None;
@@ -363,7 +411,7 @@ impl LinePlot {
 
     /// Get the bounding box of the data
     pub fn bounds(&mut self) -> BoundingBox {
-        if self.gpu_vertices.is_some() {
+        if self.bounds.is_some() && self.x_data.is_empty() && self.y_data.is_empty() {
             return self.bounds.unwrap_or_default();
         }
         if self.dirty || self.bounds.is_none() {
@@ -376,6 +424,91 @@ impl LinePlot {
             self.bounds = Some(BoundingBox::from_points(&points));
         }
         self.bounds.unwrap()
+    }
+
+    fn pack_gpu_vertices_if_needed(
+        &mut self,
+        gpu: &GpuPackContext<'_>,
+        viewport_px: (u32, u32),
+    ) -> Result<(), String> {
+        if self.gpu_vertices.is_some() {
+            return Ok(());
+        }
+        let Some(inputs) = self.gpu_line_inputs.as_ref() else {
+            return Ok(());
+        };
+        let bounds = self
+            .bounds
+            .as_ref()
+            .ok_or_else(|| "missing line bounds".to_string())?;
+
+        let thick_px = self.line_width > 1.0;
+        let data_per_px = crate::core::data_units_per_px(bounds, viewport_px);
+        let half_width_data = if thick_px {
+            ((self.line_width.max(0.1)) * 0.5) * data_per_px
+        } else {
+            0.0
+        };
+        trace!(
+            target: "runmat_plot",
+            "line-pack: begin len={} line_width_px={} thick={} half_width_data={} viewport_px={:?} bounds=({:?}..{:?})",
+            inputs.len,
+            self.line_width,
+            thick_px,
+            half_width_data,
+            viewport_px,
+            bounds.min,
+            bounds.max
+        );
+
+        let params = crate::gpu::line::LineGpuParams {
+            color: self.color,
+            half_width_data,
+            thick: thick_px,
+            line_style: self.line_style,
+            marker_size: 1.0,
+        };
+        let packed =
+            crate::gpu::line::pack_vertices_from_xy(gpu.device, gpu.queue, inputs, &params)
+                .map_err(|e| format!("gpu line packing failed: {e}"))?;
+        trace!(
+            target: "runmat_plot",
+            "line-pack: complete max_vertices={} indirect_present={}",
+            packed.vertex_count,
+            packed.indirect.is_some()
+        );
+
+        self.gpu_vertices = Some(packed);
+        self.gpu_vertex_count = Some(self.gpu_vertices.as_ref().unwrap().vertex_count);
+        self.gpu_topology = Some(if thick_px {
+            PipelineType::Triangles
+        } else {
+            PipelineType::Lines
+        });
+        Ok(())
+    }
+
+    pub fn render_data_with_viewport_gpu(
+        &mut self,
+        viewport_px: Option<(u32, u32)>,
+        gpu: Option<&GpuPackContext<'_>>,
+    ) -> RenderData {
+        trace!(
+            target: "runmat_plot",
+            "line: render_data_with_viewport_gpu viewport_px={:?} gpu_ctx_present={} gpu_line_inputs_present={} gpu_vertices_present={}",
+            viewport_px,
+            gpu.is_some(),
+            self.gpu_line_inputs.is_some(),
+            self.gpu_vertices.is_some()
+        );
+        if self.gpu_line_inputs.is_some() && self.gpu_vertices.is_none() {
+            if let (Some(gpu), Some(vp)) = (gpu, viewport_px) {
+                // Best-effort: if packing fails, fall through and let the caller handle
+                // missing geometry (typically via a plotting error upstream).
+                let _ = self.pack_gpu_vertices_if_needed(gpu, vp);
+            }
+        }
+        self.render_data_with_viewport(viewport_px)
     }
 
     /// Generate complete render data for the graphics pipeline
@@ -444,6 +577,7 @@ impl LinePlot {
             vertices,
             indices: None,
             gpu_vertices,
+            bounds: Some(self.bounds()),
             material,
             draw_calls: vec![draw_call],
             image: None,
@@ -462,25 +596,9 @@ impl LinePlot {
         }
 
         let (vertices, vertex_count, pipeline) = if self.line_width > 1.0 {
-            let (w_px, h_px) = viewport_px.unwrap_or((600, 400));
-            let w_px = w_px.max(1) as f32;
-            let h_px = h_px.max(1) as f32;
-
-            let (min_x, max_x) = self
-                .x_data
-                .iter()
-                .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &v| {
-                    (mn.min(v), mx.max(v))
-                });
-            let (min_y, max_y) = self
-                .y_data
-                .iter()
-                .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &v| {
-                    (mn.min(v), mx.max(v))
-                });
-            let x_range = ((max_x - min_x).abs() as f32).max(1e-6);
-            let y_range = ((max_y - min_y).abs() as f32).max(1e-6);
-            let data_per_px = (x_range / w_px).max(y_range / h_px);
+            let bounds = self.bounds();
+            let viewport_px = viewport_px.unwrap_or((600, 400));
+            let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
             let width_data = (self.line_width.max(0.1)) * data_per_px;
 
             let base_tris = match self.line_cap {
@@ -563,6 +681,7 @@ impl LinePlot {
             vertices,
             indices: None,
             gpu_vertices: None,
+            bounds: Some(self.bounds()),
             material,
             draw_calls: vec![draw_call],
             image: None,
@@ -591,6 +710,7 @@ impl LinePlot {
                 vertices: Vec::new(),
                 indices: None,
                 gpu_vertices: Some(gpu_vertices),
+                bounds: None,
                 material,
                 draw_calls: vec![draw_call],
                 image: None,
@@ -614,6 +734,7 @@ impl LinePlot {
             vertices: vertices.to_vec(),
             indices: None,
             gpu_vertices: None,
+            bounds: None,
             material,
             draw_calls: vec![draw_call],
             image: None,

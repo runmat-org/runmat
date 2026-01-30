@@ -473,6 +473,7 @@ fn apply_padding_owned(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
     use crate::builtins::common::test_support;
 
     fn pad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

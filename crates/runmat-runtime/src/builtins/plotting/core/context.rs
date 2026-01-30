@@ -80,7 +80,19 @@ fn context_error(message: impl Into<String>) -> RuntimeError {
 }
 
 fn propagate_to_plot_crate(context: &WgpuContextHandle) {
-    #[cfg(feature = "plot-core")]
+    // Make the shared device available to the `runmat-plot` crate.
+    //
+    // This is required for zero-copy GPU-resident plotting:
+    // - plot builtins export provider buffers
+    // - plot GPU packers need an Arc<Device/Queue> to build vertex buffers
+    //
+    // Note: `runmat-plot` owns its own global context store; we install into it whenever
+    // a provider exports a plotting-capable WGPU context.
+    #[cfg(any(
+        feature = "gui",
+        feature = "plot-core",
+        all(target_arch = "wasm32", feature = "plot-web")
+    ))]
     {
         use runmat_plot::context::{
             install_shared_wgpu_context as install_plot_context, SharedWgpuContext,
@@ -98,6 +110,11 @@ fn propagate_to_plot_crate(context: &WgpuContextHandle) {
         if let Some(wg) = runmat_accelerate_api::workgroup_size_hint() {
             plot_tuning::set_effective_workgroup_size(wg);
         }
+    }
+
+    #[cfg(not(any(feature = "gui", all(target_arch = "wasm32", feature = "plot-web"))))]
+    {
+        let _ = context;
     }
 }
 

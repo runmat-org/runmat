@@ -140,6 +140,7 @@ pub(super) fn ifft_complex_tensor(
     length: Option<usize>,
     dimension: Option<usize>,
 ) -> BuiltinResult<ComplexTensor> {
+    let origin_rank = tensor.shape.len();
     if is_scalar_shape(&tensor.shape) {
         tensor.shape = normalize_scalar_shape(&tensor.shape);
         tensor.rows = tensor.shape.first().copied().unwrap_or(1);
@@ -147,7 +148,6 @@ pub(super) fn ifft_complex_tensor(
     }
 
     let mut shape = tensor.shape.clone();
-    let origin_rank = shape.len();
     let dim_index = match dimension {
         Some(0) => return Err(ifft_error("ifft: dimension must be >= 1")),
         Some(dim) => dim - 1,
