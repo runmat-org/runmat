@@ -5,11 +5,12 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::linalg::type_resolvers::qr_type;
+use crate::builtins::common::type_shapes::{element_count_if_known, unknown_shape};
+use crate::builtins::math::linalg::type_resolvers::{matrix_dims, numeric_tensor_from_shape};
 use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use super::lu::PivotMode;
@@ -36,6 +37,31 @@ fn qr_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
+}
+
+fn qr_type(args: &[Type]) -> Type {
+    let Some(input) = args.first() else {
+        return Type::Unknown;
+    };
+    match input {
+        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+            if element_count_if_known(shape.as_slice()) == Some(1) {
+                return Type::Num;
+            }
+            if args.len() == 1 {
+                let (rows, cols) = matrix_dims(shape);
+                numeric_tensor_from_shape(vec![rows, cols])
+            } else {
+                Type::Tensor {
+                    shape: Some(unknown_shape(shape.len().max(2))),
+                }
+            }
+        }
+        Type::Tensor { shape: None } | Type::Logical { shape: None } => Type::tensor(),
+        Type::Num | Type::Int | Type::Bool => Type::Num,
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
 }
 
 fn with_qr_context(mut error: RuntimeError) -> RuntimeError {
@@ -799,7 +825,12 @@ pub(crate) mod tests {
         let out = qr_type(&[Type::Tensor {
             shape: Some(vec![Some(3), Some(2)]),
         }]);
-        assert_eq!(out, Type::tensor());
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(2)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

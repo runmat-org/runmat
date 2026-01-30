@@ -437,6 +437,20 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn dot_type_vector_with_dim_returns_scalar() {
+        let out = dot_type(&[
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(4)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(4)]),
+            },
+            Type::Int,
+        ]);
+        assert_eq!(out, Type::Num);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_column_vectors() {

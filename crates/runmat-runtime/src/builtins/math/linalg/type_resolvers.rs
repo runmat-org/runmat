@@ -113,8 +113,11 @@ pub fn dot_type(args: &[Type]) -> Type {
         Type::Unknown => return Type::Unknown,
         _ => return Type::Unknown,
     };
+    if args.len() > 2 && is_vector_shape(shape) {
+        return Type::Num;
+    }
     let out_shape = if args.len() > 2 {
-        unknown_shape(shape.len())
+        unknown_shape(shape.len().max(2))
     } else {
         reduce_first_nonsingleton(shape)
     };
@@ -203,18 +206,6 @@ pub fn bandwidth_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn qr_type(args: &[Type]) -> Type {
-    let Some(input) = args.first() else {
-        return Type::Unknown;
-    };
-    match input {
-        Type::Tensor { .. } | Type::Logical { .. } => Type::tensor(),
-        Type::Num | Type::Int | Type::Bool => Type::Num,
-        Type::Unknown => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
 fn matmul_binary_type(lhs: &Type, rhs: &Type) -> Type {
     if is_numeric_scalar(lhs) && is_numeric_scalar(rhs) {
         return Type::Num;
@@ -274,6 +265,9 @@ fn left_divide_binary_type(lhs: &Type, rhs: &Type) -> Type {
 }
 
 fn right_divide_binary_type(lhs: &Type, rhs: &Type) -> Type {
+    if is_numeric_scalar(lhs) {
+        return numeric_like(rhs);
+    }
     if is_numeric_scalar(rhs) {
         return numeric_like(lhs);
     }
@@ -303,7 +297,7 @@ fn numeric_like(input: &Type) -> Type {
     }
 }
 
-fn numeric_tensor_from_shape(shape: Vec<Option<usize>>) -> Type {
+pub fn numeric_tensor_from_shape(shape: Vec<Option<usize>>) -> Type {
     if element_count_if_known(&shape) == Some(1) {
         Type::Num
     } else {
@@ -352,7 +346,7 @@ fn transpose_shape(shape: &[Option<usize>]) -> Vec<Option<usize>> {
     }
 }
 
-fn matrix_dims(shape: &[Option<usize>]) -> (Option<usize>, Option<usize>) {
+pub fn matrix_dims(shape: &[Option<usize>]) -> (Option<usize>, Option<usize>) {
     match shape.len() {
         0 => (Some(1), Some(1)),
         1 => (shape[0], Some(1)),
@@ -365,6 +359,14 @@ fn is_effective_matrix(shape: &[Option<usize>]) -> bool {
         return true;
     }
     shape.iter().skip(2).all(|dim| matches!(dim, Some(1)))
+}
+
+fn is_vector_shape(shape: &[Option<usize>]) -> bool {
+    match shape.len() {
+        0 => false,
+        1 => true,
+        _ => shape.iter().take(2).any(|dim| matches!(dim, Some(1))),
+    }
 }
 
 fn min_dim(lhs: Option<usize>, rhs: Option<usize>) -> Option<usize> {
@@ -405,6 +407,21 @@ mod tests {
             out,
             Type::Tensor {
                 shape: Some(vec![Some(2), Some(4)])
+            }
+        );
+    }
+
+    #[test]
+    fn right_divide_scalar_by_matrix_returns_matrix_shape() {
+        let lhs = Type::Num;
+        let rhs = Type::Tensor {
+            shape: Some(vec![Some(2), Some(2)]),
+        };
+        let out = right_divide_type(&[lhs, rhs]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(2)])
             }
         );
     }
