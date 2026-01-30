@@ -740,7 +740,7 @@ pub fn handle_plot_surface_event(surface_id: u32, event: JsValue) -> Result<(), 
     use runmat_plot::core::PlotEvent;
 
     let payload: PlotSurfaceEventPayload =
-        serde_wasm_bindgen::from_value(event).map_err(|err| js_error(err.to_string()))?;
+        serde_wasm_bindgen::from_value(event).map_err(|err| js_error(&err.to_string()))?;
     let position = Vec2::new(payload.x, payload.y);
     let delta = Vec2::new(payload.dx, payload.dy);
     let button = match payload.button {
@@ -756,7 +756,10 @@ pub fn handle_plot_surface_event(surface_id: u32, event: JsValue) -> Result<(), 
         "wheel" => PlotEvent::MouseWheel {
             delta: payload.wheel_delta,
         },
-        other => return Err(js_error(format!("Unknown plot event kind '{other}'"))),
+        other => {
+            let message = format!("Unknown plot event kind '{other}'");
+            return Err(js_error(&message));
+        }
     };
 
     runtime_handle_plot_surface_event(surface_id, event).map_err(|err| js_error(err.message()))

@@ -156,6 +156,33 @@ export type FigurePlotKind =
 export type FigureEventListener = (event: FigureEvent) => void;
 export type HoldMode = "on" | "off" | "toggle" | boolean;
 
+export type PlotSurfaceEvent =
+  | {
+      kind: "mouseDown";
+      x: number;
+      y: number;
+      button: number;
+    }
+  | {
+      kind: "mouseUp";
+      x: number;
+      y: number;
+      button: number;
+    }
+  | {
+      kind: "mouseMove";
+      x: number;
+      y: number;
+      dx: number;
+      dy: number;
+    }
+  | {
+      kind: "wheel";
+      x: number;
+      y: number;
+      wheelDelta: number;
+    };
+
 export type StdoutStreamKind = "stdout" | "stderr";
 
 export interface StdoutEntry {
@@ -673,6 +700,12 @@ export async function renderCurrentFigureScene(handle: number): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "renderCurrentFigureScene");
   native.renderCurrentFigureScene(handle);
+}
+
+export async function handlePlotSurfaceEvent(surfaceId: number, event: PlotSurfaceEvent): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "handlePlotSurfaceEvent");
+  native.handlePlotSurfaceEvent(surfaceId, event);
 }
 
 export async function onFigureEvent(listener: FigureEventListener | null): Promise<void> {

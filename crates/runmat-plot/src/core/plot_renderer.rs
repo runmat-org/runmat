@@ -1081,6 +1081,11 @@ impl PlotRenderer {
         // Apply MSAA preference into pipelines
         self.wgpu_renderer.ensure_msaa(config.msaa_samples);
 
+        // Ensure a depth attachment exists for camera-based 3D rendering.
+        // This is a no-op for pure 2D direct-mapped pipelines, but is required for correct
+        // occlusion in 3D plots (surf/mesh/scatter3).
+        let depth_view = self.wgpu_renderer.ensure_depth_view();
+
         // Update aspect ratio based on provided config (caller should pass plot area aspect)
         let aspect_ratio = (config.width.max(1)) as f32 / (config.height.max(1)) as f32;
         self.camera.update_aspect_ratio(aspect_ratio);
@@ -1275,7 +1280,14 @@ impl PlotRenderer {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth_view.as_ref(),
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });

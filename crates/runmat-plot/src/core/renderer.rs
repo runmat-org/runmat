@@ -217,6 +217,11 @@ pub struct WgpuRenderer {
     // Current uniforms
     uniforms: Uniforms,
     direct_uniforms: DirectUniforms,
+
+    // Depth resources (used by camera-based 3D rendering paths)
+    depth_texture: Option<wgpu::Texture>,
+    depth_view: Option<Arc<wgpu::TextureView>>,
+    depth_extent: (u32, u32, u32), // (w, h, sample_count)
 }
 
 impl WgpuRenderer {
@@ -375,6 +380,9 @@ impl WgpuRenderer {
             direct_uniform_bind_group_layout,
             uniforms,
             direct_uniforms,
+            depth_texture: None,
+            depth_view: None,
+            depth_extent: (0, 0, 0),
         }
     }
 
@@ -399,7 +407,46 @@ impl WgpuRenderer {
             self.direct_triangle_pipeline = None;
             self.direct_point_pipeline = None;
             self.image_pipeline = None;
+            // Depth attachment must match sample count.
+            self.depth_texture = None;
+            self.depth_view = None;
+            self.depth_extent = (0, 0, 0);
         }
+    }
+
+    fn depth_format() -> wgpu::TextureFormat {
+        // Web-friendly depth format.
+        wgpu::TextureFormat::Depth24Plus
+    }
+
+    pub fn ensure_depth_view(&mut self) -> Arc<wgpu::TextureView> {
+        let width = self.surface_config.width.max(1);
+        let height = self.surface_config.height.max(1);
+        let samples = self.msaa_sample_count.max(1);
+        if self.depth_view.is_none() || self.depth_extent != (width, height, samples) {
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("runmat_depth_texture"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: samples,
+                dimension: wgpu::TextureDimension::D2,
+                format: Self::depth_format(),
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            self.depth_texture = Some(texture);
+            self.depth_view = Some(Arc::new(view));
+            self.depth_extent = (width, height, samples);
+        }
+        self.depth_view
+            .as_ref()
+            .cloned()
+            .expect("depth view missing")
     }
 
     /// Create a GPU texture and bind group for an RGBA8 image
@@ -622,7 +669,13 @@ impl WgpuRenderer {
                     unclipped_depth: false,
                     conservative: false,
                 },
-                depth_stencil: None, // Disable depth testing for 2D point plots
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: Self::depth_format(),
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState {
                     count: self.msaa_sample_count,
                     mask: !0,
@@ -676,7 +729,13 @@ impl WgpuRenderer {
                     unclipped_depth: false,
                     conservative: false,
                 },
-                depth_stencil: None, // Disable depth testing for 2D line plots
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: Self::depth_format(),
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState {
                     count: self.msaa_sample_count,
                     mask: !0,
@@ -975,7 +1034,13 @@ impl WgpuRenderer {
                     unclipped_depth: false,
                     conservative: false,
                 },
-                depth_stencil: None, // Disable depth testing for 2D plotting
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: Self::depth_format(),
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState {
                     count: self.msaa_sample_count,
                     mask: !0,

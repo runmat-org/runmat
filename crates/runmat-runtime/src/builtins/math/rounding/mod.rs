@@ -7,7 +7,7 @@ pub(crate) mod rem;
 pub(crate) mod round;
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::BroadcastPlan;
@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding")]
@@ -85,6 +86,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     summary = "MATLAB-compatible modulus a - b .* floor(a./b) with support for complex values and broadcasting.",
     keywords = "mod,modulus,remainder,gpu",
     accel = "binary",
+    type_resolver(numeric_binary_type),
     builtin_path = "crate::builtins::math::rounding"
 )]
 async fn mod_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -370,7 +372,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::RuntimeError;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor};
+    use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor, Type};
 
     fn mod_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         block_on(super::mod_builtin(lhs, rhs))
@@ -382,6 +384,46 @@ pub(crate) mod tests {
             "unexpected error: {}",
             error.message()
         );
+    }
+
+    #[test]
+    fn mod_type_preserves_tensor_shape() {
+        let out = numeric_binary_type(&[
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            },
+        ]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
+
+    #[test]
+    fn mod_type_scalar_and_tensor_returns_tensor() {
+        let out = numeric_binary_type(&[
+            Type::Num,
+            Type::Tensor {
+                shape: Some(vec![Some(4), Some(1)]),
+            },
+        ]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(4), Some(1)])
+            }
+        );
+    }
+
+    #[test]
+    fn mod_type_scalar_returns_num() {
+        let out = numeric_binary_type(&[Type::Num, Type::Int]);
+        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

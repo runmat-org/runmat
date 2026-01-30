@@ -1,7 +1,7 @@
 //! MATLAB-compatible `sin` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{CharArray, ComplexTensor, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::sin")]
@@ -61,6 +62,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Sine of scalars, vectors, matrices, or N-D tensors (element-wise).",
     keywords = "sin,sine,trigonometry,gpu",
     accel = "unary",
+    type_resolver(numeric_unary_type),
     builtin_path = "crate::builtins::math::trigonometry::sin"
 )]
 async fn sin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -232,12 +234,33 @@ pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_builtins::{IntValue, Tensor, Type};
 
     use crate::builtins::common::test_support;
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[test]
+    fn sin_type_preserves_tensor_shape() {
+        let out = numeric_unary_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(3)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
+
+    #[test]
+    fn sin_type_scalar_tensor_returns_num() {
+        let out = numeric_unary_type(&[Type::Tensor {
+            shape: Some(vec![Some(1), Some(1)]),
+        }]);
+        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
