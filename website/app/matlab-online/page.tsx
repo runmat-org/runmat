@@ -211,9 +211,9 @@ export default function MatlabOnlinePage() {
         }}
       />
 
-      <div className="container mx-auto px-4 md:px-6 lg:px-8 py-16 md:py-20">
+      <div className="container mx-auto px-4 md:px-6 lg:px-8">
         {/* Hero */}
-        <section className="w-full mb-16" id="hero">
+        <section className="w-full py-16 md:py-24 lg:py-32" id="hero">
           <div className="grid grid-cols-1 gap-10 lg:grid-cols-2 lg:items-center">
             <div className="flex flex-col space-y-6 text-left items-start">
               <div className="mb-2 p-0 text-lg font-semibold uppercase tracking-wide text-primary">
@@ -265,7 +265,7 @@ export default function MatlabOnlinePage() {
         </section>
 
         {/* What is MATLAB Online? */}
-        <section className="mb-16 border-y border-border/60 py-12">
+        <section className="py-16 md:py-24 lg:py-32 border-y border-border/60">
           <div className="mx-auto max-w-4xl text-center space-y-4">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground">What is MATLAB Online?</h2>
             <p className="text-muted-foreground text-lg">
@@ -276,7 +276,7 @@ export default function MatlabOnlinePage() {
         </section>
 
         {/* Challenges with MATLAB Online */}
-        <section className="mb-16">
+        <section className="py-16 md:py-24 lg:py-32">
           <div className="mx-auto max-w-5xl rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-500/15 to-transparent shadow-lg">
             <div className="px-6 py-8">
               <div className="flex flex-col gap-6">
@@ -322,7 +322,7 @@ export default function MatlabOnlinePage() {
         </section>
 
         {/* RunMat as an alternative */}
-        <section className="mb-16">
+        <section className="py-16 md:py-24 lg:py-32">
           <div className="mx-auto max-w-4xl space-y-4 text-center">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground">
               Meet RunMat: A Free Alternative
@@ -530,7 +530,7 @@ export default function MatlabOnlinePage() {
         </section>
 
         {/* How it works */}
-        <section className="mb-16">
+        <section className="py-16 md:py-24 lg:py-32">
           <div className="mx-auto max-w-4xl text-center mb-10 space-y-3">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground">How It Works</h2>
             <p className="text-muted-foreground text-lg">Get started in three simple steps.</p>
@@ -602,7 +602,7 @@ export default function MatlabOnlinePage() {
         </section>
 
         {/* Comparison */}
-        <section className="mb-16">
+        <section className="py-16 md:py-24 lg:py-32">
           <div className="mx-auto max-w-5xl text-center mb-10 space-y-3">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground">RunMat vs. MATLAB Online</h2>
             <p className="text-muted-foreground text-lg">A clear comparison of capabilities and requirements.</p>
@@ -740,7 +740,7 @@ export default function MatlabOnlinePage() {
         </section>
 
         {/* What works today */}
-        <section className="mb-16">
+        <section className="py-16 md:py-24 lg:py-32">
           <div className="mx-auto max-w-5xl text-center mb-10 space-y-3">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground">What Works Today</h2>
            
@@ -855,7 +855,7 @@ export default function MatlabOnlinePage() {
         </section>
 
         {/* FAQs */}
-        <section className="mb-16">
+        <section className="py-16 md:py-24 lg:py-32">
           <div className="mx-auto max-w-4xl text-center mb-8 space-y-3">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground">Frequently Asked Questions</h2>
             <p className="text-muted-foreground text-lg">
@@ -883,7 +883,7 @@ export default function MatlabOnlinePage() {
         </section>
 
         {/* Final CTA */}
-        <section className="mb-8 text-center">
+        <section className="py-16 md:py-24 lg:py-32 text-center">
           <Card className="mx-auto max-w-3xl border border-purple-500/30 bg-gradient-to-r from-purple-500/10 to-blue-500/10 shadow-lg">
             <CardContent className="py-8 space-y-4">
               <h2 className="text-3xl md:text-4xl font-bold text-foreground">
@@ -892,7 +892,7 @@ export default function MatlabOnlinePage() {
               <p className="text-muted-foreground text-lg">
                 Start running math immediately in your browser.
               </p>
-              <div className="flex justify-center">
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
                 <Button
                   size="lg"
                   asChild
@@ -906,6 +906,14 @@ export default function MatlabOnlinePage() {
                   >
                     Launch the Sandbox
                   </Link>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="lg"
+                  asChild
+                  className="h-12 px-8 text-base bg-[#0E1B1E] dark:bg-[#0E1B1E] border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100"
+                >
+                  <Link href="/download">Other download options</Link>
                 </Button>
               </div>
             </CardContent>
