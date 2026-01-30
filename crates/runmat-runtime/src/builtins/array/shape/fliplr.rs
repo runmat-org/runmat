@@ -155,7 +155,20 @@ pub(crate) mod tests {
     use crate::builtins::array::shape::flip::{flip_logical_array, flip_tensor};
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, LogicalArray, StringArray, StructValue, Tensor, Value};
+    use runmat_builtins::{CharArray, LogicalArray, StringArray, StructValue, Tensor, Type, Value};
+
+    #[test]
+    fn fliplr_type_keeps_matrix_shape() {
+        let out = preserve_matrix_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(4)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(4)])
+            }
+        );
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

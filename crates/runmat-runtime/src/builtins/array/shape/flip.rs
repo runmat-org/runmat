@@ -562,6 +562,19 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, Tensor};
 
+    #[test]
+    fn flip_type_preserves_logical_shape() {
+        let out = preserve_array_type(&[Type::Logical {
+            shape: Some(vec![Some(2), Some(1)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Logical {
+                shape: Some(vec![Some(2), Some(1)])
+            }
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flip_vector_defaults_to_first_non_singleton_dim() {

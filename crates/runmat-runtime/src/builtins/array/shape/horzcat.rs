@@ -236,6 +236,24 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor};
 
+    #[test]
+    fn horzcat_type_combines_shapes() {
+        let out = horzcat_type(&[
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(1)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            },
+        ]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(4)])
+            }
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_invocation_returns_zero_by_zero() {

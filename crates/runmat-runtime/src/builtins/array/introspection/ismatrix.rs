@@ -71,7 +71,13 @@ pub(crate) mod tests {
     }
     use runmat_builtins::{
         CellArray, CharArray, LogicalArray, ObjectInstance, StringArray, StructValue, Tensor,
+        Type,
     };
+
+    #[test]
+    fn ismatrix_type_returns_bool() {
+        assert_eq!(super::bool_scalar_type(&[Type::Num]), Type::Bool);
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

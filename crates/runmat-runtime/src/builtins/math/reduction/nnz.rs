@@ -400,6 +400,11 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
 
+    #[test]
+    fn nnz_type_returns_num() {
+        assert_eq!(nnz_type(&[Type::Tensor { shape: None }]), Type::Num);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_scalar_zero() {

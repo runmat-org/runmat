@@ -843,6 +843,19 @@ pub(crate) mod tests {
         block_on(super::prod_builtin(value, rest))
     }
 
+    #[test]
+    fn prod_type_reduces_first_dim() {
+        let out = prod_type(&[Type::Tensor {
+            shape: Some(vec![Some(3), Some(2)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(2)])
+            }
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_scalar_num() {

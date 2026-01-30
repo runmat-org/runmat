@@ -538,6 +538,19 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::IntValue;
 
+    #[test]
+    fn median_type_reduces_first_dim() {
+        let out = median_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(5)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(5)])
+            }
+        );
+    }
+
     fn median_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::median_builtin(value, rest))
     }

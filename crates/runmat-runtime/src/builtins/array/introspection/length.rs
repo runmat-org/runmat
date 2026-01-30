@@ -78,8 +78,13 @@ pub(crate) mod tests {
         block_on(super::length_builtin(value))
     }
     use runmat_builtins::{
-        CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+        CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
     };
+
+    #[test]
+    fn length_type_returns_int() {
+        assert_eq!(super::length_type(&[Type::Tensor { shape: None }]), Type::Int);
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

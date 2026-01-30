@@ -1012,6 +1012,19 @@ pub(crate) mod tests {
         block_on(super::std_builtin(value, rest))
     }
 
+    #[test]
+    fn std_type_reduces_first_dim() {
+        let out = std_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(2)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(2)])
+            }
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn std_vector_sample_default() {

@@ -1615,6 +1615,12 @@ pub(crate) mod tests {
         block_on(super::min_builtin(value, rest))
     }
 
+    #[test]
+    fn min_type_with_two_args_returns_tensor() {
+        let out = min_type(&[Type::Tensor { shape: None }, Type::Tensor { shape: None }]);
+        assert_eq!(out, Type::tensor());
+    }
+
     fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluation> {
         block_on(super::evaluate(value, rest))
     }

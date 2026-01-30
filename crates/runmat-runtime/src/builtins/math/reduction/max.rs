@@ -1740,6 +1740,12 @@ pub(crate) mod tests {
         block_on(super::max_builtin(value, rest))
     }
 
+    #[test]
+    fn max_type_with_two_args_returns_tensor() {
+        let out = max_type(&[Type::Tensor { shape: None }, Type::Tensor { shape: None }]);
+        assert_eq!(out, Type::tensor());
+    }
+
     fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MaxEvaluation> {
         block_on(super::evaluate(value, rest))
     }

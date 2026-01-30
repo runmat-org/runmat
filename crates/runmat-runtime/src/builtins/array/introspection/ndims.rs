@@ -68,8 +68,13 @@ pub(crate) mod tests {
         block_on(super::ndims_builtin(value))
     }
     use runmat_builtins::{
-        CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+        CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
     };
+
+    #[test]
+    fn ndims_type_returns_int() {
+        assert_eq!(super::ndims_type(&[Type::Tensor { shape: None }]), Type::Int);
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

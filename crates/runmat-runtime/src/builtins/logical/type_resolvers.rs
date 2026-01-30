@@ -62,3 +62,42 @@ pub fn logical_binary_type(args: &[Type]) -> Type {
 pub fn logical_unary_type(args: &[Type]) -> Type {
     args.first().map(logical_like).unwrap_or(Type::logical())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logical_like_preserves_shape() {
+        let ty = Type::Tensor {
+            shape: Some(vec![Some(2), Some(3)]),
+        };
+        assert_eq!(
+            logical_like(&ty),
+            Type::Logical {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
+
+    #[test]
+    fn logical_binary_prefers_matching_shape() {
+        let lhs = Type::Tensor {
+            shape: Some(vec![Some(2), Some(2)]),
+        };
+        let rhs = Type::Logical {
+            shape: Some(vec![Some(2), Some(2)]),
+        };
+        assert_eq!(
+            logical_binary_type(&[lhs, rhs]),
+            Type::Logical {
+                shape: Some(vec![Some(2), Some(2)])
+            }
+        );
+    }
+
+    #[test]
+    fn logical_binary_scalar_defaults_bool() {
+        assert_eq!(logical_binary_type(&[Type::Num, Type::Bool]), Type::Bool);
+    }
+}

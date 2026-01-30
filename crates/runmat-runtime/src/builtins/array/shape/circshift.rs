@@ -700,6 +700,19 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor};
 
+    #[test]
+    fn circshift_type_preserves_tensor_shape() {
+        let out = preserve_array_type(&[Type::Tensor {
+            shape: Some(vec![Some(3), Some(2)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(2)])
+            }
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn circshift_vector_positive_shift() {

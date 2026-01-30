@@ -1071,6 +1071,19 @@ pub(crate) mod tests {
         block_on(super::sum_builtin(value, rest))
     }
 
+    #[test]
+    fn sum_type_reduces_first_dim() {
+        let out = sum_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(3)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(3)])
+            }
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sum_scalar_num() {

@@ -700,6 +700,19 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::IntValue;
 
+    #[test]
+    fn cummin_type_keeps_shape() {
+        let out = cummin_type(&[Type::Tensor {
+            shape: Some(vec![Some(3), Some(1)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(1)])
+            }
+        );
+    }
+
     fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CumminEvaluation> {
         block_on(super::evaluate(value, rest))
     }

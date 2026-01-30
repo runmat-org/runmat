@@ -556,6 +556,17 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[test]
+    fn repmat_type_preserves_logical_kind() {
+        let out = repmat_type(&[
+            Type::Logical {
+                shape: Some(vec![Some(2), Some(2)]),
+            },
+            Type::Num,
+        ]);
+        assert_eq!(out, Type::Logical { shape: Some(vec![None, None]) });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn repeats_matrix_with_vector_reps() {

@@ -609,6 +609,19 @@ pub(crate) mod tests {
         block_on(super::var_builtin(value, rest))
     }
 
+    #[test]
+    fn var_type_reduces_first_dim() {
+        let out = var_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(2)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(2)])
+            }
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn var_scalar_num() {

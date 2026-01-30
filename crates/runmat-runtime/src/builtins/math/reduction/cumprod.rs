@@ -488,6 +488,19 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor as BuiltinsTensor};
 
+    #[test]
+    fn cumprod_type_keeps_shape() {
+        let out = cumprod_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(2)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(2)])
+            }
+        );
+    }
+
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     #[cfg(feature = "wgpu")]

@@ -290,7 +290,20 @@ pub(crate) mod tests {
         block_on(super::triu_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, LogicalArray};
+    use runmat_builtins::{IntValue, LogicalArray, Type};
+
+    #[test]
+    fn triu_type_preserves_matrix_shape() {
+        let out = preserve_matrix_type(&[Type::Tensor {
+            shape: Some(vec![Some(4), Some(1)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(4), Some(1)])
+            }
+        );
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

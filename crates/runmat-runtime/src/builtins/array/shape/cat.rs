@@ -866,6 +866,28 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[test]
+    fn cat_type_prefers_cell() {
+        let out = cat_type(&[
+            Type::Int,
+            Type::Cell {
+                element_type: Some(Box::new(Type::Num)),
+                length: None,
+            },
+            Type::Cell {
+                element_type: Some(Box::new(Type::Num)),
+                length: None,
+            },
+        ]);
+        assert!(matches!(out, Type::Cell { .. }));
+    }
+
+    #[test]
+    fn cat_type_numeric_falls_back_tensor() {
+        let out = cat_type(&[Type::Int, Type::Num, Type::Num]);
+        assert_eq!(out, Type::tensor());
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cat_numeric_rows() {

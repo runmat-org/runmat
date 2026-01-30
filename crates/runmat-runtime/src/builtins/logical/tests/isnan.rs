@@ -176,6 +176,12 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
 
+    #[test]
+    fn isnan_type_returns_logical() {
+        let out = logical_unary_type(&[Type::Tensor { shape: None }]);
+        assert_eq!(out, Type::logical());
+    }
+
     fn run_isnan(value: Value) -> BuiltinResult<Value> {
         block_on(super::isnan_builtin(value))
     }

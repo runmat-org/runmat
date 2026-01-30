@@ -164,6 +164,7 @@ fn inverse_permutation(order: &[usize]) -> Vec<usize> {
 #[cfg(test)]
 pub(crate) mod tests {
     use futures::executor::block_on;
+    use runmat_builtins::Type;
 
     fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
         block_on(super::ipermute_builtin(value, order))
@@ -174,6 +175,20 @@ pub(crate) mod tests {
     };
     use crate::builtins::common::{tensor, test_support};
     use runmat_builtins::{CharArray, LogicalArray, StringArray, Tensor, Value};
+
+    #[test]
+    fn ipermute_type_uses_order_len() {
+        let order = Type::Tensor {
+            shape: Some(vec![Some(1), Some(3)]),
+        };
+        let out = super::ipermute_type(&[Type::Tensor { shape: None }, order]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![None, None, None])
+            }
+        );
+    }
 
     fn make_tensor(data: &[f64], shape: &[usize]) -> Tensor {
         Tensor::new(data.to_vec(), shape.to_vec()).unwrap()

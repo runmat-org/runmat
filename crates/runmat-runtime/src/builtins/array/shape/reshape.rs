@@ -428,6 +428,37 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
 
+    #[test]
+    fn reshape_type_infers_rank_from_size_vector() {
+        let size_vec = Type::Tensor {
+            shape: Some(vec![Some(1), Some(2)]),
+        };
+        let out = reshape_type(&[Type::Tensor { shape: None }, size_vec]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![None, None])
+            }
+        );
+    }
+
+    #[test]
+    fn reshape_type_preserves_logical_kind() {
+        let out = reshape_type(&[
+            Type::Logical {
+                shape: Some(vec![Some(2), Some(2)]),
+            },
+            Type::Num,
+            Type::Num,
+        ]);
+        assert_eq!(
+            out,
+            Type::Logical {
+                shape: Some(vec![None, None])
+            }
+        );
+    }
+
     fn tensor_from_slice(data: &[f64], shape: &[usize]) -> Tensor {
         Tensor::new(data.to_vec(), shape.to_vec()).unwrap()
     }

@@ -156,3 +156,55 @@ pub fn min_max_type(args: &[Type]) -> Type {
         Type::Num
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reduce_numeric_preserves_rank() {
+        let ty = Type::Tensor {
+            shape: Some(vec![Some(3), Some(4)]),
+        };
+        let out = reduce_numeric_type(&[ty]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(4)])
+            }
+        );
+    }
+
+    #[test]
+    fn reduce_logical_returns_logical() {
+        let ty = Type::Logical {
+            shape: Some(vec![Some(2), Some(2)]),
+        };
+        let out = reduce_logical_type(&[ty]);
+        assert_eq!(
+            out,
+            Type::Logical {
+                shape: Some(vec![Some(1), Some(2)])
+            }
+        );
+    }
+
+    #[test]
+    fn cumulative_numeric_keeps_shape() {
+        let ty = Type::Tensor {
+            shape: Some(vec![Some(5), Some(1)]),
+        };
+        let out = cumulative_numeric_type(&[ty]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(5), Some(1)])
+            }
+        );
+    }
+
+    #[test]
+    fn min_max_two_args_scalar() {
+        assert_eq!(min_max_type(&[Type::Num, Type::Num]), Type::Num);
+    }
+}

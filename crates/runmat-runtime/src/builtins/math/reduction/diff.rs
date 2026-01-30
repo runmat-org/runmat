@@ -350,6 +350,14 @@ pub(crate) mod tests {
         block_on(super::diff_builtin(value, rest))
     }
 
+    #[test]
+    fn diff_type_defaults_tensor() {
+        let out = diff_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(3)]),
+        }]);
+        assert_eq!(out, Type::Tensor { shape: Some(vec![None, None]) });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_row_vector_default_dimension() {

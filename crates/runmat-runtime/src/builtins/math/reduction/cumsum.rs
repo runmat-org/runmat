@@ -487,6 +487,19 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor as BuiltinsTensor};
 
+    #[test]
+    fn cumsum_type_keeps_shape() {
+        let out = cumsum_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(3)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
+
     fn cumsum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::cumsum_builtin(value, rest))
     }

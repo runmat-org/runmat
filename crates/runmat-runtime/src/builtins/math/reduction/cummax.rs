@@ -700,6 +700,19 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::IntValue;
 
+    #[test]
+    fn cummax_type_keeps_shape() {
+        let out = cummax_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(2)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(2)])
+            }
+        );
+    }
+
     fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CummaxEvaluation> {
         block_on(super::evaluate(value, rest))
     }

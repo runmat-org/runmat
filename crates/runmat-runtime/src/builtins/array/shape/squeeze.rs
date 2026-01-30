@@ -222,6 +222,19 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[test]
+    fn squeeze_type_preserves_logical_shape() {
+        let out = squeeze_type(&[Type::Logical {
+            shape: Some(vec![Some(1), Some(3), Some(1)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Logical {
+                shape: Some(vec![Some(3), Some(1)])
+            }
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn squeeze_removes_middle_singletons() {

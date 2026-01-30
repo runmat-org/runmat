@@ -121,6 +121,32 @@ async fn diag_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diag_type_vector_to_square() {
+        let out = diag_type(&[Type::Tensor {
+            shape: Some(vec![Some(4), Some(1)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(4), Some(4)])
+            }
+        );
+    }
+
+    #[test]
+    fn diag_type_matrix_falls_back_tensor() {
+        let out = diag_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(3)]),
+        }]);
+        assert_eq!(out, Type::tensor());
+    }
+}
+
 async fn parse_offset(rest: &[Value]) -> BuiltinResult<isize> {
     if rest.is_empty() {
         return Ok(0);

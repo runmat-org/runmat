@@ -197,6 +197,19 @@ pub(crate) mod tests {
     }
     use runmat_builtins::Tensor;
 
+    #[test]
+    fn size_type_infers_row_vector_rank() {
+        let out = size_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(3), Some(4)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(3)])
+            }
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_matrix_returns_row_vector() {

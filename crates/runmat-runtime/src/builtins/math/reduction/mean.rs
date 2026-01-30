@@ -1302,6 +1302,19 @@ pub(crate) mod tests {
         block_on(super::mean_builtin(value, rest))
     }
 
+    #[test]
+    fn mean_type_reduces_first_dim() {
+        let out = mean_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(4)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(4)])
+            }
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_scalar_num() {

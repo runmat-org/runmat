@@ -176,6 +176,12 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+
+    #[test]
+    fn isfinite_type_returns_logical() {
+        let out = logical_unary_type(&[Type::Tensor { shape: None }]);
+        assert_eq!(out, Type::logical());
+    }
     use runmat_builtins::{CharArray, IntValue, StringArray};
 
     fn run_isfinite(value: Value) -> BuiltinResult<Value> {

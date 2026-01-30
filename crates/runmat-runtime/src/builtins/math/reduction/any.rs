@@ -734,6 +734,19 @@ pub(crate) mod tests {
         block_on(super::any_builtin(value, rest))
     }
 
+    #[test]
+    fn any_type_returns_logical() {
+        let out = any_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(2)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Logical {
+                shape: Some(vec![Some(1), Some(2)])
+            }
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn any_matrix_default_dimension() {

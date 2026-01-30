@@ -418,7 +418,13 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{LogicalArray, Tensor};
+    use runmat_builtins::{LogicalArray, Tensor, Type};
+
+    #[test]
+    fn kron_type_logical_returns_logical() {
+        let out = kron_type(&[Type::Logical { shape: None }, Type::Logical { shape: None }]);
+        assert_eq!(out, Type::logical());
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

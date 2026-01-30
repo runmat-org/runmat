@@ -483,6 +483,20 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
 
+    #[test]
+    fn permute_type_uses_order_len() {
+        let order = Type::Tensor {
+            shape: Some(vec![Some(1), Some(2)]),
+        };
+        let out = permute_type(&[Type::Tensor { shape: None }, order]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![None, None])
+            }
+        );
+    }
+
     fn tensor(data: &[f64], shape: &[usize]) -> Tensor {
         Tensor::new(data.to_vec(), shape.to_vec()).unwrap()
     }
