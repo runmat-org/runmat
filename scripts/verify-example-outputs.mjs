@@ -781,7 +781,11 @@ function normalizeOutput(text) {
             .replace(/^\s*[A-Za-z_]\w*(?:\([^)]*\))?\s*=\s*/, "")
     );
     const joined = stripped.join(" ");
-    const withoutAssignments = joined.replace(/\b[A-Za-z_]\w*(?:\([^)]*\))?\s*=\s*/g, "");
+    const separatedAssignments = joined.replace(/(\d)([A-Za-z_]\w*\s*=\s*)/g, "$1 $2");
+    const withoutAssignments = separatedAssignments.replace(
+        /\b[A-Za-z_]\w*(?:\([^)]*\))?\s*=\s*/g,
+        ""
+    );
     const withoutHeaders = withoutAssignments.replace(
         /\b\w+\s*[x×]\s*\w+(?:\s*[x×]\s*\w+)*\s+(?:gpuArray\s*)?(?:sparse\s+)?(?:complex\s+)?(?:logical|double|single|char|string|cell|struct|table|categorical|datetime|duration)(?:\s+array)?\b/gi,
         " "

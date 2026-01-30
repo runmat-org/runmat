@@ -48,7 +48,7 @@
     {
       "description": "Element-wise arctangent of a vector",
       "input": "x = linspace(-2, 2, 5);\nangles = atan(x)",
-      "output": "angles = [-1.1071  -0.5880         0    0.5880    1.1071]"
+      "output": "angles = [-1.1071  -0.7854         0    0.7854    1.1071]"
     },
     {
       "description": "Computing inverse tangent of every entry in a matrix",
@@ -58,7 +58,7 @@
     {
       "description": "Evaluating `atan` on a complex number",
       "input": "z = 1 + 2i;\nw = atan(z)",
-      "output": "w = 1.3389 + 0.4024i"
+      "output": "w = 1.3390 + 0.4024i"
     },
     {
       "description": "Keeping the result on the GPU with `'like'`",
@@ -68,7 +68,7 @@
     {
       "description": "Inspecting character codes via inverse tangent",
       "input": "codes = atan('RUN')",
-      "output": "codes =\n    1.5625    1.5648    1.5691"
+      "output": "codes =\n    1.5586    1.5590    1.5580"
     }
   ],
   "faqs": [

@@ -47,9 +47,9 @@
       "output": "Y =\n    1.3333    2.3333    1.7778\n    3.0000    5.0000    3.6667\n    2.6667    4.3333    3.1111"
     },
     {
-      "description": "Requesting the full convolution result",
+      "description": "Requesting the full correlation result",
       "input": "H = [1 2; 3 4];\nX = [4 1; 2 0];\nY = filter2(H, X, 'full')",
-      "output": "Y =\n     4     9     2\n    14    23     4\n     6     8     0"
+      "output": "Y =\n    16    16     3\n    16    12     1\n     4     2     0"
     },
     {
       "description": "Restricting the result to the valid interior",
@@ -59,12 +59,12 @@
     {
       "description": "Switching to convolution mode",
       "input": "H = [1 2; 3 4];\nX = [1 2 3; 4 5 6; 7 8 9];\nY = filter2(H, X, 'conv')",
-      "output": "Y =\n     4    11    18\n    18    37    47\n    36    67    77"
+      "output": "Y =\n     1     4     7\n     7    23    33\n    19    53    63"
     },
     {
       "description": "Filtering data already on the GPU",
       "input": "H = gpuArray([1 0 -1; 1 0 -1; 1 0 -1]);\nX = gpuArray([1 2 3; 4 5 6; 7 8 9]);\nY = filter2(H, X);\nresult = gather(Y)",
-      "output": "result =\n     7     4    -7\n    15     6   -15\n    13     4   -13"
+      "output": "result =\n    -7    -4     7\n   -15    -6    15\n   -13    -4    13"
     }
   ],
   "faqs": [

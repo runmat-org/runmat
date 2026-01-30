@@ -53,7 +53,7 @@
     {
       "description": "Determining quadrants for a vector of coordinates",
       "input": "Y = [-1 0 1];\nX = [-1 -1 -1];\nangles = atan2(Y, X)",
-      "output": "angles = [-2.3562 -3.1416 2.3562]"
+      "output": "angles = [-2.3562 3.1416 2.3562]"
     },
     {
       "description": "Broadcasting a scalar denominator across a matrix",
@@ -73,7 +73,7 @@
     {
       "description": "Converting character data to angles",
       "input": "theta = atan2('A', 100)",
-      "output": "theta = 0.5720"
+      "output": "theta = 0.5764"
     }
   ],
   "faqs": [

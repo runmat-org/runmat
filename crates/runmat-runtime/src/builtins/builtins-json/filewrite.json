@@ -50,16 +50,16 @@
     {
       "description": "Append Text Without Overwriting",
       "input": "filewrite(\"log.txt\", \"First line\\n\");\nbytes = filewrite(\"log.txt\", \"Second line\\n\", 'WriteMode', 'append')",
-      "output": "bytes = 12"
+      "output": "bytes = 13"
     },
     {
       "description": "Specify A Particular Encoding",
-      "input": "bytes = filewrite(\"latin1.txt\", \"Espa\\u00F1a\", 'Encoding', 'latin1')",
+      "input": "bytes = filewrite(\"latin1.txt\", ['E' 's' 'p' 'a' char(241) 'a'], 'Encoding', 'latin1')",
       "output": "bytes = 6"
     },
     {
       "description": "Write Raw Bytes From A Numeric Array",
-      "input": "payload = uint8([1 2 3 255]);\nbytes = filewrite(\"data.bin\", payload, 'Encoding', 'raw')",
+      "input": "payload = [1 2 3 255];\nbytes = filewrite(\"data.bin\", payload, 'Encoding', 'raw')",
       "output": "bytes = 4"
     },
     {
@@ -69,7 +69,7 @@
     },
     {
       "description": "Handle Invalid ASCII Characters",
-      "input": "try\n    filewrite(\"ascii.txt\", \"caf\u00e9\", 'Encoding', 'ascii');\ncatch err\n    disp(err.message);\nend",
+      "input": "try\n    filewrite(\"ascii.txt\", ['c' 'a' 'f' char(233)], 'Encoding', 'ascii');\ncatch err\n    disp(err.message);\nend",
       "output": "filewrite: character '\u00e9' (U+00E9) cannot be encoded as ASCII"
     }
   ],

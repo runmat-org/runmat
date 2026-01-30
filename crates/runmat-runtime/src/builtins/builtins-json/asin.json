@@ -64,12 +64,12 @@
     {
       "description": "Computing `asin` on a GPU array and keeping the result on device",
       "input": "G = gpuArray(linspace(-1, 1, 5));\nresult_gpu = asin(G);\nresult = gather(result_gpu)",
-      "output": "result = [-1.5708 -0.7854 0 0.7854 1.5708]"
+      "output": "result = [-1.5708 -0.5236 0 0.5236 1.5708]"
     },
     {
       "description": "Evaluating inverse sine of complex numbers",
       "input": "vals = [1+2i, -0.5+0.75i];\nw = asin(vals)",
-      "output": "w =\n   0.4271 + 1.5286i\n  -0.4829 + 0.7676i"
+      "output": "w =\n   0.4271 + 1.5286i\n  -0.3983 + 0.7433i"
     }
   ],
   "faqs": [
