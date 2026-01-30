@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{broadcast::BroadcastPlan, gpu_helpers, tensor};
+use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "atan2";
@@ -63,6 +64,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Quadrant-aware inverse tangent atan2(y, x) with MATLAB-compatible broadcasting.",
     keywords = "atan2,inverse tangent,quadrant,gpu",
     accel = "binary",
+    type_resolver(numeric_binary_type),
     builtin_path = "crate::builtins::math::trigonometry::atan2"
 )]
 async fn atan2_builtin(y: Value, x: Value) -> BuiltinResult<Value> {
@@ -160,7 +162,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
+    use runmat_builtins::{CharArray, LogicalArray, Tensor, Type, Value};
     use std::f64::consts::PI;
 
     const EPS: f64 = 1e-12;
@@ -171,6 +173,30 @@ pub(crate) mod tests {
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[test]
+    fn atan2_type_preserves_tensor_shape() {
+        let out = numeric_binary_type(&[
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            },
+        ]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
+
+    #[test]
+    fn atan2_type_scalar_returns_num() {
+        let out = numeric_binary_type(&[Type::Num, Type::Int]);
+        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

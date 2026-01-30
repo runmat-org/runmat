@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sinh";
@@ -60,6 +61,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Hyperbolic sine of scalars, vectors, matrices, or N-D tensors (element-wise).",
     keywords = "sinh,hyperbolic,trigonometry,gpu",
     accel = "unary",
+    type_resolver(numeric_unary_type),
     builtin_path = "crate::builtins::math::trigonometry::sinh"
 )]
 async fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
@@ -134,12 +136,33 @@ fn sinh_complex_im(re: f64, im: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_builtins::{IntValue, Tensor, Type};
 
     use crate::builtins::common::test_support;
 
     fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::sinh_builtin(value))
+    }
+
+    #[test]
+    fn sinh_type_preserves_tensor_shape() {
+        let out = numeric_unary_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(3)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
+
+    #[test]
+    fn sinh_type_scalar_tensor_returns_num() {
+        let out = numeric_unary_type(&[Type::Tensor {
+            shape: Some(vec![Some(1), Some(1)]),
+        }]);
+        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

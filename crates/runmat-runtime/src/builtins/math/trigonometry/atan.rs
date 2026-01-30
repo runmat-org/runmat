@@ -16,6 +16,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::dispatcher;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -66,6 +67,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Arctangent of scalars, vectors, matrices, or N-D tensors (element-wise).",
     keywords = "atan,arctangent,inverse tangent,trigonometry,gpu",
     accel = "unary",
+    type_resolver(numeric_unary_type),
     builtin_path = "crate::builtins::math::trigonometry::atan"
 )]
 async fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -356,10 +358,31 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_builtins::{IntValue, Tensor, Type};
 
     fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::atan_builtin(value, rest))
+    }
+
+    #[test]
+    fn atan_type_preserves_tensor_shape() {
+        let out = numeric_unary_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(3)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
+
+    #[test]
+    fn atan_type_scalar_tensor_returns_num() {
+        let out = numeric_unary_type(&[Type::Tensor {
+            shape: Some(vec![Some(1), Some(1)]),
+        }]);
+        assert_eq!(out, Type::Num);
     }
 
     fn error_message(err: RuntimeError) -> String {

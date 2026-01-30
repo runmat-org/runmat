@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "asin";
@@ -68,6 +69,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Element-wise inverse sine with MATLAB-compatible complex promotion.",
     keywords = "asin,inverse sine,arcsin,gpu",
     accel = "unary",
+    type_resolver(numeric_unary_type),
     builtin_path = "crate::builtins::math::trigonometry::asin"
 )]
 async fn asin_builtin(value: Value) -> BuiltinResult<Value> {
@@ -242,7 +244,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray};
+    use runmat_builtins::{IntValue, LogicalArray, Type};
 
     fn asin_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::asin_builtin(value))
@@ -250,6 +252,27 @@ pub(crate) mod tests {
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[test]
+    fn asin_type_preserves_tensor_shape() {
+        let out = numeric_unary_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(3)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
+
+    #[test]
+    fn asin_type_scalar_tensor_returns_num() {
+        let out = numeric_unary_type(&[Type::Tensor {
+            shape: Some(vec![Some(1), Some(1)]),
+        }]);
+        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
