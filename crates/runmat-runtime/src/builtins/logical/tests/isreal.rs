@@ -7,7 +7,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::{gpu_helpers, type_shapes::bool_scalar_type};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -50,6 +50,7 @@ const IDENTIFIER_INTERNAL: &str = "RunMat:isreal:InternalError";
     summary = "Return true when a value uses real storage without an imaginary component.",
     keywords = "isreal,real,complex,gpu,logical",
     accel = "metadata",
+    type_resolver(bool_scalar_type),
     builtin_path = "crate::builtins::logical::tests::isreal"
 )]
 async fn isreal_builtin(value: Value) -> BuiltinResult<Value> {

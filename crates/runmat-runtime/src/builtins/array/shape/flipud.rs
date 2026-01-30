@@ -10,10 +10,42 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{CellArray, ComplexTensor, Value};
+use runmat_builtins::{CellArray, ComplexTensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 const UD_DIM: [usize; 1] = [1];
+
+fn preserve_matrix_type(args: &[Type]) -> Type {
+    let input = match args.first() {
+        Some(value) => value,
+        None => return Type::Unknown,
+    };
+    match input {
+        Type::Tensor { shape: Some(shape) } => {
+            let rows = shape.get(0).copied().unwrap_or(None);
+            let cols = shape.get(1).copied().unwrap_or(None);
+            Type::Tensor {
+                shape: Some(vec![rows, cols]),
+            }
+        }
+        Type::Logical { shape: Some(shape) } => {
+            let rows = shape.get(0).copied().unwrap_or(None);
+            let cols = shape.get(1).copied().unwrap_or(None);
+            Type::Logical {
+                shape: Some(vec![rows, cols]),
+            }
+        }
+        Type::Tensor { shape: None } => Type::tensor(),
+        Type::Logical { shape: None } => Type::logical(),
+        Type::Num | Type::Int | Type::Bool => Type::tensor(),
+        Type::Cell { element_type, .. } => Type::Cell {
+            element_type: element_type.clone(),
+            length: None,
+        },
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::flipud")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -57,6 +89,7 @@ fn flipud_error(message: impl Into<String>) -> RuntimeError {
     summary = "Flip an array up-to-down along the first dimension.",
     keywords = "flipud,flip,vertical,matrix,gpu",
     accel = "custom",
+    type_resolver(preserve_matrix_type),
     builtin_path = "crate::builtins::array::shape::flipud"
 )]
 async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {

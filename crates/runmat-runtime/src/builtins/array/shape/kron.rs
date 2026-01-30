@@ -8,10 +8,28 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{CharArray, ComplexTensor, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 type AlignedShapes = (Vec<usize>, Vec<usize>, Vec<usize>);
+
+fn kron_type(args: &[Type]) -> Type {
+    let input = match args.first() {
+        Some(value) => value,
+        None => return Type::Unknown,
+    };
+    match input {
+        Type::Tensor { .. } => Type::tensor(),
+        Type::Logical { .. } => Type::logical(),
+        Type::Num | Type::Int | Type::Bool => Type::tensor(),
+        Type::Cell { element_type, .. } => Type::Cell {
+            element_type: element_type.clone(),
+            length: None,
+        },
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::kron")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -62,6 +80,7 @@ enum KronInput {
     summary = "Compute the Kronecker (tensor) product of two arrays.",
     keywords = "kron,kronecker product,tensor product,block matrix,gpu",
     accel = "custom",
+    type_resolver(kron_type),
     builtin_path = "crate::builtins::array::shape::kron"
 )]
 async fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

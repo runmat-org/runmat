@@ -1,6 +1,6 @@
 //! MATLAB-compatible `ismatrix` builtin with GPU-aware semantics for RunMat.
 
-use crate::builtins::common::shape::value_dimensions;
+use crate::builtins::common::{shape::value_dimensions, type_shapes::bool_scalar_type};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -45,6 +45,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return true when an array has at most two dimensions (m-by-n, including vectors and scalars).",
     keywords = "ismatrix,matrix detection,metadata query,logical,gpu",
     accel = "metadata",
+    type_resolver(bool_scalar_type),
     builtin_path = "crate::builtins::array::introspection::ismatrix"
 )]
 async fn ismatrix_builtin(value: Value) -> crate::BuiltinResult<Value> {

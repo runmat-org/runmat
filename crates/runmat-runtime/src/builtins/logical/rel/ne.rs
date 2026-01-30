@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, tensor, type_shapes::logical_binary_type};
 use crate::{build_runtime_error, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::rel::ne")]
@@ -73,6 +73,7 @@ fn ne_error(message: impl Into<String>, identifier: &'static str) -> RuntimeErro
     summary = "Element-wise inequality comparison for scalars, arrays, and gpuArray inputs.",
     keywords = "ne,not equal,comparison,logical,gpu",
     accel = "elementwise",
+    type_resolver(logical_binary_type),
     builtin_path = "crate::builtins::logical::rel::ne"
 )]
 async fn ne_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {

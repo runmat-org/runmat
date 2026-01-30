@@ -1,7 +1,7 @@
 //! MATLAB-compatible `diff` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{CharArray, ComplexTensor, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -9,10 +9,14 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, tensor, type_shapes::diff_numeric_type};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "diff";
+
+fn diff_type(args: &[Type]) -> Type {
+    diff_numeric_type(args)
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::diff")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -51,6 +55,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Forward finite differences of scalars, vectors, matrices, or N-D tensors.",
     keywords = "diff,difference,finite difference,nth difference,gpu",
     accel = "diff",
+    type_resolver(diff_type),
     builtin_path = "crate::builtins::math::reduction::diff"
 )]
 async fn diff_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

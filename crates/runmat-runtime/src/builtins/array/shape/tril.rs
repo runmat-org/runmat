@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::tril")]
@@ -45,6 +45,38 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Triangular masking is not currently fused; fusion planner treats tril nodes as boundaries.",
 };
 
+fn preserve_matrix_type(args: &[Type]) -> Type {
+    let input = match args.first() {
+        Some(value) => value,
+        None => return Type::Unknown,
+    };
+    match input {
+        Type::Tensor { shape: Some(shape) } => {
+            let rows = shape.get(0).copied().unwrap_or(None);
+            let cols = shape.get(1).copied().unwrap_or(None);
+            Type::Tensor {
+                shape: Some(vec![rows, cols]),
+            }
+        }
+        Type::Logical { shape: Some(shape) } => {
+            let rows = shape.get(0).copied().unwrap_or(None);
+            let cols = shape.get(1).copied().unwrap_or(None);
+            Type::Logical {
+                shape: Some(vec![rows, cols]),
+            }
+        }
+        Type::Tensor { shape: None } => Type::tensor(),
+        Type::Logical { shape: None } => Type::logical(),
+        Type::Num | Type::Int | Type::Bool => Type::tensor(),
+        Type::Cell { element_type, .. } => Type::Cell {
+            element_type: element_type.clone(),
+            length: None,
+        },
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
+
 fn tril_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("tril").build()
 }
@@ -55,6 +87,7 @@ fn tril_error(message: impl Into<String>) -> RuntimeError {
     summary = "Lower triangular portion of a matrix or paged tensor.",
     keywords = "tril,lower triangular,matrix,diagonal,gpu",
     accel = "custom",
+    type_resolver(preserve_matrix_type),
     builtin_path = "crate::builtins::array::shape::tril"
 )]
 async fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

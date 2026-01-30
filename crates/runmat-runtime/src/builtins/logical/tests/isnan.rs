@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, tensor, type_shapes::logical_unary_type};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::tests::isnan")]
@@ -64,6 +64,7 @@ const IDENTIFIER_INTERNAL: &str = "RunMat:isnan:InternalError";
     summary = "Return a logical mask indicating which elements of the input are NaN.",
     keywords = "isnan,nan,logical,gpu",
     accel = "elementwise",
+    type_resolver(logical_unary_type),
     builtin_path = "crate::builtins::logical::tests::isnan"
 )]
 async fn isnan_builtin(value: Value) -> BuiltinResult<Value> {

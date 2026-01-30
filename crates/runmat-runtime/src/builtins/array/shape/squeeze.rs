@@ -1,13 +1,13 @@
 //! MATLAB-compatible `squeeze` builtin with GPU-aware semantics for RunMat.
 
-use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::{gpu_helpers, type_shapes::squeeze_shape_options};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ComplexTensor, LogicalArray, StringArray, Tensor, Value};
+use runmat_builtins::{ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::squeeze")]
@@ -47,12 +47,34 @@ fn squeeze_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("squeeze").build()
 }
 
+fn squeeze_type(args: &[Type]) -> Type {
+    let input = match args.first() {
+        Some(value) => value,
+        None => return Type::Unknown,
+    };
+    match input {
+        Type::Tensor { shape: Some(shape) } => Type::Tensor {
+            shape: Some(squeeze_shape_options(shape)),
+        },
+        Type::Logical { shape: Some(shape) } => Type::Logical {
+            shape: Some(squeeze_shape_options(shape)),
+        },
+        Type::Tensor { shape: None } => Type::tensor(),
+        Type::Logical { shape: None } => Type::logical(),
+        Type::Num | Type::Int | Type::Bool => input.clone(),
+        Type::Cell { .. } => input.clone(),
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
+
 #[runtime_builtin(
     name = "squeeze",
     category = "array/shape",
     summary = "Remove singleton dimensions while preserving MATLAB row/column semantics.",
     keywords = "squeeze,singleton dimensions,array reshape,gpu",
     accel = "shape",
+    type_resolver(squeeze_type),
     builtin_path = "crate::builtins::array::shape::squeeze"
 )]
 async fn squeeze_builtin(value: Value) -> crate::BuiltinResult<Value> {

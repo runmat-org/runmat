@@ -7,7 +7,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::numel")]
@@ -44,12 +44,21 @@ fn numel_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("numel").build()
 }
 
+fn numel_type(args: &[Type]) -> Type {
+    if args.is_empty() {
+        Type::Unknown
+    } else {
+        Type::Int
+    }
+}
+
 #[runtime_builtin(
     name = "numel",
     category = "array/introspection",
     summary = "Count the number of elements in scalars, vectors, matrices, and N-D arrays.",
     keywords = "numel,number of elements,array length,gpu metadata,dimensions",
     accel = "metadata",
+    type_resolver(numel_type),
     builtin_path = "crate::builtins::array::introspection::numel"
 )]
 async fn numel_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

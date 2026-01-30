@@ -7,7 +7,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::containers::map::map_length;
 use crate::runtime_error::RuntimeError;
-use runmat_builtins::Value;
+use runmat_builtins::{Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::length")]
@@ -39,12 +39,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata query; fusion planner treats this as a host scalar lookup.",
 };
 
+fn length_type(args: &[Type]) -> Type {
+    if args.is_empty() {
+        Type::Unknown
+    } else {
+        Type::Int
+    }
+}
+
 #[runtime_builtin(
     name = "length",
     category = "array/introspection",
     summary = "Return the length of the largest dimension of scalars, vectors, matrices, and N-D arrays.",
     keywords = "length,largest dimension,vector length,gpu metadata,array size",
     accel = "metadata",
+    type_resolver(length_type),
     builtin_path = "crate::builtins::array::introspection::length"
 )]
 async fn length_builtin(value: Value) -> crate::BuiltinResult<Value> {

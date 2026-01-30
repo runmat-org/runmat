@@ -3,19 +3,23 @@
 use std::cmp::Ordering;
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "median";
 
+fn median_type(args: &[Type]) -> Type {
+    reduce_numeric_type(args)
+}
+
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, tensor, type_shapes::reduce_numeric_type};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::median")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -76,6 +80,7 @@ struct ParsedArguments {
     summary = "Median of scalars, vectors, matrices, or N-D tensors.",
     keywords = "median,reduction,omitnan,includenan,statistics,gpu",
     accel = "reduction",
+    type_resolver(median_type),
     builtin_path = "crate::builtins::math::reduction::median"
 )]
 async fn median_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

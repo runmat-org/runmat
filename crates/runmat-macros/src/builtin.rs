@@ -2,15 +2,15 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, ItemFn, Meta, NestedMeta, AttributeArgs};
+use syn::{parse_macro_input, AttributeArgs, ItemFn, Meta, NestedMeta};
 
 /// Macro for defining builtin functions with automatic registration
-/// 
+///
 /// Usage:
 /// ```rust
 /// #[builtin_function(
 ///     name = "plot",
-///     category = "Plotting", 
+///     category = "Plotting",
 ///     description = "Create a 2D line plot"
 /// )]
 /// fn plot_impl(args: &Arguments) -> BuiltinResult {
@@ -20,12 +20,12 @@ use syn::{parse_macro_input, ItemFn, Meta, NestedMeta, AttributeArgs};
 pub fn builtin_function_impl(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as AttributeArgs);
     let input_fn = parse_macro_input!(input as ItemFn);
-    
+
     // Extract attributes
     let mut name = None;
     let mut category = None;
     let mut description = None;
-    
+
     for arg in args {
         match arg {
             NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("name") => {
@@ -46,11 +46,11 @@ pub fn builtin_function_impl(args: TokenStream, input: TokenStream) -> TokenStre
             _ => {}
         }
     }
-    
+
     let name = name.expect("builtin_function macro requires 'name' attribute");
     let category = category.unwrap_or_else(|| "User".to_string());
     let description = description.unwrap_or_else(|| "User-defined function".to_string());
-    
+
     let fn_name = &input_fn.sig.ident;
     let wrapper_ident = quote::format_ident!("__rt_builtin_wrap_{}", fn_name);
     let is_async = input_fn.sig.asyncness.is_some();
@@ -63,7 +63,7 @@ pub fn builtin_function_impl(args: TokenStream, input: TokenStream) -> TokenStre
     let fn_block = &input_fn.block;
     let fn_inputs = &input_fn.sig.inputs;
     let fn_output = &input_fn.sig.output;
-    
+
     // Convert category string to enum variant
     let category_variant = match category.as_str() {
         "Mathematics" => quote! { FunctionCategory::Mathematics },
@@ -81,9 +81,9 @@ pub fn builtin_function_impl(args: TokenStream, input: TokenStream) -> TokenStre
         "System" => quote! { FunctionCategory::System },
         _ => quote! { FunctionCategory::User },
     };
-    
+
     let _static_name = format!("__{}_BUILTIN", name.to_uppercase().replace("-", "_"));
-    
+
     // Extract parameter information from function signature
     let param_info = extract_parameter_info(&parsed.sig);
     let return_type_info = extract_return_type_info(&parsed.sig);
@@ -106,6 +106,7 @@ pub fn builtin_function_impl(args: TokenStream, input: TokenStream) -> TokenStre
                 "",
                 #param_info,
                 #return_type_info,
+                None,
                 #wrapper_ident,
                 &[],
                 false,
@@ -113,21 +114,21 @@ pub fn builtin_function_impl(args: TokenStream, input: TokenStream) -> TokenStre
             )
         }
     };
-    
+
     TokenStream::from(expanded)
 }
 
 /// Extract parameter information from function signature
 fn extract_parameter_info(sig: &syn::Signature) -> proc_macro2::TokenStream {
     let mut params = Vec::new();
-    
+
     for input in &sig.inputs {
         match input {
             syn::FnArg::Typed(pat_type) => {
                 if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
                     let param_name = pat_ident.ident.to_string();
                     let param_type = infer_parameter_type(&pat_type.ty);
-                    
+
                     params.push(quote! {
                         runmat_builtins::ParameterInfo {
                             name: #param_name.to_string(),
@@ -143,7 +144,7 @@ fn extract_parameter_info(sig: &syn::Signature) -> proc_macro2::TokenStream {
             }
         }
     }
-    
+
     quote! { vec![#(#params),*] }
 }
 
@@ -159,7 +160,7 @@ fn extract_return_type_info(sig: &syn::Signature) -> proc_macro2::TokenStream {
 fn infer_parameter_type(ty: &syn::Type) -> proc_macro2::TokenStream {
     // Convert type to string and analyze
     let type_str = quote! { #ty }.to_string();
-    
+
     if type_str.contains("f64") || type_str.contains("f32") {
         quote! { runmat_builtins::ParameterType::Number }
     } else if type_str.contains("i64") || type_str.contains("i32") || type_str.contains("usize") {

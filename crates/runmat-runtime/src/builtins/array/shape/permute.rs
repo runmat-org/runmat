@@ -8,10 +8,10 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, tensor, type_shapes::permute_order_len};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
+use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::permute")]
@@ -47,6 +47,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Permute only changes metadata/data layout; fusion plans treat it as a boundary between kernels.",
 };
 
+fn permute_type(args: &[Type]) -> Type {
+    if args.len() < 2 {
+        return Type::Unknown;
+    }
+    let input = &args[0];
+    let order_len = permute_order_len(&args[1]);
+    let shape = order_len.map(crate::builtins::common::type_shapes::unknown_shape);
+    match input {
+        Type::Tensor { .. } => Type::Tensor { shape },
+        Type::Logical { .. } => Type::Logical { shape },
+        Type::Num | Type::Int | Type::Bool => input.clone(),
+        Type::Cell { .. } => input.clone(),
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
+
 fn permute_error(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
 }
@@ -57,6 +74,7 @@ fn permute_error(builtin: &'static str, message: impl Into<String>) -> RuntimeEr
     summary = "Reorder the dimensions of arrays, tensors, logical masks, and gpuArray values.",
     keywords = "permute,dimension reorder,swap axes,gpu",
     accel = "custom",
+    type_resolver(permute_type),
     builtin_path = "crate::builtins::array::shape::permute"
 )]
 async fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {

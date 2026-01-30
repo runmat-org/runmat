@@ -5,10 +5,10 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{tensor, type_shapes::reshape_rank_from_args};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -49,12 +49,33 @@ fn reshape_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("reshape").build()
 }
 
+fn reshape_type(args: &[Type]) -> Type {
+    let input = match args.first() {
+        Some(value) => value,
+        None => return Type::Unknown,
+    };
+    let rank = reshape_rank_from_args(args);
+    let shape = rank.map(crate::builtins::common::type_shapes::unknown_shape);
+    match input {
+        Type::Tensor { .. } => Type::Tensor { shape },
+        Type::Logical { .. } => Type::Logical { shape },
+        Type::Cell { element_type, .. } => Type::Cell {
+            element_type: element_type.clone(),
+            length: None,
+        },
+        Type::Num | Type::Int | Type::Bool => Type::Tensor { shape },
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
+
 #[runtime_builtin(
     name = "reshape",
     category = "array/shape",
     summary = "Rearrange the dimensions of an array without changing its data.",
     keywords = "reshape,resize,dimensions,gpu,auto",
     accel = "shape",
+    type_resolver(reshape_type),
     builtin_path = "crate::builtins::array::shape::reshape"
 )]
 async fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

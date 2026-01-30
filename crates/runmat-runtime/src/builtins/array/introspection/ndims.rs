@@ -5,7 +5,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use runmat_builtins::Value;
+use runmat_builtins::{Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::ndims")]
@@ -37,12 +37,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata query; fusion planner bypasses this builtin and emits a host scalar.",
 };
 
+fn ndims_type(args: &[Type]) -> Type {
+    if args.is_empty() {
+        Type::Unknown
+    } else {
+        Type::Int
+    }
+}
+
 #[runtime_builtin(
     name = "ndims",
     category = "array/introspection",
     summary = "Return the number of dimensions of scalars, vectors, matrices, and N-D arrays.",
     keywords = "ndims,number of dimensions,array rank,gpu metadata,MATLAB compatibility",
     accel = "metadata",
+    type_resolver(ndims_type),
     builtin_path = "crate::builtins::array::introspection::ndims"
 )]
 async fn ndims_builtin(value: Value) -> crate::BuiltinResult<Value> {

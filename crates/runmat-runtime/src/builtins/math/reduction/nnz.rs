@@ -9,14 +9,19 @@ use crate::builtins::common::{
     gpu_helpers,
     shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
     tensor,
+    type_shapes::count_nonzero_type,
 };
 use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 const NAME: &str = "nnz";
+
+fn nnz_type(args: &[Type]) -> Type {
+    count_nonzero_type(args)
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::nnz")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -78,6 +83,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Count the number of nonzero elements in an array with MATLAB-compatible semantics.",
     keywords = "nnz,nonzero,count,sparsity,gpu",
     accel = "reduction",
+    type_resolver(nnz_type),
     builtin_path = "crate::builtins::math::reduction::nnz"
 )]
 async fn nnz_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

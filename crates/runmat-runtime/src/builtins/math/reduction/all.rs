@@ -9,13 +9,18 @@ use crate::builtins::common::{
     gpu_helpers,
     shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
     tensor,
+    type_shapes::reduce_logical_type,
 };
 use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 const NAME: &str = "all";
+
+fn all_type(args: &[Type]) -> Type {
+    reduce_logical_type(args)
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::all")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -69,6 +74,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Test whether every element of an array is nonzero with MATLAB-compatible options.",
     keywords = "all,logical,reduction,omitnan,gpu",
     accel = "reduction",
+    type_resolver(all_type),
     builtin_path = "crate::builtins::math::reduction::all"
 )]
 async fn all_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

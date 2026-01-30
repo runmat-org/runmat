@@ -5,8 +5,12 @@ use std::collections::HashSet;
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, HostTensorView, ProviderPrecision, ReductionFlavor,
 };
-use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
+use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Type, Value};
 const NAME: &str = "sum";
+
+fn sum_type(args: &[Type]) -> Type {
+    reduce_numeric_type(args)
+}
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
@@ -18,6 +22,7 @@ use crate::builtins::common::{
     gpu_helpers,
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
+    type_shapes::reduce_numeric_type,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_macros::runtime_builtin;
@@ -71,6 +76,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Sum elements of scalars, vectors, matrices, or N-D tensors.",
     keywords = "sum,reduction,gpu,omitnan,all,like",
     accel = "reduction",
+    type_resolver(sum_type),
     builtin_path = "crate::builtins::math::reduction::sum"
 )]
 async fn sum_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

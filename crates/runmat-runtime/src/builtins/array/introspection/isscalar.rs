@@ -1,6 +1,9 @@
 //! MATLAB-compatible `isscalar` builtin with GPU-aware semantics for RunMat.
 
-use crate::builtins::common::shape::{value_dimensions, value_numel};
+use crate::builtins::common::{
+    shape::{value_dimensions, value_numel},
+    type_shapes::bool_scalar_type,
+};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -45,6 +48,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return true when a value has exactly one element and unit dimensions.",
     keywords = "isscalar,scalar,metadata query,gpu,logical",
     accel = "metadata",
+    type_resolver(bool_scalar_type),
     builtin_path = "crate::builtins::array::introspection::isscalar"
 )]
 async fn isscalar_builtin(value: Value) -> crate::BuiltinResult<Value> {

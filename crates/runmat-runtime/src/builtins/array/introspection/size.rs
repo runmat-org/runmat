@@ -7,7 +7,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::size")]
@@ -42,11 +42,61 @@ fn size_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("size").build()
 }
 
+fn vector_len_from_type(ty: &Type) -> Option<usize> {
+    let shape = match ty {
+        Type::Tensor { shape: Some(shape) } => Some(shape.as_slice()),
+        Type::Logical { shape: Some(shape) } => Some(shape.as_slice()),
+        _ => None,
+    }?;
+    match shape {
+        [Some(len)] => Some(*len),
+        [Some(rows), Some(cols)] if *rows == 1 => Some(*cols),
+        [Some(rows), Some(cols)] if *cols == 1 => Some(*rows),
+        _ => None,
+    }
+}
+
+fn normalized_rank(shape: &[Option<usize>]) -> usize {
+    shape.len().max(2)
+}
+
+fn size_type(args: &[Type]) -> Type {
+    let input = match args.first() {
+        Some(value) => value,
+        None => return Type::Unknown,
+    };
+    if args.len() == 1 {
+        let rank = match input {
+            Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+                normalized_rank(shape)
+            }
+            Type::Num | Type::Int | Type::Bool => 2,
+            _ => return Type::tensor(),
+        };
+        return Type::Tensor {
+            shape: Some(vec![Some(1), Some(rank)]),
+        };
+    }
+
+    if let Some(len) = vector_len_from_type(&args[1]) {
+        return Type::Tensor {
+            shape: Some(vec![Some(1), Some(len)]),
+        };
+    }
+
+    if matches!(args[1], Type::Num | Type::Int | Type::Bool) {
+        return Type::Int;
+    }
+
+    Type::tensor()
+}
+
 #[runtime_builtin(
     name = "size",
     category = "array/introspection",
     summary = "Get the dimensions of scalars, vectors, matrices, and N-D arrays.",
     keywords = "size,dimensions,shape,gpu,introspection",
+    type_resolver(size_type),
     builtin_path = "crate::builtins::array::introspection::size"
 )]
 async fn size_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

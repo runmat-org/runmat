@@ -4,12 +4,16 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ReduceDimResult};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "max";
+
+fn max_type(args: &[Type]) -> Type {
+    min_max_type(args)
+}
 
 fn max_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
@@ -26,6 +30,7 @@ use crate::builtins::common::{
     gpu_helpers,
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
+    type_shapes::min_max_type,
 };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::max")]
@@ -99,6 +104,7 @@ impl MaxEvaluation {
     summary = "Return the maximum elements of scalars, vectors, matrices, or N-D tensors.",
     keywords = "max,maximum,reduction,gpu,comparisonmethod,omitnan",
     accel = "reduction",
+    type_resolver(max_type),
     builtin_path = "crate::builtins::math::reduction::max"
 )]
 async fn max_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

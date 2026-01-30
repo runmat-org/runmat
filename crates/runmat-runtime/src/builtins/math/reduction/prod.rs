@@ -3,8 +3,12 @@
 use std::collections::HashSet;
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
-use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
+use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Type, Value};
 const NAME: &str = "prod";
+
+fn prod_type(args: &[Type]) -> Type {
+    reduce_numeric_type(args)
+}
 
 use runmat_macros::runtime_builtin;
 
@@ -18,6 +22,7 @@ use crate::builtins::common::{
     gpu_helpers,
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
+    type_shapes::reduce_numeric_type,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -75,6 +80,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Multiply elements of scalars, vectors, matrices, or N-D tensors.",
     keywords = "prod,product,reduction,gpu,omitnan",
     accel = "reduction",
+    type_resolver(prod_type),
     builtin_path = "crate::builtins::math::reduction::prod"
 )]
 async fn prod_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

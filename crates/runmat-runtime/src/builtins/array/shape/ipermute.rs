@@ -13,10 +13,10 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{tensor, type_shapes::permute_order_len};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::Value;
+use runmat_builtins::{Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::ipermute")]
@@ -52,6 +52,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a layout barrier in fusion graphs, mirroring the behaviour of `permute`.",
 };
 
+fn ipermute_type(args: &[Type]) -> Type {
+    if args.len() < 2 {
+        return Type::Unknown;
+    }
+    let input = &args[0];
+    let order_len = permute_order_len(&args[1]);
+    let shape = order_len.map(crate::builtins::common::type_shapes::unknown_shape);
+    match input {
+        Type::Tensor { .. } => Type::Tensor { shape },
+        Type::Logical { .. } => Type::Logical { shape },
+        Type::Num | Type::Int | Type::Bool => input.clone(),
+        Type::Cell { .. } => input.clone(),
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
+
 fn ipermute_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("ipermute")
@@ -64,6 +81,7 @@ fn ipermute_error(message: impl Into<String>) -> RuntimeError {
     summary = "Reorder array dimensions using the inverse of a permutation vector.",
     keywords = "ipermute,inverse permute,dimension reorder,gpu",
     accel = "custom",
+    type_resolver(ipermute_type),
     builtin_path = "crate::builtins::array::shape::ipermute"
 )]
 async fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {

@@ -4,12 +4,16 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use runmat_accelerate_api::{GpuTensorHandle, ReduceDimResult};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "min";
+
+fn min_type(args: &[Type]) -> Type {
+    min_max_type(args)
+}
 
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
@@ -22,6 +26,7 @@ use crate::builtins::common::{
     gpu_helpers,
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
+    type_shapes::min_max_type,
 };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::min")]
@@ -104,6 +109,7 @@ impl MinEvaluation {
     summary = "Return the minimum elements of scalars, vectors, matrices, or N-D tensors.",
     keywords = "min,minimum,reduction,gpu,comparisonmethod,omitnan",
     accel = "reduction",
+    type_resolver(min_type),
     builtin_path = "crate::builtins::math::reduction::min"
 )]
 async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

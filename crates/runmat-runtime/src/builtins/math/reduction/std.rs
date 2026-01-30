@@ -3,8 +3,12 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, HostTensorView, ProviderNanMode, ProviderPrecision,
     ProviderStdNormalization,
 };
-use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
+use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Type, Value};
 const NAME: &str = "std";
+
+fn std_type(args: &[Type]) -> Type {
+    reduce_numeric_type(args)
+}
 
 use runmat_macros::runtime_builtin;
 
@@ -17,6 +21,7 @@ use crate::builtins::common::{
     gpu_helpers,
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
+    type_shapes::reduce_numeric_type,
 };
 use crate::dispatcher;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -213,6 +218,7 @@ enum NormParse {
     summary = "Standard deviation of scalars, vectors, matrices, or N-D tensors.",
     keywords = "std,standard deviation,statistics,gpu,omitnan,all,like,native",
     accel = "reduction",
+    type_resolver(std_type),
     builtin_path = "crate::builtins::math::reduction::std"
 )]
 async fn std_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

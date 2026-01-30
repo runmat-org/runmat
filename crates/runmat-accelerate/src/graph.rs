@@ -192,7 +192,11 @@ pub enum ShapeInfo {
 impl ShapeInfo {
     pub fn from_type(ty: &Type) -> Self {
         match ty {
-            Type::Int | Type::Num | Type::Bool | Type::Logical => ShapeInfo::Scalar,
+            Type::Int | Type::Num | Type::Bool => ShapeInfo::Scalar,
+            Type::Logical { shape } => match shape {
+                Some(dims) => ShapeInfo::Tensor(dims.clone()),
+                None => ShapeInfo::Tensor(Vec::new()),
+            },
             Type::Tensor { shape } => match shape {
                 Some(dims) => ShapeInfo::Tensor(dims.clone()),
                 None => ShapeInfo::Tensor(Vec::new()),

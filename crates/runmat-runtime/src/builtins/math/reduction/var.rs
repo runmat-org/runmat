@@ -2,7 +2,7 @@
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, ProviderNanMode, ProviderStdNormalization,
 };
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::{extract_dims, keyword_of};
@@ -14,10 +14,15 @@ use crate::builtins::common::{
     gpu_helpers,
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
+    type_shapes::reduce_numeric_type,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "var";
+
+fn var_type(args: &[Type]) -> Type {
+    reduce_numeric_type(args)
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::var")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -91,6 +96,7 @@ enum NormParse {
     summary = "Variance of scalars, vectors, matrices, or N-D tensors.",
     keywords = "var,variance,statistics,gpu,omitnan,all",
     accel = "reduction",
+    type_resolver(var_type),
     builtin_path = "crate::builtins::math::reduction::var"
 )]
 async fn var_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

@@ -802,8 +802,11 @@ pub enum Type {
     Num,
     /// Boolean type
     Bool,
-    /// Logical array type (N-D boolean array)
-    Logical,
+    /// Logical array type (N-D boolean array) with optional shape information
+    Logical {
+        /// Optional full shape; None means unknown/dynamic; individual dims can be omitted by using None
+        shape: Option<Vec<Option<usize>>>,
+    },
     /// String type
     String,
     /// Tensor type with optional shape information (column-major semantics in runtime)
@@ -842,6 +845,18 @@ impl Type {
     /// Create a tensor type with unknown shape
     pub fn tensor() -> Self {
         Type::Tensor { shape: None }
+    }
+
+    /// Create a logical type with unknown shape
+    pub fn logical() -> Self {
+        Type::Logical { shape: None }
+    }
+
+    /// Create a logical type with known shape
+    pub fn logical_with_shape(shape: Vec<usize>) -> Self {
+        Type::Logical {
+            shape: Some(shape.into_iter().map(Some).collect()),
+        }
     }
 
     /// Create a tensor type with known shape
@@ -883,6 +898,13 @@ impl Type {
             (Type::Unknown, t) | (t, Type::Unknown) => t.clone(),
             (Type::Int, Type::Num) | (Type::Num, Type::Int) => Type::Num,
             (Type::Tensor { .. }, Type::Tensor { .. }) => Type::tensor(), // Lose shape info for now
+            (Type::Logical { shape: a }, Type::Logical { shape: b }) => {
+                if a == b {
+                    Type::Logical { shape: a.clone() }
+                } else {
+                    Type::logical()
+                }
+            }
             (Type::Struct { known_fields: a }, Type::Struct { known_fields: b }) => match (a, b) {
                 (None, None) => Type::Struct { known_fields: None },
                 (Some(ka), None) | (None, Some(ka)) => Type::Struct {
@@ -908,7 +930,9 @@ impl Type {
             Value::Num(_) => Type::Num,
             Value::Complex(_, _) => Type::Num, // treat as numeric double (complex) in type system for now
             Value::Bool(_) => Type::Bool,
-            Value::LogicalArray(_) => Type::Logical,
+            Value::LogicalArray(arr) => Type::Logical {
+                shape: Some(arr.shape.iter().map(|&d| Some(d)).collect()),
+            },
             Value::String(_) => Type::String,
             Value::StringArray(_sa) => {
                 // Model as Cell of String for type system for now
@@ -983,6 +1007,8 @@ pub type BuiltinControlFlow = runmat_async::RuntimeError;
 /// Async result type for builtins.
 pub type BuiltinFuture = Pin<Box<dyn Future<Output = Result<Value, BuiltinControlFlow>> + 'static>>;
 
+pub type TypeResolver = fn(args: &[Type]) -> Type;
+
 /// Simple builtin function definition using the unified type system
 #[derive(Debug, Clone)]
 pub struct BuiltinFunction {
@@ -993,6 +1019,7 @@ pub struct BuiltinFunction {
     pub examples: &'static str,
     pub param_types: Vec<Type>,
     pub return_type: Type,
+    pub type_resolver: Option<TypeResolver>,
     pub implementation: fn(&[Value]) -> BuiltinFuture,
     pub accel_tags: &'static [AccelTag],
     pub is_sink: bool,
@@ -1009,6 +1036,7 @@ impl BuiltinFunction {
         examples: &'static str,
         param_types: Vec<Type>,
         return_type: Type,
+        type_resolver: Option<TypeResolver>,
         implementation: fn(&[Value]) -> BuiltinFuture,
         accel_tags: &'static [AccelTag],
         is_sink: bool,
@@ -1022,11 +1050,19 @@ impl BuiltinFunction {
             examples,
             param_types,
             return_type,
+            type_resolver,
             implementation,
             accel_tags,
             is_sink,
             suppress_auto_output,
         }
+    }
+
+    pub fn infer_return_type(&self, args: &[Type]) -> Type {
+        if let Some(resolver) = self.type_resolver {
+            return resolver(args);
+        }
+        self.return_type.clone()
     }
 }
 

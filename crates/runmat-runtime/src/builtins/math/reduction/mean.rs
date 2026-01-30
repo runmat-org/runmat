@@ -1,8 +1,12 @@
 //! MATLAB-compatible `mean` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ProviderPrecision};
-use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
+use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Type, Value};
 const NAME: &str = "mean";
+
+fn mean_type(args: &[Type]) -> Type {
+    reduce_numeric_type(args)
+}
 
 use runmat_macros::runtime_builtin;
 
@@ -17,6 +21,7 @@ use crate::builtins::common::{
     gpu_helpers,
     shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
     tensor,
+    type_shapes::reduce_numeric_type,
 };
 use crate::dispatcher;
 
@@ -203,6 +208,7 @@ enum MeanAxes {
     summary = "Average elements of scalars, vectors, matrices, or N-D tensors.",
     keywords = "mean,average,reduction,gpu,omitnan",
     accel = "reduction",
+    type_resolver(mean_type),
     builtin_path = "crate::builtins::math::reduction::mean"
 )]
 async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

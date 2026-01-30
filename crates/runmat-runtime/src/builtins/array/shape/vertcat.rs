@@ -4,8 +4,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::type_shapes::{cell_element_type, concat_input_shape, concat_shape};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{IntValue, Tensor, Value};
+use runmat_builtins::{IntValue, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::vertcat")]
@@ -35,6 +36,54 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Concatenation materialises outputs immediately, terminating fusion pipelines.",
 };
 
+fn concat_type_with_dim(args: &[Type], dim_1based: usize) -> Type {
+    if args.is_empty() {
+        return Type::tensor();
+    }
+    if args.len() == 1 {
+        return args[0].clone();
+    }
+
+    let all_cells = args.iter().all(|arg| matches!(arg, Type::Cell { .. }));
+    if all_cells {
+        return Type::Cell {
+            element_type: cell_element_type(args),
+            length: None,
+        };
+    }
+
+    let all_strings = args.iter().all(|arg| matches!(arg, Type::String));
+    if all_strings {
+        return Type::cell_of(Type::String);
+    }
+
+    let has_numeric =
+        args.iter().any(|arg| matches!(arg, Type::Tensor { .. } | Type::Num | Type::Int));
+    let has_logical = args
+        .iter()
+        .any(|arg| matches!(arg, Type::Logical { .. } | Type::Bool));
+
+    if has_numeric {
+        let shapes: Option<Vec<Vec<Option<usize>>>> = args.iter().map(concat_input_shape).collect();
+        return Type::Tensor {
+            shape: shapes.as_ref().and_then(|s| concat_shape(s, dim_1based)),
+        };
+    }
+
+    if has_logical {
+        let shapes: Option<Vec<Vec<Option<usize>>>> = args.iter().map(concat_input_shape).collect();
+        return Type::Logical {
+            shape: shapes.as_ref().and_then(|s| concat_shape(s, dim_1based)),
+        };
+    }
+
+    Type::Unknown
+}
+
+fn vertcat_type(args: &[Type]) -> Type {
+    concat_type_with_dim(args, 1)
+}
+
 fn vertcat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("vertcat").build()
 }
@@ -45,6 +94,7 @@ fn vertcat_error(message: impl Into<String>) -> RuntimeError {
     summary = "Concatenate inputs vertically (dimension 1) just like MATLAB semicolons.",
     keywords = "vertcat,vertical concatenation,array,gpu",
     accel = "array_construct",
+    type_resolver(vertcat_type),
     builtin_path = "crate::builtins::array::shape::vertcat"
 )]
 async fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

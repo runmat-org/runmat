@@ -1,18 +1,22 @@
 //! MATLAB-compatible `cumsum` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, ProviderNanMode, ProviderScanDirection};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cumsum";
 
+fn cumsum_type(args: &[Type]) -> Type {
+    cumulative_numeric_type(args)
+}
+
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, tensor, type_shapes::cumulative_numeric_type};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::cumsum")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -63,6 +67,7 @@ enum CumsumNanMode {
     summary = "Cumulative sum of scalars, vectors, matrices, or N-D tensors.",
     keywords = "cumsum,cumulative sum,running total,reverse,omitnan,gpu",
     accel = "reduction",
+    type_resolver(cumsum_type),
     builtin_path = "crate::builtins::math::reduction::cumsum"
 )]
 async fn cumsum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

@@ -6,11 +6,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{tensor, type_shapes::cell_element_type};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -43,6 +43,40 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 fn cat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("cat").build()
+}
+
+fn cat_type(args: &[Type]) -> Type {
+    if args.len() < 3 {
+        return Type::Unknown;
+    }
+    let inputs = &args[1..];
+    let all_cells = inputs.iter().all(|arg| matches!(arg, Type::Cell { .. }));
+    if all_cells {
+        return Type::Cell {
+            element_type: cell_element_type(inputs),
+            length: None,
+        };
+    }
+
+    let all_strings = inputs.iter().all(|arg| matches!(arg, Type::String));
+    if all_strings {
+        return Type::cell_of(Type::String);
+    }
+
+    let has_numeric = inputs
+        .iter()
+        .any(|arg| matches!(arg, Type::Tensor { .. } | Type::Num | Type::Int));
+    let has_logical = inputs
+        .iter()
+        .any(|arg| matches!(arg, Type::Logical { .. } | Type::Bool));
+
+    if has_numeric {
+        return Type::tensor();
+    }
+    if has_logical {
+        return Type::logical();
+    }
+    Type::Unknown
 }
 
 fn cat_err(message: impl Into<String>) -> RuntimeError {
@@ -145,6 +179,7 @@ fn extract_like(mut inputs: Vec<Value>) -> BuiltinResult<(Vec<Value>, LikeSpec)>
     summary = "Concatenate arrays along a specified dimension while preserving MATLAB semantics.",
     keywords = "cat,concatenate,array,dimension,gpu",
     accel = "array_construct",
+    type_resolver(cat_type),
     builtin_path = "crate::builtins::array::shape::cat"
 )]
 async fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

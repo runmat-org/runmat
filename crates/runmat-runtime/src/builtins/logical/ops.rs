@@ -2,7 +2,7 @@
 
 use log::trace;
 use runmat_accelerate_api::{self, AccelProvider, GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
+use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::{
@@ -13,6 +13,7 @@ use crate::builtins::common::{
         ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
     },
     tensor,
+    type_shapes::logical_like,
 };
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -49,6 +50,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "logical";
 
+fn logical_type(args: &[Type]) -> Type {
+    args.first().map(logical_like).unwrap_or(Type::logical())
+}
+
 fn logical_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -61,6 +66,7 @@ fn logical_error(message: impl Into<String>) -> RuntimeError {
     summary = "Convert scalars, arrays, and gpuArray values to logical outputs.",
     keywords = "logical,boolean,gpuArray,mask,conversion",
     accel = "unary",
+    type_resolver(logical_type),
     builtin_path = "crate::builtins::logical::ops"
 )]
 async fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

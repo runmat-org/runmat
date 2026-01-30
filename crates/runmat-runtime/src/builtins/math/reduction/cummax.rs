@@ -5,18 +5,22 @@ use std::cmp::Ordering;
 use runmat_accelerate_api::{
     GpuTensorHandle, ProviderCummaxResult, ProviderNanMode, ProviderScanDirection,
 };
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cummax";
 
+fn cummax_type(args: &[Type]) -> Type {
+    cumulative_numeric_type(args)
+}
+
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, tensor, type_shapes::cumulative_numeric_type};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::cummax")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -92,6 +96,7 @@ impl CummaxEvaluation {
     summary = "Cumulative maximum and index tracking for scalars, vectors, matrices, or N-D tensors.",
     keywords = "cummax,cumulative maximum,running maximum,reverse,omitnan,indices,gpu",
     accel = "reduction",
+    type_resolver(cummax_type),
     builtin_path = "crate::builtins::math::reduction::cummax"
 )]
 async fn cummax_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
