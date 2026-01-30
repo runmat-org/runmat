@@ -547,6 +547,7 @@ interface RunMatNativeModule {
   bindSurfaceToFigure?: (surfaceId: number, handle: number) => void;
   presentSurface?: (surfaceId: number) => void;
   presentFigureOnSurface?: (surfaceId: number, handle: number) => void;
+  handlePlotSurfaceEvent?: (surfaceId: number, event: PlotSurfaceEvent) => void;
   onFigureEvent?: (callback: ((event: FigureEvent) => void) | null) => void;
   newFigureHandle?: () => number;
   selectFigure?: (handle: number) => void;

@@ -5,6 +5,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::linalg::type_resolvers::qr_type;
 use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
@@ -67,6 +68,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "qr,factorization,decomposition,householder",
     accel = "sink",
     sink = true,
+    type_resolver(qr_type),
     builtin_path = "crate::builtins::math::linalg::factor::qr"
 )]
 async fn qr_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -774,7 +776,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor as Matrix;
+    use runmat_builtins::{Tensor as Matrix, Type};
 
     fn tensor_from_value(value: Value) -> Matrix {
         match value {
@@ -790,6 +792,14 @@ pub(crate) mod tests {
                 panic!("tensor mismatch: lhs={lhs}, rhs={rhs}, tol={tol}");
             }
         }
+    }
+
+    #[test]
+    fn qr_type_returns_tensor_for_arrays() {
+        let out = qr_type(&[Type::Tensor {
+            shape: Some(vec![Some(3), Some(2)]),
+        }]);
+        assert_eq!(out, Type::tensor());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

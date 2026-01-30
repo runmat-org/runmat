@@ -3,10 +3,11 @@
 use std::collections::HashSet;
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
+use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -50,6 +51,17 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("range").build()
 }
 
+fn range_type(args: &[Type]) -> Type {
+    let Some(input) = args.first() else {
+        return Type::Unknown;
+    };
+    match input {
+        Type::Num | Type::Int | Type::Bool => Type::Num,
+        Type::Tensor { .. } | Type::Logical { .. } => tensor_type_from_rank(None),
+        _ => Type::tensor(),
+    }
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::range")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "range",
@@ -67,6 +79,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Compute the difference between the maximum and minimum values.",
     keywords = "range,max,min,spread,gpu",
     accel = "reduction",
+    type_resolver(range_type),
     builtin_path = "crate::builtins::array::creation::range"
 )]
 async fn range_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -608,6 +621,17 @@ pub(crate) mod tests {
             Value::Num(n) => assert_eq!(n, 0.0),
             other => panic!("expected scalar zero, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn range_type_scalar_returns_num() {
+        assert_eq!(range_type(&[Type::Num]), Type::Num);
+    }
+
+    #[test]
+    fn range_type_tensor_returns_tensor() {
+        let out = range_type(&[Type::Tensor { shape: None }]);
+        assert_eq!(out, Type::tensor());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

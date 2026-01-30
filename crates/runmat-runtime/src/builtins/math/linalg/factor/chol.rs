@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, random_args, tensor};
+use crate::builtins::math::linalg::type_resolvers::matrix_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderCholResult};
@@ -71,6 +72,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "chol,cholesky,factorization,positive-definite",
     accel = "sink",
     sink = true,
+    type_resolver(matrix_unary_type),
     builtin_path = "crate::builtins::math::linalg::factor::chol"
 )]
 async fn chol_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -424,7 +426,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{LogicalArray, Tensor as Matrix};
+    use runmat_builtins::{LogicalArray, Tensor as Matrix, Type};
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
@@ -436,6 +438,19 @@ pub(crate) mod tests {
             Value::Num(n) => Matrix::new(vec![n], vec![1, 1]).expect("tensor"),
             other => panic!("expected tensor value, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn chol_type_preserves_matrix_shape() {
+        let out = matrix_unary_type(&[Type::Tensor {
+            shape: Some(vec![Some(3), Some(3)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(3)])
+            }
+        );
     }
 
     fn reconstruct_from_upper(matrix: &Matrix) -> Matrix {

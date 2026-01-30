@@ -13,8 +13,14 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::math::linalg::type_resolvers::symrcm_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+// NOTE: The `symrcm_type` symbol is referenced from the `#[runtime_builtin]` macro
+// attribute arguments, which does not currently count as a "use" for Rust's
+// unused-import lint. Keep a small reference so `-D unused-imports` builds.
+#[allow(dead_code)]
+const _SYMR_CM_TYPE_RESOLVER: fn(&[runmat_builtins::Type]) -> runmat_builtins::Type = symrcm_type;
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::linalg::structure::symrcm"
 )]
@@ -59,6 +65,7 @@ fn runtime_error(name: &str, message: impl Into<String>) -> RuntimeError {
     summary = "Compute the symmetric reverse Cuthill-McKee permutation that reduces matrix bandwidth.",
     keywords = "symrcm,reverse cuthill-mckee,bandwidth reduction,gpu",
     accel = "graph",
+    type_resolver(symrcm_type),
     builtin_path = "crate::builtins::math::linalg::structure::symrcm"
 )]
 async fn symrcm_builtin(matrix: Value) -> crate::BuiltinResult<Value> {
@@ -304,7 +311,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::LogicalArray;
+    use runmat_builtins::{LogicalArray, Type};
 
     fn tensor_from_entries(rows: usize, cols: usize, entries: &[(usize, usize, f64)]) -> Tensor {
         let mut data = vec![0.0; rows * cols];
@@ -327,6 +334,19 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn symrcm_type_returns_row_vector() {
+        let out = symrcm_type(&[Type::Tensor {
+            shape: Some(vec![Some(4), Some(4)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(4)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

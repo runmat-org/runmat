@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "trace";
@@ -79,6 +80,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Sum the diagonal elements of matrices and matrix-like tensors.",
     keywords = "trace,matrix trace,diagonal sum,gpu",
     accel = "reduction",
+    type_resolver(numeric_scalar_type),
     builtin_path = "crate::builtins::math::linalg::ops::trace"
 )]
 async fn trace_builtin(value: Value) -> BuiltinResult<Value> {
@@ -216,7 +218,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray};
+    use runmat_builtins::{IntValue, LogicalArray, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -226,6 +228,14 @@ pub(crate) mod tests {
     fn trace_scalar_num() {
         let result = trace_builtin(Value::Num(7.0)).expect("trace");
         assert_eq!(result, Value::Num(7.0));
+    }
+
+    #[test]
+    fn trace_type_returns_scalar() {
+        let out = numeric_scalar_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(2)]),
+        }]);
+        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

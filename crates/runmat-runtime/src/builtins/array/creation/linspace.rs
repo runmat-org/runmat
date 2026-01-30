@@ -2,10 +2,11 @@
 
 use log::trace;
 use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
+use crate::builtins::array::type_resolvers::row_vector_type;
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -46,6 +47,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Sequence generation is treated as a sink and is not fused with other operations.",
 };
 
+fn linspace_type(_args: &[Type]) -> Type {
+    row_vector_type()
+}
+
 #[runtime_builtin(
     name = "linspace",
     category = "array/creation",
@@ -53,6 +58,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "linspace,range,vector,gpu",
     examples = "x = linspace(0, 1, 5)  % [0 0.25 0.5 0.75 1]",
     accel = "array_construct",
+    type_resolver(linspace_type),
     builtin_path = "crate::builtins::array::creation::linspace"
 )]
 async fn linspace_builtin(
@@ -362,6 +368,16 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn linspace_type_is_row_vector() {
+        assert_eq!(
+            linspace_type(&[Type::Num, Type::Num]),
+            Type::Tensor {
+                shape: Some(vec![Some(1), None])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

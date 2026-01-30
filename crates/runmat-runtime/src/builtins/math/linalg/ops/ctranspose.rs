@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::linalg::type_resolvers::transpose_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use log::warn;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
@@ -83,6 +84,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Swap the first two dimensions of arrays and conjugate complex values.",
     keywords = "ctranspose,conjugate transpose,hermitian,gpu",
     accel = "transpose",
+    type_resolver(transpose_type),
     builtin_path = "crate::builtins::math::linalg::ops::ctranspose"
 )]
 async fn ctranspose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
@@ -410,7 +412,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, LogicalArray, StringArray, StructValue, Tensor};
+    use runmat_builtins::{IntValue, LogicalArray, StringArray, StructValue, Tensor, Type};
 
     fn call_ctranspose(value: Value) -> BuiltinResult<Value> {
         block_on(super::ctranspose_builtin(vec![value]))
@@ -605,6 +607,19 @@ pub(crate) mod tests {
         st.fields.insert("field".to_string(), Value::Num(1.0));
         let err = unwrap_error(call_ctranspose(Value::Struct(st)).unwrap_err());
         assert!(err.message().contains("unsupported input type"));
+    }
+
+    #[test]
+    fn ctranspose_type_swaps_dims() {
+        let out = transpose_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(5)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(5), Some(2)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

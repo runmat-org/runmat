@@ -10,6 +10,8 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{random, tensor};
+use crate::builtins::array::type_resolvers::{rank_from_dims_args, tensor_type_from_rank};
+use runmat_builtins::Type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::randi")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -34,6 +36,21 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("randi").build()
 }
 
+fn randi_type(args: &[Type]) -> Type {
+    if args.is_empty() {
+        return Type::Unknown;
+    }
+    if args.len() == 1 {
+        return Type::Num;
+    }
+    let rest = &args[1..];
+    if rest.iter().any(|arg| matches!(arg, Type::String)) {
+        return Type::Unknown;
+    }
+    let rank = rank_from_dims_args(rest);
+    tensor_type_from_rank(rank)
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randi")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "randi",
@@ -51,6 +68,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Uniform random integers with inclusive bounds.",
     keywords = "randi,random,integer,gpu,like",
     accel = "array_construct",
+    type_resolver(randi_type),
     builtin_path = "crate::builtins::array::creation::randi"
 )]
 async fn randi_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -560,6 +578,21 @@ pub(crate) mod tests {
             }
             other => panic!("expected scalar double, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn randi_type_single_bound_is_num() {
+        assert_eq!(randi_type(&[Type::Num]), Type::Num);
+    }
+
+    #[test]
+    fn randi_type_infers_rank_from_dims() {
+        assert_eq!(
+            randi_type(&[Type::Num, Type::Num, Type::Num]),
+            Type::Tensor {
+                shape: Some(vec![None, None])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

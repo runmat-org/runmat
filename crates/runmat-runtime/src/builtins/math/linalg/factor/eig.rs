@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::linalg::type_resolvers::eig_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use nalgebra::linalg::Schur;
 use nalgebra::{DMatrix, DVector};
@@ -75,6 +76,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "eig,eigenvalues,eigenvectors,linalg",
     accel = "sink",
     sink = true,
+    type_resolver(eig_type),
     builtin_path = "crate::builtins::math::linalg::factor::eig"
 )]
 async fn eig_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -554,7 +556,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, Type};
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
@@ -566,6 +568,19 @@ pub(crate) mod tests {
             Value::ComplexTensor(ct) => complex_tensor_to_matrix(&ct).expect("matrix"),
             other => panic!("expected matrix value, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn eig_type_returns_eigenvalue_vector() {
+        let out = eig_type(&[Type::Tensor {
+            shape: Some(vec![Some(3), Some(3)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(1)])
+            }
+        );
     }
 
     fn column_vector_from_value(value: Value) -> Vec<Complex64> {

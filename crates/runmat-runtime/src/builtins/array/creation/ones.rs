@@ -12,6 +12,9 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use runmat_builtins::NumericDType;
+use runmat_builtins::Type;
+
+use crate::builtins::array::type_resolvers::{rank_from_dims_args, tensor_type_from_rank};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::ones")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -34,6 +37,17 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("ones").build()
+}
+
+fn ones_type(args: &[Type]) -> Type {
+    if args.is_empty() {
+        return Type::Num;
+    }
+    if args.iter().any(|arg| matches!(arg, Type::String)) {
+        return Type::Unknown;
+    }
+    let rank = rank_from_dims_args(args);
+    tensor_type_from_rank(rank)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::ones")]
@@ -64,6 +78,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Create arrays filled with ones.",
     keywords = "ones,array,logical,gpu,like",
     accel = "array_construct",
+    type_resolver(ones_type),
     builtin_path = "crate::builtins::array::creation::ones"
 )]
 async fn ones_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -355,6 +370,34 @@ pub(crate) mod tests {
     fn ones_default_scalar() {
         let result = block_on(ones_builtin(Vec::new())).expect("ones");
         assert_eq!(result, Value::Num(1.0));
+    }
+
+    #[test]
+    fn ones_type_defaults_to_num() {
+        assert_eq!(ones_type(&[]), Type::Num);
+    }
+
+    #[test]
+    fn ones_type_infers_rank_from_scalar_dim() {
+        assert_eq!(
+            ones_type(&[Type::Num]),
+            Type::Tensor {
+                shape: Some(vec![None, None])
+            }
+        );
+    }
+
+    #[test]
+    fn ones_type_infers_rank_from_size_vector() {
+        let size_vec = Type::Tensor {
+            shape: Some(vec![Some(1), Some(4)]),
+        };
+        assert_eq!(
+            ones_type(&[size_vec]),
+            Type::Tensor {
+                shape: Some(vec![None, None, None, None])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

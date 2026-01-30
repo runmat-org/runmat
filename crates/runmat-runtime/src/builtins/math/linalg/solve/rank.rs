@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "rank";
@@ -78,6 +79,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Compute the numerical rank of a matrix using SVD with MATLAB-compatible tolerance handling.",
     keywords = "rank,svd,tolerance,matrix,gpu",
     accel = "rank",
+    type_resolver(numeric_scalar_type),
     builtin_path = "crate::builtins::math::linalg::solve::rank"
 )]
 async fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -224,7 +226,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -238,6 +240,14 @@ pub(crate) mod tests {
             Value::Num(r) => assert_eq!(r, 2.0),
             other => panic!("expected scalar result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rank_type_returns_scalar() {
+        let out = numeric_scalar_type(&[Type::Tensor {
+            shape: Some(vec![Some(3), Some(3)]),
+        }]);
+        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

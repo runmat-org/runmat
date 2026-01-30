@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::math::linalg::type_resolvers::left_divide_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "mldivide";
@@ -78,6 +79,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Solve A * X = B using MATLAB-compatible left division.",
     keywords = "mldivide,matrix division,linear algebra,least squares,gpu",
     accel = "mldivide",
+    type_resolver(left_divide_type),
     builtin_path = "crate::builtins::math::linalg::ops::mldivide"
 )]
 async fn mldivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -424,6 +426,7 @@ pub(crate) mod tests {
     }
 
     use num_complex::Complex64;
+    use runmat_builtins::Type;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -433,6 +436,24 @@ pub(crate) mod tests {
             Value::Num(n) => assert!((n - 3.0).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn mldivide_type_uses_rhs_columns() {
+        let out = left_divide_type(&[
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(2)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            },
+        ]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

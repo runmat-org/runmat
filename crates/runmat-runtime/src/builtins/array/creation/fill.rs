@@ -3,9 +3,12 @@
 //! The implementation mirrors the modern RunMat builtin blueprint with GPU-aware semantics.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::array::type_resolvers::{
+    is_scalar_type, logical_type_from_rank, rank_from_dims_args, tensor_type_from_rank,
+};
 use crate::builtins::common::random_args::{extract_dims, keyword_of, shape_from_value};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionExprContext,
@@ -53,12 +56,40 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner treats fill as a constant generator backed by a uniform parameter.",
 };
 
+fn fill_type(args: &[Type]) -> Type {
+    let Some((fill_value, rest)) = args.split_first() else {
+        return Type::Unknown;
+    };
+    if rest.iter().any(|arg| matches!(arg, Type::String)) {
+        return Type::Unknown;
+    }
+    let wants_logical = matches!(fill_value, Type::Bool | Type::Logical { .. });
+    if rest.is_empty() {
+        if wants_logical {
+            return Type::Logical {
+                shape: Some(vec![Some(1), Some(1)]),
+            };
+        }
+        if is_scalar_type(fill_value) {
+            return Type::Num;
+        }
+        return Type::tensor();
+    }
+    let rank = rank_from_dims_args(rest);
+    if wants_logical {
+        logical_type_from_rank(rank)
+    } else {
+        tensor_type_from_rank(rank)
+    }
+}
+
 #[runtime_builtin(
     name = "fill",
     category = "array/creation",
     summary = "Create arrays filled with a constant value.",
     keywords = "fill,constant,array,gpu,like",
     accel = "array_construct",
+    type_resolver(fill_type),
     builtin_path = "crate::builtins::array::creation::fill"
 )]
 async fn fill_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -419,6 +450,21 @@ pub(crate) mod tests {
     fn fill_scalar_defaults() {
         let result = block_on(fill_builtin(Value::Num(5.0), Vec::new())).expect("fill");
         assert_eq!(result, Value::Num(5.0));
+    }
+
+    #[test]
+    fn fill_type_scalar_numeric_is_num() {
+        assert_eq!(fill_type(&[Type::Num]), Type::Num);
+    }
+
+    #[test]
+    fn fill_type_logical_dims_returns_logical_tensor() {
+        assert_eq!(
+            fill_type(&[Type::Bool, Type::Num, Type::Num]),
+            Type::Logical {
+                shape: Some(vec![None, None])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

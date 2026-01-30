@@ -4,10 +4,11 @@ use std::cmp::max;
 
 use log::warn;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, MeshgridAxisView};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
+use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
@@ -51,12 +52,28 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Meshgrid explicitly materialises dense coordinate arrays and therefore bypasses fusion.",
 };
 
+fn meshgrid_type(args: &[Type]) -> Type {
+    if args.is_empty() {
+        return Type::Unknown;
+    }
+    let mut axis_count = args.len();
+    if axis_count >= 2 && matches!(args[axis_count - 2], Type::String) {
+        axis_count = axis_count.saturating_sub(2);
+    }
+    if axis_count == 0 {
+        return Type::Unknown;
+    }
+    let rank = if axis_count >= 3 { 3 } else { 2 };
+    tensor_type_from_rank(Some(rank))
+}
+
 #[runtime_builtin(
     name = "meshgrid",
     category = "array/creation",
     summary = "Generate coordinate matrices for 2-D and 3-D grids.",
     keywords = "meshgrid,grid,gpu,like,3d",
     accel = "array_construct",
+    type_resolver(meshgrid_type),
     builtin_path = "crate::builtins::array::creation::meshgrid"
 )]
 async fn meshgrid_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -331,10 +348,10 @@ async fn axis_from_value(
     prefer_gpu: &mut bool,
 ) -> crate::BuiltinResult<AxisData> {
     match value {
-        Value::Tensor(tensor) => axis_from_tensor(tensor),
+        Value::Tensor(tensor) => axis_from_tensor(tensor, index),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)?;
-            axis_from_tensor(tensor)
+            axis_from_tensor(tensor, index)
         }
         Value::Num(n) => Ok(AxisData {
             values: vec![(n, 0.0)],
@@ -359,11 +376,11 @@ async fn axis_from_value(
             len: 1,
             is_complex: im != 0.0,
         }),
-        Value::ComplexTensor(tensor) => axis_from_complex_tensor(tensor),
+        Value::ComplexTensor(tensor) => axis_from_complex_tensor(tensor, index),
         Value::GpuTensor(handle) => {
             *prefer_gpu = true;
             let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-            axis_from_tensor(tensor)
+            axis_from_tensor(tensor, index)
         }
         other => Err(builtin_error(format!(
             "meshgrid: input argument {} must be numeric, got {other:?}",
@@ -372,11 +389,13 @@ async fn axis_from_value(
     }
 }
 
-fn axis_from_tensor(tensor: Tensor) -> crate::BuiltinResult<AxisData> {
+fn axis_from_tensor(tensor: Tensor, index: usize) -> crate::BuiltinResult<AxisData> {
     if !is_vector_shape(&tensor.shape) {
-        return Err(builtin_error(
-            "meshgrid: input vectors must be one-dimensional",
-        ));
+        return Err(builtin_error(format!(
+            "meshgrid: input argument {} must be a vector (1xN or Nx1), got shape {:?}",
+            index + 1,
+            tensor.shape
+        )));
     }
     let mut values = Vec::with_capacity(tensor.data.len());
     for &v in &tensor.data {
@@ -389,11 +408,13 @@ fn axis_from_tensor(tensor: Tensor) -> crate::BuiltinResult<AxisData> {
     })
 }
 
-fn axis_from_complex_tensor(tensor: ComplexTensor) -> crate::BuiltinResult<AxisData> {
+fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> crate::BuiltinResult<AxisData> {
     if !is_vector_shape(&tensor.shape) {
-        return Err(builtin_error(
-            "meshgrid: input vectors must be one-dimensional",
-        ));
+        return Err(builtin_error(format!(
+            "meshgrid: input argument {} must be a vector (1xN or Nx1), got shape {:?}",
+            index + 1,
+            tensor.shape
+        )));
     }
     let is_complex = tensor
         .data
@@ -689,6 +710,22 @@ pub(crate) mod tests {
         assert_eq!(
             y_out.data,
             vec![-1.0, 0.0, 1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 1.0]
+        );
+    }
+
+    #[test]
+    fn meshgrid_type_infers_rank_from_axis_count() {
+        assert_eq!(
+            meshgrid_type(&[Type::Num, Type::Num]),
+            Type::Tensor {
+                shape: Some(vec![None, None])
+            }
+        );
+        assert_eq!(
+            meshgrid_type(&[Type::Num, Type::Num, Type::Num]),
+            Type::Tensor {
+                shape: Some(vec![None, None, None])
+            }
         );
     }
 

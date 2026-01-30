@@ -1,10 +1,11 @@
 //! MATLAB-compatible `find` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{HostTensorView, ProviderFindResult};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
+use crate::builtins::array::type_resolvers::column_vector_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -39,12 +40,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Find drives control flow and currently bypasses fusion; metadata is present for completeness only.",
 };
 
+fn find_type(_args: &[Type]) -> Type {
+    column_vector_type()
+}
+
 #[runtime_builtin(
     name = "find",
     category = "array/indexing",
     summary = "Locate indices and values of nonzero elements.",
     keywords = "find,nonzero,indices,row,column,gpu",
     accel = "custom",
+    type_resolver(find_type),
     builtin_path = "crate::builtins::array::indexing::find"
 )]
 async fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -523,7 +529,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntValue};
+    use runmat_builtins::{CharArray, IntValue, Type};
 
     fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::find_builtin(value, rest))
@@ -545,6 +551,16 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn find_type_is_column_vector() {
+        assert_eq!(
+            find_type(&[Type::Tensor { shape: None }]),
+            Type::Tensor {
+                shape: Some(vec![None, Some(1)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
