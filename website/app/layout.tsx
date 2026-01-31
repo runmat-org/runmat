@@ -6,7 +6,7 @@ import Footer from "@/components/Footer";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { GoogleAnalytics } from "@/components/GoogleAnalytics";
 import { GoogleTagManager } from "@/components/GoogleTagManager";
-import AnalyticsBootstrap from "@/components/AnalyticsBootstrap";
+import AnalyticsBootstrapClient from "@/components/AnalyticsBootstrapClient";
 
 const inter = Inter({ 
   subsets: ["latin"],
@@ -15,6 +15,7 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://runmat.org'),
+  manifest: "/manifest.webmanifest",
   title: {
     default: "RunMat - Fast, Free, Modern MATLAB Runtime",
     template: "%s | RunMat"
@@ -26,9 +27,9 @@ export const metadata: Metadata = {
     "mathematics", "engineering", "simulation", "drop-in replacement", "dystr",
     "jupyter kernel", "jupyter matlab", "blas", "lapack", "matlab jupyter"
   ],
-  authors: [{ name: "Dystr Inc.", url: "https://dystr.com" }],
-  creator: "Dystr Inc.",
-  publisher: "Dystr Inc.",
+  authors: [{ name: "RunMat", url: "https://runmat.org" }],
+  creator: "RunMat",
+  publisher: "RunMat",
   formatDetection: {
     email: false,
     address: false,
@@ -71,7 +72,6 @@ export default function RootLayout({
         <link rel="icon" href="/favicon.ico" sizes="32x32" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-        <link rel="manifest" href="/site.webmanifest" />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
@@ -169,7 +169,7 @@ export default function RootLayout({
       </head>
       <body className={`${inter.className} antialiased`} suppressHydrationWarning>
         <GoogleTagManager />
-        <AnalyticsBootstrap />
+        <AnalyticsBootstrapClient />
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"

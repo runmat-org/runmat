@@ -9,6 +9,7 @@ import NewsletterCta from "@/components/NewsletterCta";
 export default function Footer() {
   // Default to plain Dystr URL during SSR; hydrate with UTM params on client
   const [dystrHref, setDystrHref] = useState("https://dystr.com");
+  const currentYear = new Date().getFullYear();
   useEffect(() => {
     try {
       const baseUrl = "https://dystr.com";
@@ -73,7 +74,7 @@ export default function Footer() {
         <div className="container flex flex-col items-center justify-between gap-4 py-6 md:flex-row">
           <div className="text-sm text-center md:text-left" style={{ color: 'hsl(var(--muted-foreground))' }}>
             <p>
-            © 2025 Dystr Inc. All rights reserved. MIT+ Licensed.
+            © {currentYear} Dystr Inc. All rights reserved. MIT+ Licensed.
             </p>
             <p>
               MATLAB is a registered trademark of The MathWorks, Inc.
