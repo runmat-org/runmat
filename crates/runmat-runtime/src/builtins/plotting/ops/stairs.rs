@@ -24,6 +24,7 @@ use super::style::{
     marker_metadata_from_appearance, parse_line_style_args, LineAppearance, LineStyleParseOptions,
     DEFAULT_LINE_MARKER_SIZE,
 };
+use crate::builtins::plotting::type_resolvers::string_type;
 use std::convert::TryFrom;
 
 use crate::BuiltinResult;
@@ -63,6 +64,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "stairs,plotting,step",
     sink = true,
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::stairs"
 )]
 pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -285,6 +287,7 @@ impl StairsInput {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use runmat_builtins::Type;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -322,5 +325,10 @@ pub(crate) mod tests {
             Vec::new(),
         );
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn stairs_type_is_string() {
+        assert_eq!(string_type(&[Type::tensor(), Type::tensor()]), Type::String);
     }
 }

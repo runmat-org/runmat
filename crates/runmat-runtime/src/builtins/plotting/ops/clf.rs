@@ -7,6 +7,7 @@ use runmat_macros::runtime_builtin;
 
 use super::handle_args::{handle_from_string, handles_from_value, parse_string};
 use super::state::{clear_figure, clear_figure_with_builtin, figure_handles, FigureHandle};
+use crate::builtins::plotting::type_resolvers::string_type;
 
 use crate::BuiltinResult;
 
@@ -17,6 +18,7 @@ use crate::BuiltinResult;
     keywords = "clf,clear figure,plotting",
     sink = true,
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::clf"
 )]
 pub fn clf_builtin(rest: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -105,6 +107,7 @@ fn parse_clf_action(args: &[Value]) -> BuiltinResult<(ClfAction, bool)> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use runmat_builtins::Type;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -143,5 +146,10 @@ pub(crate) mod tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    #[test]
+    fn clf_type_is_string() {
+        assert_eq!(string_type(&[Type::tensor()]), Type::String);
     }
 }

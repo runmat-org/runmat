@@ -5,6 +5,7 @@ use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
 use super::plotting_error;
+use crate::builtins::plotting::type_resolvers::string_type;
 
 fn as_lower_str(val: &Value) -> Option<String> {
     match val {
@@ -27,6 +28,7 @@ fn accepts_arg(arg: Option<&Value>, allowed: &[&str]) -> bool {
     summary = "Toggle grid lines on current axes.",
     keywords = "grid,plotting",
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn grid_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -42,6 +44,7 @@ pub fn grid_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     summary = "Toggle box outline on current axes.",
     keywords = "box,plotting",
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn box_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -57,6 +60,7 @@ pub fn box_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     summary = "Adjust axis limits/aspect.",
     keywords = "axis,plotting",
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -79,6 +83,7 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     summary = "Set shading mode for surface/mesh plots.",
     keywords = "shading,plotting",
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn shading_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -97,6 +102,7 @@ pub fn shading_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     summary = "Set colormap.",
     keywords = "colormap,plotting",
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn colormap_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -109,6 +115,7 @@ pub fn colormap_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
     summary = "Show or hide colorbar.",
     keywords = "colorbar,plotting",
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn colorbar_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -121,6 +128,7 @@ pub fn colorbar_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
     summary = "Create/select figure.",
     keywords = "figure,plotting",
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn figure_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -133,6 +141,7 @@ pub fn figure_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
     summary = "Select subplot layout/axes.",
     keywords = "subplot,plotting",
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn subplot_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -145,6 +154,7 @@ pub fn subplot_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
     summary = "Clear current figure.",
     keywords = "clf,plotting",
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn clf_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -157,6 +167,7 @@ pub fn clf_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
     summary = "Clear current axes.",
     keywords = "cla,plotting",
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn cla_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -169,6 +180,7 @@ pub fn cla_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
     summary = "Close figure.",
     keywords = "close,plotting",
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn close_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {

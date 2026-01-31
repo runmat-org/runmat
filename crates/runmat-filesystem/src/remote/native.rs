@@ -26,6 +26,7 @@ pub struct RemoteFsConfig {
     pub auth_token: Option<String>,
     pub chunk_bytes: usize,
     pub parallel_requests: usize,
+    pub direct_read_threshold_bytes: u64,
     pub timeout: Duration,
 }
 
@@ -34,8 +35,9 @@ impl Default for RemoteFsConfig {
         Self {
             base_url: String::new(),
             auth_token: None,
-            chunk_bytes: 8 * 1024 * 1024,
+            chunk_bytes: 16 * 1024 * 1024,
             parallel_requests: 4,
+            direct_read_threshold_bytes: 64 * 1024 * 1024,
             timeout: Duration::from_secs(120),
         }
     }
@@ -47,6 +49,7 @@ struct RemoteInner {
     auth_header: Option<String>,
     chunk_bytes: usize,
     parallel_requests: usize,
+    direct_read_threshold_bytes: u64,
 }
 
 impl RemoteInner {
@@ -69,6 +72,7 @@ impl RemoteInner {
             auth_header: config.auth_token.map(|token| format!("Bearer {token}")),
             chunk_bytes: config.chunk_bytes.max(64 * 1024),
             parallel_requests: config.parallel_requests.max(1),
+            direct_read_threshold_bytes: config.direct_read_threshold_bytes,
         })
     }
 
@@ -143,23 +147,73 @@ impl RemoteInner {
             .send()
             .map_err(map_http_err)?;
         let mut body = handle_error(resp)?;
+        if let Some(content_type) = body.headers().get(reqwest::header::CONTENT_TYPE) {
+            if content_type
+                .to_str()
+                .map(|value| value.contains("application/json"))
+                .unwrap_or(false)
+            {
+                let json: DownloadUrlResponse = body.json().map_err(map_http_err)?;
+                return self.download_range_from_url(&json.download_url, offset, length as u64);
+            }
+        }
         let mut buf = Vec::with_capacity(length);
         body.copy_to(&mut buf).map_err(map_http_err)?;
         Ok(buf)
     }
 
-    fn upload_chunk(&self, path: &str, offset: u64, truncate: bool, data: &[u8]) -> io::Result<()> {
+    fn download_range_from_url(
+        &self,
+        url: &str,
+        offset: u64,
+        length: u64,
+    ) -> io::Result<Vec<u8>> {
+        if length == 0 {
+            return Ok(Vec::new());
+        }
+        let end = offset + length - 1;
+        let resp = self
+            .client
+            .get(url)
+            .header(reqwest::header::RANGE, format!("bytes={offset}-{end}"))
+            .send()
+            .map_err(map_http_err)?;
+        let mut body = handle_error(resp)?;
+        let mut buf = Vec::with_capacity(length as usize);
+        body.copy_to(&mut buf).map_err(map_http_err)?;
+        Ok(buf)
+    }
+
+    fn fetch_download_url(&self, path: &str) -> io::Result<DownloadUrlResponse> {
+        self.get_json("/fs/download-url", &[("path", path.to_string())])
+    }
+
+    fn upload_chunk(
+        &self,
+        path: &str,
+        offset: u64,
+        truncate: bool,
+        final_chunk: bool,
+        data: &[u8],
+    ) -> io::Result<Option<FsWriteSessionResponse>> {
         let mut query = vec![("path", path.to_string()), ("offset", offset.to_string())];
         if truncate {
             query.push(("truncate", "true".to_string()));
+        }
+        if final_chunk {
+            query.push(("final", "true".to_string()));
         }
         let resp = self
             .request(reqwest::Method::PUT, "/fs/write", &query)
             .body(data.to_vec())
             .send()
             .map_err(map_http_err)?;
+        if resp.status() == StatusCode::ACCEPTED {
+            let session = handle_error(resp)?.json().map_err(map_http_err)?;
+            return Ok(Some(session));
+        }
         handle_error(resp)?;
-        Ok(())
+        Ok(None)
     }
 
     fn fetch_metadata(&self, path: &str) -> io::Result<MetadataResponse> {
@@ -205,6 +259,10 @@ impl RemoteFsProvider {
     fn download_entire_file(&self, path: &str, len: u64) -> io::Result<Vec<u8>> {
         if len == 0 {
             return Ok(Vec::new());
+        }
+        if len >= self.inner.direct_read_threshold_bytes {
+            let url = self.inner.fetch_download_url(path)?.download_url;
+            return self.download_entire_file_from_url(&url, len);
         }
         let chunk = self.inner.chunk_bytes as u64;
         let mut tasks = Vec::new();
@@ -279,28 +337,27 @@ impl RemoteFsProvider {
         Ok(buffer)
     }
 
-    fn upload_entire_file(&self, path: &str, data: &[u8]) -> io::Result<()> {
-        if data.is_empty() {
-            self.inner.upload_chunk(path, 0, true, data)?;
-            return Ok(());
-        }
-        let chunk = self.inner.chunk_bytes;
+    fn download_entire_file_from_url(&self, url: &str, len: u64) -> io::Result<Vec<u8>> {
+        let chunk = self.inner.chunk_bytes as u64;
         let mut tasks = Vec::new();
-        let mut offset = 0usize;
+        let mut offset = 0;
         let mut index = 0;
-        while offset < data.len() {
-            let end = std::cmp::min(offset + chunk, data.len());
+        while offset < len {
+            let remaining = len - offset;
+            let length = std::cmp::min(chunk, remaining);
             tasks.push(ChunkTask {
-                offset: offset as u64,
-                length: end - offset,
+                offset,
+                length: length as usize,
                 index,
             });
-            offset = end;
+            offset += length;
             index += 1;
         }
-        let path = path.to_string();
+        let mut buffer = vec![0u8; len as usize];
+        let url = url.to_string();
         let inner = self.inner.clone();
         let queue = Arc::new(Mutex::new(VecDeque::from(tasks.clone())));
+        let results = Arc::new(Mutex::new(vec![None::<Vec<u8>>; tasks.len()]));
         let error: Arc<Mutex<Option<io::Error>>> = Arc::new(Mutex::new(None));
         let threads = inner
             .parallel_requests
@@ -310,8 +367,9 @@ impl RemoteFsProvider {
             for _ in 0..threads {
                 let queue = queue.clone();
                 let error = error.clone();
+                let results = results.clone();
                 let inner = inner.clone();
-                let path = path.clone();
+                let url = url.clone();
                 scope.spawn(move |_| loop {
                     let task_opt = {
                         let mut guard = queue.lock().unwrap();
@@ -321,23 +379,61 @@ impl RemoteFsProvider {
                         Some(task) => task,
                         None => break,
                     };
-                    let start = task.offset as usize;
-                    let end = start + task.length;
-                    let slice = &data[start..end];
-                    let truncate = task.offset == 0;
-                    if let Err(err) = inner.upload_chunk(&path, task.offset, truncate, slice) {
-                        let mut guard = error.lock().unwrap();
-                        if guard.is_none() {
-                            *guard = Some(err);
+                    match inner.download_range_from_url(&url, task.offset, task.length as u64) {
+                        Ok(bytes) => {
+                            let mut guard = results.lock().unwrap();
+                            guard[task.index] = Some(bytes);
                         }
-                        break;
+                        Err(err) => {
+                            let mut guard = error.lock().unwrap();
+                            if guard.is_none() {
+                                *guard = Some(err);
+                            }
+                            break;
+                        }
                     }
                 });
             }
         })
-        .expect("remote upload scope");
+        .expect("remote download scope");
         if let Some(err) = error.lock().unwrap().take() {
             return Err(err);
+        }
+        let chunks = Arc::try_unwrap(results)
+            .expect("results still in use")
+            .into_inner()
+            .expect("results poisoned");
+        for (task, maybe) in tasks.iter().zip(chunks.into_iter()) {
+            let bytes = maybe.expect("missing downloaded chunk for remote file");
+            let start = task.offset as usize;
+            buffer[start..start + bytes.len()].copy_from_slice(&bytes);
+        }
+        Ok(buffer)
+    }
+
+    fn upload_entire_file(&self, path: &str, data: &[u8]) -> io::Result<()> {
+        if data.is_empty() {
+            self.inner.upload_chunk(path, 0, true, true, data)?;
+            return Ok(());
+        }
+        let chunk = self.inner.chunk_bytes;
+        let mut offset = 0usize;
+        while offset < data.len() {
+            let end = std::cmp::min(offset + chunk, data.len());
+            let slice = &data[offset..end];
+            let truncate = offset == 0;
+            let final_chunk = end == data.len();
+            let result = self.inner.upload_chunk(path, offset as u64, truncate, final_chunk, slice)?;
+            if let Some(session) = result {
+                let expected = offset as u64 + slice.len() as u64;
+                if session.next_offset as u64 != expected {
+                    return Err(io::Error::new(
+                        ErrorKind::Other,
+                        "unexpected next offset",
+                    ));
+                }
+            }
+            offset = end;
         }
         Ok(())
     }
@@ -643,6 +739,20 @@ struct CanonicalizeResponse {
     path: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct DownloadUrlResponse {
+    #[serde(rename = "downloadUrl")]
+    download_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct FsWriteSessionResponse {
+    #[serde(rename = "sessionId")]
+    _session_id: String,
+    #[serde(rename = "nextOffset")]
+    next_offset: i64,
+}
+
 fn map_http_err(err: reqwest::Error) -> io::Error {
     io::Error::other(err)
 }
@@ -915,6 +1025,7 @@ mod tests {
             auth_token: None,
             chunk_bytes: 1024,
             parallel_requests: 4,
+            direct_read_threshold_bytes: u64::MAX,
             timeout: Duration::from_secs(30),
         })
         .expect("provider");

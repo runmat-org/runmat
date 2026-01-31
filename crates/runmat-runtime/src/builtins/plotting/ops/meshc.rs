@@ -15,6 +15,7 @@ use super::state::{render_active_plot, PlotRenderOptions};
 
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::build_surface_gpu_plot;
+use crate::builtins::plotting::type_resolvers::string_type;
 use std::sync::Arc;
 
 const BUILTIN_NAME: &str = "meshc";
@@ -26,6 +27,7 @@ const BUILTIN_NAME: &str = "meshc";
     keywords = "meshc,plotting,mesh,contour",
     sink = true,
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::meshc"
 )]
 pub fn meshc_builtin(
@@ -130,6 +132,7 @@ pub fn meshc_builtin(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use runmat_builtins::Type;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -162,5 +165,13 @@ pub(crate) mod tests {
             Vec::new(),
         );
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn meshc_type_is_string() {
+        assert_eq!(
+            string_type(&[Type::tensor(), Type::tensor(), Type::tensor()]),
+            Type::String
+        );
     }
 }

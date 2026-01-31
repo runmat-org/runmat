@@ -34,6 +34,7 @@ use super::point::{
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::LineStyleParseOptions;
+use crate::builtins::plotting::type_resolvers::string_type;
 
 const BUILTIN_NAME: &str = "scatter3";
 
@@ -71,6 +72,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "scatter3,plotting,3d,pointcloud",
     sink = true,
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::scatter3"
 )]
 pub async fn scatter3_builtin(
@@ -521,6 +523,7 @@ pub(crate) mod tests {
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_builtins::Value;
+    use runmat_builtins::Type;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -615,5 +618,10 @@ pub(crate) mod tests {
         let plot = build_scatter3_plot(vec![0.0, 1.0], vec![0.0, 1.0], vec![0.0, 1.0], &mut style)
             .expect("plot");
         assert_eq!(plot.label.as_deref(), Some("Cloud A"));
+    }
+
+    #[test]
+    fn scatter3_type_is_string() {
+        assert_eq!(string_type(&[Type::tensor(), Type::tensor(), Type::tensor()]), Type::String);
     }
 }

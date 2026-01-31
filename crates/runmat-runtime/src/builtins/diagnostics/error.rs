@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::diagnostics::type_resolvers::error_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const DEFAULT_IDENTIFIER: &str = "MATLAB:error";
@@ -62,6 +63,7 @@ fn remap_error_flow(err: RuntimeError, identifier: &str) -> RuntimeError {
     summary = "Throw an exception with an identifier and a formatted diagnostic message.",
     keywords = "error,exception,diagnostics,throw",
     accel = "metadata",
+    type_resolver(error_type),
     builtin_path = "crate::builtins::diagnostics::error"
 )]
 fn error_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -198,7 +200,7 @@ fn looks_like_unqualified_identifier(text: &str) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{IntValue, MException};
+    use runmat_builtins::{IntValue, MException, Type};
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -310,5 +312,10 @@ pub(crate) mod tests {
         assert!(err
             .message()
             .contains("message struct must contain a 'message' field"));
+    }
+
+    #[test]
+    fn error_type_is_unknown() {
+        assert_eq!(error_type(&[Type::String]), Type::Unknown);
     }
 }

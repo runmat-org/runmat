@@ -25,6 +25,7 @@ use super::gpu_helpers::axis_bounds;
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarLayout, BarStyle, BarStyleDefaults};
+use crate::builtins::plotting::type_resolvers::string_type;
 
 const BUILTIN_NAME: &str = "bar";
 
@@ -62,6 +63,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "bar,barchart,plotting",
     sink = true,
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::bar"
 )]
 pub async fn bar_builtin(values: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -544,6 +546,7 @@ pub(crate) mod tests {
     use crate::builtins::plotting::tests::ensure_plot_test_env;
     use futures::executor::block_on;
     use runmat_builtins::Value;
+    use runmat_builtins::Type;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -626,5 +629,10 @@ pub(crate) mod tests {
         let tensor = matrix_tensor(&[1.0, -2.0, 3.0, 4.0], 2, 2);
         let charts = build_bar_series_from_tensor(tensor, &style).unwrap();
         assert_eq!(charts.len(), 2);
+    }
+
+    #[test]
+    fn bar_type_is_string() {
+        assert_eq!(string_type(&[Type::tensor()]), Type::String);
     }
 }

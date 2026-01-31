@@ -19,6 +19,9 @@ pub(crate) mod style;
 #[path = "core/web.rs"]
 pub mod web;
 
+#[path = "type_resolvers.rs"]
+pub(crate) mod type_resolvers;
+
 #[path = "ops/bar.rs"]
 pub(crate) mod bar;
 #[path = "ops/clf.rs"]

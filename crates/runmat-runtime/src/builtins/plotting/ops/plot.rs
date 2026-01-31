@@ -23,6 +23,7 @@ use super::style::{
     value_as_string, LineAppearance, LineStyleParseOptions, MarkerAppearance, MarkerColor,
     MarkerKind, DEFAULT_LINE_MARKER_SIZE,
 };
+use crate::builtins::plotting::type_resolvers::string_type;
 use std::convert::TryFrom;
 
 use crate::{BuiltinResult, RuntimeError};
@@ -66,6 +67,7 @@ const BUILTIN_NAME: &str = "plot";
     keywords = "plot,line,2d,visualization",
     sink = true,
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::plot"
 )]
 pub async fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -531,6 +533,7 @@ pub(crate) mod tests {
     use crate::builtins::plotting::{clone_figure, current_figure_handle};
     use crate::RuntimeError;
     use futures::executor::block_on;
+    use runmat_builtins::Type;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -667,5 +670,10 @@ pub(crate) mod tests {
         assert!(order.is_some());
         apply_line_style_order(&mut plans, order.as_ref().unwrap());
         assert_eq!(plans[0].appearance.line_style, LineStyle::Dashed);
+    }
+
+    #[test]
+    fn plot_type_is_string() {
+        assert_eq!(string_type(&[Type::tensor(), Type::tensor()]), Type::String);
     }
 }

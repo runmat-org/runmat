@@ -7,6 +7,7 @@ use runmat_macros::runtime_builtin;
 
 use super::handle_args::{handle_from_string, handles_from_value, parse_string};
 use super::state::{close_figure, close_figure_with_builtin, figure_handles, FigureHandle};
+use crate::builtins::plotting::type_resolvers::string_type;
 
 use crate::BuiltinResult;
 
@@ -17,6 +18,7 @@ use crate::BuiltinResult;
     keywords = "close,figure,plotting",
     sink = true,
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::close"
 )]
 pub fn close_builtin(rest: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -101,6 +103,7 @@ fn parse_close_action(args: &[Value]) -> BuiltinResult<CloseAction> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use runmat_builtins::Type;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -140,5 +143,10 @@ pub(crate) mod tests {
             parse_close_action(&values).unwrap(),
             CloseAction::All
         ));
+    }
+
+    #[test]
+    fn close_type_is_string() {
+        assert_eq!(string_type(&[Type::tensor()]), Type::String);
     }
 }

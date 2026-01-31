@@ -10,6 +10,9 @@ use once_cell::sync::Lazy;
 use runmat_builtins::{CharArray, HandleRef, IntValue, LogicalArray, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::containers::type_resolvers::{
+    map_cell_type, map_handle_type, map_is_key_type, map_unknown_type,
+};
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -380,6 +383,7 @@ struct KeyCandidate {
     keywords = "map,containers.Map,dictionary,hash map,lookup",
     accel = "metadata",
     sink = true,
+    type_resolver(map_handle_type),
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -390,6 +394,7 @@ async fn containers_map_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value>
 
 #[runtime_builtin(
     name = "containers.Map.keys",
+    type_resolver(map_cell_type),
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_keys(map: Value) -> crate::BuiltinResult<Value> {
@@ -401,6 +406,7 @@ async fn containers_map_keys(map: Value) -> crate::BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "containers.Map.values",
+    type_resolver(map_cell_type),
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_values(map: Value) -> crate::BuiltinResult<Value> {
@@ -412,6 +418,7 @@ async fn containers_map_values(map: Value) -> crate::BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "containers.Map.isKey",
+    type_resolver(map_is_key_type),
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_is_key(map: Value, key_spec: Value) -> crate::BuiltinResult<Value> {
@@ -436,6 +443,7 @@ async fn containers_map_is_key(map: Value, key_spec: Value) -> crate::BuiltinRes
 
 #[runtime_builtin(
     name = "containers.Map.remove",
+    type_resolver(map_handle_type),
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_remove(map: Value, key_spec: Value) -> crate::BuiltinResult<Value> {
@@ -453,6 +461,7 @@ async fn containers_map_remove(map: Value, key_spec: Value) -> crate::BuiltinRes
 
 #[runtime_builtin(
     name = "containers.Map.subsref",
+    type_resolver(map_unknown_type),
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_subsref(
@@ -542,6 +551,7 @@ async fn containers_map_subsref(
 
 #[runtime_builtin(
     name = "containers.Map.subsasgn",
+    type_resolver(map_handle_type),
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_subsasgn(
@@ -1430,6 +1440,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::Type;
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message.clone()
@@ -1497,6 +1508,14 @@ pub(crate) mod tests {
             value_type,
             Value::CharArray(CharArray::new("any".chars().collect(), 1, 3).unwrap())
         );
+    }
+
+    #[test]
+    fn map_type_resolvers_basics() {
+        assert_eq!(map_handle_type(&[Type::Unknown]), Type::Unknown);
+        assert_eq!(map_cell_type(&[]), Type::cell());
+        assert_eq!(map_is_key_type(&[Type::String]), Type::logical());
+        assert_eq!(map_unknown_type(&[]), Type::Unknown);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

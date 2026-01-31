@@ -19,6 +19,7 @@ use super::perf::compute_surface_lod;
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
+use crate::builtins::plotting::type_resolvers::string_type;
 use std::convert::TryFrom;
 use std::sync::Arc;
 
@@ -60,6 +61,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "surf,plotting,3d,surface",
     sink = true,
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::surf"
 )]
 pub fn surf_builtin(
@@ -263,6 +265,7 @@ pub(crate) fn build_color_lut(colormap: ColorMap, samples: usize, alpha: f32) ->
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use runmat_builtins::Type;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -295,5 +298,13 @@ pub(crate) mod tests {
             Vec::new(),
         );
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn surf_type_is_string() {
+        assert_eq!(
+            string_type(&[Type::tensor(), Type::tensor(), Type::tensor()]),
+            Type::String
+        );
     }
 }

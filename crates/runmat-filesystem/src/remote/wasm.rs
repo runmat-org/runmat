@@ -14,6 +14,7 @@ pub struct RemoteFsConfig {
     pub base_url: String,
     pub auth_token: Option<String>,
     pub chunk_bytes: usize,
+    pub direct_read_threshold_bytes: u64,
     pub timeout_ms: u32,
 }
 
@@ -22,7 +23,8 @@ impl Default for RemoteFsConfig {
         Self {
             base_url: String::new(),
             auth_token: None,
-            chunk_bytes: 8 * 1024 * 1024,
+            chunk_bytes: 16 * 1024 * 1024,
+            direct_read_threshold_bytes: 64 * 1024 * 1024,
             timeout_ms: 120_000,
         }
     }
@@ -32,6 +34,7 @@ pub struct RemoteFsProvider {
     base: Url,
     auth_header: Option<String>,
     chunk_bytes: usize,
+    direct_read_threshold_bytes: u64,
     timeout_ms: u32,
 }
 
@@ -48,6 +51,7 @@ impl RemoteFsProvider {
             base,
             auth_header: config.auth_token.map(|token| format!("Bearer {token}")),
             chunk_bytes: config.chunk_bytes.max(64 * 1024),
+            direct_read_threshold_bytes: config.direct_read_threshold_bytes,
             timeout_ms: config.timeout_ms.max(1),
         })
     }
@@ -93,6 +97,31 @@ impl RemoteFsProvider {
         let xhr = self.prepare_xhr(method, &url, XmlHttpRequestResponseType::Arraybuffer)?;
         self.apply_headers(&xhr, content_type)?;
         self.dispatch(&xhr, body)?;
+        self.read_bytes(&xhr)
+    }
+
+    fn fetch_download_url(&self, path: &str) -> io::Result<DownloadUrlResponse> {
+        let text = self.send_text(
+            "GET",
+            "/fs/download-url",
+            &[("path", path.to_string())],
+            None,
+            None,
+        )?;
+        serde_json::from_str(&text).map_err(map_serde_err)
+    }
+
+    fn read_range_from_url(&self, url: &str, offset: u64, length: u64) -> io::Result<Vec<u8>> {
+        if length == 0 {
+            return Ok(Vec::new());
+        }
+        let end = offset + length - 1;
+        let xhr = self.prepare_xhr("GET", url, XmlHttpRequestResponseType::Arraybuffer)?;
+        let range = format!("bytes={offset}-{end}");
+        xhr.set_request_header("Range", &range)
+            .map_err(|err| map_js_error("set_request_header", err))?;
+        self.apply_headers(&xhr, None)?;
+        self.dispatch(&xhr, None)?;
         self.read_bytes(&xhr)
     }
 
@@ -246,13 +275,27 @@ impl RemoteFsProvider {
         )
     }
 
-    fn upload_chunk(&self, path: &str, offset: u64, truncate: bool, data: &[u8]) -> io::Result<()> {
+    fn upload_chunk(
+        &self,
+        path: &str,
+        offset: u64,
+        truncate: bool,
+        final_chunk: bool,
+        data: &[u8],
+    ) -> io::Result<Option<FsWriteSessionResponse>> {
         let mut query = vec![("path", path.to_string()), ("offset", offset.to_string())];
         if truncate {
             query.push(("truncate", "true".into()));
         }
-        self.send_bytes("PUT", "/fs/write", &query, Some(data), None)?;
-        Ok(())
+        if final_chunk {
+            query.push(("final", "true".into()));
+        }
+        let text = self.send_text("PUT", "/fs/write", &query, Some(data), None)?;
+        if text.is_empty() {
+            return Ok(None);
+        }
+        let session: FsWriteSessionResponse = serde_json::from_str(&text).map_err(map_serde_err)?;
+        Ok(Some(session))
     }
 
     fn normalize(&self, path: &Path) -> String {
@@ -273,6 +316,10 @@ impl RemoteFsProvider {
         if len == 0 {
             return Ok(Vec::new());
         }
+        if should_use_direct_read(len, self.direct_read_threshold_bytes) {
+            let url = self.fetch_download_url(path)?.download_url;
+            return self.read_range_from_url(&url, 0, len);
+        }
         let mut buffer = Vec::with_capacity(len as usize);
         let mut offset = 0;
         while offset < len {
@@ -290,7 +337,7 @@ impl RemoteFsProvider {
 
     fn upload_entire_file(&self, path: &str, data: &[u8]) -> io::Result<()> {
         if data.is_empty() {
-            self.upload_chunk(path, 0, true, data)?;
+            self.upload_chunk(path, 0, true, true, data)?;
             return Ok(());
         }
         let mut offset = 0;
@@ -298,12 +345,24 @@ impl RemoteFsProvider {
         while offset < data.len() {
             let end = std::cmp::min(offset + self.chunk_bytes, data.len());
             let chunk = &data[offset..end];
-            self.upload_chunk(path, offset as u64, index == 0, chunk)?;
+            let truncate = index == 0;
+            let final_chunk = end == data.len();
+            let session = self.upload_chunk(path, offset as u64, truncate, final_chunk, chunk)?;
+            if let Some(session) = session {
+                let expected = offset as u64 + chunk.len() as u64;
+                if session.next_offset as u64 != expected {
+                    return Err(io::Error::new(ErrorKind::Other, "unexpected next offset"));
+                }
+            }
             offset = end;
             index += 1;
         }
         Ok(())
     }
+}
+
+fn should_use_direct_read(length: u64, threshold: u64) -> bool {
+    length >= threshold
 }
 
 impl FsProvider for RemoteFsProvider {
@@ -655,6 +714,43 @@ struct SetReadonlyRequest {
 #[derive(Debug, Deserialize)]
 struct CanonicalizeResponse {
     path: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DownloadUrlResponse {
+    #[serde(rename = "downloadUrl")]
+    download_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct FsWriteSessionResponse {
+    #[serde(rename = "sessionId")]
+    _session_id: String,
+    #[serde(rename = "nextOffset")]
+    next_offset: i64,
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod tests {
+    use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
+    use wasm_bindgen_test::wasm_bindgen_test_configure;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test]
+    fn download_url_parses() {
+        let json = r#"{\"downloadUrl\":\"https://example.com/obj\"}"#;
+        let parsed: DownloadUrlResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.download_url, "https://example.com/obj");
+    }
+
+    #[wasm_bindgen_test]
+    fn direct_read_threshold_checks() {
+        let threshold = RemoteFsConfig::default().direct_read_threshold_bytes;
+        assert!(should_use_direct_read(threshold, threshold));
+        assert!(!should_use_direct_read(threshold - 1, threshold));
+    }
 }
 
 fn map_js_error(op: &str, err: JsValue) -> io::Error {
