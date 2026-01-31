@@ -8,6 +8,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::strings::type_resolvers::string_array_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::char")]
@@ -52,6 +53,7 @@ fn remap_char_flow(err: RuntimeError) -> RuntimeError {
     summary = "Convert numeric codes, strings, and cell contents into a character array.",
     keywords = "char,character,string,gpu",
     accel = "conversion",
+    type_resolver(string_array_type),
     builtin_path = "crate::builtins::strings::core::char"
 )]
 async fn char_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -286,6 +288,7 @@ fn infer_rows_cols(shape: &[usize], len: usize) -> (usize, usize) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use runmat_builtins::Type;
 
     fn char_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::char_builtin(rest))
@@ -516,5 +519,10 @@ pub(crate) mod tests {
             }
             other => panic!("unexpected results {other:?}"),
         }
+    }
+
+    #[test]
+    fn char_type_is_string_array() {
+        assert_eq!(string_array_type(&[Type::Num]), Type::cell_of(Type::String));
     }
 }

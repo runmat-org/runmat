@@ -13,6 +13,7 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 
 use super::text_utils::{logical_result, parse_ignore_case, TextCollection, TextElement};
+use crate::builtins::strings::type_resolvers::logical_text_match_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::search::endswith")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -49,6 +50,7 @@ const BUILTIN_NAME: &str = "endsWith";
     summary = "Return logical values indicating whether text inputs end with specific patterns.",
     keywords = "endswith,suffix,text,ignorecase,search",
     accel = "sink",
+    type_resolver(logical_text_match_type),
     builtin_path = "crate::builtins::strings::search::endswith"
 )]
 async fn endswith_builtin(
@@ -131,7 +133,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CellArray, CharArray, IntValue, LogicalArray, StringArray, Tensor};
+    use runmat_builtins::{CellArray, CharArray, IntValue, LogicalArray, StringArray, Tensor, Type};
 
     fn run_endswith(text: Value, pattern: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(endswith_builtin(text, pattern, rest))
@@ -542,5 +544,10 @@ pub(crate) mod tests {
         )
         .expect("endsWith");
         assert_eq!(result, Value::Bool(false));
+    }
+
+    #[test]
+    fn endswith_type_is_logical_match() {
+        assert_eq!(logical_text_match_type(&[Type::String, Type::String]), Type::Bool);
     }
 }

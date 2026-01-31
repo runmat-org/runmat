@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::strings::type_resolvers::string_scalar_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::sprintf")]
@@ -56,6 +57,7 @@ fn remap_sprintf_flow(err: RuntimeError) -> RuntimeError {
     keywords = "sprintf,format,printf,text",
     accel = "format",
     sink = true,
+    type_resolver(string_scalar_type),
     builtin_path = "crate::builtins::strings::core::sprintf"
 )]
 async fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -105,7 +107,7 @@ fn char_row_value(text: &str) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::{builtins::common::test_support, make_cell};
-    use runmat_builtins::{CharArray, IntValue, StringArray, Tensor};
+    use runmat_builtins::{CharArray, IntValue, StringArray, Tensor, Type};
 
     fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::sprintf_builtin(format_spec, rest))
@@ -329,5 +331,10 @@ pub(crate) mod tests {
         let result =
             sprintf_builtin(Value::String("Value\\q".to_string()), Vec::new()).expect("sprintf");
         assert_eq!(char_value_to_string(result), "Value\\q");
+    }
+
+    #[test]
+    fn sprintf_type_is_string_scalar() {
+        assert_eq!(string_scalar_type(&[Type::String]), Type::String);
     }
 }

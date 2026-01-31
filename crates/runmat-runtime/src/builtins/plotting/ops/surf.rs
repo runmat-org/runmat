@@ -27,6 +27,89 @@ use crate::BuiltinResult;
 
 const BUILTIN_NAME: &str = "surf";
 
+fn is_vector_like(tensor: &Tensor) -> bool {
+    // MATLAB vectors are 1xN or Nx1 (scalars included). Treat empty shape as scalar.
+    if tensor.shape.is_empty() {
+        return true;
+    }
+    tensor.rows == 1 || tensor.cols == 1
+}
+
+fn matrix_rows_are_identical(tensor: &Tensor) -> bool {
+    let rows = tensor.rows;
+    let cols = tensor.cols;
+    if rows == 0 || cols == 0 {
+        return false;
+    }
+    for row in 1..rows {
+        for col in 0..cols {
+            let idx0 = 0 + rows * col;
+            let idx = row + rows * col;
+            if tensor.data[idx] != tensor.data[idx0] {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn matrix_cols_are_identical(tensor: &Tensor) -> bool {
+    let rows = tensor.rows;
+    let cols = tensor.cols;
+    if rows == 0 || cols == 0 {
+        return false;
+    }
+    for col in 1..cols {
+        for row in 0..rows {
+            let idx0 = row + rows * 0;
+            let idx = row + rows * col;
+            if tensor.data[idx] != tensor.data[idx0] {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn extract_meshgrid_axes_from_xy_matrices(
+    x: &Tensor,
+    y: &Tensor,
+    rows: usize,
+    cols: usize,
+) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
+    if x.rows != rows || x.cols != cols || y.rows != rows || y.cols != cols {
+        return Err(plotting_error(
+            BUILTIN_NAME,
+            "surf: when X and Y are matrices, they must match the shape of Z",
+        ));
+    }
+
+    // MATLAB meshgrid: X has identical rows, Y has identical columns.
+    if !matrix_rows_are_identical(x) || !matrix_cols_are_identical(y) {
+        return Err(plotting_error(
+            BUILTIN_NAME,
+            "surf: matrix X/Y inputs must be meshgrid-style coordinate matrices",
+        ));
+    }
+
+    // Extract x vector (length = cols) from the first row of X.
+    let mut x_vec = Vec::with_capacity(cols);
+    for col in 0..cols {
+        let idx = 0 + rows * col;
+        x_vec.push(x.data[idx]);
+    }
+    // Extract y vector (length = rows) from the first column of Y.
+    let mut y_vec = Vec::with_capacity(rows);
+    for row in 0..rows {
+        y_vec.push(y.data[row]);
+    }
+
+    // Internally, `tensor_to_surface_grid` uses (x_len, y_len) as (rows, cols) and stores the
+    // grid as [x_index][y_index]. For a MATLAB meshgrid, that means we pass the *row* axis as
+    // the "x" axis vector and the *column* axis as the "y" axis vector.
+    Ok((y_vec, x_vec))
+}
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::surf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "surf",
@@ -74,10 +157,7 @@ pub fn surf_builtin(
         Tensor::try_from(&x).map_err(|e| plotting_error(BUILTIN_NAME, format!("surf: {e}")))?;
     let y_tensor =
         Tensor::try_from(&y).map_err(|e| plotting_error(BUILTIN_NAME, format!("surf: {e}")))?;
-    let x_axis = numeric_vector(x_tensor);
-    let y_axis = numeric_vector(y_tensor);
-    let mut x_axis = Some(x_axis);
-    let mut y_axis = Some(y_axis);
+    let mut xy = Some((x_tensor, y_tensor));
     let mut z_input = Some(SurfaceDataInput::from_value(z, "surf")?);
     let style = Arc::new(parse_surface_style_args(
         "surf",
@@ -99,9 +179,15 @@ pub fn surf_builtin(
         ..Default::default()
     };
     let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
-        let x_axis_vec = x_axis.take().expect("surf: X axis consumed once");
-        let y_axis_vec = y_axis.take().expect("surf: Y axis consumed once");
+        let (x_tensor, y_tensor) = xy.take().expect("surf: X/Y consumed once");
         let z_arg = z_input.take().expect("surf: Z consumed once");
+        let (rows, cols) = z_arg.grid_shape(BUILTIN_NAME)?;
+
+        let (x_axis_vec, y_axis_vec) = if is_vector_like(&x_tensor) && is_vector_like(&y_tensor) {
+            (numeric_vector(x_tensor), numeric_vector(y_tensor))
+        } else {
+            extract_meshgrid_axes_from_xy_matrices(&x_tensor, &y_tensor, rows, cols)?
+        };
 
         if let Some(z_gpu) = z_arg.gpu_handle() {
             let style = Arc::clone(&style);
@@ -306,5 +392,46 @@ pub(crate) mod tests {
             string_type(&[Type::tensor(), Type::tensor(), Type::tensor()]),
             Type::String
         );
+    }
+
+    #[test]
+    fn surf_accepts_meshgrid_xy_matrices() {
+        // x = [0, 1, 2], y = [10, 20] => meshgrid X/Y are 2x3.
+        // Column-major storage for X:
+        // X = [0 1 2;
+        //      0 1 2]
+        let x = Tensor {
+            data: vec![0.0, 0.0, 1.0, 1.0, 2.0, 2.0],
+            shape: vec![2, 3],
+            rows: 2,
+            cols: 3,
+            dtype: runmat_builtins::NumericDType::F64,
+        };
+        // Y = [10 10 10;
+        //      20 20 20]
+        let y = Tensor {
+            data: vec![10.0, 20.0, 10.0, 20.0, 10.0, 20.0],
+            shape: vec![2, 3],
+            rows: 2,
+            cols: 3,
+            dtype: runmat_builtins::NumericDType::F64,
+        };
+        // Z is 2x3 surface heights (any values), column-major.
+        let z = Tensor {
+            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            shape: vec![2, 3],
+            rows: 2,
+            cols: 3,
+            dtype: runmat_builtins::NumericDType::F64,
+        };
+
+        let (x_axis, y_axis) =
+            extract_meshgrid_axes_from_xy_matrices(&x, &y, z.rows, z.cols).expect("axes");
+        assert_eq!(x_axis.len(), 2);
+        assert_eq!(y_axis.len(), 3);
+
+        // With extracted axes, Z should validate and reshape into a surface grid.
+        let grid = tensor_to_surface_grid(z, x_axis.len(), y_axis.len(), BUILTIN_NAME);
+        assert!(grid.is_ok(), "expected Z to be compatible with extracted axes");
     }
 }

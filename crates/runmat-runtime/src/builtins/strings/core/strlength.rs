@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::is_missing_string;
+use crate::builtins::strings::type_resolvers::numeric_text_scalar_or_tensor_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strlength")]
@@ -60,6 +61,7 @@ fn remap_strlength_flow(err: RuntimeError) -> RuntimeError {
     summary = "Count characters in string arrays, character arrays, or cell arrays of character vectors.",
     keywords = "strlength,string length,text,count,characters",
     accel = "sink",
+    type_resolver(numeric_text_scalar_or_tensor_type),
     builtin_path = "crate::builtins::strings::core::strlength"
 )]
 async fn strlength_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -151,6 +153,7 @@ fn trimmed_row_length(array: &CharArray, row: usize) -> usize {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_builtins::Type;
 
     fn strlength_builtin(value: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strlength_builtin(value))
@@ -306,5 +309,10 @@ pub(crate) mod tests {
         .unwrap();
         let err = error_message(strlength_builtin(Value::Cell(cell)).unwrap_err());
         assert_eq!(err, CELL_ELEMENT_ERROR);
+    }
+
+    #[test]
+    fn strlength_type_is_numeric_text_scalar_or_tensor() {
+        assert_eq!(numeric_text_scalar_or_tensor_type(&[Type::String]), Type::Num);
     }
 }

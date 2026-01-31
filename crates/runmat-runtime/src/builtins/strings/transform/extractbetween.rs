@@ -5,6 +5,7 @@ use std::cmp::min;
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::type_resolvers::unknown_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
@@ -81,6 +82,7 @@ enum BoundariesMode {
     summary = "Extract substrings between boundary markers using MATLAB-compatible semantics.",
     keywords = "extractBetween,substring,boundaries,strings",
     accel = "sink",
+    type_resolver(unknown_type),
     builtin_path = "crate::builtins::strings::transform::extractbetween"
 )]
 async fn extract_between_builtin(
@@ -682,7 +684,7 @@ pub(crate) mod tests {
     #![allow(non_snake_case)]
 
     use super::*;
-    use runmat_builtins::{CellArray, Tensor};
+    use runmat_builtins::{CellArray, Tensor, Type};
 
     fn extract_between_builtin(
         text: Value,
@@ -1000,5 +1002,10 @@ pub(crate) mod tests {
             }
             other => panic!("expected cell array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn extract_between_type_is_unknown() {
+        assert_eq!(unknown_type(&[Type::String]), Type::Unknown);
     }
 }

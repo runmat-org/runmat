@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::type_resolvers::unknown_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
@@ -261,6 +262,7 @@ fn cell_element_to_text(value: &Value) -> BuiltinResult<TextElement> {
     summary = "Concatenate strings, character arrays, or cell arrays of character vectors element-wise.",
     keywords = "strcat,string concatenation,character arrays,cell arrays",
     accel = "sink",
+    type_resolver(unknown_type),
     builtin_path = "crate::builtins::strings::transform::strcat"
 )]
 async fn strcat_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -385,7 +387,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_builtins::Tensor;
-    use runmat_builtins::{CellArray, CharArray, IntValue, StringArray};
+    use runmat_builtins::{CellArray, CharArray, IntValue, StringArray, Type};
 
     fn run_strcat(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(strcat_builtin(rest))
@@ -650,5 +652,10 @@ pub(crate) mod tests {
             let err = run_strcat(vec![Value::GpuTensor(handle)]).expect_err("expected error");
             assert!(err.to_string().contains("inputs must be strings"));
         });
+    }
+
+    #[test]
+    fn strcat_type_is_unknown() {
+        assert_eq!(unknown_type(&[Type::String]), Type::Unknown);
     }
 }

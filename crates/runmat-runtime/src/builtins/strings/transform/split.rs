@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::type_resolvers::string_array_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::split")]
@@ -68,6 +69,7 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     summary = "Split strings, character arrays, and cell arrays into substrings using delimiters.",
     keywords = "split,strsplit,delimiter,CollapseDelimiters,IncludeDelimiters",
     accel = "sink",
+    type_resolver(string_array_type),
     builtin_path = "crate::builtins::strings::transform::split"
 )]
 async fn split_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -548,7 +550,7 @@ fn name_key(value: &Value) -> Option<NameKey> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, LogicalArray, Tensor};
+    use runmat_builtins::{CellArray, LogicalArray, Tensor, Type};
 
     fn split_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::split_builtin(text, rest))
@@ -948,5 +950,10 @@ pub(crate) mod tests {
             }
             other => panic!("expected string array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn split_type_is_string_array() {
+        assert_eq!(string_array_type(&[Type::String]), Type::cell_of(Type::String));
     }
 }

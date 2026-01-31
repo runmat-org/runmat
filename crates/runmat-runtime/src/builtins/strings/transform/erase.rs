@@ -8,6 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::type_resolvers::unknown_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
@@ -65,6 +66,7 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     summary = "Remove substring occurrences from strings, character arrays, and cell arrays.",
     keywords = "erase,remove substring,strings,character array,text",
     accel = "sink",
+    type_resolver(unknown_type),
     builtin_path = "crate::builtins::strings::transform::erase"
 )]
 async fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
@@ -229,6 +231,7 @@ fn erase_cell_element(value: &Value, patterns: &PatternList) -> BuiltinResult<Va
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_builtins::Type;
 
     fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::erase_builtin(text, pattern))
@@ -456,5 +459,10 @@ pub(crate) mod tests {
     fn erase_errors_on_invalid_pattern_type() {
         let err = erase_builtin(Value::String("abc".into()), Value::Num(1.0)).unwrap_err();
         assert_eq!(err.to_string(), PATTERN_TYPE_ERROR);
+    }
+
+    #[test]
+    fn erase_type_is_unknown() {
+        assert_eq!(unknown_type(&[Type::String]), Type::Unknown);
     }
 }

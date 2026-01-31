@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::type_resolvers::unknown_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::replace")]
@@ -74,6 +75,7 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     summary = "Replace substring occurrences in strings, character arrays, and cell arrays.",
     keywords = "replace,strrep,strings,character array,text",
     accel = "sink",
+    type_resolver(unknown_type),
     builtin_path = "crate::builtins::strings::transform::replace"
 )]
 async fn replace_builtin(text: Value, old: Value, new: Value) -> BuiltinResult<Value> {
@@ -272,6 +274,7 @@ impl ReplacementSpec {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_builtins::Type;
 
     fn replace_builtin(text: Value, old: Value, new: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::replace_builtin(text, old, new))
@@ -452,5 +455,10 @@ pub(crate) mod tests {
         )
         .expect("replace");
         assert_eq!(result, Value::String("<missing>".into()));
+    }
+
+    #[test]
+    fn replace_type_is_unknown() {
+        assert_eq!(unknown_type(&[Type::String]), Type::Unknown);
     }
 }

@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::type_resolvers::unknown_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::join")]
@@ -63,6 +64,7 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     summary = "Combine text across a specified dimension inserting delimiters between elements.",
     keywords = "join,string join,concatenate strings,delimiters,cell array join",
     accel = "none",
+    type_resolver(unknown_type),
     builtin_path = "crate::builtins::strings::transform::join"
 )]
 async fn join_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -539,7 +541,7 @@ pub(crate) mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, Type};
 
     fn join_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::join_builtin(text, rest))
@@ -951,5 +953,10 @@ pub(crate) mod tests {
             }
             other => panic!("expected string array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn join_type_is_unknown() {
+        assert_eq!(unknown_type(&[Type::String]), Type::Unknown);
     }
 }

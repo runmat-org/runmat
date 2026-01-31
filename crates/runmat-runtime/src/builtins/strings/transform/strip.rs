@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::type_resolvers::unknown_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::strip")]
@@ -131,6 +132,7 @@ impl PatternSpec {
     summary = "Remove leading and trailing characters from strings, character arrays, and cell arrays.",
     keywords = "strip,trim,strings,character array,text",
     accel = "sink",
+    type_resolver(unknown_type),
     builtin_path = "crate::builtins::strings::transform::strip"
 )]
 async fn strip_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -490,6 +492,7 @@ where
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_builtins::Type;
 
     fn run_strip(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(strip_builtin(value, rest))
@@ -808,5 +811,10 @@ pub(crate) mod tests {
         let err = run_strip(Value::GpuTensor(handle.clone()), Vec::new()).unwrap_err();
         assert_eq!(err.to_string(), ARG_TYPE_ERROR);
         provider.free(&handle).ok();
+    }
+
+    #[test]
+    fn strip_type_is_unknown() {
+        assert_eq!(unknown_type(&[Type::String]), Type::Unknown);
     }
 }
