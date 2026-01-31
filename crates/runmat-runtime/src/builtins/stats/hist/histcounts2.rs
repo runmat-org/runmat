@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::stats::type_resolvers::histcounts2_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "histcounts2";
@@ -56,6 +57,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "histcounts2,2d histogram,joint distribution,binning,probability,gpu",
     accel = "reduction",
     sink = true,
+    type_resolver(histcounts2_type),
     builtin_path = "crate::builtins::stats::hist::histcounts2"
 )]
 async fn histcounts2_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -1179,6 +1181,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::Type;
 
     fn tensor_from_value(value: Value) -> Tensor {
         match value {
@@ -1186,6 +1189,48 @@ pub(crate) mod tests {
             Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).unwrap(),
             other => panic!("expected tensor value, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn histcounts2_type_defaults_to_unknown_matrix() {
+        let out = histcounts2_type(&[
+            Type::Tensor {
+                shape: Some(vec![Some(5), Some(1)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(5), Some(1)]),
+            },
+        ]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![None, None])
+            }
+        );
+    }
+
+    #[test]
+    fn histcounts2_type_uses_edge_vectors() {
+        let out = histcounts2_type(&[
+            Type::Tensor {
+                shape: Some(vec![Some(5), Some(1)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(5), Some(1)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(4)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(6)]),
+            },
+        ]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(5)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

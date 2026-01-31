@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::stats::type_resolvers::histcounts_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "histcounts";
@@ -58,6 +59,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "histcounts,histogram,binning,normalization,probability,cdf,gpu",
     accel = "reduction",
     sink = true,
+    type_resolver(histcounts_type),
     builtin_path = "crate::builtins::stats::hist::histcounts"
 )]
 async fn histcounts_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -948,7 +950,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor, Value};
+    use runmat_builtins::{IntValue, Tensor, Type, Value};
 
     fn values_from_tensor(value: Value) -> Vec<f64> {
         match value {
@@ -956,6 +958,37 @@ pub(crate) mod tests {
             Value::Num(n) => vec![n],
             other => panic!("unexpected value {other:?}"),
         }
+    }
+
+    #[test]
+    fn histcounts_type_defaults_to_row_vector() {
+        let out = histcounts_type(&[Type::Tensor {
+            shape: Some(vec![Some(5), Some(1)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), None])
+            }
+        );
+    }
+
+    #[test]
+    fn histcounts_type_uses_edge_vector_length() {
+        let out = histcounts_type(&[
+            Type::Tensor {
+                shape: Some(vec![Some(5), Some(1)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(6)]),
+            },
+        ]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(5)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

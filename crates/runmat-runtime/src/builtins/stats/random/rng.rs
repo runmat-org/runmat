@@ -15,6 +15,7 @@ use runmat_macros::runtime_builtin;
 use runmat_time::unix_timestamp_ns;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::builtins::stats::type_resolvers::rng_type;
 
 const NAME: &str = "rng";
 
@@ -55,6 +56,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "stats/random",
     summary = "Seed, shuffle, and query the global random number generator.",
     keywords = "rng,seed,twister,shuffle,state",
+    type_resolver(rng_type),
     builtin_path = "crate::builtins::stats::random::rng"
 )]
 async fn rng_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -340,7 +342,7 @@ pub(crate) mod tests {
     use crate::builtins::common::{random, test_support};
     use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -354,6 +356,21 @@ pub(crate) mod tests {
         assert_eq!(snapshot.state, random::default_snapshot().state);
         assert_eq!(snapshot.seed, Some(DEFAULT_USER_SEED));
         assert_eq!(snapshot.algorithm, RngAlgorithm::RunMatLcg);
+    }
+
+    #[test]
+    fn rng_type_returns_struct() {
+        let out = rng_type(&[]);
+        assert_eq!(
+            out,
+            Type::Struct {
+                known_fields: Some(vec![
+                    "Seed".to_string(),
+                    "State".to_string(),
+                    "Type".to_string(),
+                ])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

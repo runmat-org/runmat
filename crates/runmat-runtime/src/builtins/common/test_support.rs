@@ -8,11 +8,16 @@ pub fn with_test_provider<F, R>(f: F) -> R
 where
     F: FnOnce(&'static dyn runmat_accelerate_api::AccelProvider) -> R,
 {
-    runmat_accelerate::simple_provider::register_inprocess_provider();
-    runmat_accelerate::simple_provider::reset_inprocess_rng();
-    let provider = runmat_accelerate_api::provider().expect("test provider registered");
-    let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-    f(provider)
+    for _ in 0..5 {
+        runmat_accelerate::simple_provider::register_inprocess_provider();
+        runmat_accelerate::simple_provider::reset_inprocess_rng();
+        if let Some(provider) = runmat_accelerate_api::provider() {
+            let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+            return f(provider);
+        }
+        std::thread::yield_now();
+    }
+    panic!("test provider registered");
 }
 
 /// Gather a value (recursively) so assertions can operate on host tensors.
