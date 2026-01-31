@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::signal::type_resolvers::conv_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::conv")]
@@ -54,6 +55,7 @@ fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     summary = "One-dimensional linear convolution with MATLAB-compatible padding.",
     keywords = "conv,convolution,signal processing,gpu",
     accel = "custom",
+    type_resolver(conv_type),
     builtin_path = "crate::builtins::math::signal::conv"
 )]
 async fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -397,10 +399,28 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, LogicalArray, Tensor};
+    use runmat_builtins::{IntValue, LogicalArray, Tensor, Type};
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
+    }
+
+    #[test]
+    fn conv_type_full_uses_lengths() {
+        let out = conv_type(&[
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(3)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(2)]),
+            },
+        ]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(4)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

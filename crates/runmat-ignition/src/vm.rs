@@ -1942,6 +1942,17 @@ async fn run_interpreter_inner(
             }
             Instr::LoadVar(i) => {
                 let v = vars[i].clone();
+                if std::env::var("RUNMAT_DEBUG_VARS").as_deref() == Ok("1") {
+                    match &v {
+                        Value::Tensor(t) => {
+                            eprintln!("[vm] LoadVar var={i} Tensor shape={:?}", t.shape);
+                        }
+                        Value::GpuTensor(h) => {
+                            eprintln!("[vm] LoadVar var={i} GpuTensor shape={:?}", h.shape);
+                        }
+                        _ => {}
+                    }
+                }
                 if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
                     match &v {
                         Value::GpuTensor(h) => {
@@ -1959,6 +1970,17 @@ async fn run_interpreter_inner(
                 let val = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                if std::env::var("RUNMAT_DEBUG_VARS").as_deref() == Ok("1") {
+                    match &val {
+                        Value::Tensor(t) => {
+                            eprintln!("[vm] StoreVar var={i} Tensor shape={:?}", t.shape);
+                        }
+                        Value::GpuTensor(h) => {
+                            eprintln!("[vm] StoreVar var={i} GpuTensor shape={:?}", h.shape);
+                        }
+                        _ => {}
+                    }
+                }
                 if let Ok(filter) = std::env::var("RUNMAT_DEBUG_STORE_VAR") {
                     let log_this = if filter.trim().eq_ignore_ascii_case("*") {
                         true
@@ -4536,6 +4558,19 @@ async fn run_interpreter_inner(
                     bytecode.source_id,
                     bytecode.call_arg_spans.get(pc).cloned().flatten(),
                 );
+                if std::env::var("RUNMAT_DEBUG_MESHGRID_ARGS").as_deref() == Ok("1")
+                    && name == "meshgrid"
+                {
+                    let summary: Vec<String> = args
+                        .iter()
+                        .map(|v| match v {
+                            Value::Tensor(t) => format!("Tensor{:?}", t.shape),
+                            Value::GpuTensor(h) => format!("GpuTensor{:?}", h.shape),
+                            other => format!("{other:?}"),
+                        })
+                        .collect();
+                    eprintln!("[vm] meshgrid args: {summary:?} out_count={out_count}");
+                }
                 if name == "gather" {
                     let eval =
                         match runmat_runtime::builtins::acceleration::gpu::gather::evaluate(&args)
@@ -4546,6 +4581,7 @@ async fn run_interpreter_inner(
                         };
                     let len = eval.len();
                     if out_count == 0 {
+                        pc += 1;
                         continue;
                     }
                     if len == 1 {
@@ -4553,6 +4589,7 @@ async fn run_interpreter_inner(
                             vm_bail!(mex("TooManyOutputs", "gather: too many output arguments"));
                         }
                         stack.push(eval.into_first());
+                        pc += 1;
                         continue;
                     }
                     if out_count != len {
@@ -4564,6 +4601,7 @@ async fn run_interpreter_inner(
                     for value in eval.into_outputs() {
                         stack.push(value);
                     }
+                    pc += 1;
                     continue;
                 }
                 if name == "meshgrid" {
@@ -4575,6 +4613,7 @@ async fn run_interpreter_inner(
                             Err(err) => vm_bail!(err),
                         };
                     if out_count == 0 {
+                        pc += 1;
                         continue;
                     }
                     let available = eval.output_count();
@@ -4605,6 +4644,7 @@ async fn run_interpreter_inner(
                         };
                         stack.push(third);
                     }
+                    pc += 1;
                     continue;
                 }
                 if name == "load" {

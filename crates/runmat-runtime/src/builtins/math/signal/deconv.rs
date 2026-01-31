@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::signal::type_resolvers::deconv_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1.0e-12;
@@ -55,6 +56,7 @@ fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     summary = "Polynomial (1-D sequence) deconvolution returning quotient and remainder.",
     keywords = "deconv,deconvolution,polynomial division,signal,gpu",
     accel = "custom",
+    type_resolver(deconv_type),
     builtin_path = "crate::builtins::math::signal::deconv"
 )]
 async fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinResult<Value> {
@@ -403,6 +405,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
+    use runmat_builtins::Type;
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
@@ -410,6 +413,24 @@ pub(crate) mod tests {
 
     fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<DeconvEval> {
         block_on(super::evaluate(numerator, denominator))
+    }
+
+    #[test]
+    fn deconv_type_uses_numerator_orientation() {
+        let out = deconv_type(&[
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(5)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(3)]),
+            },
+        ]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(3)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

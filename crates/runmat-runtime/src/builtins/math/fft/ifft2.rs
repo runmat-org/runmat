@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::fft::type_resolvers::ifft2_type;
 use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorOwned};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
@@ -57,6 +58,7 @@ fn ifft2_error(message: impl Into<String>) -> RuntimeError {
     category = "math/fft",
     summary = "Compute the two-dimensional inverse discrete Fourier transform (IDFT) of numeric or complex data.",
     keywords = "ifft2,inverse fft,image reconstruction,gpu",
+    type_resolver(ifft2_type),
     builtin_path = "crate::builtins::math::fft::ifft2"
 )]
 async fn ifft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -319,7 +321,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor as HostTensor};
+    use runmat_builtins::{IntValue, Tensor as HostTensor, Type};
 
     fn approx_eq(a: (f64, f64), b: (f64, f64), tol: f64) -> bool {
         (a.0 - b.0).abs() <= tol && (a.1 - b.1).abs() <= tol
@@ -333,6 +335,19 @@ pub(crate) mod tests {
         let complex = value_to_complex_tensor(Value::Tensor(tensor.clone()), "fft2").unwrap();
         let first = super::super::fft::fft_complex_tensor(complex, None, Some(1)).unwrap();
         super::super::fft::fft_complex_tensor(first, None, Some(2)).unwrap()
+    }
+
+    #[test]
+    fn ifft2_type_pads_rank() {
+        let out = ifft2_type(&[Type::Tensor {
+            shape: Some(vec![Some(3)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(1)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

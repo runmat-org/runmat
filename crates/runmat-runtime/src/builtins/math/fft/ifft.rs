@@ -20,6 +20,7 @@ use crate::builtins::common::{
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
+use crate::builtins::math::fft::type_resolvers::ifft_type;
 use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -63,6 +64,7 @@ fn ifft_error(message: impl Into<String>) -> RuntimeError {
     category = "math/fft",
     summary = "Inverse discrete Fourier transform with optional length, dimension, and symmetric flag.",
     keywords = "ifft,inverse fft,inverse fourier transform,symmetric,gpu",
+    type_resolver(ifft_type),
     builtin_path = "crate::builtins::math::fft::ifft"
 )]
 async fn ifft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -369,7 +371,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use num_complex::Complex;
-    use runmat_builtins::{ComplexTensor as HostComplexTensor, IntValue};
+    use runmat_builtins::{ComplexTensor as HostComplexTensor, IntValue, Type};
 
     fn approx_eq((a_re, a_im): (f64, f64), (b_re, b_im): (f64, f64), tol: f64) -> bool {
         (a_re - b_re).abs() <= tol && (a_im - b_im).abs() <= tol
@@ -390,6 +392,19 @@ pub(crate) mod tests {
             Value::Int(i) => HostComplexTensor::new(vec![(i.to_f64(), 0.0)], vec![1, 1]).unwrap(),
             other => panic!("unexpected value kind {other:?}"),
         }
+    }
+
+    #[test]
+    fn ifft_type_preserves_shape() {
+        let out = ifft_type(&[Type::Tensor {
+            shape: Some(vec![Some(4), Some(2)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(4), Some(2)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

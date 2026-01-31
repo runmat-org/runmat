@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::signal::type_resolvers::filter_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1.0e-12;
@@ -75,6 +76,7 @@ async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     summary = "Apply an IIR/FIR digital filter to scalars, vectors, or tensors.",
     keywords = "filter,IIR,FIR,difference equation,initial conditions,gpu",
     accel = "custom",
+    type_resolver(filter_type),
     builtin_path = "crate::builtins::math::signal::filter"
 )]
 async fn filter_builtin(
@@ -1108,7 +1110,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, Type};
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
@@ -1116,6 +1118,27 @@ pub(crate) mod tests {
 
     fn evaluate(b: Value, a: Value, x: Value, rest: &[Value]) -> BuiltinResult<FilterEvaluation> {
         block_on(super::evaluate(b, a, x, rest))
+    }
+
+    #[test]
+    fn filter_type_preserves_signal_shape() {
+        let out = filter_type(&[
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(2)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(2)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(4)]),
+            },
+        ]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(4)])
+            }
+        );
     }
 
     fn approx_eq_slice(lhs: &[f64], rhs: &[f64]) {

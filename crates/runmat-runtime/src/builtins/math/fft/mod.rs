@@ -6,5 +6,6 @@ pub mod forward;
 pub(crate) mod ifft;
 pub(crate) mod ifft2;
 pub(crate) mod ifftshift;
+pub(crate) mod type_resolvers;
 
 pub use forward as fft;

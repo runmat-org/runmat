@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::signal::type_resolvers::conv2_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1e-12;
@@ -55,6 +56,7 @@ fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     summary = "Two-dimensional convolution with MATLAB-compatible padding modes.",
     keywords = "conv2,2d convolution,image filtering,gpu",
     accel = "custom",
+    type_resolver(conv2_type),
     builtin_path = "crate::builtins::math::signal::conv2"
 )]
 async fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -424,7 +426,7 @@ pub(crate) mod tests {
     use crate::builtins::common::{tensor, test_support};
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::LogicalArray;
+    use runmat_builtins::{LogicalArray, Type};
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
@@ -440,6 +442,24 @@ pub(crate) mod tests {
             }
         }
         Tensor::new(col_major, vec![rows, cols]).unwrap()
+    }
+
+    #[test]
+    fn conv2_type_full_uses_dimensions() {
+        let out = conv2_type(&[
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(2)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(1)]),
+            },
+        ]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(4), Some(2)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

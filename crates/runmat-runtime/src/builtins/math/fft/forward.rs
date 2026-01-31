@@ -21,6 +21,7 @@ use crate::builtins::common::{
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
+use crate::builtins::math::fft::type_resolvers::fft_type;
 use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::fft::forward")]
@@ -68,6 +69,7 @@ fn builtin_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
     category = "math/fft",
     summary = "Compute the discrete Fourier transform (DFT) of numeric or complex data.",
     keywords = "fft,fourier transform,complex,gpu",
+    type_resolver(fft_type),
     builtin_path = "crate::builtins::math::fft::forward"
 )]
 async fn fft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -283,7 +285,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use num_complex::Complex;
-    use runmat_builtins::{ComplexTensor as HostComplexTensor, IntValue, Tensor};
+    use runmat_builtins::{ComplexTensor as HostComplexTensor, IntValue, Tensor, Type};
     use rustfft::FftPlanner;
 
     fn approx_eq(a: (f64, f64), b: (f64, f64), tol: f64) -> bool {
@@ -304,6 +306,19 @@ pub(crate) mod tests {
 
     fn fft_builtin_sync(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::fft_builtin(value, rest))
+    }
+
+    #[test]
+    fn fft_type_preserves_shape() {
+        let out = fft_type(&[Type::Tensor {
+            shape: Some(vec![Some(2), Some(3)]),
+        }]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
