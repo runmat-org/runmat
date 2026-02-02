@@ -58,14 +58,26 @@ impl KernelResourceRegistry {
         size: u64,
         label: &'static str,
     ) -> Arc<wgpu::Buffer> {
-        if let Some(existing) = self
-            .uniform_buffers
-            .lock()
-            .expect("uniform buffer registry poisoned")
-            .get(&key)
-            .cloned()
-        {
-            return existing;
+        let should_cache = !matches!(
+            key,
+            UniformBufferKey::LenOpParams
+                | UniformBufferKey::BinaryBroadcastParams
+                | UniformBufferKey::ScalarParamsF32
+                | UniformBufferKey::ScalarParamsF64
+                | UniformBufferKey::ReductionParams
+                | UniformBufferKey::ReductionPass1Params
+                | UniformBufferKey::ReductionPass2Params
+        );
+        if should_cache {
+            if let Some(existing) = self
+                .uniform_buffers
+                .lock()
+                .expect("uniform buffer registry poisoned")
+                .get(&key)
+                .cloned()
+            {
+                return existing;
+            }
         }
 
         const UNIFORM_ALIGN: u64 = 256;
@@ -81,11 +93,13 @@ impl KernelResourceRegistry {
             mapped_at_creation: false,
         }));
 
-        let mut guard = self
-            .uniform_buffers
-            .lock()
-            .expect("uniform buffer registry poisoned");
-        guard.entry(key).or_insert_with(|| buffer.clone());
+        if should_cache {
+            let mut guard = self
+                .uniform_buffers
+                .lock()
+                .expect("uniform buffer registry poisoned");
+            guard.entry(key).or_insert_with(|| buffer.clone());
+        }
         buffer
     }
 

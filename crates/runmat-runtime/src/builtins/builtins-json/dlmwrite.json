@@ -59,27 +59,27 @@
   "examples": [
     {
       "description": "Writing a numeric matrix with the default comma delimiter",
-      "input": "A = [1 2 3; 4 5 6];\ndlmwrite(\"scores.csv\", A);"
+      "input": "A = [1 2 3; 4 5 6];\ndlmwrite(\"scores.csv\", A)"
     },
     {
       "description": "Using a semicolon delimiter and positional offsets",
-      "input": "B = magic(3);\ndlmwrite(\"offset.txt\", B, \";\", 1, 2);"
+      "input": "B = magic(3);\ndlmwrite(\"offset.txt\", B, \";\", 1, 2)"
     },
     {
       "description": "Appending data with explicit row and column offsets",
-      "input": "dlmwrite(\"log.txt\", 1:3);\ndlmwrite(\"log.txt\", 10:12, \"-append\", \"roffset\", 1, \"coffset\", 1);"
+      "input": "dlmwrite(\"log.txt\", 1:3);\ndlmwrite(\"log.txt\", 10:12, \"-append\", \"roffset\", 1, \"coffset\", 1)"
     },
     {
       "description": "Controlling precision with significant digits",
-      "input": "vals = [12.34567, pi];\ndlmwrite(\"precision3.csv\", vals, \"precision\", 3);"
+      "input": "vals = [12.34567, pi];\ndlmwrite(\"precision3.csv\", vals, \"precision\", 3)"
     },
     {
       "description": "Emitting fixed-point values with a printf-style format string",
-      "input": "dlmwrite(\"fixed.txt\", rand(2, 2), \"precision\", \"%.6f\", \"delimiter\", \"\\t\");"
+      "input": "dlmwrite(\"fixed.txt\", rand(2, 2), \"precision\", \"%.6f\", \"delimiter\", \"\\t\")"
     },
     {
       "description": "Selecting the Windows line ending while writing GPU data",
-      "input": "G = gpuArray(single([1.5; 2.5; 3.5]));\ndlmwrite(\"gpu_pc.txt\", G, \"newline\", \"pc\");",
+      "input": "G = gpuArray(single([1.5; 2.5; 3.5]));\ndlmwrite(\"gpu_pc.txt\", G, \"newline\", \"pc\")",
       "output": "% Data is gathered from the GPU and written using CR/LF line endings."
     }
   ],

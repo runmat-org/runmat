@@ -42,27 +42,27 @@
   "examples": [
     {
       "description": "List All Workspace Variables",
-      "input": "a = 42;\nb = rand(3, 2);\nnames = who;",
+      "input": "a = 42;\nb = rand(3, 2);\nnames = who",
       "output": "names =\n  2\u00d71 cell array\n    {\"a\"}\n    {\"b\"}"
     },
     {
       "description": "Filter With Wildcard Patterns",
-      "input": "alpha = 1;\nbeta = 2;\nnames = who(\"a*\");",
+      "input": "alpha = 1;\nbeta = 2;\nnames = who(\"a*\")",
       "output": "names =\n  1\u00d71 cell array\n    {\"alpha\"}"
     },
     {
       "description": "Use Regular Expressions",
-      "input": "x1 = rand;\nx2 = rand;\nmatches = who('-regexp', '^x\\d$');",
+      "input": "x1 = rand;\nx2 = rand;\nmatches = who('-regexp', '^x\\d$')",
       "output": "matches =\n  2\u00d71 cell array\n    {\"x1\"}\n    {\"x2\"}"
     },
     {
       "description": "Inspect Variables Stored In A MAT-File",
-      "input": "save('snapshot.mat', 'alpha', 'beta')\nfile_names = who('-file', 'snapshot.mat');",
+      "input": "save('snapshot.mat', 'alpha', 'beta')\nfile_names = who('-file', 'snapshot.mat')",
       "output": "file_names =\n  2\u00d71 cell array\n    {\"alpha\"}\n    {\"beta\"}"
     },
     {
       "description": "List Only Global Variables",
-      "input": "global shared;\nlocal = 1;\nglobals = who('global');",
+      "input": "global shared;\nlocal = 1;\nglobals = who('global')",
       "output": "globals =\n  1\u00d71 cell array\n    {\"shared\"}"
     }
   ],

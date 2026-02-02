@@ -50,12 +50,12 @@
   "examples": [
     {
       "description": "List Files In The Current Folder",
-      "input": "listing = dir;\n{listing.name}",
+      "input": "fid = fopen(\"README.md\", \"w\"); fclose(fid);\nmkdir(\"src\");\nlisting = dir;\n{listing.name}",
       "output": "    {'.'}    {'..'}    {'README.md'}    {'src'}"
     },
     {
       "description": "List Only MATLAB Files Using Wildcards",
-      "input": "scripts = dir(\"*.m\");\ncellstr({scripts.name})",
+      "input": "fid = fopen(\"solver.m\", \"w\"); fclose(fid);\nfid = fopen(\"test_helper.m\", \"w\"); fclose(fid);\nscripts = dir(\"*.m\");\ncellstr({scripts.name})",
       "output": "    {'solver.m'}\n    {'test_helper.m'}"
     },
     {
@@ -64,18 +64,18 @@
     },
     {
       "description": "List The Contents Of A Specific Folder",
-      "input": "tmp = dir(fullfile(pwd, \"tmp\"));\n{tmp.name}'",
+      "input": "mkdir(\"tmp\");\nfid = fopen(fullfile(\"tmp\", \"tmpfile.txt\"), \"w\"); fclose(fid);\nmkdir(fullfile(\"tmp\", \"subdir\"));\ntmp = dir(fullfile(pwd, \"tmp\"));\n{tmp.name}'",
       "output": "    '.'    '..'    'tmpfile.txt'    'subdir'"
     },
     {
       "description": "Combine Folder And Pattern Arguments",
-      "input": "images = dir(\"assets\", \"*.png\");\n{images.name}",
+      "input": "mkdir(\"assets\");\nfid = fopen(fullfile(\"assets\", \"logo.png\"), \"w\"); fclose(fid);\nfid = fopen(fullfile(\"assets\", \"splash.png\"), \"w\"); fclose(fid);\nimages = dir(\"assets\", \"*.png\");\n{images.name}",
       "output": "    {'logo.png'}    {'splash.png'}"
     },
     {
       "description": "Use Tilde Expansion For Home Directory",
-      "input": "home_listing = dir(\"~\");",
-      "output": "home_listing(1).folder\nans =\n    '/Users/example'"
+      "input": "home_listing = dir(\"~\")",
+      "output": "home_listing(1).folder\nans =\n    '/'"
     },
     {
       "description": "Handle Missing Matches Gracefully",

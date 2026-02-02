@@ -51,32 +51,32 @@
   "examples": [
     {
       "description": "Smoothing an image patch with a 3\u00d73 averaging kernel",
-      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nh = ones(3) / 9;\nsmoothed = conv2(A, h, 'same');",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nh = ones(3) / 9;\nsmoothed = conv2(A, h, 'same')",
       "output": "smoothed =\n    1.3333    2.3333    1.7778\n    3.0000    5.0000    3.6667\n    2.6667    4.3333    3.1111"
     },
     {
       "description": "Computing the full convolution of two small kernels",
-      "input": "K1 = [1 2; 3 4];\nK2 = [1 1; 1 1];\nC = conv2(K1, K2);",
+      "input": "K1 = [1 2; 3 4];\nK2 = [1 1; 1 1];\nC = conv2(K1, K2)",
       "output": "C =\n     1     3     2\n     4    10     6\n     3     7     4"
     },
     {
       "description": "Extracting the same-sized result to preserve dimensions",
-      "input": "edge = conv2([1 2 3; 4 5 6; 7 8 9], [1 0 -1; 1 0 -1; 1 0 -1], 'same');",
+      "input": "edge = conv2([1 2 3; 4 5 6; 7 8 9], [1 0 -1; 1 0 -1; 1 0 -1], 'same')",
       "output": "edge =\n    -7    -4     7\n   -15    -6    15\n   -13    -4    13"
     },
     {
       "description": "Valid convolution for sliding-window statistics",
-      "input": "block = magic(4);\nkernel = ones(2);\nvalid = conv2(block, kernel, 'valid');",
+      "input": "block = magic(4);\nkernel = ones(2);\nvalid = conv2(block, kernel, 'valid')",
       "output": "valid =\n    34    26    34\n    32    34    36\n    34    42    34"
     },
     {
       "description": "Using the separable form with column and row vectors",
-      "input": "hcol = [1; 2; 1];\nhrow = [1 0 -1];\nA = [3 4 5; 6 7 8; 9 10 11];\ngx = conv2(hcol, hrow, A, 'same');",
+      "input": "hcol = [1; 2; 1];\nhrow = [1 0 -1];\nA = [3 4 5; 6 7 8; 9 10 11];\ngx = conv2(hcol, hrow, A, 'same')",
       "output": "gx =\n   -15    -6    15\n   -28    -8    28\n   -27    -6    27"
     },
     {
       "description": "Convolving gpuArray inputs with transparent fallbacks",
-      "input": "G = gpuArray(rand(128, 128));\nH = gpuArray([1 2 1; 0 0 0; -1 -2 -1]);\ngx = conv2(G, H, 'same');\nresult = gather(gx);"
+      "input": "G = gpuArray(rand(128, 128));\nH = gpuArray([1 2 1; 0 0 0; -1 -2 -1]);\ngx = conv2(G, H, 'same');\nresult = gather(gx)"
     }
   ],
   "faqs": [

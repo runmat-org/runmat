@@ -47,42 +47,42 @@
   "examples": [
     {
       "description": "Creating a diagonal matrix from a vector",
-      "input": "v = [4 5 6];\nD = diag(v);",
+      "input": "v = [4 5 6];\nD = diag(v)",
       "output": "D =\n     4     0     0\n     0     5     0\n     0     0     6"
     },
     {
       "description": "Placing a vector on an upper diagonal",
-      "input": "v = [1 2 3];\nU = diag(v, 1);",
+      "input": "v = [1 2 3];\nU = diag(v, 1)",
       "output": "U =\n     0     1     0     0\n     0     0     2     0\n     0     0     0     3\n     0     0     0     0"
     },
     {
       "description": "Extracting a subdiagonal as a column vector",
-      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nd = diag(A, -1);",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nd = diag(A, -1)",
       "output": "d =\n     4\n     8"
     },
     {
       "description": "Building a diagonal matrix from a logical mask",
-      "input": "mask = logical([1 0 1 0]);\nM = diag(mask);",
+      "input": "mask = logical([1 0 1 0]);\nM = diag(mask)",
       "output": "M =\n     1     0     0     0\n     0     0     0     0\n     0     0     1     0\n     0     0     0     0"
     },
     {
       "description": "Keeping diagonal results on the GPU",
-      "input": "G = gpuArray([2; 4; 8]);\nD = diag(G);\nfirstTwo = gather(D(1:2, 1:2));",
+      "input": "G = gpuArray([2; 4; 8]);\nD = diag(G);\nfirstTwo = gather(D(1:2, 1:2))",
       "output": "firstTwo =\n     2     0\n     0     4"
     },
     {
       "description": "Returning a vector without creating a matrix",
-      "input": "v = [10 20 30];\nd = diag(v, 'vector');",
+      "input": "v = [10 20 30];\nd = diag(v, 'vector')",
       "output": "d =\n    10\n    20\n    30"
     },
     {
       "description": "Creating a rectangular diagonal matrix with `sz`",
-      "input": "v = [1 2];\nR = diag(v, [2 4]);",
+      "input": "v = [1 2];\nR = diag(v, [2 4])",
       "output": "R =\n     1     0     0     0\n     0     2     0     0"
     },
     {
       "description": "Matching residency and type with `'like'`",
-      "input": "G = gpuArray([1 3 5]');\nD = diag([1 2 3], 'like', G);"
+      "input": "G = gpuArray([1 3 5]');\nD = diag([1 2 3], 'like', G)"
     }
   ],
   "faqs": [

@@ -3,8 +3,11 @@
 use std::cmp::min;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{gather_if_needed, make_cell_with_shape};
+use crate::{
+    build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
+};
 use runmat_builtins::{CharArray, IntValue, StringArray, Value};
 use runmat_macros::runtime_builtin;
 
@@ -58,6 +61,14 @@ const CELL_ELEMENT_ERROR: &str =
 const SIZE_MISMATCH_ERROR: &str =
     "eraseBetween: boundary sizes must be compatible with the text input";
 
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(FN_NAME).build()
+}
+
+fn map_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, FN_NAME)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BoundariesMode {
     Exclusive,
@@ -72,24 +83,24 @@ enum BoundariesMode {
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::erasebetween"
 )]
-fn erase_between_builtin(
+async fn erase_between_builtin(
     text: Value,
     start: Value,
     stop: Value,
     rest: Vec<Value>,
-) -> Result<Value, String> {
-    let text = gather_if_needed(&text).map_err(|e| format!("{FN_NAME}: {e}"))?;
-    let start = gather_if_needed(&start).map_err(|e| format!("{FN_NAME}: {e}"))?;
-    let stop = gather_if_needed(&stop).map_err(|e| format!("{FN_NAME}: {e}"))?;
+) -> BuiltinResult<Value> {
+    let text = gather_if_needed_async(&text).await.map_err(map_flow)?;
+    let start = gather_if_needed_async(&start).await.map_err(map_flow)?;
+    let stop = gather_if_needed_async(&stop).await.map_err(map_flow)?;
 
-    let mode_override = parse_boundaries_option(&rest)?;
+    let mode_override = parse_boundaries_option(&rest).await?;
 
     let normalized_text = NormalizedText::from_value(text)?;
     let start_boundary = BoundaryArg::from_value(start)?;
     let stop_boundary = BoundaryArg::from_value(stop)?;
 
     if start_boundary.kind() != stop_boundary.kind() {
-        return Err(BOUNDARY_TYPE_ERROR.to_string());
+        return Err(runtime_error_for(BOUNDARY_TYPE_ERROR));
     }
     let boundary_kind = start_boundary.kind();
     let effective_mode = mode_override.unwrap_or(match boundary_kind {
@@ -101,10 +112,11 @@ fn erase_between_builtin(
     let stop_shape = stop_boundary.shape();
     let text_shape = normalized_text.shape();
 
-    let shape_ts = broadcast_shapes(FN_NAME, text_shape, start_shape)?;
-    let output_shape = broadcast_shapes(FN_NAME, &shape_ts, stop_shape)?;
+    let shape_ts = broadcast_shapes(FN_NAME, text_shape, start_shape).map_err(runtime_error_for)?;
+    let output_shape =
+        broadcast_shapes(FN_NAME, &shape_ts, stop_shape).map_err(runtime_error_for)?;
     if !normalized_text.supports_shape(&output_shape) {
-        return Err(SIZE_MISMATCH_ERROR.to_string());
+        return Err(runtime_error_for(SIZE_MISMATCH_ERROR));
     }
 
     let total: usize = output_shape.iter().copied().product();
@@ -143,30 +155,34 @@ fn erase_between_builtin(
     normalized_text.into_value(results, output_shape)
 }
 
-fn parse_boundaries_option(args: &[Value]) -> Result<Option<BoundariesMode>, String> {
+async fn parse_boundaries_option(args: &[Value]) -> BuiltinResult<Option<BoundariesMode>> {
     if args.is_empty() {
         return Ok(None);
     }
     if !args.len().is_multiple_of(2) {
-        return Err(OPTION_PAIR_ERROR.to_string());
+        return Err(runtime_error_for(OPTION_PAIR_ERROR));
     }
 
     let mut mode: Option<BoundariesMode> = None;
     let mut idx = 0;
     while idx < args.len() {
-        let name_value = gather_if_needed(&args[idx]).map_err(|e| format!("{FN_NAME}: {e}"))?;
-        let name = value_to_string(&name_value).ok_or_else(|| OPTION_NAME_ERROR.to_string())?;
+        let name_value = gather_if_needed_async(&args[idx]).await.map_err(map_flow)?;
+        let name =
+            value_to_string(&name_value).ok_or_else(|| runtime_error_for(OPTION_NAME_ERROR))?;
         if !name.eq_ignore_ascii_case("boundaries") {
-            return Err(OPTION_NAME_ERROR.to_string());
+            return Err(runtime_error_for(OPTION_NAME_ERROR));
         }
-        let value = gather_if_needed(&args[idx + 1]).map_err(|e| format!("{FN_NAME}: {e}"))?;
-        let value_str = value_to_string(&value).ok_or_else(|| OPTION_VALUE_ERROR.to_string())?;
+        let value = gather_if_needed_async(&args[idx + 1])
+            .await
+            .map_err(map_flow)?;
+        let value_str =
+            value_to_string(&value).ok_or_else(|| runtime_error_for(OPTION_VALUE_ERROR))?;
         let parsed_mode = if value_str.eq_ignore_ascii_case("inclusive") {
             BoundariesMode::Inclusive
         } else if value_str.eq_ignore_ascii_case("exclusive") {
             BoundariesMode::Exclusive
         } else {
-            return Err(OPTION_VALUE_ERROR.to_string());
+            return Err(runtime_error_for(OPTION_VALUE_ERROR));
         };
         mode = Some(parsed_mode);
         idx += 2;
@@ -347,7 +363,7 @@ struct NormalizedText {
 }
 
 impl NormalizedText {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::String(s) => Ok(Self {
                 data: vec![s],
@@ -393,8 +409,8 @@ impl NormalizedText {
                             }
                             kinds.push(CellElementKind::Char);
                         }
-                        Value::CharArray(_) => return Err(CELL_ELEMENT_ERROR.to_string()),
-                        _ => return Err(CELL_ELEMENT_ERROR.to_string()),
+                        Value::CharArray(_) => return Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+                        _ => return Err(runtime_error_for(CELL_ELEMENT_ERROR)),
                     }
                 }
                 Ok(Self {
@@ -406,7 +422,7 @@ impl NormalizedText {
                     }),
                 })
             }
-            _ => Err(ARG_TYPE_ERROR.to_string()),
+            _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
         }
     }
 
@@ -431,14 +447,14 @@ impl NormalizedText {
         self,
         results: Vec<EraseResult>,
         output_shape: Vec<usize>,
-    ) -> Result<Value, String> {
+    ) -> BuiltinResult<Value> {
         match self.kind {
             TextKind::StringScalar => {
                 let total: usize = output_shape.iter().product();
                 if total == 0 {
                     let data = results.into_iter().map(|r| r.text).collect::<Vec<_>>();
                     let array = StringArray::new(data, output_shape)
-                        .map_err(|e| format!("{FN_NAME}: {e}"))?;
+                        .map_err(|e| runtime_error_for(format!("{FN_NAME}: {e}")))?;
                     return Ok(Value::StringArray(array));
                 }
 
@@ -451,24 +467,24 @@ impl NormalizedText {
                 } else {
                     let data = results.into_iter().map(|r| r.text).collect::<Vec<_>>();
                     let array = StringArray::new(data, output_shape)
-                        .map_err(|e| format!("{FN_NAME}: {e}"))?;
+                        .map_err(|e| runtime_error_for(format!("{FN_NAME}: {e}")))?;
                     Ok(Value::StringArray(array))
                 }
             }
             TextKind::StringArray => {
                 let data = results.into_iter().map(|r| r.text).collect::<Vec<_>>();
-                let array =
-                    StringArray::new(data, output_shape).map_err(|e| format!("{FN_NAME}: {e}"))?;
+                let array = StringArray::new(data, output_shape)
+                    .map_err(|e| runtime_error_for(format!("{FN_NAME}: {e}")))?;
                 Ok(Value::StringArray(array))
             }
             TextKind::CharArray { rows } => {
                 if rows == 0 {
                     return CharArray::new(Vec::new(), 0, 0)
                         .map(Value::CharArray)
-                        .map_err(|e| format!("{FN_NAME}: {e}"));
+                        .map_err(|e| runtime_error_for(format!("{FN_NAME}: {e}")));
                 }
                 if results.len() != rows {
-                    return Err(SIZE_MISMATCH_ERROR.to_string());
+                    return Err(runtime_error_for(SIZE_MISMATCH_ERROR));
                 }
                 let mut max_width = 0usize;
                 let mut row_strings = Vec::with_capacity(rows);
@@ -487,11 +503,11 @@ impl NormalizedText {
                 }
                 CharArray::new(flattened, rows, max_width)
                     .map(Value::CharArray)
-                    .map_err(|e| format!("{FN_NAME}: {e}"))
+                    .map_err(|e| runtime_error_for(format!("{FN_NAME}: {e}")))
             }
             TextKind::CellArray(info) => {
                 if results.len() != info.element_kinds.len() {
-                    return Err(SIZE_MISMATCH_ERROR.to_string());
+                    return Err(runtime_error_for(SIZE_MISMATCH_ERROR));
                 }
                 let mut values = Vec::with_capacity(results.len());
                 for (idx, result) in results.into_iter().enumerate() {
@@ -504,6 +520,7 @@ impl NormalizedText {
                     }
                 }
                 make_cell_with_shape(values, info.shape)
+                    .map_err(|e| runtime_error_for(format!("{FN_NAME}: {e}")))
             }
         }
     }
@@ -522,7 +539,7 @@ enum BoundaryArg {
 }
 
 impl BoundaryArg {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
                 BoundaryText::from_value(value).map(BoundaryArg::Text)
@@ -530,9 +547,9 @@ impl BoundaryArg {
             Value::Num(_) | Value::Int(_) | Value::Tensor(_) => {
                 BoundaryPositions::from_value(value).map(BoundaryArg::Position)
             }
-            other => Err(format!(
+            other => Err(runtime_error_for(format!(
                 "{BOUNDARY_TYPE_ERROR}: unsupported argument {other:?}"
-            )),
+            ))),
         }
     }
 
@@ -572,7 +589,7 @@ struct BoundaryText {
 }
 
 impl BoundaryText {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::String(s) => Ok(Self {
                 data: vec![s],
@@ -608,13 +625,13 @@ impl BoundaryText {
                                 data.push(char_row_to_string_slice(&ca.data, ca.cols, 0));
                             }
                         }
-                        Value::CharArray(_) => return Err(CELL_ELEMENT_ERROR.to_string()),
-                        _ => return Err(CELL_ELEMENT_ERROR.to_string()),
+                        Value::CharArray(_) => return Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+                        _ => return Err(runtime_error_for(CELL_ELEMENT_ERROR)),
                     }
                 }
                 Ok(Self { data, shape })
             }
-            _ => Err(BOUNDARY_TYPE_ERROR.to_string()),
+            _ => Err(runtime_error_for(BOUNDARY_TYPE_ERROR)),
         }
     }
 }
@@ -626,7 +643,7 @@ struct BoundaryPositions {
 }
 
 impl BoundaryPositions {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::Num(n) => Ok(Self {
                 data: vec![parse_position(n)?],
@@ -650,28 +667,28 @@ impl BoundaryPositions {
                     },
                 })
             }
-            _ => Err(BOUNDARY_TYPE_ERROR.to_string()),
+            _ => Err(runtime_error_for(BOUNDARY_TYPE_ERROR)),
         }
     }
 }
 
-fn parse_position(value: f64) -> Result<usize, String> {
+fn parse_position(value: f64) -> BuiltinResult<usize> {
     if !value.is_finite() || value < 1.0 {
-        return Err(POSITION_TYPE_ERROR.to_string());
+        return Err(runtime_error_for(POSITION_TYPE_ERROR));
     }
     if (value.fract()).abs() > f64::EPSILON {
-        return Err(POSITION_TYPE_ERROR.to_string());
+        return Err(runtime_error_for(POSITION_TYPE_ERROR));
     }
     if value > (usize::MAX as f64) {
-        return Err(POSITION_TYPE_ERROR.to_string());
+        return Err(runtime_error_for(POSITION_TYPE_ERROR));
     }
     Ok(value as usize)
 }
 
-fn parse_position_int(value: IntValue) -> Result<usize, String> {
+fn parse_position_int(value: IntValue) -> BuiltinResult<usize> {
     let val = value.to_i64();
     if val <= 0 {
-        return Err(POSITION_TYPE_ERROR.to_string());
+        return Err(runtime_error_for(POSITION_TYPE_ERROR));
     }
     Ok(val as usize)
 }
@@ -682,6 +699,15 @@ pub(crate) mod tests {
 
     use super::*;
     use runmat_builtins::{CellArray, CharArray, StringArray, Tensor};
+
+    fn erase_between_builtin(
+        text: Value,
+        start: Value,
+        stop: Value,
+        rest: Vec<Value>,
+    ) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::erase_between_builtin(text, start, stop, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -973,7 +999,7 @@ pub(crate) mod tests {
             ],
         )
         .unwrap_err();
-        assert_eq!(err, OPTION_VALUE_ERROR);
+        assert_eq!(err.to_string(), OPTION_VALUE_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -989,7 +1015,7 @@ pub(crate) mod tests {
             ],
         )
         .unwrap_err();
-        assert_eq!(err, OPTION_NAME_ERROR);
+        assert_eq!(err.to_string(), OPTION_NAME_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1002,7 +1028,7 @@ pub(crate) mod tests {
             vec![Value::String("Boundaries".into())],
         )
         .unwrap_err();
-        assert_eq!(err, OPTION_PAIR_ERROR);
+        assert_eq!(err.to_string(), OPTION_PAIR_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1015,7 +1041,7 @@ pub(crate) mod tests {
             Vec::new(),
         )
         .unwrap_err();
-        assert_eq!(err, POSITION_TYPE_ERROR);
+        assert_eq!(err.to_string(), POSITION_TYPE_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1028,6 +1054,6 @@ pub(crate) mod tests {
             Vec::new(),
         )
         .unwrap_err();
-        assert_eq!(err, BOUNDARY_TYPE_ERROR);
+        assert_eq!(err.to_string(), BOUNDARY_TYPE_ERROR);
     }
 }

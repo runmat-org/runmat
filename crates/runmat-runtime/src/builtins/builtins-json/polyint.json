@@ -46,32 +46,32 @@
   "examples": [
     {
       "description": "Integrating a cubic polynomial",
-      "input": "p = [3 -2 5 7];        % 3x^3 - 2x^2 + 5x + 7\nq = polyint(p);",
+      "input": "p = [3 -2 5 7];        % 3x^3 - 2x^2 + 5x + 7\nq = polyint(p)",
       "output": "q = [0.75  -0.6667  2.5  7  0];"
     },
     {
       "description": "Supplying a constant of integration",
-      "input": "p = [4 0 -8];\nq = polyint(p, 3);",
+      "input": "p = [4 0 -8];\nq = polyint(p, 3)",
       "output": "q = [1.3333  0  -8  3];"
     },
     {
       "description": "Preserving column-vector orientation",
-      "input": "p = [2; 0; -6];\nq = polyint(p);",
+      "input": "p = [2; 0; -6];\nq = polyint(p)",
       "output": "q =\n    0.6667\n         0\n   -6.0000\n         0"
     },
     {
       "description": "Integrating the zero polynomial",
-      "input": "q = polyint([]);",
+      "input": "q = polyint([])",
       "output": "q = 0;"
     },
     {
       "description": "Integrating complex coefficients",
-      "input": "p = [1+2i  -3  4i];\nq = polyint(p, -1i);",
+      "input": "p = [1+2i  -3  4i];\nq = polyint(p, -1i)",
       "output": "q = [(1+2i)/3  -1.5  4i  -1i];"
     },
     {
       "description": "Working with gpuArray inputs",
-      "input": "g = gpuArray([1 -4 6]);\nq = polyint(g);          % Gathered to host, integrated, and re-uploaded\nresult = gather(q);",
+      "input": "g = gpuArray([1 -4 6]);\nq = polyint(g);          % Gathered to host, integrated, and re-uploaded\nresult = gather(q)",
       "output": "result = [0.3333  -2  6  0];"
     }
   ],

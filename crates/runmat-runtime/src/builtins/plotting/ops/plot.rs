@@ -1,10 +1,9 @@
 //! MATLAB-compatible `plot` builtin.
 
-use log::warn;
+use log::trace;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
-use runmat_plot::core::PipelineType;
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::{LineGpuStyle, LinePlot, LineStyle};
 
@@ -14,16 +13,19 @@ use crate::builtins::common::spec::{
 };
 
 use super::common::numeric_pair;
-use super::gpu_helpers::{gather_tensor_from_gpu, gpu_xy_bounds};
+use super::plotting_error;
 use super::state::{
-    next_line_style_for_axes, render_active_plot, set_line_style_order_for_axes, PlotRenderOptions,
+    current_axes_state, current_hold_enabled, next_line_style_for_axes, render_active_plot,
+    set_line_style_order_for_axes, PlotRenderOptions,
 };
 use super::style::{
     looks_like_option_name, marker_metadata_from_appearance, parse_line_style_args,
-    value_as_string, LineAppearance, LineStyleParseOptions, DEFAULT_LINE_MARKER_SIZE,
+    value_as_string, LineAppearance, LineStyleParseOptions, MarkerAppearance, MarkerColor,
+    MarkerKind, DEFAULT_LINE_MARKER_SIZE,
 };
-use std::collections::VecDeque;
 use std::convert::TryFrom;
+
+use crate::{BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::plot")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -33,12 +35,15 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    // Plotting is a sink: it does not participate in fusion, but it *can* consume GPU-resident
+    // tensors directly (zero-copy) when the web renderer shares the provider WGPU context.
+    // Do not force implicit gathers here; that defeats GPU-resident workloads.
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Plots are rendered on the host; gpuArray inputs are gathered before rendering.",
+    notes: "Plots are rendered by the host renderer; GPU inputs may be consumed zero-copy when a shared WGPU context is installed.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::plot")]
@@ -52,6 +57,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "plot performs I/O and terminates fusion graphs.",
 };
 
+const BUILTIN_NAME: &str = "plot";
+
 #[runtime_builtin(
     name = "plot",
     category = "plotting",
@@ -61,15 +68,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::plot"
 )]
-pub fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, String> {
+pub async fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let mut args = Vec::with_capacity(2 + rest.len());
     args.push(x);
     args.push(y);
     args.extend(rest);
 
     let (mut series_plans, line_style_order) = parse_series_specs(args)?;
+    let axes = current_axes_state().active_index;
+    let hold_enabled = current_hold_enabled();
     if let Some(order) = line_style_order.as_ref() {
         apply_line_style_order(&mut series_plans, order);
+        set_line_style_order_for_axes(axes, order);
     }
     let opts = PlotRenderOptions {
         title: "Plot",
@@ -77,12 +87,101 @@ pub fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, Stri
         y_label: "Y",
         ..Default::default()
     };
-    render_active_plot(opts, move |figure, axes| {
-        if let Some(order) = line_style_order.clone() {
-            set_line_style_order_for_axes(axes, &order);
+    let total = series_plans.len();
+    let mut plots: Vec<LinePlot> = Vec::with_capacity(series_plans.len());
+    for (series_idx, mut plan) in series_plans.drain(..).enumerate() {
+        if !plan.line_style_explicit {
+            plan.appearance.line_style = if hold_enabled {
+                next_line_style_for_axes(axes)
+            } else {
+                match series_idx % 4 {
+                    0 => LineStyle::Solid,
+                    1 => LineStyle::Dashed,
+                    2 => LineStyle::Dotted,
+                    _ => LineStyle::DashDot,
+                }
+            };
+            plan.line_style_explicit = true;
         }
-        render_series(figure, axes, &mut series_plans)
-    })
+        let inferred_label = plan
+            .label
+            .take()
+            .or_else(|| plan.source_y_arg_index.and_then(crate::callsite::arg_text));
+        let label = inferred_label.unwrap_or_else(|| {
+            if total == 1 {
+                "Data".to_string()
+            } else {
+                format!("Series {}", series_idx + 1)
+            }
+        });
+        let SeriesRenderPlan {
+            data,
+            appearance,
+            requires_cpu,
+            ..
+        } = plan;
+
+        let x_kind = match &data.x {
+            LineInput::Host(_) => "Host",
+            LineInput::Gpu(_) => "Gpu",
+        };
+        let y_kind = match &data.y {
+            LineInput::Host(_) => "Host",
+            LineInput::Gpu(_) => "Gpu",
+        };
+        let gpu_pair = data.gpu_handles().map(|(x, y)| {
+            format!(
+                "x(device_id={}, buffer_id={}, shape={:?}) y(device_id={}, buffer_id={}, shape={:?})",
+                x.device_id, x.buffer_id, x.shape, y.device_id, y.buffer_id, y.shape
+            )
+        });
+        trace!(
+            "plot: series={} requires_cpu={} inputs=({}, {}) gpu_pair={}",
+            series_idx + 1,
+            requires_cpu,
+            x_kind,
+            y_kind,
+            gpu_pair
+                .as_deref()
+                .unwrap_or("<none: at least one input not GPU-resident>")
+        );
+
+        if !requires_cpu {
+            if let Some((x_gpu, y_gpu)) = data.gpu_handles() {
+                match build_line_gpu_plot_async(x_gpu, y_gpu, &label, &appearance).await {
+                    Ok(line_plot) => {
+                        trace!("plot: series={} used GPU path", series_idx + 1);
+                        plots.push(line_plot);
+                        continue;
+                    }
+                    Err(err) => {
+                        trace!(
+                            "plot: series={} GPU path unavailable: {err}",
+                            series_idx + 1
+                        );
+                    }
+                }
+            }
+        }
+
+        trace!(
+            "plot: series={} falling back to CPU gather path",
+            series_idx + 1
+        );
+        let (x_tensor, y_tensor) = data.into_tensors_async("plot").await?;
+        let (x_vals, y_vals) = numeric_pair(x_tensor, y_tensor, "plot")?;
+        plots.push(build_line_plot(x_vals, y_vals, &label, &appearance)?);
+    }
+
+    let mut plots_opt = Some(plots);
+    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes_index| {
+        let plots = plots_opt.take().expect("plot series consumed exactly once");
+        for plot in plots {
+            figure.add_line_plot_on_axes(plot, axes_index);
+        }
+        Ok(())
+    })?;
+    Ok(rendered)
 }
 
 fn build_line_plot(
@@ -90,16 +189,17 @@ fn build_line_plot(
     y: Vec<f64>,
     label: &str,
     appearance: &LineAppearance,
-) -> Result<LinePlot, String> {
+) -> BuiltinResult<LinePlot> {
+    let point_count = x.len();
     let mut plot = LinePlot::new(x, y)
-        .map_err(|e| format!("plot: {e}"))?
+        .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot: {e}")))?
         .with_label(label)
         .with_style(
             appearance.color,
             appearance.line_width,
             appearance.line_style,
         );
-    apply_marker_metadata(&mut plot, appearance);
+    apply_marker_metadata(&mut plot, appearance, point_count);
     Ok(plot)
 }
 
@@ -110,11 +210,12 @@ enum LineInput {
 }
 
 impl LineInput {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
             other => {
-                let tensor = Tensor::try_from(&other).map_err(|e| format!("plot: {e}"))?;
+                let tensor = Tensor::try_from(&other)
+                    .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot: {e}")))?;
                 Ok(Self::Host(tensor))
             }
         }
@@ -126,40 +227,63 @@ impl LineInput {
             Self::Host(_) => None,
         }
     }
-
-    fn into_tensor(self, name: &str) -> Result<Tensor, String> {
-        match self {
-            Self::Host(tensor) => Ok(tensor),
-            Self::Gpu(handle) => gather_tensor_from_gpu(handle, name),
-        }
-    }
 }
 
 fn parse_series_specs(
     args: Vec<Value>,
-) -> Result<(Vec<SeriesRenderPlan>, Option<Vec<LineStyle>>), String> {
-    let mut queue: VecDeque<Value> = VecDeque::from(args);
-    if queue.is_empty() {
+) -> BuiltinResult<(Vec<SeriesRenderPlan>, Option<Vec<LineStyle>>)> {
+    if args.is_empty() {
         return Err(plot_err("expected at least one data series"));
     }
     let mut plans = Vec::new();
     let mut line_style_order: Option<Vec<LineStyle>> = None;
     let mut inline_opts = LineStyleParseOptions::plot();
     inline_opts.forbid_leading_numeric = false;
-    while let Some(x_val) = queue.pop_front() {
+
+    let mut idx = 0usize;
+    while idx < args.len() {
+        let x_val = args[idx].clone();
+        idx += 1;
         if !is_numeric_value(&x_val) {
             return Err(plot_err(
                 "expected numeric X data before style arguments or options",
             ));
         }
-        let y_val = queue
-            .pop_front()
-            .ok_or_else(|| plot_err("expected Y argument after X data"))?;
+        if idx >= args.len() {
+            return Err(plot_err("expected Y argument after X data"));
+        }
+        let y_arg_index = idx;
+        let y_val = args[idx].clone();
+        idx += 1;
         if !is_numeric_value(&y_val) {
             return Err(plot_err("expected numeric Y argument after X data"));
         }
+
         let series_input = PlotSeriesInput::new(x_val, y_val)?;
-        let style_tokens = consume_inline_style_tokens(&mut queue)?;
+
+        let mut style_tokens = Vec::new();
+        loop {
+            let should_consume =
+                matches!(args.get(idx), Some(Value::String(_) | Value::CharArray(_)));
+            if !should_consume {
+                break;
+            }
+            let token = args[idx].clone();
+            idx += 1;
+            let token_text = value_as_string(&token)
+                .ok_or_else(|| plot_err("style tokens must be char arrays or strings"))?;
+            let lower = token_text.trim().to_ascii_lowercase();
+            style_tokens.push(token);
+
+            if looks_like_option_name(&lower) {
+                if idx >= args.len() {
+                    return Err(plot_err("name-value arguments must come in pairs"));
+                }
+                style_tokens.push(args[idx].clone());
+                idx += 1;
+            }
+        }
+
         let parsed_style = parse_line_style_args(&style_tokens, &inline_opts)?;
         if let Some(order) = parsed_style.line_style_order.clone() {
             line_style_order = Some(order);
@@ -170,6 +294,7 @@ fn parse_series_specs(
             requires_cpu: parsed_style.requires_cpu_fallback,
             line_style_explicit: parsed_style.line_style_explicit,
             label: parsed_style.label.clone(),
+            source_y_arg_index: Some(y_arg_index),
         });
     }
 
@@ -187,32 +312,8 @@ fn is_numeric_value(value: &Value) -> bool {
     )
 }
 
-fn plot_err(msg: impl Into<String>) -> String {
-    format!("plot: {}", msg.into())
-}
-
-fn consume_inline_style_tokens(queue: &mut VecDeque<Value>) -> Result<Vec<Value>, String> {
-    let mut tokens = Vec::new();
-    loop {
-        let should_consume = matches!(queue.front(), Some(Value::String(_) | Value::CharArray(_)));
-        if !should_consume {
-            break;
-        }
-
-        let token = queue.pop_front().expect("front value exists");
-        let token_text = value_as_string(&token)
-            .ok_or_else(|| plot_err("style tokens must be char arrays or strings"))?;
-        let lower = token_text.trim().to_ascii_lowercase();
-        tokens.push(token);
-
-        if looks_like_option_name(&lower) {
-            let value = queue
-                .pop_front()
-                .ok_or_else(|| plot_err("name-value arguments must come in pairs"))?;
-            tokens.push(value);
-        }
-    }
-    Ok(tokens)
+fn plot_err(msg: impl Into<String>) -> RuntimeError {
+    plotting_error(BUILTIN_NAME, format!("plot: {}", msg.into()))
 }
 
 fn apply_line_style_order(plans: &mut [SeriesRenderPlan], order: &[LineStyle]) {
@@ -228,37 +329,108 @@ fn apply_line_style_order(plans: &mut [SeriesRenderPlan], order: &[LineStyle]) {
     }
 }
 
-fn apply_marker_metadata(plot: &mut LinePlot, appearance: &LineAppearance) {
-    if let Some(marker) = marker_metadata_from_appearance(appearance) {
+fn apply_marker_metadata(plot: &mut LinePlot, appearance: &LineAppearance, point_count: usize) {
+    let marker = marker_metadata_from_appearance(appearance).or_else(|| {
+        if point_count == 1 {
+            // MATLAB renders a lone point for plot(x, y) when x/y have length 1. If the user
+            // didn't specify a marker, default to a small point marker so the plot isn't blank.
+            let mut temp = appearance.clone();
+            temp.marker = Some(MarkerAppearance {
+                kind: MarkerKind::Point,
+                size: Some(DEFAULT_LINE_MARKER_SIZE),
+                edge_color: MarkerColor::Auto,
+                face_color: MarkerColor::Auto,
+            });
+            marker_metadata_from_appearance(&temp)
+        } else {
+            None
+        }
+    });
+    if let Some(marker) = marker {
         plot.set_marker(Some(marker));
     }
 }
 
-fn build_line_gpu_plot(
+async fn build_line_gpu_plot_async(
     x: &GpuTensorHandle,
     y: &GpuTensorHandle,
     label: &str,
     appearance: &LineAppearance,
-) -> Result<LinePlot, String> {
-    let context = runmat_plot::shared_wgpu_context()
-        .ok_or_else(|| "plot: plotting GPU context unavailable".to_string())?;
+) -> BuiltinResult<LinePlot> {
+    let api_provider_present = runmat_accelerate_api::provider().is_some();
+    let api_provider_for_x_present = runmat_accelerate_api::provider_for_handle(x).is_some();
+    let api_provider_for_y_present = runmat_accelerate_api::provider_for_handle(y).is_some();
+    let shared_ctx = runmat_plot::shared_wgpu_context();
+    trace!(
+        "plot-gpu: attempt label={label:?} x(device_id={}, buffer_id={}, shape={:?}) y(device_id={}, buffer_id={}, shape={:?}) shared_ctx_present={} api_provider_present={} api_provider_for_x_present={} api_provider_for_y_present={}",
+        x.device_id,
+        x.buffer_id,
+        x.shape,
+        y.device_id,
+        y.buffer_id,
+        y.shape,
+        shared_ctx.is_some(),
+        api_provider_present,
+        api_provider_for_x_present,
+        api_provider_for_y_present
+    );
+    let context = shared_ctx
+        .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot: plotting GPU context unavailable"))?;
 
-    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
-        .ok_or_else(|| "plot: unable to export GPU X data".to_string())?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
-        .ok_or_else(|| "plot: unable to export GPU Y data".to_string())?;
+    let x_ref = match runmat_accelerate_api::export_wgpu_buffer(x) {
+        Some(buf) => {
+            trace!(
+                "plot-gpu: export_wgpu_buffer(X) ok len={} element_size={} precision={:?}",
+                buf.len,
+                buf.element_size,
+                buf.precision
+            );
+            buf
+        }
+        None => {
+            trace!(
+                "plot-gpu: export_wgpu_buffer(X) FAILED (api_provider_present={} api_provider_for_x_present={} x_device_id={})",
+                api_provider_present, api_provider_for_x_present, x.device_id
+            );
+            return Err(plotting_error(
+                BUILTIN_NAME,
+                "plot: unable to export GPU X data",
+            ));
+        }
+    };
+    let y_ref = match runmat_accelerate_api::export_wgpu_buffer(y) {
+        Some(buf) => {
+            trace!(
+                "plot-gpu: export_wgpu_buffer(Y) ok len={} element_size={} precision={:?}",
+                buf.len,
+                buf.element_size,
+                buf.precision
+            );
+            buf
+        }
+        None => {
+            trace!(
+                "plot-gpu: export_wgpu_buffer(Y) FAILED (api_provider_present={} api_provider_for_y_present={} y_device_id={})",
+                api_provider_present, api_provider_for_y_present, y.device_id
+            );
+            return Err(plotting_error(
+                BUILTIN_NAME,
+                "plot: unable to export GPU Y data",
+            ));
+        }
+    };
 
     if x_ref.len < 2 {
-        return Err("plot: inputs must contain at least two elements".to_string());
+        return Err(plot_err("inputs must contain at least two elements"));
     }
     if x_ref.len != y_ref.len {
-        return Err("plot: X and Y inputs must have identical lengths".to_string());
+        return Err(plot_err("X and Y inputs must have identical lengths"));
     }
     if x_ref.precision != y_ref.precision {
-        return Err("plot: X and Y gpuArrays must have matching precision".to_string());
+        return Err(plot_err("X and Y gpuArrays must have matching precision"));
     }
-    let len_u32 = u32::try_from(x_ref.len)
-        .map_err(|_| "plot: point count exceeds supported range".to_string())?;
+    let len_u32 =
+        u32::try_from(x_ref.len).map_err(|_| plot_err("point count exceeds supported range"))?;
     let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
 
     let inputs = runmat_plot::gpu::line::LineGpuInputs {
@@ -267,26 +439,13 @@ fn build_line_gpu_plot(
         len: len_u32,
         scalar,
     };
-    let params = runmat_plot::gpu::line::LineGpuParams {
-        color: appearance.color,
-        line_width: appearance.line_width,
-        line_style: appearance.line_style,
-        marker_size: DEFAULT_LINE_MARKER_SIZE,
-    };
     let marker_meta = marker_metadata_from_appearance(appearance);
-
-    let gpu_vertices = runmat_plot::gpu::line::pack_vertices_from_xy(
-        &context.device,
-        &context.queue,
-        &inputs,
-        &params,
-    )
-    .map_err(|e| format!("plot: failed to build GPU vertices: {e}"))?;
 
     let marker_gpu_vertices = if let Some(marker) = marker_meta.as_ref() {
         let marker_params = runmat_plot::gpu::line::LineGpuParams {
             color: marker.face_color,
-            line_width: 1.0,
+            half_width_data: 0.0,
+            thick: false,
             line_style: LineStyle::Solid,
             marker_size: marker.size.max(1.0),
         };
@@ -297,83 +456,27 @@ fn build_line_gpu_plot(
                 &inputs,
                 &marker_params,
             )
-            .map_err(|e| format!("plot: failed to build marker vertices: {e}"))?,
+            .map_err(|e| {
+                plotting_error(
+                    BUILTIN_NAME,
+                    format!("plot: failed to build marker vertices: {e}"),
+                )
+            })?,
         )
     } else {
         None
     };
 
-    let bounds = gpu_xy_bounds(x, y, "plot")?;
+    let bounds = super::gpu_helpers::gpu_xy_bounds_async(x, y, "plot").await?;
     let gpu_style = LineGpuStyle {
         color: appearance.color,
         line_width: appearance.line_width,
         line_style: appearance.line_style,
         marker: marker_meta.clone(),
     };
-    let pipeline = if appearance.line_width > 1.0 {
-        PipelineType::Triangles
-    } else {
-        PipelineType::Lines
-    };
-    let mut plot = LinePlot::from_gpu_buffer(
-        gpu_vertices,
-        x_ref.len,
-        gpu_style,
-        bounds,
-        pipeline,
-        marker_gpu_vertices,
-    );
+    let mut plot = LinePlot::from_gpu_xy(inputs, gpu_style, bounds, marker_gpu_vertices);
     plot = plot.with_label(label);
     Ok(plot)
-}
-
-fn render_series(
-    figure: &mut runmat_plot::plots::Figure,
-    axes_index: usize,
-    plans: &mut Vec<SeriesRenderPlan>,
-) -> Result<(), String> {
-    let total = plans.len();
-    for (series_idx, plan) in plans.drain(..).enumerate() {
-        let SeriesRenderPlan {
-            data,
-            mut appearance,
-            requires_cpu,
-            line_style_explicit,
-            label,
-        } = plan;
-
-        if !line_style_explicit {
-            appearance.line_style = next_line_style_for_axes(axes_index);
-        }
-
-        let label = label.unwrap_or_else(|| {
-            if total == 1 {
-                "Data".to_string()
-            } else {
-                format!("Series {}", series_idx + 1)
-            }
-        });
-
-        if !requires_cpu {
-            if let Some((x_gpu, y_gpu)) = data.gpu_handles() {
-                match build_line_gpu_plot(x_gpu, y_gpu, &label, &appearance) {
-                    Ok(line_plot) => {
-                        figure.add_line_plot_on_axes(line_plot, axes_index);
-                        continue;
-                    }
-                    Err(err) => {
-                        warn!("plot GPU path unavailable: {err}");
-                    }
-                }
-            }
-        }
-
-        let (x_tensor, y_tensor) = data.into_tensors("plot")?;
-        let (x_vals, y_vals) = numeric_pair(x_tensor, y_tensor, "plot")?;
-        let line_plot = build_line_plot(x_vals, y_vals, &label, &appearance)?;
-        figure.add_line_plot_on_axes(line_plot, axes_index);
-    }
-    Ok(())
 }
 
 #[derive(Debug)]
@@ -389,10 +492,11 @@ struct SeriesRenderPlan {
     requires_cpu: bool,
     line_style_explicit: bool,
     label: Option<String>,
+    source_y_arg_index: Option<usize>,
 }
 
 impl PlotSeriesInput {
-    fn new(x: Value, y: Value) -> Result<Self, String> {
+    fn new(x: Value, y: Value) -> BuiltinResult<Self> {
         Ok(Self {
             x: LineInput::from_value(x)?,
             y: LineInput::from_value(y)?,
@@ -406,9 +510,15 @@ impl PlotSeriesInput {
         }
     }
 
-    fn into_tensors(self, name: &str) -> Result<(Tensor, Tensor), String> {
-        let x = self.x.into_tensor(name)?;
-        let y = self.y.into_tensor(name)?;
+    async fn into_tensors_async(self, name: &'static str) -> BuiltinResult<(Tensor, Tensor)> {
+        let x = match self.x {
+            LineInput::Host(t) => t,
+            LineInput::Gpu(h) => super::gpu_helpers::gather_tensor_from_gpu_async(h, name).await?,
+        };
+        let y = match self.y {
+            LineInput::Host(t) => t,
+            LineInput::Gpu(h) => super::gpu_helpers::gather_tensor_from_gpu_async(h, name).await?,
+        };
         Ok((x, y))
     }
 }
@@ -417,6 +527,9 @@ impl PlotSeriesInput {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use crate::builtins::plotting::{clone_figure, current_figure_handle};
+    use crate::RuntimeError;
+    use futures::executor::block_on;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -432,11 +545,11 @@ pub(crate) mod tests {
         }
     }
 
-    fn assert_plotting_unavailable(msg: &str) {
-        let lower = msg.to_lowercase();
+    fn assert_plotting_unavailable(err: &RuntimeError) {
+        let lower = err.to_string().to_lowercase();
         assert!(
             lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
-            "unexpected error: {msg}"
+            "unexpected error: {err}"
         );
     }
 
@@ -457,14 +570,39 @@ pub(crate) mod tests {
     #[test]
     fn plot_builtin_produces_figure_even_without_backend() {
         setup_plot_tests();
-        let result = plot_builtin(
+        let result = block_on(plot_builtin(
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Vec::new(),
-        );
-        if let Err(msg) = result {
-            assert_plotting_unavailable(&msg);
+        ));
+        if let Err(flow) = result {
+            assert_plotting_unavailable(&flow);
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn plot_builtin_infers_label_from_callsite() {
+        setup_plot_tests();
+        let source = "plot(a, b);";
+        let _source_guard = crate::source_context::replace_current_source(Some(source));
+        let spans = vec![
+            runmat_hir::Span { start: 5, end: 6 }, // "a"
+            runmat_hir::Span { start: 8, end: 9 }, // "b"
+        ];
+        let _callsite_guard = crate::callsite::push_callsite(None, Some(spans));
+
+        let _ = block_on(plot_builtin(
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Vec::new(),
+        ));
+
+        let handle = current_figure_handle();
+        let fig = clone_figure(handle).expect("figure exists");
+        let entries = fig.legend_entries();
+        assert!(!entries.is_empty(), "expected legend entries");
+        assert_eq!(entries[0].label, "b");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -494,7 +632,7 @@ pub(crate) mod tests {
             Value::String("linewidth".into()),
         ];
         let err = parse_series_specs(args).unwrap_err();
-        assert!(err.contains("expected numeric Y argument"));
+        assert!(err.to_string().contains("expected numeric Y argument"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -503,7 +641,7 @@ pub(crate) mod tests {
         setup_plot_tests();
         let args = vec![Value::String("linewidth".into()), Value::Num(2.0)];
         let err = parse_series_specs(args).unwrap_err();
-        assert!(err.contains("expected numeric X data"));
+        assert!(err.to_string().contains("expected numeric X data"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

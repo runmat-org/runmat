@@ -238,6 +238,7 @@ impl FsProvider for JsFsProvider {
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         let mut initial = Vec::new();
         let mut exists = false;
+        let mut dirty = false;
 
         if flags.read || (!flags.create && !flags.create_new) || flags.append {
             match self.funcs.read_file(path) {
@@ -261,6 +262,7 @@ impl FsProvider for JsFsProvider {
 
         if flags.create && !exists {
             exists = true;
+            dirty = true;
         }
 
         if !exists && !flags.create {
@@ -272,6 +274,7 @@ impl FsProvider for JsFsProvider {
 
         if flags.truncate {
             initial.clear();
+            dirty = true;
         }
 
         let cursor = if flags.append { initial.len() } else { 0 };
@@ -284,11 +287,11 @@ impl FsProvider for JsFsProvider {
             can_read: flags.read,
             can_write: flags.write || flags.append,
             append: flags.append,
-            dirty: false,
+            dirty,
         };
-        Ok(Box::new(JsFileHandle {
-            inner: Arc::new(Mutex::new(inner)),
-        }))
+        #[allow(clippy::arc_with_non_send_sync)]
+        let inner = Arc::new(Mutex::new(inner));
+        Ok(Box::new(JsFileHandle { inner }))
     }
 
     fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
@@ -368,6 +371,7 @@ impl JsFileState {
 }
 
 struct JsFileHandle {
+    #[allow(clippy::arc_with_non_send_sync)]
     inner: Arc<Mutex<JsFileState>>,
 }
 
@@ -479,7 +483,7 @@ fn map_js_error(op: &str, err: JsValue) -> io::Error {
         return io::Error::new(ErrorKind::NotFound, format!("{op}: not found"));
     }
     let message = err.as_string().unwrap_or_else(|| format!("{:?}", err));
-    io::Error::new(ErrorKind::Other, format!("{op}: {message}"))
+    io::Error::other(format!("{op}: {message}"))
 }
 
 fn is_not_found_error(err: &JsValue) -> bool {

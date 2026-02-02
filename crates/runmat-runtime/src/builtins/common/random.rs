@@ -1,6 +1,8 @@
 use std::f64::consts::PI;
 use std::sync::{Mutex, OnceLock};
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
 pub(crate) const DEFAULT_RNG_SEED: u64 = 0x9e3779b97f4a7c15;
 pub(crate) const DEFAULT_USER_SEED: u64 = 0;
 const RNG_MULTIPLIER: u64 = 6364136223846793005;
@@ -8,6 +10,10 @@ const RNG_INCREMENT: u64 = 1;
 const RNG_SHIFT: u32 = 11;
 const RNG_SCALE: f64 = 1.0 / ((1u64 << 53) as f64);
 const MIN_UNIFORM: f64 = f64::MIN_POSITIVE;
+
+fn random_error(label: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(label).build()
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RngAlgorithm {
@@ -95,17 +101,17 @@ fn mix_seed(seed: u64) -> u64 {
     }
 }
 
-pub(crate) fn snapshot() -> Result<RngSnapshot, String> {
+pub(crate) fn snapshot() -> BuiltinResult<RngSnapshot> {
     rng_state()
         .lock()
         .map(|guard| guard.snapshot())
-        .map_err(|_| "rng: failed to acquire RNG lock".to_string())
+        .map_err(|_| random_error("rng", "rng: failed to acquire RNG lock"))
 }
 
-pub(crate) fn apply_snapshot(snapshot: RngSnapshot) -> Result<RngSnapshot, String> {
+pub(crate) fn apply_snapshot(snapshot: RngSnapshot) -> BuiltinResult<RngSnapshot> {
     let mut guard = rng_state()
         .lock()
-        .map_err(|_| "rng: failed to acquire RNG lock".to_string())?;
+        .map_err(|_| random_error("rng", "rng: failed to acquire RNG lock"))?;
     let previous = guard.snapshot();
     guard.state = snapshot.state;
     guard.seed = snapshot.seed;
@@ -113,12 +119,12 @@ pub(crate) fn apply_snapshot(snapshot: RngSnapshot) -> Result<RngSnapshot, Strin
     Ok(previous)
 }
 
-pub(crate) fn set_seed(seed: u64) -> Result<RngSnapshot, String> {
+pub(crate) fn set_seed(seed: u64) -> BuiltinResult<RngSnapshot> {
     let state = mix_seed(seed);
     apply_snapshot(RngSnapshot::new(state, Some(seed), RngAlgorithm::RunMatLcg))
 }
 
-pub(crate) fn set_default() -> Result<RngSnapshot, String> {
+pub(crate) fn set_default() -> BuiltinResult<RngSnapshot> {
     apply_snapshot(default_snapshot())
 }
 
@@ -130,10 +136,10 @@ pub(crate) fn default_snapshot() -> RngSnapshot {
     )
 }
 
-pub(crate) fn generate_uniform(len: usize, label: &str) -> Result<Vec<f64>, String> {
+pub(crate) fn generate_uniform(len: usize, label: &str) -> BuiltinResult<Vec<f64>> {
     let mut guard = rng_state()
         .lock()
-        .map_err(|_| format!("{label}: failed to acquire RNG lock"))?;
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
     let mut out = Vec::with_capacity(len);
     for _ in 0..len {
         out.push(next_uniform_state(&mut guard.state));
@@ -141,7 +147,7 @@ pub(crate) fn generate_uniform(len: usize, label: &str) -> Result<Vec<f64>, Stri
     Ok(out)
 }
 
-pub(crate) fn generate_uniform_single(len: usize, label: &str) -> Result<Vec<f64>, String> {
+pub(crate) fn generate_uniform_single(len: usize, label: &str) -> BuiltinResult<Vec<f64>> {
     generate_uniform(len, label).map(|data| {
         data.into_iter()
             .map(|v| {
@@ -152,13 +158,13 @@ pub(crate) fn generate_uniform_single(len: usize, label: &str) -> Result<Vec<f64
     })
 }
 
-pub(crate) fn skip_uniform(len: usize, label: &str) -> Result<(), String> {
+pub(crate) fn skip_uniform(len: usize, label: &str) -> BuiltinResult<()> {
     if len == 0 {
         return Ok(());
     }
     let mut guard = rng_state()
         .lock()
-        .map_err(|_| format!("{label}: failed to acquire RNG lock"))?;
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
     guard.state = advance_state(guard.state, len as u64);
     Ok(())
 }
@@ -183,10 +189,10 @@ fn advance_state(state: u64, mut delta: u64) -> u64 {
     acc_mult.wrapping_mul(state).wrapping_add(acc_plus)
 }
 
-pub(crate) fn generate_complex(len: usize, label: &str) -> Result<Vec<(f64, f64)>, String> {
+pub(crate) fn generate_complex(len: usize, label: &str) -> BuiltinResult<Vec<(f64, f64)>> {
     let mut guard = rng_state()
         .lock()
-        .map_err(|_| format!("{label}: failed to acquire RNG lock"))?;
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
     let mut out = Vec::with_capacity(len);
     for _ in 0..len {
         let re = next_uniform_state(&mut guard.state);
@@ -215,10 +221,10 @@ fn next_normal_pair(state: &mut u64) -> (f64, f64) {
     (radius * angle.cos(), radius * angle.sin())
 }
 
-pub(crate) fn generate_normal(len: usize, label: &str) -> Result<Vec<f64>, String> {
+pub(crate) fn generate_normal(len: usize, label: &str) -> BuiltinResult<Vec<f64>> {
     let mut guard = rng_state()
         .lock()
-        .map_err(|_| format!("{label}: failed to acquire RNG lock"))?;
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
     let mut out = Vec::with_capacity(len);
     while out.len() < len {
         let (z0, z1) = next_normal_pair(&mut guard.state);
@@ -230,10 +236,10 @@ pub(crate) fn generate_normal(len: usize, label: &str) -> Result<Vec<f64>, Strin
     Ok(out)
 }
 
-pub(crate) fn generate_normal_complex(len: usize, label: &str) -> Result<Vec<(f64, f64)>, String> {
+pub(crate) fn generate_normal_complex(len: usize, label: &str) -> BuiltinResult<Vec<(f64, f64)>> {
     let mut guard = rng_state()
         .lock()
-        .map_err(|_| format!("{label}: failed to acquire RNG lock"))?;
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
     let mut out = Vec::with_capacity(len);
     for _ in 0..len {
         let (re, im) = next_normal_pair(&mut guard.state);

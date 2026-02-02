@@ -4,7 +4,7 @@ use runmat_filesystem as vfs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use glob::PatternError;
+use glob::Pattern;
 use runmat_builtins::{CharArray, Value};
 use runmat_macros::runtime_builtin;
 
@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const MESSAGE_ID_OS_ERROR: &str = "MATLAB:COPYFILE:OSError";
 const MESSAGE_ID_SOURCE_NOT_FOUND: &str = "MATLAB:COPYFILE:FileDoesNotExist";
@@ -59,6 +59,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Filesystem side effects materialise immediately; metadata is registered for completeness.",
 };
 
+const BUILTIN_NAME: &str = "copyfile";
+
+fn copyfile_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "copyfile",
     category = "io/repl_fs",
@@ -68,22 +87,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::copyfile"
 )]
-fn copyfile_builtin(args: Vec<Value>) -> Result<Value, String> {
-    let eval = evaluate(&args)?;
+async fn copyfile_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(&args).await?;
     Ok(eval.first_output())
 }
 
 /// Evaluate `copyfile` once and expose all outputs.
-pub fn evaluate(args: &[Value]) -> Result<CopyfileResult, String> {
-    let gathered = gather_arguments(args)?;
+pub async fn evaluate(args: &[Value]) -> BuiltinResult<CopyfileResult> {
+    let gathered = gather_arguments(args).await?;
     match gathered.len() {
-        0 | 1 => Err("copyfile: not enough input arguments".to_string()),
+        0 | 1 => Err(copyfile_error("copyfile: not enough input arguments")),
         2 => copy_operation(&gathered[0], &gathered[1], false),
         3 => {
             let force = parse_force_flag(&gathered[2])?;
             copy_operation(&gathered[0], &gathered[1], force)
         }
-        _ => Err("copyfile: too many input arguments".to_string()),
+        _ => Err(copyfile_error("copyfile: too many input arguments")),
     }
 }
 
@@ -212,7 +231,7 @@ fn copy_operation(
     source: &Value,
     destination: &Value,
     force: bool,
-) -> Result<CopyfileResult, String> {
+) -> BuiltinResult<CopyfileResult> {
     let source_raw = extract_path(source, ERR_SOURCE_ARG)?;
     if source_raw.is_empty() {
         return Ok(CopyfileResult::empty_source());
@@ -223,8 +242,9 @@ fn copy_operation(
         return Ok(CopyfileResult::empty_destination());
     }
 
-    let source_expanded = expand_user_path(&source_raw, "copyfile")?;
-    let destination_expanded = expand_user_path(&destination_raw, "copyfile")?;
+    let source_expanded = expand_user_path(&source_raw, "copyfile").map_err(copyfile_error)?;
+    let destination_expanded =
+        expand_user_path(&destination_raw, "copyfile").map_err(copyfile_error)?;
 
     if contains_wildcards(&source_expanded) {
         Ok(copy_with_pattern(
@@ -334,19 +354,34 @@ fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileR
 }
 
 fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileResult {
-    let paths = match glob::glob(pattern) {
-        Ok(iter) => iter,
-        Err(PatternError { msg, .. }) => return CopyfileResult::glob_pattern_error(pattern, msg),
+    let pattern_path = Path::new(pattern);
+    let (base_dir, name_pattern) = match pattern_path.file_name() {
+        Some(name) => (
+            pattern_path.parent().unwrap_or_else(|| Path::new(".")),
+            name,
+        ),
+        None => {
+            return CopyfileResult::glob_pattern_error(pattern, "pattern has no file name");
+        }
+    };
+    let matcher = match Pattern::new(&name_pattern.to_string_lossy()) {
+        Ok(matcher) => matcher,
+        Err(err) => return CopyfileResult::glob_pattern_error(pattern, err.msg),
     };
 
     let mut matches = Vec::new();
-    for entry in paths {
-        match entry {
-            Ok(path) => matches.push(path),
-            Err(err) => {
-                let path_display = path_to_display(err.path());
-                return CopyfileResult::os_error(&path_display, destination, err.error());
-            }
+    let entries = match vfs::read_dir(base_dir) {
+        Ok(entries) => entries,
+        Err(err) => {
+            let display = path_to_display(base_dir);
+            return CopyfileResult::os_error(&display, destination, &err);
+        }
+    };
+
+    for entry in entries {
+        let file_name = entry.file_name().to_string_lossy();
+        if matcher.matches(&file_name) {
+            matches.push(entry.path().to_path_buf());
         }
     }
 
@@ -519,7 +554,7 @@ fn copy_directory_recursive(source: &Path, destination: &Path) -> io::Result<()>
             if err.kind() != io::ErrorKind::NotFound {
                 return Err(err);
             }
-            vfs::create_dir(destination)?;
+            vfs::create_dir_all(destination)?;
         }
     }
 
@@ -555,6 +590,9 @@ fn copy_file_to_path(source: &Path, destination: &Path) -> io::Result<()> {
 
 fn ensure_parent_exists(path: &Path) -> io::Result<()> {
     if let Some(parent) = path.parent() {
+        if parent.as_os_str().is_empty() || parent == Path::new(".") {
+            return Ok(());
+        }
         if vfs::metadata(parent).is_err() {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
@@ -587,40 +625,44 @@ fn is_descendant(parent: &Path, candidate: &Path) -> bool {
     }
 }
 
-fn parse_force_flag(value: &Value) -> Result<bool, String> {
+fn parse_force_flag(value: &Value) -> BuiltinResult<bool> {
     let text = extract_path(value, ERR_FLAG_ARG)?;
     if text.eq_ignore_ascii_case("f") {
         Ok(true)
     } else {
-        Err(ERR_FLAG_ARG.to_string())
+        Err(copyfile_error(ERR_FLAG_ARG))
     }
 }
 
-fn extract_path(value: &Value, error_message: &str) -> Result<String, String> {
+fn extract_path(value: &Value, error_message: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::CharArray(array) => {
             if array.rows == 1 {
                 Ok(array.data.iter().collect())
             } else {
-                Err(error_message.to_string())
+                Err(copyfile_error(error_message))
             }
         }
         Value::StringArray(array) => {
             if array.data.len() == 1 {
                 Ok(array.data[0].clone())
             } else {
-                Err(error_message.to_string())
+                Err(copyfile_error(error_message))
             }
         }
-        _ => Err(error_message.to_string()),
+        _ => Err(copyfile_error(error_message)),
     }
 }
 
-fn gather_arguments(args: &[Value]) -> Result<Vec<Value>, String> {
+async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(|err| format!("copyfile: {err}"))?);
+        out.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     Ok(out)
 }
@@ -639,6 +681,10 @@ pub(crate) mod tests {
     use super::*;
     use std::fs::{self, File};
     use tempfile::tempdir;
+
+    fn evaluate(args: &[Value]) -> BuiltinResult<CopyfileResult> {
+        futures::executor::block_on(super::evaluate(args))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -892,7 +938,7 @@ pub(crate) mod tests {
 
         let err = evaluate(&[Value::from("a"), Value::from("b"), Value::Num(1.0)])
             .expect_err("expected error");
-        assert_eq!(err, ERR_FLAG_ARG);
+        assert_eq!(err.message(), ERR_FLAG_ARG);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

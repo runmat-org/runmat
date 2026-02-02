@@ -1,5 +1,7 @@
 //! MATLAB-compatible `cd` builtin for RunMat.
 
+use runmat_filesystem as vfs;
+#[cfg(test)]
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -10,8 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::console::{record_console_output, ConsoleStream};
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::cd")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -41,6 +42,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "I/O builtins are not eligible for fusion; metadata is registered for completeness.",
 };
 
+const BUILTIN_NAME: &str = "cd";
+
+fn cd_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "cd",
     category = "io/repl_fs",
@@ -50,117 +70,93 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::cd"
 )]
-fn cd_builtin(args: Vec<Value>) -> Result<Value, String> {
-    let gathered = gather_arguments(&args)?;
+async fn cd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let gathered = gather_arguments(&args).await?;
     match gathered.len() {
         0 => current_directory_value(),
         1 => change_directory(&gathered[0]),
-        _ => Err("cd: too many input arguments".to_string()),
+        _ => Err(cd_error("cd: too many input arguments")),
     }
 }
 
-fn current_directory_value() -> Result<Value, String> {
-    let current = env::current_dir()
-        .map_err(|err| format!("cd: unable to determine current directory ({err})"))?;
-    emit_path_stdout(&current);
+fn current_directory_value() -> BuiltinResult<Value> {
+    let current = vfs::current_dir()
+        .map_err(|err| cd_error(format!("cd: unable to determine current directory ({err})")))?;
     Ok(path_to_value(&current))
 }
 
-fn change_directory(value: &Value) -> Result<Value, String> {
+fn change_directory(value: &Value) -> BuiltinResult<Value> {
     let target_raw = extract_path(value)?;
     let target = expand_path(&target_raw)?;
-    let previous = env::current_dir()
-        .map_err(|err| format!("cd: unable to determine current directory ({err})"))?;
+    let previous = vfs::current_dir()
+        .map_err(|err| cd_error(format!("cd: unable to determine current directory ({err})")))?;
 
-    env::set_current_dir(&target)
-        .map_err(|err| format!("cd: unable to change directory to '{target_raw}' ({err})"))?;
+    vfs::set_current_dir(&target).map_err(|err| {
+        cd_error(format!(
+            "cd: unable to change directory to '{target_raw}' ({err})"
+        ))
+    })?;
 
-    let new_path = env::current_dir()
-        .map_err(|err| format!("cd: unable to determine current directory ({err})"))?;
-    emit_path_stdout(&new_path);
-
+    let _new_path = vfs::current_dir()
+        .map_err(|err| cd_error(format!("cd: unable to determine current directory ({err})")))?;
     Ok(path_to_value(&previous))
 }
 
-fn extract_path(value: &Value) -> Result<String, String> {
+fn extract_path(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(text) => {
             if text.is_empty() {
-                Err("cd: folder name must not be empty".to_string())
+                Err(cd_error("cd: folder name must not be empty"))
             } else {
                 Ok(text.clone())
             }
         }
         Value::StringArray(array) => {
             if array.data.len() != 1 {
-                return Err(
-                    "cd: folder name must be a character vector or string scalar".to_string(),
-                );
+                return Err(cd_error(
+                    "cd: folder name must be a character vector or string scalar",
+                ));
             }
             let text = array.data[0].clone();
             if text.is_empty() {
-                Err("cd: folder name must not be empty".to_string())
+                Err(cd_error("cd: folder name must not be empty"))
             } else {
                 Ok(text)
             }
         }
         Value::CharArray(chars) => {
             if chars.rows != 1 {
-                return Err(
-                    "cd: folder name must be a character vector or string scalar".to_string(),
-                );
+                return Err(cd_error(
+                    "cd: folder name must be a character vector or string scalar",
+                ));
             }
             let text: String = chars.data.iter().collect();
             if text.is_empty() {
-                Err("cd: folder name must not be empty".to_string())
+                Err(cd_error("cd: folder name must not be empty"))
             } else {
                 Ok(text)
             }
         }
-        _ => Err("cd: folder name must be a character vector or string scalar".to_string()),
+        _ => Err(cd_error(
+            "cd: folder name must be a character vector or string scalar",
+        )),
     }
 }
 
-fn expand_path(raw: &str) -> Result<PathBuf, String> {
-    if raw == "~" {
-        return home_directory().ok_or_else(|| "cd: unable to resolve home directory".to_string());
-    }
-
-    if let Some(stripped) = raw.strip_prefix("~/").or_else(|| raw.strip_prefix("~\\")) {
-        let home =
-            home_directory().ok_or_else(|| "cd: unable to resolve home directory".to_string())?;
-        if stripped.is_empty() {
-            return Ok(home);
-        }
-        let mut buf = home;
-        buf.push(stripped);
-        return Ok(buf);
-    }
-
-    Ok(PathBuf::from(raw))
+fn expand_path(raw: &str) -> BuiltinResult<PathBuf> {
+    let expanded =
+        crate::builtins::common::fs::expand_user_path(raw, BUILTIN_NAME).map_err(cd_error)?;
+    Ok(PathBuf::from(expanded))
 }
 
-fn home_directory() -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        if let Ok(user_profile) = env::var("USERPROFILE") {
-            return Some(PathBuf::from(user_profile));
-        }
-        if let (Ok(drive), Ok(path)) = (env::var("HOMEDRIVE"), env::var("HOMEPATH")) {
-            return Some(PathBuf::from(format!("{drive}{path}")));
-        }
-        None
-    }
-    #[cfg(not(windows))]
-    {
-        env::var("HOME").map(PathBuf::from).ok()
-    }
-}
-
-fn gather_arguments(args: &[Value]) -> Result<Vec<Value>, String> {
+async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(|err| format!("cd: {err}"))?);
+        out.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     Ok(out)
 }
@@ -178,10 +174,6 @@ fn char_array_value(text: &str) -> Value {
     Value::CharArray(CharArray::new_row(text))
 }
 
-fn emit_path_stdout(path: &Path) {
-    record_console_output(ConsoleStream::Stdout, path_to_string(path));
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
@@ -190,6 +182,10 @@ pub(crate) mod tests {
     use std::convert::TryFrom;
     use std::path::{Path, PathBuf};
     use tempfile::tempdir;
+
+    fn cd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::cd_builtin(args))
+    }
 
     fn canonical_path(path: &Path) -> PathBuf {
         std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
@@ -281,7 +277,7 @@ pub(crate) mod tests {
 
         let missing = Value::from("this-directory-does-not-exist".to_string());
         let err = cd_builtin(vec![missing]).expect_err("error");
-        assert!(err.contains("cd: unable to change directory"));
+        assert!(err.message().contains("cd: unable to change directory"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -293,7 +289,9 @@ pub(crate) mod tests {
         let guard = DirGuard::new();
         let original = guard.original.clone();
 
-        let home = home_directory().expect("home directory");
+        let home_text =
+            crate::builtins::common::fs::expand_user_path("~", BUILTIN_NAME).expect("home");
+        let home = PathBuf::from(home_text);
         let previous = cd_builtin(vec![Value::from("~")]).expect("cd ~");
         let previous_str = String::try_from(&previous).expect("string conversion");
         let previous_path = PathBuf::from(previous_str);
@@ -313,7 +311,7 @@ pub(crate) mod tests {
         let _guard = DirGuard::new();
 
         let err = cd_builtin(vec![Value::from("".to_string())]).expect_err("empty string error");
-        assert_eq!(err, "cd: folder name must not be empty");
+        assert_eq!(err.message(), "cd: folder name must not be empty");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -328,7 +326,7 @@ pub(crate) mod tests {
             StringArray::new(vec!["foo".to_string(), "bar".to_string()], vec![2]).expect("array");
         let err = cd_builtin(vec![Value::StringArray(strings)]).expect_err("string array error");
         assert_eq!(
-            err,
+            err.message(),
             "cd: folder name must be a character vector or string scalar"
         );
     }
@@ -344,7 +342,7 @@ pub(crate) mod tests {
         let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("char array");
         let err = cd_builtin(vec![Value::CharArray(chars)]).expect_err("char array error");
         assert_eq!(
-            err,
+            err.message(),
             "cd: folder name must be a character vector or string scalar"
         );
     }

@@ -6,6 +6,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
     CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
 };
@@ -44,6 +45,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Reshape influences fusion layout but emits no kernels; fusion planner treats it as a metadata op.",
 };
 
+fn reshape_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("reshape").build()
+}
+
 #[runtime_builtin(
     name = "reshape",
     category = "array/shape",
@@ -52,35 +57,35 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "shape",
     builtin_path = "crate::builtins::array::shape::reshape"
 )]
-fn reshape_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        return Err("reshape: size information missing".to_string());
+        return Err(reshape_error("reshape: size information missing"));
     }
-    let tokens = parse_size_arguments(&rest)?;
-    let numel = value_numel(&value);
+    let tokens = parse_size_arguments(&rest).await?;
+    let numel = value_numel(&value).await?;
     let dims = finalize_dimensions(tokens, numel)?;
     reshape_value(value, &dims)
 }
 
-fn reshape_value(value: Value, dims: &[usize]) -> Result<Value, String> {
+fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => {
             let Tensor { data, .. } = tensor;
             Tensor::new(data, dims.to_vec())
                 .map(Value::Tensor)
-                .map_err(|e| format!("reshape: {e}"))
+                .map_err(|e| reshape_error(format!("reshape: {e}")))
         }
         Value::ComplexTensor(ct) => {
             let ComplexTensor { data, .. } = ct;
             ComplexTensor::new(data, dims.to_vec())
                 .map(Value::ComplexTensor)
-                .map_err(|e| format!("reshape: {e}"))
+                .map_err(|e| reshape_error(format!("reshape: {e}")))
         }
         Value::LogicalArray(logical) => {
             let LogicalArray { data, .. } = logical;
             LogicalArray::new(data, dims.to_vec())
                 .map(Value::LogicalArray)
-                .map_err(|e| format!("reshape: {e}"))
+                .map_err(|e| reshape_error(format!("reshape: {e}")))
         }
         Value::String(s) => {
             if dims.len() <= 2 && dims.iter().all(|&d| d == 1) {
@@ -88,14 +93,14 @@ fn reshape_value(value: Value, dims: &[usize]) -> Result<Value, String> {
             } else {
                 StringArray::new(vec![s], dims.to_vec())
                     .map(Value::StringArray)
-                    .map_err(|e| format!("reshape: {e}"))
+                    .map_err(|e| reshape_error(format!("reshape: {e}")))
             }
         }
         Value::StringArray(strings) => {
             let StringArray { data, .. } = strings;
             StringArray::new(data, dims.to_vec())
                 .map(Value::StringArray)
-                .map_err(|e| format!("reshape: {e}"))
+                .map_err(|e| reshape_error(format!("reshape: {e}")))
         }
         Value::CharArray(chars) => reshape_char_array(chars, dims),
         Value::Cell(cell) => reshape_cell_array(cell, dims),
@@ -106,7 +111,7 @@ fn reshape_value(value: Value, dims: &[usize]) -> Result<Value, String> {
             } else {
                 Tensor::new(vec![n], dims.to_vec())
                     .map(Value::Tensor)
-                    .map_err(|e| format!("reshape: {e}"))
+                    .map_err(|e| reshape_error(format!("reshape: {e}")))
             }
         }
         Value::Int(i) => {
@@ -115,7 +120,7 @@ fn reshape_value(value: Value, dims: &[usize]) -> Result<Value, String> {
             } else {
                 Tensor::new(vec![i.to_f64()], dims.to_vec())
                     .map(Value::Tensor)
-                    .map_err(|e| format!("reshape: {e}"))
+                    .map_err(|e| reshape_error(format!("reshape: {e}")))
             }
         }
         Value::Bool(b) => {
@@ -126,23 +131,23 @@ fn reshape_value(value: Value, dims: &[usize]) -> Result<Value, String> {
                 let total: usize = dims.iter().product();
                 LogicalArray::new(vec![fill; total], dims.to_vec())
                     .map(Value::LogicalArray)
-                    .map_err(|e| format!("reshape: {e}"))
+                    .map_err(|e| reshape_error(format!("reshape: {e}")))
             }
         }
         Value::Complex(re, im) => reshape_complex_scalar(re, im, dims),
-        other => Err(format!(
+        other => Err(reshape_error(format!(
             "reshape: unsupported input type {:?}; expected numeric, logical, char, string, cell, or gpu array",
             other
-        )),
+        ))),
     }
 }
 
-fn reshape_complex_scalar(re: f64, im: f64, dims: &[usize]) -> Result<Value, String> {
+fn reshape_complex_scalar(re: f64, im: f64, dims: &[usize]) -> crate::BuiltinResult<Value> {
     let total: usize = dims.iter().copied().product();
     if total != 1 {
-        return Err(format!(
+        return Err(reshape_error(format!(
             "reshape: product of dimensions ({total}) must equal numel(A) (1)"
-        ));
+        )));
     }
 
     if dims.len() <= 2 && dims.iter().all(|&d| d == 1) {
@@ -150,47 +155,59 @@ fn reshape_complex_scalar(re: f64, im: f64, dims: &[usize]) -> Result<Value, Str
     } else {
         ComplexTensor::new(vec![(re, im)], dims.to_vec())
             .map(Value::ComplexTensor)
-            .map_err(|e| format!("reshape: {e}"))
+            .map_err(|e| reshape_error(format!("reshape: {e}")))
     }
 }
 
-fn reshape_char_array(ca: CharArray, dims: &[usize]) -> Result<Value, String> {
+fn reshape_char_array(ca: CharArray, dims: &[usize]) -> crate::BuiltinResult<Value> {
     let (rows, cols) = match dims.len() {
-        0 => return Err("reshape: size vector must contain at least one element".to_string()),
+        0 => {
+            return Err(reshape_error(
+                "reshape: size vector must contain at least one element",
+            ))
+        }
         1 => (dims[0], 1),
         2 => (dims[0], dims[1]),
         _ => {
-            return Err("reshape: char arrays currently support at most two dimensions".to_string())
+            return Err(reshape_error(
+                "reshape: char arrays currently support at most two dimensions",
+            ))
         }
     };
     CharArray::new(ca.data, rows, cols)
         .map(Value::CharArray)
-        .map_err(|e| format!("reshape: {e}"))
+        .map_err(|e| reshape_error(format!("reshape: {e}")))
 }
 
-fn reshape_cell_array(ca: CellArray, dims: &[usize]) -> Result<Value, String> {
+fn reshape_cell_array(ca: CellArray, dims: &[usize]) -> crate::BuiltinResult<Value> {
     let (rows, cols) = match dims.len() {
-        0 => return Err("reshape: size vector must contain at least one element".to_string()),
+        0 => {
+            return Err(reshape_error(
+                "reshape: size vector must contain at least one element",
+            ))
+        }
         1 => (dims[0], 1),
         2 => (dims[0], dims[1]),
         _ => {
-            return Err("reshape: cell arrays currently support at most two dimensions".to_string())
+            return Err(reshape_error(
+                "reshape: cell arrays currently support at most two dimensions",
+            ))
         }
     };
     CellArray::new_handles(ca.data, rows, cols)
         .map(Value::Cell)
-        .map_err(|e| format!("reshape: {e}"))
+        .map_err(|e| reshape_error(format!("reshape: {e}")))
 }
 
 fn reshape_gpu_tensor(
     handle: runmat_accelerate_api::GpuTensorHandle,
     dims: &[usize],
-) -> Result<Value, String> {
+) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         provider
             .reshape(&handle, dims)
             .map(Value::GpuTensor)
-            .map_err(|e| format!("reshape: {e}"))
+            .map_err(|e| reshape_error(format!("reshape: {e}")))
     } else {
         let mut updated = handle;
         updated.shape = dims.to_vec();
@@ -204,126 +221,107 @@ enum DimToken {
     Auto,
 }
 
-fn parse_size_arguments(args: &[Value]) -> Result<Vec<DimToken>, String> {
+async fn parse_size_arguments(args: &[Value]) -> crate::BuiltinResult<Vec<DimToken>> {
     if args.len() == 1 {
-        match &args[0] {
-            Value::Tensor(t) => parse_size_vector(t),
-            Value::Int(_) | Value::Num(_) | Value::Bool(_) => {
-                Ok(vec![parse_size_scalar(&args[0])?])
+        let value = &args[0];
+        match value {
+            Value::Tensor(t) => {
+                if t.data.is_empty() {
+                    return Err(reshape_error(
+                        "reshape: size vector must contain at least one element",
+                    ));
+                }
+                let dims = tensor::dims_from_value_async(value)
+                    .await
+                    .map_err(|e| reshape_error(format!("reshape: {e}")))?;
+                let Some(dims) = dims else {
+                    return Err(reshape_error(
+                        "reshape: size vector must be a row or column vector",
+                    ));
+                };
+                Ok(dims.into_iter().map(DimToken::Known).collect())
             }
-            Value::GpuTensor(_) => Err(
-                "reshape: size vector must be numeric; gpu tensors are not supported as size arguments"
-                    .to_string(),
-            ),
             Value::LogicalArray(la) => {
                 if la.data.is_empty() {
-                    Err("reshape: size vector must contain at least one element".to_string())
-                } else {
-                    let tensor = tensor::logical_to_tensor(la)
-                        .map_err(|e| format!("reshape: failed to parse size vector: {e}"))?;
-                    parse_size_vector(&tensor)
+                    return Err(reshape_error(
+                        "reshape: size vector must contain at least one element",
+                    ));
                 }
+                let dims = tensor::dims_from_value_async(value)
+                    .await
+                    .map_err(|e| reshape_error(format!("reshape: {e}")))?;
+                let Some(dims) = dims else {
+                    return Err(reshape_error(
+                        "reshape: size vector must be a row or column vector",
+                    ));
+                };
+                Ok(dims.into_iter().map(DimToken::Known).collect())
             }
-            other => Err(format!(
+            Value::GpuTensor(_) => {
+                let dims = tensor::dims_from_value_async(value)
+                    .await
+                    .map_err(|e| reshape_error(format!("reshape: {e}")))?;
+                let Some(dims) = dims else {
+                    return Err(reshape_error(
+                        "reshape: size vector must be a row or column vector",
+                    ));
+                };
+                Ok(dims.into_iter().map(DimToken::Known).collect())
+            }
+            Value::Int(_) | Value::Num(_) | Value::Bool(_) => {
+                Ok(vec![parse_size_scalar(value).await?])
+            }
+            other => Err(reshape_error(format!(
                 "reshape: size vector must be numeric, got {:?}",
                 other
-            )),
+            ))),
         }
     } else {
-        args.iter().map(parse_size_scalar).collect()
-    }
-}
-
-fn parse_size_vector(t: &Tensor) -> Result<Vec<DimToken>, String> {
-    if !is_vector(t) {
-        return Err("reshape: size vector must be a row or column vector".to_string());
-    }
-    if t.data.is_empty() {
-        return Err("reshape: size vector must contain at least one element".to_string());
-    }
-    t.data.iter().map(|&v| parse_dim_value(v)).collect()
-}
-
-fn parse_size_scalar(value: &Value) -> Result<DimToken, String> {
-    match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err("reshape: size arguments must be nonnegative integers".to_string());
-            }
-            Ok(DimToken::Known(raw as usize))
+        let mut tokens = Vec::with_capacity(args.len());
+        for value in args {
+            tokens.push(parse_size_scalar(value).await?);
         }
-        Value::Num(n) => parse_num_scalar(*n).map(DimToken::Known),
-        Value::Bool(b) => Ok(DimToken::Known(if *b { 1 } else { 0 })),
+        Ok(tokens)
+    }
+}
+async fn parse_size_scalar(value: &Value) -> crate::BuiltinResult<DimToken> {
+    match value {
         Value::Tensor(t) => {
             if t.data.is_empty() {
-                Ok(DimToken::Auto)
-            } else if t.data.len() == 1 {
-                parse_dim_value(t.data[0])
-            } else {
-                Err("reshape: size arguments must be scalars".to_string())
+                return Ok(DimToken::Auto);
+            }
+            if t.data.len() != 1 {
+                return Err(reshape_error("reshape: size arguments must be scalars"));
             }
         }
         Value::LogicalArray(la) => {
             if la.data.is_empty() {
-                Ok(DimToken::Auto)
-            } else if la.data.len() == 1 {
-                Ok(DimToken::Known(if la.data[0] != 0 { 1 } else { 0 }))
-            } else {
-                Err("reshape: size arguments must be scalars".to_string())
+                return Ok(DimToken::Auto);
+            }
+            if la.data.len() != 1 {
+                return Err(reshape_error("reshape: size arguments must be scalars"));
             }
         }
-        Value::GpuTensor(_) => Err(
-            "reshape: size arguments must be numeric scalars; gpu tensors are not supported"
-                .to_string(),
-        ),
-        other => Err(format!(
+        _ => {}
+    }
+
+    let Some(dim) = tensor::dimension_from_value_async(value, "reshape", true)
+        .await
+        .map_err(|e| reshape_error(format!("reshape: {e}")))?
+    else {
+        return Err(reshape_error(format!(
             "reshape: size arguments must be numeric scalars, got {:?}",
-            other
-        )),
-    }
+            value
+        )));
+    };
+    Ok(DimToken::Known(dim))
 }
 
-fn parse_dim_value(raw: f64) -> Result<DimToken, String> {
-    if !raw.is_finite() {
-        return Err("reshape: size arguments must be finite".to_string());
-    }
-    if raw == 0.0 {
-        return Ok(DimToken::Known(0));
-    }
-    let rounded = raw.round();
-    if (rounded - raw).abs() > f64::EPSILON {
-        return Err("reshape: size arguments must be integers".to_string());
-    }
-    if rounded < 0.0 {
-        return Err("reshape: size arguments must be nonnegative integers".to_string());
-    }
-    if rounded > (usize::MAX as f64) {
-        return Err("reshape: size argument is too large".to_string());
-    }
-    Ok(DimToken::Known(rounded as usize))
-}
-
-fn parse_num_scalar(raw: f64) -> Result<usize, String> {
-    if !raw.is_finite() {
-        return Err("reshape: size arguments must be finite".to_string());
-    }
-    let rounded = raw.round();
-    if (rounded - raw).abs() > f64::EPSILON {
-        return Err("reshape: size arguments must be integers".to_string());
-    }
-    if rounded < 0.0 {
-        return Err("reshape: size arguments must be nonnegative integers".to_string());
-    }
-    if rounded > (usize::MAX as f64) {
-        return Err("reshape: size argument is too large".to_string());
-    }
-    Ok(rounded as usize)
-}
-
-fn finalize_dimensions(tokens: Vec<DimToken>, numel: usize) -> Result<Vec<usize>, String> {
+fn finalize_dimensions(tokens: Vec<DimToken>, numel: usize) -> crate::BuiltinResult<Vec<usize>> {
     if tokens.is_empty() {
-        return Err("reshape: size vector must contain at least one element".to_string());
+        return Err(reshape_error(
+            "reshape: size vector must contain at least one element",
+        ));
     }
 
     let mut dims = Vec::with_capacity(tokens.len());
@@ -337,14 +335,16 @@ fn finalize_dimensions(tokens: Vec<DimToken>, numel: usize) -> Result<Vec<usize>
                     known_product = 0;
                 } else if known_product != 0 {
                     known_product = known_product.checked_mul(*value).ok_or_else(|| {
-                        "reshape: product of dimensions exceeds usize range".to_string()
+                        reshape_error("reshape: product of dimensions exceeds usize range")
                     })?;
                 }
                 dims.push(*value);
             }
             DimToken::Auto => {
                 if auto_index.is_some() {
-                    return Err("reshape: can only specify a single [] dimension".to_string());
+                    return Err(reshape_error(
+                        "reshape: can only specify a single [] dimension",
+                    ));
                 }
                 auto_index = Some(idx);
                 dims.push(1); // placeholder
@@ -355,35 +355,38 @@ fn finalize_dimensions(tokens: Vec<DimToken>, numel: usize) -> Result<Vec<usize>
     if let Some(auto) = auto_index {
         if known_product == 0 {
             if numel != 0 {
-                return Err(format!(
+                return Err(reshape_error(format!(
                     "reshape: product of dimensions (0) must equal numel(A) ({numel})"
-                ));
+                )));
             }
             dims[auto] = 0;
         } else if !numel.is_multiple_of(known_product) {
-            return Err(format!(
+            return Err(reshape_error(format!(
                 "reshape: product of dimensions ({}) must equal numel(A) ({numel})",
                 known_product
-            ));
+            )));
         } else {
             dims[auto] = numel / known_product;
         }
     } else if known_product != numel {
-        return Err(format!(
+        return Err(reshape_error(format!(
             "reshape: product of dimensions ({known_product}) must equal numel(A) ({numel})"
-        ));
+        )));
     }
 
     Ok(dims)
 }
 
-fn is_vector(t: &Tensor) -> bool {
-    t.shape.iter().filter(|&&dim| dim > 1).count() <= 1
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use crate::dispatcher::download_handle_async;
+    use futures::executor::block_on;
+
+    fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::reshape_builtin(value, rest))
+    }
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
 
@@ -548,7 +551,7 @@ pub(crate) mod tests {
             panic!("expected gpu tensor");
         };
         assert_eq!(reshaped.shape, vec![2, 6]);
-        let host = provider.download(&reshaped).expect("download");
+        let host = block_on(download_handle_async(provider, &reshaped)).expect("download");
         assert_eq!(host.shape, vec![2, 6]);
         assert_eq!(host.data, tensor.data);
     }
@@ -563,7 +566,7 @@ pub(crate) mod tests {
             vec![Value::from(4.0), Value::from(4.0)],
         )
         .expect_err("should fail");
-        assert!(err.contains("product of dimensions"));
+        assert!(err.to_string().contains("product of dimensions"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -577,7 +580,7 @@ pub(crate) mod tests {
             vec![Value::Tensor(empty.clone()), Value::Tensor(empty)],
         )
         .expect_err("should fail");
-        assert!(err.contains("single []"));
+        assert!(err.to_string().contains("single []"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -601,7 +604,7 @@ pub(crate) mod tests {
         let value = Value::Int(IntValue::I32(5));
         let err = reshape_builtin(value.clone(), vec![Value::from(1.0), Value::from(5.0)])
             .expect_err("should fail because numel mismatch");
-        assert!(err.contains("numel"));
+        assert!(err.to_string().contains("numel"));
         let ok = reshape_builtin(value, vec![Value::from(1.0), Value::from(1.0)])
             .expect("reshape scalar");
         assert!(matches!(ok, Value::Int(_)));
@@ -636,7 +639,7 @@ pub(crate) mod tests {
         )
         .expect_err("should fail");
         assert!(
-            err.contains("5"),
+            err.to_string().contains("5"),
             "expected product to appear in error message, got {err}"
         );
     }

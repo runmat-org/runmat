@@ -1,4 +1,6 @@
 #[cfg(feature = "wgpu")]
+use futures::executor::block_on;
+#[cfg(feature = "wgpu")]
 use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::{AccelProvider, HostTensorView};
@@ -61,7 +63,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         })
         .expect("upload b");
 
-    let _prod = provider.matmul(&a, &b).expect("matmul");
+    let _prod = block_on(provider.matmul(&a, &b)).expect("matmul");
 
     let telemetry = provider.telemetry_snapshot();
     assert!(telemetry.upload_bytes > 0, "expected upload bytes > 0");
@@ -98,7 +100,7 @@ fn telemetry_records_bind_group_cache_hits_for_chunked_matmul() {
 
     let a = provider.zeros(&[m, k]).expect("zeros a");
     let b = provider.zeros(&[k, n]).expect("zeros b");
-    let c = provider.matmul(&a, &b).expect("matmul");
+    let c = block_on(provider.matmul(&a, &b)).expect("matmul");
 
     let telemetry = provider.telemetry_snapshot();
     assert!(

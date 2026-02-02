@@ -47,31 +47,31 @@
   "examples": [
     {
       "description": "Save the entire workspace",
-      "input": "x = 42;\ny = magic(3);\nsave('session.mat');"
+      "input": "x = 42;\ny = magic(3);\nsave('session.mat')"
     },
     {
       "description": "Save selected variables only",
-      "input": "a = rand(1, 3);\nb = eye(2);\nc = \"ignore me\";\nsave('selection.mat', 'a', 'b');"
+      "input": "a = rand(1, 3);\nb = eye(2);\nc = \"ignore me\";\nsave('selection.mat', 'a', 'b')"
     },
     {
       "description": "Save struct fields as individual variables",
-      "input": "opts.output = y;\nopts.answer = x;\nsave('opts.mat', '-struct', 'opts');"
+      "input": "opts.output = y;\nopts.answer = x;\nsave('opts.mat', '-struct', 'opts')"
     },
     {
       "description": "Select variables by regular expression",
-      "input": "result_acc = 1:3;\nresult_tmp = 4:6;\nscratch = pi;\nsave('filtered.mat', '-regexp', '^result_', 'tmp$');"
+      "input": "result_acc = 1:3;\nresult_tmp = 4:6;\nscratch = pi;\nsave('filtered.mat', '-regexp', '^result_', 'tmp$')"
     },
     {
       "description": "Save multiple names using a string array",
-      "input": "names = [\"result_acc\", \"scratch\"];\nsave('mixed.mat', names);"
+      "input": "names = [\"result_acc\", \"scratch\"];\nsave('mixed.mat', names)"
     },
     {
       "description": "Save GPU arrays without manual gather",
-      "input": "G = gpuArray(magic(3));\nsave('gpu.mat', 'G');"
+      "input": "G = gpuArray(magic(3));\nsave('gpu.mat', 'G')"
     },
     {
       "description": "Error when a variable is missing",
-      "input": "save('bad.mat', 'missing');"
+      "input": "save('bad.mat', 'missing')"
     }
   ],
   "faqs": [

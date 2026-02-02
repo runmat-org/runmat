@@ -1,5 +1,6 @@
 use crate::functions::UserFunction;
 use crate::instr::{EmitLabel, Instr};
+use crate::CompileError;
 use once_cell::sync::OnceCell;
 use runmat_builtins::{self, Type};
 use runmat_hir::{HirExpr, HirExprKind, HirProgram, HirStmt};
@@ -12,11 +13,40 @@ pub struct LoopLabels {
 
 pub struct Compiler {
     pub instructions: Vec<Instr>,
+    pub instr_spans: Vec<runmat_hir::Span>,
+    pub call_arg_spans: Vec<Option<Vec<runmat_hir::Span>>>,
     pub var_count: usize,
     pub loop_stack: Vec<LoopLabels>,
     pub functions: HashMap<String, UserFunction>,
     pub imports: Vec<(Vec<String>, bool)>,
     pub var_types: Vec<Type>,
+    current_span: Option<runmat_hir::Span>,
+}
+
+struct SpanGuard {
+    compiler: *mut Compiler,
+    prev: Option<runmat_hir::Span>,
+}
+
+impl SpanGuard {
+    fn new(compiler: &mut Compiler, span: runmat_hir::Span) -> Self {
+        let prev = compiler.current_span;
+        compiler.current_span = Some(span);
+        Self {
+            compiler: compiler as *mut Compiler,
+            prev,
+        }
+    }
+}
+
+impl Drop for SpanGuard {
+    fn drop(&mut self) {
+        unsafe {
+            if let Some(compiler) = self.compiler.as_mut() {
+                compiler.current_span = self.prev;
+            }
+        }
+    }
 }
 
 struct StochasticEvolutionPlan<'a> {
@@ -136,7 +166,7 @@ impl Compiler {
     fn compile_stochastic_evolution(
         &mut self,
         plan: StochasticEvolutionPlan<'_>,
-    ) -> Result<(), String> {
+    ) -> Result<(), CompileError> {
         self.emit(Instr::LoadVar(plan.state.0));
         self.compile_expr(plan.drift)?;
         self.compile_expr(plan.scale)?;
@@ -178,14 +208,14 @@ impl Compiler {
                     return None;
                 }
                 let (z_var, randn_expr) = match &body[0] {
-                    HirStmt::Assign(var, expr, _) => (*var, expr),
+                    HirStmt::Assign(var, expr, _, _) => (*var, expr),
                     _ => return None,
                 };
                 if !is_randn_call(randn_expr) {
                     return None;
                 }
                 let (state_var, update_expr) = match &body[1] {
-                    HirStmt::Assign(var, expr, _) => (*var, expr),
+                    HirStmt::Assign(var, expr, _, _) => (*var, expr),
                     _ => return None,
                 };
                 let (drift, scale) = extract_drift_and_scale(update_expr, state_var, z_var)?;
@@ -403,19 +433,20 @@ impl Compiler {
         fn visit_stmts(stmts: &[HirStmt], max: &mut usize) {
             for s in stmts {
                 match s {
-                    HirStmt::Assign(id, expr, _) => {
+                    HirStmt::Assign(id, expr, _, _) => {
                         if id.0 + 1 > *max {
                             *max = id.0 + 1;
                         }
                         visit_expr(expr, max);
                     }
-                    HirStmt::ExprStmt(expr, _) => visit_expr(expr, max),
-                    HirStmt::Return => {}
+                    HirStmt::ExprStmt(expr, _, _) => visit_expr(expr, max),
+                    HirStmt::Return(_) => {}
                     HirStmt::If {
                         cond,
                         then_body,
                         elseif_blocks,
                         else_body,
+                        ..
                     } => {
                         visit_expr(cond, max);
                         visit_stmts(then_body, max);
@@ -427,11 +458,13 @@ impl Compiler {
                             visit_stmts(body, max);
                         }
                     }
-                    HirStmt::While { cond, body } => {
+                    HirStmt::While { cond, body, .. } => {
                         visit_expr(cond, max);
                         visit_stmts(body, max);
                     }
-                    HirStmt::For { var, expr, body } => {
+                    HirStmt::For {
+                        var, expr, body, ..
+                    } => {
                         if var.0 + 1 > *max {
                             *max = var.0 + 1;
                         }
@@ -442,6 +475,7 @@ impl Compiler {
                         expr,
                         cases,
                         otherwise,
+                        ..
                     } => {
                         visit_expr(expr, max);
                         for (c, b) in cases {
@@ -456,6 +490,7 @@ impl Compiler {
                         try_body,
                         catch_var,
                         catch_body,
+                        ..
                     } => {
                         if let Some(v) = catch_var {
                             if v.0 + 1 > *max {
@@ -465,15 +500,15 @@ impl Compiler {
                         visit_stmts(try_body, max);
                         visit_stmts(catch_body, max);
                     }
-                    HirStmt::Global(vars) | HirStmt::Persistent(vars) => {
+                    HirStmt::Global(vars, _) | HirStmt::Persistent(vars, _) => {
                         for (v, _name) in vars {
                             if v.0 + 1 > *max {
                                 *max = v.0 + 1;
                             }
                         }
                     }
-                    HirStmt::AssignLValue(_, expr, _) => visit_expr(expr, max),
-                    HirStmt::MultiAssign(vars, expr, _) => {
+                    HirStmt::AssignLValue(_, expr, _, _) => visit_expr(expr, max),
+                    HirStmt::MultiAssign(vars, expr, _, _) => {
                         for v in vars.iter().flatten() {
                             if v.0 + 1 > *max {
                                 *max = v.0 + 1;
@@ -484,8 +519,8 @@ impl Compiler {
                     HirStmt::Function { .. }
                     | HirStmt::ClassDef { .. }
                     | HirStmt::Import { .. }
-                    | HirStmt::Break
-                    | HirStmt::Continue => {}
+                    | HirStmt::Break(_)
+                    | HirStmt::Continue(_) => {}
                 }
             }
         }
@@ -497,11 +532,14 @@ impl Compiler {
         }
         Self {
             instructions: Vec::new(),
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
             var_count: max_var,
             loop_stack: Vec::new(),
             functions: HashMap::new(),
             imports: Vec::new(),
             var_types,
+            current_span: None,
         }
     }
 
@@ -530,6 +568,19 @@ impl Compiler {
         }
         let pc = self.instructions.len();
         self.instructions.push(instr);
+        let span = self.current_span.unwrap_or_default();
+        self.instr_spans.push(span);
+        self.call_arg_spans.push(None);
+        pc
+    }
+
+    fn emit_call_with_arg_spans(&mut self, instr: Instr, arg_spans: &[runmat_hir::Span]) -> usize {
+        let pc = self.emit(instr);
+        if !arg_spans.is_empty() {
+            if let Some(slot) = self.call_arg_spans.get_mut(pc) {
+                *slot = Some(arg_spans.to_vec());
+            }
+        }
         pc
     }
 
@@ -537,26 +588,35 @@ impl Compiler {
         self.instructions[idx] = instr;
     }
 
-    pub fn compile_program(&mut self, prog: &HirProgram) -> Result<(), String> {
+    fn compile_error(&self, message: impl Into<String>) -> CompileError {
+        let mut err = CompileError::new(message);
+        if let Some(span) = self.current_span {
+            err = err.with_span(span);
+        }
+        err
+    }
+
+    pub fn compile_program(&mut self, prog: &HirProgram) -> Result<(), CompileError> {
         // Validate imports early for duplicate/specific-name ambiguities
         runmat_hir::validate_imports(prog)?;
         // Validate class definitions for attribute correctness and name conflicts
         runmat_hir::validate_classdefs(prog)?;
         // Pre-collect imports (both wildcard and specific) for name resolution
         for stmt in &prog.body {
-            if let HirStmt::Import { path, wildcard } = stmt {
+            let _span_guard = SpanGuard::new(self, stmt.span());
+            if let HirStmt::Import { path, wildcard, .. } = stmt {
                 self.imports.push((path.clone(), *wildcard));
                 self.emit(Instr::RegisterImport {
                     path: path.clone(),
                     wildcard: *wildcard,
                 });
             }
-            if let HirStmt::Global(vars) = stmt {
+            if let HirStmt::Global(vars, _) = stmt {
                 let ids: Vec<usize> = vars.iter().map(|(v, _n)| v.0).collect();
                 let names: Vec<String> = vars.iter().map(|(_v, n)| n.clone()).collect();
                 self.emit(Instr::DeclareGlobalNamed(ids, names));
             }
-            if let HirStmt::Persistent(vars) = stmt {
+            if let HirStmt::Persistent(vars, _) = stmt {
                 let ids: Vec<usize> = vars.iter().map(|(v, _n)| v.0).collect();
                 let names: Vec<String> = vars.iter().map(|(_v, n)| n.clone()).collect();
                 self.emit(Instr::DeclarePersistentNamed(ids, names));
@@ -565,7 +625,7 @@ impl Compiler {
         for stmt in &prog.body {
             if !matches!(
                 stmt,
-                HirStmt::Import { .. } | HirStmt::Global(_) | HirStmt::Persistent(_)
+                HirStmt::Import { .. } | HirStmt::Global(_, _) | HirStmt::Persistent(_, _)
             ) {
                 self.compile_stmt(stmt)?;
             }
@@ -573,9 +633,10 @@ impl Compiler {
         Ok(())
     }
 
-    pub fn compile_stmt(&mut self, stmt: &HirStmt) -> Result<(), String> {
+    pub fn compile_stmt(&mut self, stmt: &HirStmt) -> Result<(), CompileError> {
+        let _span_guard = SpanGuard::new(self, stmt.span());
         match stmt {
-            HirStmt::ExprStmt(expr, suppressed) => {
+            HirStmt::ExprStmt(expr, suppressed, _) => {
                 self.compile_expr(expr)?;
                 if !suppressed && expr_supports_inline_emit(expr) {
                     let label = label_for_expr(expr);
@@ -583,7 +644,7 @@ impl Compiler {
                 }
                 self.emit(Instr::Pop);
             }
-            HirStmt::Assign(id, expr, suppressed) => {
+            HirStmt::Assign(id, expr, suppressed, _) => {
                 self.compile_expr(expr)?;
                 self.emit(Instr::StoreVar(id.0));
                 if !suppressed {
@@ -598,6 +659,7 @@ impl Compiler {
                 then_body,
                 elseif_blocks,
                 else_body,
+                ..
             } => {
                 self.compile_expr(cond)?;
                 let mut last_jump = self.emit(Instr::JumpIfFalse(usize::MAX));
@@ -626,7 +688,7 @@ impl Compiler {
                     self.patch(j, Instr::Jump(end));
                 }
             }
-            HirStmt::While { cond, body } => {
+            HirStmt::While { cond, body, .. } => {
                 let start = self.instructions.len();
                 self.compile_expr(cond)?;
                 let jump_end = self.emit(Instr::JumpIfFalse(usize::MAX));
@@ -649,7 +711,9 @@ impl Compiler {
                     self.patch(j, Instr::Jump(end));
                 }
             }
-            HirStmt::For { var, expr, body } => {
+            HirStmt::For {
+                var, expr, body, ..
+            } => {
                 if let Some(plan) = self.detect_stochastic_evolution(expr, body) {
                     self.compile_stochastic_evolution(plan)?;
                     return Ok(());
@@ -731,28 +795,28 @@ impl Compiler {
                         self.patch(j, Instr::Jump(end_pc));
                     }
                 } else {
-                    return Err("for loop expects range".into());
+                    return Err(self.compile_error("for loop expects range"));
                 }
             }
-            HirStmt::Break => {
+            HirStmt::Break(_) => {
+                if self.loop_stack.is_empty() {
+                    return Err(self.compile_error("break outside loop"));
+                }
+                let idx = self.emit(Instr::Jump(usize::MAX));
                 if let Some(labels) = self.loop_stack.last_mut() {
-                    let idx = self.instructions.len();
-                    self.instructions.push(Instr::Jump(usize::MAX));
                     labels.break_jumps.push(idx);
-                } else {
-                    return Err("break outside loop".into());
                 }
             }
-            HirStmt::Continue => {
+            HirStmt::Continue(_) => {
+                if self.loop_stack.is_empty() {
+                    return Err(self.compile_error("continue outside loop"));
+                }
+                let idx = self.emit(Instr::Jump(usize::MAX));
                 if let Some(labels) = self.loop_stack.last_mut() {
-                    let idx = self.instructions.len();
-                    self.instructions.push(Instr::Jump(usize::MAX));
                     labels.continue_jumps.push(idx);
-                } else {
-                    return Err("continue outside loop".into());
                 }
             }
-            HirStmt::Return => {
+            HirStmt::Return(_) => {
                 self.emit(Instr::Return);
             }
             HirStmt::Function {
@@ -762,6 +826,7 @@ impl Compiler {
                 body,
                 has_varargin,
                 has_varargout,
+                ..
             } => {
                 let mut max_local_var = 0;
                 fn visit_expr_for_vars(expr: &HirExpr, max: &mut usize) {
@@ -807,8 +872,8 @@ impl Compiler {
                 }
                 fn visit_stmt_for_vars(stmt: &HirStmt, max: &mut usize) {
                     match stmt {
-                        HirStmt::ExprStmt(expr, _) => visit_expr_for_vars(expr, max),
-                        HirStmt::Assign(id, expr, _) => {
+                        HirStmt::ExprStmt(expr, _, _) => visit_expr_for_vars(expr, max),
+                        HirStmt::Assign(id, expr, _, _) => {
                             if id.0 + 1 > *max {
                                 *max = id.0 + 1;
                             }
@@ -819,6 +884,7 @@ impl Compiler {
                             then_body,
                             elseif_blocks,
                             else_body,
+                            ..
                         } => {
                             visit_expr_for_vars(cond, max);
                             for stmt in then_body {
@@ -836,13 +902,15 @@ impl Compiler {
                                 }
                             }
                         }
-                        HirStmt::While { cond, body } => {
+                        HirStmt::While { cond, body, .. } => {
                             visit_expr_for_vars(cond, max);
                             for stmt in body {
                                 visit_stmt_for_vars(stmt, max);
                             }
                         }
-                        HirStmt::For { var, expr, body } => {
+                        HirStmt::For {
+                            var, expr, body, ..
+                        } => {
                             if var.0 + 1 > *max {
                                 *max = var.0 + 1;
                             }
@@ -851,11 +919,12 @@ impl Compiler {
                                 visit_stmt_for_vars(stmt, max);
                             }
                         }
-                        HirStmt::Break | HirStmt::Continue | HirStmt::Return => {}
+                        HirStmt::Break(_) | HirStmt::Continue(_) | HirStmt::Return(_) => {}
                         HirStmt::Switch {
                             expr,
                             cases,
                             otherwise,
+                            ..
                         } => {
                             visit_expr_for_vars(expr, max);
                             for (c, b) in cases {
@@ -874,6 +943,7 @@ impl Compiler {
                             try_body,
                             catch_var,
                             catch_body,
+                            ..
                         } => {
                             if let Some(v) = catch_var {
                                 if v.0 + 1 > *max {
@@ -887,15 +957,15 @@ impl Compiler {
                                 visit_stmt_for_vars(s, max);
                             }
                         }
-                        HirStmt::Global(vars) | HirStmt::Persistent(vars) => {
+                        HirStmt::Global(vars, _) | HirStmt::Persistent(vars, _) => {
                             for (v, _name) in vars {
                                 if v.0 + 1 > *max {
                                     *max = v.0 + 1;
                                 }
                             }
                         }
-                        HirStmt::AssignLValue(_, expr, _) => visit_expr_for_vars(expr, max),
-                        HirStmt::MultiAssign(vars, expr, _) => {
+                        HirStmt::AssignLValue(_, expr, _, _) => visit_expr_for_vars(expr, max),
+                        HirStmt::MultiAssign(vars, expr, _, _) => {
                             for v in vars.iter().flatten() {
                                 if v.0 + 1 > *max {
                                     *max = v.0 + 1;
@@ -934,6 +1004,7 @@ impl Compiler {
                     has_varargin: *has_varargin,
                     has_varargout: *has_varargout,
                     var_types: func_var_types,
+                    source_id: None,
                 };
                 self.functions.insert(name.clone(), user_func);
             }
@@ -941,6 +1012,7 @@ impl Compiler {
                 expr,
                 cases,
                 otherwise,
+                ..
             } => {
                 let temp_id = self.alloc_temp();
                 self.compile_expr(expr)?;
@@ -979,6 +1051,7 @@ impl Compiler {
                 try_body,
                 catch_var,
                 catch_body,
+                ..
             } => {
                 // Reserve slot for EnterTry with placeholder
                 let enter_idx = self.emit(Instr::EnterTry(usize::MAX, catch_var.map(|v| v.0)));
@@ -1000,7 +1073,7 @@ impl Compiler {
                 let end_pc = self.instructions.len();
                 self.patch(jmp_end, Instr::Jump(end_pc));
             }
-            HirStmt::AssignLValue(lv, rhs, _) => {
+            HirStmt::AssignLValue(lv, rhs, _, _) => {
                 match lv {
                     runmat_hir::HirLValue::Index(base, indices) => {
                         if let runmat_hir::HirExprKind::Var(var_id) = base.kind {
@@ -1017,7 +1090,12 @@ impl Compiler {
                                 matches!(
                                     e.kind,
                                     HirExprKind::Range(_, _, _) | HirExprKind::Tensor(_)
-                                ) || matches!(e.ty, runmat_hir::Type::Tensor { .. })
+                                ) || matches!(
+                                    e.ty,
+                                    runmat_hir::Type::Tensor { .. }
+                                        | runmat_hir::Type::Bool
+                                        | runmat_hir::Type::Logical
+                                )
                             });
                             if has_colon || has_end || has_vector || indices.len() > 2 {
                                 let mut colon_mask: u32 = 0;
@@ -1099,16 +1177,38 @@ impl Compiler {
                                                             runmat_hir::HirExprKind::End
                                                         )
                                                     {
-                                                        // Emit StoreSlice1DRangeEnd: base is already on stack
+                                                        // Emit StoreSlice1DRangeEnd: base and range params evaluated before RHS
                                                         self.compile_expr(start)?;
+                                                        let mut lvalue_count = 2usize;
+                                                        let has_step = step.is_some();
                                                         if let Some(st) = step {
                                                             self.compile_expr(st)?;
-                                                            self.compile_expr(rhs)?;
-                                                            self.emit(Instr::StoreSlice1DRangeEnd { has_step: true, offset: match right.kind { runmat_hir::HirExprKind::Number(ref s) => s.parse::<i64>().unwrap_or(0), _ => 0 } });
-                                                        } else {
-                                                            self.compile_expr(rhs)?;
-                                                            self.emit(Instr::StoreSlice1DRangeEnd { has_step: false, offset: match right.kind { runmat_hir::HirExprKind::Number(ref s) => s.parse::<i64>().unwrap_or(0), _ => 0 } });
+                                                            lvalue_count += 1;
                                                         }
+                                                        let mut lvalue_temps =
+                                                            Vec::with_capacity(lvalue_count);
+                                                        for _ in 0..lvalue_count {
+                                                            let temp = self.alloc_temp();
+                                                            self.emit(Instr::StoreVar(temp));
+                                                            lvalue_temps.push(temp);
+                                                        }
+                                                        lvalue_temps.reverse();
+                                                        self.compile_expr(rhs)?;
+                                                        let rhs_temp = self.alloc_temp();
+                                                        self.emit(Instr::StoreVar(rhs_temp));
+                                                        for temp in &lvalue_temps {
+                                                            self.emit(Instr::LoadVar(*temp));
+                                                        }
+                                                        self.emit(Instr::LoadVar(rhs_temp));
+                                                        self.emit(Instr::StoreSlice1DRangeEnd {
+                                                            has_step,
+                                                            offset: match right.kind {
+                                                                runmat_hir::HirExprKind::Number(
+                                                                    ref s,
+                                                                ) => s.parse::<i64>().unwrap_or(0),
+                                                                _ => 0,
+                                                            },
+                                                        });
                                                         lowered_range_end = true;
                                                         break;
                                                     }
@@ -1187,7 +1287,25 @@ impl Compiler {
                                                 }
                                             }
                                         }
+                                        let range_value_count = range_has_step
+                                            .iter()
+                                            .map(|has_step| if *has_step { 2 } else { 1 })
+                                            .sum::<usize>();
+                                        let lvalue_count = 1 + numeric_count + range_value_count;
+                                        let mut lvalue_temps = Vec::with_capacity(lvalue_count);
+                                        for _ in 0..lvalue_count {
+                                            let temp = self.alloc_temp();
+                                            self.emit(Instr::StoreVar(temp));
+                                            lvalue_temps.push(temp);
+                                        }
+                                        lvalue_temps.reverse();
                                         self.compile_expr(rhs)?;
+                                        let rhs_temp = self.alloc_temp();
+                                        self.emit(Instr::StoreVar(rhs_temp));
+                                        for temp in &lvalue_temps {
+                                            self.emit(Instr::LoadVar(*temp));
+                                        }
+                                        self.emit(Instr::LoadVar(rhs_temp));
                                         self.emit(Instr::StoreRangeEnd {
                                             dims: indices.len(),
                                             numeric_count,
@@ -1268,6 +1386,14 @@ impl Compiler {
                                                 _ => None,
                                             }
                                         }
+                                        let lvalue_count = 1 + numeric_count;
+                                        let mut lvalue_temps = Vec::with_capacity(lvalue_count);
+                                        for _ in 0..lvalue_count {
+                                            let temp = self.alloc_temp();
+                                            self.emit(Instr::StoreVar(temp));
+                                            lvalue_temps.push(temp);
+                                        }
+                                        lvalue_temps.reverse();
                                         let mut packed = false;
                                         if let HirExprKind::FuncCall(fname, fargs) = &rhs.kind {
                                             if self.functions.contains_key(fname)
@@ -1333,6 +1459,12 @@ impl Compiler {
                                         if !packed {
                                             self.compile_expr(rhs)?;
                                         }
+                                        let rhs_temp = self.alloc_temp();
+                                        self.emit(Instr::StoreVar(rhs_temp));
+                                        for temp in &lvalue_temps {
+                                            self.emit(Instr::LoadVar(*temp));
+                                        }
+                                        self.emit(Instr::LoadVar(rhs_temp));
                                         if end_offsets.is_empty() {
                                             self.emit(Instr::StoreSlice(
                                                 indices.len(),
@@ -1418,7 +1550,21 @@ impl Compiler {
                                         numeric_count += 1;
                                     }
                                 }
+                                let lvalue_count = 1 + numeric_count;
+                                let mut lvalue_temps = Vec::with_capacity(lvalue_count);
+                                for _ in 0..lvalue_count {
+                                    let temp = self.alloc_temp();
+                                    self.emit(Instr::StoreVar(temp));
+                                    lvalue_temps.push(temp);
+                                }
+                                lvalue_temps.reverse();
                                 self.compile_expr(rhs)?;
+                                let rhs_temp = self.alloc_temp();
+                                self.emit(Instr::StoreVar(rhs_temp));
+                                for temp in &lvalue_temps {
+                                    self.emit(Instr::LoadVar(*temp));
+                                }
+                                self.emit(Instr::LoadVar(rhs_temp));
                                 self.emit(Instr::StoreSlice(
                                     indices.len(),
                                     numeric_count,
@@ -1441,10 +1587,9 @@ impl Compiler {
                                 self.emit(Instr::StoreVar(root_var.0));
                             }
                         } else {
-                            return Err(
-                                "unsupported lvalue target (index on non-variable/non-member)"
-                                    .into(),
-                            );
+                            return Err(self.compile_error(
+                                "unsupported lvalue target (index on non-variable/non-member)",
+                            ));
                         }
                     }
                     runmat_hir::HirLValue::IndexCell(base, indices) => {
@@ -1512,20 +1657,20 @@ impl Compiler {
                             self.emit(Instr::StoreMemberDynamic);
                         }
                     }
-                    _ => return Err("unsupported lvalue target".into()),
+                    _ => return Err(self.compile_error("unsupported lvalue target")),
                 }
             }
-            HirStmt::Global(vars) => {
+            HirStmt::Global(vars, _) => {
                 let ids: Vec<usize> = vars.iter().map(|(v, _n)| v.0).collect();
                 let names: Vec<String> = vars.iter().map(|(_v, n)| n.clone()).collect();
                 self.emit(Instr::DeclareGlobalNamed(ids, names));
             }
-            HirStmt::Persistent(vars) => {
+            HirStmt::Persistent(vars, _) => {
                 let ids: Vec<usize> = vars.iter().map(|(v, _n)| v.0).collect();
                 let names: Vec<String> = vars.iter().map(|(_v, n)| n.clone()).collect();
                 self.emit(Instr::DeclarePersistentNamed(ids, names));
             }
-            HirStmt::Import { path, wildcard } => {
+            HirStmt::Import { path, wildcard, .. } => {
                 self.emit(Instr::RegisterImport {
                     path: path.clone(),
                     wildcard: *wildcard,
@@ -1535,6 +1680,7 @@ impl Compiler {
                 name,
                 super_class,
                 members,
+                ..
             } => {
                 // Synthesize a minimal RegisterClass instruction by extracting property names and method names
                 let mut props: Vec<(String, bool, String, String)> = Vec::new();
@@ -1582,20 +1728,21 @@ impl Compiler {
                     methods,
                 });
             }
-            HirStmt::MultiAssign(vars, expr, suppressed) => {
+            HirStmt::MultiAssign(vars, expr, suppressed, _) => {
                 // Compile RHS once; if function call or value, arrange to extract multiple
                 match &expr.kind {
                     HirExprKind::FuncCall(name, args) => {
+                        let call_arg_spans: Vec<runmat_hir::Span> =
+                            args.iter().map(|a| a.span).collect();
                         if self.functions.contains_key(name) {
                             for arg in args {
                                 self.compile_expr(arg)?;
                             }
                             // Emit multi-call to request N outputs
-                            self.emit(Instr::CallFunctionMulti(
-                                name.clone(),
-                                args.len(),
-                                vars.len(),
-                            ));
+                            self.emit_call_with_arg_spans(
+                                Instr::CallFunctionMulti(name.clone(), args.len(), vars.len()),
+                                &call_arg_spans,
+                            );
                             // Store outputs in order
                             for (_i, var) in vars.iter().enumerate().rev() {
                                 if let Some(v) = var {
@@ -1609,11 +1756,10 @@ impl Compiler {
                             for arg in args {
                                 self.compile_expr(arg)?;
                             }
-                            self.emit(Instr::CallBuiltinMulti(
-                                name.clone(),
-                                args.len(),
-                                vars.len(),
-                            ));
+                            self.emit_call_with_arg_spans(
+                                Instr::CallBuiltinMulti(name.clone(), args.len(), vars.len()),
+                                &call_arg_spans,
+                            );
                             for (_i, var) in vars.iter().enumerate().rev() {
                                 if let Some(v) = var {
                                     self.emit(Instr::StoreVar(v.0));
@@ -1667,7 +1813,8 @@ impl Compiler {
         Ok(())
     }
 
-    pub fn compile_expr(&mut self, expr: &HirExpr) -> Result<(), String> {
+    pub fn compile_expr(&mut self, expr: &HirExpr) -> Result<(), CompileError> {
+        let _span_guard = SpanGuard::new(self, expr.span);
         match &expr.kind {
             HirExprKind::Number(n) => {
                 let val: f64 = n.parse().map_err(|_| "invalid number")?;
@@ -1710,7 +1857,9 @@ impl Compiler {
                             self.emit(Instr::LoadBool(*b));
                         }
                         _ => {
-                            return Err(format!("Constant {name} is not a number or boolean"));
+                            return Err(self.compile_error(format!(
+                                "Constant {name} is not a number or boolean"
+                            )));
                         }
                     }
                 } else {
@@ -1737,17 +1886,19 @@ impl Compiler {
                         }
                     }
                     if classes.len() > 1 {
-                        return Err(format!(
+                        return Err(self.compile_error(format!(
                             "ambiguous unqualified static property '{}' via Class.* imports: {}",
                             name,
                             classes.join(", ")
-                        ));
+                        )));
                     }
                     if classes.len() == 1 {
                         self.emit(Instr::LoadStaticProperty(classes.remove(0), name.clone()));
                         return Ok(());
                     }
-                    return Err(format!("Unknown constant or static property: {name}"));
+                    return Err(
+                        self.compile_error(format!("Unknown constant or static property: {name}"))
+                    );
                 }
             }
             HirExprKind::Unary(op, e) => {
@@ -1873,7 +2024,7 @@ impl Compiler {
                                 self.emit(Instr::GreaterEqual);
                             }
                             BinOp::Colon => {
-                                return Err("colon operator not supported".into());
+                                return Err(self.compile_error("colon operator not supported"));
                             }
                             _ => unreachable!(),
                         }
@@ -1892,10 +2043,11 @@ impl Compiler {
                 }
             }
             HirExprKind::FuncCall(name, args) => {
+                let call_arg_spans: Vec<runmat_hir::Span> = args.iter().map(|a| a.span).collect();
                 // Special-case: feval(f, a1, a2, ...) compiles to VM feval to access user functions/closures
                 if name == "feval" {
                     if args.is_empty() {
-                        return Err("feval: missing function argument".into());
+                        return Err(self.compile_error("feval: missing function argument"));
                     }
                     // Push function value first
                     self.compile_expr(&args[0])?;
@@ -1936,12 +2088,18 @@ impl Compiler {
                                 self.compile_expr(arg)?;
                             }
                         }
-                        self.emit(Instr::CallFevalExpandMulti(specs));
+                        self.emit_call_with_arg_spans(
+                            Instr::CallFevalExpandMulti(specs),
+                            &call_arg_spans,
+                        );
                     } else {
                         for arg in rest {
                             self.compile_expr(arg)?;
                         }
-                        self.emit(Instr::CallFeval(rest.len()));
+                        self.emit_call_with_arg_spans(
+                            Instr::CallFeval(rest.len()),
+                            &call_arg_spans,
+                        );
                     }
                     return Ok(());
                 }
@@ -1983,12 +2141,18 @@ impl Compiler {
                                 self.compile_expr(arg)?;
                             }
                         }
-                        self.emit(Instr::CallFunctionExpandMulti(name.clone(), specs));
+                        self.emit_call_with_arg_spans(
+                            Instr::CallFunctionExpandMulti(name.clone(), specs),
+                            &call_arg_spans,
+                        );
                     } else {
                         for arg in args {
                             self.compile_expr(arg)?;
                         }
-                        self.emit(Instr::CallFunction(name.clone(), args.len()));
+                        self.emit_call_with_arg_spans(
+                            Instr::CallFunction(name.clone(), args.len()),
+                            &call_arg_spans,
+                        );
                     }
                 } else {
                     // Existing import-based function/builtin resolution, extended with static method via Class.*
@@ -2022,11 +2186,11 @@ impl Compiler {
                             }
                         }
                         if specific_candidates.len() > 1 {
-                            return Err(format!(
+                            return Err(self.compile_error(format!(
                                 "ambiguous unqualified reference '{}' via imports: {}",
                                 name,
                                 specific_candidates.join(", ")
-                            ));
+                            )));
                         }
                         if specific_candidates.len() == 1 {
                             resolved = specific_candidates.remove(0);
@@ -2073,11 +2237,11 @@ impl Compiler {
                                 }
                             }
                             if wildcard_candidates.len() > 1 {
-                                return Err(format!(
+                                return Err(self.compile_error(format!(
                                     "ambiguous unqualified reference '{}' via wildcard imports: {}",
                                     name,
                                     wildcard_candidates.join(", ")
-                                ));
+                                )));
                             }
                             if wildcard_candidates.len() == 1 {
                                 resolved = wildcard_candidates.remove(0);
@@ -2120,7 +2284,10 @@ impl Compiler {
                                     self.compile_expr(arg)?;
                                 }
                             }
-                            self.emit(Instr::CallFunctionExpandMulti(resolved.clone(), specs));
+                            self.emit_call_with_arg_spans(
+                                Instr::CallFunctionExpandMulti(resolved.clone(), specs),
+                                &call_arg_spans,
+                            );
                             return Ok(());
                         } else {
                             // Flatten inner user-function returns into argument list for the call
@@ -2148,7 +2315,10 @@ impl Compiler {
                                 self.compile_expr(arg)?;
                                 total_argc += 1;
                             }
-                            self.emit(Instr::CallFunction(resolved.clone(), total_argc));
+                            self.emit_call_with_arg_spans(
+                                Instr::CallFunction(resolved.clone(), total_argc),
+                                &call_arg_spans,
+                            );
                             return Ok(());
                         }
                     }
@@ -2162,7 +2332,10 @@ impl Compiler {
                         for arg in args {
                             self.compile_expr(arg)?;
                         }
-                        self.emit(Instr::CallStaticMethod(cls, method, args.len()));
+                        self.emit_call_with_arg_spans(
+                            Instr::CallStaticMethod(cls, method, args.len()),
+                            &call_arg_spans,
+                        );
                         return Ok(());
                     }
                     // If multiple static candidates and no function resolved, report ambiguity
@@ -2171,7 +2344,7 @@ impl Compiler {
                         .any(|b| b.name == resolved)
                         && static_candidates.len() > 1
                     {
-                        return Err(format!(
+                        return Err(self.compile_error(format!(
                             "ambiguous unqualified static method '{}' via Class.* imports: {}",
                             name,
                             static_candidates
@@ -2179,7 +2352,7 @@ impl Compiler {
                                 .map(|(c, _)| c.clone())
                                 .collect::<Vec<_>>()
                                 .join(", ")
-                        ));
+                        )));
                     }
                     // Existing propagation path and builtin call
                     if !has_any_expand {
@@ -2221,7 +2394,10 @@ impl Compiler {
                                 self.compile_expr(arg)?;
                                 total_argc += 1;
                             }
-                            self.emit(Instr::CallBuiltin(resolved, total_argc));
+                            self.emit_call_with_arg_spans(
+                                Instr::CallBuiltin(resolved, total_argc),
+                                &call_arg_spans,
+                            );
                             return Ok(());
                         }
                     }
@@ -2258,12 +2434,18 @@ impl Compiler {
                                 self.compile_expr(arg)?;
                             }
                         }
-                        self.emit(Instr::CallBuiltinExpandMulti(resolved, specs));
+                        self.emit_call_with_arg_spans(
+                            Instr::CallBuiltinExpandMulti(resolved, specs),
+                            &call_arg_spans,
+                        );
                     } else {
                         for arg in args {
                             self.compile_expr(arg)?;
                         }
-                        self.emit(Instr::CallBuiltin(resolved, args.len()));
+                        self.emit_call_with_arg_spans(
+                            Instr::CallBuiltin(resolved, args.len()),
+                            &call_arg_spans,
+                        );
                     }
                     return Ok(());
                 }
@@ -2347,7 +2529,16 @@ impl Compiler {
                 let has_end = indices.iter().any(|e| matches!(e.kind, HirExprKind::End));
                 let has_vector = indices.iter().any(|e| {
                     matches!(e.kind, HirExprKind::Range(_, _, _) | HirExprKind::Tensor(_))
-                        || matches!(e.ty, runmat_hir::Type::Tensor { .. })
+                        || matches!(
+                            e.ty,
+                            runmat_hir::Type::Tensor { .. }
+                                | runmat_hir::Type::Bool
+                                | runmat_hir::Type::Logical
+                        )
+                        || !matches!(
+                            e.kind,
+                            HirExprKind::Number(_) | HirExprKind::Colon | HirExprKind::End
+                        )
                 });
                 // General case: any-dimension ranges with end arithmetic (e.g., A(:,2:2:end-1,...))
                 // We lower into IndexRangeEnd: push base, then per-range start[, step] in increasing dimension order,
@@ -2621,7 +2812,12 @@ impl Compiler {
                     var_map.insert(*old, runmat_hir::VarId(capture_count + j));
                 }
                 let remapped_body = runmat_hir::remapping::remap_expr(body, &var_map);
-                let func_body = vec![runmat_hir::HirStmt::Assign(output_id, remapped_body, true)];
+                let func_body = vec![runmat_hir::HirStmt::Assign(
+                    output_id,
+                    remapped_body,
+                    true,
+                    runmat_hir::Span::default(),
+                )];
 
                 // Synthesize function name and register
                 let synthesized = format!("__anon_{}", self.functions.len());
@@ -2634,6 +2830,7 @@ impl Compiler {
                     has_varargin: false,
                     has_varargout: false,
                     var_types: vec![Type::Unknown; capture_count + params.len() + 1],
+                    source_id: None,
                 };
                 self.functions.insert(synthesized.clone(), user_func);
 

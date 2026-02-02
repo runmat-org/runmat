@@ -47,17 +47,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::argsort"
 )]
-fn argsort_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let evaluation = sort::evaluate(value, &rest)?;
+async fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let evaluation = sort::evaluate(value, &rest).await?;
     Ok(evaluation.indices_value())
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::sort;
-    use super::*;
+    use futures::executor::block_on;
+
+    fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::argsort_builtin(value, rest))
+    }
     use crate::builtins::common::test_support;
     use runmat_builtins::{ComplexTensor, IntValue, Tensor, Value};
+
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -92,7 +100,7 @@ pub(crate) mod tests {
         let args = vec![Value::Int(IntValue::I32(2))];
         let indices =
             argsort_builtin(Value::Tensor(tensor.clone()), args.clone()).expect("argsort");
-        let expected = sort::evaluate(Value::Tensor(tensor), &args)
+        let expected = futures::executor::block_on(sort::evaluate(Value::Tensor(tensor), &args))
             .expect("sort evaluate")
             .indices_value();
         assert_eq!(indices, expected);
@@ -136,7 +144,7 @@ pub(crate) mod tests {
         ];
         let indices =
             argsort_builtin(Value::Tensor(tensor.clone()), args.clone()).expect("argsort");
-        let expected = sort::evaluate(Value::Tensor(tensor), &args)
+        let expected = futures::executor::block_on(sort::evaluate(Value::Tensor(tensor), &args))
             .expect("sort evaluate")
             .indices_value();
         assert_eq!(indices, expected);
@@ -158,8 +166,9 @@ pub(crate) mod tests {
     #[test]
     fn argsort_dimension_zero_errors() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let err =
-            argsort_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(0))]).unwrap_err();
+        let err = error_message(
+            argsort_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(0))]).unwrap_err(),
+        );
         assert!(
             err.contains("dimension must be >= 1"),
             "unexpected error: {err}"
@@ -170,11 +179,13 @@ pub(crate) mod tests {
     #[test]
     fn argsort_invalid_argument_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = argsort_builtin(
-            Value::Tensor(tensor),
-            vec![Value::from("MissingPlacement"), Value::from("auto")],
-        )
-        .unwrap_err();
+        let err = error_message(
+            argsort_builtin(
+                Value::Tensor(tensor),
+                vec![Value::from("MissingPlacement"), Value::from("auto")],
+            )
+            .unwrap_err(),
+        );
         assert!(
             err.contains("sort: the 'MissingPlacement' option is not supported"),
             "{err}"
@@ -185,11 +196,13 @@ pub(crate) mod tests {
     #[test]
     fn argsort_invalid_comparison_method_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = argsort_builtin(
-            Value::Tensor(tensor),
-            vec![Value::from("ComparisonMethod"), Value::from("unknown")],
-        )
-        .unwrap_err();
+        let err = error_message(
+            argsort_builtin(
+                Value::Tensor(tensor),
+                vec![Value::from("ComparisonMethod"), Value::from("unknown")],
+            )
+            .unwrap_err(),
+        );
         assert!(
             err.contains("unsupported ComparisonMethod"),
             "unexpected error: {err}"
@@ -200,14 +213,16 @@ pub(crate) mod tests {
     #[test]
     fn argsort_invalid_comparison_method_value_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = argsort_builtin(
-            Value::Tensor(tensor),
-            vec![
-                Value::from("ComparisonMethod"),
-                Value::Int(IntValue::I32(1)),
-            ],
-        )
-        .unwrap_err();
+        let err = error_message(
+            argsort_builtin(
+                Value::Tensor(tensor),
+                vec![
+                    Value::from("ComparisonMethod"),
+                    Value::Int(IntValue::I32(1)),
+                ],
+            )
+            .unwrap_err(),
+        );
         assert!(
             err.contains("requires a string value"),
             "unexpected error: {err}"

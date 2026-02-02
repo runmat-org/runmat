@@ -4,6 +4,8 @@
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
+use super::plotting_error;
+
 fn as_lower_str(val: &Value) -> Option<String> {
     match val {
         Value::String(s) => Some(s.to_ascii_lowercase()),
@@ -27,9 +29,9 @@ fn accepts_arg(arg: Option<&Value>, allowed: &[&str]) -> bool {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
-pub fn grid_builtin(args: Vec<Value>) -> Result<String, String> {
+pub fn grid_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     if !accepts_arg(args.first(), &["on", "off"]) {
-        return Err("grid: expected 'on' or 'off'".into());
+        return Err(plotting_error("grid", "grid: expected 'on' or 'off'"));
     }
     Ok("grid toggled".into())
 }
@@ -42,9 +44,9 @@ pub fn grid_builtin(args: Vec<Value>) -> Result<String, String> {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
-pub fn box_builtin(args: Vec<Value>) -> Result<String, String> {
+pub fn box_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     if !accepts_arg(args.first(), &["on", "off"]) {
-        return Err("box: expected 'on' or 'off'".into());
+        return Err(plotting_error("box", "box: expected 'on' or 'off'"));
     }
     Ok("box toggled".into())
 }
@@ -57,7 +59,7 @@ pub fn box_builtin(args: Vec<Value>) -> Result<String, String> {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
-pub fn axis_builtin(args: Vec<Value>) -> Result<String, String> {
+pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     // Accept common command-style args; ignore for now.
     let ok = args.first().is_none_or(|v| {
         matches!(
@@ -66,7 +68,7 @@ pub fn axis_builtin(args: Vec<Value>) -> Result<String, String> {
         )
     });
     if !ok {
-        return Err("axis: unsupported argument".into());
+        return Err(plotting_error("axis", "axis: unsupported argument"));
     }
     Ok("axis updated".into())
 }
@@ -79,9 +81,12 @@ pub fn axis_builtin(args: Vec<Value>) -> Result<String, String> {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
-pub fn shading_builtin(args: Vec<Value>) -> Result<String, String> {
+pub fn shading_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     if !accepts_arg(args.first(), &["flat", "interp", "faceted"]) {
-        return Err("shading: expected 'flat', 'interp', or 'faceted'".into());
+        return Err(plotting_error(
+            "shading",
+            "shading: expected 'flat', 'interp', or 'faceted'",
+        ));
     }
     Ok("shading set".into())
 }
@@ -94,7 +99,7 @@ pub fn shading_builtin(args: Vec<Value>) -> Result<String, String> {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
-pub fn colormap_builtin(_args: Vec<Value>) -> Result<String, String> {
+pub fn colormap_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
     Ok("colormap set".into())
 }
 
@@ -106,7 +111,7 @@ pub fn colormap_builtin(_args: Vec<Value>) -> Result<String, String> {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
-pub fn colorbar_builtin(_args: Vec<Value>) -> Result<String, String> {
+pub fn colorbar_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
     Ok("colorbar toggled".into())
 }
 
@@ -118,7 +123,7 @@ pub fn colorbar_builtin(_args: Vec<Value>) -> Result<String, String> {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
-pub fn figure_builtin(_args: Vec<Value>) -> Result<String, String> {
+pub fn figure_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
     Ok("figure selected".into())
 }
 
@@ -130,7 +135,7 @@ pub fn figure_builtin(_args: Vec<Value>) -> Result<String, String> {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
-pub fn subplot_builtin(_args: Vec<Value>) -> Result<String, String> {
+pub fn subplot_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
     Ok("subplot selected".into())
 }
 
@@ -142,7 +147,7 @@ pub fn subplot_builtin(_args: Vec<Value>) -> Result<String, String> {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
-pub fn clf_builtin(_args: Vec<Value>) -> Result<String, String> {
+pub fn clf_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
     Ok("figure cleared".into())
 }
 
@@ -154,7 +159,7 @@ pub fn clf_builtin(_args: Vec<Value>) -> Result<String, String> {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
-pub fn cla_builtin(_args: Vec<Value>) -> Result<String, String> {
+pub fn cla_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
     Ok("axes cleared".into())
 }
 
@@ -166,6 +171,6 @@ pub fn cla_builtin(_args: Vec<Value>) -> Result<String, String> {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
-pub fn close_builtin(_args: Vec<Value>) -> Result<String, String> {
+pub fn close_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
     Ok("figure closed".into())
 }

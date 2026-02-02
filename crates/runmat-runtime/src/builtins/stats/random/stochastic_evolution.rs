@@ -2,21 +2,24 @@
 //! unavailable.
 
 use crate::builtins::common::random;
+use crate::BuiltinResult;
 use runmat_builtins::Tensor;
+
+const NAME: &str = "stochastic_evolution";
 
 pub fn stochastic_evolution_host(
     tensor: &mut Tensor,
     drift: f64,
     scale: f64,
     steps: u32,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     if tensor.data.is_empty() || steps == 0 {
         return Ok(());
     }
 
     let len = tensor.data.len();
     for _ in 0..steps {
-        let samples = random::generate_normal(len, "stochastic_evolution_host")?;
+        let samples = random::generate_normal(len, NAME)?;
         for (value, noise) in tensor.data.iter_mut().zip(samples.iter()) {
             let term = drift + scale * noise;
             *value *= term.exp();

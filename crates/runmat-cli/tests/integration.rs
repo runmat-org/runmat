@@ -52,6 +52,71 @@ result = z + 5
 }
 
 #[test]
+fn test_mortgage_script_output() {
+    let temp_dir = TempDir::new().unwrap();
+    let script_path = temp_dir.path().join("mortgage.m");
+    fs::write(
+        &script_path,
+        r#"
+% Mortgage Amortization Calculator Example
+
+principal = 300000;   % Principal loan amount ($)
+annual_rate = 0.045;  % Annual interest rate (4.5%)
+years = 30;           % Loan term in years
+months = years * 12;  % Total payments
+
+monthly_rate = annual_rate / 12;
+monthly_payment = principal * (monthly_rate * (1 + monthly_rate)^months) / ((1 + monthly_rate)^months - 1);
+
+balance = principal;
+
+% [Month, PrincipalPaid, InterestPaid, RemainingBalance]
+schedule = zeros(months, 4);
+
+for k = 1:months
+    % Calculate values for the current month
+    interest = balance * monthly_rate;
+    principal_paid = monthly_payment - interest;
+    balance = balance - principal_paid;
+
+    % Store the values in the schedule variable
+    schedule(k, :) = [k, principal_paid, interest, max(balance, 0)];
+end
+
+total_interest = sum(schedule(:,3));
+total_payment = monthly_payment * months;
+
+disp(['Monthly Payment: $', num2str(monthly_payment, '%.2f')]);
+disp(['Total Interest Paid: $', num2str(total_interest, '%.2f')]);
+disp(['Total Amount Paid: $', num2str(total_payment, '%.2f')]);
+"#,
+    )
+    .unwrap();
+    let output = run_runmat(&["run", script_path.to_str().unwrap()]);
+    assert!(
+        output.status.success(),
+        "Mortgage script execution failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}{stderr}");
+    let expected_lines = [
+        "Monthly Payment: $1520.06",
+        "Total Interest Paid: $247220.13",
+        "Total Amount Paid: $547220.13",
+    ];
+
+    for expected in expected_lines {
+        assert!(
+            combined.contains(expected),
+            "Mortgage output missing '{expected}'. Stdout: {stdout} Stderr: {stderr}"
+        );
+    }
+}
+
+#[test]
 fn test_gc_integration_with_cli() {
     let temp_dir = TempDir::new().unwrap();
     let script_path = temp_dir.path().join("gc_test.m");

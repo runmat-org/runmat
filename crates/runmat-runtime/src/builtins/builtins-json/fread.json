@@ -48,31 +48,31 @@
   "examples": [
     {
       "description": "Reading double-precision values from a binary file",
-      "input": "fid = fopen('numbers.bin', 'w+b');\nfwrite(fid, [1 2 3], 'double');\nfrewind(fid);\n\n[values, count] = fread(fid);      % defaults to double precision\n% values is a 3x1 column vector [1; 2; 3], count == 3\n\nfclose(fid);\ndelete('numbers.bin');"
+      "input": "fid = fopen('numbers.bin', 'w+b');\nfwrite(fid, [1 2 3], 'double');\nfrewind(fid);\n\n[values, count] = fread(fid);      % defaults to double precision\n% values is a 3x1 column vector [1; 2; 3], count == 3\n\nfclose(fid);\ndelete('numbers.bin')"
     },
     {
       "description": "Reading bytes with a specific element count",
-      "input": "fid = fopen('payload.bin', 'w+b');\nfwrite(fid, uint8(1:6), 'uint8');\nfrewind(fid);\n\n[bytes, count] = fread(fid, 4, 'uint8');\n% bytes == [1; 2; 3; 4], count == 4\n\nfclose(fid);\ndelete('payload.bin');"
+      "input": "fid = fopen('payload.bin', 'w+b');\nfwrite(fid, uint8(1:6), 'uint8');\nfrewind(fid);\n\n[bytes, count] = fread(fid, 4, 'uint8');\n% bytes == [1; 2; 3; 4], count == 4\n\nfclose(fid);\ndelete('payload.bin')"
     },
     {
       "description": "Loading a two-dimensional block of `uint8` data",
-      "input": "fid = fopen('frame.bin', 'w+b');\npayload = uint8(reshape(1:12, 3, 4));\nfwrite(fid, payload, 'uint8');\nfrewind(fid);\n\n[frame, count] = fread(fid, [3 4], 'uint8');\nframe = uint8(frame);              % convert back to uint8 if needed\n\nfclose(fid);\ndelete('frame.bin');"
+      "input": "fid = fopen('frame.bin', 'w+b');\npayload = uint8(reshape(1:12, 3, 4));\nfwrite(fid, payload, 'uint8');\nfrewind(fid);\n\n[frame, count] = fread(fid, [3 4], 'uint8');\nframe = uint8(frame);              % convert back to uint8 if needed\n\nfclose(fid);\ndelete('frame.bin')"
     },
     {
       "description": "Reading characters using the `*char` precision form",
-      "input": "fid = fopen('message.txt', 'w+b');\nfwrite(fid, 'RunMat', 'char');\nfrewind(fid);\n\n[text, count] = fread(fid, '*char');\ntext = text.';                      % row string 'RunMat'\n\nfclose(fid);\ndelete('message.txt');"
+      "input": "fid = fopen('message.txt', 'w+b');\nfwrite(fid, 'RunMat', 'char');\nfrewind(fid);\n\n[text, count] = fread(fid, '*char');\ntext = text.';                      % row string 'RunMat'\n\nfclose(fid);\ndelete('message.txt')"
     },
     {
       "description": "Skipping bytes between samples",
-      "input": "fid = fopen('interleaved.bin', 'w+b');\nfwrite(fid, uint8(1:12), 'uint8');\nfrewind(fid);\n\n[every_other, count] = fread(fid, 5, 'uint8', 1);   % read one byte, skip one byte\n% every_other == [1; 3; 5; 7; 9]\n\nfclose(fid);\ndelete('interleaved.bin');"
+      "input": "fid = fopen('interleaved.bin', 'w+b');\nfwrite(fid, uint8(1:12), 'uint8');\nfrewind(fid);\n\n[every_other, count] = fread(fid, 5, 'uint8', 1);   % read one byte, skip one byte\n% every_other == [1; 3; 5; 7; 9]\n\nfclose(fid);\ndelete('interleaved.bin')"
     },
     {
       "description": "Respecting big-endian machine formats",
-      "input": "fid = fopen('sensors.be', 'w+b', 'ieee-be');\nfwrite(fid, uint16([258 772]), 'uint16');\nfrewind(fid);\n\n[values, count] = fread(fid, [2 1], 'uint16');\n% values == [258; 772], count == 2\n\nfclose(fid);\ndelete('sensors.be');"
+      "input": "fid = fopen('sensors.be', 'w+b', 'ieee-be');\nfwrite(fid, uint16([258 772]), 'uint16');\nfrewind(fid);\n\n[values, count] = fread(fid, [2 1], 'uint16');\n% values == [258; 772], count == 2\n\nfclose(fid);\ndelete('sensors.be')"
     },
     {
       "description": "Matching GPU residency with `'like'`",
-      "input": "fid = fopen('samples.bin', 'w+b');\nfwrite(fid, [2.5 4.5 6.5 8.5], 'double');\nfrewind(fid);\n\nprototype = gpuArray.zeros(4, 1);\n[values, count] = fread(fid, 4, 'double', 'like', prototype);\n% When a GPU provider is active, values stays on the GPU and count == 4.\n\nfclose(fid);\ndelete('samples.bin');"
+      "input": "fid = fopen('samples.bin', 'w+b');\nfwrite(fid, [2.5 4.5 6.5 8.5], 'double');\nfrewind(fid);\n\nprototype = gpuArray.zeros(4, 1);\n[values, count] = fread(fid, 4, 'double', 'like', prototype);\n% When a GPU provider is active, values stays on the GPU and count == 4.\n\nfclose(fid);\ndelete('samples.bin')"
     }
   ],
   "faqs": [

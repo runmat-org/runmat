@@ -4,6 +4,7 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::build_runtime_error;
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -56,6 +57,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Sequence generation is treated as a sink; it does not participate in fusion.",
 };
 
+fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
+    build_runtime_error(message).with_builtin("colon").build()
+}
+
 #[runtime_builtin(
     name = "colon",
     category = "array/creation",
@@ -64,15 +69,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::colon"
 )]
-fn colon_builtin(start: Value, step_or_end: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn colon_builtin(
+    start: Value,
+    step_or_end: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("colon: expected two or three input arguments".to_string());
+        return Err(builtin_error(
+            "colon: expected two or three input arguments",
+        ));
     }
 
-    let start_scalar = parse_real_scalar("colon", start)?;
+    let start_scalar = parse_real_scalar("colon", start).await?;
 
     if rest.is_empty() {
-        let stop_scalar = parse_real_scalar("colon", step_or_end)?;
+        let stop_scalar = parse_real_scalar("colon", step_or_end).await?;
         let step = default_step(start_scalar.value, stop_scalar.value);
         let char_mode =
             start_scalar.origin == ScalarOrigin::Char && stop_scalar.origin == ScalarOrigin::Char;
@@ -89,11 +100,11 @@ fn colon_builtin(start: Value, step_or_end: Value, rest: Vec<Value>) -> Result<V
             char_mode,
         )
     } else {
-        let step_scalar = parse_real_scalar("colon", step_or_end)?;
+        let step_scalar = parse_real_scalar("colon", step_or_end).await?;
         if step_scalar.value == 0.0 {
-            return Err("colon: increment must be nonzero".to_string());
+            return Err(builtin_error("colon: increment must be nonzero"));
         }
-        let stop_scalar = parse_real_scalar("colon", rest[0].clone())?;
+        let stop_scalar = parse_real_scalar("colon", rest[0].clone()).await?;
         let char_mode =
             start_scalar.origin == ScalarOrigin::Char && stop_scalar.origin == ScalarOrigin::Char;
         let explicit_gpu = if char_mode {
@@ -117,12 +128,14 @@ fn build_sequence(
     stop: f64,
     explicit_gpu: bool,
     char_mode: bool,
-) -> Result<Value, String> {
+) -> crate::BuiltinResult<Value> {
     if !start.is_finite() || !step.is_finite() || !stop.is_finite() {
-        return Err("colon: inputs must be finite numeric scalars".to_string());
+        return Err(builtin_error(
+            "colon: inputs must be finite numeric scalars",
+        ));
     }
     if step == 0.0 {
-        return Err("colon: increment must be nonzero".to_string());
+        return Err(builtin_error("colon: increment must be nonzero"));
     }
 
     let plan = plan_progression(start, step, stop)?;
@@ -157,7 +170,7 @@ fn build_sequence(
     finalize_numeric_sequence(data, prefer_gpu)
 }
 
-fn finalize_numeric_sequence(data: Vec<f64>, prefer_gpu: bool) -> Result<Value, String> {
+fn finalize_numeric_sequence(data: Vec<f64>, prefer_gpu: bool) -> crate::BuiltinResult<Value> {
     let len = data.len();
     let shape = vec![1usize, len];
 
@@ -181,7 +194,7 @@ fn finalize_numeric_sequence(data: Vec<f64>, prefer_gpu: bool) -> Result<Value, 
 
     Tensor::new(data, shape)
         .map(tensor::tensor_into_value)
-        .map_err(|e| format!("colon: {e}"))
+        .map_err(|e| builtin_error(format!("colon: {e}")))
 }
 
 struct ProgressionPlan {
@@ -189,7 +202,7 @@ struct ProgressionPlan {
     final_end: f64,
 }
 
-fn plan_progression(start: f64, step: f64, stop: f64) -> Result<ProgressionPlan, String> {
+fn plan_progression(start: f64, step: f64, stop: f64) -> crate::BuiltinResult<ProgressionPlan> {
     let tol = tolerance(start, step, stop);
     let step_abs = step.abs();
 
@@ -208,7 +221,9 @@ fn plan_progression(start: f64, step: f64, stop: f64) -> Result<ProgressionPlan,
 
     let diff = (stop - start) / step;
     if !diff.is_finite() {
-        return Err("colon: sequence length exceeds representable range".to_string());
+        return Err(builtin_error(
+            "colon: sequence length exceeds representable range",
+        ));
     }
 
     let ratio_raw = (tol / step_abs).abs();
@@ -229,14 +244,16 @@ fn plan_progression(start: f64, step: f64, stop: f64) -> Result<ProgressionPlan,
     }
 
     if approx.is_infinite() || approx > usize::MAX as f64 {
-        return Err("colon: sequence length exceeds platform limits".to_string());
+        return Err(builtin_error(
+            "colon: sequence length exceeds platform limits",
+        ));
     }
 
     let floor = approx.floor();
     let count = floor as usize;
     let count = count
         .checked_add(1)
-        .ok_or_else(|| "colon: sequence length exceeds platform limits".to_string())?;
+        .ok_or_else(|| builtin_error("colon: sequence length exceeds platform limits"))?;
 
     if count == 0 {
         return Ok(ProgressionPlan {
@@ -285,7 +302,22 @@ fn tolerance(start: f64, step: f64, stop: f64) -> f64 {
     tol.max(f64::EPSILON)
 }
 
-fn parse_real_scalar(name: &str, value: Value) -> Result<ParsedScalar, String> {
+async fn parse_real_scalar(name: &str, value: Value) -> crate::BuiltinResult<ParsedScalar> {
+    match value {
+        Value::GpuTensor(handle) => {
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+            let scalar = tensor_scalar(name, &tensor)?;
+            Ok(ParsedScalar {
+                value: scalar,
+                prefer_gpu: true,
+                origin: ScalarOrigin::Numeric,
+            })
+        }
+        other => parse_real_scalar_host(name, other),
+    }
+}
+
+fn parse_real_scalar_host(name: &str, value: Value) -> crate::BuiltinResult<ParsedScalar> {
     match value {
         Value::Num(n) => ensure_finite(name, n).map(|v| ParsedScalar {
             value: v,
@@ -327,88 +359,85 @@ fn parse_real_scalar(name: &str, value: Value) -> Result<ParsedScalar, String> {
             prefer_gpu: false,
             origin: ScalarOrigin::Char,
         }),
-        Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
-            tensor_scalar(name, &tensor).map(|v| ParsedScalar {
-                value: v,
-                prefer_gpu: true,
-                origin: ScalarOrigin::Numeric,
-            })
-        }
-        Value::String(_) | Value::StringArray(_) => Err(format!(
+        Value::String(_) | Value::StringArray(_) => Err(builtin_error(format!(
             "{name}: inputs must be real scalar values; received a string-like argument"
-        )),
-        other => Err(format!(
+        ))),
+        Value::GpuTensor(_) => unreachable!("GpuTensor handled by parse_real_scalar"),
+        other => Err(builtin_error(format!(
             "{name}: inputs must be real scalar values; received {other:?}"
-        )),
+        ))),
     }
 }
 
-fn ensure_finite(name: &str, value: f64) -> Result<f64, String> {
+fn ensure_finite(name: &str, value: f64) -> crate::BuiltinResult<f64> {
     if value.is_finite() {
         Ok(value)
     } else {
-        Err(format!("{name}: inputs must be finite numeric scalars"))
+        Err(builtin_error(format!(
+            "{name}: inputs must be finite numeric scalars"
+        )))
     }
 }
 
-fn tensor_scalar(name: &str, tensor: &Tensor) -> Result<f64, String> {
+fn tensor_scalar(name: &str, tensor: &Tensor) -> crate::BuiltinResult<f64> {
     if !tensor::is_scalar_tensor(tensor) {
-        return Err(format!("{name}: expected scalar input"));
+        return Err(builtin_error(format!("{name}: expected scalar input")));
     }
     ensure_finite(name, tensor.data[0])
 }
 
-fn logical_scalar(name: &str, logical: &LogicalArray) -> Result<f64, String> {
+fn logical_scalar(name: &str, logical: &LogicalArray) -> crate::BuiltinResult<f64> {
     if logical.len() != 1 {
-        return Err(format!("{name}: expected scalar input"));
+        return Err(builtin_error(format!("{name}: expected scalar input")));
     }
     Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
 }
 
-fn complex_to_real(name: &str, re: f64, im: f64) -> Result<f64, String> {
+fn complex_to_real(name: &str, re: f64, im: f64) -> crate::BuiltinResult<f64> {
     if im.abs() > ZERO_IM_TOL * re.abs().max(1.0) {
-        return Err(format!(
+        return Err(builtin_error(format!(
             "{name}: complex inputs must have zero imaginary part"
-        ));
+        )));
     }
     ensure_finite(name, re)
 }
 
-fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> Result<f64, String> {
+fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinResult<f64> {
     if tensor.data.len() != 1 {
-        return Err(format!("{name}: expected scalar input"));
+        return Err(builtin_error(format!("{name}: expected scalar input")));
     }
     let (re, im) = tensor.data[0];
     complex_to_real(name, re, im)
 }
 
-fn char_scalar(name: &str, array: &CharArray) -> Result<f64, String> {
+fn char_scalar(name: &str, array: &CharArray) -> crate::BuiltinResult<f64> {
     if array.rows * array.cols != 1 {
-        return Err(format!("{name}: expected scalar input"));
+        return Err(builtin_error(format!("{name}: expected scalar input")));
     }
     let ch = array.data[0];
     Ok(ch as u32 as f64)
 }
 
-fn build_char_sequence(data: Vec<f64>) -> Result<Value, String> {
+fn build_char_sequence(data: Vec<f64>) -> crate::BuiltinResult<Value> {
     let len = data.len();
     let mut chars = Vec::with_capacity(len);
     for value in data {
         let rounded = value.round();
         if (value - rounded).abs() > CHAR_TOL {
-            return Err("colon: character sequence requires integer code points".to_string());
+            return Err(builtin_error(
+                "colon: character sequence requires integer code points",
+            ));
         }
         if !(0.0..=(u32::MAX as f64)).contains(&rounded) {
-            return Err("colon: character code point out of range".to_string());
+            return Err(builtin_error("colon: character code point out of range"));
         }
         let code = rounded as u32;
         let ch = std::char::from_u32(code)
-            .ok_or_else(|| "colon: character code point out of range".to_string())?;
+            .ok_or_else(|| builtin_error("colon: character code point out of range"))?;
         chars.push(ch);
     }
 
-    let array = CharArray::new(chars, 1, len).map_err(|e| format!("colon: {e}"))?;
+    let array = CharArray::new(chars, 1, len).map_err(|e| builtin_error(format!("colon: {e}")))?;
     Ok(Value::CharArray(array))
 }
 
@@ -416,7 +445,12 @@ fn build_char_sequence(data: Vec<f64>) -> Result<Value, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{CharArray, Tensor};
+
+    fn colon_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::colon_builtin(start, stop, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -491,7 +525,7 @@ pub(crate) mod tests {
     fn colon_zero_increment_errors() {
         let err = colon_builtin(Value::Num(0.0), Value::Num(0.0), vec![Value::Num(1.0)])
             .expect_err("colon should error");
-        assert!(err.contains("increment must be nonzero"));
+        assert!(err.message().contains("increment must be nonzero"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -649,7 +683,7 @@ pub(crate) mod tests {
         let err = colon_builtin(Value::Complex(1.0, 1e-2), Value::Num(2.0), Vec::new())
             .expect_err("colon should reject complex inputs");
         assert!(
-            err.contains("zero imaginary part"),
+            err.message().contains("zero imaginary part"),
             "unexpected error message: {err}"
         );
     }
@@ -660,7 +694,7 @@ pub(crate) mod tests {
         let err = colon_builtin(Value::from("hello"), Value::Num(2.0), Vec::new())
             .expect_err("colon should reject string inputs");
         assert!(
-            err.contains("string-like"),
+            err.message().contains("string-like"),
             "unexpected error message: {err}"
         );
     }
@@ -690,7 +724,8 @@ pub(crate) mod tests {
         let err = colon_builtin(start, Value::Num(1.5), vec![stop])
             .expect_err("colon should reject fractional char steps");
         assert!(
-            err.contains("character sequence requires integer"),
+            err.message()
+                .contains("character sequence requires integer"),
             "unexpected error message: {err}"
         );
     }

@@ -40,15 +40,15 @@
   "examples": [
     {
       "description": "Check for end-of-file while reading line by line",
-      "input": "[fid, msg] = fopen('log.txt', 'r');\nassert(fid ~= -1, msg);\nwhile ~feof(fid)\n    line = fgets(fid);\n    disp(line);\nend\nfclose(fid);"
+      "input": "[fid, msg] = fopen('log.txt', 'r');\nassert(fid ~= -1, msg);\nwhile ~feof(fid)\n    line = fgets(fid);\n    disp(line);\nend\nfclose(fid)"
     },
     {
       "description": "Detect the end of a binary stream read with fread",
-      "input": "[fid, msg] = fopen('payload.bin', 'rb');\nassert(fid ~= -1, msg);\nwhile ~feof(fid)\n    chunk = fread(fid, 1024, 'uint8');\n    process(chunk);\nend\nfclose(fid);"
+      "input": "[fid, msg] = fopen('payload.bin', 'rb');\nassert(fid ~= -1, msg);\nwhile ~feof(fid)\n    chunk = fread(fid, 1024, 'uint8');\n    process(chunk);\nend\nfclose(fid)"
     },
     {
       "description": "Handle empty files gracefully",
-      "input": "[fid, msg] = fopen('empty.txt', 'r');\nassert(fid ~= -1, msg);\nisAtEnd = feof(fid);   % returns true immediately because the file is empty\nfclose(fid);"
+      "input": "[fid, msg] = fopen('empty.txt', 'r');\nassert(fid ~= -1, msg);\nisAtEnd = feof(fid);   % returns true immediately because the file is empty\nfclose(fid)"
     },
     {
       "description": "Protect against invalid identifiers",

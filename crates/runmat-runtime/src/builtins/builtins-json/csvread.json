@@ -44,38 +44,38 @@
   "examples": [
     {
       "description": "Import Entire CSV File",
-      "input": "writematrix([1 2 3; 4 5 6], \"scores.csv\");\nM = csvread(\"scores.csv\");\ndelete(\"scores.csv\");",
+      "input": "writematrix([1 2 3; 4 5 6], \"scores.csv\");\nM = csvread(\"scores.csv\");\ndelete(\"scores.csv\")",
       "output": "M =\n     1     2     3\n     4     5     6"
     },
     {
       "description": "Skip Header Row And Column Using Zero-Based Offsets",
-      "input": "fid = fopen(\"with_header.csv\", \"w\");\nfprintf(fid, \"Name,Jan,Feb\\nalpha,1,2\\nbeta,3,4\\n\");\nfclose(fid);\n\nM = csvread(\"with_header.csv\", 1, 1);\ndelete(\"with_header.csv\");",
+      "input": "fid = fopen(\"with_header.csv\", \"w\");\nfprintf(fid, \"Name,Jan,Feb\\nalpha,1,2\\nbeta,3,4\\n\");\nfclose(fid);\n\nM = csvread(\"with_header.csv\", 1, 1)\ndelete(\"with_header.csv\");",
       "output": "M =\n     1     2\n     3     4"
     },
     {
       "description": "Read A Specific Range With Numeric Vector Syntax",
-      "input": "fid = fopen(\"measurements.csv\", \"w\");\nfprintf(fid, \"10,11,12,13\\n14,15,16,17\\n18,19,20,21\\n22,23,24,25\\n\");\nfclose(fid);\n\nblock = csvread(\"measurements.csv\", 0, 0, [1 1 2 3]);\ndelete(\"measurements.csv\");",
+      "input": "fid = fopen(\"measurements.csv\", \"w\");\nfprintf(fid, \"10,11,12,13\\n14,15,16,17\\n18,19,20,21\\n22,23,24,25\\n\");\nfclose(fid);\n\nblock = csvread(\"measurements.csv\", 0, 0, [1 1 2 3])\ndelete(\"measurements.csv\");",
       "output": "block =\n    15    16    17\n    19    20    21"
     },
     {
       "description": "Read A Block Using Excel-Style Range Notation",
-      "input": "fid = fopen(\"measurements2.csv\", \"w\");\nfprintf(fid, \"10,11,12\\n14,15,16\\n18,19,20\\n\");\nfclose(fid);\n\nsub = csvread(\"measurements2.csv\", 0, 0, \"B2:C3\");\ndelete(\"measurements2.csv\");",
+      "input": "fid = fopen(\"measurements2.csv\", \"w\");\nfprintf(fid, \"10,11,12\\n14,15,16\\n18,19,20\\n\");\nfclose(fid);\n\nsub = csvread(\"measurements2.csv\", 0, 0, \"B2:C3\")\ndelete(\"measurements2.csv\");",
       "output": "sub =\n    15    16\n    19    20"
     },
     {
       "description": "Handle Empty Fields As Zeros",
-      "input": "fid = fopen(\"with_blanks.csv\", \"w\");\nfprintf(fid, \"1,,3\\n,5,\\n7,8,\\n\");\nfclose(fid);\n\nM = csvread(\"with_blanks.csv\");\ndelete(\"with_blanks.csv\");",
+      "input": "fid = fopen(\"with_blanks.csv\", \"w\");\nfprintf(fid, \"1,,3\\n,5,\\n7,8,\\n\");\nfclose(fid);\n\nM = csvread(\"with_blanks.csv\")\ndelete(\"with_blanks.csv\");",
       "output": "M =\n     1     0     3\n     0     5     0\n     7     8     0"
     },
     {
       "description": "Read Numeric Data From A File In The Home Directory",
-      "input": "homePath = fullfile(getenv(\"HOME\"), \"runmat_csvread_home.csv\");\nfid = fopen(homePath, \"w\");\nfprintf(fid, \"9,10\\n11,12\\n\");\nfclose(fid);\n\nM = csvread(fullfile(\"~\", \"runmat_csvread_home.csv\"));\ndelete(homePath);",
+      "input": "homePath = fullfile(getenv(\"HOME\"), \"runmat_csvread_home.csv\");\nfid = fopen(homePath, \"w\");\nfprintf(fid, \"9,10\\n11,12\\n\");\nfclose(fid);\n\nM = csvread(fullfile(\"~\", \"runmat_csvread_home.csv\"))\ndelete(homePath);",
       "output": "M =\n     9    10\n    11    12"
     },
     {
       "description": "Detect Errors When Text Appears In Numeric Columns",
       "input": "fid = fopen(\"bad.csv\", \"w\");\nfprintf(fid, \"1,2,3\\n4,error,6\\n\");\nfclose(fid);\n\ntry\n    csvread(\"bad.csv\");\ncatch err\n    disp(err.message);\nend\ndelete(\"bad.csv\");",
-      "output": "csvread: nonnumeric token 'error' at row 2, column 2"
+      "output": "csvread: nonnumeric token error at row 2 column 2"
     }
   ],
   "faqs": [

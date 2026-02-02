@@ -1,14 +1,17 @@
-use runmat_parser::{parse_simple as parse, BinOp, Expr, Stmt};
+use runmat_parser::{BinOp, Expr, Stmt};
+
+mod parse;
+use parse::parse;
 
 #[test]
 fn anonymous_function_and_handle_parse() {
     // @(x) x^2
     let program = parse("@(x) x^2").unwrap();
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::AnonFunc { params, body }, _) => {
+        Stmt::ExprStmt(Expr::AnonFunc { params, body, .. }, _, _) => {
             let expected: Vec<String> = vec!["x".into()];
             assert_eq!(params, &expected);
-            assert!(matches!(**body, Expr::Binary(_, BinOp::Pow, _)));
+            assert!(matches!(**body, Expr::Binary(_, BinOp::Pow, _, _)));
         }
         _ => panic!("expected anonymous function expr stmt"),
     }
@@ -16,7 +19,7 @@ fn anonymous_function_and_handle_parse() {
     // @sin
     let program = parse("@sin").unwrap();
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::FuncHandle(name), _) => assert_eq!(name, "sin"),
+        Stmt::ExprStmt(Expr::FuncHandle(name, _), _, _) => assert_eq!(name, "sin"),
         _ => panic!("expected function handle expr stmt"),
     }
 }

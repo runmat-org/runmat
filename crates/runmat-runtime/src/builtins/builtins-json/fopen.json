@@ -49,19 +49,19 @@
     },
     {
       "description": "Write Text to a New File",
-      "input": "[fid, message] = fopen('logs/session.log', 'w');\nif fid == -1\n    error('Failed to create log file: %s', message);\nend\nfprintf(fid, 'Session started\\n');\nfclose(fid);"
+      "input": "[fid, message] = fopen('logs/session.log', 'w');\nif fid == -1\n    error('Failed to create log file: %s', message);\nend\nfprintf(fid, 'Session started\\n');\nfclose(fid)"
     },
     {
       "description": "Append Binary Data",
-      "input": "[fid, message] = fopen('signals.bin', 'ab+');\nif fid == -1\n    error('Failed to open binary log: %s', message);\nend\nfwrite(fid, rand(1, 1024), 'double');\nfclose(fid);"
+      "input": "[fid, message] = fopen('signals.bin', 'ab+');\nif fid == -1\n    error('Failed to open binary log: %s', message);\nend\nfwrite(fid, rand(1, 1024), 'double');\nfclose(fid)"
     },
     {
       "description": "Query File Metadata",
-      "input": "fid = fopen('config.json');\n[filename, permission, machinefmt, encoding] = fopen(fid);\ndisp(filename);\ndisp(permission);\nfclose(fid);"
+      "input": "fid = fopen('config.json');\n[filename, permission, machinefmt, encoding] = fopen(fid);\ndisp(filename);\ndisp(permission);\nfclose(fid)"
     },
     {
       "description": "List All Open Files",
-      "input": "[fid_list, names] = fopen('all');\ndisp(fid_list);\ndisp(names);"
+      "input": "[fid_list, names] = fopen('all');\ndisp(fid_list);\ndisp(names)"
     },
     {
       "description": "Handle Missing Files Gracefully",
@@ -69,7 +69,7 @@
     },
     {
       "description": "Specify Machine Format and Encoding",
-      "input": "[fid, message, machinefmt, encoding] = fopen('report.txt', 'w', 'ieee-le', 'latin1');\nif fid == -1\n    error('Failed to open report: %s', message);\nend\nfprintf(fid, 'ol\u00e1 mundo');\nfclose(fid);"
+      "input": "[fid, message, machinefmt, encoding] = fopen('report.txt', 'w', 'ieee-le', 'latin1');\nif fid == -1\n    error('Failed to open report: %s', message);\nend\nfprintf(fid, 'ol\u00e1 mundo');\nfclose(fid)"
     }
   ],
   "faqs": [

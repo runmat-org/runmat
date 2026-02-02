@@ -44,42 +44,42 @@
   "examples": [
     {
       "description": "Determine whether a string starts with a prefix",
-      "input": "tf = startsWith(\"RunMat Accelerate\", \"RunMat\");",
+      "input": "tf = startsWith(\"RunMat Accelerate\", \"RunMat\")",
       "output": "tf = logical\n   1"
     },
     {
       "description": "Perform a case-insensitive prefix check",
-      "input": "tf = startsWith(\"RunMat\", \"run\", 'IgnoreCase', true);",
+      "input": "tf = startsWith(\"RunMat\", \"run\", 'IgnoreCase', true)",
       "output": "tf = logical\n   1"
     },
     {
       "description": "Ignore case using the legacy logical flag",
-      "input": "tf = startsWith(\"RUNMAT\", \"run\", true);",
+      "input": "tf = startsWith(\"RUNMAT\", \"run\", true)",
       "output": "tf = logical\n   1"
     },
     {
       "description": "Apply a scalar prefix to every element of a string array",
-      "input": "labels = [\"alpha\" \"beta\" \"gamma\"];\ntf = startsWith(labels, \"a\");",
+      "input": "labels = [\"alpha\" \"beta\" \"gamma\"];\ntf = startsWith(labels, \"a\")",
       "output": "tf = 1\u00d73 logical array\n   1   0   0"
     },
     {
       "description": "Match element-wise prefixes with implicit expansion",
-      "input": "names = [\"hydrogen\"; \"helium\"; \"lithium\"];\nprefixes = [\"hyd\"; \"hel\"; \"lit\"];\ntf = startsWith(names, prefixes);",
+      "input": "names = [\"hydrogen\"; \"helium\"; \"lithium\"];\nprefixes = [\"hyd\"; \"hel\"; \"lit\"];\ntf = startsWith(names, prefixes)",
       "output": "tf = 3\u00d71 logical array\n   1\n   1\n   1"
     },
     {
       "description": "Test prefixes for a cell array of character vectors",
-      "input": "C = {'Mercury', 'Venus', 'Mars'};\ntf = startsWith(C, 'M');",
+      "input": "C = {'Mercury', 'Venus', 'Mars'};\ntf = startsWith(C, 'M')",
       "output": "tf = 1\u00d73 logical array\n   1   0   1"
     },
     {
       "description": "Provide multiple prefixes as a column vector",
-      "input": "tf = startsWith(\"saturn\", ['s'; 'n'; 'x']);",
+      "input": "tf = startsWith(\"saturn\", ['s'; 'n'; 'x'])",
       "output": "tf = 3\u00d71 logical array\n   1\n   0\n   0"
     },
     {
       "description": "Handle empty and missing values",
-      "input": "texts = [\"\", \"<missing>\"];\ntf = startsWith(texts, \"\");",
+      "input": "texts = [\"\", \"<missing>\"];\ntf = startsWith(texts, \"\")",
       "output": "tf = 1\u00d72 logical array\n   1   0"
     }
   ],

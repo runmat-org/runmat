@@ -14,7 +14,9 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
+const BUILTIN_NAME: &str = "acosh";
 const ZERO_EPS: f64 = 1.0e-12;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::acosh")]
@@ -32,6 +34,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Providers may execute acosh directly on device buffers when inputs stay within the real domain (x ≥ 1); otherwise the runtime gathers to the host for complex promotion.",
 };
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::acosh")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -58,51 +66,54 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::acosh"
 )]
-fn acosh_builtin(value: Value) -> Result<Value, String> {
+async fn acosh_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => acosh_gpu(handle),
+        Value::GpuTensor(handle) => acosh_gpu(handle).await,
         Value::Complex(re, im) => Ok(acosh_complex_scalar(re, im)),
         Value::ComplexTensor(ct) => acosh_complex_tensor(ct),
         Value::CharArray(ca) => acosh_char_array(ca),
         Value::String(_) | Value::StringArray(_) => {
-            Err("acosh: expected numeric input".to_string())
+            Err(runtime_error_for("acosh: expected numeric input"))
         }
         other => acosh_real(other),
     }
 }
 
-fn acosh_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn acosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        match detect_gpu_requires_complex(provider, &handle) {
+        match detect_gpu_requires_complex(provider, &handle).await {
             Ok(false) => {
-                if let Ok(out) = provider.unary_acosh(&handle) {
+                if let Ok(out) = provider.unary_acosh(&handle).await {
                     return Ok(Value::GpuTensor(out));
                 }
             }
             Ok(true) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                 return acosh_tensor_real(tensor);
             }
             Err(_) => {
-                // Fall through to host path.
+                // Fall back to host path below.
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     acosh_tensor_real(tensor)
 }
 
-fn detect_gpu_requires_complex(
+async fn detect_gpu_requires_complex(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
-) -> Result<bool, String> {
+) -> BuiltinResult<bool> {
     let min_handle = provider
         .reduce_min(handle)
-        .map_err(|e| format!("acosh: reduce_min failed: {e}"))?;
-    let min_host = provider.download(&min_handle).map_err(|e| {
-        let _ = provider.free(&min_handle);
-        format!("acosh: reduce_min download failed: {e}")
-    })?;
+        .await
+        .map_err(|e| runtime_error_for(format!("acosh: reduce_min failed: {e}")))?;
+    let min_host = download_handle_async(provider, &min_handle)
+        .await
+        .map_err(|e| {
+            let _ = provider.free(&min_handle);
+            runtime_error_for(format!("acosh: reduce_min download failed: {e}"))
+        })?;
     let _ = provider.free(&min_handle);
     let min_value = min_host.data.iter().copied().fold(f64::INFINITY, f64::min);
     if !min_value.is_finite() {
@@ -112,12 +123,12 @@ fn detect_gpu_requires_complex(
     Ok(min_value < 1.0)
 }
 
-fn acosh_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("acosh", value)?;
+fn acosh_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("acosh", value).map_err(runtime_error_for)?;
     acosh_tensor_real(tensor)
 }
 
-fn acosh_tensor_real(tensor: Tensor) -> Result<Value, String> {
+fn acosh_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
     if tensor.data.is_empty() {
         return Ok(tensor::tensor_into_value(tensor));
     }
@@ -164,17 +175,17 @@ fn acosh_tensor_real(tensor: Tensor) -> Result<Value, String> {
             Ok(Value::Complex(re, im))
         } else {
             let tensor = ComplexTensor::new(complex_data, tensor.shape.clone())
-                .map_err(|e| format!("acosh: {e}"))?;
+                .map_err(|e| runtime_error_for(format!("acosh: {e}")))?;
             Ok(Value::ComplexTensor(tensor))
         }
     } else {
-        let tensor =
-            Tensor::new(real_data, tensor.shape.clone()).map_err(|e| format!("acosh: {e}"))?;
+        let tensor = Tensor::new(real_data, tensor.shape.clone())
+            .map_err(|e| runtime_error_for(format!("acosh: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     }
 }
 
-fn acosh_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn acosh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     if ct.data.is_empty() {
         return Ok(Value::ComplexTensor(ct));
     }
@@ -187,8 +198,8 @@ fn acosh_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
         let (re, im) = mapped[0];
         Ok(Value::Complex(re, im))
     } else {
-        let tensor =
-            ComplexTensor::new(mapped, ct.shape.clone()).map_err(|e| format!("acosh: {e}"))?;
+        let tensor = ComplexTensor::new(mapped, ct.shape.clone())
+            .map_err(|e| runtime_error_for(format!("acosh: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
@@ -198,14 +209,15 @@ fn acosh_complex_scalar(re: f64, im: f64) -> Value {
     Value::Complex(zero_small(result.re), zero_small(result.im))
 }
 
-fn acosh_char_array(ca: CharArray) -> Result<Value, String> {
+fn acosh_char_array(ca: CharArray) -> BuiltinResult<Value> {
     if ca.data.is_empty() {
-        let tensor =
-            Tensor::new(Vec::new(), vec![ca.rows, ca.cols]).map_err(|e| format!("acosh: {e}"))?;
+        let tensor = Tensor::new(Vec::new(), vec![ca.rows, ca.cols])
+            .map_err(|e| runtime_error_for(format!("acosh: {e}")))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("acosh: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| runtime_error_for(format!("acosh: {e}")))?;
     acosh_tensor_real(tensor)
 }
 
@@ -221,8 +233,17 @@ fn zero_small(value: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use num_complex::Complex64;
     use runmat_builtins::{IntValue, LogicalArray};
+
+    fn acosh_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::acosh_builtin(value))
+    }
+
+    fn error_message(err: RuntimeError) -> String {
+        err.message().to_string()
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -423,7 +444,8 @@ pub(crate) mod tests {
     #[test]
     fn acosh_string_errors() {
         let err = acosh_builtin(Value::from("oops")).expect_err("expected error");
-        assert!(err.contains("expected numeric input"));
+        let message = error_message(err);
+        assert!(message.contains("expected numeric input"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -492,7 +514,7 @@ pub(crate) mod tests {
             .expect("provider")
             .upload(&view)
             .expect("upload");
-        let gpu = acosh_gpu(handle).unwrap();
+        let gpu = block_on(acosh_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
             Value::Tensor(ct) => {

@@ -101,6 +101,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
 
     let func: ItemFn = parse_macro_input!(input as ItemFn);
     let ident = &func.sig.ident;
+    let is_async = func.sig.asyncness.is_some();
 
     // Extract param idents and types
     let mut param_idents = Vec::new();
@@ -202,17 +203,36 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             .collect()
     };
 
+    let call_expr = if is_async {
+        quote! { #ident(#(#param_idents),*).await? }
+    } else {
+        quote! { #ident(#(#param_idents),*)? }
+    };
+
     let wrapper = quote! {
-        fn #wrapper_ident(args: &[runmat_builtins::Value]) -> Result<runmat_builtins::Value, String> {
+        fn #wrapper_ident(args: &[runmat_builtins::Value]) -> runmat_builtins::BuiltinFuture {
             #![allow(unused_variables)]
-            if #is_last_variadic {
-                if args.len() < #param_len - 1 { return Err(format!("expected at least {} args, got {}", #param_len - 1, args.len())); }
-            } else {
-                if args.len() != #param_len { return Err(format!("expected {} args, got {}", #param_len, args.len())); }
-            }
-            #(#conv_stmts)*
-            let res = #ident(#(#param_idents),*)?;
-            Ok(runmat_builtins::Value::from(res))
+            let args = args.to_vec();
+            Box::pin(async move {
+                if #is_last_variadic {
+                    if args.len() < #param_len - 1 {
+                        return Err(std::convert::From::from(format!(
+                            "expected at least {} args, got {}",
+                            #param_len - 1,
+                            args.len()
+                        )));
+                    }
+                } else if args.len() != #param_len {
+                    return Err(std::convert::From::from(format!(
+                        "expected {} args, got {}",
+                        #param_len,
+                        args.len()
+                    )));
+                }
+                #(#conv_stmts)*
+                let value = #call_expr;
+                Ok(runmat_builtins::Value::from(value))
+            })
         }
     };
 

@@ -45,27 +45,27 @@
   "examples": [
     {
       "description": "Running totals down each column (default dimension)",
-      "input": "A = [1 2 3; 4 5 6];\ncolumnTotals = cumsum(A);",
+      "input": "A = [1 2 3; 4 5 6];\ncolumnTotals = cumsum(A)",
       "output": "columnTotals =\n     1     2     3\n     5     7     9"
     },
     {
       "description": "Tracking cumulative sums across rows",
-      "input": "A = [1 2 3; 4 5 6];\nrowTotals = cumsum(A, 2);",
+      "input": "A = [1 2 3; 4 5 6];\nrowTotals = cumsum(A, 2)",
       "output": "rowTotals =\n     1     3     6\n     4     9    15"
     },
     {
       "description": "Reversing the direction of accumulation",
-      "input": "v = [1 3 5 7];\nreverseTotals = cumsum(v, \"reverse\");",
+      "input": "v = [1 3 5 7];\nreverseTotals = cumsum(v, \"reverse\")",
       "output": "reverseTotals =\n    16    15    12     7"
     },
     {
       "description": "Ignoring NaN values while accumulating",
-      "input": "v = [2 NaN 5 NaN 1];\nrunning = cumsum(v, \"omitnan\");",
+      "input": "v = [2 NaN 5 NaN 1];\nrunning = cumsum(v, \"omitnan\")",
       "output": "running =\n     2     2     7     7     8"
     },
     {
       "description": "Computing a cumulative sum inside a GPU workflow",
-      "input": "G = gpuArray(rand(1, 5));\ntotals = cumsum(G);\nhostResult = gather(totals);"
+      "input": "G = gpuArray(rand(1, 5));\ntotals = cumsum(G);\nhostResult = gather(totals)"
     }
   ],
   "faqs": [

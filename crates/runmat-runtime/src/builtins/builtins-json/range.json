@@ -49,32 +49,32 @@
   "examples": [
     {
       "description": "Measuring column-wise range of a matrix",
-      "input": "A = [1 4 2; 3 7 5];\nspread = range(A);",
+      "input": "A = [1 4 2; 3 7 5];\nspread = range(A)",
       "output": "% Each column's maximum minus minimum\nspread = [2 3 3];"
     },
     {
       "description": "Selecting a dimension explicitly",
-      "input": "A = [1 4 2; 3 7 5];\nrow_spread = range(A, 2);",
+      "input": "A = [1 4 2; 3 7 5];\nrow_spread = range(A, 2)",
       "output": "row_spread = [3; 4];"
     },
     {
       "description": "Collapsing all elements with 'all'",
-      "input": "temperatures = [68 72 75; 70 74 78];\noverall = range(temperatures, 'all');",
+      "input": "temperatures = [68 72 75; 70 74 78];\noverall = range(temperatures, 'all')",
       "output": "overall = 10;"
     },
     {
       "description": "Ignoring NaNs when computing range",
-      "input": "samples = [2 NaN 5; 4 6 NaN];\nspread = range(samples, 1, 'omitnan');",
+      "input": "samples = [2 NaN 5; 4 6 NaN];\nspread = range(samples, 1, 'omitnan')",
       "output": "spread = [2 0 0];"
     },
     {
       "description": "Keeping gpuArray results on the device",
-      "input": "G = gpuArray([1 10 3; 2 8 4]);\ncolumn_spread = range(G);\ngather(column_spread);",
+      "input": "G = gpuArray([1 10 3; 2 8 4]);\ncolumn_spread = range(G);\ngather(column_spread)",
       "output": "ans =\n     1     2     1"
     },
     {
       "description": "Handling higher-dimensional inputs",
-      "input": "data = reshape(1:24, [3, 4, 2]);\nslice_spread = range(data, [1 2]);",
+      "input": "data = reshape(1:24, [3, 4, 2]);\nslice_spread = range(data, [1 2])",
       "output": "slice_spread(:,:,1) =\n    11\n\nslice_spread(:,:,2) =\n    11"
     }
   ],

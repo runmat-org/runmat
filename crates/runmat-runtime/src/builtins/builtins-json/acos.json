@@ -43,32 +43,32 @@
   "examples": [
     {
       "description": "Computing the inverse cosine of a scalar angle",
-      "input": "y = acos(0.5);",
+      "input": "y = acos(0.5)",
       "output": "y = 1.0472"
     },
     {
       "description": "Handling values outside [-1, 1] that produce complex results",
-      "input": "z = acos(2);",
+      "input": "z = acos(2)",
       "output": "z = 0.0000 - 1.3170i"
     },
     {
       "description": "Applying inverse cosine to every element of a matrix",
-      "input": "A = [0 -0.5 0.75; 1 0.25 -0.8];\nY = acos(A);",
+      "input": "A = [0 -0.5 0.75; 1 0.25 -0.8];\nY = acos(A)",
       "output": "Y =\n    1.5708    2.0944    0.7227\n         0    1.3181    2.4981"
     },
     {
       "description": "Using logical input with automatic double promotion",
-      "input": "mask = logical([0 1 0 1]);\nangles = acos(mask);",
+      "input": "mask = logical([0 1 0 1]);\nangles = acos(mask)",
       "output": "angles = [1.5708 0 1.5708 0]"
     },
     {
       "description": "Running `acos` on a GPU array without explicit transfers",
-      "input": "G = gpuArray(linspace(-1, 1, 5));\nresult_gpu = acos(G);\nresult = gather(result_gpu);",
+      "input": "G = gpuArray(linspace(-1, 1, 5));\nresult_gpu = acos(G);\nresult = gather(result_gpu)",
       "output": "result = [3.1416 2.0944 1.5708 1.0472 0.0000]"
     },
     {
       "description": "Evaluating inverse cosine of complex numbers",
-      "input": "vals = [0.5 + 1i, -0.2 + 0.75i];\nw = acos(vals);",
+      "input": "vals = [0.5 + 1i, -0.2 + 0.75i];\nw = acos(vals)",
       "output": "w =\n   1.2214 - 0.9261i\n   1.7307 - 0.7009i"
     }
   ],

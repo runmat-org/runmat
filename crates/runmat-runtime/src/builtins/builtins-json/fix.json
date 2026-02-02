@@ -43,27 +43,27 @@
   "examples": [
     {
       "description": "Truncating positive and negative values toward zero",
-      "input": "values = [-3.7 -2.4 -0.6 0 0.6 2.4 3.7];\ntruncated = fix(values);",
+      "input": "values = [-3.7 -2.4 -0.6 0 0.6 2.4 3.7];\ntruncated = fix(values)",
       "output": "truncated = [-3 -2 0 0 0 2 3];"
     },
     {
       "description": "Removing fractional parts from a matrix",
-      "input": "A = [1.9  4.1; -2.8  0.5];\nB = fix(A);",
+      "input": "A = [1.9  4.1; -2.8  0.5];\nB = fix(A)",
       "output": "B = [1 4; -2 0];"
     },
     {
       "description": "Keeping GPU residency when kernels are available",
-      "input": "G = gpuArray(linspace(-2.4, 2.4, 6));\ntruncGpu = fix(G);\nhostValues = gather(truncGpu);",
+      "input": "G = gpuArray(linspace(-2.4, 2.4, 6));\ntruncGpu = fix(G);\nhostValues = gather(truncGpu)",
       "output": "hostValues = [-2 -1 0 0 1 2];"
     },
     {
       "description": "Dropping fractional parts of complex numbers",
-      "input": "z = [1.9 + 2.6i, -3.4 - 0.2i];\nfixed = fix(z);",
+      "input": "z = [1.9 + 2.6i, -3.4 - 0.2i];\nfixed = fix(z)",
       "output": "fixed = [1 + 2i, -3 + 0i];"
     },
     {
       "description": "Converting character arrays to truncated numeric codes",
-      "input": "letters = ['A' 'B' 'C'];\ncodes = fix(letters);",
+      "input": "letters = ['A' 'B' 'C'];\ncodes = fix(letters)",
       "output": "codes = [65 66 67];"
     }
   ],

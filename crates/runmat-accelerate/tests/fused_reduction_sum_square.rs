@@ -28,8 +28,8 @@ fn upload(
         .expect("upload")
 }
 
-#[test]
-fn fused_sum_square_dim0_matches_manual() {
+#[tokio::test]
+async fn fused_sum_square_dim0_matches_manual() {
     let _guard = TEST_MUTEX.lock().unwrap();
     let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         WgpuProviderOptions::default(),
@@ -98,7 +98,9 @@ fn fused_sum_square_dim0_matches_manual() {
         Value::GpuTensor(h) => h,
         _ => panic!("expected GPU tensor"),
     };
-    let out = provider.download(&out_handle).expect("download");
+    let out = AccelProvider::download(provider, &out_handle)
+        .await
+        .expect("download");
     assert_eq!(out.shape, vec![cols]);
 
     // Manual per-column sum of squares

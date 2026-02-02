@@ -1,7 +1,11 @@
-use runmat_hir::lower;
-use runmat_ignition::{compile, execute, instr::Instr};
+mod test_helpers;
+
+use runmat_ignition::{compile, instr::Instr};
 use runmat_parser::parse;
+use std::collections::HashMap;
 use std::convert::TryInto;
+use test_helpers::execute;
+use test_helpers::lower;
 
 #[test]
 fn while_loop_decrements() {
@@ -91,7 +95,7 @@ fn stochastic_evolution_loop_emits_instruction() {
     ";
     let ast = parse(source).unwrap();
     let hir = lower(&ast).unwrap();
-    let bytecode = compile(&hir).unwrap();
+    let bytecode = compile(&hir, &HashMap::new()).unwrap();
     assert!(bytecode
         .instructions
         .iter()

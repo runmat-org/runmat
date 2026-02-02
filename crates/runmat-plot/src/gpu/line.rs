@@ -1,13 +1,15 @@
 use crate::core::renderer::Vertex;
 use crate::core::scene::GpuVertexBuffer;
 use crate::gpu::shaders;
-use crate::gpu::{tuning, util, ScalarType};
+use crate::gpu::{tuning, ScalarType};
 use crate::plots::line::LineStyle;
 use glam::Vec4;
+use log::trace;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 /// Inputs required to pack line vertices directly on the GPU.
+#[derive(Debug, Clone)]
 pub struct LineGpuInputs {
     pub x_buffer: Arc<wgpu::Buffer>,
     pub y_buffer: Arc<wgpu::Buffer>,
@@ -18,7 +20,10 @@ pub struct LineGpuInputs {
 /// Parameters describing how the GPU vertices should be generated.
 pub struct LineGpuParams {
     pub color: Vec4,
-    pub line_width: f32,
+    /// Half-width in *data units* used to extrude thick line triangles.
+    pub half_width_data: f32,
+    /// Whether to emit thick triangles (6 verts/segment) instead of thin LineList.
+    pub thick: bool,
     pub line_style: LineStyle,
     pub marker_size: f32,
 }
@@ -28,9 +33,9 @@ pub struct LineGpuParams {
 struct LineSegmentUniforms {
     color: [f32; 4],
     count: u32,
-    line_width: f32,
+    half_width_data: f32,
     line_style: u32,
-    _pad: u32,
+    thick: u32,
 }
 
 #[repr(C)]
@@ -56,9 +61,17 @@ pub fn pack_vertices_from_xy(
     if segments == 0 {
         return Err("plot: unable to construct segments from degenerate input".to_string());
     }
-    let thick = params.line_width > 1.0;
+    let thick = params.thick;
     let vertices_per_segment = if thick { 6u64 } else { 2u64 };
     let max_vertices = segments as u64 * vertices_per_segment;
+    trace!(
+        target: "runmat_plot",
+        "line-pack-kernel: dispatch segments={} thick={} max_vertices={} half_width_data={}",
+        segments,
+        thick,
+        max_vertices,
+        params.half_width_data
+    );
 
     let workgroup_size = tuning::effective_workgroup_size();
     let shader = compile_shader(device, workgroup_size, inputs.scalar);
@@ -100,16 +113,6 @@ pub fn pack_vertices_from_xy(
                 binding: 3,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 4,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
                     min_binding_size: None,
@@ -142,22 +145,12 @@ pub fn pack_vertices_from_xy(
         mapped_at_creation: false,
     }));
 
-    let counter_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("line-gpu-counter"),
-        size: std::mem::size_of::<u32>() as u64,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_SRC
-            | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    queue.write_buffer(&counter_buffer, 0, bytemuck::bytes_of(&0u32));
-
     let uniforms = LineSegmentUniforms {
         color: params.color.to_array(),
         count: inputs.len,
-        line_width: params.line_width.max(0.0),
+        half_width_data: params.half_width_data.max(0.0),
         line_style: line_style_code(params.line_style),
-        _pad: 0,
+        thick: if thick { 1 } else { 0 },
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("line-pack-uniforms"),
@@ -183,10 +176,6 @@ pub fn pack_vertices_from_xy(
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: counter_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
                 resource: uniform_buffer.as_entire_binding(),
             },
         ],
@@ -205,25 +194,8 @@ pub fn pack_vertices_from_xy(
         let workgroups = segments.div_ceil(workgroup_size);
         pass.dispatch_workgroups(workgroups, 1, 1);
     }
-    let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("line-pack-count-readback"),
-        size: std::mem::size_of::<u32>() as u64,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    encoder.copy_buffer_to_buffer(
-        &counter_buffer,
-        0,
-        &readback_buffer,
-        0,
-        std::mem::size_of::<u32>() as u64,
-    );
-
     queue.submit(Some(encoder.finish()));
-
-    let drawn_vertices = util::readback_u32(device, &readback_buffer)
-        .map_err(|e| format!("plot: failed to read GPU vertex count: {e}"))?;
-    Ok(GpuVertexBuffer::new(output_buffer, drawn_vertices as usize))
+    Ok(GpuVertexBuffer::new(output_buffer, max_vertices as usize))
 }
 
 fn compile_shader(
@@ -248,8 +220,8 @@ pub fn pack_marker_vertices_from_xy(
     inputs: &LineGpuInputs,
     params: &LineGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
-    if inputs.len < 2 {
-        return Err("plot: line inputs must contain at least two points".to_string());
+    if inputs.len < 1 {
+        return Err("plot: marker inputs must contain at least one point".to_string());
     }
 
     let workgroup_size = tuning::effective_workgroup_size();
@@ -314,7 +286,9 @@ pub fn pack_marker_vertices_from_xy(
         entry_point: "main",
     });
 
-    let output_size = inputs.len as u64 * std::mem::size_of::<Vertex>() as u64;
+    // Direct point rendering expands each point into a quad (2 triangles = 6 vertices).
+    let expanded_vertices = inputs.len as u64 * 6;
+    let output_size = expanded_vertices * std::mem::size_of::<Vertex>() as u64;
     let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("line-marker-gpu-vertices"),
         size: output_size,
@@ -374,7 +348,10 @@ pub fn pack_marker_vertices_from_xy(
     }
     queue.submit(Some(encoder.finish()));
 
-    Ok(GpuVertexBuffer::new(output_buffer, inputs.len as usize))
+    Ok(GpuVertexBuffer::new(
+        output_buffer,
+        (inputs.len as usize) * 6,
+    ))
 }
 
 fn compile_marker_shader(

@@ -9,7 +9,8 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::sign")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -48,6 +49,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion kernels emit WGSL `sign` ops; providers can override via fused pipelines when advantageous.",
 };
 
+const BUILTIN_NAME: &str = "sign";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 #[runtime_builtin(
     name = "sign",
     category = "math/elementwise",
@@ -56,59 +65,64 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::sign"
 )]
-fn sign_builtin(value: Value) -> Result<Value, String> {
+async fn sign_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => sign_gpu(handle),
+        Value::GpuTensor(handle) => sign_gpu(handle).await,
         Value::Complex(re, im) => {
             let (re_out, im_out) = sign_complex(re, im);
             Ok(Value::Complex(re_out, im_out))
         }
         Value::ComplexTensor(ct) => sign_complex_tensor(ct),
         Value::CharArray(ca) => sign_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err("sign: expected numeric, logical, or character input".to_string())
-        }
+        Value::String(_) | Value::StringArray(_) => Err(builtin_error(
+            "sign: expected numeric, logical, or character input",
+        )),
         other => sign_real(other),
     }
 }
 
-fn sign_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn sign_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_sign(&handle) {
+        if let Ok(out) = provider.unary_sign(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
-    sign_tensor(tensor).map(tensor::tensor_into_value)
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    Ok(tensor::tensor_into_value(sign_tensor(tensor)?))
 }
 
-fn sign_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("sign", value)?;
-    sign_tensor(tensor).map(tensor::tensor_into_value)
+fn sign_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("sign", value)
+        .map_err(|e| builtin_error(format!("sign: {e}")))?;
+    Ok(tensor::tensor_into_value(sign_tensor(tensor)?))
 }
 
-fn sign_tensor(tensor: Tensor) -> Result<Tensor, String> {
+fn sign_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&x| sign_real_scalar(x)).collect();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| format!("sign: {e}"))
+    Tensor::new(data, tensor.shape.clone()).map_err(|e| builtin_error(format!("sign: {e}")))
 }
 
-fn sign_char_array(ca: CharArray) -> Result<Value, String> {
+fn sign_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data
         .iter()
         .map(|&ch| sign_real_scalar(ch as u32 as f64))
         .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("sign: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| builtin_error(format!("sign: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
-fn sign_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn sign_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
         .data
         .iter()
         .map(|&(re, im)| sign_complex(re, im))
         .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(mapped, ct.shape.clone()).map_err(|e| format!("sign: {e}"))?;
+    let tensor = ComplexTensor::new(mapped, ct.shape.clone())
+        .map_err(|e| builtin_error(format!("sign: {e}")))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
@@ -161,7 +175,12 @@ fn sign_complex(re: f64, im: f64) -> (f64, f64) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray};
+
+    fn sign_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::sign_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -298,7 +317,8 @@ pub(crate) mod tests {
     fn sign_string_input_errors() {
         let err = sign_builtin(Value::String("runmat".to_string())).unwrap_err();
         assert!(
-            err.contains("expected numeric, logical, or character input"),
+            err.message()
+                .contains("expected numeric, logical, or character input"),
             "unexpected error message: {err}"
         );
     }
@@ -366,7 +386,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = sign_gpu(handle).unwrap();
+        let gpu = block_on(sign_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {

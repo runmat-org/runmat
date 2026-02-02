@@ -52,6 +52,10 @@ pub struct PlotRenderer {
     axes_cameras: Vec<Camera>,
     /// Keep a clone of the last figure set for export/UX operations
     pub(crate) last_figure: Option<crate::plots::Figure>,
+
+    /// Last surface extent (in pixels) that was used to build viewport-dependent geometry.
+    /// Used so we can rebuild the scene after the canvas is resized (common on wasm).
+    last_scene_viewport_px: Option<(u32, u32)>,
 }
 
 /// Configuration for plot rendering
@@ -117,6 +121,26 @@ pub struct RenderResult {
 }
 
 impl PlotRenderer {
+    /// Notify the renderer that the underlying surface configuration has changed (e.g. resize).
+    /// On wasm the canvas is often created at a tiny size and resized shortly after; some
+    /// CPU-generated geometry (like thick 2D lines) depends on viewport pixels, so we rebuild
+    /// the scene when the surface extent changes.
+    pub fn on_surface_config_updated(&mut self) {
+        let current = (
+            self.wgpu_renderer.surface_config.width.max(1),
+            self.wgpu_renderer.surface_config.height.max(1),
+        );
+        if self.last_scene_viewport_px == Some(current) {
+            return;
+        }
+        let Some(figure) = self.last_figure.clone() else {
+            self.last_scene_viewport_px = Some(current);
+            return;
+        };
+        // Rebuild scene using the updated surface extent.
+        self.set_figure(figure);
+    }
+
     fn prepare_buffers_for_render_data(
         &self,
         render_data: &crate::core::RenderData,
@@ -129,6 +153,14 @@ impl PlotRenderer {
             .as_ref()
             .map(|indices| self.wgpu_renderer.create_index_buffer(indices));
         Some((vertex_buffer, index_buffer))
+    }
+
+    fn gpu_indirect_args(render_data: &crate::core::RenderData) -> Option<(&wgpu::Buffer, u64)> {
+        render_data
+            .gpu_vertices
+            .as_ref()
+            .and_then(|buf| buf.indirect.as_ref())
+            .map(|indirect| (indirect.args.as_ref(), indirect.offset))
     }
 
     /// Create a new plot renderer
@@ -166,6 +198,7 @@ impl PlotRenderer {
             figure_categorical_labels: None,
             axes_cameras: Vec::new(),
             last_figure: None,
+            last_scene_viewport_px: None,
         })
     }
 
@@ -200,7 +233,17 @@ impl PlotRenderer {
         use crate::core::SceneNode;
 
         // Convert figure to render data first, then create scene nodes
-        let render_data_list = figure.render_data();
+        let viewport_px = (
+            self.wgpu_renderer.surface_config.width.max(1),
+            self.wgpu_renderer.surface_config.height.max(1),
+        );
+        self.last_scene_viewport_px = Some(viewport_px);
+        let gpu = crate::core::GpuPackContext {
+            device: &self.wgpu_renderer.device,
+            queue: &self.wgpu_renderer.queue,
+        };
+        let render_data_list =
+            figure.render_data_with_viewport_and_gpu(Some(viewport_px), Some(&gpu));
         let axes_map: Vec<usize> = figure.plot_axes_indices().to_vec();
         let (rows, cols) = figure.axes_grid();
 
@@ -274,6 +317,13 @@ impl PlotRenderer {
 
         for node in self.scene.get_visible_nodes() {
             if let Some(render_data) = &node.render_data {
+                if let Some(bounds) = render_data.bounds.as_ref() {
+                    min_x = min_x.min(bounds.min.x as f64);
+                    max_x = max_x.max(bounds.max.x as f64);
+                    min_y = min_y.min(bounds.min.y as f64);
+                    max_y = max_y.max(bounds.max.y as f64);
+                    continue;
+                }
                 for vertex in &render_data.vertices {
                     let x = vertex.position[0] as f64;
                     let y = vertex.position[1] as f64;
@@ -342,13 +392,15 @@ impl PlotRenderer {
                     *bottom = b;
                     *top = t;
                 }
-                // Center camera at data center
-                let cx = (l + r) * 0.5;
-                let cy = (b + t) * 0.5;
-                self.camera.position.x = cx;
-                self.camera.position.y = cy;
-                self.camera.target.x = cx;
-                self.camera.target.y = cy;
+                // Important: for 2D plotting we treat the orthographic projection bounds as
+                // world/data coordinates. That means the view transform must not translate in X/Y,
+                // otherwise we'd effectively offset the view twice (once via view_matrix and once
+                // via projection bounds), causing the plot to appear shifted / partially clipped.
+                //
+                // Keep the camera looking down at the z=0 plane; only adjust Z so the view matrix
+                // stays stable across resizes.
+                self.camera.position.z = 1.0;
+                self.camera.target.z = 0.0;
                 self.camera.mark_dirty();
             }
         }
@@ -648,6 +700,10 @@ impl PlotRenderer {
                             &[],
                         );
                         render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                        if let Some((args, offset)) = Self::gpu_indirect_args(render_data) {
+                            render_pass.draw_indirect(args, offset);
+                            continue;
+                        }
                         for draw_call in &render_data.draw_calls {
                             render_pass.draw(
                                 draw_call.vertex_offset as u32
@@ -670,11 +726,23 @@ impl PlotRenderer {
                             &[],
                         );
                         render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                        if let Some((args, offset)) = Self::gpu_indirect_args(render_data) {
+                            render_pass.draw_indirect(args, offset);
+                            continue;
+                        }
                         if let Some(idx) = index_buffer {
                             render_pass.set_index_buffer(idx.slice(..), wgpu::IndexFormat::Uint32);
                             if let Some(indices) = &render_data.indices {
                                 render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
                             }
+                            continue;
+                        }
+                        for draw_call in &render_data.draw_calls {
+                            render_pass.draw(
+                                draw_call.vertex_offset as u32
+                                    ..(draw_call.vertex_offset + draw_call.vertex_count) as u32,
+                                0..draw_call.instance_count as u32,
+                            );
                         }
                     }
                     crate::core::PipelineType::Textured => {
@@ -698,6 +766,10 @@ impl PlotRenderer {
                                 render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
                             }
                         } else {
+                            if let Some((args, offset)) = Self::gpu_indirect_args(render_data) {
+                                render_pass.draw_indirect(args, offset);
+                                continue;
+                            }
                             for dc in &render_data.draw_calls {
                                 render_pass.draw(
                                     dc.vertex_offset as u32
@@ -743,6 +815,10 @@ impl PlotRenderer {
                                 if let Some(ref bg) = point_style_bind_groups[idx] {
                                     render_pass.set_bind_group(1, bg, &[]);
                                 }
+                            }
+                            if let Some((args, offset)) = Self::gpu_indirect_args(render_data) {
+                                render_pass.draw_indirect(args, offset);
+                                continue;
                             }
                             for dc in &render_data.draw_calls {
                                 render_pass.draw(
@@ -888,6 +964,42 @@ impl PlotRenderer {
 
             // Now render all items with proper bind group setup
             for (i, (render_data, vertex_buffer, index_buffer)) in render_items.iter().enumerate() {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    // On wasm, "blank but drawing" is often caused by bad vertex data (NaNs/alpha=0)
+                    // or using the wrong pipeline. Emit a single summary per item.
+                    if log::log_enabled!(log::Level::Debug) {
+                        if let Some(v0) = render_data.vertices.first() {
+                            log::debug!(
+                                target: "runmat_plot",
+                                "wasm draw item: pipeline={:?} verts={} v0.pos=({:.3},{:.3},{:.3}) v0.color=({:.3},{:.3},{:.3},{:.3})",
+                                render_data.pipeline_type,
+                                render_data.vertices.len(),
+                                v0.position[0],
+                                v0.position[1],
+                                v0.position[2],
+                                v0.color[0],
+                                v0.color[1],
+                                v0.color[2],
+                                v0.color[3],
+                            );
+                        } else if render_data.gpu_vertices.is_some() {
+                            log::debug!(
+                                target: "runmat_plot",
+                                "wasm draw item: pipeline={:?} using gpu_vertices vertex_count={}",
+                                render_data.pipeline_type,
+                                render_data.vertex_count(),
+                            );
+                        } else {
+                            log::debug!(
+                                target: "runmat_plot",
+                                "wasm draw item: pipeline={:?} has no vertices",
+                                render_data.pipeline_type
+                            );
+                        }
+                    }
+                }
+
                 // Get the appropriate pipeline for this render data (pipeline ensured above)
                 if render_data.pipeline_type == crate::core::PipelineType::Textured {
                     // Ensure image pipeline
@@ -920,6 +1032,10 @@ impl PlotRenderer {
                     }
                 } else {
                     log::trace!(target: "runmat_plot", "draw direct vertices");
+                    if let Some((args, offset)) = Self::gpu_indirect_args(render_data) {
+                        render_pass.draw_indirect(args, offset);
+                        continue;
+                    }
                     // Use draw_calls from render_data for proper vertex range handling
                     for draw_call in &render_data.draw_calls {
                         log::trace!(
@@ -1396,10 +1512,12 @@ impl PlotRenderer {
             right: 5.0,
             bottom: -5.0,
             top: 5.0,
-            near: -1.0,
-            far: 1.0,
+            // Use a deeper z range so the default camera position doesn't clip z=0 geometry.
+            near: -10.0,
+            far: 10.0,
         };
-        camera.position = Vec3::new(0.0, 0.0, 5.0);
+        // For 2D plotting we keep the camera close to the z=0 plane.
+        camera.position = Vec3::new(0.0, 0.0, 1.0);
         camera.target = Vec3::new(0.0, 0.0, 0.0);
         camera.up = Vec3::new(0.0, 1.0, 0.0);
         camera

@@ -31,6 +31,8 @@ pub(crate) mod compat_cmds;
 pub(crate) mod contour;
 #[path = "ops/contourf.rs"]
 pub(crate) mod contourf;
+#[path = "ops/drawnow.rs"]
+pub(crate) mod drawnow;
 #[path = "ops/figure.rs"]
 pub(crate) mod figure;
 #[path = "ops/gca.rs"]
@@ -65,14 +67,31 @@ pub(crate) mod surfc;
 pub use perf::{set_scatter_target_points, set_surface_vertex_budget};
 pub use state::{
     clear_figure, clone_figure, close_figure, configure_subplot, current_axes_state,
-    current_figure_handle, install_figure_observer, new_figure_handle, reset_recent_figures,
-    select_figure, set_hold, take_recent_figures, FigureAxesState, FigureError, FigureEventKind,
-    FigureEventView, FigureHandle, HoldMode,
+    current_figure_handle, figure_handles, install_figure_observer, new_figure_handle,
+    reset_hold_state_for_run, reset_recent_figures, select_figure, set_hold, take_recent_figures,
+    FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
 pub use web::{
-    install_web_renderer, install_web_renderer_for_handle, render_current_scene,
-    resize_web_renderer, web_renderer_ready,
+    bind_surface_to_figure, detach_surface, install_surface, present_figure_on_surface,
+    present_surface, render_current_scene, resize_surface, web_renderer_ready,
 };
+
+pub(crate) fn plotting_error(builtin: &str, message: impl Into<String>) -> crate::RuntimeError {
+    crate::build_runtime_error(message)
+        .with_builtin(builtin)
+        .build()
+}
+
+pub(crate) fn plotting_error_with_source(
+    builtin: &str,
+    message: impl Into<String>,
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> crate::RuntimeError {
+    crate::build_runtime_error(message)
+        .with_builtin(builtin)
+        .with_source(source)
+        .build()
+}
 
 #[cfg(feature = "plot-core")]
 pub use engine::{render_figure_png_bytes, render_figure_snapshot};

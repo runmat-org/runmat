@@ -1,9 +1,14 @@
 use runmat_builtins::Value;
 use runmat_gc::{gc_allocate, gc_test_context};
-use runmat_hir::lower;
+use runmat_hir::{HirProgram, LoweringContext, SemanticError};
 use runmat_ignition::{compile, Bytecode};
 use runmat_parser::parse;
 use runmat_turbine::TurbineEngine;
+use std::collections::HashMap;
+
+fn lower(ast: &runmat_parser::Program) -> Result<HirProgram, SemanticError> {
+    runmat_hir::lower(ast, &LoweringContext::empty()).map(|result| result.hir)
+}
 
 #[test]
 fn test_turbine_engine_creation() {
@@ -45,7 +50,7 @@ fn test_simple_arithmetic_compilation() {
             let source = "x = 5 + 3";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             let result = engine.compile_bytecode(&bytecode);
             assert!(result.is_ok());
@@ -60,7 +65,7 @@ fn test_execution_with_variables() {
             let source = "result = 10 * 2";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             let mut vars = vec![Value::Num(0.0); bytecode.var_count];
             let result = engine.execute_or_compile(&bytecode, &mut vars);
@@ -76,7 +81,7 @@ fn test_hotspot_compilation_threshold() {
             let source = "temp = 7 + 8";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             let hash = engine.calculate_bytecode_hash(&bytecode);
 
@@ -101,7 +106,7 @@ fn test_function_caching() {
             let source = "cached = 15 + 25";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             // First compilation
             let result1 = engine.compile_bytecode(&bytecode);
@@ -133,7 +138,7 @@ fn test_compilation_statistics() {
             let source = "stats_test = 42";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             let _ = engine.compile_bytecode(&bytecode);
 
@@ -152,7 +157,7 @@ fn test_interpreter_fallback() {
             let source = "x = 10";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             let mut vars = vec![Value::Num(0.0); bytecode.var_count];
             let result = engine.execute_or_compile(&bytecode, &mut vars);
@@ -172,7 +177,7 @@ fn test_multiple_function_compilation() {
             for (i, source) in test_cases.iter().enumerate() {
                 let ast = parse(source).unwrap();
                 let hir = lower(&ast).unwrap();
-                let bytecode = compile(&hir).unwrap();
+                let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
                 let result = engine.compile_bytecode(&bytecode);
                 assert!(result.is_ok(), "Failed to compile case {i}: {source}");
@@ -191,7 +196,7 @@ fn test_bytecode_hash_consistency() {
             let source = "hash_test = 99";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             // Same bytecode should produce same hash
             let hash1 = engine.calculate_bytecode_hash(&bytecode);
@@ -202,7 +207,7 @@ fn test_bytecode_hash_consistency() {
             let source2 = "different = 88";
             let ast2 = parse(source2).unwrap();
             let hir2 = lower(&ast2).unwrap();
-            let bytecode2 = compile(&hir2).unwrap();
+            let bytecode2 = compile(&hir2, &HashMap::new()).unwrap();
             let hash3 = engine.calculate_bytecode_hash(&bytecode2);
 
             assert_ne!(hash1, hash3);
@@ -217,7 +222,7 @@ fn test_execution_result_accuracy() {
             let source = "computation = 6 * 7";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             let mut vars = vec![Value::Num(0.0); bytecode.var_count];
             let result = engine.execute_or_compile(&bytecode, &mut vars);
@@ -243,7 +248,7 @@ fn test_memory_safety_with_gc() {
             let source = "jit_with_gc = 100";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             let result = engine.compile_bytecode(&bytecode);
             assert!(result.is_ok());
@@ -268,7 +273,7 @@ fn test_concurrent_compilation_safety() {
                     let source = format!("thread_{i} = {i} + 1");
                     let ast = parse(&source).unwrap();
                     let hir = lower(&ast).unwrap();
-                    let bytecode = compile(&hir).unwrap();
+                    let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
                     let mut engine_guard = engine_clone.lock().unwrap();
                     engine_guard.compile_bytecode(&bytecode)
@@ -300,7 +305,7 @@ fn test_error_handling_in_compilation() {
             let source = "recovery_test = 55";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            bytecode = compile(&hir).unwrap();
+            bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             let result = engine.compile_bytecode(&bytecode);
             assert!(result.is_ok());
@@ -315,7 +320,7 @@ fn test_matrix_operations_compilation() {
             let source = "matrix_test = [1, 2; 3, 4]";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             let result = engine.compile_bytecode(&bytecode);
             // Matrix operations should be compilable or fall back gracefully
@@ -337,7 +342,7 @@ fn test_complex_expression_compilation() {
             let source = "complex = (10 + 5) * 3 - 8 / 2";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             let result = engine.compile_bytecode(&bytecode);
             assert!(result.is_ok());
@@ -356,7 +361,7 @@ fn test_profiler_hotness_tracking() {
             let source = "hotness_test = 77";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             let hash = engine.calculate_bytecode_hash(&bytecode);
 
@@ -380,7 +385,7 @@ fn test_cache_eviction_under_pressure() {
                 let source = format!("cache_test_{i} = {i}");
                 let ast = parse(&source).unwrap();
                 let hir = lower(&ast).unwrap();
-                let bytecode = compile(&hir).unwrap();
+                let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
                 let result = engine.compile_bytecode(&bytecode);
                 if result.is_err() {
@@ -409,7 +414,7 @@ fn test_execution_with_different_variable_counts() {
             for (source, expected_vars) in &test_cases {
                 let ast = parse(source).unwrap();
                 let hir = lower(&ast).unwrap();
-                let bytecode = compile(&hir).unwrap();
+                let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
                 assert!(bytecode.var_count >= *expected_vars);
 
@@ -429,7 +434,7 @@ fn test_runtime_function_integration() {
             let source = "builtin_test = abs(-5)";
             let ast = parse(source).unwrap();
             let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             let result = engine.compile_bytecode(&bytecode);
             // Should handle builtin functions (either compile or fallback)

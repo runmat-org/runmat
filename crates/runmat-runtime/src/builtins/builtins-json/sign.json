@@ -43,36 +43,36 @@
   "examples": [
     {
       "description": "Determining the sign of a scalar",
-      "input": "result = sign(-42);",
+      "input": "result = sign(-42)",
       "output": "result = -1;"
     },
     {
       "description": "Applying `sign` to a vector of mixed values",
-      "input": "v = [-3 -0.0 0 2 5];\ns = sign(v);",
+      "input": "v = [-3 -0.0 0 2 5];\ns = sign(v)",
       "output": "s = [-1 0 0 1 1];"
     },
     {
       "description": "Normalising complex numbers to unit magnitude",
-      "input": "z = [3+4i, -1+1i, 0+0i];\nu = sign(z);",
+      "input": "z = [3+4i, -1+1i, 0+0i];\nu = sign(z)",
       "output": "u = [0.6+0.8i, -0.7071+0.7071i, 0];"
     },
     {
       "description": "Using `sign` with character data",
-      "input": "codes = sign('RunMat');",
+      "input": "codes = sign('RunMat')",
       "output": "codes = [1 1 1 1 1 1];"
     },
     {
       "description": "Working with logical masks",
-      "input": "mask = [false true false; true false true];\nnumeric = sign(mask);",
+      "input": "mask = [false true false; true false true];\nnumeric = sign(mask)",
       "output": "numeric = [0 1 0; 1 0 1];"
     },
     {
       "description": "Executing `sign` on a GPU-resident tensor",
-      "input": "G = randn(4096, 4096, 'gpuArray');\nS = sign(G);"
+      "input": "G = randn(4096, 4096, 'gpuArray');\nS = sign(G)"
     },
     {
       "description": "Handling infinities and NaNs",
-      "input": "values = [Inf, -Inf, NaN, 0];\nout = sign(values);",
+      "input": "values = [Inf, -Inf, NaN, 0];\nout = sign(values)",
       "output": "out = [1 -1 NaN 0];"
     }
   ],

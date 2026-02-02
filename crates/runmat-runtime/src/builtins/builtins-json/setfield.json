@@ -40,22 +40,22 @@
   "examples": [
     {
       "description": "Assigning a new field in a scalar struct",
-      "input": "s = struct();\ns = setfield(s, \"answer\", 42);\ndisp(s.answer);",
+      "input": "s = struct();\ns = setfield(s, \"answer\", 42);\ndisp(s.answer)",
       "output": "    42"
     },
     {
       "description": "Creating nested structs automatically",
-      "input": "cfg = struct();\ncfg = setfield(cfg, \"solver\", \"name\", \"cg\");\ncfg = setfield(cfg, \"solver\", \"tolerance\", 1e-6);\ndisp(cfg.solver.tolerance);",
+      "input": "cfg = struct();\ncfg = setfield(cfg, \"solver\", \"name\", \"cg\");\ncfg = setfield(cfg, \"solver\", \"tolerance\", 1e-6);\ndisp(cfg.solver.tolerance)",
       "output": "  1.0000e-06"
     },
     {
       "description": "Updating an element of a struct array",
-      "input": "people = struct(\"name\", {\"Ada\", \"Grace\"}, \"id\", {101, 102});\npeople = setfield(people, {2}, \"id\", 999);\ndisp(people(2).id);",
+      "input": "people = struct(\"name\", {\"Ada\", \"Grace\"}, \"id\", {101, 102});\npeople = setfield(people, {2}, \"id\", 999);\ndisp(people(2).id)",
       "output": "   999"
     },
     {
       "description": "Assigning through a field that contains a cell array",
-      "input": "data = struct(\"samples\", {{struct(\"value\", 1), struct(\"value\", 2)}} );\ndata = setfield(data, \"samples\", {2}, \"value\", 10);\ndisp(data.samples{2}.value);",
+      "input": "data = struct(\"samples\", {{struct(\"value\", 1), struct(\"value\", 2)}} );\ndata = setfield(data, \"samples\", {2}, \"value\", 10);\ndisp(data.samples{2}.value)",
       "output": "    10"
     },
     {

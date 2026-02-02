@@ -43,27 +43,27 @@
   "examples": [
     {
       "description": "Getting a random permutation of integers 1 through N",
-      "input": "rng(0);\np = randperm(6);",
+      "input": "rng(0);\np = randperm(6)",
       "output": "p = [1 6 2 4 3 5];"
     },
     {
       "description": "Selecting K unique indices without replacement",
-      "input": "rng(0);\nidx = randperm(10, 3);",
+      "input": "rng(0);\nidx = randperm(10, 3)",
       "output": "idx = [1 10 9];"
     },
     {
       "description": "Generating a reproducible permutation after seeding RNG",
-      "input": "rng(42);\np1 = randperm(8);\nrng(42);\np2 = randperm(8);",
+      "input": "rng(42);\np1 = randperm(8);\nrng(42);\np2 = randperm(8)",
       "output": "isequal(p1, p2)\nans = logical\n     1"
     },
     {
       "description": "Creating a GPU-resident random permutation",
-      "input": "G = gpuArray.zeros(4, 4);\np = randperm(12, 4, 'like', G);\npeek = gather(p);",
+      "input": "G = gpuArray.zeros(4, 4);\np = randperm(12, 4, 'like', G);\npeek = gather(p)",
       "output": "isa(p, 'gpuArray')\nans = logical\n     1"
     },
     {
       "description": "Working with empty permutations",
-      "input": "p = randperm(0);\nq = randperm(5, 0);",
+      "input": "p = randperm(0);\nq = randperm(5, 0)",
       "output": "size(p)\nans =\n     1     0\n\nsize(q)\nans =\n     1     0"
     }
   ],

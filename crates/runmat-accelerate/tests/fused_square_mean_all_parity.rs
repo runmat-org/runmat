@@ -14,8 +14,8 @@ use runmat_accelerate_api::{AccelProvider, HostTensorView, ReductionFlavor};
 use runmat_builtins::{Type, Value};
 use std::collections::HashMap;
 
-#[test]
-fn fused_square_mean_all_matches_cpu() {
+#[tokio::test]
+async fn fused_square_mean_all_matches_cpu() {
     let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         WgpuProviderOptions::default(),
     )
@@ -155,7 +155,9 @@ fn fused_square_mean_all_matches_cpu() {
     let result = execute_reduction(req, n, 1, 0).expect("fused mean(all) of square");
     let gpu_scalar = match result {
         runmat_builtins::Value::GpuTensor(h) => {
-            let host = provider.download(&h).expect("download");
+            let host = AccelProvider::download(provider, &h)
+                .await
+                .expect("download");
             host.data[0]
         }
         _ => panic!("expected GpuTensor result"),

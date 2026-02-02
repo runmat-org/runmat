@@ -16,7 +16,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+
+const BUILTIN_NAME: &str = "csvread";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::csvread")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -33,6 +35,34 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Runs entirely on the host; acceleration providers are not involved.",
 };
+
+fn csvread_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn csvread_error_with_source<E>(message: impl Into<String>, source: E) -> RuntimeError
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source)
+        .build()
+}
+
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(|value| value.to_string());
+    let message = err.message().to_string();
+    let mut builder = build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::csvread")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -53,15 +83,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::tabular::csvread"
 )]
-fn csvread_builtin(path: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let gathered_path = gather_if_needed(&path).map_err(|e| format!("csvread: {e}"))?;
-    let options = parse_arguments(&rest)?;
+async fn csvread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let gathered_path = gather_if_needed_async(&path)
+        .await
+        .map_err(map_control_flow)?;
+    let options = parse_arguments(&rest).await?;
     let resolved = resolve_path(&gathered_path)?;
-    let (rows, max_cols) = read_csv_rows(&resolved)?;
+    let (rows, max_cols, skipped_rows) = read_csv_rows(&resolved, &options)?;
+    let start_row = if options.range.is_none() {
+        options.start_row.saturating_sub(skipped_rows)
+    } else {
+        options.start_row
+    };
     let subset = if let Some(range) = options.range {
         apply_range(&rows, max_cols, &range, 0.0)
     } else {
-        apply_offsets(&rows, max_cols, options.start_row, options.start_col, 0.0)
+        apply_offsets(&rows, max_cols, start_row, options.start_col, 0.0)
     };
     let tensor = rows_to_tensor(subset.rows, subset.row_count, subset.col_count, 0.0)?;
     Ok(Value::Tensor(tensor))
@@ -74,10 +111,14 @@ struct CsvReadOptions {
     range: Option<RangeSpec>,
 }
 
-fn parse_arguments(args: &[Value]) -> Result<CsvReadOptions, String> {
+async fn parse_arguments(args: &[Value]) -> BuiltinResult<CsvReadOptions> {
     let mut gathered = Vec::with_capacity(args.len());
     for value in args {
-        gathered.push(gather_if_needed(value).map_err(|e| format!("csvread: {e}"))?);
+        gathered.push(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_control_flow)?,
+        );
     }
     match gathered.len() {
         0 => Ok(CsvReadOptions::default()),
@@ -100,39 +141,48 @@ fn parse_arguments(args: &[Value]) -> Result<CsvReadOptions, String> {
                 range: Some(range),
             })
         }
-        _ => Err("csvread: expected csvread(filename[, row, col[, range]])".to_string()),
-    }
-}
-
-fn value_to_start_index(value: &Value, name: &str) -> Result<usize, String> {
-    match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(format!("csvread: {name} must be a non-negative integer"));
-            }
-            usize::try_from(raw).map_err(|_| format!("csvread: {name} is too large"))
-        }
-        Value::Num(n) => {
-            if !n.is_finite() {
-                return Err(format!("csvread: {name} must be a finite integer"));
-            }
-            if *n < 0.0 {
-                return Err(format!("csvread: {name} must be a non-negative integer"));
-            }
-            let rounded = n.round();
-            if (rounded - n).abs() > f64::EPSILON {
-                return Err(format!("csvread: {name} must be an integer"));
-            }
-            usize::try_from(rounded as i64).map_err(|_| format!("csvread: {name} is too large"))
-        }
-        _ => Err(format!(
-            "csvread: expected {name} as a numeric scalar, got {value:?}"
+        _ => Err(csvread_error(
+            "csvread: expected csvread(filename[, row, col[, range]])",
         )),
     }
 }
 
-fn resolve_path(value: &Value) -> Result<PathBuf, String> {
+fn value_to_start_index(value: &Value, name: &str) -> BuiltinResult<usize> {
+    match value {
+        Value::Int(i) => {
+            let raw = i.to_i64();
+            if raw < 0 {
+                return Err(csvread_error(format!(
+                    "csvread: {name} must be a non-negative integer"
+                )));
+            }
+            usize::try_from(raw).map_err(|_| csvread_error(format!("csvread: {name} is too large")))
+        }
+        Value::Num(n) => {
+            if !n.is_finite() {
+                return Err(csvread_error(format!(
+                    "csvread: {name} must be a finite integer"
+                )));
+            }
+            if *n < 0.0 {
+                return Err(csvread_error(format!(
+                    "csvread: {name} must be a non-negative integer"
+                )));
+            }
+            let rounded = n.round();
+            if (rounded - n).abs() > f64::EPSILON {
+                return Err(csvread_error(format!("csvread: {name} must be an integer")));
+            }
+            usize::try_from(rounded as i64)
+                .map_err(|_| csvread_error(format!("csvread: {name} is too large")))
+        }
+        _ => Err(csvread_error(format!(
+            "csvread: expected {name} as a numeric scalar, got {value:?}"
+        ))),
+    }
+}
+
+fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {
         Value::String(s) => normalize_path(s),
         Value::CharArray(ca) if ca.rows == 1 => {
@@ -143,40 +193,51 @@ fn resolve_path(value: &Value) -> Result<PathBuf, String> {
             if sa.data.len() == 1 {
                 normalize_path(&sa.data[0])
             } else {
-                Err("csvread: string array inputs must be scalar".to_string())
+                Err(csvread_error("csvread: string array inputs must be scalar"))
             }
         }
-        Value::CharArray(_) => {
-            Err("csvread: expected a 1-by-N character vector for the file name".to_string())
-        }
-        other => Err(format!(
-            "csvread: expected filename as string scalar or character vector, got {other:?}"
+        Value::CharArray(_) => Err(csvread_error(
+            "csvread: expected a 1-by-N character vector for the file name",
         )),
+        other => Err(csvread_error(format!(
+            "csvread: expected filename as string scalar or character vector, got {other:?}"
+        ))),
     }
 }
 
-fn normalize_path(raw: &str) -> Result<PathBuf, String> {
+fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
     if raw.trim().is_empty() {
-        return Err("csvread: filename must not be empty".to_string());
+        return Err(csvread_error("csvread: filename must not be empty"));
     }
-    let expanded = expand_user_path(raw, "csvread").map_err(|e| format!("csvread: {e}"))?;
+    let expanded = expand_user_path(raw, BUILTIN_NAME).map_err(csvread_error)?;
     Ok(Path::new(&expanded).to_path_buf())
 }
 
-fn read_csv_rows(path: &Path) -> Result<(Vec<Vec<f64>>, usize), String> {
-    let file = File::open(path)
-        .map_err(|e| format!("csvread: unable to open '{}': {e}", path.display()))?;
+fn read_csv_rows(
+    path: &Path,
+    options: &CsvReadOptions,
+) -> BuiltinResult<(Vec<Vec<f64>>, usize, usize)> {
+    let file = File::open(path).map_err(|err| {
+        csvread_error_with_source(
+            format!("csvread: unable to open '{}': {err}", path.display()),
+            err,
+        )
+    })?;
     let mut reader = BufReader::new(file);
     let mut buffer = String::new();
     let mut rows = Vec::new();
     let mut max_cols = 0usize;
     let mut line_index = 0usize;
+    let mut skipped_rows = 0usize;
 
     loop {
         buffer.clear();
-        let bytes = reader
-            .read_line(&mut buffer)
-            .map_err(|e| format!("csvread: failed to read '{}': {}", path.display(), e))?;
+        let bytes = reader.read_line(&mut buffer).map_err(|err| {
+            csvread_error_with_source(
+                format!("csvread: failed to read '{}': {err}", path.display()),
+                err,
+            )
+        })?;
         if bytes == 0 {
             break;
         }
@@ -192,15 +253,19 @@ fn read_csv_rows(path: &Path) -> Result<(Vec<Vec<f64>>, usize), String> {
         } else if buffer.ends_with('\r') {
             buffer.pop();
         }
+        if options.range.is_none() && options.start_row > 0 && line_index <= options.start_row {
+            skipped_rows += 1;
+            continue;
+        }
         let parsed = parse_csv_row(&buffer, line_index)?;
         max_cols = max_cols.max(parsed.len());
         rows.push(parsed);
     }
 
-    Ok((rows, max_cols))
+    Ok((rows, max_cols, skipped_rows))
 }
 
-fn parse_csv_row(line: &str, line_index: usize) -> Result<Vec<f64>, String> {
+fn parse_csv_row(line: &str, line_index: usize) -> BuiltinResult<Vec<f64>> {
     let mut values = Vec::new();
     for (col_index, raw_field) in line.split(',').enumerate() {
         let trimmed = raw_field.trim();
@@ -220,12 +285,12 @@ fn parse_csv_row(line: &str, line_index: usize) -> Result<Vec<f64>, String> {
             "inf" | "+inf" => f64::INFINITY,
             "-inf" => f64::NEG_INFINITY,
             _ => unwrapped.parse::<f64>().map_err(|_| {
-                format!(
-                    "csvread: nonnumeric token '{}' at row {}, column {}",
+                csvread_error(format!(
+                    "csvread: nonnumeric token '{}' at row {} column {}",
                     unwrapped,
                     line_index,
                     col_index + 1
-                )
+                ))
             })?,
         };
         values.push(value);
@@ -241,7 +306,7 @@ struct RangeSpec {
     end_col: Option<usize>,
 }
 
-fn parse_range(value: &Value) -> Result<RangeSpec, String> {
+fn parse_range(value: &Value) -> BuiltinResult<RangeSpec> {
     match value {
         Value::String(s) => parse_range_string(s),
         Value::CharArray(ca) if ca.rows == 1 => {
@@ -252,26 +317,34 @@ fn parse_range(value: &Value) -> Result<RangeSpec, String> {
             if sa.data.len() == 1 {
                 parse_range_string(&sa.data[0])
             } else {
-                Err("csvread: Range string array inputs must be scalar".to_string())
+                Err(csvread_error(
+                    "csvread: Range string array inputs must be scalar",
+                ))
             }
         }
         Value::Tensor(_) => parse_range_numeric(value),
-        _ => Err("csvread: Range must be provided as a string or numeric vector".to_string()),
+        _ => Err(csvread_error(
+            "csvread: Range must be provided as a string or numeric vector",
+        )),
     }
 }
 
-fn parse_range_string(text: &str) -> Result<RangeSpec, String> {
+fn parse_range_string(text: &str) -> BuiltinResult<RangeSpec> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
-        return Err("csvread: Range string cannot be empty".to_string());
+        return Err(csvread_error("csvread: Range string cannot be empty"));
     }
     let parts: Vec<&str> = trimmed.split(':').collect();
     if parts.len() > 2 {
-        return Err(format!("csvread: invalid Range specification '{trimmed}'"));
+        return Err(csvread_error(format!(
+            "csvread: invalid Range specification '{trimmed}'"
+        )));
     }
     let start = parse_cell_reference(parts[0])?;
     if start.col.is_none() {
-        return Err("csvread: Range must specify a starting column".to_string());
+        return Err(csvread_error(
+            "csvread: Range must specify a starting column",
+        ));
     }
     let end = if parts.len() == 2 {
         Some(parse_cell_reference(parts[1])?)
@@ -280,7 +353,9 @@ fn parse_range_string(text: &str) -> Result<RangeSpec, String> {
     };
     if let Some(ref end_ref) = end {
         if end_ref.col.is_none() {
-            return Err("csvread: Range end must include a column reference".to_string());
+            return Err(csvread_error(
+                "csvread: Range end must include a column reference",
+            ));
         }
     }
     let start_row = start.row.unwrap_or(0);
@@ -295,18 +370,19 @@ fn parse_range_string(text: &str) -> Result<RangeSpec, String> {
     })
 }
 
-fn parse_range_numeric(value: &Value) -> Result<RangeSpec, String> {
+fn parse_range_numeric(value: &Value) -> BuiltinResult<RangeSpec> {
     let elements = match value {
         Value::Tensor(t) => t.data.clone(),
         _ => {
-            return Err(
-                "csvread: numeric Range must be provided as a vector with 2 or 4 elements"
-                    .to_string(),
-            )
+            return Err(csvread_error(
+                "csvread: numeric Range must be provided as a vector with 2 or 4 elements",
+            ))
         }
     };
     if elements.len() != 2 && elements.len() != 4 {
-        return Err("csvread: numeric Range must contain exactly 2 or 4 elements".to_string());
+        return Err(csvread_error(
+            "csvread: numeric Range must contain exactly 2 or 4 elements",
+        ));
     }
     let mut indices = Vec::with_capacity(elements.len());
     for (idx, element) in elements.iter().enumerate() {
@@ -327,22 +403,22 @@ fn parse_range_numeric(value: &Value) -> Result<RangeSpec, String> {
     })
 }
 
-fn non_negative_index(value: f64, position: usize) -> Result<usize, String> {
+fn non_negative_index(value: f64, position: usize) -> BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err("csvread: Range indices must be finite".to_string());
+        return Err(csvread_error("csvread: Range indices must be finite"));
     }
     if value < 0.0 {
-        return Err("csvread: Range indices must be non-negative".to_string());
+        return Err(csvread_error("csvread: Range indices must be non-negative"));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err("csvread: Range indices must be integers".to_string());
+        return Err(csvread_error("csvread: Range indices must be integers"));
     }
     usize::try_from(rounded as i64).map_err(|_| {
-        format!(
+        csvread_error(format!(
             "csvread: Range index {} is too large to fit in usize",
             position + 1
-        )
+        ))
     })
 }
 
@@ -352,7 +428,7 @@ struct CellReference {
     col: Option<usize>,
 }
 
-fn parse_cell_reference(token: &str) -> Result<CellReference, String> {
+fn parse_cell_reference(token: &str) -> BuiltinResult<CellReference> {
     let mut letters = String::new();
     let mut digits = String::new();
     for ch in token.trim().chars() {
@@ -364,11 +440,13 @@ fn parse_cell_reference(token: &str) -> Result<CellReference, String> {
         } else if ch.is_ascii_digit() {
             digits.push(ch);
         } else {
-            return Err(format!("csvread: invalid Range component '{token}'"));
+            return Err(csvread_error(format!(
+                "csvread: invalid Range component '{token}'"
+            )));
         }
     }
     if letters.is_empty() && digits.is_empty() {
-        return Err("csvread: Range references cannot be empty".to_string());
+        return Err(csvread_error("csvread: Range references cannot be empty"));
     }
     let col = if letters.is_empty() {
         None
@@ -379,36 +457,36 @@ fn parse_cell_reference(token: &str) -> Result<CellReference, String> {
         None
     } else {
         let parsed = digits.parse::<usize>().map_err(|_| {
-            format!(
+            csvread_error(format!(
                 "csvread: invalid row index '{}' in Range component '{token}'",
                 digits
-            )
+            ))
         })?;
         if parsed == 0 {
-            return Err("csvread: Range rows must be >= 1".to_string());
+            return Err(csvread_error("csvread: Range rows must be >= 1"));
         }
         Some(parsed - 1)
     };
     Ok(CellReference { row, col })
 }
 
-fn column_index_from_letters(letters: &str) -> Result<usize, String> {
+fn column_index_from_letters(letters: &str) -> BuiltinResult<usize> {
     let mut value: usize = 0;
     for ch in letters.chars() {
         if !ch.is_ascii_uppercase() {
-            return Err(format!(
+            return Err(csvread_error(format!(
                 "csvread: invalid column designator '{letters}' in Range"
-            ));
+            )));
         }
         let digit = (ch as u8 - b'A' + 1) as usize;
         value = value
             .checked_mul(26)
             .and_then(|v| v.checked_add(digit))
-            .ok_or_else(|| "csvread: Range column index overflowed".to_string())?;
+            .ok_or_else(|| csvread_error("csvread: Range column index overflowed"))?;
     }
     value
         .checked_sub(1)
-        .ok_or_else(|| "csvread: Range column index underflowed".to_string())
+        .ok_or_else(|| csvread_error("csvread: Range column index underflowed"))
 }
 
 struct SubsetResult {
@@ -549,9 +627,10 @@ fn rows_to_tensor(
     row_count: usize,
     col_count: usize,
     default_fill: f64,
-) -> Result<Tensor, String> {
+) -> BuiltinResult<Tensor> {
     if row_count == 0 || col_count == 0 {
-        return Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("csvread: {e}"));
+        return Tensor::new(Vec::new(), vec![0, 0])
+            .map_err(|e| csvread_error(format!("csvread: {e}")));
     }
     let mut data = vec![default_fill; row_count * col_count];
     for (row_idx, row) in rows.iter().enumerate().take(row_count) {
@@ -560,7 +639,8 @@ fn rows_to_tensor(
             data[row_idx + col_idx * row_count] = value;
         }
     }
-    Tensor::new(data, vec![row_count, col_count]).map_err(|e| format!("csvread: {e}"))
+    Tensor::new(data, vec![row_count, col_count])
+        .map_err(|e| csvread_error(format!("csvread: {e}")))
 }
 
 #[cfg(test)]
@@ -571,6 +651,10 @@ pub(crate) mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use runmat_builtins::{CharArray, IntValue, Tensor as BuiltinTensor};
+
+    fn csvread_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::csvread_builtin(path, rest))
+    }
 
     static UNIQUE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -691,9 +775,10 @@ pub(crate) mod tests {
         let path = write_temp_file(&["1,2,3", "4,error,6"]);
         let err = csvread_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new())
             .expect_err("should fail");
+        let message = err.message().to_string();
         assert!(
-            err.contains("nonnumeric token 'error'"),
-            "unexpected error: {err}"
+            message.contains("nonnumeric token 'error'"),
+            "unexpected error: {message}"
         );
         fs::remove_file(path).ok();
     }

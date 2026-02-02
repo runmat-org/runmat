@@ -1,7 +1,14 @@
 #[cfg(feature = "wgpu")]
+use once_cell::sync::Lazy;
+#[cfg(feature = "wgpu")]
 use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::{HostTensorView, ProviderPrecision};
+#[cfg(feature = "wgpu")]
+use std::sync::Mutex;
+
+#[cfg(feature = "wgpu")]
+static TEST_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 #[cfg(feature = "wgpu")]
 fn cpu_syrk(a: &[f64], rows: usize, cols: usize) -> Vec<f64> {
@@ -44,8 +51,9 @@ fn cpu_syrk_f32(a: &[f32], rows: usize, cols: usize) -> Vec<f32> {
 }
 
 #[cfg(feature = "wgpu")]
-#[test]
-fn syrk_matches_cpu() {
+#[tokio::test]
+async fn syrk_matches_cpu() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
     let p = runmat_accelerate_api::provider().expect("provider");
 
@@ -65,26 +73,48 @@ fn syrk_matches_cpu() {
         })
         .expect("upload");
     let gpu = p.syrk(&handle).expect("syrk");
-    let host = p.download(&gpu).expect("download");
+    let host = p.download(&gpu).await.expect("download");
     assert_eq!(host.shape, vec![cols, cols]);
 
-    let expected = cpu_syrk(&data, rows, cols);
-    for (idx, (got, want)) in host.data.iter().zip(expected.iter()).enumerate() {
-        let diff = (got - want).abs();
-        assert!(
-            diff < 1e-9,
-            "mismatch at {}: got={} want={} diff={}",
-            idx,
-            got,
-            want,
-            diff
-        );
+    match p.precision() {
+        ProviderPrecision::F64 => {
+            let expected = cpu_syrk(&data, rows, cols);
+            for (idx, (got, want)) in host.data.iter().zip(expected.iter()).enumerate() {
+                let diff = (got - want).abs();
+                assert!(
+                    diff < 1e-9,
+                    "mismatch at {}: got={} want={} diff={}",
+                    idx,
+                    got,
+                    want,
+                    diff
+                );
+            }
+        }
+        ProviderPrecision::F32 => {
+            let data_f32: Vec<f32> = data.iter().map(|&v| v as f32).collect();
+            let expected = cpu_syrk_f32(&data_f32, rows, cols);
+            for (idx, (got64, want)) in host.data.iter().zip(expected.iter()).enumerate() {
+                let got = *got64 as f32;
+                let diff = (got - want).abs();
+                let tol = 1e-3 * want.abs().max(1.0);
+                assert!(
+                    diff <= tol,
+                    "mismatch at {}: got={} want={} diff={}",
+                    idx,
+                    got,
+                    want,
+                    diff
+                );
+            }
+        }
     }
 }
 
 #[cfg(feature = "wgpu")]
-#[test]
-fn syrk_large_rows_chunks() {
+#[tokio::test]
+async fn syrk_large_rows_chunks() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
     let p = runmat_accelerate_api::provider().expect("provider");
 
@@ -104,7 +134,7 @@ fn syrk_large_rows_chunks() {
         })
         .expect("upload");
     let gpu = p.syrk(&handle).expect("syrk");
-    let host = p.download(&gpu).expect("download");
+    let host = p.download(&gpu).await.expect("download");
     assert_eq!(host.shape, vec![cols, cols]);
 
     let expected = cpu_syrk(&data, rows, cols);
@@ -123,8 +153,9 @@ fn syrk_large_rows_chunks() {
 }
 
 #[cfg(feature = "wgpu")]
-#[test]
-fn syrk_vec4_f32_matches_cpu() {
+#[tokio::test]
+async fn syrk_vec4_f32_matches_cpu() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
     let p = runmat_accelerate_api::provider().expect("provider");
@@ -154,7 +185,7 @@ fn syrk_vec4_f32_matches_cpu() {
         })
         .expect("upload");
     let gpu = p.syrk(&handle).expect("syrk");
-    let host = p.download(&gpu).expect("download");
+    let host = p.download(&gpu).await.expect("download");
     assert_eq!(host.shape, vec![cols, cols]);
 
     let expected = cpu_syrk_f32(&data, rows, cols);

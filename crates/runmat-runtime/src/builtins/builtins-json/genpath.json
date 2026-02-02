@@ -46,24 +46,24 @@
     },
     {
       "description": "Build a search path for a project toolbox",
-      "input": "toolboxRoot = \"toolbox/signal\";\ntoolboxPath = genpath(toolboxRoot);\naddpath(toolboxPath, \"-end\");"
+      "input": "toolboxRoot = \"toolbox/signal\";\ntoolboxPath = genpath(toolboxRoot);\naddpath(toolboxPath, \"-end\")"
     },
     {
       "description": "Exclude build output directories from the generated path",
-      "input": "root = \"projects/solver\";\nexcludes = strjoin([\n    fullfile(root, \"build\"),\n    fullfile(root, \"dist\")\n], pathsep);\np = genpath(root, excludes);"
+      "input": "root = \"projects/solver\";\nexcludes = strjoin([\n    fullfile(root, \"build\"),\n    fullfile(root, \"dist\")\n], pathsep);\np = genpath(root, excludes)"
     },
     {
       "description": "Skip a private utilities folder while including the rest of the tree",
-      "input": "root = \"analysis\";\np = genpath(root, fullfile(root, \"private\"));"
+      "input": "root = \"analysis\";\np = genpath(root, fullfile(root, \"private\"))"
     },
     {
       "description": "Automatically skip MATLAB-reserved folders",
-      "input": "root = \"toolbox\";\nmkdir(root, \"private\");\nmkdir(root, \"+package\");\np = genpath(root);",
+      "input": "root = \"toolbox\";\nmkdir(root, \"private\");\nmkdir(root, \"+package\");\np = genpath(root)",
       "output": "% `p` only includes `toolbox` and subfolders that are not named `private` or\n% `resources`, and that do not begin with `@` or `+`."
     },
     {
       "description": "Combine `genpath` with `savepath` for persistent tooling setup",
-      "input": "p = genpath(\"third_party/toolchain\");\naddpath(p);\nsavepath();"
+      "input": "p = genpath(\"third_party/toolchain\");\naddpath(p);\nsavepath()"
     }
   ],
   "faqs": [

@@ -1,19 +1,15 @@
 pub const F32: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 
 struct VertexRaw {
-    data: array<f32, 12u>;
+    data: array<f32, 12u>,
 };
 
 struct LineParams {
     color: vec4<f32>,
     count: u32,
-    line_width: f32,
+    half_width_data: f32,
     line_style: u32,
-    _pad: u32,
-};
-
-struct Counter {
-    value: atomic<u32>,
+    thick: u32,
 };
 
 @group(0) @binding(0)
@@ -26,9 +22,6 @@ var<storage, read> buf_y: array<f32>;
 var<storage, read_write> out_vertices: array<VertexRaw>;
 
 @group(0) @binding(3)
-var<storage, read_write> counter: Counter;
-
-@group(0) @binding(4)
 var<uniform> params: LineParams;
 
 fn should_draw(segment: u32, style: u32) -> bool {
@@ -71,27 +64,38 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (idx >= segments) {
         return;
     }
-    if (!should_draw(idx, params.line_style)) {
-        return;
-    }
 
     let p0 = vec2<f32>(buf_x[idx], buf_y[idx]);
     let p1 = vec2<f32>(buf_x[idx + 1u], buf_y[idx + 1u]);
     let delta = p1 - p0;
     let len = length(delta);
-    if (len == 0.0) {
-        return;
+    let draw = should_draw(idx, params.line_style) && (len != 0.0);
+    var color = params.color;
+    if (!draw) {
+        color.w = 0.0;
     }
 
-    let thick = params.line_width > 1.0;
+    let thick = params.thick != 0u;
     if (!thick) {
-        let base = atomicAdd(&(counter.value), 2u);
-        write_vertex(base + 0u, p0, params.color);
-        write_vertex(base + 1u, p1, params.color);
+        let base = idx * 2u;
+        write_vertex(base + 0u, p0, color);
+        write_vertex(base + 1u, p1, color);
         return;
     }
 
-    var half_width = params.line_width * 0.5;
+    if (!draw) {
+        let base = idx * 6u;
+        // Emit fully transparent degenerate geometry for skipped/degenerate segments.
+        write_vertex(base + 0u, p0, color);
+        write_vertex(base + 1u, p0, color);
+        write_vertex(base + 2u, p0, color);
+        write_vertex(base + 3u, p0, color);
+        write_vertex(base + 4u, p0, color);
+        write_vertex(base + 5u, p0, color);
+        return;
+    }
+
+    var half_width = params.half_width_data;
     if (half_width < 0.0001) {
         half_width = 0.0001;
     }
@@ -103,7 +107,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let v2 = p1 - offset;
     let v3 = p0 - offset;
 
-    let base = atomicAdd(&(counter.value), 6u);
+    let base = idx * 6u;
     write_vertex(base + 0u, v0, params.color);
     write_vertex(base + 1u, v1, params.color);
     write_vertex(base + 2u, v2, params.color);
@@ -116,19 +120,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 pub const F64: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 
 struct VertexRaw {
-    data: array<f32, 12u>;
+    data: array<f32, 12u>,
 };
 
 struct LineParams {
     color: vec4<f32>,
     count: u32,
-    line_width: f32,
+    half_width_data: f32,
     line_style: u32,
-    _pad: u32,
-};
-
-struct Counter {
-    value: atomic<u32>;
+    thick: u32,
 };
 
 @group(0) @binding(0)
@@ -141,9 +141,6 @@ var<storage, read> buf_y: array<f64>;
 var<storage, read_write> out_vertices: array<VertexRaw>;
 
 @group(0) @binding(3)
-var<storage, read_write> counter: Counter;
-
-@group(0) @binding(4)
 var<uniform> params: LineParams;
 
 fn should_draw(segment: u32, style: u32) -> bool {
@@ -186,27 +183,37 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (idx >= segments) {
         return;
     }
-    if (!should_draw(idx, params.line_style)) {
-        return;
-    }
 
     let p0 = vec2<f32>(f32(buf_x[idx]), f32(buf_y[idx]));
     let p1 = vec2<f32>(f32(buf_x[idx + 1u]), f32(buf_y[idx + 1u]));
     let delta = p1 - p0;
     let len = length(delta);
-    if (len == 0.0) {
-        return;
+    let draw = should_draw(idx, params.line_style) && (len != 0.0);
+    var color = params.color;
+    if (!draw) {
+        color.w = 0.0;
     }
 
-    let thick = params.line_width > 1.0;
+    let thick = params.thick != 0u;
     if (!thick) {
-        let base = atomicAdd(&(counter.value), 2u);
-        write_vertex(base + 0u, p0, params.color);
-        write_vertex(base + 1u, p1, params.color);
+        let base = idx * 2u;
+        write_vertex(base + 0u, p0, color);
+        write_vertex(base + 1u, p1, color);
         return;
     }
 
-    var half_width = params.line_width * 0.5;
+    if (!draw) {
+        let base = idx * 6u;
+        write_vertex(base + 0u, p0, color);
+        write_vertex(base + 1u, p0, color);
+        write_vertex(base + 2u, p0, color);
+        write_vertex(base + 3u, p0, color);
+        write_vertex(base + 4u, p0, color);
+        write_vertex(base + 5u, p0, color);
+        return;
+    }
+
+    var half_width = params.half_width_data;
     if (half_width < 0.0001) {
         half_width = 0.0001;
     }
@@ -218,7 +225,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let v2 = p1 - offset;
     let v3 = p0 - offset;
 
-    let base = atomicAdd(&(counter.value), 6u);
+    let base = idx * 6u;
     write_vertex(base + 0u, v0, params.color);
     write_vertex(base + 1u, v1, params.color);
     write_vertex(base + 2u, v2, params.color);
@@ -231,7 +238,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 pub const MARKER_F32: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 
 struct VertexRaw {
-    data: array<f32, 12u>;
+    data: array<f32, 12u>,
 };
 
 struct MarkerParams {
@@ -263,6 +270,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let px = buf_x[idx];
     let py = buf_y[idx];
 
+    let base = idx * 6u;
+    let corners = array<vec2<f32>, 6u>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0,  1.0)
+    );
+    for (var i: u32 = 0u; i < 6u; i = i + 1u) {
     var vertex: VertexRaw;
     vertex.data[0u] = px;
     vertex.data[1u] = py;
@@ -274,17 +291,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     vertex.data[7u] = 0.0;
     vertex.data[8u] = 0.0;
     vertex.data[9u] = params.size;
-    vertex.data[10u] = 0.0;
-    vertex.data[11u] = 0.0;
-
-    out_vertices[idx] = vertex;
+        vertex.data[10u] = corners[i].x;
+        vertex.data[11u] = corners[i].y;
+        out_vertices[base + i] = vertex;
+    }
 }
 "#;
 
 pub const MARKER_F64: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 
 struct VertexRaw {
-    data: array<f32, 12u>;
+    data: array<f32, 12u>,
 };
 
 struct MarkerParams {
@@ -316,6 +333,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let px = f32(buf_x[idx]);
     let py = f32(buf_y[idx]);
 
+    let base = idx * 6u;
+    let corners = array<vec2<f32>, 6u>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0,  1.0)
+    );
+    for (var i: u32 = 0u; i < 6u; i = i + 1u) {
     var vertex: VertexRaw;
     vertex.data[0u] = px;
     vertex.data[1u] = py;
@@ -327,9 +354,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     vertex.data[7u] = 0.0;
     vertex.data[8u] = 0.0;
     vertex.data[9u] = params.size;
-    vertex.data[10u] = 0.0;
-    vertex.data[11u] = 0.0;
-
-    out_vertices[idx] = vertex;
+        vertex.data[10u] = corners[i].x;
+        vertex.data[11u] = corners[i].y;
+        out_vertices[base + i] = vertex;
+    }
 }
 "#;

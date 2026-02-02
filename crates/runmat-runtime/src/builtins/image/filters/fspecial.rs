@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::fspecial")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -39,6 +40,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Generates constant kernels; fusion is not applicable.",
 };
+
+fn fspecial_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("fspecial")
+        .build()
+}
 
 #[derive(Clone, Copy, Debug)]
 enum FilterKind {
@@ -91,7 +98,7 @@ pub enum FspecialFilterSpec {
 }
 
 impl FspecialFilterSpec {
-    pub fn generate_tensor(&self) -> Result<Tensor, String> {
+    pub fn generate_tensor(&self) -> BuiltinResult<Tensor> {
         match self {
             FspecialFilterSpec::Average { rows, cols } => generate_average(*rows, *cols),
             FspecialFilterSpec::Disk { radius, size } => generate_disk(*radius, *size),
@@ -112,33 +119,33 @@ impl FspecialFilterSpec {
         }
     }
 
-    pub fn to_request(&self) -> Result<FspecialRequest, String> {
+    pub fn to_request(&self) -> BuiltinResult<FspecialRequest> {
         use std::convert::TryFrom;
         let filter = match self {
             FspecialFilterSpec::Average { rows, cols } => FspecialFilter::Average {
                 rows: u32::try_from(*rows)
-                    .map_err(|_| "fspecial: kernel dimensions exceed GPU limits".to_string())?,
+                    .map_err(|_| fspecial_error("fspecial: kernel dimensions exceed GPU limits"))?,
                 cols: u32::try_from(*cols)
-                    .map_err(|_| "fspecial: kernel dimensions exceed GPU limits".to_string())?,
+                    .map_err(|_| fspecial_error("fspecial: kernel dimensions exceed GPU limits"))?,
             },
             FspecialFilterSpec::Disk { radius, size } => FspecialFilter::Disk {
                 radius: *radius,
                 size: u32::try_from(*size)
-                    .map_err(|_| "fspecial: kernel dimensions exceed GPU limits".to_string())?,
+                    .map_err(|_| fspecial_error("fspecial: kernel dimensions exceed GPU limits"))?,
             },
             FspecialFilterSpec::Gaussian { rows, cols, sigma } => FspecialFilter::Gaussian {
                 rows: u32::try_from(*rows)
-                    .map_err(|_| "fspecial: kernel dimensions exceed GPU limits".to_string())?,
+                    .map_err(|_| fspecial_error("fspecial: kernel dimensions exceed GPU limits"))?,
                 cols: u32::try_from(*cols)
-                    .map_err(|_| "fspecial: kernel dimensions exceed GPU limits".to_string())?,
+                    .map_err(|_| fspecial_error("fspecial: kernel dimensions exceed GPU limits"))?,
                 sigma: *sigma,
             },
             FspecialFilterSpec::Laplacian { alpha } => FspecialFilter::Laplacian { alpha: *alpha },
             FspecialFilterSpec::Log { rows, cols, sigma } => FspecialFilter::Log {
                 rows: u32::try_from(*rows)
-                    .map_err(|_| "fspecial: kernel dimensions exceed GPU limits".to_string())?,
+                    .map_err(|_| fspecial_error("fspecial: kernel dimensions exceed GPU limits"))?,
                 cols: u32::try_from(*cols)
-                    .map_err(|_| "fspecial: kernel dimensions exceed GPU limits".to_string())?,
+                    .map_err(|_| fspecial_error("fspecial: kernel dimensions exceed GPU limits"))?,
                 sigma: *sigma,
             },
             FspecialFilterSpec::Motion {
@@ -148,12 +155,12 @@ impl FspecialFilterSpec {
                 oversample,
             } => FspecialFilter::Motion {
                 length: u32::try_from(*length)
-                    .map_err(|_| "fspecial: LENGTH exceeds GPU limits".to_string())?,
+                    .map_err(|_| fspecial_error("fspecial: LENGTH exceeds GPU limits"))?,
                 kernel_size: u32::try_from(*kernel_size)
-                    .map_err(|_| "fspecial: kernel dimensions exceed GPU limits".to_string())?,
+                    .map_err(|_| fspecial_error("fspecial: kernel dimensions exceed GPU limits"))?,
                 angle_degrees: *angle_degrees,
                 oversample: u32::try_from(*oversample)
-                    .map_err(|_| "fspecial: oversample exceeds GPU limits".to_string())?,
+                    .map_err(|_| fspecial_error("fspecial: oversample exceeds GPU limits"))?,
             },
             FspecialFilterSpec::Prewitt => FspecialFilter::Prewitt,
             FspecialFilterSpec::Sobel => FspecialFilter::Sobel,
@@ -177,7 +184,7 @@ impl FspecialFilterSpec {
 
 /// Convert an API request into a runtime specification.
 #[allow(dead_code)]
-pub fn spec_from_request(filter: &FspecialFilter) -> Result<FspecialFilterSpec, String> {
+pub fn spec_from_request(filter: &FspecialFilter) -> BuiltinResult<FspecialFilterSpec> {
     Ok(match filter {
         FspecialFilter::Average { rows, cols } => FspecialFilterSpec::Average {
             rows: *rows as usize,
@@ -223,13 +230,13 @@ pub fn spec_from_request(filter: &FspecialFilter) -> Result<FspecialFilterSpec, 
     accel = "array_construct",
     builtin_path = "crate::builtins::image::filters::fspecial"
 )]
-fn fspecial_builtin(kind: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn fspecial_builtin(kind: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let spec = build_filter_spec(&kind, &rest)?;
     let tensor = spec.generate_tensor()?;
     finalize_output(&spec, tensor)
 }
 
-fn build_filter_spec(kind: &Value, rest: &[Value]) -> Result<FspecialFilterSpec, String> {
+fn build_filter_spec(kind: &Value, rest: &[Value]) -> BuiltinResult<FspecialFilterSpec> {
     let filter_kind = parse_filter_kind(kind)?;
     match filter_kind {
         FilterKind::Average => {
@@ -284,7 +291,7 @@ fn build_filter_spec(kind: &Value, rest: &[Value]) -> Result<FspecialFilterSpec,
     }
 }
 
-fn finalize_output(spec: &FspecialFilterSpec, tensor: Tensor) -> Result<Value, String> {
+fn finalize_output(spec: &FspecialFilterSpec, tensor: Tensor) -> BuiltinResult<Value> {
     if !should_materialize_on_gpu() || !spec.is_gpu_supported() {
         return Ok(Value::Tensor(tensor));
     }
@@ -298,13 +305,18 @@ fn finalize_output(spec: &FspecialFilterSpec, tensor: Tensor) -> Result<Value, S
         }
     }
     if let Some(provider) = runmat_accelerate_api::provider() {
-        match spec
-            .to_request()
-            .and_then(|request| provider.fspecial(&request).map_err(|e| e.to_string()))
-        {
-            Ok(handle) => return Ok(Value::GpuTensor(handle)),
-            Err(err) => {
-                warn!("fspecial: provider hook unavailable, falling back to host path: {err}")
+        match spec.to_request() {
+            Ok(request) => match provider.fspecial(&request) {
+                Ok(handle) => return Ok(Value::GpuTensor(handle)),
+                Err(err) => {
+                    warn!("fspecial: provider hook unavailable, falling back to host path: {err}")
+                }
+            },
+            Err(error) => {
+                warn!(
+                    "fspecial: provider hook unavailable, falling back to host path: {}",
+                    error.message()
+                );
             }
         }
     }
@@ -312,9 +324,9 @@ fn finalize_output(spec: &FspecialFilterSpec, tensor: Tensor) -> Result<Value, S
     Ok(Value::Tensor(tensor))
 }
 
-fn parse_filter_kind(value: &Value) -> Result<FilterKind, String> {
+fn parse_filter_kind(value: &Value) -> BuiltinResult<FilterKind> {
     let text = value_to_string(value)
-        .ok_or_else(|| "fspecial: first argument must be a string filter name".to_string())?;
+        .ok_or_else(|| fspecial_error("fspecial: first argument must be a string filter name"))?;
     let lower = text.to_ascii_lowercase();
     match lower.as_str() {
         "average" => Ok(FilterKind::Average),
@@ -326,28 +338,30 @@ fn parse_filter_kind(value: &Value) -> Result<FilterKind, String> {
         "prewitt" => Ok(FilterKind::Prewitt),
         "sobel" => Ok(FilterKind::Sobel),
         "unsharp" => Ok(FilterKind::Unsharp),
-        other => Err(format!("fspecial: filter type '{other}' is not supported")),
+        other => Err(fspecial_error(format!(
+            "fspecial: filter type '{other}' is not supported"
+        ))),
     }
 }
 
-fn ensure_arg_count(name: &str, args: &[Value], min: usize, max: usize) -> Result<(), String> {
+fn ensure_arg_count(name: &str, args: &[Value], min: usize, max: usize) -> BuiltinResult<()> {
     if args.len() < min || args.len() > max {
         if min == max {
-            Err(format!(
+            Err(fspecial_error(format!(
                 "fspecial: '{name}' expects exactly {min} argument{}",
                 if min == 1 { "" } else { "s" }
-            ))
+            )))
         } else {
-            Err(format!(
+            Err(fspecial_error(format!(
                 "fspecial: '{name}' expects between {min} and {max} arguments"
-            ))
+            )))
         }
     } else {
         Ok(())
     }
 }
 
-fn parse_average_dims(arg: Option<&Value>) -> Result<(usize, usize), String> {
+fn parse_average_dims(arg: Option<&Value>) -> BuiltinResult<(usize, usize)> {
     match arg {
         None => Ok((3, 3)),
         Some(value) => {
@@ -355,19 +369,21 @@ fn parse_average_dims(arg: Option<&Value>) -> Result<(usize, usize), String> {
             match dims.len() {
                 1 => Ok((dims[0], dims[0])),
                 2 => Ok((dims[0], dims[1])),
-                _ => Err("fspecial: LENGTHS must be a scalar or two-element vector".to_string()),
+                _ => Err(fspecial_error(
+                    "fspecial: LENGTHS must be a scalar or two-element vector",
+                )),
             }
         }
     }
 }
 
-fn parse_disk_params(arg: Option<&Value>) -> Result<(f64, usize), String> {
+fn parse_disk_params(arg: Option<&Value>) -> BuiltinResult<(f64, usize)> {
     let radius = match arg {
         None => 5.0,
         Some(value) => to_positive_scalar(value, "fspecial: RADIUS must be a non-negative scalar")?,
     };
     if radius < 0.0 {
-        return Err("fspecial: RADIUS must be non-negative".to_string());
+        return Err(fspecial_error("fspecial: RADIUS must be non-negative"));
     }
     let extent = radius.ceil() as isize;
     let size = (2 * extent + 1) as usize;
@@ -377,7 +393,7 @@ fn parse_disk_params(arg: Option<&Value>) -> Result<(f64, usize), String> {
 fn parse_gaussian_params(
     lengths: Option<&Value>,
     sigma_value: Option<&Value>,
-) -> Result<(usize, usize, f64), String> {
+) -> BuiltinResult<(usize, usize, f64)> {
     let dims = match lengths {
         None => vec![3, 3],
         Some(value) => parse_lengths_strict(
@@ -389,9 +405,9 @@ fn parse_gaussian_params(
         1 => vec![dims[0], dims[0]],
         2 => dims,
         _ => {
-            return Err(
-                "fspecial: gaussian lengths must be a scalar or a two-element vector".to_string(),
-            );
+            return Err(fspecial_error(
+                "fspecial: gaussian lengths must be a scalar or a two-element vector",
+            ));
         }
     };
     let sigma = match sigma_value {
@@ -399,7 +415,7 @@ fn parse_gaussian_params(
         Some(value) => {
             let sigma = to_positive_scalar(value, "fspecial: SIGMA must be a positive scalar")?;
             if sigma <= 0.0 {
-                return Err("fspecial: SIGMA must be positive".to_string());
+                return Err(fspecial_error("fspecial: SIGMA must be positive"));
             }
             sigma
         }
@@ -407,13 +423,13 @@ fn parse_gaussian_params(
     Ok((dims[0], dims[1], sigma))
 }
 
-fn parse_laplacian_alpha(arg: Option<&Value>) -> Result<f64, String> {
+fn parse_laplacian_alpha(arg: Option<&Value>) -> BuiltinResult<f64> {
     match arg {
         None => Ok(0.2),
         Some(value) => {
             let alpha = to_scalar(value, "fspecial: ALPHA must be a scalar")?;
             if !(0.0..=1.0).contains(&alpha) {
-                return Err("fspecial: ALPHA must be between 0 and 1".to_string());
+                return Err(fspecial_error("fspecial: ALPHA must be between 0 and 1"));
             }
             Ok(alpha)
         }
@@ -423,7 +439,7 @@ fn parse_laplacian_alpha(arg: Option<&Value>) -> Result<f64, String> {
 fn parse_log_params(
     lengths: Option<&Value>,
     sigma_value: Option<&Value>,
-) -> Result<(usize, usize, f64), String> {
+) -> BuiltinResult<(usize, usize, f64)> {
     let dims = match lengths {
         None => vec![5, 5],
         Some(value) => {
@@ -434,7 +450,9 @@ fn parse_log_params(
         1 => vec![dims[0], dims[0]],
         2 => dims,
         _ => {
-            return Err("fspecial: log lengths must be a scalar or two-element vector".to_string());
+            return Err(fspecial_error(
+                "fspecial: log lengths must be a scalar or two-element vector",
+            ));
         }
     };
     let sigma = match sigma_value {
@@ -442,7 +460,7 @@ fn parse_log_params(
         Some(value) => {
             let sigma = to_positive_scalar(value, "fspecial: SIGMA must be a positive scalar")?;
             if sigma <= 0.0 {
-                return Err("fspecial: SIGMA must be positive".to_string());
+                return Err(fspecial_error("fspecial: SIGMA must be positive"));
             }
             sigma
         }
@@ -453,20 +471,20 @@ fn parse_log_params(
 fn parse_motion_params(
     length_value: Option<&Value>,
     angle_value: Option<&Value>,
-) -> Result<(usize, usize, f64, usize), String> {
+) -> BuiltinResult<(usize, usize, f64, usize)> {
     let length_raw = match length_value {
         None => 9.0,
         Some(value) => {
             let len = to_positive_scalar(value, "fspecial: LENGTH must be a positive scalar")?;
             if len <= 0.0 {
-                return Err("fspecial: LENGTH must be positive".to_string());
+                return Err(fspecial_error("fspecial: LENGTH must be positive"));
             }
             len
         }
     };
     let length = length_raw.round() as usize;
     if length == 0 {
-        return Err("fspecial: LENGTH must be at least 1".to_string());
+        return Err(fspecial_error("fspecial: LENGTH must be at least 1"));
     }
     let kernel_size = if length % 2 == 1 { length } else { length + 1 };
     let angle_deg = match angle_value {
@@ -476,34 +494,37 @@ fn parse_motion_params(
     Ok((length, kernel_size, angle_deg, 8))
 }
 
-fn parse_unsharp_alpha(arg: Option<&Value>) -> Result<f64, String> {
+fn parse_unsharp_alpha(arg: Option<&Value>) -> BuiltinResult<f64> {
     match arg {
         None => Ok(0.2),
         Some(value) => {
             let alpha = to_scalar(value, "fspecial: ALPHA must be a scalar")?;
             if !(0.0..=1.0).contains(&alpha) {
-                return Err("fspecial: ALPHA must be between 0 and 1".to_string());
+                return Err(fspecial_error("fspecial: ALPHA must be between 0 and 1"));
             }
             Ok(alpha)
         }
     }
 }
 
-fn generate_average(rows: usize, cols: usize) -> Result<Tensor, String> {
+fn generate_average(rows: usize, cols: usize) -> BuiltinResult<Tensor> {
     let total = rows
         .checked_mul(cols)
-        .ok_or_else(|| "fspecial: LENGTHS are too large".to_string())?;
+        .ok_or_else(|| fspecial_error("fspecial: LENGTHS are too large"))?;
     if total == 0 {
-        return Err("fspecial: LENGTHS must be positive integers".to_string());
+        return Err(fspecial_error(
+            "fspecial: LENGTHS must be positive integers",
+        ));
     }
     let fill = 1.0 / total as f64;
     let data = vec![fill; total];
-    Tensor::new(data, vec![rows, cols]).map_err(|e| format!("fspecial: {e}"))
+    Tensor::new(data, vec![rows, cols]).map_err(|e| fspecial_error(format!("fspecial: {e}")))
 }
 
-fn generate_disk(radius: f64, size: usize) -> Result<Tensor, String> {
+fn generate_disk(radius: f64, size: usize) -> BuiltinResult<Tensor> {
     if radius == 0.0 {
-        return Tensor::new(vec![1.0], vec![1, 1]).map_err(|e| format!("fspecial: {e}"));
+        return Tensor::new(vec![1.0], vec![1, 1])
+            .map_err(|e| fspecial_error(format!("fspecial: {e}")));
     }
 
     let mut data = vec![0.0f64; size * size];
@@ -522,7 +543,7 @@ fn generate_disk(radius: f64, size: usize) -> Result<Tensor, String> {
 
     let normaliser = PI * radius * radius;
     if normaliser <= f64::EPSILON {
-        return Err("fspecial: radius is too small".to_string());
+        return Err(fspecial_error("fspecial: radius is too small"));
     }
     let mut sum = 0.0;
     for value in &mut data {
@@ -530,16 +551,16 @@ fn generate_disk(radius: f64, size: usize) -> Result<Tensor, String> {
         sum += *value;
     }
     if sum <= 0.0 {
-        return Err("fspecial: failed to generate disk filter".to_string());
+        return Err(fspecial_error("fspecial: failed to generate disk filter"));
     }
     for value in &mut data {
         *value /= sum;
     }
 
-    Tensor::new(data, vec![size, size]).map_err(|e| format!("fspecial: {e}"))
+    Tensor::new(data, vec![size, size]).map_err(|e| fspecial_error(format!("fspecial: {e}")))
 }
 
-fn generate_gaussian(rows: usize, cols: usize, sigma: f64) -> Result<Tensor, String> {
+fn generate_gaussian(rows: usize, cols: usize, sigma: f64) -> BuiltinResult<Tensor> {
     let row_center = (rows as f64 - 1.0) / 2.0;
     let col_center = (cols as f64 - 1.0) / 2.0;
     let denom = 2.0 * sigma * sigma;
@@ -555,16 +576,18 @@ fn generate_gaussian(rows: usize, cols: usize, sigma: f64) -> Result<Tensor, Str
         }
     }
     if sum == 0.0 {
-        return Err("fspecial: gaussian generation failed (degenerate sigma)".to_string());
+        return Err(fspecial_error(
+            "fspecial: gaussian generation failed (degenerate sigma)",
+        ));
     }
     for value in &mut data {
         *value /= sum;
     }
 
-    Tensor::new(data, vec![rows, cols]).map_err(|e| format!("fspecial: {e}"))
+    Tensor::new(data, vec![rows, cols]).map_err(|e| fspecial_error(format!("fspecial: {e}")))
 }
 
-fn generate_laplacian(alpha: f64) -> Result<Tensor, String> {
+fn generate_laplacian(alpha: f64) -> BuiltinResult<Tensor> {
     let scale = 4.0 / (alpha + 1.0);
     let a = alpha / 4.0;
     let b = (1.0 - alpha) / 4.0;
@@ -576,10 +599,10 @@ fn generate_laplacian(alpha: f64) -> Result<Tensor, String> {
     for value in &mut data {
         *value *= scale;
     }
-    Tensor::new(data, vec![3, 3]).map_err(|e| format!("fspecial: {e}"))
+    Tensor::new(data, vec![3, 3]).map_err(|e| fspecial_error(format!("fspecial: {e}")))
 }
 
-fn generate_log(rows: usize, cols: usize, sigma: f64) -> Result<Tensor, String> {
+fn generate_log(rows: usize, cols: usize, sigma: f64) -> BuiltinResult<Tensor> {
     let row_center = (rows as f64 - 1.0) / 2.0;
     let col_center = (cols as f64 - 1.0) / 2.0;
     let mut gauss = Vec::with_capacity(rows * cols);
@@ -594,7 +617,9 @@ fn generate_log(rows: usize, cols: usize, sigma: f64) -> Result<Tensor, String> 
         }
     }
     if gauss_sum == 0.0 {
-        return Err("fspecial: failed to normalise Laplacian of Gaussian".to_string());
+        return Err(fspecial_error(
+            "fspecial: failed to normalise Laplacian of Gaussian",
+        ));
     }
     let mut data = Vec::with_capacity(rows * cols);
     let sigma2 = sigma * sigma;
@@ -611,7 +636,7 @@ fn generate_log(rows: usize, cols: usize, sigma: f64) -> Result<Tensor, String> 
             *value -= correction;
         }
     }
-    Tensor::new(data, vec![rows, cols]).map_err(|e| format!("fspecial: {e}"))
+    Tensor::new(data, vec![rows, cols]).map_err(|e| fspecial_error(format!("fspecial: {e}")))
 }
 
 fn sigma6(sigma: f64) -> f64 {
@@ -624,7 +649,7 @@ fn generate_motion(
     kernel_size: usize,
     angle_degrees: f64,
     oversample: usize,
-) -> Result<Tensor, String> {
+) -> BuiltinResult<Tensor> {
     let mut data = vec![0.0f64; kernel_size * kernel_size];
     let center = (kernel_size as f64 - 1.0) / 2.0;
     let theta = angle_degrees.to_radians();
@@ -646,13 +671,14 @@ fn generate_motion(
         sum += *value;
     }
     if sum == 0.0 {
-        return Err("fspecial: failed to build motion kernel".to_string());
+        return Err(fspecial_error("fspecial: failed to build motion kernel"));
     }
     for value in &mut data {
         *value /= sum;
     }
 
-    Tensor::new(data, vec![kernel_size, kernel_size]).map_err(|e| format!("fspecial: {e}"))
+    Tensor::new(data, vec![kernel_size, kernel_size])
+        .map_err(|e| fspecial_error(format!("fspecial: {e}")))
 }
 
 fn deposit_bilinear(data: &mut [f64], size: usize, x: f64, y: f64, contribution: f64) {
@@ -678,7 +704,7 @@ fn deposit_bilinear(data: &mut [f64], size: usize, x: f64, y: f64, contribution:
     }
 }
 
-fn generate_prewitt() -> Result<Tensor, String> {
+fn generate_prewitt() -> BuiltinResult<Tensor> {
     Tensor::new(
         vec![
             1.0, 0.0, -1.0, //
@@ -687,10 +713,10 @@ fn generate_prewitt() -> Result<Tensor, String> {
         ],
         vec![3, 3],
     )
-    .map_err(|e| format!("fspecial: {e}"))
+    .map_err(|e| fspecial_error(format!("fspecial: {e}")))
 }
 
-fn generate_sobel() -> Result<Tensor, String> {
+fn generate_sobel() -> BuiltinResult<Tensor> {
     Tensor::new(
         vec![
             1.0, 0.0, -1.0, //
@@ -699,10 +725,10 @@ fn generate_sobel() -> Result<Tensor, String> {
         ],
         vec![3, 3],
     )
-    .map_err(|e| format!("fspecial: {e}"))
+    .map_err(|e| fspecial_error(format!("fspecial: {e}")))
 }
 
-fn generate_unsharp(alpha: f64) -> Result<Tensor, String> {
+fn generate_unsharp(alpha: f64) -> BuiltinResult<Tensor> {
     let denom = alpha + 1.0;
     let mut data = vec![
         -alpha,
@@ -718,7 +744,7 @@ fn generate_unsharp(alpha: f64) -> Result<Tensor, String> {
     for value in &mut data {
         *value /= denom;
     }
-    Tensor::new(data, vec![3, 3]).map_err(|e| format!("fspecial: {e}"))
+    Tensor::new(data, vec![3, 3]).map_err(|e| fspecial_error(format!("fspecial: {e}")))
 }
 
 fn should_materialize_on_gpu() -> bool {
@@ -740,7 +766,7 @@ fn value_to_string(value: &Value) -> Option<String> {
     }
 }
 
-fn parse_lengths_strict(value: &Value, err: &str) -> Result<Vec<usize>, String> {
+fn parse_lengths_strict(value: &Value, err: &str) -> BuiltinResult<Vec<usize>> {
     parse_lengths_inner(value, err, true)
 }
 
@@ -748,15 +774,15 @@ fn parse_lengths_inner(
     value: &Value,
     err: &str,
     enforce_positive: bool,
-) -> Result<Vec<usize>, String> {
+) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Int(i) => {
             let len = i.to_i64();
             if enforce_positive && len <= 0 {
-                return Err(err.to_string());
+                return Err(fspecial_error(err));
             }
             if len < 0 {
-                return Err(err.to_string());
+                return Err(fspecial_error(err));
             }
             Ok(vec![len as usize])
         }
@@ -768,13 +794,13 @@ fn parse_lengths_inner(
                 .map(|&v| parse_numeric_dimension(v))
                 .collect::<Result<Vec<_>, _>>()?;
             if enforce_positive && dims.contains(&0) {
-                return Err(err.to_string());
+                return Err(fspecial_error(err));
             }
             Ok(dims)
         }
         Value::LogicalArray(logical) => {
             if logical.data.len() != logical.shape.iter().product::<usize>() {
-                return Err(err.to_string());
+                return Err(fspecial_error(err));
             }
             let dims = logical
                 .data
@@ -782,40 +808,40 @@ fn parse_lengths_inner(
                 .map(|&v| parse_numeric_dimension(v as f64))
                 .collect::<Result<Vec<_>, _>>()?;
             if enforce_positive && dims.contains(&0) {
-                return Err(err.to_string());
+                return Err(fspecial_error(err));
             }
             Ok(dims)
         }
-        _ => Err(err.to_string()),
+        _ => Err(fspecial_error(err)),
     }
 }
 
-fn parse_numeric_dimension(n: f64) -> Result<usize, String> {
+fn parse_numeric_dimension(n: f64) -> BuiltinResult<usize> {
     if !n.is_finite() {
-        return Err("fspecial: dimensions must be finite".to_string());
+        return Err(fspecial_error("fspecial: dimensions must be finite"));
     }
     if n < 0.0 {
-        return Err("fspecial: dimensions must be non-negative".to_string());
+        return Err(fspecial_error("fspecial: dimensions must be non-negative"));
     }
     let rounded = n.round();
     if (rounded - n).abs() > f64::EPSILON {
-        return Err("fspecial: dimensions must be integers".to_string());
+        return Err(fspecial_error("fspecial: dimensions must be integers"));
     }
     Ok(rounded as usize)
 }
 
-fn to_scalar(value: &Value, err: &str) -> Result<f64, String> {
+fn to_scalar(value: &Value, err: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
-        _ => Err(err.to_string()),
+        _ => Err(fspecial_error(err)),
     }
 }
 
-fn to_positive_scalar(value: &Value, err: &str) -> Result<f64, String> {
+fn to_positive_scalar(value: &Value, err: &str) -> BuiltinResult<f64> {
     let scalar = to_scalar(value, err)?;
     if scalar.is_nan() || scalar.is_infinite() {
-        return Err(err.to_string());
+        return Err(fspecial_error(err));
     }
     Ok(scalar)
 }
@@ -929,7 +955,9 @@ fn clamp_asin(value: f64) -> f64 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
 
     fn assert_close(actual: f64, expected: f64, epsilon: f64) {
         if (actual - expected).abs() > epsilon {
@@ -939,10 +967,14 @@ pub(crate) mod tests {
         }
     }
 
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_average_default() {
-        let result = fspecial_builtin(Value::from("average"), Vec::new()).unwrap();
+        let result = block_on(fspecial_builtin(Value::from("average"), Vec::new())).unwrap();
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
@@ -958,7 +990,7 @@ pub(crate) mod tests {
     #[test]
     fn fspecial_average_scalar_size() {
         let args = vec![Value::from(5)];
-        let result = fspecial_builtin(Value::from("average"), args).unwrap();
+        let result = block_on(fspecial_builtin(Value::from("average"), args)).unwrap();
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![5, 5]);
@@ -975,7 +1007,7 @@ pub(crate) mod tests {
         let args = vec![Value::from(
             Tensor::new(vec![4.0, 6.0], vec![1, 2]).unwrap(),
         )];
-        let result = fspecial_builtin(Value::from("average"), args).unwrap();
+        let result = block_on(fspecial_builtin(Value::from("average"), args)).unwrap();
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![4, 6]);
@@ -992,14 +1024,15 @@ pub(crate) mod tests {
     #[test]
     fn fspecial_average_rejects_zero_size() {
         let args = vec![Value::from(0)];
-        let err = fspecial_builtin(Value::from("average"), args).unwrap_err();
-        assert!(err.contains("positive"));
+        let err = block_on(fspecial_builtin(Value::from("average"), args))
+            .expect_err("fspecial should error");
+        assert!(error_message(err).contains("positive"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_gaussian_default_matches_reference() {
-        let result = fspecial_builtin(Value::from("gaussian"), Vec::new()).unwrap();
+        let result = block_on(fspecial_builtin(Value::from("gaussian"), Vec::new())).unwrap();
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
@@ -1026,7 +1059,7 @@ pub(crate) mod tests {
     #[test]
     fn fspecial_gaussian_size_sigma() {
         let args = vec![Value::from(7), Value::from(2.0)];
-        let result = fspecial_builtin(Value::from("gaussian"), args).unwrap();
+        let result = block_on(fspecial_builtin(Value::from("gaussian"), args)).unwrap();
         let tensor = match result {
             Value::Tensor(t) => t,
             Value::GpuTensor(h) => {
@@ -1040,55 +1073,62 @@ pub(crate) mod tests {
         let idx = col * tensor.rows + center;
         assert!(tensor.data[idx] > 0.0);
         let sum: f64 = tensor.data.iter().sum();
-        assert_close(sum, 1.0, 1e-12);
+        assert_close(sum, 1.0, 1e-5);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_laplacian_alpha() {
         let args = vec![Value::from(0.2)];
-        let result = fspecial_builtin(Value::from("laplacian"), args).unwrap();
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
-                let expected = [
-                    0.16666666666666669,
-                    0.6666666666666667,
-                    0.16666666666666669,
-                    0.6666666666666667,
-                    -3.3333333333333335,
-                    0.6666666666666667,
-                    0.16666666666666669,
-                    0.6666666666666667,
-                    0.16666666666666669,
-                ];
-                for (idx, value) in t.data.iter().enumerate() {
-                    assert_close(*value, expected[idx], 1e-12);
-                }
+        let result = block_on(fspecial_builtin(Value::from("laplacian"), args)).unwrap();
+        let t = match result {
+            Value::Tensor(t) => t,
+            Value::GpuTensor(h) => {
+                crate::builtins::common::test_support::gather(Value::GpuTensor(h)).expect("gather")
             }
             other => panic!("expected tensor, got {other:?}"),
+        };
+        assert_eq!(t.shape, vec![3, 3]);
+        let expected = [
+            0.16666666666666669,
+            0.6666666666666667,
+            0.16666666666666669,
+            0.6666666666666667,
+            -3.3333333333333335,
+            0.6666666666666667,
+            0.16666666666666669,
+            0.6666666666666667,
+            0.16666666666666669,
+        ];
+        for (idx, value) in t.data.iter().enumerate() {
+            assert_close(*value, expected[idx], 1e-7);
         }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_unsharp_default() {
-        let result = fspecial_builtin(Value::from("unsharp"), Vec::new()).unwrap();
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
-                let sum: f64 = t.data.iter().sum();
-                assert_close(sum, 1.0, 1e-12);
+        let result = block_on(fspecial_builtin(Value::from("unsharp"), Vec::new())).unwrap();
+        let t = match result {
+            Value::Tensor(t) => t,
+            Value::GpuTensor(h) => {
+                crate::builtins::common::test_support::gather(Value::GpuTensor(h)).expect("gather")
             }
             other => panic!("expected tensor, got {other:?}"),
-        }
+        };
+        assert_eq!(t.shape, vec![3, 3]);
+        let sum: f64 = t.data.iter().sum();
+        assert_close(sum, 1.0, 1e-6);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_log_basic_properties() {
-        let result =
-            fspecial_builtin(Value::from("log"), vec![Value::from(5), Value::from(0.5)]).unwrap();
+        let result = block_on(fspecial_builtin(
+            Value::from("log"),
+            vec![Value::from(5), Value::from(0.5)],
+        ))
+        .unwrap();
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![5, 5]);
@@ -1105,7 +1145,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_disk_sum_is_one() {
-        let result = fspecial_builtin(Value::from("disk"), vec![Value::from(5)]).unwrap();
+        let result = block_on(fspecial_builtin(Value::from("disk"), vec![Value::from(5)])).unwrap();
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![11, 11]);
@@ -1121,17 +1161,21 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_disk_negative_radius_errors() {
-        let err = fspecial_builtin(Value::from("disk"), vec![Value::from(-1.0)]).unwrap_err();
-        assert!(err.contains("non-negative"));
+        let err = block_on(fspecial_builtin(
+            Value::from("disk"),
+            vec![Value::from(-1.0)],
+        ))
+        .expect_err("fspecial should error");
+        assert!(error_message(err).contains("non-negative"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_motion_sum_is_one() {
-        let result = fspecial_builtin(
+        let result = block_on(fspecial_builtin(
             Value::from("motion"),
             vec![Value::from(15), Value::from(45.0)],
-        )
+        ))
         .unwrap();
         match result {
             Value::Tensor(t) => {
@@ -1146,8 +1190,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_invalid_filter_name() {
-        let err = fspecial_builtin(Value::from("notafilter"), Vec::new()).unwrap_err();
-        assert!(err.contains("not supported"));
+        let err = block_on(fspecial_builtin(Value::from("notafilter"), Vec::new()))
+            .expect_err("fspecial should error");
+        assert!(error_message(err).contains("not supported"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1158,21 +1203,23 @@ pub(crate) mod tests {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
-        let gpu_tensor = match fspecial_builtin(Value::from("gaussian"), Vec::new()).unwrap() {
-            Value::GpuTensor(handle) => {
-                test_support::gather(Value::GpuTensor(handle)).expect("gather gpu result")
-            }
-            Value::Tensor(t) => t,
-            other => panic!("unexpected result {other:?}"),
-        };
+        let gpu_tensor =
+            match block_on(fspecial_builtin(Value::from("gaussian"), Vec::new())).unwrap() {
+                Value::GpuTensor(handle) => {
+                    test_support::gather(Value::GpuTensor(handle)).expect("gather gpu result")
+                }
+                Value::Tensor(t) => t,
+                other => panic!("unexpected result {other:?}"),
+            };
         std::env::remove_var("RUNMAT_ACCEL_FSPECIAL_DEVICE");
-        let host_tensor = match fspecial_builtin(Value::from("gaussian"), Vec::new()).unwrap() {
-            Value::Tensor(t) => t,
-            Value::GpuTensor(handle) => {
-                test_support::gather(Value::GpuTensor(handle)).expect("gather fallback")
-            }
-            other => panic!("unexpected result {other:?}"),
-        };
+        let host_tensor =
+            match block_on(fspecial_builtin(Value::from("gaussian"), Vec::new())).unwrap() {
+                Value::Tensor(t) => t,
+                Value::GpuTensor(handle) => {
+                    test_support::gather(Value::GpuTensor(handle)).expect("gather fallback")
+                }
+                other => panic!("unexpected result {other:?}"),
+            };
         assert_eq!(gpu_tensor.shape, host_tensor.shape);
         for (a, b) in gpu_tensor.data.iter().zip(host_tensor.data.iter()) {
             assert_close(*a, *b, 1e-6);

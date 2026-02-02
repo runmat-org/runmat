@@ -8,6 +8,10 @@ use runmat_accelerate_api::{
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+const NAME: &str = "cummax";
+
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -30,6 +34,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes:
         "Providers may expose prefix-max kernels that return running values and indices; the runtime gathers to host when hooks or options are unsupported.",
 };
+
+fn cummax_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::cummax")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -86,18 +94,18 @@ impl CummaxEvaluation {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::cummax"
 )]
-fn cummax_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    evaluate(value, &rest).map(|eval| eval.into_value())
+async fn cummax_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    evaluate(value, &rest).await.map(|eval| eval.into_value())
 }
 
 /// Evaluate the builtin once and expose both outputs (value + indices).
-pub fn evaluate(value: Value, rest: &[Value]) -> Result<CummaxEvaluation, String> {
+pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CummaxEvaluation> {
     let (dim, direction, nan_mode) = parse_arguments(rest)?;
     match value {
-        Value::GpuTensor(handle) => cummax_gpu(handle, dim, direction, nan_mode),
+        Value::GpuTensor(handle) => cummax_gpu(handle, dim, direction, nan_mode).await,
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("cummax: {e}"))?;
+                .map_err(|e| cummax_error(format!("cummax: {e}")))?;
             let target_dim = dim.unwrap_or(1);
             let (values, indices) =
                 cummax_complex_tensor(&tensor, target_dim, direction, nan_mode)?;
@@ -120,9 +128,9 @@ pub fn evaluate(value: Value, rest: &[Value]) -> Result<CummaxEvaluation, String
 
 fn parse_arguments(
     args: &[Value],
-) -> Result<(Option<usize>, CummaxDirection, CummaxNanMode), String> {
+) -> BuiltinResult<(Option<usize>, CummaxDirection, CummaxNanMode)> {
     if args.len() > 4 {
-        return Err("cummax: unsupported arguments".to_string());
+        return Err(cummax_error("cummax: unsupported arguments"));
     }
 
     let mut dim: Option<usize> = None;
@@ -135,9 +143,11 @@ fn parse_arguments(
         match value {
             Value::Int(_) | Value::Num(_) => {
                 if dim.is_some() {
-                    return Err("cummax: dimension specified more than once".to_string());
+                    return Err(cummax_error("cummax: dimension specified more than once"));
                 }
-                dim = Some(tensor::parse_dimension(value, "cummax")?);
+                dim = Some(
+                    tensor::parse_dimension(value, "cummax").map_err(|err| cummax_error(err))?,
+                );
             }
             Value::Tensor(t) if t.data.is_empty() => {
                 // MATLAB allows [] placeholders; ignore them.
@@ -149,51 +159,55 @@ fn parse_arguments(
                     match keyword.as_str() {
                         "forward" => {
                             if direction_set {
-                                return Err(
-                                    "cummax: direction specified more than once".to_string()
-                                );
+                                return Err(cummax_error(
+                                    "cummax: direction specified more than once",
+                                ));
                             }
                             direction = CummaxDirection::Forward;
                             direction_set = true;
                         }
                         "reverse" => {
                             if direction_set {
-                                return Err(
-                                    "cummax: direction specified more than once".to_string()
-                                );
+                                return Err(cummax_error(
+                                    "cummax: direction specified more than once",
+                                ));
                             }
                             direction = CummaxDirection::Reverse;
                             direction_set = true;
                         }
                         "omitnan" | "omitmissing" => {
                             if nan_set {
-                                return Err(
-                                    "cummax: missing-value handling specified more than once"
-                                        .to_string(),
-                                );
+                                return Err(cummax_error(
+                                    "cummax: missing-value handling specified more than once",
+                                ));
                             }
                             nan_mode = CummaxNanMode::Omit;
                             nan_set = true;
                         }
                         "includenan" | "includemissing" => {
                             if nan_set {
-                                return Err(
-                                    "cummax: missing-value handling specified more than once"
-                                        .to_string(),
-                                );
+                                return Err(cummax_error(
+                                    "cummax: missing-value handling specified more than once",
+                                ));
                             }
                             nan_mode = CummaxNanMode::Include;
                             nan_set = true;
                         }
                         "" => {
-                            return Err("cummax: empty string option is not supported".to_string());
+                            return Err(cummax_error(
+                                "cummax: empty string option is not supported",
+                            ));
                         }
                         other => {
-                            return Err(format!("cummax: unrecognised option '{other}'"));
+                            return Err(cummax_error(format!(
+                                "cummax: unrecognised option '{other}'"
+                            )));
                         }
                     }
                 } else {
-                    return Err(format!("cummax: unsupported argument type {value:?}"));
+                    return Err(cummax_error(format!(
+                        "cummax: unsupported argument type {value:?}"
+                    )));
                 }
             }
         }
@@ -207,8 +221,8 @@ fn cummax_host(
     dim: Option<usize>,
     direction: CummaxDirection,
     nan_mode: CummaxNanMode,
-) -> Result<CummaxEvaluation, String> {
-    let tensor = tensor::value_into_tensor_for("cummax", value)?;
+) -> BuiltinResult<CummaxEvaluation> {
+    let tensor = tensor::value_into_tensor_for("cummax", value).map_err(|err| cummax_error(err))?;
     let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
     let (values, indices) = cummax_tensor(&tensor, target_dim, direction, nan_mode)?;
     Ok(CummaxEvaluation {
@@ -217,12 +231,12 @@ fn cummax_host(
     })
 }
 
-fn cummax_gpu(
+async fn cummax_gpu(
     handle: GpuTensorHandle,
     dim: Option<usize>,
     direction: CummaxDirection,
     nan_mode: CummaxNanMode,
-) -> Result<CummaxEvaluation, String> {
+) -> BuiltinResult<CummaxEvaluation> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -233,13 +247,13 @@ fn cummax_gpu(
     }
     if let Some(target) = dim {
         if target == 0 {
-            return Err("cummax: dimension must be >= 1".to_string());
+            return Err(cummax_error("cummax: dimension must be >= 1"));
         }
     }
 
     let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&handle.shape));
     if target_dim == 0 {
-        return Err("cummax: dimension must be >= 1".to_string());
+        return Err(cummax_error("cummax: dimension must be >= 1"));
     }
 
     if target_dim > handle.shape.len() {
@@ -275,7 +289,7 @@ fn cummax_gpu(
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let (values, indices) = cummax_tensor(&tensor, target_dim, direction, nan_mode)?;
     Ok(CummaxEvaluation {
         values: tensor::tensor_into_value(values),
@@ -288,13 +302,13 @@ fn cummax_tensor(
     dim: usize,
     direction: CummaxDirection,
     nan_mode: CummaxNanMode,
-) -> Result<(Tensor, Tensor), String> {
+) -> BuiltinResult<(Tensor, Tensor)> {
     if dim == 0 {
-        return Err("cummax: dimension must be >= 1".to_string());
+        return Err(cummax_error("cummax: dimension must be >= 1"));
     }
     if tensor.data.is_empty() {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| format!("cummax: {e}"))?;
+        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
+            .map_err(|e| cummax_error(format!("cummax: {e}")))?;
         return Ok((tensor.clone(), indices));
     }
     if dim > tensor.shape.len() {
@@ -305,8 +319,8 @@ fn cummax_tensor(
     let dim_index = dim - 1;
     let segment_len = tensor.shape[dim_index];
     if segment_len == 0 {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| format!("cummax: {e}"))?;
+        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
+            .map_err(|e| cummax_error(format!("cummax: {e}")))?;
         return Ok((tensor.clone(), indices));
     }
 
@@ -432,10 +446,10 @@ fn cummax_tensor(
         }
     }
 
-    let values_tensor =
-        Tensor::new(values_out, tensor.shape.clone()).map_err(|e| format!("cummax: {e}"))?;
-    let indices_tensor =
-        Tensor::new(indices_out, tensor.shape.clone()).map_err(|e| format!("cummax: {e}"))?;
+    let values_tensor = Tensor::new(values_out, tensor.shape.clone())
+        .map_err(|e| cummax_error(format!("cummax: {e}")))?;
+    let indices_tensor = Tensor::new(indices_out, tensor.shape.clone())
+        .map_err(|e| cummax_error(format!("cummax: {e}")))?;
     Ok((values_tensor, indices_tensor))
 }
 
@@ -444,13 +458,13 @@ fn cummax_complex_tensor(
     dim: usize,
     direction: CummaxDirection,
     nan_mode: CummaxNanMode,
-) -> Result<(ComplexTensor, Tensor), String> {
+) -> BuiltinResult<(ComplexTensor, Tensor)> {
     if dim == 0 {
-        return Err("cummax: dimension must be >= 1".to_string());
+        return Err(cummax_error("cummax: dimension must be >= 1"));
     }
     if tensor.data.is_empty() {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| format!("cummax: {e}"))?;
+        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
+            .map_err(|e| cummax_error(format!("cummax: {e}")))?;
         return Ok((tensor.clone(), indices));
     }
     if dim > tensor.shape.len() {
@@ -461,8 +475,8 @@ fn cummax_complex_tensor(
     let dim_index = dim - 1;
     let segment_len = tensor.shape[dim_index];
     if segment_len == 0 {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| format!("cummax: {e}"))?;
+        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
+            .map_err(|e| cummax_error(format!("cummax: {e}")))?;
         return Ok((tensor.clone(), indices));
     }
 
@@ -590,10 +604,10 @@ fn cummax_complex_tensor(
         }
     }
 
-    let values_tensor =
-        ComplexTensor::new(values_out, tensor.shape.clone()).map_err(|e| format!("cummax: {e}"))?;
-    let indices_tensor =
-        Tensor::new(indices_out, tensor.shape.clone()).map_err(|e| format!("cummax: {e}"))?;
+    let values_tensor = ComplexTensor::new(values_out, tensor.shape.clone())
+        .map_err(|e| cummax_error(format!("cummax: {e}")))?;
+    let indices_tensor = Tensor::new(indices_out, tensor.shape.clone())
+        .map_err(|e| cummax_error(format!("cummax: {e}")))?;
     Ok((values_tensor, indices_tensor))
 }
 
@@ -642,14 +656,14 @@ fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
     }
 }
 
-fn ones_indices(shape: &[usize]) -> Result<Tensor, String> {
+fn ones_indices(shape: &[usize]) -> BuiltinResult<Tensor> {
     let len = tensor::element_count(shape);
     let data = if len == 0 {
         Vec::new()
     } else {
         vec![1.0f64; len]
     };
-    Tensor::new(data, shape.to_vec()).map_err(|e| format!("cummax: {e}"))
+    Tensor::new(data, shape.to_vec()).map_err(|e| cummax_error(format!("cummax: {e}")))
 }
 
 fn default_dimension(tensor: &Tensor) -> usize {
@@ -677,7 +691,12 @@ fn dim_product(dims: &[usize]) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::IntValue;
+
+    fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CummaxEvaluation> {
+        block_on(super::evaluate(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -836,9 +855,12 @@ pub(crate) mod tests {
             Value::Num(1.0),
             &[Value::from("reverse"), Value::from("forward")],
         );
-        assert!(
-            matches!(err, Err(message) if message.contains("direction specified more than once"))
-        );
+        match err {
+            Err(err) => {
+                assert!(err.message().contains("direction specified more than once"));
+            }
+            Ok(_) => panic!("expected error"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -848,9 +870,14 @@ pub(crate) mod tests {
             Value::Num(1.0),
             &[Value::from("omitnan"), Value::from("includenan")],
         );
-        assert!(
-            matches!(err, Err(message) if message.contains("missing-value handling specified more than once"))
-        );
+        match err {
+            Err(err) => {
+                assert!(err
+                    .message()
+                    .contains("missing-value handling specified more than once"));
+            }
+            Ok(_) => panic!("expected error"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -919,7 +946,9 @@ pub(crate) mod tests {
         let args = [Value::Int(IntValue::I32(0))];
         match evaluate(Value::Tensor(tensor), &args) {
             Ok(_) => panic!("expected dimension error"),
-            Err(err) => assert!(err.contains("dimension must be >= 1")),
+            Err(err) => {
+                assert!(err.message().contains("dimension must be >= 1"));
+            }
         }
     }
 

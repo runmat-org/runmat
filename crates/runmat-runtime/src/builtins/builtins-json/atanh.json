@@ -44,32 +44,32 @@
   "examples": [
     {
       "description": "Inverse hyperbolic tangent of a real scalar",
-      "input": "y = atanh(0.5);",
+      "input": "y = atanh(0.5)",
       "output": "y = 0.5493"
     },
     {
       "description": "Applying atanh element-wise to a vector",
-      "input": "x = linspace(-0.9, 0.9, 5);\ny = atanh(x);",
+      "input": "x = linspace(-0.9, 0.9, 5);\ny = atanh(x)",
       "output": "y = [-1.4722  -0.4847   0    0.4847   1.4722]"
     },
     {
       "description": "Dealing with values near \u00b11 in atanh",
-      "input": "A = [0.99  1.0  -1.0; 0.0  0.5  -0.5];\nB = atanh(A);",
+      "input": "A = [0.99  1.0  -1.0; 0.0  0.5  -0.5];\nB = atanh(A)",
       "output": "B =\n    2.6467        Inf       -Inf\n         0    0.5493    -0.5493"
     },
     {
       "description": "Producing complex outputs for |x| > 1",
-      "input": "values = [2 -3];\nresult = atanh(values);",
+      "input": "values = [2 -3];\nresult = atanh(values)",
       "output": "result =\n   0.5493 + 1.5708i  -0.3466 + 1.5708i"
     },
     {
       "description": "Computing atanh for complex numbers",
-      "input": "Z = [1 + 2i, -0.5 + 0.75i];\nW = atanh(Z);",
+      "input": "Z = [1 + 2i, -0.5 + 0.75i];\nW = atanh(Z)",
       "output": "W =\n   0.1733 + 1.1781i  -0.3104 + 0.7232i"
     },
     {
       "description": "Running atanh on GPU arrays",
-      "input": "G = gpuArray(linspace(-0.8, 0.8, 4));\ngpuResult = atanh(G);\nhostResult = gather(gpuResult);",
+      "input": "G = gpuArray(linspace(-0.8, 0.8, 4));\ngpuResult = atanh(G);\nhostResult = gather(gpuResult)",
       "output": "hostResult = [-1.0986  -0.2733   0.2733   1.0986]"
     }
   ],

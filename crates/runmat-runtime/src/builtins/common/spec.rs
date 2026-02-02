@@ -1,22 +1,35 @@
 use std::fmt;
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::HashMap;
+
+#[cfg(not(target_arch = "wasm32"))]
+use once_cell::sync::OnceCell;
+
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm_registry {
     #![allow(dead_code)]
     use super::{BuiltinFusionSpec, BuiltinGpuSpec};
     use once_cell::sync::Lazy;
+    use std::collections::HashMap;
     use std::sync::Mutex;
 
     static GPU_SPECS: Lazy<Mutex<Vec<&'static BuiltinGpuSpec>>> =
         Lazy::new(|| Mutex::new(Vec::new()));
     static FUSION_SPECS: Lazy<Mutex<Vec<&'static BuiltinFusionSpec>>> =
         Lazy::new(|| Mutex::new(Vec::new()));
+    static RESIDENCY_POLICIES: Lazy<Mutex<HashMap<String, super::ResidencyPolicy>>> =
+        Lazy::new(|| Mutex::new(HashMap::new()));
 
     pub(crate) fn submit_gpu_spec(spec: &'static BuiltinGpuSpec) {
         GPU_SPECS
             .lock()
             .expect("gpu spec registry poisoned")
             .push(spec);
+        RESIDENCY_POLICIES
+            .lock()
+            .expect("gpu spec registry poisoned")
+            .insert(spec.name.to_ascii_lowercase(), spec.residency);
     }
 
     pub(crate) fn submit_fusion_spec(spec: &'static BuiltinFusionSpec) {
@@ -32,6 +45,14 @@ pub(crate) mod wasm_registry {
             .expect("gpu spec registry poisoned")
             .clone()
             .into_iter()
+    }
+
+    pub(crate) fn residency_policy(name: &str) -> Option<super::ResidencyPolicy> {
+        RESIDENCY_POLICIES
+            .lock()
+            .expect("gpu spec registry poisoned")
+            .get(&name.to_ascii_lowercase())
+            .copied()
     }
 
     pub(crate) fn fusion_specs() -> std::vec::IntoIter<&'static BuiltinFusionSpec> {
@@ -221,6 +242,35 @@ pub fn builtin_fusion_specs() -> impl Iterator<Item = &'static BuiltinFusionSpec
 #[cfg(target_arch = "wasm32")]
 pub fn builtin_fusion_specs() -> std::vec::IntoIter<&'static BuiltinFusionSpec> {
     wasm_registry::fusion_specs()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+static RESIDENCY_POLICY_MAP: OnceCell<HashMap<String, ResidencyPolicy>> = OnceCell::new();
+
+#[cfg(not(target_arch = "wasm32"))]
+fn build_residency_policy_map() -> HashMap<String, ResidencyPolicy> {
+    let mut map = HashMap::new();
+    for spec in builtin_gpu_specs() {
+        map.insert(spec.name.to_ascii_lowercase(), spec.residency);
+    }
+    map
+}
+
+/// Return the declared residency policy for a builtin's GPU implementation.
+///
+/// This is used at the runtime/auto-offload boundary to decide whether GPU-resident
+/// arguments must be gathered to host (`GatherImmediately`) or can remain device-resident.
+pub fn builtin_residency_policy(name: &str) -> Option<ResidencyPolicy> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        return wasm_registry::residency_policy(name);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let map = RESIDENCY_POLICY_MAP.get_or_init(build_residency_policy_map);
+        map.get(&name.to_ascii_lowercase()).copied()
+    }
 }
 
 impl fmt::Debug for BuiltinFusionSpec {

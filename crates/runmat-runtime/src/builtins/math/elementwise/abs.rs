@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::abs")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -44,6 +45,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL abs; providers can swap in specialised kernels.",
 };
 
+const BUILTIN_NAME: &str = "abs";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 #[runtime_builtin(
     name = "abs",
     category = "math/elementwise",
@@ -52,54 +61,58 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::abs"
 )]
-fn abs_builtin(value: Value) -> Result<Value, String> {
+async fn abs_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => abs_gpu(handle),
+        Value::GpuTensor(handle) => abs_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Num(complex_magnitude(re, im))),
         Value::ComplexTensor(ct) => abs_complex_tensor(ct),
         Value::CharArray(ca) => abs_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => Err("abs: expected numeric input".to_string()),
+        Value::String(_) | Value::StringArray(_) => {
+            Err(builtin_error("abs: expected numeric input"))
+        }
         other => abs_real(other),
     }
 }
 
-fn abs_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn abs_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_abs(&handle) {
+        if let Ok(out) = provider.unary_abs(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
-    abs_tensor(tensor).map(tensor::tensor_into_value)
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+    Ok(tensor::tensor_into_value(abs_tensor(tensor)?))
 }
 
-fn abs_real(value: Value) -> Result<Value, String> {
+fn abs_real(value: Value) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for("abs", value)?;
-    abs_tensor(tensor).map(tensor::tensor_into_value)
+    Ok(tensor::tensor_into_value(abs_tensor(tensor)?))
 }
 
-fn abs_tensor(tensor: Tensor) -> Result<Tensor, String> {
+fn abs_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.abs()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| format!("abs: {e}"))
+    Tensor::new(data, tensor.shape.clone()).map_err(|e| builtin_error(format!("abs: {e}")))
 }
 
-fn abs_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn abs_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let data = ct
         .data
         .iter()
         .map(|&(re, im)| complex_magnitude(re, im))
         .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, ct.shape.clone()).map_err(|e| format!("abs: {e}"))?;
+    let tensor =
+        Tensor::new(data, ct.shape.clone()).map_err(|e| builtin_error(format!("abs: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn abs_char_array(ca: CharArray) -> Result<Value, String> {
+fn abs_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data
         .iter()
         .map(|&ch| ch as u32 as f64)
         .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("abs: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| builtin_error(format!("abs: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -112,7 +125,12 @@ fn complex_magnitude(re: f64, im: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor};
+
+    fn abs_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::abs_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -191,7 +209,7 @@ pub(crate) mod tests {
     #[test]
     fn abs_string_rejected() {
         let err = abs_builtin(Value::from("hello")).expect_err("should error");
-        assert!(err.contains("expected numeric"));
+        assert!(err.message().contains("expected numeric"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -228,7 +246,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = abs_gpu(h).unwrap();
+        let gpu = block_on(abs_gpu(h)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {

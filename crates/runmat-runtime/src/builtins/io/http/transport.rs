@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use encoding_rs::Encoding;
+use thiserror::Error;
 use url::Url;
 
 #[cfg(target_arch = "wasm32")]
@@ -63,44 +64,40 @@ pub enum TransportErrorKind {
     Other,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{message}")]
 pub struct TransportError {
     pub kind: TransportErrorKind,
     pub url: String,
     pub detail: String,
+    message: String,
 }
 
 impl TransportError {
     fn new(kind: TransportErrorKind, url: &Url, detail: impl Into<String>) -> Self {
+        let url = url.to_string();
+        let detail = detail.into();
+        let message = match &kind {
+            TransportErrorKind::Timeout => format!("request to {url} timed out"),
+            TransportErrorKind::Connect => format!("unable to connect to {url}: {detail}"),
+            TransportErrorKind::Status(code) => {
+                format!("request to {url} failed with HTTP status {code}")
+            }
+            TransportErrorKind::InvalidHeader(name) => {
+                format!("invalid header '{name}': {detail}")
+            }
+            TransportErrorKind::Other => format!("failed to contact {url}: {detail}"),
+        };
         Self {
             kind,
-            url: url.to_string(),
-            detail: detail.into(),
+            url,
+            detail,
+            message,
         }
     }
 
-    pub fn into_context(self, prefix: &str) -> String {
-        match self.kind {
-            TransportErrorKind::Timeout => {
-                format!("{prefix}: request to {} timed out", self.url)
-            }
-            TransportErrorKind::Connect => {
-                format!(
-                    "{prefix}: unable to connect to {}: {}",
-                    self.url, self.detail
-                )
-            }
-            TransportErrorKind::Status(code) => format!(
-                "{prefix}: request to {} failed with HTTP status {}",
-                self.url, code
-            ),
-            TransportErrorKind::InvalidHeader(name) => {
-                format!("{prefix}: invalid header '{}': {}", name, self.detail)
-            }
-            TransportErrorKind::Other => {
-                format!("{prefix}: failed to contact {}: {}", self.url, self.detail)
-            }
-        }
+    pub fn message_with_prefix(&self, prefix: &str) -> String {
+        format!("{prefix}: {}", self.message)
     }
 }
 
@@ -261,7 +258,7 @@ fn send_request_impl(request: &HttpRequest) -> Result<HttpResponse, TransportErr
 
     let status = xhr
         .status()
-        .map_err(|err| map_js_error(&request.url, err))? as u16;
+        .map_err(|err| map_js_error(&request.url, err))?;
     if status == 0 {
         return Err(TransportError::new(
             TransportErrorKind::Connect,

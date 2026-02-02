@@ -3,16 +3,21 @@ use runmat_plot::plots::{Figure, LineStyle};
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
-use std::fmt;
 use std::ops::{Deref, DerefMut};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::MutexGuard;
 #[cfg(test)]
 use std::sync::Once;
 use std::sync::{Arc, Mutex};
+use thiserror::Error;
 
 use super::common::{default_figure, ERR_PLOTTING_UNAVAILABLE};
+#[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
 use super::engine::render_figure;
+use super::{plotting_error, plotting_error_with_source};
+
+use crate::builtins::common::map_control_flow_with_builtin;
+use crate::{BuiltinResult, RuntimeError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FigureHandle(u32);
@@ -91,6 +96,7 @@ struct FigureState {
     active_axes: usize,
     hold_per_axes: HashMap<usize, bool>,
     line_style_cycles: HashMap<usize, LineStyleCycle>,
+    revision: u64,
 }
 
 impl FigureState {
@@ -102,6 +108,7 @@ impl FigureState {
             active_axes: 0,
             hold_per_axes: HashMap::new(),
             line_style_cycles: HashMap::new(),
+            revision: 0,
         }
     }
 
@@ -226,45 +233,54 @@ impl<'a> DerefMut for PlotRegistryGuard<'a> {
 const AXES_INDEX_BITS: u32 = 20;
 const AXES_INDEX_MASK: u64 = (1 << AXES_INDEX_BITS) - 1;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Error)]
 pub enum FigureError {
+    #[error("figure handle {0} does not exist")]
     InvalidHandle(u32),
-    InvalidSubplotGrid {
-        rows: usize,
-        cols: usize,
-    },
+    #[error("subplot grid dimensions must be positive (rows={rows}, cols={cols})")]
+    InvalidSubplotGrid { rows: usize, cols: usize },
+    #[error("subplot index {index} is out of range for a {rows}x{cols} grid")]
     InvalidSubplotIndex {
         rows: usize,
         cols: usize,
         index: usize,
     },
+    #[error("invalid axes handle")]
     InvalidAxesHandle,
-    RenderFailure(String),
+    #[error("failed to render figure snapshot: {source}")]
+    RenderFailure {
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
-impl fmt::Display for FigureError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            FigureError::InvalidHandle(handle) => {
-                write!(f, "figure handle {handle} does not exist")
-            }
-            FigureError::InvalidSubplotGrid { rows, cols } => write!(
-                f,
-                "subplot grid dimensions must be positive (rows={rows}, cols={cols})"
-            ),
-            FigureError::InvalidSubplotIndex { rows, cols, index } => write!(
-                f,
-                "subplot index {index} is out of range for a {rows}x{cols} grid"
-            ),
-            FigureError::InvalidAxesHandle => write!(f, "invalid axes handle"),
-            FigureError::RenderFailure(message) => {
-                write!(f, "failed to render figure snapshot: {message}")
-            }
-        }
-    }
+fn map_figure_error(builtin: &'static str, err: FigureError) -> RuntimeError {
+    let message = format!("{builtin}: {err}");
+    plotting_error_with_source(builtin, message, err)
 }
 
-impl std::error::Error for FigureError {}
+pub(crate) fn clear_figure_with_builtin(
+    builtin: &'static str,
+    target: Option<FigureHandle>,
+) -> BuiltinResult<FigureHandle> {
+    clear_figure(target).map_err(|err| map_figure_error(builtin, err))
+}
+
+pub(crate) fn close_figure_with_builtin(
+    builtin: &'static str,
+    target: Option<FigureHandle>,
+) -> BuiltinResult<FigureHandle> {
+    close_figure(target).map_err(|err| map_figure_error(builtin, err))
+}
+
+pub(crate) fn configure_subplot_with_builtin(
+    builtin: &'static str,
+    rows: usize,
+    cols: usize,
+    index: usize,
+) -> BuiltinResult<()> {
+    configure_subplot(rows, cols, index).map_err(|err| map_figure_error(builtin, err))
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FigureEventKind {
@@ -385,7 +401,7 @@ fn observer_registry() -> &'static FigureObserverRegistry {
     FIGURE_OBSERVERS.get_or_init(FigureObserverRegistry::new)
 }
 
-pub fn install_figure_observer(observer: Arc<FigureObserver>) -> Result<(), String> {
+pub fn install_figure_observer(observer: Arc<FigureObserver>) -> BuiltinResult<()> {
     observer_registry().install(observer);
     Ok(())
 }
@@ -468,14 +484,38 @@ pub fn current_figure_handle() -> FigureHandle {
 }
 
 pub fn current_axes_state() -> FigureAxesState {
-    let reg = registry();
+    let mut reg = registry();
     let handle = reg.current;
-    let state = reg.figures.get(&handle).expect("current figure must exist");
+    // Ensure a default figure exists even if nothing has rendered yet (common on wasm/web).
+    let state = get_state_mut(&mut reg, handle);
     FigureAxesState {
         handle,
         rows: state.figure.axes_rows.max(1),
         cols: state.figure.axes_cols.max(1),
         active_index: state.active_axes,
+    }
+}
+
+pub fn current_hold_enabled() -> bool {
+    let mut reg = registry();
+    let handle = reg.current;
+    // Ensure a default figure exists even if nothing has rendered yet (common on wasm/web).
+    let state = get_state_mut(&mut reg, handle);
+    *state
+        .hold_per_axes
+        .get(&state.active_axes)
+        .unwrap_or(&false)
+}
+
+/// Reset hold state for all figures/axes.
+///
+/// In the IDE, we want re-running code to behave like a fresh plotting run unless the code
+/// explicitly enables `hold on` again. Without this, a prior `hold on` will cause subsequent
+/// runs to keep appending to the same axes (surprising for typical "Run" workflows).
+pub fn reset_hold_state_for_run() {
+    let mut reg = registry();
+    for state in reg.figures.values_mut() {
+        state.hold_per_axes.clear();
     }
 }
 
@@ -596,9 +636,13 @@ pub fn configure_subplot(rows: usize, cols: usize, index: usize) -> Result<(), F
     Ok(())
 }
 
-pub fn render_active_plot<F>(opts: PlotRenderOptions<'_>, mut apply: F) -> Result<String, String>
+pub fn render_active_plot<F>(
+    builtin: &'static str,
+    opts: PlotRenderOptions<'_>,
+    mut apply: F,
+) -> BuiltinResult<String>
 where
-    F: FnMut(&mut Figure, usize) -> Result<(), String>,
+    F: FnMut(&mut Figure, usize) -> BuiltinResult<()>,
 {
     let rendering_disabled = interactive_rendering_disabled();
     let (handle, figure_clone) = {
@@ -620,18 +664,44 @@ where
         state.figure.set_axis_equal(opts.axis_equal);
 
         let _axes_context = AxesContextGuard::install(state, axes_index);
-        apply(&mut state.figure, axes_index)?;
+        apply(&mut state.figure, axes_index)
+            .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
 
+        // Increment revision after a successful mutation so surfaces can avoid
+        // re-rendering unchanged figures when "presenting" an already-loaded handle.
+        state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone())
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 
     if rendering_disabled {
-        return Err(ERR_PLOTTING_UNAVAILABLE.to_string());
+        return Err(plotting_error(builtin, ERR_PLOTTING_UNAVAILABLE));
     }
 
-    let rendered = render_figure(handle, figure_clone)?;
-    Ok(format!("Figure {} updated: {rendered}", handle.as_u32()))
+    // On Web/WASM we deliberately decouple "mutate figure state" from "present pixels".
+    // The host coalesces figure events and presents on a frame cadence, and `drawnow()` /
+    // `pause()` provide explicit "flush" boundaries for scripts.
+    #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+    {
+        let _ = figure_clone;
+        Ok(format!("Figure {} updated", handle.as_u32()))
+    }
+
+    #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
+    {
+        let rendered = render_figure(handle, figure_clone)
+            .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
+        Ok(format!("Figure {} updated: {rendered}", handle.as_u32()))
+    }
+}
+
+/// Monotonic revision counter that increments on each successful mutation of the figure.
+/// Used by web surface presentation logic to avoid redundant `render_figure` calls when
+/// a surface is already up-to-date for a handle.
+#[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+pub fn current_figure_revision(handle: FigureHandle) -> Option<u64> {
+    let reg = registry();
+    reg.figures.get(&handle).map(|state| state.revision)
 }
 
 fn interactive_rendering_disabled() -> bool {

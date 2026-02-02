@@ -106,7 +106,8 @@ fn test_nested_cell_stress() {
 #[test]
 fn test_gc_with_interpreter_integration() {
     // Test GC under interpreter load
-    use runmat_hir::lower;
+    use futures::executor::block_on;
+    use runmat_hir::{HirProgram, LoweringContext, SemanticError};
     use runmat_ignition::execute;
     use runmat_parser::parse;
 
@@ -121,11 +122,15 @@ fn test_gc_with_interpreter_integration() {
         end
     "#;
 
+    fn lower(ast: &runmat_parser::Program) -> std::result::Result<HirProgram, SemanticError> {
+        runmat_hir::lower(ast, &LoweringContext::empty()).map(|result| result.hir)
+    }
+
     // Run the program multiple times to stress the GC
     for run in 0..50 {
         let ast = parse(program).expect("parsing should succeed");
         let hir = lower(&ast).expect("lowering should succeed");
-        let vars = execute(&hir).expect("execution should succeed");
+        let vars = block_on(execute(&hir)).expect("execution should succeed");
 
         // Verify the result is consistent
         let result: f64 = (&vars[0]).try_into().expect("result should be a number");

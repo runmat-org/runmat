@@ -15,7 +15,8 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const IMAG_EPS: f64 = 1e-12;
 const LOG10_E: f64 = std::f64::consts::LOG10_E;
@@ -66,6 +67,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL `log` multiplied by log10(e); providers can override with fused kernels when available.",
 };
 
+const BUILTIN_NAME: &str = "log10";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 #[runtime_builtin(
     name = "log10",
     category = "math/elementwise",
@@ -74,9 +83,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::log10"
 )]
-fn log10_builtin(value: Value) -> Result<Value, String> {
+async fn log10_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => log10_gpu(handle),
+        Value::GpuTensor(handle) => log10_gpu(handle).await,
         Value::Complex(re, im) => {
             let (r, i) = log10_complex_parts(re, im);
             Ok(Value::Complex(r, i))
@@ -84,39 +93,47 @@ fn log10_builtin(value: Value) -> Result<Value, String> {
         Value::ComplexTensor(ct) => log10_complex_tensor(ct),
         Value::CharArray(ca) => log10_char_array(ca),
         Value::String(_) | Value::StringArray(_) => {
-            Err("log10: expected numeric input".to_string())
+            Err(builtin_error("log10: expected numeric input"))
         }
         other => log10_real(other),
     }
 }
 
-fn log10_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn log10_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        match detect_gpu_requires_complex(provider, &handle) {
+        match detect_gpu_requires_complex(provider, &handle).await {
             Ok(false) => {
-                if let Ok(out) = provider.unary_log10(&handle) {
+                if let Ok(out) = provider.unary_log10(&handle).await {
                     return Ok(Value::GpuTensor(out));
                 }
             }
             Ok(true) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle)
+                    .await
+                    .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
                 return log10_tensor(tensor);
             }
-            Err(_) => {
+            Err(err) => {
+                if err.message() == "interaction pending..." {
+                    return Err(err);
+                }
                 // Fall through and gather below if detection fails.
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     log10_tensor(tensor)
 }
 
-fn log10_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("log10", value)?;
+fn log10_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("log10", value)
+        .map_err(|e| builtin_error(format!("log10: {e}")))?;
     log10_tensor(tensor)
 }
 
-fn log10_tensor(tensor: Tensor) -> Result<Value, String> {
+fn log10_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let shape = tensor.shape.clone();
     let len = tensor.data.len();
     let mut complex_values = Vec::with_capacity(len);
@@ -135,8 +152,8 @@ fn log10_tensor(tensor: Tensor) -> Result<Value, String> {
             let (re, im) = complex_values[0];
             Ok(Value::Complex(re, im))
         } else {
-            let tensor =
-                ComplexTensor::new(complex_values, shape).map_err(|e| format!("log10: {e}"))?;
+            let tensor = ComplexTensor::new(complex_values, shape)
+                .map_err(|e| builtin_error(format!("log10: {e}")))?;
             Ok(Value::ComplexTensor(tensor))
         }
     } else {
@@ -149,12 +166,12 @@ fn log10_tensor(tensor: Tensor) -> Result<Value, String> {
                 re
             })
             .collect();
-        let tensor = Tensor::new(data, shape).map_err(|e| format!("log10: {e}"))?;
+        let tensor = Tensor::new(data, shape).map_err(|e| builtin_error(format!("log10: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     }
 }
 
-fn log10_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn log10_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mut data = Vec::with_capacity(ct.data.len());
     for &(re, im) in &ct.data {
         data.push(log10_complex_parts(re, im));
@@ -163,15 +180,16 @@ fn log10_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
         let (re, im) = data[0];
         Ok(Value::Complex(re, im))
     } else {
-        let tensor =
-            ComplexTensor::new(data, ct.shape.clone()).map_err(|e| format!("log10: {e}"))?;
+        let tensor = ComplexTensor::new(data, ct.shape.clone())
+            .map_err(|e| builtin_error(format!("log10: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
 
-fn log10_char_array(ca: CharArray) -> Result<Value, String> {
+fn log10_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("log10: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| builtin_error(format!("log10: {e}")))?;
     log10_tensor(tensor)
 }
 
@@ -194,7 +212,12 @@ fn log10_complex_parts(re: f64, im: f64) -> (f64, f64) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray, StringArray, Tensor, Value};
+
+    fn log10_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::log10_builtin(value))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -335,16 +358,16 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log10_string_input_errors() {
-        let err = log10_builtin(Value::from("hello"));
-        assert!(matches!(err, Err(msg) if msg.contains("expected numeric input")));
+        let err = log10_builtin(Value::from("hello")).expect_err("expected error");
+        assert!(err.message().contains("expected numeric input"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log10_string_array_errors() {
         let array = StringArray::new(vec!["hello".to_string()], vec![1, 1]).unwrap();
-        let err = log10_builtin(Value::StringArray(array));
-        assert!(matches!(err, Err(msg) if msg.contains("expected numeric input")));
+        let err = log10_builtin(Value::StringArray(array)).expect_err("expected error");
+        assert!(err.message().contains("expected numeric input"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -396,7 +419,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .expect("upload");
-        let gpu_value = log10_gpu(handle).expect("gpu log10");
+        let gpu_value = block_on(log10_gpu(handle)).expect("gpu log10");
         let gathered = test_support::gather(gpu_value).expect("gather");
         match cpu {
             Value::Tensor(ct) => {

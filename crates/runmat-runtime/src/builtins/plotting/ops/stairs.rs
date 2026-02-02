@@ -18,12 +18,16 @@ use crate::builtins::common::spec::{
 
 use super::common::numeric_pair;
 use super::gpu_helpers::{gather_tensor_from_gpu, gpu_xy_bounds};
+use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{
     marker_metadata_from_appearance, parse_line_style_args, LineAppearance, LineStyleParseOptions,
     DEFAULT_LINE_MARKER_SIZE,
 };
 use std::convert::TryFrom;
+
+use crate::BuiltinResult;
+const BUILTIN_NAME: &str = "stairs";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::stairs")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -61,7 +65,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::stairs"
 )]
-pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, String> {
+pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let parsed_style = parse_line_style_args(&rest, &LineStyleParseOptions::stairs())?;
     let mut x_input = Some(StairsInput::from_value(x)?);
     let mut y_input = Some(StairsInput::from_value(y)?);
@@ -71,7 +75,7 @@ pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, St
         y_label: "Y",
         ..Default::default()
     };
-    render_active_plot(opts, move |figure, axes| {
+    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let appearance = parsed_style.appearance.clone();
         let marker_meta = marker_metadata_from_appearance(&appearance);
         let label = parsed_style
@@ -82,12 +86,21 @@ pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, St
         let y_arg = y_input.take().expect("stairs y consumed once");
 
         if let (Some(x_gpu), Some(y_gpu)) = (x_arg.gpu_handle(), y_arg.gpu_handle()) {
-            match build_stairs_gpu_plot(x_gpu, y_gpu, &appearance, marker_meta.clone(), &label) {
+            match build_stairs_gpu_plot(
+                BUILTIN_NAME,
+                x_gpu,
+                y_gpu,
+                &appearance,
+                marker_meta.clone(),
+                &label,
+            ) {
                 Ok(plot) => {
                     figure.add_stairs_plot_on_axes(plot, axes);
                     return Ok(());
                 }
-                Err(err) => warn!("stairs GPU path unavailable: {err}"),
+                Err(err) => {
+                    warn!("stairs GPU path unavailable: {err}");
+                }
             }
         }
 
@@ -96,7 +109,8 @@ pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, St
         let plot = build_stairs_plot(x_vals, y_vals, &appearance, marker_meta, &label)?;
         figure.add_stairs_plot_on_axes(plot, axes);
         Ok(())
-    })
+    })?;
+    Ok(rendered)
 }
 
 fn build_stairs_plot(
@@ -105,15 +119,21 @@ fn build_stairs_plot(
     appearance: &LineAppearance,
     marker_meta: Option<LineMarkerAppearance>,
     label: &str,
-) -> Result<StairsPlot, String> {
+) -> BuiltinResult<StairsPlot> {
     if x.len() != y.len() {
-        return Err("stairs: X and Y inputs must share the same length".to_string());
+        return Err(plotting_error(
+            BUILTIN_NAME,
+            "stairs: X and Y inputs must share the same length",
+        ));
     }
     if x.len() < 2 {
-        return Err("stairs: inputs must contain at least two elements".to_string());
+        return Err(plotting_error(
+            BUILTIN_NAME,
+            "stairs: inputs must contain at least two elements",
+        ));
     }
     let mut plot = StairsPlot::new(x, y)
-        .map_err(|e| format!("stairs: {e}"))?
+        .map_err(|e| plotting_error(BUILTIN_NAME, format!("stairs: {e}")))?
         .with_style(appearance.color, appearance.line_width)
         .with_label(label);
     apply_stairs_marker_metadata(&mut plot, marker_meta);
@@ -121,32 +141,43 @@ fn build_stairs_plot(
 }
 
 fn build_stairs_gpu_plot(
+    name: &'static str,
     x: &GpuTensorHandle,
     y: &GpuTensorHandle,
     appearance: &LineAppearance,
     marker_meta: Option<LineMarkerAppearance>,
     label: &str,
-) -> Result<StairsPlot, String> {
+) -> BuiltinResult<StairsPlot> {
     let context = runmat_plot::shared_wgpu_context()
-        .ok_or_else(|| "stairs: plotting GPU context unavailable".to_string())?;
+        .ok_or_else(|| plotting_error(name, format!("{name}: plotting GPU context unavailable")))?;
 
     let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
-        .ok_or_else(|| "stairs: unable to export GPU X data".to_string())?;
+        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU X data")))?;
     let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
-        .ok_or_else(|| "stairs: unable to export GPU Y data".to_string())?;
+        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Y data")))?;
 
     if x_ref.len < 2 {
-        return Err("stairs: inputs must contain at least two elements".to_string());
+        return Err(plotting_error(
+            name,
+            format!("{name}: inputs must contain at least two elements"),
+        ));
     }
     if x_ref.len != y_ref.len {
-        return Err("stairs: X and Y inputs must have identical lengths".to_string());
+        return Err(plotting_error(
+            name,
+            format!("{name}: X and Y inputs must have identical lengths"),
+        ));
     }
     if x_ref.precision != y_ref.precision {
-        return Err("stairs: X and Y gpuArrays must share the same precision".to_string());
+        return Err(plotting_error(
+            name,
+            format!("{name}: X and Y gpuArrays must share the same precision"),
+        ));
     }
 
-    let len_u32 = u32::try_from(x_ref.len)
-        .map_err(|_| "stairs: point count exceeds supported range".to_string())?;
+    let len_u32 = u32::try_from(x_ref.len).map_err(|_| {
+        plotting_error(name, format!("{name}: point count exceeds supported range"))
+    })?;
     let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
 
     let inputs = StairsGpuInputs {
@@ -165,7 +196,7 @@ fn build_stairs_gpu_plot(
         &inputs,
         &params,
     )
-    .map_err(|e| format!("stairs: failed to build GPU vertices: {e}"))?;
+    .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
 
     let marker_gpu = if let Some(marker) = marker_meta.clone() {
         let marker_inputs = MarkerGpuInputs {
@@ -176,7 +207,8 @@ fn build_stairs_gpu_plot(
         };
         let marker_params = MarkerGpuParams {
             color: marker.face_color,
-            line_width: 1.0,
+            half_width_data: 0.0,
+            thick: false,
             line_style: LineStyle::Solid,
             marker_size: marker.size.max(DEFAULT_LINE_MARKER_SIZE),
         };
@@ -187,7 +219,12 @@ fn build_stairs_gpu_plot(
                 &marker_inputs,
                 &marker_params,
             )
-            .map_err(|e| format!("stairs: failed to build marker vertices: {e}"))?,
+            .map_err(|e| {
+                plotting_error(
+                    name,
+                    format!("{name}: failed to build marker vertices: {e}"),
+                )
+            })?,
         )
     } else {
         None
@@ -218,11 +255,12 @@ enum StairsInput {
 }
 
 impl StairsInput {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
             other => {
-                let tensor = Tensor::try_from(&other).map_err(|e| format!("stairs: {e}"))?;
+                let tensor = Tensor::try_from(&other)
+                    .map_err(|e| plotting_error(BUILTIN_NAME, format!("stairs: {e}")))?;
                 Ok(Self::Host(tensor))
             }
         }
@@ -235,7 +273,7 @@ impl StairsInput {
         }
     }
 
-    fn into_tensor(self, name: &str) -> Result<Tensor, String> {
+    fn into_tensor(self, name: &'static str) -> BuiltinResult<Tensor> {
         match self {
             Self::Host(tensor) => Ok(tensor),
             Self::Gpu(handle) => gather_tensor_from_gpu(handle, name),

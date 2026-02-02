@@ -8,7 +8,6 @@
 
 use runmat_filesystem as vfs;
 use std::collections::HashSet;
-use std::env;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -122,7 +121,7 @@ pub fn search_directories(error_prefix: &str) -> Result<Vec<PathBuf>, String> {
     let mut dirs = Vec::new();
     let mut seen = HashSet::new();
 
-    if let Ok(cwd) = env::current_dir() {
+    if let Ok(cwd) = vfs::current_dir() {
         push_unique_dir(&mut dirs, &mut seen, cwd);
     } else {
         return Err(format!(

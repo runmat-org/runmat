@@ -1,4 +1,5 @@
-use runmat_parser::parse;
+mod parse;
+use parse::parse;
 
 const PCA_SCRIPT: &str = r"n_default = 200000;
 d_default = 1024;

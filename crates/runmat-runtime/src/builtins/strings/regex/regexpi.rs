@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::regex::regexp::{self, RegexpEvaluation};
-use crate::make_cell;
+use crate::{build_runtime_error, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::regex::regexpi")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -37,14 +37,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Control-flow-heavy regex evaluation is not eligible for fusion.",
 };
 
+const BUILTIN_NAME: &str = "regexpi";
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 /// Evaluate `regexpi` with MATLAB-compatible defaults and return the shared regex evaluation handle.
-pub fn evaluate(
+pub async fn evaluate(
     subject: Value,
     pattern: Value,
     rest: &[Value],
-) -> Result<RegexpEvaluation, String> {
+) -> BuiltinResult<RegexpEvaluation> {
     let options = build_options(rest);
-    regexp::evaluate(subject, pattern, &options)
+    regexp::evaluate_with(BUILTIN_NAME, subject, pattern, &options).await
 }
 
 #[runtime_builtin(
@@ -55,8 +63,12 @@ pub fn evaluate(
     accel = "sink",
     builtin_path = "crate::builtins::strings::regex::regexpi"
 )]
-fn regexpi_builtin(subject: Value, pattern: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let evaluation = evaluate(subject, pattern, &rest)?;
+async fn regexpi_builtin(
+    subject: Value,
+    pattern: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let evaluation = evaluate(subject, pattern, &rest).await?;
     let mut outputs = evaluation.outputs_for_single()?;
     if outputs.is_empty() {
         return Ok(Value::Num(0.0));
@@ -66,6 +78,7 @@ fn regexpi_builtin(subject: Value, pattern: Value, rest: Vec<Value>) -> Result<V
     } else {
         let len = outputs.len();
         make_cell(outputs, 1, len)
+            .map_err(|err| runtime_error_for(format!("{BUILTIN_NAME}: {err}")))
     }
 }
 
@@ -101,6 +114,18 @@ fn option_name(value: &Value) -> Option<String> {
 pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{CellArray, StringArray};
+
+    fn evaluate(subject: Value, pattern: Value, rest: &[Value]) -> BuiltinResult<RegexpEvaluation> {
+        futures::executor::block_on(super::evaluate(subject, pattern, rest))
+    }
+
+    fn run_regexpi_builtin(
+        subject: Value,
+        pattern: Value,
+        rest: Vec<Value>,
+    ) -> BuiltinResult<Value> {
+        futures::executor::block_on(regexpi_builtin(subject, pattern, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -163,7 +188,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexpi_builtin_match_output() {
-        let result = regexpi_builtin(
+        let result = run_regexpi_builtin(
             Value::String("FooBarBaz".into()),
             Value::String("bar".into()),
             vec![Value::String("match".into())],
@@ -360,9 +385,10 @@ pub(crate) mod tests {
         let err = evaluate(Value::Cell(cell), Value::String("a".into()), &[])
             .err()
             .expect("expected regexpi to reject non-text cell elements");
+        let message = err.message().to_string();
         assert!(
-            err.contains("cell array elements"),
-            "unexpected error message: {err}"
+            message.contains("cell array elements"),
+            "unexpected error message: {message}"
         );
     }
 }

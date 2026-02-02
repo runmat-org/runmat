@@ -11,10 +11,14 @@ use crate::builtins::common::spec::{
 };
 
 use super::common::{numeric_vector, tensor_to_surface_grid, SurfaceDataInput};
+use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::build_surface_gpu_plot;
+use crate::BuiltinResult;
 use std::sync::Arc;
+
+const BUILTIN_NAME: &str = "mesh";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::mesh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -52,7 +56,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::mesh"
 )]
-pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result<String, String> {
+pub fn mesh_builtin(
+    x: Tensor,
+    y: Tensor,
+    z: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<String> {
     let x_axis = numeric_vector(x);
     let y_axis = numeric_vector(y);
     let mut x_axis = Some(x_axis);
@@ -77,14 +86,14 @@ pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result<
         axis_equal: false,
         ..Default::default()
     };
-    render_active_plot(opts, move |figure, axes| {
+    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let x_axis_vec = x_axis.take().expect("mesh data consumed once");
         let y_axis_vec = y_axis.take().expect("mesh data consumed once");
         let z_arg = z_input.take().expect("mesh data consumed once");
 
         if let Some(z_gpu) = z_arg.gpu_handle() {
             let style = Arc::clone(&style);
-            match build_surface_gpu_plot(&x_axis_vec, &y_axis_vec, z_gpu) {
+            match build_surface_gpu_plot(BUILTIN_NAME, &x_axis_vec, &y_axis_vec, z_gpu) {
                 Ok(surface_gpu) => {
                     let mut surface = surface_gpu
                         .with_colormap(ColorMap::Turbo)
@@ -101,29 +110,34 @@ pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result<
         }
 
         let grid = tensor_to_surface_grid(
-            z_arg.into_tensor("mesh")?,
+            z_arg.into_tensor(BUILTIN_NAME)?,
             x_axis_vec.len(),
             y_axis_vec.len(),
+            BUILTIN_NAME,
         )?;
         let mut surface = build_mesh_surface(x_axis_vec, y_axis_vec, grid)?;
         let style = Arc::clone(&style);
         style.apply_to_plot(&mut surface);
         figure.add_surface_plot_on_axes(surface, axes);
         Ok(())
-    })
+    })?;
+    Ok(rendered)
 }
 
 pub(crate) fn build_mesh_surface(
     x_axis: Vec<f64>,
     y_axis: Vec<f64>,
     z_grid: Vec<Vec<f64>>,
-) -> Result<SurfacePlot, String> {
+) -> BuiltinResult<SurfacePlot> {
     if x_axis.is_empty() || y_axis.is_empty() {
-        return Err("mesh: axis vectors must be non-empty".to_string());
+        return Err(plotting_error(
+            "mesh",
+            "mesh: axis vectors must be non-empty",
+        ));
     }
 
     let surface = SurfacePlot::new(x_axis, y_axis, z_grid)
-        .map_err(|err| format!("mesh: {err}"))?
+        .map_err(|err| plotting_error("mesh", format!("mesh: {err}")))?
         .with_colormap(ColorMap::Turbo)
         .with_wireframe(true)
         .with_shading(ShadingMode::Faceted);

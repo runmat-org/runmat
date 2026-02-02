@@ -1,12 +1,17 @@
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::Value;
 
 use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::tensor;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 /// Materialise a value so indexing helpers can operate on host tensors.
-pub(crate) fn materialize_value(value: Value) -> Result<(Value, bool), String> {
+pub(crate) async fn materialize_value(
+    value: Value,
+    _builtin: &str,
+) -> BuiltinResult<(Value, bool)> {
     match value {
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_tensor(&handle)?;
+            let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
             Ok((Value::Tensor(gathered), true))
         }
         other => Ok((other, false)),
@@ -14,85 +19,129 @@ pub(crate) fn materialize_value(value: Value) -> Result<(Value, bool), String> {
 }
 
 /// Parse a MATLAB-style size vector into concrete dimension extents.
-pub(crate) fn parse_dims(value: &Value) -> Result<Vec<usize>, String> {
+pub(crate) async fn parse_dims(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Tensor(tensor) => dims_from_tensor(tensor),
-        Value::Num(n) => Ok(vec![coerce_positive_int(*n)?]),
-        Value::Int(i) => Ok(vec![coerce_positive_int(i.to_f64())?]),
+        Value::Num(_) | Value::Int(_) => parse_scalar_dims(value, builtin).await,
+        Value::Tensor(tensor) if tensor.data.len() == 1 => parse_scalar_dims(value, builtin).await,
+        Value::GpuTensor(handle) if tensor::element_count(&handle.shape) == 1 => {
+            parse_scalar_dims(value, builtin).await
+        }
+        Value::Tensor(_) | Value::GpuTensor(_) => parse_vector_dims(value, builtin).await,
         Value::Cell(ca) => {
             if ca.data.is_empty() {
-                return Err("Size vector must have at least one element.".to_string());
+                return Err(indexing_error(
+                    builtin,
+                    "Size vector must have at least one element.",
+                ));
             }
             let mut dims = Vec::with_capacity(ca.data.len());
             for cell in &ca.data {
                 let coerced = match &**cell {
-                    Value::Num(n) => coerce_positive_int(*n)?,
-                    Value::Int(i) => coerce_positive_int(i.to_f64())?,
-                    _ => return Err("Size vector must contain numeric values.".to_string()),
+                    Value::Num(n) => coerce_positive_int(*n, builtin)?,
+                    Value::Int(i) => coerce_positive_int(i.to_f64(), builtin)?,
+                    _ => {
+                        return Err(indexing_error(
+                            builtin,
+                            "Size vector must contain numeric values.",
+                        ))
+                    }
                 };
                 dims.push(coerced);
             }
             Ok(dims)
         }
-        _ => Err("Size vector must be a numeric vector.".to_string()),
+        _ => Err(indexing_error(
+            builtin,
+            "Size vector must be a numeric vector.",
+        )),
     }
 }
 
-fn dims_from_tensor(tensor: &Tensor) -> Result<Vec<usize>, String> {
-    if !is_vector_shape(&tensor.shape) {
-        return Err("Size vector must be a row vector.".to_string());
+async fn parse_scalar_dims(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
+    let Some(dim) = tensor::dimension_from_value_async(value, builtin, false)
+        .await
+        .map_err(|_| indexing_error(builtin, "Size arguments must be positive integers."))?
+    else {
+        return Err(indexing_error(
+            builtin,
+            "Size vector must be a numeric vector.",
+        ));
+    };
+    Ok(vec![dim])
+}
+
+async fn parse_vector_dims(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
+    let dims = tensor::dims_from_value_async(value)
+        .await
+        .map_err(|_| indexing_error(builtin, "Size arguments must be positive integers."))?
+        .ok_or_else(|| indexing_error(builtin, "Size vector must be a row vector."))?;
+    if dims.is_empty() {
+        return Err(indexing_error(
+            builtin,
+            "Size vector must have at least one element.",
+        ));
     }
-    if tensor.data.is_empty() {
-        return Err("Size vector must have at least one element.".to_string());
-    }
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for &value in &tensor.data {
-        dims.push(coerce_positive_int(value)?);
+    if dims.contains(&0) {
+        return Err(indexing_error(
+            builtin,
+            "Size arguments must be positive integers.",
+        ));
     }
     Ok(dims)
 }
 
-fn is_vector_shape(shape: &[usize]) -> bool {
-    match shape.len() {
-        0 => true,
-        1 => true,
-        2 => shape[0] == 1 || shape[1] == 1,
-        _ => false,
-    }
-}
-
 /// Coerce a floating-point value into a strictly positive integer.
-pub(crate) fn coerce_positive_int(value: f64) -> Result<usize, String> {
+pub(crate) fn coerce_positive_int(value: f64, builtin: &str) -> BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err("Size arguments must be positive integers.".to_string());
+        return Err(indexing_error(
+            builtin,
+            "Size arguments must be positive integers.",
+        ));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err("Size arguments must be positive integers.".to_string());
+        return Err(indexing_error(
+            builtin,
+            "Size arguments must be positive integers.",
+        ));
     }
     if rounded < 1.0 {
-        return Err("Size arguments must be positive integers.".to_string());
+        return Err(indexing_error(
+            builtin,
+            "Size arguments must be positive integers.",
+        ));
     }
     Ok(rounded as usize)
 }
 
 /// Build column-major strides for the supplied dimensions, checking overflow.
-pub(crate) fn build_strides(dims: &[usize]) -> Result<Vec<usize>, String> {
+pub(crate) fn build_strides(dims: &[usize], builtin: &str) -> BuiltinResult<Vec<usize>> {
     let mut strides = Vec::with_capacity(dims.len());
     let mut stride = 1usize;
     for &dim in dims {
         strides.push(stride);
         stride = stride.checked_mul(dim).ok_or_else(|| {
-            "Size vector elements overflow the maximum supported size.".to_string()
+            indexing_error(
+                builtin,
+                "Size vector elements overflow the maximum supported size.",
+            )
         })?;
     }
     Ok(strides)
 }
 
 /// Compute the total number of elements implied by the size vector.
-pub(crate) fn total_elements(dims: &[usize]) -> Result<usize, String> {
+pub(crate) fn total_elements(dims: &[usize], builtin: &str) -> BuiltinResult<usize> {
     dims.iter().try_fold(1usize, |acc, &dim| {
-        acc.checked_mul(dim)
-            .ok_or_else(|| "Size vector elements overflow the maximum supported size.".to_string())
+        acc.checked_mul(dim).ok_or_else(|| {
+            indexing_error(
+                builtin,
+                "Size vector elements overflow the maximum supported size.",
+            )
+        })
     })
+}
+
+fn indexing_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(builtin).build()
 }

@@ -1,6 +1,9 @@
-use runmat_hir::lower;
-use runmat_ignition::execute;
+mod test_helpers;
+
+use runmat_builtins::Value;
 use runmat_parser::parse;
+use test_helpers::execute;
+use test_helpers::lower;
 
 #[test]
 fn chained_member_and_index_assignments() {
@@ -58,7 +61,7 @@ fn colon_slice_and_broadcast_assign() {
 #[test]
 fn logical_mask_indexing_chain() {
     // Logical mask on second column selection then assigning via chain: A(:, [true false]) = A(:,[true false])
-    let src = "A=[1,2;3,4]; mask=[1 0]; B=A(:,mask);";
+    let src = "A=[1,2;3,4]; mask=[true false]; B=A(:,mask);";
     let hir = lower(&parse(src).unwrap()).unwrap();
     let vars = execute(&hir).unwrap();
     // B should be first column [1;3]
@@ -79,8 +82,6 @@ fn broadcast_row_assign() {
         panic!("B not tensor");
     }
 }
-
-use runmat_builtins::Value;
 
 #[test]
 fn assign_scalar_element() {

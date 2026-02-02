@@ -6,6 +6,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::containers::map::map_length;
+use crate::runtime_error::RuntimeError;
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
@@ -46,23 +47,27 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::array::introspection::length"
 )]
-fn length_builtin(value: Value) -> Result<Value, String> {
+async fn length_builtin(value: Value) -> crate::BuiltinResult<Value> {
     if let Some(count) = map_length(&value) {
         return Ok(Value::Num(count as f64));
     }
-    let len = max_dimension(&value) as f64;
+    let len = max_dimension(&value).await? as f64;
     Ok(Value::Num(len))
 }
 
-fn max_dimension(value: &Value) -> usize {
-    let dims = value_dimensions(value);
-    dims.into_iter().max().unwrap_or(0)
+async fn max_dimension(value: &Value) -> Result<usize, RuntimeError> {
+    let dims = value_dimensions(value).await?;
+    Ok(dims.into_iter().max().unwrap_or(0))
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+
+    fn length_builtin(value: Value) -> crate::BuiltinResult<Value> {
+        block_on(super::length_builtin(value))
+    }
     use runmat_builtins::{
         CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
     };

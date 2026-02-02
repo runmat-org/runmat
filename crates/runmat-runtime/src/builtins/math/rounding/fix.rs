@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding::fix")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -53,6 +54,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL truncation; providers can substitute custom kernels when unary_fix is available.",
 };
 
+const BUILTIN_NAME: &str = "fix";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 #[runtime_builtin(
     name = "fix",
     category = "math/rounding",
@@ -61,70 +70,73 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::rounding::fix"
 )]
-fn fix_builtin(value: Value) -> Result<Value, String> {
+async fn fix_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => fix_gpu(handle),
+        Value::GpuTensor(handle) => fix_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Complex(fix_scalar(re), fix_scalar(im))),
         Value::ComplexTensor(ct) => fix_complex_tensor(ct),
         Value::CharArray(ca) => fix_char_array(ca),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(|err| builtin_error(err))?;
             fix_tensor(tensor).map(tensor::tensor_into_value)
         }
         Value::String(_) | Value::StringArray(_) => {
-            Err("fix: expected numeric or logical input".to_string())
+            Err(builtin_error("fix: expected numeric or logical input"))
         }
         other => fix_numeric(other),
     }
 }
 
-fn fix_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+async fn fix_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_fix(&handle) {
+        if let Ok(out) = provider.unary_fix(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     fix_tensor(tensor).map(tensor::tensor_into_value)
 }
 
-fn fix_numeric(value: Value) -> Result<Value, String> {
+fn fix_numeric(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Num(n) => Ok(Value::Num(fix_scalar(n))),
         Value::Int(i) => Ok(Value::Num(fix_scalar(i.to_f64()))),
         Value::Bool(b) => Ok(Value::Num(fix_scalar(if b { 1.0 } else { 0.0 }))),
         Value::Tensor(t) => fix_tensor(t).map(tensor::tensor_into_value),
         other => {
-            let tensor = tensor::value_into_tensor_for("fix", other)?;
-            fix_tensor(tensor).map(tensor::tensor_into_value)
+            let tensor =
+                tensor::value_into_tensor_for("fix", other).map_err(|err| builtin_error(err))?;
+            Ok(fix_tensor(tensor).map(tensor::tensor_into_value)?)
         }
     }
 }
 
-fn fix_tensor(mut tensor: Tensor) -> Result<Tensor, String> {
+fn fix_tensor(mut tensor: Tensor) -> BuiltinResult<Tensor> {
     for value in &mut tensor.data {
         *value = fix_scalar(*value);
     }
     Ok(tensor)
 }
 
-fn fix_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn fix_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let data = ct
         .data
         .iter()
         .map(|&(re, im)| (fix_scalar(re), fix_scalar(im)))
         .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(data, ct.shape.clone()).map_err(|e| format!("fix: {e}"))?;
+    let tensor = ComplexTensor::new(data, ct.shape.clone())
+        .map_err(|e| builtin_error(format!("fix: {e}")))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
-fn fix_char_array(ca: CharArray) -> Result<Value, String> {
+fn fix_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data
         .iter()
         .map(|&ch| fix_scalar(ch as u32 as f64))
         .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("fix: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| builtin_error(format!("fix: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -144,7 +156,21 @@ fn fix_scalar(value: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeError;
+    use futures::executor::block_on;
     use runmat_builtins::{ComplexTensor, IntValue, LogicalArray};
+
+    fn fix_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::fix_builtin(value))
+    }
+
+    fn assert_error_contains(error: RuntimeError, needle: &str) {
+        assert!(
+            error.message().contains(needle),
+            "unexpected error: {}",
+            error.message()
+        );
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -238,10 +264,7 @@ pub(crate) mod tests {
     #[test]
     fn fix_string_errors() {
         let err = fix_builtin(Value::from("abc")).unwrap_err();
-        assert!(
-            err.contains("expected numeric"),
-            "unexpected error message: {err}"
-        );
+        assert_error_contains(err, "expected numeric");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -311,7 +334,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = fix_gpu(handle).unwrap();
+        let gpu = block_on(fix_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
         assert_eq!(gathered.data, cpu.data);

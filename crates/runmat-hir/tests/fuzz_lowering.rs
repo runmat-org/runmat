@@ -1,4 +1,4 @@
-use runmat_hir::lower;
+use runmat_hir::{lower, LoweringContext};
 use runmat_parser::parse;
 
 #[test]
@@ -13,7 +13,7 @@ fn lower_various_valid_seeds() {
     for (i, src) in seeds.iter().enumerate() {
         println!("seed {i} input: {src}");
         let ast = parse(src).expect("parse");
-        let res = lower(&ast);
+        let res = lower(&ast, &LoweringContext::empty());
         assert!(res.is_ok(), "seed {i} failed to lower: {:?}", res.err());
     }
 }
@@ -23,13 +23,13 @@ fn validate_classdefs_basic() {
     // Well-formed classdef: no error during lowering
     let src = "classdef C\n properties; a; end; methods; function obj=setA(obj,v); end; end; end";
     let ast = parse(src).unwrap();
-    let hir = lower(&ast);
+    let hir = lower(&ast, &LoweringContext::empty());
     assert!(hir.is_ok());
 
     // Duplicate property should error at lowering time now
     let dup = "classdef D\n properties; a; a; end; end";
     let ast2 = parse(dup).unwrap();
-    let hir2 = lower(&ast2);
+    let hir2 = lower(&ast2, &LoweringContext::empty());
     assert!(hir2.is_err());
 }
 
@@ -37,7 +37,7 @@ fn validate_classdefs_basic() {
 fn collect_imports_list() {
     let src = "import pkg.sub.*; import top.mid.leaf; x=1;";
     let ast = parse(src).unwrap();
-    let hir = lower(&ast).unwrap();
+    let hir = lower(&ast, &LoweringContext::empty()).unwrap().hir;
     let imports = runmat_hir::collect_imports(&hir);
     assert_eq!(imports.len(), 2);
     assert!(imports[0].1);

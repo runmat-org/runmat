@@ -5,10 +5,18 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{
+    gpu_helpers,
+    shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
+    tensor,
+};
+use crate::dispatcher::download_handle_async;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
+
+const NAME: &str = "nnz";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::nnz")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -32,6 +40,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Providers that implement reduce_nnz[_dim] keep counting on-device; the builtin downloads the MATLAB-compatible double result afterwards.",
 };
+
+fn nnz_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::nnz")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -68,60 +80,72 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::nnz"
 )]
-fn nnz_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let dim = parse_dimension_arg(&rest)?;
+async fn nnz_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let dim = parse_dimension_arg(&rest).await?;
     match value {
-        Value::GpuTensor(handle) => nnz_gpu(handle, dim),
+        Value::GpuTensor(handle) => nnz_gpu(handle, dim).await,
         other => nnz_host_value(other, dim),
     }
 }
 
-fn parse_dimension_arg(args: &[Value]) -> Result<Option<usize>, String> {
+async fn parse_dimension_arg(args: &[Value]) -> BuiltinResult<Option<usize>> {
     match args.len() {
         0 => Ok(None),
         1 => {
-            let dim = tensor::parse_dimension(&args[0], "nnz")?;
-            Ok(Some(dim))
+            let dim = tensor::dimension_from_value_async(&args[0], "nnz", false)
+                .await
+                .map_err(nnz_error)?;
+            match dim {
+                Some(dim) => Ok(Some(dim)),
+                None => Err(nnz_error(format!(
+                    "nnz: dimension must be numeric, got {:?}",
+                    args[0]
+                ))),
+            }
         }
-        _ => Err("nnz: too many input arguments".to_string()),
+        _ => Err(nnz_error("nnz: too many input arguments")),
     }
 }
 
-fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> Result<Value, String> {
+async fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider();
     match dim {
         None => {
             if let Some(p) = provider {
-                if let Ok(result) = p.reduce_nnz(&handle) {
-                    let host = p.download(&result).map_err(|e| format!("nnz: {e}"))?;
+                if let Ok(result) = p.reduce_nnz(&handle).await {
+                    let host = download_handle_async(p, &result)
+                        .await
+                        .map_err(|e| nnz_error(format!("nnz: {e}")))?;
                     let _ = p.free(&result);
                     let count = host.data.into_iter().next().unwrap_or(0.0);
                     return Ok(Value::Num(count));
                 }
             }
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             nnz_host_value(Value::Tensor(tensor), None)
         }
         Some(dim) => {
             if let Some(p) = provider {
                 let zero_based = dim.saturating_sub(1);
                 if zero_based < handle.shape.len() {
-                    if let Ok(result) = p.reduce_nnz_dim(&handle, zero_based) {
-                        let host = p.download(&result).map_err(|e| format!("nnz: {e}"))?;
+                    if let Ok(result) = p.reduce_nnz_dim(&handle, zero_based).await {
+                        let host = download_handle_async(p, &result)
+                            .await
+                            .map_err(|e| nnz_error(format!("nnz: {e}")))?;
                         let _ = p.free(&result);
-                        let tensor =
-                            Tensor::new(host.data, host.shape).map_err(|e| format!("nnz: {e}"))?;
+                        let tensor = Tensor::new(host.data, host.shape)
+                            .map_err(|e| nnz_error(format!("nnz: {e}")))?;
                         return Ok(tensor::tensor_into_value(tensor));
                     }
                 }
             }
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             nnz_host_value(Value::Tensor(tensor), Some(dim))
         }
     }
 }
 
-fn nnz_host_value(value: Value, dim: Option<usize>) -> Result<Value, String> {
+fn nnz_host_value(value: Value, dim: Option<usize>) -> BuiltinResult<Value> {
     match dim {
         None => {
             let count = count_nonzero_value(&value)?;
@@ -135,7 +159,7 @@ fn nnz_host_value(value: Value, dim: Option<usize>) -> Result<Value, String> {
     }
 }
 
-fn count_nonzero_value(value: &Value) -> Result<usize, String> {
+fn count_nonzero_value(value: &Value) -> BuiltinResult<usize> {
     match value {
         Value::Tensor(tensor) => Ok(count_nonzero_tensor(tensor)),
         Value::ComplexTensor(ct) => Ok(count_nonzero_complex_tensor(ct)),
@@ -145,13 +169,13 @@ fn count_nonzero_value(value: &Value) -> Result<usize, String> {
         Value::Int(i) => Ok(if i.to_i64() != 0 { 1 } else { 0 }),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Complex(re, im) => Ok(if is_nonzero_complex(*re, *im) { 1 } else { 0 }),
-        Value::GpuTensor(_) => {
-            Err("nnz: GPU inputs are handled before host evaluation".to_string())
-        }
-        other => Err(format!(
+        Value::GpuTensor(_) => Err(nnz_error(
+            "nnz: GPU inputs are handled before host evaluation",
+        )),
+        other => Err(nnz_error(format!(
             "nnz: expected numeric, logical, complex, or char array, got {}",
             describe_value_kind(other)
-        )),
+        ))),
     }
 }
 
@@ -196,7 +220,7 @@ struct Mask {
     shape: Vec<usize>,
 }
 
-fn mask_from_value(value: &Value) -> Result<Mask, String> {
+fn mask_from_value(value: &Value) -> BuiltinResult<Mask> {
     match value {
         Value::Tensor(tensor) => {
             let shape = canonical_shape(&tensor.shape, tensor.data.len());
@@ -251,32 +275,33 @@ fn mask_from_value(value: &Value) -> Result<Mask, String> {
             bits: vec![if is_nonzero_complex(*re, *im) { 1 } else { 0 }],
             shape: vec![1, 1],
         }),
-        Value::GpuTensor(_) => {
-            Err("nnz: GPU inputs are handled before host evaluation".to_string())
-        }
-        other => Err(format!(
+        Value::GpuTensor(_) => Err(nnz_error(
+            "nnz: GPU inputs are handled before host evaluation",
+        )),
+        other => Err(nnz_error(format!(
             "nnz: expected numeric, logical, complex, or char array, got {}",
             describe_value_kind(other)
-        )),
+        ))),
     }
 }
 
-fn reduce_mask_dim(mask: &Mask, dim: usize) -> Result<Tensor, String> {
+fn reduce_mask_dim(mask: &Mask, dim: usize) -> BuiltinResult<Tensor> {
     if dim == 0 {
-        return Err("nnz: dimension must be >= 1".to_string());
+        return Err(nnz_error("nnz: dimension must be >= 1"));
     }
     if mask.bits.is_empty() {
         let mut out_shape = canonical_shape(&mask.shape, 0);
-        if dim <= out_shape.len() && !out_shape.is_empty() {
+        if dim <= out_shape.len() && !is_scalar_shape(&out_shape) {
             out_shape[dim - 1] = 1;
         }
         let out_len = out_shape.iter().copied().product::<usize>();
         let zeros = vec![0.0; out_len];
-        return Tensor::new(zeros, out_shape).map_err(|e| format!("nnz: {e}"));
+        return Tensor::new(zeros, out_shape).map_err(|e| nnz_error(format!("nnz: {e}")));
     }
-    if mask.shape.is_empty() {
+    if is_scalar_shape(&mask.shape) {
         let data = vec![mask.bits[0] as f64];
-        return Tensor::new(data, vec![1, 1]).map_err(|e| format!("nnz: {e}"));
+        return Tensor::new(data, canonical_scalar_shape())
+            .map_err(|e| nnz_error(format!("nnz: {e}")));
     }
     if dim > mask.shape.len() {
         return mask_to_tensor(mask);
@@ -317,25 +342,26 @@ fn reduce_mask_dim(mask: &Mask, dim: usize) -> Result<Tensor, String> {
             }
         }
     }
-    Tensor::new(output, out_shape).map_err(|e| format!("nnz: {e}"))
+    Tensor::new(output, out_shape).map_err(|e| nnz_error(format!("nnz: {e}")))
 }
 
-fn mask_to_tensor(mask: &Mask) -> Result<Tensor, String> {
+fn mask_to_tensor(mask: &Mask) -> BuiltinResult<Tensor> {
     let data = mask.bits.iter().map(|&b| b as f64).collect::<Vec<_>>();
     Tensor::new(data, canonical_shape(&mask.shape, mask.bits.len()))
-        .map_err(|e| format!("nnz: {e}"))
+        .map_err(|e| nnz_error(format!("nnz: {e}")))
 }
 
 fn canonical_shape(shape: &[usize], len: usize) -> Vec<usize> {
-    if shape.is_empty() {
+    if is_scalar_shape(shape) {
         if len <= 1 {
-            vec![1, 1]
-        } else {
-            vec![len, 1]
+            return canonical_scalar_shape();
         }
-    } else {
-        shape.to_vec()
+        return vec![len, 1];
     }
+    if tensor::element_count(shape) == len {
+        return normalize_scalar_shape(shape);
+    }
+    shape.to_vec()
 }
 
 fn describe_value_kind(value: &Value) -> String {
@@ -526,7 +552,7 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = nnz_gpu(handle, None).expect("nnz");
+            let result = futures::executor::block_on(nnz_gpu(handle, None)).expect("nnz");
             assert_eq!(result, Value::Num(3.0));
         });
     }
@@ -546,7 +572,7 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let gpu = nnz_gpu(handle, Some(1)).expect("nnz");
+        let gpu = futures::executor::block_on(nnz_gpu(handle, Some(1))).expect("nnz");
         match (cpu, gpu) {
             (Value::Tensor(ct), Value::Tensor(gt)) => {
                 assert_eq!(gt.shape, ct.shape);
@@ -561,9 +587,13 @@ pub(crate) mod tests {
     fn nnz_rejects_strings() {
         let err = nnz_host_value(Value::from("hello"), None).unwrap_err();
         assert!(
-            err.contains("expected numeric, logical, complex, or char array"),
+            err.message()
+                .contains("expected numeric, logical, complex, or char array"),
             "unexpected error: {err}"
         );
-        assert!(err.contains("string scalar"), "unexpected error: {err}");
+        assert!(
+            err.message().contains("string scalar"),
+            "unexpected error: {err}"
+        );
     }
 }

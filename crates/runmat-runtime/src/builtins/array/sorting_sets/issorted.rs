@@ -5,6 +5,7 @@ use std::cmp::Ordering;
 use runmat_builtins::{CharArray, ComplexTensor, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -41,6 +42,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Predicate builtin evaluated outside fusion; planner prevents kernel generation.",
 };
 
+fn issorted_error(message: impl Into<String>) -> crate::RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("issorted")
+        .build()
+}
+
 #[runtime_builtin(
     name = "issorted",
     category = "array/sorting_sets",
@@ -50,8 +57,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::issorted"
 )]
-fn issorted_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let input = normalize_input(value)?;
+async fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let input = normalize_input(value).await?;
     let shape = input.shape();
     let args = IssortedArgs::parse(&rest, &shape)?;
 
@@ -150,7 +157,7 @@ impl InputArray {
 }
 
 impl IssortedArgs {
-    fn parse(args: &[Value], shape: &[usize]) -> Result<Self, String> {
+    fn parse(args: &[Value], shape: &[usize]) -> crate::BuiltinResult<Self> {
         let mut dim_arg: Option<usize> = None;
         let mut direction: Option<Direction> = None;
         let mut comparison: ComparisonMethod = ComparisonMethod::Auto;
@@ -165,13 +172,14 @@ impl IssortedArgs {
                 match token.as_str() {
                     "rows" => {
                         if saw_rows {
-                            return Err("issorted: 'rows' specified more than once".to_string());
+                            return Err(issorted_error(
+                                "issorted: 'rows' specified more than once",
+                            ));
                         }
                         if dim_arg.is_some() {
-                            return Err(
-                                "issorted: cannot combine 'rows' with a dimension argument"
-                                    .to_string(),
-                            );
+                            return Err(issorted_error(
+                                "issorted: cannot combine 'rows' with a dimension argument",
+                            ));
                         }
                         saw_rows = true;
                         mode = CheckMode::Rows;
@@ -217,21 +225,21 @@ impl IssortedArgs {
                     "comparisonmethod" => {
                         idx += 1;
                         if idx >= args.len() {
-                            return Err(
-                                "issorted: expected a value for 'ComparisonMethod'".to_string()
-                            );
+                            return Err(issorted_error(
+                                "issorted: expected a value for 'ComparisonMethod'",
+                            ));
                         }
                         let value = value_to_string_lower(&args[idx]).ok_or_else(|| {
-                            "issorted: 'ComparisonMethod' expects a string value".to_string()
+                            issorted_error("issorted: 'ComparisonMethod' expects a string value")
                         })?;
                         comparison = match value.as_str() {
                             "auto" => ComparisonMethod::Auto,
                             "real" => ComparisonMethod::Real,
                             "abs" | "magnitude" => ComparisonMethod::Abs,
                             other => {
-                                return Err(format!(
+                                return Err(issorted_error(format!(
                                     "issorted: unsupported ComparisonMethod '{other}'"
-                                ));
+                                )));
                             }
                         };
                         idx += 1;
@@ -240,21 +248,21 @@ impl IssortedArgs {
                     "missingplacement" => {
                         idx += 1;
                         if idx >= args.len() {
-                            return Err(
-                                "issorted: expected a value for 'MissingPlacement'".to_string()
-                            );
+                            return Err(issorted_error(
+                                "issorted: expected a value for 'MissingPlacement'",
+                            ));
                         }
                         let value = value_to_string_lower(&args[idx]).ok_or_else(|| {
-                            "issorted: 'MissingPlacement' expects a string value".to_string()
+                            issorted_error("issorted: 'MissingPlacement' expects a string value")
                         })?;
                         missing = match value.as_str() {
                             "auto" => MissingPlacement::Auto,
                             "first" => MissingPlacement::First,
                             "last" => MissingPlacement::Last,
                             other => {
-                                return Err(format!(
+                                return Err(issorted_error(format!(
                                     "issorted: unsupported MissingPlacement '{other}'"
-                                ));
+                                )));
                             }
                         };
                         idx += 1;
@@ -272,7 +280,10 @@ impl IssortedArgs {
                 }
             }
 
-            return Err(format!("issorted: unrecognised argument {:?}", arg));
+            return Err(issorted_error(format!(
+                "issorted: unrecognised argument {:?}",
+                arg
+            )));
         }
 
         if let Some(dim) = dim_arg {
@@ -288,29 +299,33 @@ impl IssortedArgs {
     }
 }
 
-fn ensure_unique_direction(direction: &Option<Direction>) -> Result<(), String> {
+fn ensure_unique_direction(direction: &Option<Direction>) -> crate::BuiltinResult<()> {
     if direction.is_some() {
-        Err("issorted: sorting direction specified more than once".to_string())
+        Err(issorted_error(
+            "issorted: sorting direction specified more than once",
+        ))
     } else {
         Ok(())
     }
 }
 
-fn normalize_input(value: Value) -> Result<InputArray, String> {
+async fn normalize_input(value: Value) -> crate::BuiltinResult<InputArray> {
     match value {
         Value::Tensor(tensor) => Ok(InputArray::Real(tensor)),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| issorted_error(e))?;
             Ok(InputArray::Real(tensor))
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
-            let tensor = tensor::value_into_tensor_for("issorted", value)?;
+            let tensor = tensor::value_into_tensor_for("issorted", value)
+                .map_err(|e| issorted_error(e))?;
             Ok(InputArray::Real(tensor))
         }
         Value::ComplexTensor(ct) => Ok(InputArray::Complex(ct)),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("issorted: {e}"))?;
+                .map_err(|e| issorted_error(format!("issorted: {e}")))?;
             Ok(InputArray::Complex(tensor))
         }
         Value::CharArray(ca) => {
@@ -320,21 +335,21 @@ fn normalize_input(value: Value) -> Result<InputArray, String> {
         Value::StringArray(sa) => Ok(InputArray::String(sa)),
         Value::String(s) => {
             let array =
-                StringArray::new(vec![s], vec![1, 1]).map_err(|e| format!("issorted: {e}"))?;
+                StringArray::new(vec![s], vec![1, 1]).map_err(|e| issorted_error(format!("issorted: {e}")))?;
             Ok(InputArray::String(array))
         }
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             Ok(InputArray::Real(tensor))
         }
-        other => Err(format!(
+        other => Err(issorted_error(format!(
             "issorted: unsupported input type {:?}; expected numeric, logical, complex, char, or string arrays",
             other
-        )),
+        ))),
     }
 }
 
-fn issorted_real(tensor: &Tensor, args: &IssortedArgs) -> Result<bool, String> {
+fn issorted_real(tensor: &Tensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
     if tensor.data.is_empty() {
         return Ok(true);
     }
@@ -344,7 +359,7 @@ fn issorted_real(tensor: &Tensor, args: &IssortedArgs) -> Result<bool, String> {
     }
 }
 
-fn issorted_complex(tensor: &ComplexTensor, args: &IssortedArgs) -> Result<bool, String> {
+fn issorted_complex(tensor: &ComplexTensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
     if tensor.data.is_empty() {
         return Ok(true);
     }
@@ -354,12 +369,14 @@ fn issorted_complex(tensor: &ComplexTensor, args: &IssortedArgs) -> Result<bool,
     }
 }
 
-fn issorted_string(array: &StringArray, args: &IssortedArgs) -> Result<bool, String> {
+fn issorted_string(array: &StringArray, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
     if array.data.is_empty() {
         return Ok(true);
     }
     if !matches!(args.comparison, ComparisonMethod::Auto) {
-        return Err("issorted: 'ComparisonMethod' is not supported for string arrays".to_string());
+        return Err(issorted_error(
+            "issorted: 'ComparisonMethod' is not supported for string arrays",
+        ));
     }
     match args.mode {
         CheckMode::Dimension(dim) => Ok(check_string_dimension(array, dim, args)),
@@ -457,9 +474,9 @@ fn check_string_dimension(array: &StringArray, dim: usize, args: &IssortedArgs) 
     true
 }
 
-fn check_real_rows(tensor: &Tensor, args: &IssortedArgs) -> Result<bool, String> {
+fn check_real_rows(tensor: &Tensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
     if tensor.shape.len() > 2 {
-        return Err("issorted: 'rows' expects a 2-D matrix".to_string());
+        return Err(issorted_error("issorted: 'rows' expects a 2-D matrix"));
     }
     let rows = tensor.rows();
     let cols = tensor.cols();
@@ -479,9 +496,9 @@ fn check_real_rows(tensor: &Tensor, args: &IssortedArgs) -> Result<bool, String>
     Ok(false)
 }
 
-fn check_complex_rows(tensor: &ComplexTensor, args: &IssortedArgs) -> Result<bool, String> {
+fn check_complex_rows(tensor: &ComplexTensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
     if tensor.shape.len() > 2 {
-        return Err("issorted: 'rows' expects a 2-D matrix".to_string());
+        return Err(issorted_error("issorted: 'rows' expects a 2-D matrix"));
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
@@ -501,9 +518,9 @@ fn check_complex_rows(tensor: &ComplexTensor, args: &IssortedArgs) -> Result<boo
     Ok(false)
 }
 
-fn check_string_rows(array: &StringArray, args: &IssortedArgs) -> Result<bool, String> {
+fn check_string_rows(array: &StringArray, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
     if array.shape.len() > 2 {
-        return Err("issorted: 'rows' expects a 2-D matrix".to_string());
+        return Err(issorted_error("issorted: 'rows' expects a 2-D matrix"));
     }
     let rows = array.rows;
     let cols = array.cols;
@@ -1012,7 +1029,7 @@ fn value_to_string_lower(value: &Value) -> Option<String> {
     }
 }
 
-fn char_array_to_tensor(array: &CharArray) -> Result<Tensor, String> {
+fn char_array_to_tensor(array: &CharArray) -> crate::BuiltinResult<Tensor> {
     let rows = array.rows;
     let cols = array.cols;
     let mut data = vec![0.0f64; rows * cols];
@@ -1023,14 +1040,19 @@ fn char_array_to_tensor(array: &CharArray) -> Result<Tensor, String> {
             data[idx] = ch as u32 as f64;
         }
     }
-    Tensor::new(data, vec![rows, cols]).map_err(|e| format!("issorted: {e}"))
+    Tensor::new(data, vec![rows, cols]).map_err(|e| issorted_error(format!("issorted: {e}")))
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray, Value};
+
+    fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(super::issorted_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

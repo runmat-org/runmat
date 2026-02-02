@@ -525,8 +525,14 @@ impl SnapshotLoader {
                     function_meta.name
                 );
                 // Use a placeholder function that returns an error
-                dispatch_table
-                    .push(|_args| Err("Function not available in current runtime".to_string()));
+                dispatch_table.push(|_args| {
+                    Box::pin(async {
+                        Err(runmat_async::runtime_error(
+                            "Function not available in current runtime",
+                        )
+                        .build())
+                    })
+                });
             }
         }
 

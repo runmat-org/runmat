@@ -41,32 +41,32 @@
   "examples": [
     {
       "description": "Measure Characters In A String Scalar",
-      "input": "len = strlength(\"RunMat\");",
+      "input": "len = strlength(\"RunMat\")",
       "output": "len = 6"
     },
     {
       "description": "Count Characters Across A String Array",
-      "input": "labels = [\"North\" \"South\" \"East\" \"West\"];\ncounts = strlength(labels);",
+      "input": "labels = [\"North\" \"South\" \"East\" \"West\"];\ncounts = strlength(labels)",
       "output": "counts = 1\u00d74\n    5    5    4    4"
     },
     {
       "description": "Compute Lengths For Each Row Of A Character Array",
-      "input": "names = char(\"cat\", \"giraffe\");\nrow_counts = strlength(names);",
+      "input": "names = char(\"cat\", \"giraffe\");\nrow_counts = strlength(names)",
       "output": "row_counts = 2\u00d71\n     3\n     7"
     },
     {
       "description": "Handle Empty And Blank Strings",
-      "input": "mixed = [\"\", \"   \"];\nlen = strlength(mixed);",
+      "input": "mixed = [\"\", \"   \"];\nlen = strlength(mixed)",
       "output": "len = 1\u00d72\n     0     3"
     },
     {
       "description": "Get Lengths From A Cell Array Of Character Vectors",
-      "input": "C = {'red', 'green', 'blue'};\nL = strlength(C);",
+      "input": "C = {'red', 'green', 'blue'};\nL = strlength(C)",
       "output": "L = 1\u00d73\n     3     5     4"
     },
     {
       "description": "Treat Missing Strings As NaN",
-      "input": "values = string([\"alpha\" \"beta\" \"gamma\"]);\nvalues(2) = string(missing);  % Displays as <missing> when printed\nlengths = strlength(values);",
+      "input": "values = string([\"alpha\" \"beta\" \"gamma\"]);\nvalues(2) = string(missing);  % Displays as <missing> when printed\nlengths = strlength(values)",
       "output": "lengths = 1\u00d73\n    5   NaN    5"
     }
   ],

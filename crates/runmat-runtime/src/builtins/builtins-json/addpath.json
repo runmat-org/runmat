@@ -44,43 +44,43 @@
   "examples": [
     {
       "description": "Add a single folder to the top of the search path",
-      "input": "old = addpath(\"util/toolbox\");\npath()",
-      "output": "old          % Previous search path as a character vector\n% The folder util/toolbox now appears before the old entries."
+      "input": "mkdir(\"util/toolbox\");\noldPath = path();\naddpath(\"util/toolbox\");\nnewPath = path();\ncount = fprintf('%s %s\\n', oldPath, newPath);",
+      "output": " /util/toolbox"
     },
     {
       "description": "Append folders to the end of the search path",
-      "input": "dirs = [\"shared/filters\", \"shared/signal\"];\naddpath(dirs, \"-end\");",
-      "output": "% The specified folders are appended to the end of the search path."
+      "input": "mkdir(\"shared/filters\");\nmkdir(\"shared/signal\");\noldPath = path();\ndirs = [\"shared/filters\", \"shared/signal\"];\naddpath(dirs, \"-end\");\nnewPath = path();\ncount = fprintf('%s %s\\n', oldPath, newPath);",
+      "output": " /shared/filters:/shared/signal"
     },
     {
       "description": "Use `genpath` output to add a folder tree",
-      "input": "toolchain = genpath(\"third_party/toolchain\");\naddpath(toolchain);",
-      "output": "% Every directory produced by genpath is inserted at the top of the search path."
+      "input": "mkdir(\"third_party/toolchain\");\nmkdir(\"third_party/toolchain/bin\");\noldPath = path();\ntoolchain = genpath(\"third_party/toolchain\");\naddpath(toolchain);\nnewPath = path();\ncount = fprintf('%s %s\\n', oldPath, newPath);",
+      "output": " /third_party/toolchain:/third_party/toolchain/bin"
     },
     {
       "description": "Add folders from a cell array",
-      "input": "folders = {'src/algorithms', 'src/visualization'};\naddpath(folders{:}, \"-begin\");",
-      "output": "% Both folders appear at the beginning of the MATLAB search path."
+      "input": "mkdir(\"src/algorithms\");\nmkdir(\"src/visualization\");\noldPath = path();\nfolders = [\"src/algorithms\", \"src/visualization\"];\naddpath(folders, \"-begin\");\nnewPath = path();\ncount = fprintf('%s %s\\n', oldPath, newPath);",
+      "output": " /src/algorithms:/src/visualization"
     },
     {
       "description": "Move an existing folder to the top of the search path",
-      "input": "addpath(\"src/algorithms\");",
-      "output": "% The folder is removed from its previous position and reinserted at the front."
+      "input": "mkdir(\"src/algorithms\");\noldPath = path();\naddpath(\"src/algorithms\");\nnewPath = path();\ncount = fprintf('%s %s\\n', oldPath, newPath);",
+      "output": " /src/algorithms"
     },
     {
       "description": "Accept the MATLAB `-frozen` flag",
-      "input": "addpath(\"vendor/hardware\", \"-frozen\");",
-      "output": "% The folder is added; RunMat currently treats '-frozen' as an informational hint."
+      "input": "mkdir(\"vendor/hardware\");\noldPath = path();\naddpath(\"vendor/hardware\", \"-frozen\");\nnewPath = path();\ncount = fprintf('%s %s\\n', oldPath, newPath);",
+      "output": " /vendor/hardware"
     },
     {
       "description": "Retrieve the previous path and restore it later",
-      "input": "old = addpath(\"analysis/utilities\");\n% ... run experiments ...\npath(old);",
-      "output": "% The original search path is restored when you call path(old)."
+      "input": "mkdir(\"analysis/utilities\");\noldPath = path();\nold = addpath(\"analysis/utilities\");\nnewPath = path();\npath(old);\ncount = fprintf('%s %s\\n', oldPath, newPath);",
+      "output": " /analysis/utilities"
     },
     {
       "description": "Combine multiple options",
-      "input": "addpath(\"contrib\", \"docs/examples\", \"-end\", \"-frozen\");",
-      "output": "% Both folders are appended to the end of the search path."
+      "input": "mkdir(\"contrib\");\nmkdir(\"docs/examples\");\noldPath = path();\naddpath(\"contrib\", \"docs/examples\", \"-end\", \"-frozen\");\nnewPath = path();\ncount = fprintf('%s %s\\n', oldPath, newPath);",
+      "output": " /contrib:/docs/examples"
     }
   ],
   "faqs": [

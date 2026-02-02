@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{gather_if_needed, make_cell};
+use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::regex::regexp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -40,16 +40,43 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Regex evaluation is control-flow heavy and not eligible for fusion today.",
 };
 
+const BUILTIN_NAME: &str = "regexp";
+
+fn runtime_error_for(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(builtin).build()
+}
+
+fn with_builtin_context(builtin: &'static str, mut err: RuntimeError) -> RuntimeError {
+    if err.context.builtin.is_none() {
+        err.context = err.context.with_builtin(builtin);
+    }
+    err
+}
+
 /// Evaluate a regular expression and return an evaluation handle that can produce MATLAB-compatible outputs.
-pub fn evaluate(
+pub async fn evaluate(
     subject: Value,
     pattern: Value,
     rest: &[Value],
-) -> Result<RegexpEvaluation, String> {
-    let subject = gather_if_needed(&subject).map_err(|e| format!("regexp: {e}"))?;
-    let pattern = gather_if_needed(&pattern).map_err(|e| format!("regexp: {e}"))?;
-    let options = RegexpOptions::parse(rest)?;
-    RegexpEvaluation::new(subject, pattern, options)
+) -> BuiltinResult<RegexpEvaluation> {
+    evaluate_with(BUILTIN_NAME, subject, pattern, rest).await
+}
+
+/// Evaluate a regular expression using the specified builtin name for error context.
+pub async fn evaluate_with(
+    builtin: &'static str,
+    subject: Value,
+    pattern: Value,
+    rest: &[Value],
+) -> BuiltinResult<RegexpEvaluation> {
+    let subject = gather_if_needed_async(&subject)
+        .await
+        .map_err(|err| with_builtin_context(builtin, err))?;
+    let pattern = gather_if_needed_async(&pattern)
+        .await
+        .map_err(|err| with_builtin_context(builtin, err))?;
+    let options = RegexpOptions::parse(builtin, rest)?;
+    RegexpEvaluation::new(builtin, subject, pattern, options).await
 }
 
 #[runtime_builtin(
@@ -60,8 +87,12 @@ pub fn evaluate(
     accel = "sink",
     builtin_path = "crate::builtins::strings::regex::regexp"
 )]
-fn regexp_builtin(subject: Value, pattern: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let evaluation = evaluate(subject, pattern, &rest)?;
+async fn regexp_builtin(
+    subject: Value,
+    pattern: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let evaluation = evaluate(subject, pattern, &rest).await?;
     let mut outputs = evaluation.outputs_for_single()?;
     if outputs.is_empty() {
         return Ok(Value::Num(0.0));
@@ -71,6 +102,7 @@ fn regexp_builtin(subject: Value, pattern: Value, rest: Vec<Value>) -> Result<Va
     } else {
         let len = outputs.len();
         make_cell(outputs, 1, len)
+            .map_err(|err| runtime_error_for(BUILTIN_NAME, format!("{BUILTIN_NAME}: {err}")))
     }
 }
 
@@ -103,7 +135,7 @@ struct RegexpOptions {
 }
 
 impl RegexpOptions {
-    fn parse(rest: &[Value]) -> Result<Self, String> {
+    fn parse(builtin: &'static str, rest: &[Value]) -> BuiltinResult<Self> {
         let mut outputs = Vec::new();
         let mut once = false;
         let mut emptymatch = EmptyMatchPolicy::Remove;
@@ -113,8 +145,12 @@ impl RegexpOptions {
         let mut dot_all = false;
         let mut idx = 0usize;
         while idx < rest.len() {
-            let raw = value_to_lower_string(&rest[idx])
-                .ok_or_else(|| format!("regexp: expected option string, got {:?}", rest[idx]))?;
+            let raw = value_to_lower_string(&rest[idx]).ok_or_else(|| {
+                runtime_error_for(
+                    builtin,
+                    format!("{builtin}: expected option string, got {:?}", rest[idx]),
+                )
+            })?;
             idx += 1;
             match raw.as_str() {
                 "match" => outputs.push(OutputSpec::Match),
@@ -130,39 +166,57 @@ impl RegexpOptions {
                 "matchcase" => case_insensitive = false,
                 "lineanchors" => {
                     let flag = parse_on_off(rest.get(idx)).ok_or_else(|| {
-                        "regexp: expected 'on' or 'off' after 'lineanchors'".to_string()
+                        runtime_error_for(
+                            builtin,
+                            format!("{builtin}: expected 'on' or 'off' after 'lineanchors'"),
+                        )
                     })?;
                     multi_line = flag;
                     idx += 1;
                 }
                 "dotall" => {
                     let flag = parse_on_off(rest.get(idx)).ok_or_else(|| {
-                        "regexp: expected 'on' or 'off' after 'dotall'".to_string()
+                        runtime_error_for(
+                            builtin,
+                            format!("{builtin}: expected 'on' or 'off' after 'dotall'"),
+                        )
                     })?;
                     dot_all = flag;
                     idx += 1;
                 }
                 "dotexceptnewline" => {
                     let flag = parse_on_off(rest.get(idx)).ok_or_else(|| {
-                        "regexp: expected 'on' or 'off' after 'dotExceptNewline'".to_string()
+                        runtime_error_for(
+                            builtin,
+                            format!("{builtin}: expected 'on' or 'off' after 'dotExceptNewline'"),
+                        )
                     })?;
                     dot_all = !flag;
                     idx += 1;
                 }
                 "emptymatch" => {
                     let policy = rest.get(idx).ok_or_else(|| {
-                        "regexp: expected 'allow' or 'remove' after 'emptymatch'".to_string()
+                        runtime_error_for(
+                            builtin,
+                            format!("{builtin}: expected 'allow' or 'remove' after 'emptymatch'"),
+                        )
                     })?;
                     let policy_str = value_to_lower_string(policy).ok_or_else(|| {
-                        "regexp: expected 'allow' or 'remove' after 'emptymatch'".to_string()
+                        runtime_error_for(
+                            builtin,
+                            format!("{builtin}: expected 'allow' or 'remove' after 'emptymatch'"),
+                        )
                     })?;
                     idx += 1;
                     match policy_str.as_str() {
                         "allow" => emptymatch = EmptyMatchPolicy::Allow,
                         "remove" => emptymatch = EmptyMatchPolicy::Remove,
                         other => {
-                            return Err(format!(
-                                "regexp: invalid emptymatch policy '{other}', expected 'allow' or 'remove'"
+                            return Err(runtime_error_for(
+                                builtin,
+                                format!(
+                                    "{builtin}: invalid emptymatch policy '{other}', expected 'allow' or 'remove'"
+                                ),
                             ))
                         }
                     }
@@ -174,7 +228,10 @@ impl RegexpOptions {
                     }
                 }
                 other => {
-                    return Err(format!("regexp: unrecognised option '{other}'"));
+                    return Err(runtime_error_for(
+                        builtin,
+                        format!("{builtin}: unrecognised option '{other}'"),
+                    ));
                 }
             }
         }
@@ -217,7 +274,11 @@ impl SubjectCollection {
     }
 }
 
-fn collect_subjects(value: Value, force_cell_output: bool) -> Result<SubjectCollection, String> {
+async fn collect_subjects(
+    builtin: &'static str,
+    value: Value,
+    force_cell_output: bool,
+) -> BuiltinResult<SubjectCollection> {
     match value {
         Value::String(s) => Ok(SubjectCollection {
             entries: vec![s],
@@ -228,9 +289,12 @@ fn collect_subjects(value: Value, force_cell_output: bool) -> Result<SubjectColl
         }),
         Value::CharArray(array) => collect_char_array(array, force_cell_output),
         Value::StringArray(array) => collect_string_array(array, force_cell_output),
-        Value::Cell(cell) => collect_cell_array(cell, force_cell_output),
-        other => Err(format!(
-            "regexp: expected char vector, string, string array, or cell array of char vectors, got {other:?}"
+        Value::Cell(cell) => collect_cell_array(builtin, cell, force_cell_output).await,
+        other => Err(runtime_error_for(
+            builtin,
+            format!(
+                "{builtin}: expected char vector, string, string array, or cell array of char vectors, got {other:?}"
+            ),
         )),
     }
 }
@@ -238,7 +302,7 @@ fn collect_subjects(value: Value, force_cell_output: bool) -> Result<SubjectColl
 fn collect_char_array(
     array: CharArray,
     force_cell_output: bool,
-) -> Result<SubjectCollection, String> {
+) -> BuiltinResult<SubjectCollection> {
     if array.rows == 0 {
         return Ok(SubjectCollection {
             entries: Vec::new(),
@@ -284,7 +348,7 @@ fn collect_char_array(
 fn collect_string_array(
     array: StringArray,
     force_cell_output: bool,
-) -> Result<SubjectCollection, String> {
+) -> BuiltinResult<SubjectCollection> {
     let rows = array.rows();
     let cols = array.cols();
     let total = array.data.len();
@@ -313,16 +377,22 @@ fn collect_string_array(
     })
 }
 
-fn collect_cell_array(
+async fn collect_cell_array(
+    builtin: &'static str,
     cell: runmat_builtins::CellArray,
     _force_cell_output: bool,
-) -> Result<SubjectCollection, String> {
+) -> BuiltinResult<SubjectCollection> {
     let mut entries = Vec::with_capacity(cell.data.len());
     for ptr in &cell.data {
-        let value = gather_if_needed(ptr).map_err(|e| format!("regexp: {e}"))?;
+        let value = gather_if_needed_async(ptr)
+            .await
+            .map_err(|err| with_builtin_context(builtin, err))?;
         let text = extract_string(&value).ok_or_else(|| {
-            format!(
-                "regexp: cell array elements must be character vectors or string scalars, got {value:?}"
+            runtime_error_for(
+                builtin,
+                format!(
+                    "{builtin}: cell array elements must be character vectors or string scalars, got {value:?}"
+                ),
             )
         })?;
         entries.push(text);
@@ -393,6 +463,7 @@ struct SubjectMatchData {
 }
 
 pub struct RegexpEvaluation {
+    builtin: &'static str,
     subjects: SubjectCollection,
     options: RegexpOptions,
     named_groups: Vec<String>,
@@ -400,10 +471,18 @@ pub struct RegexpEvaluation {
 }
 
 impl RegexpEvaluation {
-    fn new(subject: Value, pattern: Value, options: RegexpOptions) -> Result<Self, String> {
-        let subjects = collect_subjects(subject, options.force_cell_output)?;
+    async fn new(
+        builtin: &'static str,
+        subject: Value,
+        pattern: Value,
+        options: RegexpOptions,
+    ) -> BuiltinResult<Self> {
+        let subjects = collect_subjects(builtin, subject, options.force_cell_output).await?;
         let pattern_str = extract_string(&pattern).ok_or_else(|| {
-            format!("regexp: expected char vector or string pattern, got {pattern:?}")
+            runtime_error_for(
+                builtin,
+                format!("{builtin}: expected char vector or string pattern, got {pattern:?}"),
+            )
         })?;
         let mut builder = RegexBuilder::new(&pattern_str);
         if options.case_insensitive {
@@ -415,7 +494,9 @@ impl RegexpEvaluation {
         if options.dot_all {
             builder.dot_matches_new_line(true);
         }
-        let regex = builder.build().map_err(|e| format!("regexp: {e}"))?;
+        let regex = builder
+            .build()
+            .map_err(|e| runtime_error_for(builtin, format!("{builtin}: {e}")))?;
         let mut named_groups = Vec::new();
         for name in regex.capture_names().flatten() {
             if !name.is_empty() {
@@ -433,6 +514,7 @@ impl RegexpEvaluation {
             data.push(subject_data);
         }
         Ok(Self {
+            builtin,
             subjects,
             options,
             named_groups,
@@ -440,7 +522,18 @@ impl RegexpEvaluation {
         })
     }
 
-    pub fn outputs_for_single(&self) -> Result<Vec<Value>, String> {
+    fn make_cell_value(
+        &self,
+        values: Vec<Value>,
+        rows: usize,
+        cols: usize,
+    ) -> BuiltinResult<Value> {
+        let builtin = self.builtin;
+        make_cell(values, rows, cols)
+            .map_err(|err| runtime_error_for(builtin, format!("{builtin}: {err}")))
+    }
+
+    pub fn outputs_for_single(&self) -> BuiltinResult<Vec<Value>> {
         let specs = if self.options.outputs.is_empty() {
             vec![OutputSpec::Start]
         } else {
@@ -450,7 +543,7 @@ impl RegexpEvaluation {
     }
 
     #[allow(dead_code)] // Used by ignition's CallBuiltinMulti path
-    pub fn outputs_for_multi(&self) -> Result<Vec<Value>, String> {
+    pub fn outputs_for_multi(&self) -> BuiltinResult<Vec<Value>> {
         let specs = if self.options.outputs.is_empty() {
             vec![OutputSpec::Start, OutputSpec::End, OutputSpec::Match]
         } else {
@@ -459,7 +552,7 @@ impl RegexpEvaluation {
         self.values_for_specs(&specs)
     }
 
-    fn values_for_specs(&self, specs: &[OutputSpec]) -> Result<Vec<Value>, String> {
+    fn values_for_specs(&self, specs: &[OutputSpec]) -> BuiltinResult<Vec<Value>> {
         let mut results = Vec::with_capacity(specs.len());
         for spec in specs {
             let value = match spec {
@@ -476,33 +569,33 @@ impl RegexpEvaluation {
         Ok(results)
     }
 
-    fn start_value(&self) -> Result<Value, String> {
+    fn start_value(&self) -> BuiltinResult<Value> {
         if self.subjects.is_scalar_text() {
             let starts = &self.data[0].matches;
             let nums: Vec<f64> = starts.iter().map(|m| m.start).collect();
-            vector_to_value(&nums)
+            vector_to_value(self.builtin, &nums)
         } else {
             self.collect_cells(|data| {
                 let nums: Vec<f64> = data.matches.iter().map(|m| m.start).collect();
-                vector_to_value(&nums)
+                vector_to_value(self.builtin, &nums)
             })
         }
     }
 
-    fn end_value(&self) -> Result<Value, String> {
+    fn end_value(&self) -> BuiltinResult<Value> {
         if self.subjects.is_scalar_text() {
             let ends = &self.data[0].matches;
             let nums: Vec<f64> = ends.iter().map(|m| m.end).collect();
-            vector_to_value(&nums)
+            vector_to_value(self.builtin, &nums)
         } else {
             self.collect_cells(|data| {
                 let nums: Vec<f64> = data.matches.iter().map(|m| m.end).collect();
-                vector_to_value(&nums)
+                vector_to_value(self.builtin, &nums)
             })
         }
     }
 
-    fn match_value(&self) -> Result<Value, String> {
+    fn match_value(&self) -> BuiltinResult<Value> {
         if self.subjects.is_scalar_text() {
             let data = &self.data[0];
             if self.options.once {
@@ -517,7 +610,7 @@ impl RegexpEvaluation {
             for m in &data.matches {
                 elements.push(Value::String(m.matched.clone()));
             }
-            return make_cell(elements, 1, data.matches.len());
+            return self.make_cell_value(elements, 1, data.matches.len());
         }
         let once = self.options.once;
         self.collect_cells(|data| {
@@ -533,18 +626,18 @@ impl RegexpEvaluation {
             for m in &data.matches {
                 elements.push(Value::String(m.matched.clone()));
             }
-            make_cell(elements, 1, data.matches.len())
+            self.make_cell_value(elements, 1, data.matches.len())
         })
     }
 
-    fn tokens_value(&self) -> Result<Value, String> {
+    fn tokens_value(&self) -> BuiltinResult<Value> {
         if self.subjects.is_scalar_text() {
             let data = &self.data[0];
             if self.options.once {
                 if let Some(first) = data.matches.first() {
-                    return tokens_to_cell(&first.tokens);
+                    return tokens_to_cell(self.builtin, &first.tokens);
                 }
-                return make_cell(Vec::new(), 1, 0);
+                return self.make_cell_value(Vec::new(), 1, 0);
             }
             let mut per_match = Vec::with_capacity(data.matches.len());
             for m in &data.matches {
@@ -552,17 +645,17 @@ impl RegexpEvaluation {
                 for token in &m.tokens {
                     tokens.push(Value::String(token.text.clone().unwrap_or_default()));
                 }
-                per_match.push(make_cell(tokens, 1, m.tokens.len())?);
+                per_match.push(self.make_cell_value(tokens, 1, m.tokens.len())?);
             }
-            return make_cell(per_match, 1, data.matches.len());
+            return self.make_cell_value(per_match, 1, data.matches.len());
         }
         let once = self.options.once;
         self.collect_cells(|data| {
             if once {
                 if let Some(first) = data.matches.first() {
-                    return tokens_to_cell(&first.tokens);
+                    return tokens_to_cell(self.builtin, &first.tokens);
                 }
-                return make_cell(Vec::new(), 1, 0);
+                return self.make_cell_value(Vec::new(), 1, 0);
             }
             let mut per_match = Vec::with_capacity(data.matches.len());
             for m in &data.matches {
@@ -570,44 +663,44 @@ impl RegexpEvaluation {
                 for token in &m.tokens {
                     tokens.push(Value::String(token.text.clone().unwrap_or_default()));
                 }
-                per_match.push(make_cell(tokens, 1, m.tokens.len())?);
+                per_match.push(self.make_cell_value(tokens, 1, m.tokens.len())?);
             }
-            make_cell(per_match, 1, data.matches.len())
+            self.make_cell_value(per_match, 1, data.matches.len())
         })
     }
 
-    fn token_extents_value(&self) -> Result<Value, String> {
+    fn token_extents_value(&self) -> BuiltinResult<Value> {
         if self.subjects.is_scalar_text() {
             let data = &self.data[0];
             if self.options.once {
                 if let Some(first) = data.matches.first() {
-                    return token_extents_matrix(&first.tokens);
+                    return token_extents_matrix(self.builtin, &first.tokens);
                 }
-                return empty_token_extents();
+                return empty_token_extents(self.builtin);
             }
             let mut per_match = Vec::with_capacity(data.matches.len());
             for m in &data.matches {
-                per_match.push(token_extents_matrix(&m.tokens)?);
+                per_match.push(token_extents_matrix(self.builtin, &m.tokens)?);
             }
-            return make_cell(per_match, 1, data.matches.len());
+            return self.make_cell_value(per_match, 1, data.matches.len());
         }
         let once = self.options.once;
         self.collect_cells(|data| {
             if once {
                 if let Some(first) = data.matches.first() {
-                    return token_extents_matrix(&first.tokens);
+                    return token_extents_matrix(self.builtin, &first.tokens);
                 }
-                return empty_token_extents();
+                return empty_token_extents(self.builtin);
             }
             let mut per_match = Vec::with_capacity(data.matches.len());
             for m in &data.matches {
-                per_match.push(token_extents_matrix(&m.tokens)?);
+                per_match.push(token_extents_matrix(self.builtin, &m.tokens)?);
             }
-            make_cell(per_match, 1, data.matches.len())
+            self.make_cell_value(per_match, 1, data.matches.len())
         })
     }
 
-    fn names_value(&self) -> Result<Value, String> {
+    fn names_value(&self) -> BuiltinResult<Value> {
         let names = self.named_groups.clone();
         if self.subjects.is_scalar_text() {
             let data = &self.data[0];
@@ -623,7 +716,7 @@ impl RegexpEvaluation {
             for m in &data.matches {
                 per_match.push(names_struct(&names, Some(m)));
             }
-            return make_cell(per_match, 1, data.matches.len());
+            return self.make_cell_value(per_match, 1, data.matches.len());
         }
         let once = self.options.once;
         self.collect_cells(|data| {
@@ -639,11 +732,11 @@ impl RegexpEvaluation {
             for m in &data.matches {
                 per_match.push(names_struct(&names, Some(m)));
             }
-            make_cell(per_match, 1, data.matches.len())
+            self.make_cell_value(per_match, 1, data.matches.len())
         })
     }
 
-    fn split_value(&self) -> Result<Value, String> {
+    fn split_value(&self) -> BuiltinResult<Value> {
         if self.subjects.is_scalar_text() {
             let splits = self.data[0]
                 .splits
@@ -655,7 +748,7 @@ impl RegexpEvaluation {
                 values.push(Value::String(part.clone()));
             }
             let len = splits.len();
-            return make_cell(values, 1, len);
+            return self.make_cell_value(values, 1, len);
         }
         self.collect_cells(|data| {
             let splits = data.splits.as_ref().cloned().unwrap_or_else(Vec::new);
@@ -664,13 +757,13 @@ impl RegexpEvaluation {
                 values.push(Value::String(part.clone()));
             }
             let len = splits.len();
-            make_cell(values, 1, len)
+            self.make_cell_value(values, 1, len)
         })
     }
 
-    fn collect_cells<F>(&self, mut build: F) -> Result<Value, String>
+    fn collect_cells<F>(&self, mut build: F) -> BuiltinResult<Value>
     where
-        F: FnMut(&SubjectMatchData) -> Result<Value, String>,
+        F: FnMut(&SubjectMatchData) -> BuiltinResult<Value>,
     {
         let rows = self.subjects.rows;
         let cols = self.subjects.cols;
@@ -686,7 +779,7 @@ impl RegexpEvaluation {
                 values.push(value);
             }
         }
-        make_cell(values, rows, cols)
+        self.make_cell_value(values, rows, cols)
     }
 }
 
@@ -803,34 +896,38 @@ fn byte_to_char_index(text: &str, byte_index: usize) -> usize {
     text[..byte_index].chars().count()
 }
 
-fn vector_to_value(values: &[f64]) -> Result<Value, String> {
+fn vector_to_value(builtin: &'static str, values: &[f64]) -> BuiltinResult<Value> {
     let cols = values.len();
     let shape = vec![1, cols];
-    let tensor = Tensor::new(values.to_vec(), shape).map_err(|e| format!("regexp: {e}"))?;
+    let tensor = Tensor::new(values.to_vec(), shape)
+        .map_err(|e| runtime_error_for(builtin, format!("{builtin}: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn tokens_to_cell(tokens: &[TokenComponent]) -> Result<Value, String> {
+fn tokens_to_cell(builtin: &'static str, tokens: &[TokenComponent]) -> BuiltinResult<Value> {
     let mut values = Vec::with_capacity(tokens.len());
     for token in tokens {
         values.push(Value::String(token.text.clone().unwrap_or_default()));
     }
     make_cell(values, 1, tokens.len())
+        .map_err(|err| runtime_error_for(builtin, format!("{builtin}: {err}")))
 }
 
-fn token_extents_matrix(tokens: &[TokenComponent]) -> Result<Value, String> {
+fn token_extents_matrix(builtin: &'static str, tokens: &[TokenComponent]) -> BuiltinResult<Value> {
     let rows = tokens.len();
     let mut tensor_data = vec![0.0; rows * 2];
     for (row, token) in tokens.iter().enumerate() {
         tensor_data[row] = token.start.unwrap_or(f64::NAN);
         tensor_data[row + rows] = token.end.unwrap_or(f64::NAN);
     }
-    let tensor = Tensor::new(tensor_data, vec![rows, 2]).map_err(|e| format!("regexp: {e}"))?;
+    let tensor = Tensor::new(tensor_data, vec![rows, 2])
+        .map_err(|e| runtime_error_for(builtin, format!("{builtin}: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn empty_token_extents() -> Result<Value, String> {
-    let tensor = Tensor::new(Vec::new(), vec![0, 2]).map_err(|e| format!("regexp: {e}"))?;
+fn empty_token_extents(builtin: &'static str) -> BuiltinResult<Value> {
+    let tensor = Tensor::new(Vec::new(), vec![0, 2])
+        .map_err(|e| runtime_error_for(builtin, format!("{builtin}: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -849,6 +946,10 @@ fn names_struct(names: &[String], match_data: Option<&MatchComponents>) -> Value
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    fn evaluate(subject: Value, pattern: Value, rest: &[Value]) -> BuiltinResult<RegexpEvaluation> {
+        futures::executor::block_on(super::evaluate(subject, pattern, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

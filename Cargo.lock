@@ -252,6 +252,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ar_archive_writer"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7eb93bbb63b9c227414f6eb3a0adfddca591a8ce1e9b60661bb08969b87e340b"
+dependencies = [
+ "object 0.37.3",
+]
+
+[[package]]
 name = "arbitrary"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -284,6 +293,9 @@ name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "as-raw-xcb-connection"
@@ -820,7 +832,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "miniz_oxide",
- "object",
+ "object 0.36.7",
  "rustc-demangle",
  "windows-targets 0.52.6",
 ]
@@ -899,6 +911,9 @@ name = "bitflags"
 version = "2.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b8e56985ec62d17e9c1001dc89c88ecd7dc08e47eba5ec7c29c7b5eeecde967"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "blake3"
@@ -1008,6 +1023,18 @@ dependencies = [
  "memchr",
  "regex-automata",
  "serde",
+]
+
+[[package]]
+name = "builtin-controlflow-migrate"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+ "walkdir",
 ]
 
 [[package]]
@@ -1132,10 +1159,11 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.30"
+version = "1.2.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "deec109607ca693028562ed836a5f1c4b8bd77755c4e132fc5ce11b0b6211ae7"
+checksum = "6354c81bbfd62d9cfa9cb3c773c2b7b2a3a482d569de977fd0e961f6e7c00583"
 dependencies = [
+ "find-msvc-tools",
  "jobserver",
  "libc",
  "shlex",
@@ -2593,6 +2621,12 @@ dependencies = [
  "libredox",
  "windows-sys 0.59.0",
 ]
+
+[[package]]
+name = "find-msvc-tools"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8591b0bcc8a98a64310a2fae1bb3e9b8564dd10e381e6e28010fde8e8e8568db"
 
 [[package]]
 name = "fixed_decimal"
@@ -4330,6 +4364,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "miette"
+version = "7.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f98efec8807c63c752b5bd61f862c165c115b0a35685bdcfd9238c7aeb592b7"
+dependencies = [
+ "cfg-if",
+ "miette-derive",
+ "unicode-width 0.1.14",
+]
+
+[[package]]
+name = "miette-derive"
+version = "7.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db5b29714e950dbb20d5e6f74f9dcec4edbcc1067bb7f8ed198c097b8c1a818b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4408,6 +4464,7 @@ dependencies = [
  "log",
  "num-traits",
  "rustc-hash 1.1.0",
+ "serde",
  "spirv",
  "termcolor",
  "thiserror 1.0.69",
@@ -4832,6 +4889,15 @@ name = "object"
 version = "0.36.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62948e14d923ea95ea2c7c86c71013138b66525b86bdc08d2dcc262bdb497b87"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "object"
+version = "0.37.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff76201f031d8863c38aa7f905eca4f53abbfa15f609db4277d44cd8938f33fe"
 dependencies = [
  "memchr",
 ]
@@ -5456,6 +5522,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "psm"
+version = "0.1.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fa96cb91275ed31d6da3e983447320c4eb219ac180fa1679a0889ff32861e2d"
+dependencies = [
+ "ar_archive_writer",
+ "cc",
+]
+
+[[package]]
 name = "qoi"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5941,6 +6017,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3582f63211428f83597b51b2ddb88e2a91a9d52d12831f9d08f5e624e8977422"
 
 [[package]]
+name = "ron"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b91f7eff05f748767f183df4320a63d6936e9c6107d97c9e6bdd9784f4289c94"
+dependencies = [
+ "base64 0.21.7",
+ "bitflags 2.9.1",
+ "serde",
+ "serde_derive",
+]
+
+[[package]]
 name = "runmat"
 version = "0.2.8"
 dependencies = [
@@ -5951,6 +6039,7 @@ dependencies = [
  "dirs 5.0.1",
  "env_logger 0.11.8",
  "log",
+ "miette",
  "once_cell",
  "openssl",
  "openssl-sys",
@@ -5989,12 +6078,15 @@ dependencies = [
  "bytemuck",
  "dirs 5.0.1",
  "env_logger 0.11.8",
+ "futures",
+ "futures-channel",
  "log",
  "num-complex",
  "once_cell",
  "pollster",
  "rand 0.8.5",
  "runmat-accelerate-api",
+ "runmat-async",
  "runmat-builtins",
  "runmat-hir",
  "runmat-ignition",
@@ -6007,6 +6099,7 @@ dependencies = [
  "smallvec",
  "tempfile",
  "thiserror 1.0.69",
+ "tokio",
  "tracing",
  "wgpu",
 ]
@@ -6022,6 +6115,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-async"
+version = "0.2.8"
+dependencies = [
+ "miette",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "runmat-builtins"
 version = "0.2.8"
 dependencies = [
@@ -6029,6 +6130,7 @@ dependencies = [
  "inventory",
  "once_cell",
  "runmat-accelerate-api",
+ "runmat-async",
  "runmat-gc-api",
  "runmat-macros",
  "serde",
@@ -6058,9 +6160,11 @@ name = "runmat-core"
 version = "0.2.8"
 dependencies = [
  "anyhow",
+ "futures",
  "log",
  "runmat-accelerate",
  "runmat-accelerate-api",
+ "runmat-async",
  "runmat-builtins",
  "runmat-gc",
  "runmat-hir",
@@ -6099,6 +6203,7 @@ name = "runmat-gc"
 version = "0.2.8"
 dependencies = [
  "criterion",
+ "futures",
  "log",
  "num-traits",
  "num_cpus",
@@ -6136,10 +6241,13 @@ name = "runmat-ignition"
 version = "0.2.8"
 dependencies = [
  "anyhow",
+ "futures",
  "log",
+ "miette",
  "once_cell",
  "runmat-accelerate",
  "runmat-accelerate-api",
+ "runmat-async",
  "runmat-builtins",
  "runmat-gc",
  "runmat-hir",
@@ -6220,6 +6328,7 @@ dependencies = [
  "runmat-config",
  "runmat-core",
  "runmat-hir",
+ "runmat-ignition",
  "runmat-lexer",
  "runmat-parser",
  "runmat-runtime",
@@ -6239,6 +6348,7 @@ dependencies = [
  "inventory",
  "proc-macro2",
  "quote",
+ "runmat-async",
  "runmat-builtins",
  "syn 1.0.109",
  "trybuild",
@@ -6301,12 +6411,15 @@ name = "runmat-runtime"
 version = "0.2.8"
 dependencies = [
  "accelerate-src",
+ "anyhow",
+ "async-recursion",
  "axum 0.7.9",
  "base64 0.22.1",
  "blas",
  "chrono",
  "ctor 0.2.9",
  "encoding_rs",
+ "futures",
  "getrandom 0.2.16",
  "glam",
  "glob",
@@ -6326,10 +6439,12 @@ dependencies = [
  "reqwest 0.12.23",
  "runmat-accelerate",
  "runmat-accelerate-api",
+ "runmat-async",
  "runmat-builtins",
  "runmat-filesystem",
  "runmat-gc",
  "runmat-gc-api",
+ "runmat-hir",
  "runmat-macros",
  "runmat-plot",
  "runmat-thread-local",
@@ -6338,10 +6453,12 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
  "url",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "wasm-bindgen-test",
  "web-sys",
  "wgpu",
@@ -6351,6 +6468,7 @@ dependencies = [
 name = "runmat-runtime-integration-tests"
 version = "0.2.8"
 dependencies = [
+ "futures",
  "inventory",
  "runmat-accelerate",
  "runmat-accelerate-api",
@@ -6379,6 +6497,7 @@ dependencies = [
  "lz4_flex",
  "memmap2",
  "parking_lot",
+ "runmat-async",
  "runmat-builtins",
  "runmat-filesystem",
  "runmat-gc",
@@ -6418,6 +6537,7 @@ dependencies = [
  "cranelift-module",
  "cranelift-native",
  "env_logger 0.11.8",
+ "futures",
  "libm",
  "log",
  "runmat-accelerate",
@@ -6428,6 +6548,7 @@ dependencies = [
  "runmat-parser",
  "runmat-runtime",
  "runmat-time",
+ "stacker",
  "target-lexicon",
  "thiserror 1.0.69",
  "tracing",
@@ -6442,11 +6563,13 @@ dependencies = [
  "getrandom 0.2.16",
  "js-sys",
  "log",
+ "miette",
  "runmat-accelerate",
  "runmat-accelerate-api",
  "runmat-builtins",
  "runmat-core",
  "runmat-filesystem",
+ "runmat-ignition",
  "runmat-logging",
  "runmat-plot",
  "runmat-runtime",
@@ -7210,6 +7333,19 @@ name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
+
+[[package]]
+name = "stacker"
+version = "0.1.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1f8b29fb42aafcea4edeeb6b2f2d7ecd0d969c48b4cf0d2e64aafc471dd6e59"
+dependencies = [
+ "cc",
+ "cfg-if",
+ "libc",
+ "psm",
+ "windows-sys 0.59.0",
+]
 
 [[package]]
 name = "static_assertions"
@@ -8733,6 +8869,7 @@ dependencies = [
  "parking_lot",
  "profiling",
  "raw-window-handle 0.6.2",
+ "serde",
  "smallvec",
  "static_assertions",
  "wasm-bindgen",
@@ -8761,7 +8898,9 @@ dependencies = [
  "parking_lot",
  "profiling",
  "raw-window-handle 0.6.2",
+ "ron",
  "rustc-hash 1.1.0",
+ "serde",
  "smallvec",
  "thiserror 1.0.69",
  "web-sys",
@@ -8822,6 +8961,7 @@ checksum = "b671ff9fb03f78b46ff176494ee1ebe7d603393f42664be55b64dc8d53969805"
 dependencies = [
  "bitflags 2.9.1",
  "js-sys",
+ "serde",
  "web-sys",
 ]
 

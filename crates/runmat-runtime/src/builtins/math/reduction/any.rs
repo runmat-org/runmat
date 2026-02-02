@@ -5,10 +5,18 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ReductionNaN, ResidencyPolicy, ScalarType,
     ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{
+    gpu_helpers,
+    shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
+    tensor,
+};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
+
+use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
+
+const NAME: &str = "any";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::any")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -32,6 +40,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: true,
     notes: "Providers may execute device-side OR reductions; runtimes gather to host when hooks are unavailable.",
 };
+
+fn any_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::any")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -60,25 +72,29 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::any"
 )]
-fn any_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let (spec, nan_mode) = parse_arguments(&rest)?;
+async fn any_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let (spec, nan_mode) = parse_arguments(&rest).await?;
     match value {
-        Value::GpuTensor(handle) => any_gpu(handle, spec, nan_mode),
-        other => any_host(other, spec, nan_mode),
+        Value::GpuTensor(handle) => any_gpu(handle, spec, nan_mode).await,
+        other => any_host(other, spec, nan_mode).await,
     }
 }
 
-fn any_host(value: Value, spec: ReductionSpec, nan_mode: ReductionNaN) -> Result<Value, String> {
-    let truth = TruthTensor::from_value("any", value)?;
+async fn any_host(
+    value: Value,
+    spec: ReductionSpec,
+    nan_mode: ReductionNaN,
+) -> BuiltinResult<Value> {
+    let truth = TruthTensor::from_value(value).await?;
     let reduced = apply_reduction(truth, spec, nan_mode)?;
     reduced.into_value()
 }
 
-fn any_gpu(
+async fn any_gpu(
     handle: GpuTensorHandle,
     spec: ReductionSpec,
     nan_mode: ReductionNaN,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -89,55 +105,57 @@ fn any_gpu(
     }
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
-        None => return gpu_fallback(handle, spec, nan_mode),
+        None => return gpu_fallback(handle, spec, nan_mode).await,
     };
     if matches!(nan_mode, ReductionNaN::Omit) {
         // Logical reductions return host results; gather to ensure exact omitnan semantics
-        return gpu_fallback(handle, spec, nan_mode);
+        return gpu_fallback(handle, spec, nan_mode).await;
     }
-    match try_any_gpu(provider, &handle, &spec, nan_mode)? {
+    match try_any_gpu(provider, &handle, &spec, nan_mode).await? {
         Some(host) => logical_from_host(host),
-        None => gpu_fallback(handle, spec, nan_mode),
+        None => gpu_fallback(handle, spec, nan_mode).await,
     }
 }
 
-fn gpu_fallback(
+async fn gpu_fallback(
     handle: GpuTensorHandle,
     spec: ReductionSpec,
     nan_mode: ReductionNaN,
-) -> Result<Value, String> {
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
-    any_host(Value::Tensor(tensor), spec, nan_mode)
+) -> BuiltinResult<Value> {
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+    any_host(Value::Tensor(tensor), spec, nan_mode).await
 }
 
-fn try_any_gpu(
+async fn try_any_gpu(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     handle: &GpuTensorHandle,
     spec: &ReductionSpec,
     nan_mode: ReductionNaN,
-) -> Result<Option<HostTensorOwned>, String> {
+) -> BuiltinResult<Option<HostTensorOwned>> {
     let omit_nan = matches!(nan_mode, ReductionNaN::Omit);
 
     // For omitnan, prefer explicit truth-mask path to ensure semantics match host exactly
     if !omit_nan {
         if let ReductionSpec::All = spec {
-            if let Ok(tmp) = provider.reduce_any(handle, omit_nan) {
-                let host = provider.download(&tmp).map_err(|e| e.to_string())?;
+            if let Ok(tmp) = provider.reduce_any(handle, omit_nan).await {
+                let host = download_handle_async(provider, &tmp)
+                    .await
+                    .map_err(|e| any_error(format!("any: {e}")))?;
                 let _ = provider.free(&tmp);
                 return Ok(Some(host));
             }
         }
     }
 
-    reduce_dims_gpu(provider, handle, spec, omit_nan)
+    reduce_dims_gpu(provider, handle, spec, omit_nan).await
 }
 
-fn reduce_dims_gpu(
+async fn reduce_dims_gpu(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     handle: &GpuTensorHandle,
     spec: &ReductionSpec,
     omit_nan: bool,
-) -> Result<Option<HostTensorOwned>, String> {
+) -> BuiltinResult<Option<HostTensorOwned>> {
     let mut dims = dims_from_spec(spec, &handle.shape);
     if dims.is_empty() {
         return Ok(None);
@@ -171,38 +189,48 @@ fn reduce_dims_gpu(
         }
         let next = if omit_nan {
             // Build truth mask: (!isnan(current)) && (current != 0)
-            let zeros = provider.zeros_like(&current).map_err(|e| e.to_string())?;
+            let zeros = provider
+                .zeros_like(&current)
+                .map_err(|e| any_error(format!("any: {e}")))?;
             let ne_zero = provider
                 .elem_ne(&current, &zeros)
-                .map_err(|e| e.to_string())?;
+                .await
+                .map_err(|e| any_error(format!("any: {e}")))?;
             let _ = provider.free(&zeros);
             let is_nan = provider
                 .logical_isnan(&current)
-                .map_err(|e| e.to_string())?;
-            let not_nan = provider.logical_not(&is_nan).map_err(|e| e.to_string())?;
+                .map_err(|e| any_error(format!("any: {e}")))?;
+            let not_nan = provider
+                .logical_not(&is_nan)
+                .map_err(|e| any_error(format!("any: {e}")))?;
             let _ = provider.free(&is_nan);
             let truth = provider
                 .logical_and(&ne_zero, &not_nan)
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| any_error(format!("any: {e}")))?;
             let _ = provider.free(&ne_zero);
             let _ = provider.free(&not_nan);
 
             // Sum along axis to count any true; then threshold > 0
             let summed = provider
                 .reduce_sum_dim(&truth, axis)
-                .map_err(|e| e.to_string())?;
+                .await
+                .map_err(|e| any_error(format!("any: {e}")))?;
             let _ = provider.free(&truth);
-            let zeros_out = provider.zeros_like(&summed).map_err(|e| e.to_string())?;
+            let zeros_out = provider
+                .zeros_like(&summed)
+                .map_err(|e| any_error(format!("any: {e}")))?;
             let gt_zero = provider
                 .elem_gt(&summed, &zeros_out)
-                .map_err(|e| e.to_string())?;
+                .await
+                .map_err(|e| any_error(format!("any: {e}")))?;
             let _ = provider.free(&summed);
             let _ = provider.free(&zeros_out);
             Ok(gt_zero)
         } else {
             provider
                 .reduce_any_dim(&current, axis, omit_nan)
-                .map_err(|e| e.to_string())
+                .await
+                .map_err(|e| any_error(format!("any: {e}")))
         };
         match next {
             Ok(new_handle) => {
@@ -228,7 +256,9 @@ fn reduce_dims_gpu(
         return Ok(None);
     }
 
-    let host = provider.download(&current).map_err(|e| e.to_string())?;
+    let host = download_handle_async(provider, &current)
+        .await
+        .map_err(|e| any_error(format!("any: {e}")))?;
     let _ = provider.free(&current);
     for owned in intermediates {
         let _ = provider.free(&owned);
@@ -236,11 +266,13 @@ fn reduce_dims_gpu(
     Ok(Some(host))
 }
 
-fn logical_from_host(host: HostTensorOwned) -> Result<Value, String> {
+fn logical_from_host(host: HostTensorOwned) -> BuiltinResult<Value> {
     if host.data.len() == 1 {
         return Ok(Value::Bool(host.data[0] != 0.0));
     }
-    let shape = if host.shape.is_empty() {
+    let shape = if tensor::element_count(&host.shape) == host.data.len() {
+        normalize_scalar_shape(&host.shape)
+    } else if is_scalar_shape(&host.shape) {
         if host.data.is_empty() {
             Vec::new()
         } else {
@@ -256,7 +288,7 @@ fn logical_from_host(host: HostTensorOwned) -> Result<Value, String> {
         .collect();
     LogicalArray::new(logical_data, shape)
         .map(Value::LogicalArray)
-        .map_err(|e| format!("any: {e}"))
+        .map_err(|e| any_error(format!("any: {e}")))
 }
 
 fn dims_from_spec(spec: &ReductionSpec, shape: &[usize]) -> Vec<usize> {
@@ -270,7 +302,7 @@ fn dims_from_spec(spec: &ReductionSpec, shape: &[usize]) -> Vec<usize> {
             sorted
         }
         ReductionSpec::All => {
-            if shape.is_empty() {
+            if is_scalar_shape(shape) {
                 vec![1]
             } else {
                 (1..=shape.len()).collect()
@@ -280,7 +312,7 @@ fn dims_from_spec(spec: &ReductionSpec, shape: &[usize]) -> Vec<usize> {
 }
 
 fn default_dimension_from_shape(shape: &[usize]) -> usize {
-    if shape.is_empty() {
+    if is_scalar_shape(shape) {
         return 1;
     }
     shape
@@ -320,15 +352,17 @@ impl TruthValue {
 }
 
 impl TruthTensor {
-    fn from_value(name: &str, value: Value) -> Result<Self, String> {
+    async fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::Tensor(t) => Ok(Self::from_tensor(t)),
             Value::LogicalArray(logical) => Ok(Self::from_logical(logical)),
             Value::Num(n) => Ok(Self::from_tensor(
-                Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("{name}: {e}"))?,
+                Tensor::new(vec![n], vec![1, 1])
+                    .map_err(|e| any_error(format!("{NAME}: {e}")))?,
             )),
             Value::Int(i) => Ok(Self::from_tensor(
-                Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| format!("{name}: {e}"))?,
+                Tensor::new(vec![i.to_f64()], vec![1, 1])
+                    .map_err(|e| any_error(format!("{NAME}: {e}")))?,
             )),
             Value::Bool(b) => Ok(Self {
                 shape: vec![1, 1],
@@ -351,18 +385,20 @@ impl TruthTensor {
             Value::ComplexTensor(ct) => Ok(Self::from_complex_tensor(ct)),
             Value::CharArray(ca) => Ok(Self::from_char_array(ca)),
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                 Ok(Self::from_tensor(tensor))
             }
-            other => Err(format!(
-                "{name}: unsupported input type {:?}; expected numeric, logical, complex, or char data",
+            other => Err(any_error(format!(
+                "{NAME}: unsupported input type {:?}; expected numeric, logical, complex, or char data",
                 other
-            )),
+            ))),
         }
     }
 
     fn from_tensor(tensor: Tensor) -> Self {
-        let shape = if tensor.shape.is_empty() {
+        let shape = if tensor::element_count(&tensor.shape) == tensor.data.len() {
+            normalize_scalar_shape(&tensor.shape)
+        } else if is_scalar_shape(&tensor.shape) {
             if tensor.data.is_empty() {
                 Vec::new()
             } else {
@@ -431,11 +467,11 @@ impl TruthTensor {
         }
     }
 
-    fn reduce_dim(&self, dim: usize, nan_mode: ReductionNaN) -> Result<Self, String> {
+    fn reduce_dim(&self, dim: usize, nan_mode: ReductionNaN) -> BuiltinResult<Self> {
         if dim == 0 {
-            return Err("any: dimension must be >= 1".to_string());
+            return Err(any_error("any: dimension must be >= 1"));
         }
-        if self.shape.is_empty() {
+        if is_scalar_shape(&self.shape) {
             let truth = self.data.first().copied().unwrap_or(TruthValue {
                 truthy: false,
                 has_nan: false,
@@ -445,7 +481,7 @@ impl TruthTensor {
                 ReductionNaN::Omit => truth.truthy && !truth.has_nan,
             };
             return Ok(TruthTensor {
-                shape: vec![1, 1],
+                shape: canonical_scalar_shape(),
                 data: vec![TruthValue::from_bool(truthy)],
             });
         }
@@ -499,11 +535,13 @@ impl TruthTensor {
         })
     }
 
-    fn into_value(self) -> Result<Value, String> {
+    fn into_value(self) -> BuiltinResult<Value> {
         if self.data.len() == 1 {
             return Ok(Value::Bool(self.data[0].truthy));
         }
-        let shape = if self.shape.is_empty() {
+        let shape = if tensor::element_count(&self.shape) == self.data.len() {
+            normalize_scalar_shape(&self.shape)
+        } else if is_scalar_shape(&self.shape) {
             if self.data.is_empty() {
                 Vec::new()
             } else {
@@ -519,7 +557,7 @@ impl TruthTensor {
             .collect();
         LogicalArray::new(logical_data, shape)
             .map(Value::LogicalArray)
-            .map_err(|e| format!("any: {e}"))
+            .map_err(|e| any_error(format!("any: {e}")))
     }
 }
 
@@ -527,7 +565,7 @@ fn apply_reduction(
     tensor: TruthTensor,
     spec: ReductionSpec,
     nan_mode: ReductionNaN,
-) -> Result<TruthTensor, String> {
+) -> BuiltinResult<TruthTensor> {
     match spec {
         ReductionSpec::Default => {
             tensor.reduce_dim(default_dimension_from_shape(&tensor.shape), nan_mode)
@@ -544,7 +582,7 @@ fn apply_reduction(
         }
         ReductionSpec::All => {
             let mut current = tensor;
-            if current.shape.is_empty() {
+            if is_scalar_shape(&current.shape) {
                 current = current.reduce_dim(1, nan_mode)?;
             } else {
                 for dim in 1..=current.shape.len() {
@@ -556,46 +594,52 @@ fn apply_reduction(
     }
 }
 
-fn parse_arguments(args: &[Value]) -> Result<(ReductionSpec, ReductionNaN), String> {
+async fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, ReductionNaN)> {
     let mut spec = ReductionSpec::Default;
     let mut nan_mode = ReductionNaN::Include;
 
     for arg in args {
         if is_all_token(arg) {
             if !matches!(spec, ReductionSpec::Default) {
-                return Err("any: 'all' cannot be combined with dimension arguments".to_string());
+                return Err(any_error(
+                    "any: 'all' cannot be combined with dimension arguments",
+                ));
             }
             spec = ReductionSpec::All;
             continue;
         }
         if let Some(mode) = parse_nan_mode(arg)? {
             if !matches!(nan_mode, ReductionNaN::Include) {
-                return Err("any: multiple NaN handling options specified".to_string());
+                return Err(any_error("any: multiple NaN handling options specified"));
             }
             nan_mode = mode;
             continue;
         }
-        let dims = parse_dimensions(arg)?;
+        let dims = parse_dimensions(arg).await?;
         if dims.is_empty() {
-            return Err("any: dimension vector must contain at least one entry".to_string());
+            continue;
         }
         if dims.len() == 1 {
             if matches!(spec, ReductionSpec::Default) {
                 spec = ReductionSpec::Dim(dims[0]);
             } else {
-                return Err("any: multiple dimension specifications are not supported".to_string());
+                return Err(any_error(
+                    "any: multiple dimension specifications are not supported",
+                ));
             }
         } else if matches!(spec, ReductionSpec::Default) {
             spec = ReductionSpec::VecDim(dims);
         } else {
-            return Err("any: multiple dimension specifications are not supported".to_string());
+            return Err(any_error(
+                "any: multiple dimension specifications are not supported",
+            ));
         }
     }
 
     Ok((spec, nan_mode))
 }
 
-fn parse_nan_mode(value: &Value) -> Result<Option<ReductionNaN>, String> {
+fn parse_nan_mode(value: &Value) -> BuiltinResult<Option<ReductionNaN>> {
     let Some(text) = extract_text_token(value) else {
         return Ok(None);
     };
@@ -603,7 +647,7 @@ fn parse_nan_mode(value: &Value) -> Result<Option<ReductionNaN>, String> {
     match lowered.as_str() {
         "omitnan" => Ok(Some(ReductionNaN::Omit)),
         "includenan" => Ok(Some(ReductionNaN::Include)),
-        _ => Err(format!("any: unknown option '{}'", text.trim())),
+        _ => Err(any_error(format!("any: unknown option '{}'", text.trim()))),
     }
 }
 
@@ -613,32 +657,46 @@ fn is_all_token(value: &Value) -> bool {
         .unwrap_or(false)
 }
 
-fn parse_dimensions(value: &Value) -> Result<Vec<usize>, String> {
-    let tensor = tensor::value_to_tensor(value)?;
-    if tensor.data.is_empty() {
+async fn parse_dimensions(value: &Value) -> BuiltinResult<Vec<usize>> {
+    let dims = tensor::dims_from_value_async(value)
+        .await
+        .map_err(map_dims_error)?;
+    let dims = match dims {
+        Some(dims) => dims,
+        None => match tensor::dimension_from_value_async(value, "any", false)
+            .await
+            .map_err(map_dims_error)?
+        {
+            Some(dim) => vec![dim],
+            None => return Ok(Vec::new()),
+        },
+    };
+    if dims.is_empty() {
         return Ok(Vec::new());
     }
-    let mut dims = Vec::new();
-    for raw in tensor.data {
-        if !raw.is_finite() {
-            return Err("any: dimension values must be finite".to_string());
+    let mut out = Vec::new();
+    for dim in dims {
+        if dim < 1 {
+            return Err(any_error("any: dimension values must be >= 1"));
         }
-        let rounded = raw.round();
-        if (rounded - raw).abs() > f64::EPSILON {
-            return Err("any: dimension values must be integers".to_string());
-        }
-        if rounded < 1.0 {
-            return Err("any: dimension values must be >= 1".to_string());
-        }
-        if rounded > (usize::MAX as f64) {
-            return Err("any: dimension value is too large".to_string());
-        }
-        let dim = rounded as usize;
-        if !dims.contains(&dim) {
-            dims.push(dim);
+        if !out.contains(&dim) {
+            out.push(dim);
         }
     }
-    Ok(dims)
+    Ok(out)
+}
+
+fn map_dims_error(message: String) -> RuntimeError {
+    if message.contains("finite") {
+        return any_error("any: dimension values must be finite");
+    }
+    if message.contains("integer") {
+        return any_error("any: dimension values must be integers");
+    }
+    if message.contains("non-negative") {
+        return any_error("any: dimension values must be >= 1");
+    }
+    any_error(message)
 }
 
 fn extract_text_token(value: &Value) -> Option<String> {
@@ -660,8 +718,13 @@ fn product(dims: &[usize]) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue};
+
+    fn any_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::any_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -853,7 +916,10 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap();
         let args = vec![Value::from("all"), Value::Int(IntValue::I32(1))];
         let err = any_builtin(Value::Tensor(tensor), args).unwrap_err();
-        assert!(err.contains("dimension"), "unexpected error message: {err}");
+        assert!(
+            err.message().contains("dimension"),
+            "unexpected error message: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -919,11 +985,11 @@ pub(crate) mod tests {
             return;
         }
         let tensor = Tensor::new(vec![0.0, 0.0, 2.0, 0.0, 0.0, 0.0], vec![2, 3]).unwrap();
-        let cpu = any_host(
+        let cpu = block_on(any_host(
             Value::Tensor(tensor.clone()),
             ReductionSpec::Default,
             ReductionNaN::Include,
-        )
+        ))
         .unwrap();
         let view = HostTensorView {
             data: &tensor.data,
@@ -973,11 +1039,11 @@ pub(crate) mod tests {
             return;
         }
         let tensor = Tensor::new(vec![f64::NAN, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
-        let cpu = any_host(
+        let cpu = block_on(any_host(
             Value::Tensor(tensor.clone()),
             ReductionSpec::Default,
             ReductionNaN::Omit,
-        )
+        ))
         .unwrap();
         let view = HostTensorView {
             data: &tensor.data,

@@ -43,14 +43,14 @@
     "Supports real, complex, logical, and character inputs; logical and character data are promoted to double precision before division.",
     "Implicit expansion follows MATLAB rules: singleton dimensions expand automatically, while mismatched non-singleton extents raise MATLAB-compatible size errors.",
     "Complex operands use the analytic continuation `B ./ A`, propagating `NaN` and `Inf` exactly as MATLAB does.",
-    "Empty shapes propagate cleanly—if the broadcasted output has a zero dimension, the result is empty with the expected shape.",
-    "Integer inputs promote to double precision, mirroring MATLAB’s numeric tower.",
+    "Empty shapes propagate cleanly\u2014if the broadcasted output has a zero dimension, the result is empty with the expected shape.",
+    "Integer inputs promote to double precision, mirroring MATLAB\u2019s numeric tower.",
     "The optional `'like'` prototype makes the result adopt the residency (host or GPU) and numeric flavour of the prototype. Complex prototypes are honoured on the host today; real gpuArray prototypes keep the result on the device."
   ],
   "examples": [
     {
       "description": "Left-dividing a vector by a scalar",
-      "input": "A = 2;\nB = [4 6 8];\nQ = ldivide(A, B);",
+      "input": "A = 2;\nB = [4 6 8];\nQ = ldivide(A, B)",
       "output": "Q = [2 3 4]"
     },
     {
@@ -60,12 +60,12 @@
     },
     {
       "description": "Element-wise left division of complex values",
-      "input": "A = [1+2i, 3-4i];\nB = [2-1i, -1+1i];\nZ = ldivide(A, B);",
+      "input": "A = [1+2i, 3-4i];\nB = [2-1i, -1+1i];\nZ = ldivide(A, B)",
       "output": "Z =\n   0.0000 - 1.0000i   -0.2800 - 0.0400i"
     },
     {
       "description": "Dividing character codes by a scalar",
-      "input": "A = 'ABC';\nB = 2;\ncodes = ldivide(A, B);",
+      "input": "A = 'ABC';\nB = 2;\ncodes = ldivide(A, B)",
       "output": "codes = [0.0308 0.0303 0.0301]"
     },
     {
@@ -75,7 +75,7 @@
     },
     {
       "description": "Keeping results on the GPU with `'like'`",
-      "input": "proto = gpuArray.zeros(1, 1);\nA = gpuArray([2 4 8 16]);\nB = gpuArray([4 8 16 32]);\ndeviceResult = ldivide(A, B, 'like', proto);\nhostCheck = gather(deviceResult);",
+      "input": "proto = gpuArray.zeros(1, 1);\nA = gpuArray([2 4 8 16]);\nB = gpuArray([4 8 16 32]);\ndeviceResult = ldivide(A, B, 'like', proto);\nhostCheck = gather(deviceResult)",
       "output": "deviceResult =\n  1x4 gpuArray\n    2  2  2  2\nhostCheck = [2 2 2 2]"
     }
   ],
@@ -106,7 +106,7 @@
     },
     {
       "question": "How are empty arrays handled?",
-      "answer": "Empty operands propagate cleanly—the output shape is the broadcasted shape, and the data vector is empty."
+      "answer": "Empty operands propagate cleanly\u2014the output shape is the broadcasted shape, and the data vector is empty."
     },
     {
       "question": "Are integers and logicals supported?",
@@ -143,8 +143,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/elementwise/ldivide.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/ldivide.rs"
   },
-  "gpu_residency": "You usually do not need to call `gpuArray` manually. RunMat’s auto-offload planner keeps tensors on the GPU whenever provider kernels cover the operation. Explicit `gpuArray` / `gather` calls remain available for MATLAB compatibility; when a provider fallback happens, the runtime gathers to host, computes the MATLAB-accurate answer, and reapplies `'like'` residency requests automatically.",
+  "gpu_residency": "You usually do not need to call `gpuArray` manually. RunMat\u2019s auto-offload planner keeps tensors on the GPU whenever provider kernels cover the operation. Explicit `gpuArray` / `gather` calls remain available for MATLAB compatibility; when a provider fallback happens, the runtime gathers to host, computes the MATLAB-accurate answer, and reapplies `'like'` residency requests automatically.",
   "gpu_behavior": [
-    "When a gpuArray provider is active:\n\n1. If both operands are gpuArrays with identical shapes, RunMat calls the provider’s `elem_div` hook with `(B, A)` so the division runs entirely on the GPU. 2. If the divisor `A` is scalar (host or device) and the numerator `B` is a gpuArray, the runtime uses `scalar_div` to evaluate `B ./ a` on device memory. 3. If the numerator `B` is scalar and the divisor `A` is a gpuArray, `scalar_rdiv` performs `b ./ A` without leaving the GPU. 4. When shapes require implicit expansion—or the provider lacks the necessary kernels—RunMat gathers to the host, computes the MATLAB-accurate result, then reapplies `'like'` residency rules (including re-uploading to a gpuArray when requested). 5. The fusion planner treats `ldivide` as a fusible elementwise node, so adjacent elementwise producers and consumers can execute inside a single GPU pipeline or WGSL kernel, minimising redundant host↔device transfers."
+    "When a gpuArray provider is active:\n\n1. If both operands are gpuArrays with identical shapes, RunMat calls the provider\u2019s `elem_div` hook with `(B, A)` so the division runs entirely on the GPU. 2. If the divisor `A` is scalar (host or device) and the numerator `B` is a gpuArray, the runtime uses `scalar_div` to evaluate `B ./ a` on device memory. 3. If the numerator `B` is scalar and the divisor `A` is a gpuArray, `scalar_rdiv` performs `b ./ A` without leaving the GPU. 4. When shapes require implicit expansion\u2014or the provider lacks the necessary kernels\u2014RunMat gathers to the host, computes the MATLAB-accurate result, then reapplies `'like'` residency rules (including re-uploading to a gpuArray when requested). 5. The fusion planner treats `ldivide` as a fusible elementwise node, so adjacent elementwise producers and consumers can execute inside a single GPU pipeline or WGSL kernel, minimising redundant host\u2194device transfers."
   ]
 }

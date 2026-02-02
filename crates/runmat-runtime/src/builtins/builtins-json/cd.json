@@ -42,27 +42,27 @@
   "examples": [
     {
       "description": "Display The Current Working Folder In RunMat",
-      "input": "current = cd;",
+      "input": "current = cd",
       "output": "% current is the absolute path to the folder where RunMat is executing"
     },
     {
       "description": "Change Directory To A Project Subfolder",
-      "input": "projectRoot = pwd;\nmkdir(\"data/logs\");\nold = cd(\"data/logs\");\n% ... work inside the logs folder ...\ncd(old);",
+      "input": "projectRoot = pwd;\nmkdir(\"data/logs\");\nold = cd(\"data/logs\");\n% ... work inside the logs folder ...\ncd(old)",
       "output": "% old contains the previous folder so you can restore it later, and the final cd(old)\n% call brings you back to projectRoot"
     },
     {
       "description": "Navigate Up One Level From The Current Folder",
-      "input": "old = cd(\"..\");",
+      "input": "old = cd(\"..\")",
       "output": "% RunMat moves to the parent folder and old captures the prior location"
     },
     {
       "description": "Switch To Your Home Folder With cd ~",
-      "input": "old = cd(\"~\");",
+      "input": "old = cd(\"~\")",
       "output": "% Changes to the user home directory; old stores the previous folder"
     },
     {
       "description": "Capture The Previous Folder And Restore Later",
-      "input": "old = cd(\"results\");\n% ... run code that writes outputs into results ...\ncd(old);",
+      "input": "old = cd(\"results\");\n% ... run code that writes outputs into results ...\ncd(old)",
       "output": "% The working folder is restored to its original location at the end"
     },
     {

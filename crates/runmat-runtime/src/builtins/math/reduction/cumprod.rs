@@ -4,6 +4,10 @@ use runmat_accelerate_api::{GpuTensorHandle, ProviderNanMode, ProviderScanDirect
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+const NAME: &str = "cumprod";
+
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -25,6 +29,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Providers may expose device prefix-product kernels; the runtime gathers to host when hooks are absent or options are unsupported.",
 };
+
+fn cumprod_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::cumprod")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -57,13 +65,13 @@ enum CumprodNanMode {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::cumprod"
 )]
-fn cumprod_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+async fn cumprod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let (dim, direction, nan_mode) = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => cumprod_gpu(handle, dim, direction, nan_mode),
+        Value::GpuTensor(handle) => cumprod_gpu(handle, dim, direction, nan_mode).await,
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("cumprod: {e}"))?;
+                .map_err(|e| cumprod_error(format!("cumprod: {e}")))?;
             let target_dim = dim.unwrap_or(1);
             let result = cumprod_complex_tensor(&tensor, target_dim, direction, nan_mode)?;
             Ok(complex_tensor_into_value(result))
@@ -79,9 +87,9 @@ fn cumprod_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
 
 fn parse_arguments(
     args: &[Value],
-) -> Result<(Option<usize>, CumprodDirection, CumprodNanMode), String> {
+) -> BuiltinResult<(Option<usize>, CumprodDirection, CumprodNanMode)> {
     if args.len() > 3 {
-        return Err("cumprod: unsupported arguments".to_string());
+        return Err(cumprod_error("cumprod: unsupported arguments"));
     }
 
     let mut dim: Option<usize> = None;
@@ -94,9 +102,11 @@ fn parse_arguments(
         match value {
             Value::Int(_) | Value::Num(_) => {
                 if dim.is_some() {
-                    return Err("cumprod: dimension specified more than once".to_string());
+                    return Err(cumprod_error("cumprod: dimension specified more than once"));
                 }
-                dim = Some(tensor::parse_dimension(value, "cumprod")?);
+                dim = Some(
+                    tensor::parse_dimension(value, "cumprod").map_err(|err| cumprod_error(err))?,
+                );
             }
             Value::Tensor(t) if t.data.is_empty() => {
                 // MATLAB allows [] as a placeholder for the default dimension; ignore it.
@@ -110,51 +120,55 @@ fn parse_arguments(
                     match keyword.as_str() {
                         "forward" => {
                             if direction_set {
-                                return Err(
-                                    "cumprod: direction specified more than once".to_string()
-                                );
+                                return Err(cumprod_error(
+                                    "cumprod: direction specified more than once",
+                                ));
                             }
                             direction = CumprodDirection::Forward;
                             direction_set = true;
                         }
                         "reverse" => {
                             if direction_set {
-                                return Err(
-                                    "cumprod: direction specified more than once".to_string()
-                                );
+                                return Err(cumprod_error(
+                                    "cumprod: direction specified more than once",
+                                ));
                             }
                             direction = CumprodDirection::Reverse;
                             direction_set = true;
                         }
                         "omitnan" | "omitmissing" => {
                             if nan_set {
-                                return Err(
-                                    "cumprod: missing-value handling specified more than once"
-                                        .to_string(),
-                                );
+                                return Err(cumprod_error(
+                                    "cumprod: missing-value handling specified more than once",
+                                ));
                             }
                             nan_mode = CumprodNanMode::Omit;
                             nan_set = true;
                         }
                         "includenan" | "includemissing" => {
                             if nan_set {
-                                return Err(
-                                    "cumprod: missing-value handling specified more than once"
-                                        .to_string(),
-                                );
+                                return Err(cumprod_error(
+                                    "cumprod: missing-value handling specified more than once",
+                                ));
                             }
                             nan_mode = CumprodNanMode::Include;
                             nan_set = true;
                         }
                         "" => {
-                            return Err("cumprod: empty string option is not supported".to_string());
+                            return Err(cumprod_error(
+                                "cumprod: empty string option is not supported",
+                            ));
                         }
                         other => {
-                            return Err(format!("cumprod: unrecognised option '{other}'"));
+                            return Err(cumprod_error(format!(
+                                "cumprod: unrecognised option '{other}'"
+                            )));
                         }
                     }
                 } else {
-                    return Err(format!("cumprod: unsupported argument type {value:?}"));
+                    return Err(cumprod_error(format!(
+                        "cumprod: unsupported argument type {value:?}"
+                    )));
                 }
             }
         }
@@ -168,19 +182,20 @@ fn cumprod_host(
     dim: Option<usize>,
     direction: CumprodDirection,
     nan_mode: CumprodNanMode,
-) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("cumprod", value)?;
+) -> BuiltinResult<Value> {
+    let tensor =
+        tensor::value_into_tensor_for("cumprod", value).map_err(|err| cumprod_error(err))?;
     let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
     let result = cumprod_tensor(&tensor, target_dim, direction, nan_mode)?;
     Ok(tensor::tensor_into_value(result))
 }
 
-fn cumprod_gpu(
+async fn cumprod_gpu(
     handle: GpuTensorHandle,
     dim: Option<usize>,
     direction: CumprodDirection,
     nan_mode: CumprodNanMode,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -190,7 +205,7 @@ fn cumprod_gpu(
         }
     }
     if matches!(direction, CumprodDirection::Reverse) && matches!(nan_mode, CumprodNanMode::Omit) {
-        let tensor = gpu_helpers::gather_tensor(&handle)?;
+        let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&tensor.shape));
         let result = cumprod_tensor(&tensor, fallback_dim, direction, nan_mode)?;
         return Ok(tensor::tensor_into_value(result));
@@ -198,7 +213,7 @@ fn cumprod_gpu(
 
     if let Some(target) = dim {
         if target == 0 {
-            return Err("cumprod: dimension must be >= 1".to_string());
+            return Err(cumprod_error("cumprod: dimension must be >= 1"));
         }
         if target > handle.shape.len() {
             return Ok(Value::GpuTensor(handle));
@@ -207,7 +222,7 @@ fn cumprod_gpu(
 
     let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&handle.shape));
     if fallback_dim == 0 {
-        return Err("cumprod: dimension must be >= 1".to_string());
+        return Err(cumprod_error("cumprod: dimension must be >= 1"));
     }
 
     if let Some(provider) = runmat_accelerate_api::provider() {
@@ -232,7 +247,7 @@ fn cumprod_gpu(
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let result = cumprod_tensor(&tensor, fallback_dim, direction, nan_mode)?;
     Ok(tensor::tensor_into_value(result))
 }
@@ -242,9 +257,9 @@ fn cumprod_tensor(
     dim: usize,
     direction: CumprodDirection,
     nan_mode: CumprodNanMode,
-) -> Result<Tensor, String> {
+) -> BuiltinResult<Tensor> {
     if dim == 0 {
-        return Err("cumprod: dimension must be >= 1".to_string());
+        return Err(cumprod_error("cumprod: dimension must be >= 1"));
     }
     if tensor.data.is_empty() || dim > tensor.shape.len() {
         return Ok(tensor.clone());
@@ -327,7 +342,7 @@ fn cumprod_tensor(
         }
     }
 
-    Tensor::new(output, tensor.shape.clone()).map_err(|e| format!("cumprod: {e}"))
+    Tensor::new(output, tensor.shape.clone()).map_err(|e| cumprod_error(format!("cumprod: {e}")))
 }
 
 fn cumprod_complex_tensor(
@@ -335,9 +350,9 @@ fn cumprod_complex_tensor(
     dim: usize,
     direction: CumprodDirection,
     nan_mode: CumprodNanMode,
-) -> Result<ComplexTensor, String> {
+) -> BuiltinResult<ComplexTensor> {
     if dim == 0 {
-        return Err("cumprod: dimension must be >= 1".to_string());
+        return Err(cumprod_error("cumprod: dimension must be >= 1"));
     }
     if tensor.data.is_empty() || dim > tensor.shape.len() {
         return Ok(tensor.clone());
@@ -422,7 +437,8 @@ fn cumprod_complex_tensor(
         }
     }
 
-    ComplexTensor::new(output, tensor.shape.clone()).map_err(|e| format!("cumprod: {e}"))
+    ComplexTensor::new(output, tensor.shape.clone())
+        .map_err(|e| cumprod_error(format!("cumprod: {e}")))
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
@@ -463,12 +479,17 @@ fn dim_product(dims: &[usize]) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor as BuiltinsTensor};
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
+
+    fn cumprod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::cumprod_builtin(value, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -667,11 +688,15 @@ pub(crate) mod tests {
     fn cumprod_dimension_zero_errors() {
         let tensor = BuiltinsTensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let result = cumprod_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(0))]);
-        assert!(
-            matches!(result, Err(ref msg) if msg.contains("dimension must be >= 1")),
-            "unexpected result: {:?}",
-            result
-        );
+        match result {
+            Err(err) => {
+                assert!(
+                    err.message().contains("dimension must be >= 1"),
+                    "unexpected result: {err}"
+                );
+            }
+            Ok(_) => panic!("expected error"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -696,12 +721,12 @@ pub(crate) mod tests {
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload");
-        let gpu_value = cumprod_gpu(
+        let gpu_value = block_on(cumprod_gpu(
             handle,
             Some(1),
             CumprodDirection::Forward,
             CumprodNanMode::Include,
-        )
+        ))
         .expect("cumprod gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
 
@@ -736,12 +761,12 @@ pub(crate) mod tests {
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload");
-        let gpu_value = cumprod_gpu(
+        let gpu_value = block_on(cumprod_gpu(
             handle,
             Some(1),
             CumprodDirection::Reverse,
             CumprodNanMode::Omit,
-        )
+        ))
         .expect("cumprod gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
 

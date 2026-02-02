@@ -1,7 +1,9 @@
+mod test_helpers;
+
 use runmat_builtins::Value;
-use runmat_hir::lower;
-use runmat_ignition::execute;
 use runmat_parser::parse;
+use test_helpers::execute;
+use test_helpers::lower;
 
 #[test]
 fn create_and_index_cell_2d() {

@@ -1,4 +1,5 @@
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use crate::builtins::common::tensor;
+use runmat_builtins::{ComplexTensor, Value};
 
 /// Extract a lowercased keyword from runtime values such as strings or
 /// single-row char arrays.
@@ -17,53 +18,26 @@ pub(crate) fn keyword_of(value: &Value) -> Option<String> {
 /// Attempt to parse a dimension argument. Returns `Ok(Some(Vec))` when the
 /// value encodes dimensions, `Ok(None)` when the value is not a dimension
 /// argument, and `Err` when the value is dimension-like but invalid.
-pub(crate) fn extract_dims(value: &Value, label: &str) -> Result<Option<Vec<usize>>, String> {
-    match value {
-        Value::Int(i) => {
-            let dim = i.to_i64();
-            if dim < 0 {
-                return Err(format!("{label}: matrix dimensions must be non-negative"));
-            }
-            Ok(Some(vec![dim as usize]))
-        }
-        Value::Num(n) => parse_numeric_dimension(label, *n).map(|d| Some(vec![d])),
-        Value::Tensor(t) => dims_from_tensor(label, t),
-        Value::LogicalArray(_) => Ok(None),
-        _ => Ok(None),
-    }
-}
-
-/// Parse a numeric dimension, ensuring it aligns with MATLAB semantics.
-pub(crate) fn parse_numeric_dimension(label: &str, n: f64) -> Result<usize, String> {
-    if !n.is_finite() {
-        return Err(format!("{label}: dimensions must be finite"));
-    }
-    if n < 0.0 {
-        return Err(format!("{label}: matrix dimensions must be non-negative"));
-    }
-    let rounded = n.round();
-    if (rounded - n).abs() > f64::EPSILON {
-        return Err(format!("{label}: dimensions must be integers"));
-    }
-    Ok(rounded as usize)
-}
-
-/// Parse dimensions from a tensor representing a size vector.
-pub(crate) fn dims_from_tensor(label: &str, tensor: &Tensor) -> Result<Option<Vec<usize>>, String> {
-    let is_row = tensor.rows() == 1;
-    let is_column = tensor.cols() == 1;
-    let is_scalar = tensor.data.len() == 1;
-    if !(is_row || is_column || is_scalar || tensor.shape.len() == 1) {
+pub(crate) async fn extract_dims(value: &Value, label: &str) -> Result<Option<Vec<usize>>, String> {
+    if matches!(value, Value::LogicalArray(_)) {
         return Ok(None);
     }
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for &v in &tensor.data {
-        match parse_numeric_dimension(label, v) {
-            Ok(dim) => dims.push(dim),
-            Err(_) => return Ok(None),
+    let gpu_scalar = match value {
+        Value::GpuTensor(handle) => tensor::element_count(&handle.shape) == 1,
+        _ => false,
+    };
+    match tensor::dims_from_value_async(value).await {
+        Ok(dims) => Ok(dims),
+        Err(err) => {
+            if matches!(value, Value::Tensor(_))
+                || (matches!(value, Value::GpuTensor(_)) && !gpu_scalar)
+            {
+                Ok(None)
+            } else {
+                Err(format!("{label}: {err}"))
+            }
         }
     }
-    Ok(Some(dims))
 }
 
 /// Determine the output shape encoded by a runtime value.

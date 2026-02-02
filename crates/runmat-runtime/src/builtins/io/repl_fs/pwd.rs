@@ -1,5 +1,7 @@
 //! MATLAB-compatible `pwd` builtin for RunMat.
 
+use runmat_filesystem as vfs;
+#[cfg(test)]
 use std::env;
 use std::path::Path;
 
@@ -10,7 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::console::{record_console_output, ConsoleStream};
+use crate::{build_runtime_error, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::pwd")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -39,6 +41,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "I/O builtins are not eligible for fusion; metadata registered for introspection completeness.",
 };
 
+const BUILTIN_NAME: &str = "pwd";
+
+fn pwd_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
 #[runtime_builtin(
     name = "pwd",
     category = "io/repl_fs",
@@ -48,13 +58,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::pwd"
 )]
-fn pwd_builtin(args: Vec<Value>) -> Result<Value, String> {
+async fn pwd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !args.is_empty() {
-        return Err("pwd: too many input arguments".to_string());
+        return Err(pwd_error("pwd: too many input arguments"));
     }
-    let current = env::current_dir()
-        .map_err(|err| format!("pwd: unable to determine current directory ({err})"))?;
-    emit_path_stdout(&current);
+    let current = vfs::current_dir().map_err(|err| {
+        pwd_error(format!(
+            "pwd: unable to determine current directory ({err})"
+        ))
+    })?;
     Ok(path_to_value(&current))
 }
 
@@ -63,18 +75,19 @@ fn path_to_value(path: &Path) -> Value {
     Value::CharArray(CharArray::new_row(&text))
 }
 
-fn emit_path_stdout(path: &Path) {
-    record_console_output(ConsoleStream::Stdout, path.to_string_lossy().into_owned());
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
+    use crate::BuiltinResult;
     use runmat_builtins::CharArray;
     use std::convert::TryFrom;
     use std::path::PathBuf;
     use tempfile::tempdir;
+
+    fn pwd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::pwd_builtin(args))
+    }
 
     struct DirGuard {
         original: PathBuf,
@@ -157,6 +170,6 @@ pub(crate) mod tests {
         let _guard = DirGuard::new();
 
         let err = pwd_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
-        assert_eq!(err, "pwd: too many input arguments");
+        assert_eq!(err.message(), "pwd: too many input arguments");
     }
 }

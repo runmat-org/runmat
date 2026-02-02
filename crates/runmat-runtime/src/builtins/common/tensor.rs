@@ -2,6 +2,8 @@ use std::convert::TryFrom;
 
 use runmat_builtins::{LogicalArray, NumericDType, Tensor, Value};
 
+use crate::dispatcher::gather_if_needed_async;
+
 /// Return the total number of elements for a given shape.
 pub fn element_count(shape: &[usize]) -> usize {
     let mut acc: u128 = 1;
@@ -95,6 +97,177 @@ pub fn tensor_into_value(tensor: Tensor) -> Value {
 /// Return true when a tensor contains exactly one scalar element.
 pub fn is_scalar_tensor(tensor: &Tensor) -> bool {
     tensor.data.len() == 1
+}
+
+fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, String> {
+    match value {
+        Value::Num(n) => Ok(Some(*n)),
+        Value::Int(i) => Ok(Some(i.to_f64())),
+        Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
+        Value::Tensor(t) => {
+            if t.data.len() == 1 {
+                Ok(Some(t.data[0]))
+            } else {
+                Err(format!(
+                    "expected scalar tensor, got tensor of size {}",
+                    t.data.len()
+                ))
+            }
+        }
+        Value::LogicalArray(la) => {
+            if la.data.len() == 1 {
+                Ok(Some(if la.data[0] != 0 { 1.0 } else { 0.0 }))
+            } else {
+                Err(format!(
+                    "expected scalar logical array, got array of size {}",
+                    la.data.len()
+                ))
+            }
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Attempt to extract a scalar f64 from a runtime value asynchronously.
+pub async fn scalar_f64_from_value_async(value: &Value) -> Result<Option<f64>, String> {
+    match value {
+        Value::GpuTensor(handle) => {
+            if !handle.shape.is_empty() {
+                let len = element_count(&handle.shape);
+                if len != 1 {
+                    return Err(format!("expected scalar gpuArray, got array of size {len}"));
+                }
+            }
+            let gathered = gather_if_needed_async(&Value::GpuTensor(handle.clone()))
+                .await
+                .map_err(|e| format!("scalar: {e}"))?;
+            scalar_f64_from_host_value(&gathered)
+        }
+        _ => scalar_f64_from_host_value(value),
+    }
+}
+
+/// Attempt to parse a dimension index from a scalar-like runtime value.
+pub async fn dimension_from_value_async(
+    value: &Value,
+    name: &str,
+    allow_zero: bool,
+) -> Result<Option<usize>, String> {
+    let Some(raw) = scalar_f64_from_value_async(value).await? else {
+        return Ok(None);
+    };
+    if !raw.is_finite() {
+        return Err(format!("{name}: dimension must be finite"));
+    }
+    let rounded = raw.round();
+    if (rounded - raw).abs() > 1e-6 {
+        return Err(format!("{name}: dimension must be an integer"));
+    }
+    let min = if allow_zero { 0.0 } else { 1.0 };
+    if rounded < min {
+        let bound = if allow_zero { 0 } else { 1 };
+        return Err(format!("{name}: dimension must be >= {bound}"));
+    }
+    Ok(Some(rounded as usize))
+}
+
+fn parse_numeric_dimension(value: f64) -> Result<usize, String> {
+    if !value.is_finite() {
+        return Err("dimensions must be finite".to_string());
+    }
+    if value < 0.0 {
+        return Err("matrix dimensions must be non-negative".to_string());
+    }
+    let rounded = value.round();
+    if (rounded - value).abs() > f64::EPSILON {
+        return Err("dimensions must be integers".to_string());
+    }
+    Ok(rounded as usize)
+}
+
+fn dims_from_tensor_values(values: &[f64], shape: &[usize]) -> Result<Option<Vec<usize>>, String> {
+    let len = values.len();
+    if len == 0 {
+        return Ok(Some(Vec::new()));
+    }
+    let is_scalar = len == 1;
+    let is_row = shape.len() >= 2 && shape[0] == 1;
+    let is_column = shape.len() >= 2 && shape[1] == 1;
+    if !(is_row || is_column || is_scalar || shape.len() == 1) {
+        return Ok(None);
+    }
+    let mut dims = Vec::with_capacity(len);
+    for &value in values {
+        dims.push(parse_numeric_dimension(value)?);
+    }
+    Ok(Some(dims))
+}
+
+/// Attempt to parse a dimension vector from a runtime value asynchronously.
+pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, String> {
+    match value {
+        Value::Num(n) => parse_numeric_dimension(*n).map(|dim| Some(vec![dim])),
+        Value::Int(i) => parse_numeric_dimension(i.to_f64()).map(|dim| Some(vec![dim])),
+        Value::Tensor(t) => dims_from_tensor_values(&t.data, &t.shape),
+        Value::LogicalArray(la) => {
+            let values: Vec<f64> = la
+                .data
+                .iter()
+                .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+                .collect();
+            dims_from_tensor_values(&values, &la.shape)
+        }
+        Value::GpuTensor(handle) => {
+            let gathered = gather_if_needed_async(&Value::GpuTensor(handle.clone()))
+                .await
+                .map_err(|e| format!("dimensions: {e}"))?;
+            match gathered {
+                Value::Tensor(t) => {
+                    if t.data.is_empty() {
+                        tracing::warn!(
+                            gpu_shape = ?handle.shape,
+                            "dims_from_value_async: gathered GPU tensor has no data"
+                        );
+                    }
+                    tracing::trace!(
+                        "dims_from_value_async: GPU tensor values gpu_shape={:?} host_shape={:?} values={:?}",
+                        handle.shape,
+                        t.shape,
+                        t.data
+                    );
+                    let dims = dims_from_tensor_values(&t.data, &t.shape)?;
+                    if dims.is_none() {
+                        tracing::debug!(
+                            gpu_shape = ?handle.shape,
+                            host_shape = ?t.shape,
+                            "dims_from_value_async: GPU tensor not interpretable as dims"
+                        );
+                    }
+                    Ok(dims)
+                }
+                Value::LogicalArray(la) => {
+                    let values: Vec<f64> = la
+                        .data
+                        .iter()
+                        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+                        .collect();
+                    let dims = dims_from_tensor_values(&values, &la.shape)?;
+                    if dims.is_none() {
+                        tracing::debug!(
+                            gpu_shape = ?handle.shape,
+                            host_shape = ?la.shape,
+                            "dims_from_value_async: GPU logical not interpretable as dims"
+                        );
+                    }
+                    Ok(dims)
+                }
+                Value::Num(n) => parse_numeric_dimension(n).map(|dim| Some(vec![dim])),
+                Value::Int(i) => parse_numeric_dimension(i.to_f64()).map(|dim| Some(vec![dim])),
+                _ => Ok(None),
+            }
+        }
+        _ => Ok(None),
+    }
 }
 
 /// Convert an argument into a dimension index (1-based) if possible.

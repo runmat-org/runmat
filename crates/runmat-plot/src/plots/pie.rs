@@ -128,6 +128,7 @@ impl PieChart {
             material,
             draw_calls: vec![dc],
             gpu_vertices: None,
+            bounds: None,
             image: None,
         }
     }

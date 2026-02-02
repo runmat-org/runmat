@@ -44,17 +44,17 @@
   "examples": [
     {
       "description": "Creating a 2x3 matrix of zeros",
-      "input": "A = zeros(2, 3);",
+      "input": "A = zeros(2, 3)",
       "output": "A = [0 0 0; 0 0 0];"
     },
     {
       "description": "Creating a 4x1 logical matrix of zeros",
-      "input": "mask = zeros(4, 1, 'logical');",
+      "input": "mask = zeros(4, 1, 'logical')",
       "output": "mask = [0 0 0 0];"
     },
     {
       "description": "Creating a 128x128 matrix of zeros on a GPU",
-      "input": "H = zeros(128, 128);",
+      "input": "H = zeros(128, 128)",
       "output": "H = [0 0 0 ... 0; 0 0 0 ... 0; ...; 0 0 0 ... 0];"
     }
   ],

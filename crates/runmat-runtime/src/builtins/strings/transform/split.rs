@@ -5,12 +5,13 @@ use std::collections::HashSet;
 use runmat_builtins::{CellArray, CharArray, StringArray, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::split")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -39,6 +40,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "String transformation builtin; not eligible for fusion planning and always gathers GPU inputs.",
 };
 
+const BUILTIN_NAME: &str = "split";
 const ARG_TYPE_ERROR: &str =
     "split: first argument must be a string scalar, string array, character array, or cell array of character vectors";
 const DELIMITER_TYPE_ERROR: &str =
@@ -50,6 +52,16 @@ const EMPTY_DELIMITER_ERROR: &str = "split: delimiters must contain at least one
 const CELL_ELEMENT_ERROR: &str =
     "split: cell array elements must be string scalars or character vectors";
 
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn map_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, BUILTIN_NAME)
+}
+
 #[runtime_builtin(
     name = "split",
     category = "strings/transform",
@@ -58,11 +70,11 @@ const CELL_ELEMENT_ERROR: &str =
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::split"
 )]
-fn split_builtin(text: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let text = gather_if_needed(&text).map_err(|e| format!("split: {e}"))?;
+async fn split_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let text = gather_if_needed_async(&text).await.map_err(map_flow)?;
     let mut args: Vec<Value> = Vec::with_capacity(rest.len());
     for arg in rest {
-        args.push(gather_if_needed(&arg).map_err(|e| format!("split: {e}"))?);
+        args.push(gather_if_needed_async(&arg).await.map_err(map_flow)?);
     }
 
     let options = SplitOptions::parse(&args)?;
@@ -84,20 +96,20 @@ struct SplitOptions {
 }
 
 impl SplitOptions {
-    fn parse(args: &[Value]) -> Result<Self, String> {
+    fn parse(args: &[Value]) -> BuiltinResult<Self> {
         let mut index = 0usize;
         let mut delimiters = DelimiterSpec::Whitespace;
 
         if index < args.len() && !is_name_key(&args[index]) {
             let list = extract_delimiters(&args[index])?;
             if list.is_empty() {
-                return Err(EMPTY_DELIMITER_ERROR.to_string());
+                return Err(runtime_error_for(EMPTY_DELIMITER_ERROR));
             }
             let mut seen = HashSet::new();
             let mut patterns: Vec<String> = Vec::new();
             for pattern in list {
                 if pattern.is_empty() {
-                    return Err(EMPTY_DELIMITER_ERROR.to_string());
+                    return Err(runtime_error_for(EMPTY_DELIMITER_ERROR));
                 }
                 if seen.insert(pattern.clone()) {
                     patterns.push(pattern);
@@ -118,11 +130,11 @@ impl SplitOptions {
             let name = match name_key(&args[index]) {
                 Some(NameKey::CollapseDelimiters) => NameKey::CollapseDelimiters,
                 Some(NameKey::IncludeDelimiters) => NameKey::IncludeDelimiters,
-                None => return Err(UNKNOWN_NAME_ERROR.to_string()),
+                None => return Err(runtime_error_for(UNKNOWN_NAME_ERROR)),
             };
             index += 1;
             if index >= args.len() {
-                return Err(NAME_VALUE_PAIR_ERROR.to_string());
+                return Err(runtime_error_for(NAME_VALUE_PAIR_ERROR));
             }
             let value = &args[index];
             index += 1;
@@ -152,7 +164,7 @@ struct TextMatrix {
 }
 
 impl TextMatrix {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::String(text) => Ok(Self {
                 data: vec![text],
@@ -166,11 +178,11 @@ impl TextMatrix {
             }),
             Value::CharArray(array) => Self::from_char_array(array),
             Value::Cell(cell) => Self::from_cell_array(cell),
-            _ => Err(ARG_TYPE_ERROR.to_string()),
+            _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
         }
     }
 
-    fn from_char_array(array: CharArray) -> Result<Self, String> {
+    fn from_char_array(array: CharArray) -> BuiltinResult<Self> {
         let CharArray { data, rows, cols } = array;
         if rows == 0 {
             return Ok(Self {
@@ -190,7 +202,7 @@ impl TextMatrix {
         })
     }
 
-    fn from_cell_array(cell: CellArray) -> Result<Self, String> {
+    fn from_cell_array(cell: CellArray) -> BuiltinResult<Self> {
         let CellArray {
             data, rows, cols, ..
         } = cell;
@@ -201,7 +213,7 @@ impl TextMatrix {
                 let value_ref: &Value = &data[idx];
                 strings.push(
                     cell_element_to_string(value_ref)
-                        .ok_or_else(|| CELL_ELEMENT_ERROR.to_string())?,
+                        .ok_or_else(|| runtime_error_for(CELL_ELEMENT_ERROR))?,
                 );
             }
         }
@@ -212,7 +224,7 @@ impl TextMatrix {
         })
     }
 
-    fn into_split_result(self, options: &SplitOptions) -> Result<Value, String> {
+    fn into_split_result(self, options: &SplitOptions) -> BuiltinResult<Value> {
         let TextMatrix { data, rows, cols } = self;
 
         if data.is_empty() {
@@ -222,7 +234,8 @@ impl TextMatrix {
             } else {
                 vec![rows, cols * block_cols]
             };
-            let array = StringArray::new(Vec::new(), shape).map_err(|e| format!("split: {e}"))?;
+            let array = StringArray::new(Vec::new(), shape)
+                .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
             return Ok(Value::StringArray(array));
         }
 
@@ -265,7 +278,8 @@ impl TextMatrix {
         }
 
         let shape = vec![rows, result_cols];
-        let array = StringArray::new(output, shape).map_err(|e| format!("split: {e}"))?;
+        let array = StringArray::new(output, shape)
+            .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
         Ok(Value::StringArray(array))
     }
 }
@@ -405,7 +419,7 @@ fn advance_whitespace(text: &str, mut start: usize) -> usize {
     start
 }
 
-fn extract_delimiters(value: &Value) -> Result<Vec<String>, String> {
+fn extract_delimiters(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(text) => Ok(vec![text.clone()]),
         Value::StringArray(array) => Ok(array.data.clone()),
@@ -424,12 +438,12 @@ fn extract_delimiters(value: &Value) -> Result<Vec<String>, String> {
             for element in &cell.data {
                 entries.push(
                     cell_element_to_string(element)
-                        .ok_or_else(|| CELL_ELEMENT_ERROR.to_string())?,
+                        .ok_or_else(|| runtime_error_for(CELL_ELEMENT_ERROR))?,
                 );
             }
             Ok(entries)
         }
-        _ => Err(DELIMITER_TYPE_ERROR.to_string()),
+        _ => Err(runtime_error_for(DELIMITER_TYPE_ERROR)),
     }
 }
 
@@ -464,7 +478,7 @@ fn value_to_scalar_string(value: &Value) -> Option<String> {
     }
 }
 
-fn parse_bool(value: &Value, name: &str) -> Result<bool, String> {
+fn parse_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(b) => Ok(*b),
         Value::Int(i) => Ok(i.to_i64() != 0),
@@ -473,20 +487,20 @@ fn parse_bool(value: &Value, name: &str) -> Result<bool, String> {
             if array.data.len() == 1 {
                 Ok(array.data[0] != 0)
             } else {
-                Err(format!(
-                    "split: value for '{}' must be logical true or false",
+                Err(runtime_error_for(format!(
+                    "{BUILTIN_NAME}: value for '{}' must be logical true or false",
                     name
-                ))
+                )))
             }
         }
         Value::Tensor(tensor) => {
             if tensor.data.len() == 1 {
                 Ok(tensor.data[0] != 0.0)
             } else {
-                Err(format!(
-                    "split: value for '{}' must be logical true or false",
+                Err(runtime_error_for(format!(
+                    "{BUILTIN_NAME}: value for '{}' must be logical true or false",
                     name
-                ))
+                )))
             }
         }
         _ => {
@@ -495,16 +509,16 @@ fn parse_bool(value: &Value, name: &str) -> Result<bool, String> {
                 match lowered.as_str() {
                     "true" | "on" | "yes" => Ok(true),
                     "false" | "off" | "no" => Ok(false),
-                    _ => Err(format!(
-                        "split: value for '{}' must be logical true or false",
+                    _ => Err(runtime_error_for(format!(
+                        "{BUILTIN_NAME}: value for '{}' must be logical true or false",
                         name
-                    )),
+                    ))),
                 }
             } else {
-                Err(format!(
-                    "split: value for '{}' must be logical true or false",
+                Err(runtime_error_for(format!(
+                    "{BUILTIN_NAME}: value for '{}' must be logical true or false",
                     name
-                ))
+                )))
             }
         }
     }
@@ -535,6 +549,10 @@ fn name_key(value: &Value) -> Option<NameKey> {
 pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{CellArray, LogicalArray, Tensor};
+
+    fn split_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        futures::executor::block_on(super::split_builtin(text, rest))
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -818,14 +836,14 @@ pub(crate) mod tests {
         let input = Value::String("abc".to_string());
         let args = vec![Value::String("CollapseDelimiters".to_string())];
         let err = split_builtin(input, args).unwrap_err();
-        assert!(err.contains("name-value"));
+        assert!(err.to_string().contains("name-value"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_invalid_text_argument_errors() {
         let err = split_builtin(Value::Num(1.0), Vec::new()).unwrap_err();
-        assert!(err.contains("first argument"));
+        assert!(err.to_string().contains("first argument"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -833,7 +851,7 @@ pub(crate) mod tests {
     fn split_invalid_delimiter_type_errors() {
         let err =
             split_builtin(Value::String("abc".to_string()), vec![Value::Num(1.0)]).unwrap_err();
-        assert!(err.contains("delimiter input"));
+        assert!(err.to_string().contains("delimiter input"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -844,7 +862,7 @@ pub(crate) mod tests {
             vec![Value::String(String::new())],
         )
         .unwrap_err();
-        assert!(err.contains("at least one character"));
+        assert!(err.to_string().contains("at least one character"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -858,7 +876,7 @@ pub(crate) mod tests {
             ],
         )
         .unwrap_err();
-        assert!(err.contains("unrecognized"));
+        assert!(err.to_string().contains("unrecognized"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

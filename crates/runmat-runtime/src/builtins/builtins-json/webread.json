@@ -46,30 +46,30 @@
     "Additional name-value pairs that do not match an option are appended to the query string using percent-encoding. A leading struct or cell array argument can also supply query parameters.",
     "`ContentType 'auto'` (default) inspects the `Content-Type` response header to choose between JSON, text, or binary decoding. Explicit `ContentType 'json'`, `'text'`, or `'binary'` override the detection logic.",
     "JSON responses are parsed with the same rules as `jsondecode`, producing doubles, logicals, strings, structs, and cell arrays that match MATLAB semantics.",
-    "Text responses preserve the server-provided character encoding (UTF-8 with automatic decoding of exotic charsets exposed in the HTTP headers). Binary payloads return `1×N` double arrays whose entries store byte values in the range 0–255.",
+    "Text responses preserve the server-provided character encoding (UTF-8 with automatic decoding of exotic charsets exposed in the HTTP headers). Binary payloads return `1\u00d7N` double arrays whose entries store byte values in the range 0\u2013255.",
     "HTTP errors (non-2xx status codes), timeouts, TLS failures, and parsing problems raise descriptive MATLAB-style errors."
   ],
   "examples": [
     {
       "description": "Reading JSON data from a REST API",
-      "input": "opts = weboptions(\"ContentType\", \"json\", \"Timeout\", 15);\nweather = webread(\"https://api.example.com/weather\", opts, \"city\", \"Reykjavik\");\ndisp(weather.temperatureC);",
+      "input": "opts = weboptions(\"ContentType\", \"json\", \"Timeout\", 15);\nweather = webread(\"https://api.example.com/weather\", opts, \"city\", \"Reykjavik\");\ndisp(weather.temperatureC)",
       "output": "    2.3"
     },
     {
       "description": "Downloading plain text as a character vector",
-      "input": "html = webread(\"https://example.com/index.txt\", \"Timeout\", 5);\nextract = html(1:200);"
+      "input": "html = webread(\"https://example.com/index.txt\", \"Timeout\", 5);\nextract = html(1:200)"
     },
     {
       "description": "Retrieving binary payloads such as images",
-      "input": "bytes = webread(\"https://example.com/logo.png\", \"ContentType\", \"binary\");\nfilewrite(\"logo.png\", uint8(bytes));"
+      "input": "bytes = webread(\"https://example.com/logo.png\", \"ContentType\", \"binary\");\nfilewrite(\"logo.png\", uint8(bytes))"
     },
     {
       "description": "Supplying custom headers and credentials",
-      "input": "headers = struct(\"Accept\", \"application/json\", \"X-Client\", \"RunMat\");\ndata = webread(\"https://api.example.com/me\", ...\n               \"Username\", \"ada\", \"Password\", \"secret\", ...\n               \"HeaderFields\", headers, ...\n               \"ContentType\", \"json\");"
+      "input": "headers = struct(\"Accept\", \"application/json\", \"X-Client\", \"RunMat\");\ndata = webread(\"https://api.example.com/me\", ...\n               \"Username\", \"ada\", \"Password\", \"secret\", ...\n               \"HeaderFields\", headers, ...\n               \"ContentType\", \"json\")"
     },
     {
       "description": "Passing query parameters as a struct",
-      "input": "query = struct(\"limit\", 25, \"sort\", \"name\");\nresponse = webread(\"https://api.example.com/resources\", query, \"ContentType\", \"json\");"
+      "input": "query = struct(\"limit\", 25, \"sort\", \"name\");\nresponse = webread(\"https://api.example.com/resources\", query, \"ContentType\", \"json\")"
     }
   ],
   "faqs": [
@@ -99,11 +99,11 @@
     },
     {
       "question": "How are binary responses represented?",
-      "answer": "Binary payloads return `1×N` double arrays whose elements are byte values. Convert them to the desired integer type (for example `uint8`) before further processing."
+      "answer": "Binary payloads return `1\u00d7N` double arrays whose elements are byte values. Convert them to the desired integer type (for example `uint8`) before further processing."
     },
     {
       "question": "What happens when the server returns an error status?",
-      "answer": "Non-success HTTP status codes raise `webread: request to … failed with HTTP status XYZ`. Inspect the remote server logs or response headers for additional diagnostics."
+      "answer": "Non-success HTTP status codes raise `webread: request to \u2026 failed with HTTP status XYZ`. Inspect the remote server logs or response headers for additional diagnostics."
     },
     {
       "question": "Does `webread` support compressed responses?",

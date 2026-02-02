@@ -11,12 +11,15 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use nalgebra::linalg::Schur;
 use nalgebra::{DMatrix, DVector};
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
+
+const BUILTIN_NAME: &str = "eig";
 
 const REAL_EPS: f64 = 1e-12;
 
@@ -35,6 +38,24 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     accepts_nan_mode: false,
     notes: "Prefers the provider `eig` hook (WGPU reuploads host-computed results for real spectra) and falls back to the CPU implementation for complex spectra or unsupported options.",
 };
+
+fn eig_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn with_eig_context(mut error: RuntimeError) -> RuntimeError {
+    if error.message() == "interaction pending..." {
+        return build_runtime_error("interaction pending...")
+            .with_builtin(BUILTIN_NAME)
+            .build();
+    }
+    if error.context.builtin.is_none() {
+        error.context = error.context.with_builtin(BUILTIN_NAME);
+    }
+    error
+}
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::factor::eig")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -56,8 +77,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::math::linalg::factor::eig"
 )]
-fn eig_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let eval = evaluate(value, &rest, false)?;
+async fn eig_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(value, &rest, false).await?;
     Ok(eval.eigenvalues())
 }
 
@@ -87,10 +108,11 @@ impl EigEval {
         self.right.clone()
     }
 
-    pub fn left(&self) -> Result<Value, String> {
+    pub fn left(&self) -> BuiltinResult<Value> {
         self.left.clone().ok_or_else(|| {
-            "eig: left eigenvectors are not available from the active acceleration provider"
-                .to_string()
+            eig_error(
+                "eig: left eigenvectors are not available from the active acceleration provider",
+            )
         })
     }
 
@@ -126,25 +148,27 @@ impl Default for EigOptions {
     }
 }
 
-pub fn evaluate(value: Value, args: &[Value], require_left: bool) -> Result<EigEval, String> {
+pub async fn evaluate(value: Value, args: &[Value], require_left: bool) -> BuiltinResult<EigEval> {
     let options = parse_options(args)?;
     match value {
         Value::GpuTensor(handle) => {
-            if let Some(eval) = evaluate_gpu(&handle, options, require_left)? {
+            if let Some(eval) = evaluate_gpu(&handle, options, require_left).await? {
                 return Ok(eval);
             }
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
-            evaluate_host(Value::Tensor(tensor), options, require_left)
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(with_eig_context)?;
+            evaluate_host(Value::Tensor(tensor), options, require_left).await
         }
-        other => evaluate_host(other, options, require_left),
+        other => evaluate_host(other, options, require_left).await,
     }
 }
 
-fn evaluate_gpu(
+async fn evaluate_gpu(
     handle: &GpuTensorHandle,
     options: EigOptions,
     require_left: bool,
-) -> Result<Option<EigEval>, String> {
+) -> BuiltinResult<Option<EigEval>> {
     if options.vector_output {
         return Ok(None);
     }
@@ -155,7 +179,7 @@ fn evaluate_gpu(
         Some(p) => p,
         None => return Ok(None),
     };
-    match provider.eig(handle, require_left) {
+    match provider.eig(handle, require_left).await {
         Ok(result) => {
             if require_left && result.left.is_none() {
                 Ok(None)
@@ -167,12 +191,16 @@ fn evaluate_gpu(
     }
 }
 
-fn evaluate_host(value: Value, options: EigOptions, require_left: bool) -> Result<EigEval, String> {
-    let matrix = value_to_complex_matrix(value)?;
+async fn evaluate_host(
+    value: Value,
+    options: EigOptions,
+    require_left: bool,
+) -> BuiltinResult<EigEval> {
+    let matrix = value_to_complex_matrix(value).await?;
     compute_eigen(matrix, options, require_left)
 }
 
-fn parse_options(args: &[Value]) -> Result<EigOptions, String> {
+fn parse_options(args: &[Value]) -> BuiltinResult<EigOptions> {
     let mut opts = EigOptions::default();
     for (idx, arg) in args.iter().enumerate() {
         if let Some(text) = tensor::value_to_string(arg) {
@@ -182,18 +210,17 @@ fn parse_options(args: &[Value]) -> Result<EigOptions, String> {
                 "vector" => opts.vector_output = true,
                 "matrix" => opts.vector_output = false,
                 other => {
-                    return Err(format!("eig: unknown option '{other}'"));
+                    return Err(eig_error(format!("eig: unknown option '{other}'")));
                 }
             }
         } else if idx == 0 {
-            return Err(
-                "eig: generalized eigenvalue decomposition (eig(A,B)) is not implemented"
-                    .to_string(),
-            );
+            return Err(eig_error(
+                "eig: generalized eigenvalue decomposition (eig(A,B)) is not implemented",
+            ));
         } else {
-            return Err(
-                "eig: option arguments must be character vectors or string scalars".to_string(),
-            );
+            return Err(eig_error(
+                "eig: option arguments must be character vectors or string scalars",
+            ));
         }
     }
     Ok(opts)
@@ -203,14 +230,16 @@ fn compute_eigen(
     matrix: DMatrix<Complex64>,
     options: EigOptions,
     require_left: bool,
-) -> Result<EigEval, String> {
+) -> BuiltinResult<EigEval> {
     if matrix.nrows() != matrix.ncols() {
-        return Err("eig: input matrix must be square".to_string());
+        return Err(eig_error("eig: input matrix must be square"));
     }
     let n = matrix.nrows();
     if n == 0 {
-        let empty_vals = Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("eig: {e}"))?;
-        let empty_mat = Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("eig: {e}"))?;
+        let empty_vals =
+            Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| eig_error(format!("eig: {e}")))?;
+        let empty_mat =
+            Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| eig_error(format!("eig: {e}")))?;
         let eigenvalues_value = Value::Tensor(empty_vals.clone());
         let diagonal_matrix_value = Value::Tensor(empty_mat.clone());
         let diagonal_output = if options.vector_output {
@@ -232,7 +261,7 @@ fn compute_eigen(
     }
 
     let balanced = maybe_balance(&matrix, options.balance);
-    let (eigenvalues, right) = schur_eigendecompose(&balanced).map_err(|e| format!("eig: {e}"))?;
+    let (eigenvalues, right) = schur_eigendecompose(&balanced)?;
 
     let eigenvalue_value = vector_to_value(&eigenvalues)?;
     let diag_value = diag_matrix_value(&eigenvalues)?;
@@ -241,7 +270,7 @@ fn compute_eigen(
     let left_value = if require_left {
         let left_matrix =
             compute_left_vectors(&balanced, &right, &eigenvalues).ok_or_else(|| {
-                "eig: unable to compute left eigenvectors for the requested matrix".to_string()
+                eig_error("eig: unable to compute left eigenvectors for the requested matrix")
             })?;
         Some(matrix_to_value(&left_matrix)?)
     } else {
@@ -269,7 +298,7 @@ fn maybe_balance(matrix: &DMatrix<Complex64>, _balance: bool) -> DMatrix<Complex
 
 fn schur_eigendecompose(
     matrix: &DMatrix<Complex64>,
-) -> Result<(DVector<Complex64>, DMatrix<Complex64>), String> {
+) -> BuiltinResult<(DVector<Complex64>, DMatrix<Complex64>)> {
     let n = matrix.nrows();
     if n == 0 {
         return Ok((DVector::from(vec![]), DMatrix::zeros(0, 0)));
@@ -383,12 +412,13 @@ fn normalize_left(left: &mut DMatrix<Complex64>, right: &DMatrix<Complex64>) {
     }
 }
 
-fn value_to_complex_matrix(value: Value) -> Result<DMatrix<Complex64>, String> {
+async fn value_to_complex_matrix(value: Value) -> BuiltinResult<DMatrix<Complex64>> {
     match value {
         Value::Tensor(tensor) => tensor_to_matrix(&tensor),
         Value::ComplexTensor(ct) => complex_tensor_to_matrix(&ct),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|err| eig_error(format!("eig: {err}")))?;
             tensor_to_matrix(&tensor)
         }
         Value::Num(n) => Ok(DMatrix::from_element(1, 1, Complex64::new(n, 0.0))),
@@ -400,22 +430,23 @@ fn value_to_complex_matrix(value: Value) -> Result<DMatrix<Complex64>, String> {
         )),
         Value::Complex(re, im) => Ok(DMatrix::from_element(1, 1, Complex64::new(re, im))),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(with_eig_context)?;
             tensor_to_matrix(&tensor)
         }
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(
-            "eig: input must be numeric or logical; convert character data with double() first"
-                .to_string(),
-        ),
-        other => Err(format!(
-            "eig: unsupported input type {other:?}; expected numeric or logical values"
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(eig_error(
+            "eig: input must be numeric or logical; convert character data with double() first",
         )),
+        other => Err(eig_error(format!(
+            "eig: unsupported input type {other:?}; expected numeric or logical values"
+        ))),
     }
 }
 
-fn tensor_to_matrix(tensor: &Tensor) -> Result<DMatrix<Complex64>, String> {
+fn tensor_to_matrix(tensor: &Tensor) -> BuiltinResult<DMatrix<Complex64>> {
     if tensor.shape.len() > 2 {
-        return Err("eig: input must be 2-D".to_string());
+        return Err(eig_error("eig: input must be 2-D"));
     }
     let rows = tensor.rows();
     let cols = tensor.cols();
@@ -426,9 +457,9 @@ fn tensor_to_matrix(tensor: &Tensor) -> Result<DMatrix<Complex64>, String> {
     Ok(DMatrix::from_column_slice(rows, cols, &data))
 }
 
-fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> Result<DMatrix<Complex64>, String> {
+fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> BuiltinResult<DMatrix<Complex64>> {
     if tensor.shape.len() > 2 {
-        return Err("eig: input must be 2-D".to_string());
+        return Err(eig_error("eig: input must be 2-D"));
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
@@ -439,9 +470,10 @@ fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> Result<DMatrix<Complex64>
     Ok(DMatrix::from_column_slice(rows, cols, &data))
 }
 
-fn vector_to_value(values: &DVector<Complex64>) -> Result<Value, String> {
+fn vector_to_value(values: &DVector<Complex64>) -> BuiltinResult<Value> {
     if values.is_empty() {
-        let tensor = Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("eig: {e}"))?;
+        let tensor =
+            Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| eig_error(format!("eig: {e}")))?;
         return Ok(Value::Tensor(tensor));
     }
     if is_all_real(values.iter().copied()) {
@@ -449,22 +481,24 @@ fn vector_to_value(values: &DVector<Complex64>) -> Result<Value, String> {
         for value in values.iter() {
             data.push(value.re);
         }
-        let tensor = Tensor::new(data, vec![values.len(), 1]).map_err(|e| format!("eig: {e}"))?;
+        let tensor =
+            Tensor::new(data, vec![values.len(), 1]).map_err(|e| eig_error(format!("eig: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     } else {
         let mut data = Vec::with_capacity(values.len());
         for value in values.iter() {
             data.push((value.re, value.im));
         }
-        let tensor =
-            ComplexTensor::new(data, vec![values.len(), 1]).map_err(|e| format!("eig: {e}"))?;
+        let tensor = ComplexTensor::new(data, vec![values.len(), 1])
+            .map_err(|e| eig_error(format!("eig: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
 
-fn diag_matrix_value(values: &DVector<Complex64>) -> Result<Value, String> {
+fn diag_matrix_value(values: &DVector<Complex64>) -> BuiltinResult<Value> {
     if values.is_empty() {
-        let tensor = Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("eig: {e}"))?;
+        let tensor =
+            Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| eig_error(format!("eig: {e}")))?;
         return Ok(Value::Tensor(tensor));
     }
     let size = values.len();
@@ -473,26 +507,28 @@ fn diag_matrix_value(values: &DVector<Complex64>) -> Result<Value, String> {
         for i in 0..size {
             data[i + i * size] = values[i].re;
         }
-        let tensor = Tensor::new(data, vec![size, size]).map_err(|e| format!("eig: {e}"))?;
+        let tensor =
+            Tensor::new(data, vec![size, size]).map_err(|e| eig_error(format!("eig: {e}")))?;
         Ok(Value::Tensor(tensor))
     } else {
         let mut data = vec![(0.0f64, 0.0f64); size * size];
         for i in 0..size {
             data[i + i * size] = (values[i].re, values[i].im);
         }
-        let tensor = ComplexTensor::new(data, vec![size, size]).map_err(|e| format!("eig: {e}"))?;
+        let tensor = ComplexTensor::new(data, vec![size, size])
+            .map_err(|e| eig_error(format!("eig: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
 
-fn matrix_to_value(matrix: &DMatrix<Complex64>) -> Result<Value, String> {
+fn matrix_to_value(matrix: &DMatrix<Complex64>) -> BuiltinResult<Value> {
     if is_all_real(matrix.iter().copied()) {
         let mut data = Vec::with_capacity(matrix.len());
         for value in matrix.iter() {
             data.push(value.re);
         }
         let tensor = Tensor::new(data, vec![matrix.nrows(), matrix.ncols()])
-            .map_err(|e| format!("eig: {e}"))?;
+            .map_err(|e| eig_error(format!("eig: {e}")))?;
         Ok(Value::Tensor(tensor))
     } else {
         let mut data = Vec::with_capacity(matrix.len());
@@ -500,7 +536,7 @@ fn matrix_to_value(matrix: &DMatrix<Complex64>) -> Result<Value, String> {
             data.push((value.re, value.im));
         }
         let tensor = ComplexTensor::new(data, vec![matrix.nrows(), matrix.ncols()])
-            .map_err(|e| format!("eig: {e}"))?;
+            .map_err(|e| eig_error(format!("eig: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
@@ -517,7 +553,12 @@ where
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, Tensor};
+    use futures::executor::block_on;
+    use runmat_builtins::IntValue;
+
+    fn error_message(err: RuntimeError) -> String {
+        err.message().to_string()
+    }
 
     fn matrix_from_value(value: Value) -> DMatrix<Complex64> {
         match value {
@@ -634,7 +675,7 @@ pub(crate) mod tests {
     #[test]
     fn eig_errors_on_non_square() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = eig_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err();
+        let err = error_message(eig_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err());
         assert!(err.contains("square"));
     }
 
@@ -740,7 +781,7 @@ pub(crate) mod tests {
     #[test]
     fn eig_handles_single_numeric_argument() {
         let args = vec![Value::Int(IntValue::I32(3))];
-        let err = evaluate(Value::Num(4.0), &args, false).unwrap_err();
+        let err = error_message(evaluate(Value::Num(4.0), &args, false).unwrap_err());
         assert!(
             err.contains("generalized")
                 || err.contains("option arguments must be")
@@ -828,5 +869,13 @@ pub(crate) mod tests {
         if let Value::GpuTensor(_) = eval.eigenvalues() {
             panic!("expected host fallback for 'nobalance' option");
         }
+    }
+
+    fn eig_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::eig_builtin(value, rest))
+    }
+
+    fn evaluate(value: Value, args: &[Value], require_left: bool) -> BuiltinResult<EigEval> {
+        block_on(super::evaluate(value, args, require_left))
     }
 }

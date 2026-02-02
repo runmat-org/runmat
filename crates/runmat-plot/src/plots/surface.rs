@@ -576,6 +576,7 @@ impl SurfacePlot {
             indices: Some(indices),
 
             gpu_vertices: self.gpu_vertices.clone(),
+            bounds: None,
             material,
             draw_calls: vec![draw_call],
             image: None,
