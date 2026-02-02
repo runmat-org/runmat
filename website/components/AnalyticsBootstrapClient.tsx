@@ -1,7 +1,13 @@
 "use client";
 
-import AnalyticsBootstrap from "@/components/AnalyticsBootstrap";
+import { useEffect } from "react";
 
 export default function AnalyticsBootstrapClient() {
-  return <AnalyticsBootstrap />;
+  useEffect(() => {
+    import("@/lib/instrumentation-client").catch(() => {
+      // ignore
+    });
+  }, []);
+
+  return null;
 }

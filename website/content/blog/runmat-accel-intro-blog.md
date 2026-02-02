@@ -181,7 +181,7 @@ fprintf('Done. MSE=%.6e\n', mse);    % Only here does data return to CPU for pri
 
 We ran this exact pipeline on an **Apple M2 Max** using the Metal backend, averaged over **3 runs** per point. Each batch size `B` is `B × 2160 × 3840` single-precision pixels.
 
-### 4K Image Pipeline Perf Sweep (B = batch size)
+### 4K image pipeline perf sweep (B = batch size)
 | B | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
 |---|---:|---:|---:|---:|---:|
 | 4  | 142.97 | 801.29 | 500.34 | 3.50× | 5.60× |
@@ -258,7 +258,7 @@ flowchart TD
 	
 ```
 
-### The Complexity You're Avoiding
+### The complexity you're avoiding
 
 To understand what RunMat eliminates from your workflow, let's look at what GPU acceleration currently requires. PyTorch is the de facto standard for GPU computing in machine learning and scientific computing—it's mature, well-optimized, and widely used. If you want GPU acceleration today, PyTorch is often your best option. 
 

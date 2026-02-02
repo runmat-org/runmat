@@ -31,14 +31,16 @@ export default function Footer() {
       <div className="container mx-auto flex flex-col md:flex-row items-start justify-between gap-8 py-8 px-4 md:px-6 border-t">
         <div className="hidden md:flex flex-col gap-3">
           <div className="flex items-center gap-3">
-            <Image
-              src="/runmat-logo.svg"
-              alt="RunMat"
-              width={136}
-              height={24}
-              className="h-6 w-auto"
-              priority
-            />
+            <Link href="/" className="focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded">
+              <Image
+                src="/runmat-logo.svg"
+                alt="RunMat"
+                width={136}
+                height={24}
+                className="h-6 w-auto"
+                priority
+              />
+            </Link>
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed">
             The Fastest Runtime for Math
@@ -48,8 +50,8 @@ export default function Footer() {
           <div>
             <h3 className="text-foreground font-semibold mb-2">Resources</h3>
             <ul className="space-y-1">
+              <li><Link href="/about" className="hover:underline">About</Link></li>
               <li><Link href="/license" className="hover:underline">License</Link></li>
-              <li><Link href="/docs/telemetry" className="hover:underline">Telemetry</Link></li>
               <li><Link href="/matlab-online" className="hover:underline">MATLAB Online</Link></li>
             </ul>
           </div>
