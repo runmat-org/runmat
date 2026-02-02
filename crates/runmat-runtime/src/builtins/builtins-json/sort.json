@@ -48,37 +48,37 @@
   "examples": [
     {
       "description": "Sorting a column vector in ascending order",
-      "input": "A = [3; 1; 2];\nB = sort(A);",
+      "input": "A = [3; 1; 2];\nB = sort(A)",
       "output": "B =\n     1\n     2\n     3"
     },
     {
       "description": "Sorting rows by specifying the dimension",
-      "input": "A = [1 4 2; 3 2 5];\nB = sort(A, 2);",
+      "input": "A = [1 4 2; 3 2 5];\nB = sort(A, 2)",
       "output": "B =\n     1     2     4\n     2     3     5"
     },
     {
       "description": "Sorting values in descending order",
-      "input": "A = [10 4 7 9];\nB = sort(A, 'descend');",
+      "input": "A = [10 4 7 9];\nB = sort(A, 'descend')",
       "output": "B =\n    10     9     7     4"
     },
     {
       "description": "Retrieving permutation indices alongside the sorted values",
-      "input": "A = [4 1 9 2];\n[B, I] = sort(A);",
+      "input": "A = [4 1 9 2];\n[B, I] = sort(A)",
       "output": "B =\n     1     2     4     9\nI =\n     2     4     1     3"
     },
     {
       "description": "Sorting by absolute value using `ComparisonMethod`",
-      "input": "A = [-8 -1 3 -2];\nB = sort(A, 'ComparisonMethod', 'abs');",
+      "input": "A = [-8 -1 3 -2];\nB = sort(A, 'ComparisonMethod', 'abs')",
       "output": "B =\n    -1    -2     3    -8"
     },
     {
       "description": "Sorting tensors containing NaN values",
-      "input": "A = [NaN 4 1 2];\n[B, I] = sort(A);",
+      "input": "A = [NaN 4 1 2];\n[B, I] = sort(A)",
       "output": "B =\n     1     2     4   NaN\nI =\n     3     4     2     1"
     },
     {
       "description": "Sorting GPU tensors with automatic host fallback",
-      "input": "G = gpuArray(randn(5, 1));\n[B, I] = sort(G, 'descend');"
+      "input": "G = gpuArray(randn(5, 1));\n[B, I] = sort(G, 'descend')"
     }
   ],
   "faqs": [

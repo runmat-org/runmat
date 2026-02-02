@@ -46,32 +46,32 @@
   "examples": [
     {
       "description": "Finding values exclusive to the first numeric vector",
-      "input": "A = [5 7 5 1];\nB = [7 1 3];\n[C, IA] = setdiff(A, B);",
+      "input": "A = [5 7 5 1];\nB = [7 1 3];\n[C, IA] = setdiff(A, B)",
       "output": "C =\n     5\nIA =\n     1"
     },
     {
       "description": "Preserving input order with `'stable'`",
-      "input": "A = [4 2 4 1 3];\nB = [3 4 5 1];\n[C, IA] = setdiff(A, B, 'stable');",
+      "input": "A = [4 2 4 1 3];\nB = [3 4 5 1];\n[C, IA] = setdiff(A, B, 'stable')",
       "output": "C =\n     2\nIA =\n     2"
     },
     {
       "description": "Working with rows of numeric matrices",
-      "input": "A = [1 2; 3 4; 1 2];\nB = [3 4; 5 6];\n[C, IA] = setdiff(A, B, 'rows');",
+      "input": "A = [1 2; 3 4; 1 2];\nB = [3 4; 5 6];\n[C, IA] = setdiff(A, B, 'rows')",
       "output": "C =\n     1     2\nIA =\n     1"
     },
     {
       "description": "Computing set difference for character data",
-      "input": "A = ['m','z'; 'm','a'];\nB = ['a','x'; 'm','a'];\n[C, IA] = setdiff(A, B);",
+      "input": "A = ['m','z'; 'm','a'];\nB = ['a','x'; 'm','a'];\n[C, IA] = setdiff(A, B)",
       "output": "C =\n    m\nIA =\n     1"
     },
     {
       "description": "Subtracting string arrays by row",
-      "input": "A = [\"alpha\" \"beta\"; \"gamma\" \"beta\"];\nB = [\"gamma\" \"beta\"; \"delta\" \"beta\"];\n[C, IA] = setdiff(A, B, 'rows', 'stable');",
+      "input": "A = [\"alpha\" \"beta\"; \"gamma\" \"beta\"];\nB = [\"gamma\" \"beta\"; \"delta\" \"beta\"];\n[C, IA] = setdiff(A, B, 'rows', 'stable')",
       "output": "C =\n  1x2 string array\n    \"alpha\"    \"beta\"\nIA =\n     1"
     },
     {
       "description": "Using `setdiff` with GPU arrays",
-      "input": "G = gpuArray([10 4 6 4]);\nH = gpuArray([6 4 2]);\nC = setdiff(G, H);",
+      "input": "G = gpuArray([10 4 6 4]);\nH = gpuArray([6 4 2]);\nC = setdiff(G, H)",
       "output": "C =\n    10"
     }
   ],

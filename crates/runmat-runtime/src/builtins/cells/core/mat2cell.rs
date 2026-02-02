@@ -267,7 +267,15 @@ fn split_into_cells(input: &Mat2CellInput, partitions: Vec<Vec<usize>>) -> Built
         per_dim_counts = vec![1, 1];
     }
     let normalized_shape = normalize_cell_shape(per_dim_counts.clone());
-    let total_cells = normalized_shape.iter().product::<usize>();
+    let total_cells = normalized_shape
+        .iter()
+        .try_fold(1usize, |acc, &v| acc.checked_mul(v))
+        .ok_or_else(|| {
+            mat2cell_error_with_identifier(
+                "mat2cell: resulting cell array is too large to represent on this platform",
+                IDENT_SIZE_LIMIT,
+            )
+        })?;
 
     if total_cells == 0 || partitions.iter().any(|p| p.is_empty()) {
         return make_cell_with_shape(Vec::new(), normalized_shape)
@@ -525,8 +533,22 @@ fn slice_char_array(array: &CharArray, start: &[usize], sizes: &[usize]) -> Buil
     let mut data = Vec::with_capacity(row_count * col_count);
     for r in 0..row_count {
         for c in 0..col_count {
-            let idx = (row_start + r) * array.cols + (col_start + c);
-            data.push(array.data[idx]);
+            let idx = (row_start + r)
+                .checked_mul(array.cols)
+                .and_then(|v| v.checked_add(col_start + c))
+                .ok_or_else(|| {
+                    mat2cell_error_with_identifier(
+                        "mat2cell: partition exceeds character array bounds",
+                        IDENT_INVALID_PARTITION,
+                    )
+                })?;
+            let ch = array.data.get(idx).copied().ok_or_else(|| {
+                mat2cell_error_with_identifier(
+                    "mat2cell: partition exceeds character array bounds",
+                    IDENT_INVALID_PARTITION,
+                )
+            })?;
+            data.push(ch);
         }
     }
     let slice = CharArray::new(data, row_count, col_count)
@@ -561,7 +583,7 @@ fn prefix_sums(values: &[usize]) -> Vec<usize> {
     let mut acc = 0usize;
     for &v in values {
         result.push(acc);
-        acc += v;
+        acc = acc.saturating_add(v);
     }
     result
 }

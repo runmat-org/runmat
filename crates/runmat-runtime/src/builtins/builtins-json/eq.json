@@ -44,33 +44,33 @@
   "examples": [
     {
       "description": "Check If Two Scalars Are Equal",
-      "input": "flag = eq(42, 42);",
+      "input": "flag = eq(42, 42)",
       "output": "flag =\n     1"
     },
     {
       "description": "Compare Two Vectors Element-Wise",
-      "input": "A = [1 2 3 4];\nB = [1 0 3 5];\nmask = eq(A, B);",
-      "output": "mask =\n  1×4 logical array\n     1     0     1     0"
+      "input": "A = [1 2 3 4];\nB = [1 0 3 5];\nmask = eq(A, B)",
+      "output": "mask =\n  1\u00d74 logical array\n     1     0     1     0"
     },
     {
       "description": "Apply Equality With Implicit Expansion",
-      "input": "M = [1 2 3; 4 5 6];\nsel = eq(M, 2);",
-      "output": "sel =\n  2×3 logical array\n     0     1     0\n     0     0     0"
+      "input": "M = [1 2 3; 4 5 6];\nsel = eq(M, 2)",
+      "output": "sel =\n  2\u00d73 logical array\n     0     1     0\n     0     0     0"
     },
     {
       "description": "Compare Character Data To Numeric Codes",
-      "input": "letters = ['A' 'B' 'C'];\nisA = eq(letters, 65);",
-      "output": "isA =\n  1×3 logical array\n     1     0     0"
+      "input": "letters = ['A' 'B' 'C'];\nisA = eq(letters, 65)",
+      "output": "isA =\n  1\u00d73 logical array\n     1     0     0"
     },
     {
       "description": "Compare String Arrays To A Scalar String",
-      "input": "names = [\"alice\" \"bob\" \"alice\"];\nmatches = eq(names, \"alice\");",
-      "output": "matches =\n  1×3 logical array\n     1     0     1"
+      "input": "names = [\"alice\" \"bob\" \"alice\"];\nmatches = eq(names, \"alice\")",
+      "output": "matches =\n  1\u00d73 logical array\n     1     0     1"
     },
     {
       "description": "Run `eq` Directly On `gpuArray` Inputs",
-      "input": "G1 = gpuArray([1 2 3]);\nG2 = gpuArray([1 0 3]);\ndeviceResult = eq(G1, G2);\nhostResult = gather(deviceResult);",
-      "output": "deviceResult =\n  1×3 gpuArray logical array\n     1     0     1\nhostResult =\n  1×3 logical array\n     1     0     1"
+      "input": "G1 = gpuArray([1 2 3]);\nG2 = gpuArray([1 0 3]);\ndeviceResult = eq(G1, G2);\nhostResult = gather(deviceResult)",
+      "output": "deviceResult =\n  1\u00d73 gpuArray logical array\n     1     0     1\nhostResult =\n  1\u00d73 logical array\n     1     0     1"
     }
   ],
   "faqs": [

@@ -44,11 +44,11 @@
   "examples": [
     {
       "description": "Getting the singular values of a matrix",
-      "input": "A = [1 2 3; 4 5 6; 7 8 9];\ns = svd(A);"
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\ns = svd(A)"
     },
     {
       "description": "Full SVD and reconstruction of a square matrix",
-      "input": "A = [3 1; 0 2];\n[U,S,V] = svd(A);\nA_recon = U * S * V';"
+      "input": "A = [3 1; 0 2];\n[U,S,V] = svd(A);\nA_recon = U * S * V'"
     },
     {
       "description": "Economy-size SVD for a tall matrix",
@@ -60,11 +60,11 @@
     },
     {
       "description": "Requesting vector form of the singular values",
-      "input": "A = [10 0; 0 1];\n[U,s,V] = svd(A, 'vector');"
+      "input": "A = [10 0; 0 1];\n[U,s,V] = svd(A, 'vector')"
     },
     {
       "description": "Computing the SVD of a complex matrix",
-      "input": "A = [1+2i, 2-1i; 0, 3i];\n[U,S,V] = svd(A);"
+      "input": "A = [1+2i, 2-1i; 0, 3i];\n[U,S,V] = svd(A)"
     },
     {
       "description": "Running `svd` on a `gpuArray` (automatic host fallback today)",

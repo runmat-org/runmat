@@ -1,5 +1,7 @@
 //! MATLAB-compatible `pwd` builtin for RunMat.
 
+use runmat_filesystem as vfs;
+#[cfg(test)]
 use std::env;
 use std::path::Path;
 
@@ -10,7 +12,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::console::{record_console_output, ConsoleStream};
 use crate::{build_runtime_error, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::pwd")]
@@ -61,22 +62,17 @@ async fn pwd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !args.is_empty() {
         return Err(pwd_error("pwd: too many input arguments"));
     }
-    let current = env::current_dir().map_err(|err| {
+    let current = vfs::current_dir().map_err(|err| {
         pwd_error(format!(
             "pwd: unable to determine current directory ({err})"
         ))
     })?;
-    emit_path_stdout(&current);
     Ok(path_to_value(&current))
 }
 
 fn path_to_value(path: &Path) -> Value {
     let text = path.to_string_lossy().into_owned();
     Value::CharArray(CharArray::new_row(&text))
-}
-
-fn emit_path_stdout(path: &Path) {
-    record_console_output(ConsoleStream::Stdout, path.to_string_lossy().into_owned());
 }
 
 #[cfg(test)]

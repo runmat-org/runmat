@@ -41,17 +41,17 @@
   "examples": [
     {
       "description": "Centering the spectrum of a 1-D FFT result with even length",
-      "input": "x = [0 1 2 3 4 5 6 7];\nfx = fft(x);\ny = fftshift(fx);",
+      "input": "x = [0 1 2 3 4 5 6 7];\nfx = fft(x);\ny = fftshift(fx)",
       "output": "y = [4 5 6 7 0 1 2 3];"
     },
     {
       "description": "Handling odd-length vectors",
-      "input": "x = 1:5;\ny = fftshift(x);",
+      "input": "x = 1:5;\ny = fftshift(x)",
       "output": "y = [4 5 1 2 3];"
     },
     {
       "description": "Centering both axes of a 2-D FFT",
-      "input": "A = [1 2 3; 4 5 6];\nC = fftshift(A);",
+      "input": "A = [1 2 3; 4 5 6];\nC = fftshift(A)",
       "output": "C =\n     6     4     5\n     3     1     2"
     },
     {
@@ -61,7 +61,7 @@
     },
     {
       "description": "Applying `fftshift` to a gpuArray spectrum",
-      "input": "G = gpuArray(0:7);\ncentered = fftshift(G);\nH = gather(centered);",
+      "input": "G = gpuArray(0:7);\ncentered = fftshift(G);\nH = gather(centered)",
       "output": "H = [4 5 6 7 0 1 2 3];"
     }
   ],

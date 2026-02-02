@@ -640,12 +640,20 @@ async fn get_field_value(value: Value, name: &str) -> BuiltinResult<Value> {
         Value::Listener(listener) => get_listener_field(&listener, name),
         Value::MException(ex) => get_exception_field(&ex, name),
         Value::Cell(cell) if is_struct_array(&cell) => {
-            let Some(first) = struct_array_first(&cell)? else {
+            if cell.data.is_empty() {
                 return Err(getfield_flow(
                     "Struct contents reference from an empty struct array.",
                 ));
-            };
-            get_field_value(first, name).await
+            }
+            // Default to first element when no index is specified
+            let first_handle = &cell.data[0];
+            let first_entry = unsafe { &*first_handle.as_raw() };
+            match first_entry {
+                Value::Struct(st) => get_struct_field(st, name),
+                _ => Err(getfield_flow(
+                    "Struct contents reference from a non-struct array object.",
+                )),
+            }
         }
         _ => Err(getfield_flow(
             "Struct contents reference from a non-struct array object.",
@@ -776,20 +784,6 @@ fn is_struct_array(cell: &CellArray) -> bool {
     cell.data
         .iter()
         .all(|handle| matches!(unsafe { &*handle.as_raw() }, Value::Struct(_)))
-}
-
-fn struct_array_first(cell: &CellArray) -> BuiltinResult<Option<Value>> {
-    if cell.data.is_empty() {
-        return Ok(None);
-    }
-    let handle = cell.data.first().unwrap();
-    let value = unsafe { &*handle.as_raw() };
-    match value {
-        Value::Struct(_) => Ok(Some(value.clone())),
-        _ => Err(getfield_flow(
-            "getfield: expected struct array elements to be structs",
-        )),
-    }
 }
 
 #[cfg(test)]

@@ -33,7 +33,7 @@
   "description": "`disp` prints the contents of a variable to the Command Window without including the variable name. RunMat mirrors MATLAB behaviour for numeric, logical, string, character, struct, cell, and gpuArray inputs so scripts and diagnostic utilities behave identically.",
   "behaviors": [
     "Accepts exactly one input argument; additional arguments raise a MATLAB-compatible error.",
-    "Numeric, logical, and complex arrays respect MATLAB’s column-major layout with right-aligned columns that honour the active numeric format.",
+    "Numeric, logical, and complex arrays respect MATLAB\u2019s column-major layout with right-aligned columns that honour the active numeric format.",
     "N-D arrays (with three or more dimensions) display one 2-D slice at a time with MATLAB-style `(:,:,[...]) =` headers so each page mirrors the Command Window output.",
     "Text inputs follow MATLAB conventions:",
     "Character arrays print each row as plain text without surrounding quotes.",
@@ -46,22 +46,22 @@
   "examples": [
     {
       "description": "Printing a message in the Command Window",
-      "input": "disp(\"Simulation complete.\");",
+      "input": "disp(\"Simulation complete.\")",
       "output": "Simulation complete."
     },
     {
       "description": "Displaying numeric vectors with MATLAB spacing",
-      "input": "angles = [0 pi/6 pi/4 pi/3];\ndisp(angles);",
+      "input": "angles = [0 pi/6 pi/4 pi/3];\ndisp(angles)",
       "output": "         0    0.5236    0.7854    1.0472"
     },
     {
       "description": "Showing a matrix without variable names",
-      "input": "A = [1 23 456; 78 9 10];\ndisp(A);",
+      "input": "A = [1 23 456; 78 9 10];\ndisp(A)",
       "output": "     1    23   456\n    78     9    10"
     },
     {
       "description": "Printing struct fields in the Command Window",
-      "input": "cfg = struct(\"solver\", \"bicgstab\", \"tolerance\", 1e-8);\ndisp(cfg);",
+      "input": "cfg = struct(\"solver\", \"bicgstab\", \"tolerance\", 1e-8);\ndisp(cfg)",
       "output": "    solver: \"bicgstab\"\n  tolerance: 1e-08"
     },
     {
@@ -71,7 +71,7 @@
     },
     {
       "description": "Showing string and character arrays",
-      "input": "names = [\"alpha\" \"beta\"; \"gamma\" \"delta\"];\ndisp(names);\ndisp('RunMat');",
+      "input": "names = [\"alpha\" \"beta\"; \"gamma\" \"delta\"];\ndisp(names);\ndisp('RunMat')",
       "output": "\"alpha\"    \"beta\"\n\"gamma\"    \"delta\"\nRunMat"
     }
   ],
@@ -139,8 +139,8 @@
     "label": "`crates/runmat-runtime/src/builtins/io/disp.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/disp.rs"
   },
-  "gpu_residency": "`disp` is a side-effecting sink. When the input (or nested values) reside on the GPU, RunMat gathers them to host memory using the active acceleration provider. Providers do not need to implement special hooks—the builtin always renders on the CPU before writing to standard output.",
+  "gpu_residency": "`disp` is a side-effecting sink. When the input (or nested values) reside on the GPU, RunMat gathers them to host memory using the active acceleration provider. Providers do not need to implement special hooks\u2014the builtin always renders on the CPU before writing to standard output.",
   "gpu_behavior": [
-    "`disp` is a side-effecting sink. When the input (or nested values) reside on the GPU, RunMat gathers them to host memory using the active acceleration provider. Providers do not need to implement special hooks—the builtin always renders on the CPU before writing to standard output."
+    "`disp` is a side-effecting sink. When the input (or nested values) reside on the GPU, RunMat gathers them to host memory using the active acceleration provider. Providers do not need to implement special hooks\u2014the builtin always renders on the CPU before writing to standard output."
   ]
 }

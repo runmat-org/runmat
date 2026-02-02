@@ -45,27 +45,27 @@
   "examples": [
     {
       "description": "Counting nonzero elements in a dense matrix",
-      "input": "A = [1 0 3; 0 0 5];\ncount = nnz(A);",
+      "input": "A = [1 0 3; 0 0 5];\ncount = nnz(A)",
       "output": "count = 3;"
     },
     {
       "description": "Counting nonzero entries in each column",
-      "input": "A = [1 0 3; 0 7 5];\nperColumn = nnz(A, 1);",
+      "input": "A = [1 0 3; 0 7 5];\nperColumn = nnz(A, 1)",
       "output": "perColumn = [1 1 2];"
     },
     {
       "description": "Counting nonzero entries in each row",
-      "input": "A = [1 0 3; 0 7 0];\nperRow = nnz(A, 2);",
+      "input": "A = [1 0 3; 0 7 0];\nperRow = nnz(A, 2)",
       "output": "perRow = [2; 1];"
     },
     {
       "description": "Recognising `NaN` values as nonzero",
-      "input": "values = [0 NaN 5];\nnanCount = nnz(values);",
+      "input": "values = [0 NaN 5];\nnanCount = nnz(values)",
       "output": "nanCount = 2;"
     },
     {
       "description": "Counting GPU-resident values without manual gathers",
-      "input": "G = gpuArray([1 0 2 0 3]);\ngpuCount = nnz(G);",
+      "input": "G = gpuArray([1 0 2 0 3]);\ngpuCount = nnz(G)",
       "output": "gpuCount = 3;"
     }
   ],

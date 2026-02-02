@@ -4,6 +4,7 @@
 //! can depend on.
 
 pub mod broadcast;
+pub mod env;
 pub mod format;
 pub mod fs;
 pub mod gpu_helpers;

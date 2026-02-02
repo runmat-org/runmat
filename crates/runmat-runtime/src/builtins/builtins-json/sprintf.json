@@ -44,42 +44,42 @@
   "examples": [
     {
       "description": "Formatting A Scalar Value",
-      "input": "txt = sprintf('Value: %d', 42);",
+      "input": "txt = sprintf('Value: %d', 42)",
       "output": "txt =\n    'Value: 42'"
     },
     {
       "description": "Formatting With Precision And Width",
-      "input": "txt = sprintf('pi ~= %8.4f', pi);",
+      "input": "txt = sprintf('pi ~= %8.4f', pi)",
       "output": "txt =\n    'pi ~=   3.1416'"
     },
     {
       "description": "Combining Strings And Numbers",
-      "input": "label = sprintf('Trial %02d: %.1f%% complete', 7, 84.95);",
+      "input": "label = sprintf('Trial %02d: %.1f%% complete', 7, 84.95)",
       "output": "label =\n    'Trial 07: 85.0% complete'"
     },
     {
       "description": "Formatting Vector Inputs",
-      "input": "data = [10 20 30];\ntxt = sprintf('%d ', data);",
+      "input": "data = [10 20 30];\ntxt = sprintf('%d ', data)",
       "output": "txt =\n    '10 20 30 '"
     },
     {
       "description": "Using Star Width/Precision Arguments",
-      "input": "txt = sprintf('%*.*f %*.*f', 4, 2, 15.2, 6, 4, 0.001);",
+      "input": "txt = sprintf('%*.*f %*.*f', 4, 2, 15.2, 6, 4, 0.001)",
       "output": "txt =\n    '15.20  0.0010'"
     },
     {
       "description": "Quoting Text With `%s`",
-      "input": "names = [\"Ada\", \"Grace\"];\ntxt = sprintf('Hello, %s! ', names);",
+      "input": "names = [\"Ada\", \"Grace\"];\ntxt = sprintf('Hello, %s! ', names)",
       "output": "txt =\n    'Hello, Ada! Hello, Grace! '"
     },
     {
       "description": "Formatting GPU-Resident Data",
-      "input": "G = gpuArray([1.5 2.5 3.5]);\ntxt = sprintf('%.1f;', G);",
+      "input": "G = gpuArray([1.5 2.5 3.5]);\ntxt = sprintf('%.1f;', G)",
       "output": "txt =\n    '1.5;2.5;3.5;'"
     },
     {
       "description": "Creating Multi-line Text",
-      "input": "message = sprintf('First line\\\\nSecond line\\\\t(indented)');",
+      "input": "message = sprintf('First line\\\\nSecond line\\\\t(indented)')",
       "output": "message =\n    'First line\nSecond line\t(indented)'"
     }
   ],
@@ -118,7 +118,7 @@
     },
     {
       "question": "How are empty inputs handled?",
-      "answer": "If all argument arrays are empty, `sprintf` returns an empty character array (`1×0`). If the format string itself is empty, the result is also empty."
+      "answer": "If all argument arrays are empty, `sprintf` returns an empty character array (`1\u00d70`). If the format string itself is empty, the result is also empty."
     },
     {
       "question": "What happens with multi-row character arrays?",

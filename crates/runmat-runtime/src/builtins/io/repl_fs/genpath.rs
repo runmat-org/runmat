@@ -12,6 +12,7 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 use runmat_filesystem as vfs;
 use std::collections::HashSet;
+#[cfg(test)]
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -85,7 +86,7 @@ async fn genpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 }
 
 fn generate_from_current_directory() -> BuiltinResult<Value> {
-    let cwd = env::current_dir().map_err(|err| {
+    let cwd = vfs::current_dir().map_err(|err| {
         genpath_error(format!(
             "genpath: unable to resolve current directory: {err}"
         ))
@@ -149,7 +150,7 @@ fn normalize_root(text: &str) -> BuiltinResult<RootInfo> {
     let absolute = if raw_path.is_absolute() {
         raw_path
     } else {
-        let cwd = env::current_dir().map_err(|err| {
+        let cwd = vfs::current_dir().map_err(|err| {
             genpath_error(format!(
                 "genpath: unable to resolve current directory: {err}"
             ))
@@ -354,7 +355,7 @@ fn build_exclude_set(excludes: Option<&str>, root: &RootInfo) -> BuiltinResult<E
             }
 
             // Fallback: try relative to the current working directory
-            if let Ok(cwd) = env::current_dir() {
+            if let Ok(cwd) = vfs::current_dir() {
                 let alt = if Path::new(trimmed).is_absolute() {
                     PathBuf::from(trimmed)
                 } else {

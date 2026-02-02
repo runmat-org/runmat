@@ -187,6 +187,9 @@ fn parse_numeric_dimension(value: f64) -> Result<usize, String> {
 
 fn dims_from_tensor_values(values: &[f64], shape: &[usize]) -> Result<Option<Vec<usize>>, String> {
     let len = values.len();
+    if len == 0 {
+        return Ok(Some(Vec::new()));
+    }
     let is_scalar = len == 1;
     let is_row = shape.len() >= 2 && shape[0] == 1;
     let is_column = shape.len() >= 2 && shape[1] == 1;

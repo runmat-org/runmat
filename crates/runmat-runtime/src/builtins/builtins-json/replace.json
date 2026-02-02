@@ -43,42 +43,42 @@
   "examples": [
     {
       "description": "Replace all instances of a word in a string",
-      "input": "txt = \"RunMat accelerates MATLAB code\";\nresult = replace(txt, \"RunMat\", \"RunMat Accelerate\");",
+      "input": "txt = \"RunMat accelerates MATLAB code\";\nresult = replace(txt, \"RunMat\", \"RunMat Accelerate\")",
       "output": "result = \"RunMat Accelerate accelerates MATLAB code\""
     },
     {
       "description": "Replace multiple terms in a string array",
-      "input": "labels = [\"GPU pipeline\"; \"CPU pipeline\"];\nresult = replace(labels, [\"GPU\", \"CPU\"], [\"Device\", \"Host\"]);",
+      "input": "labels = [\"GPU pipeline\"; \"CPU pipeline\"];\nresult = replace(labels, [\"GPU\", \"CPU\"], [\"Device\", \"Host\"])",
       "output": "result = 2\u00d71 string\n    \"Device pipeline\"\n    \"Host pipeline\""
     },
     {
       "description": "Replace substrings in a character array while preserving padding",
-      "input": "chars = char(\"alpha\", \"beta \");\nout = replace(chars, \"a\", \"A\");",
+      "input": "chars = char(\"alpha\", \"beta \");\nout = replace(chars, \"a\", \"A\")",
       "output": "out =\n\n  2\u00d75 char array\n\n    'AlphA'\n    'betA '"
     },
     {
       "description": "Replace text within a cell array of character vectors",
-      "input": "C = {'Kernel Fusion', 'GPU Planner'};\nupdated = replace(C, {'Kernel', 'GPU'}, {'Shader', 'Device'});",
+      "input": "C = {'Kernel Fusion', 'GPU Planner'};\nupdated = replace(C, {'Kernel', 'GPU'}, {'Shader', 'Device'})",
       "output": "updated = 1\u00d72 cell array\n    {'Shader Fusion'}    {'Device Planner'}"
     },
     {
       "description": "Remove substrings by replacing with empty text",
-      "input": "paths = [\"runmat/bin\", \"runmat/lib\"];\nclean = replace(paths, \"runmat/\", \"\");",
+      "input": "paths = [\"runmat/bin\", \"runmat/lib\"];\nclean = replace(paths, \"runmat/\", \"\")",
       "output": "clean = 1\u00d72 string\n    \"bin\"    \"lib\""
     },
     {
       "description": "Replace using scalar replacement for multiple search terms",
-      "input": "message = \"OpenCL or CUDA or Vulkan\";\nunified = replace(message, [\"OpenCL\", \"CUDA\", \"Vulkan\"], \"GPU backend\");",
+      "input": "message = \"OpenCL or CUDA or Vulkan\";\nunified = replace(message, [\"OpenCL\", \"CUDA\", \"Vulkan\"], \"GPU backend\")",
       "output": "unified = \"GPU backend or GPU backend or GPU backend\""
     },
     {
       "description": "Replace text stored inside a cell array of strings",
-      "input": "cells = { \"Snapshot\", \"Ignition Interpreter\" };\nrenamed = replace(cells, \" \", \"_\");",
+      "input": "cells = { \"Snapshot\", \"Ignition Interpreter\" };\nrenamed = replace(cells, \" \", \"_\")",
       "output": "renamed = 1\u00d72 cell array\n    {\"Snapshot\"}    {\"Ignition_Interpreter\"}"
     },
     {
       "description": "Preserve missing strings during replacement",
-      "input": "vals = [\"runmat\", \"<missing>\", \"accelerate\"];\nout = replace(vals, \"runmat\", \"RunMat\");",
+      "input": "vals = [\"runmat\", \"<missing>\", \"accelerate\"];\nout = replace(vals, \"runmat\", \"RunMat\")",
       "output": "out = 1\u00d73 string\n    \"RunMat\"    <missing>    \"accelerate\""
     }
   ],

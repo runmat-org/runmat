@@ -42,32 +42,32 @@
   "examples": [
     {
       "description": "Concatenate string scalars element-wise",
-      "input": "greeting = strcat(\"Run\", \"Mat\");",
+      "input": "greeting = strcat(\"Run\", \"Mat\")",
       "output": "greeting = \"RunMat\""
     },
     {
       "description": "Concatenate a string scalar with a string array",
-      "input": "names = [\"Ignition\", \"Turbine\", \"Accelerate\"];\ntagged = strcat(\"runmat-\", names);",
+      "input": "names = [\"Ignition\", \"Turbine\", \"Accelerate\"];\ntagged = strcat(\"runmat-\", names)",
       "output": "tagged = 1\u00d73 string\n    \"runmat-Ignition\"    \"runmat-Turbine\"    \"runmat-Accelerate\""
     },
     {
       "description": "Concatenate character arrays while trimming trailing spaces",
-      "input": "A = char(\"GPU \", \"Planner\");\nB = char(\"Accel\", \" Stage \");\nresult = strcat(A, B);",
+      "input": "A = char(\"GPU \", \"Planner\");\nB = char(\"Accel\", \" Stage \");\nresult = strcat(A, B)",
       "output": "result =\n\n  2\u00d711 char array\n\n    'GPUAccel'\n    'PlannerStage'"
     },
     {
       "description": "Concatenate cell arrays of character vectors",
-      "input": "C = {'Run ', 'Plan '; 'Fuse ', 'Cache '};\nsuffix = {'Mat', 'Ops'; 'Kernels', 'Stats'};\ncombined = strcat(C, suffix);",
+      "input": "C = {'Run ', 'Plan '; 'Fuse ', 'Cache '};\nsuffix = {'Mat', 'Ops'; 'Kernels', 'Stats'};\ncombined = strcat(C, suffix)",
       "output": "combined = 2\u00d72 cell\n    {'RunMat'}    {'PlanOps'}\n    {'FuseKernels'}    {'CacheStats'}"
     },
     {
       "description": "Propagate missing strings during concatenation",
-      "input": "values = [string(missing) \"ready\"];\nout = strcat(\"job-\", values);",
+      "input": "values = [string(missing) \"ready\"];\nout = strcat(\"job-\", values)",
       "output": "out = 1\u00d72 string\n    <missing>    \"job-ready\""
     },
     {
       "description": "Broadcast a scalar character vector across a character array",
-      "input": "labels = char(\"core\", \"runtime\", \"planner\");\nprefixed = strcat(\"runmat-\", labels);",
+      "input": "labels = char(\"core\", \"runtime\", \"planner\");\nprefixed = strcat(\"runmat-\", labels)",
       "output": "prefixed =\n\n  3\u00d711 char array\n\n    'runmat-core'\n    'runmat-runtime'\n    'runmat-planner'"
     }
   ],

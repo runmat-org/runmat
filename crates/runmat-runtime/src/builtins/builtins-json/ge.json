@@ -43,32 +43,32 @@
   "examples": [
     {
       "description": "Test Whether One Scalar Is Greater Than or Equal To Another",
-      "input": "flag = ge(42, 42);",
+      "input": "flag = ge(42, 42)",
       "output": "flag =\n     1"
     },
     {
       "description": "Keep Matrix Elements Above or Equal To A Threshold",
-      "input": "M = [1 2 3; 4 5 6];\nmask = ge(M, 3);",
+      "input": "M = [1 2 3; 4 5 6];\nmask = ge(M, 3)",
       "output": "mask =\n  2\u00d73 logical array\n     0     0     1\n     1     1     1"
     },
     {
       "description": "Apply Greater-Equal With Implicit Expansion",
-      "input": "v = [1 3 5 7];\nmask = ge(v, [2 6]);",
+      "input": "v = [1 3 5 7];\nmask = ge(v, [2 6])",
       "output": "mask =\n  1\u00d74 logical array\n     0     0     1     1"
     },
     {
       "description": "Compare Character Data To Numeric Codes",
-      "input": "letters = ['A' 'B' 'C'];\nisAfterOrB = ge(letters, 66);",
+      "input": "letters = ['A' 'B' 'C'];\nisAfterOrB = ge(letters, 66)",
       "output": "isAfterOrB =\n  1\u00d73 logical array\n     0     1     1"
     },
     {
       "description": "Compare String Arrays Lexicographically With Equality Support",
-      "input": "names = [\"alice\" \"charlie\" \"bob\"];\nlaterOrSame = ge(names, \"bob\");",
+      "input": "names = [\"alice\" \"charlie\" \"bob\"];\nlaterOrSame = ge(names, \"bob\")",
       "output": "laterOrSame =\n  1\u00d73 logical array\n     0     1     1"
     },
     {
       "description": "Run `ge` Directly On `gpuArray` Inputs",
-      "input": "G1 = gpuArray([1 4 6]);\nG2 = gpuArray([1 5 6]);\ndeviceResult = ge(G1, G2);\nhostResult = gather(deviceResult);",
+      "input": "G1 = gpuArray([1 4 6]);\nG2 = gpuArray([1 5 6]);\ndeviceResult = ge(G1, G2);\nhostResult = gather(deviceResult)",
       "output": "deviceResult =\n  1\u00d73 gpuArray logical array\n     1     0     1\nhostResult =\n  1\u00d73 logical array\n     1     0     1"
     }
   ],

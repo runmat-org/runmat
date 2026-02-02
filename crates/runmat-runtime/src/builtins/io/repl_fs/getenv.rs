@@ -5,6 +5,8 @@
 //! `getenv` with no arguments returns a struct containing every environment variable visible to
 //! the current process.
 
+use crate::builtins::common::env as runtime_env;
+#[cfg(test)]
 use std::env;
 
 use runmat_builtins::{CharArray, StringArray, StructValue, Value};
@@ -90,7 +92,7 @@ async fn getenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
 fn getenv_all() -> Value {
     let mut st = StructValue::new();
-    for (name, value) in env::vars() {
+    for (name, value) in runtime_env::vars() {
         st.fields
             .insert(name, Value::CharArray(CharArray::new_row(&value)));
     }
@@ -167,7 +169,7 @@ async fn getenv_from_cell_array(array: runmat_builtins::CellArray) -> BuiltinRes
 }
 
 fn read_env_string(name: &str) -> String {
-    env::var(name).unwrap_or_default()
+    runtime_env::var(name).unwrap_or_default()
 }
 
 fn char_row_to_string(array: &CharArray, row: usize) -> String {

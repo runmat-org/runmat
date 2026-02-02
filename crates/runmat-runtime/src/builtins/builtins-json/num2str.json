@@ -30,10 +30,10 @@
     "unit": "builtins::strings::core::num2str::tests",
     "integration": "builtins::strings::core::num2str::tests::num2str_gpu_tensor_roundtrip"
   },
-  "description": "`num2str(x)` converts numeric scalars, vectors, and matrices into a character array where each row of `x` becomes a row of text. Values use MATLAB's short-`g` formatting by default, and you can provide a precision or an explicit format specifier to control the output. Complex inputs produce `a ± bi` strings, and logical data is converted to `0` or `1`.",
+  "description": "`num2str(x)` converts numeric scalars, vectors, and matrices into a character array where each row of `x` becomes a row of text. Values use MATLAB's short-`g` formatting by default, and you can provide a precision or an explicit format specifier to control the output. Complex inputs produce `a \u00b1 bi` strings, and logical data is converted to `0` or `1`.",
   "behaviors": [
     "Default formatting uses up to 15 significant digits with MATLAB-style `g` behaviour (switching to scientific notation when needed).",
-    "`num2str(x, p)` formats using `p` significant digits (`0 ≤ p ≤ 52`).",
+    "`num2str(x, p)` formats using `p` significant digits (`0 \u2264 p \u2264 52`).",
     "`num2str(x, fmt)` accepts a single-number `printf`-style format such as `'%0.3f'`, `'%10.4e'`, or `'%.5g'`. Width, `+`, `-`, and `0` flags are supported.",
     "A trailing `'local'` argument switches the decimal separator to the one inferred from the active locale (or the `RUNMAT_DECIMAL_SEPARATOR` environment variable).",
     "Vector inputs return single-row character arrays; matrices return one textual row per numeric row.",
@@ -43,36 +43,36 @@
   "examples": [
     {
       "description": "Converting A Scalar With Default Precision",
-      "input": "label = num2str(pi);",
+      "input": "label = num2str(pi)",
       "output": "label =\n    '3.14159265358979'"
     },
     {
       "description": "Formatting With A Specific Number Of Significant Digits",
-      "input": "digits = num2str(pi, 4);",
+      "input": "digits = num2str(pi, 4)",
       "output": "digits =\n    '3.142'"
     },
     {
       "description": "Using A Custom Format String",
-      "input": "row = num2str([1.234 5.678], '%.2f');",
+      "input": "row = num2str([1.234 5.678], '%.2f')",
       "output": "row =\n    '1.23  5.68'"
     },
     {
       "description": "Displaying A Matrix With Column Alignment",
-      "input": "block = num2str([1 23 456; 78 9 10]);",
+      "input": "block = num2str([1 23 456; 78 9 10])",
       "output": "block =\n    ' 1  23  456'\n    '78   9   10'"
     },
     {
       "description": "Formatting Complex Numbers",
-      "input": "z = num2str([3+4i 5-6i]);",
+      "input": "z = num2str([3+4i 5-6i])",
       "output": "z =\n    '3 + 4i  5 - 6i'"
     },
     {
       "description": "Respecting Locale-Specific Decimal Separators",
-      "input": "text = num2str(0.125, 'local');"
+      "input": "text = num2str(0.125, 'local')"
     },
     {
       "description": "Converting GPU-Resident Data",
-      "input": "G = gpuArray([10.5 20.5]);\ntxt = num2str(G, '%.1f');",
+      "input": "G = gpuArray([10.5 20.5]);\ntxt = num2str(G, '%.1f')",
       "output": "txt =\n    '10.5  20.5'"
     }
   ],

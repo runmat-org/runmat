@@ -31,46 +31,46 @@
   "description": "`ismatrix(A)` returns logical `true` when the input has two dimensions (`m`-by-`n`) and logical `false` otherwise. Scalars and vectors are considered matrices because they occupy a 1-by-1 or 1-by-`n` grid. The builtin mirrors MATLAB semantics across numeric, logical, character, string, cell, struct, and GPU-resident data.",
   "behaviors": [
     "Returns `true` for scalars, row vectors, column vectors, and ordinary 2-D matrices.",
-    "Returns `false` for arrays whose rank exceeds two, even if trailing dimensions are singleton (for example, `1×1×1`).",
-    "Empty arrays such as `0×0`, `1×0`, and `0×1` are matrices; higher-rank empties such as `0×0×3` are not.",
+    "Returns `false` for arrays whose rank exceeds two, even if trailing dimensions are singleton (for example, `1\u00d71\u00d71`).",
+    "Empty arrays such as `0\u00d70`, `1\u00d70`, and `0\u00d71` are matrices; higher-rank empties such as `0\u00d70\u00d73` are not.",
     "Character arrays, string arrays, and cell arrays honor their reported MATLAB dimensions.",
     "GPU tensors rely on their `GpuTensorHandle` metadata; if a provider omits the shape, RunMat gathers once to inspect it.",
-    "Objects, structs, numeric scalars, and logical scalars behave like their underlying dimensions (`1×1`)."
+    "Objects, structs, numeric scalars, and logical scalars behave like their underlying dimensions (`1\u00d71`)."
   ],
   "examples": [
     {
       "description": "Confirming that a 2-D matrix returns true",
-      "input": "tf = ismatrix([1 2 3; 4 5 6]);",
+      "input": "tf = ismatrix([1 2 3; 4 5 6])",
       "output": "tf = logical(1)"
     },
     {
       "description": "Showing that vectors and scalars count as matrices",
-      "input": "scalar_tf = ismatrix(42);\nrow_tf = ismatrix(1:5);\ncol_tf = ismatrix((1:5)');",
+      "input": "scalar_tf = ismatrix(42);\nrow_tf = ismatrix(1:5);\ncol_tf = ismatrix((1:5)')",
       "output": "scalar_tf = logical(1)\nrow_tf = logical(1)\ncol_tf = logical(1)"
     },
     {
       "description": "Detecting that higher-dimensional arrays are not matrices",
-      "input": "tf = ismatrix(ones(2,2,3));",
+      "input": "tf = ismatrix(ones(2,2,3))",
       "output": "tf = logical(0)"
     },
     {
       "description": "Working with empty arrays",
-      "input": "tf_empty = ismatrix([]);\ntf_row0 = ismatrix(zeros(1,0));\ntf_col0 = ismatrix(zeros(0,1));\ntf_3d_empty = ismatrix(zeros(0,0,3));",
+      "input": "tf_empty = ismatrix([]);\ntf_row0 = ismatrix(zeros(1,0));\ntf_col0 = ismatrix(zeros(0,1));\ntf_3d_empty = ismatrix(zeros(0,0,3))",
       "output": "tf_empty = logical(1)\ntf_row0 = logical(1)\ntf_col0 = logical(1)\ntf_3d_empty = logical(0)"
     },
     {
       "description": "Character and string arrays follow their visible dimensions",
-      "input": "tf_char = ismatrix('RunMat');\ntf_string = ismatrix([\"a\",\"b\",\"c\"]);",
+      "input": "tf_char = ismatrix('RunMat');\ntf_string = ismatrix([\"a\",\"b\",\"c\"])",
       "output": "tf_char = logical(1)\ntf_string = logical(1)"
     },
     {
       "description": "Cell and struct arrays respect their grid layout",
-      "input": "C = {1, 2; 3, 4};\nS = repmat(struct(\"field\", 1), 1, 3, 1);\ntf_cell = ismatrix(C);\ntf_struct = ismatrix(S);",
+      "input": "C = {1, 2; 3, 4};\nS = repmat(struct(\"field\", 1), 1, 3, 1);\ntf_cell = ismatrix(C);\ntf_struct = ismatrix(S)",
       "output": "tf_cell = logical(1)\ntf_struct = logical(0)"
     },
     {
       "description": "Inspecting GPU arrays without explicit gathers",
-      "input": "G = gpuArray(rand(4,4));\ntf_gpu = ismatrix(G);",
+      "input": "G = gpuArray(rand(4,4));\ntf_gpu = ismatrix(G)",
       "output": "tf_gpu = logical(1)"
     }
   ],
@@ -85,11 +85,11 @@
     },
     {
       "question": "Do trailing singleton dimensions change the result?",
-      "answer": "Yes. Any array whose rank exceeds two returns `false`, even if the extra dimensions are size one (for example, `1×1×1`)."
+      "answer": "Yes. Any array whose rank exceeds two returns `false`, even if the extra dimensions are size one (for example, `1\u00d71\u00d71`)."
     },
     {
       "question": "How are empty arrays handled?",
-      "answer": "Empty arrays with at most two dimensions (such as `0×0`, `1×0`, or `0×1`) return `true`. Higher-rank empties return `false`."
+      "answer": "Empty arrays with at most two dimensions (such as `0\u00d70`, `1\u00d70`, or `0\u00d71`) return `true`. Higher-rank empties return `false`."
     },
     {
       "question": "What about character, string, or cell arrays?",

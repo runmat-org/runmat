@@ -45,27 +45,27 @@
   "examples": [
     {
       "description": "Running products down each column (default dimension)",
-      "input": "A = [1 2 3; 4 5 6];\ncolumnProducts = cumprod(A);",
+      "input": "A = [1 2 3; 4 5 6];\ncolumnProducts = cumprod(A)",
       "output": "columnProducts =\n     1     2     3\n     4    10    18"
     },
     {
       "description": "Tracking cumulative products across rows",
-      "input": "A = [1 2 3; 4 5 6];\nrowProducts = cumprod(A, 2);",
+      "input": "A = [1 2 3; 4 5 6];\nrowProducts = cumprod(A, 2)",
       "output": "rowProducts =\n     1     2     6\n     4    20   120"
     },
     {
       "description": "Reversing the accumulation direction",
-      "input": "v = [2 3 4 5];\nreverseProducts = cumprod(v, \"reverse\");",
+      "input": "v = [2 3 4 5];\nreverseProducts = cumprod(v, \"reverse\")",
       "output": "reverseProducts =\n   120    60    20     5"
     },
     {
       "description": "Ignoring NaN values while multiplying",
-      "input": "v = [2 NaN 4 NaN 3];\nrunning = cumprod(v, \"omitnan\");",
+      "input": "v = [2 NaN 4 NaN 3];\nrunning = cumprod(v, \"omitnan\")",
       "output": "running =\n     2     2     8     8    24"
     },
     {
       "description": "Computing a cumulative product inside a GPU workflow",
-      "input": "G = gpuArray(1 + 0.1*rand(1, 5));\ntotals = cumprod(G);\nhostResult = gather(totals);"
+      "input": "G = gpuArray(1 + 0.1*rand(1, 5));\ntotals = cumprod(G);\nhostResult = gather(totals)"
     }
   ],
   "faqs": [
