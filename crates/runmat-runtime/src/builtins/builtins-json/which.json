@@ -53,12 +53,12 @@
     {
       "description": "Listing all matches on the path",
       "input": "which(\"sum\", \"-all\")",
-      "output": "{\n    [1,1] = built-in (RunMat builtin: sum)\n    [2,1] = /home/user/runmat/stdlib/sum.m\n}"
+      "output": "{\n    [1,1] = built-in (RunMat builtin: sum)\n    [2,1] = //runmat/stdlib/sum.m\n}"
     },
     {
       "description": "Locating a script or function file",
       "input": "which(\"helpers/process_data\")",
-      "output": "/home/user/projects/runmat/helpers/process_data.m"
+      "output": "//projects/runmat/helpers/process_data.m"
     },
     {
       "description": "Restricting the search to variables",
@@ -68,7 +68,7 @@
     {
       "description": "Restricting the search to files",
       "input": "which(\"fft\", \"-file\")",
-      "output": "/home/user/runmat/overrides/fft.m"
+      "output": "//runmat/overrides/fft.m"
     }
   ],
   "faqs": [

@@ -63,7 +63,7 @@
     {
       "description": "Rounding up to two decimal places",
       "input": "temps = [21.452 19.991 22.501];\nrounded = ceil(temps, 2)",
-      "output": "rounded = [21.46 19.99 22.51];"
+      "output": "rounded = [21.46 20 22.51];"
     },
     {
       "description": "Rounding to significant digits",

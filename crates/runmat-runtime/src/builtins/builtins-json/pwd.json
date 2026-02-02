@@ -41,7 +41,7 @@
     {
       "description": "Show The Current Working Folder",
       "input": "current = pwd;\ndisp(current)",
-      "output": "/home/user"
+      "output": "/"
     },
     {
       "description": "Capture The Folder Before Changing Directories",
@@ -56,12 +56,12 @@
     {
       "description": "Confirm The Folder Inside Scripts",
       "input": "fprintf(\"Script started in %s\\n\", pwd)",
-      "output": "% Example output:\n%   Script started in /home/user"
+      "output": "% Example output:\n%   Script started in /"
     },
     {
       "description": "Log The Working Folder Together With Results",
       "input": "logFile = \"run.log\";\nfid = fopen(logFile, \"w\");\nfprintf(fid, \"Working folder: %s\\n\", pwd);\nfclose(fid)",
-      "output": "% The log file contains a line such as:\n%   Working folder: /home/user"
+      "output": "% The log file contains a line such as:\n%   Working folder: /"
     },
     {
       "description": "Handle Errors When The Working Folder Is Unavailable",

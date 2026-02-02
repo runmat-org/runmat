@@ -11,22 +11,7 @@ use once_cell::sync::OnceCell;
 #[cfg(target_arch = "wasm32")]
 fn env_lock() -> &'static RwLock<BTreeMap<String, String>> {
     static ENV: OnceCell<RwLock<BTreeMap<String, String>>> = OnceCell::new();
-    ENV.get_or_init(|| {
-        let mut vars = BTreeMap::new();
-        vars.insert("HOME".to_string(), "/home/user".to_string());
-        vars.insert(
-            "RUNMAT_PATH".to_string(),
-            "/home/user/runmat/toolbox:/home/user/runmat/user".to_string(),
-        );
-        vars.insert(
-            "PATH".to_string(),
-            "/usr/local/bin:/usr/bin:/bin".to_string(),
-        );
-        vars.insert("USER".to_string(), "user".to_string());
-        vars.insert("SHELL".to_string(), "/bin/sh".to_string());
-        vars.insert("TMPDIR".to_string(), "/tmp".to_string());
-        RwLock::new(vars)
-    })
+    ENV.get_or_init(|| RwLock::new(BTreeMap::new()))
 }
 
 pub fn var(key: &str) -> io::Result<String> {
