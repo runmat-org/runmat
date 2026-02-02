@@ -75,7 +75,7 @@
     {
       "description": "Use Tilde Expansion For Home Directory",
       "input": "home_listing = dir(\"~\")",
-      "output": "home_listing(1).folder\nans =\n    '/Users/alex'"
+      "output": "home_listing(1).folder\nans =\n    '/home/user'"
     },
     {
       "description": "Handle Missing Matches Gracefully",

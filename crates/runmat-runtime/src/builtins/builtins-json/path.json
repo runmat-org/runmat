@@ -42,22 +42,22 @@
     {
       "description": "Display the current MATLAB search path",
       "input": "p = path();\ndisp(p)",
-      "output": "/Users/alex/runmat/toolbox:/Users/alex/runmat/user"
+      "output": "/home/user/runmat/toolbox:/home/user/runmat/user"
     },
     {
       "description": "Temporarily replace the MATLAB path",
-      "input": "old = path(\"/Users/alex/runmat-addons\");\n% ... run code that relies on the temporary path ...\npath(old);   % Restore the previous path",
-      "output": "old =\n    '/Users/alex/runmat/toolbox:/Users/alex/runmat/user'"
+      "input": "old = path(\"/home/user/runmat-addons\");\n% ... run code that relies on the temporary path ...\npath(old);   % Restore the previous path",
+      "output": "old =\n    '/home/user/runmat/toolbox:/home/user/runmat/user'"
     },
     {
       "description": "Append folders to the end of the search path",
-      "input": "extra = \"/Users/alex/projects/analysis\";\npath(path(), extra);\npath()",
-      "output": "ans =\n    '/Users/alex/runmat/toolbox:/Users/alex/runmat/user:/Users/alex/projects/analysis'"
+      "input": "extra = \"/home/user/projects/analysis\";\npath(path(), extra);\npath()",
+      "output": "ans =\n    '/home/user/runmat/toolbox:/home/user/runmat/user:/home/user/projects/analysis'"
     },
     {
       "description": "Prepend folders ahead of the existing path",
       "input": "extra = \"/opt/runmat/toolbox\";\npath(extra, path());\npath()",
-      "output": "ans =\n    '/opt/runmat/toolbox:/Users/alex/runmat/toolbox:/Users/alex/runmat/user'"
+      "output": "ans =\n    '/opt/runmat/toolbox:/home/user/runmat/toolbox:/home/user/runmat/user'"
     },
     {
       "description": "Combine generated folder lists",
