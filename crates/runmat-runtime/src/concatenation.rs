@@ -11,16 +11,31 @@ fn concat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).build()
 }
 
-fn char_array_from_f64(value: f64) -> BuiltinResult<CharArray> {
+/// Converts an f64 code point to a 1x1 `CharArray`.
+///
+/// Validates that the value is a finite integer in the valid Unicode code point range,
+/// then constructs a single-character array. The `error_prefix` is prepended to error
+/// messages (e.g., "cat" or "char concat").
+pub fn char_array_from_f64_with_prefix(
+    value: f64,
+    error_prefix: &str,
+) -> BuiltinResult<CharArray> {
     if !value.is_finite() || value.fract() != 0.0 {
-        return Err(concat_error("char concat: expected integer code point"));
+        return Err(concat_error(format!(
+            "{error_prefix}: expected integer code point"
+        )));
     }
     if value < 0.0 || value > u32::MAX as f64 {
-        return Err(concat_error("char concat: code point out of range"));
+        return Err(concat_error(format!("{error_prefix}: code point out of range")));
     }
     let code = value as u32;
-    let ch = char::from_u32(code).ok_or_else(|| concat_error("char concat: invalid code point"))?;
+    let ch = char::from_u32(code)
+        .ok_or_else(|| concat_error(format!("{error_prefix}: invalid code point")))?;
     CharArray::new(vec![ch], 1, 1).map_err(concat_error)
+}
+
+fn char_array_from_f64(value: f64) -> BuiltinResult<CharArray> {
+    char_array_from_f64_with_prefix(value, "char concat")
 }
 
 /// Horizontally concatenate two matrices [A, B]

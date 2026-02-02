@@ -7,6 +7,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::concatenation::char_array_from_f64_with_prefix;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
@@ -433,25 +434,13 @@ fn cat_char_arrays(dim_zero: usize, values: Vec<Value>) -> BuiltinResult<Value> 
 fn char_array_from_value(value: Value) -> BuiltinResult<CharArray> {
     match value {
         Value::CharArray(ca) => Ok(ca),
-        Value::Num(n) => char_array_from_f64(n),
-        Value::Int(i) => char_array_from_f64(i.to_f64()),
-        Value::Bool(flag) => char_array_from_f64(if flag { 1.0 } else { 0.0 }),
+        Value::Num(n) => char_array_from_f64_with_prefix(n, "cat"),
+        Value::Int(i) => char_array_from_f64_with_prefix(i.to_f64(), "cat"),
+        Value::Bool(flag) => char_array_from_f64_with_prefix(if flag { 1.0 } else { 0.0 }, "cat"),
         other => Err(cat_err(format!(
             "cat: expected char arrays or scalar code points, got {other:?}"
         ))),
     }
-}
-
-fn char_array_from_f64(value: f64) -> BuiltinResult<CharArray> {
-    if !value.is_finite() || value.fract() != 0.0 {
-        return Err(cat_err("cat: expected integer code point for char concatenation"));
-    }
-    if value < 0.0 || value > u32::MAX as f64 {
-        return Err(cat_err("cat: code point out of range"));
-    }
-    let code = value as u32;
-    let ch = char::from_u32(code).ok_or_else(|| cat_err("cat: invalid code point"))?;
-    CharArray::new(vec![ch], 1, 1).map_err(|e| cat_err(format!("cat: {e}")))
 }
 
 fn concat_char_rows(arrays: Vec<CharArray>) -> BuiltinResult<Value> {

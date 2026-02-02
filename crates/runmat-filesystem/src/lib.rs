@@ -271,7 +271,7 @@ fn provider_lock() -> &'static RwLock<Arc<dyn FsProvider>> {
 
 #[cfg(target_arch = "wasm32")]
 fn current_dir_lock() -> &'static RwLock<PathBuf> {
-    CURRENT_DIR.get_or_init(|| RwLock::new(PathBuf::from("/Users/testUser/runmat-project")))
+    CURRENT_DIR.get_or_init(|| RwLock::new(PathBuf::from("/home/user")))
 }
 
 fn with_provider<T>(f: impl FnOnce(&dyn FsProvider) -> T) -> T {

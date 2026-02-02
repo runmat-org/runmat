@@ -10,6 +10,28 @@ use runmat_time::Instant;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+/// Recursively collect GC roots from a Value.
+///
+/// This is a shared helper used by all root types to traverse nested
+/// values (cells and structs) and collect GC pointers.
+fn collect_value_roots(value: &Value, roots: &mut Vec<GcPtr<Value>>) {
+    match value {
+        Value::Cell(cells) => {
+            for cell_value in &cells.data {
+                roots.push(cell_value.clone());
+                let inner = unsafe { &*cell_value.as_raw() };
+                collect_value_roots(inner, roots);
+            }
+        }
+        Value::Struct(struct_value) => {
+            for field_value in struct_value.fields.values() {
+                collect_value_roots(field_value, roots);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Unique identifier for a GC root
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RootId(pub usize);
@@ -70,7 +92,7 @@ impl GcRoot for StackRoot {
             let mut roots = Vec::new();
 
             for value in stack {
-                self.collect_value_roots(value, &mut roots);
+                collect_value_roots(value, &mut roots);
             }
 
             roots
@@ -97,27 +119,6 @@ impl GcRoot for StackRoot {
     }
 }
 
-impl StackRoot {
-    /// Recursively collect GC roots from a Value
-    #[allow(clippy::only_used_in_recursion)]
-    fn collect_value_roots(&self, value: &Value, roots: &mut Vec<GcPtr<Value>>) {
-        match value {
-            Value::Cell(cells) => {
-                for cell_value in &cells.data {
-                    roots.push(cell_value.clone());
-                    let inner = unsafe { &*cell_value.as_raw() };
-                    self.collect_value_roots(inner, roots);
-                }
-            }
-            Value::Struct(struct_value) => {
-                for field_value in struct_value.fields.values() {
-                    self.collect_value_roots(field_value, roots);
-                }
-            }
-            _ => {}
-        }
-    }
-}
 
 /// A root representing an array of variables
 pub struct VariableArrayRoot {
@@ -156,7 +157,7 @@ impl GcRoot for VariableArrayRoot {
             let mut roots = Vec::new();
 
             for value in vars {
-                self.collect_value_roots(value, &mut roots);
+                collect_value_roots(value, &mut roots);
             }
 
             roots
@@ -183,26 +184,6 @@ impl GcRoot for VariableArrayRoot {
     }
 }
 
-impl VariableArrayRoot {
-    #[allow(clippy::only_used_in_recursion)]
-    fn collect_value_roots(&self, value: &Value, roots: &mut Vec<GcPtr<Value>>) {
-        match value {
-            Value::Cell(cells) => {
-                for cell_value in &cells.data {
-                    roots.push(cell_value.clone());
-                    let inner = unsafe { &*cell_value.as_raw() };
-                    self.collect_value_roots(inner, roots);
-                }
-            }
-            Value::Struct(struct_value) => {
-                for field_value in struct_value.fields.values() {
-                    self.collect_value_roots(field_value, roots);
-                }
-            }
-            _ => {}
-        }
-    }
-}
 
 /// A root for global/static values
 pub struct GlobalRoot {
@@ -236,7 +217,7 @@ impl GcRoot for GlobalRoot {
     fn scan(&self) -> Vec<GcPtr<Value>> {
         let mut roots = Vec::new();
         for value in &self.values {
-            self.collect_value_roots(value, &mut roots);
+            collect_value_roots(value, &mut roots);
         }
         roots
     }
@@ -250,26 +231,6 @@ impl GcRoot for GlobalRoot {
     }
 }
 
-impl GlobalRoot {
-    #[allow(clippy::only_used_in_recursion)]
-    fn collect_value_roots(&self, value: &Value, roots: &mut Vec<GcPtr<Value>>) {
-        match value {
-            Value::Cell(cells) => {
-                for cell_value in &cells.data {
-                    roots.push(cell_value.clone());
-                    let inner = unsafe { &*cell_value.as_raw() };
-                    self.collect_value_roots(inner, roots);
-                }
-            }
-            Value::Struct(struct_value) => {
-                for field_value in struct_value.fields.values() {
-                    self.collect_value_roots(field_value, roots);
-                }
-            }
-            _ => {}
-        }
-    }
-}
 
 /// Manages all GC roots in the system
 pub struct RootScanner {

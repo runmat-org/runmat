@@ -1060,10 +1060,15 @@ impl Parser {
     fn parse_add_sub(&mut self) -> Result<Expr, String> {
         let mut node = self.parse_mul_div()?;
         loop {
+            // In matrix expressions, `[1 +2]` (space before but not after) is element
+            // separation yielding [1, 2], while `[1 + 2]` (space on both sides) is
+            // addition yielding [3]. Break only when there's space before the operator
+            // but the operator is adjacent to the next token.
             if self.in_matrix_expr
                 && matches!(self.peek_token(), Some(Token::Plus | Token::Minus))
                 && self.pos > 0
                 && !self.tokens_adjacent(self.pos - 1, self.pos)
+                && self.tokens_adjacent(self.pos, self.pos + 1)
             {
                 let rhs_index = self.pos + 1;
                 let rhs_is_imag_literal = self
