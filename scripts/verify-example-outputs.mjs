@@ -827,6 +827,10 @@ function normalizeOutput(text) {
             if (formatted === "-0") {
                 formatted = "0";
             }
+            // Preserve leading + sign for positive numbers (important for complex imaginary parts)
+            if (match.startsWith('+') && !formatted.startsWith('-')) {
+                formatted = '+' + formatted;
+            }
             return formatted;
         }
     );

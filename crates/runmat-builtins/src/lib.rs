@@ -590,16 +590,6 @@ impl fmt::Display for LogicalArray {
         }
         match self.shape.len() {
             0 => write!(f, "[]"),
-            1 => {
-                write!(f, "[")?;
-                for (i, v) in self.data.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{}", if *v != 0 { 1 } else { 0 })?;
-                }
-                write!(f, "]")
-            }
             2 => {
                 let rows = self.shape[0];
                 let cols = self.shape[1];
@@ -617,6 +607,7 @@ impl fmt::Display for LogicalArray {
                 }
                 Ok(())
             }
+            // 1-D and higher-dimensional arrays: linear bracket display
             _ => {
                 write!(f, "[")?;
                 for (i, v) in self.data.iter().enumerate() {
