@@ -787,7 +787,7 @@ function normalizeOutput(text) {
         ""
     );
     const withoutHeaders = withoutAssignments.replace(
-        /\b\w+\s*[x×]\s*\w+(?:\s*[x×]\s*\w+)*\s+(?:gpuArray\s*)?(?:sparse\s+)?(?:complex\s+)?(?:logical|double|single|char|string|cell|struct|table|categorical|datetime|duration)(?:\s+array)?\b/gi,
+        /\b\d+\s*[x×]\s*\d+(?:\s*[x×]\s*\d+)*\s+(?:gpuArray\s*)?(?:sparse\s+)?(?:complex\s+)?(?:logical\s+)?(?:logical|double|single|char|string|cell|struct|table|categorical|datetime|duration)(?:\s+array)?\b/gi,
         " "
     );
     const withoutBrackets = withoutHeaders.replace(/[\[\]{};,]/g, " ");
