@@ -330,7 +330,10 @@ fn move_single_source(source: &str, destination: &str, force: bool) -> MovefileR
 fn move_with_pattern(pattern: &str, destination: &str, force: bool) -> MovefileResult {
     let pattern_path = Path::new(pattern);
     let (base_dir, name_pattern) = match pattern_path.file_name() {
-        Some(name) => (pattern_path.parent().unwrap_or_else(|| Path::new(".")), name),
+        Some(name) => (
+            pattern_path.parent().unwrap_or_else(|| Path::new(".")),
+            name,
+        ),
         None => {
             return MovefileResult::glob_pattern_error(pattern, "pattern has no file name");
         }

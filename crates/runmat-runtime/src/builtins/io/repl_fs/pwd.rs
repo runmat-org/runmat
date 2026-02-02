@@ -75,7 +75,6 @@ fn path_to_value(path: &Path) -> Value {
     Value::CharArray(CharArray::new_row(&text))
 }
 
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;

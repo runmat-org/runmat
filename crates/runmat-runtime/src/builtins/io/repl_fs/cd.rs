@@ -144,8 +144,8 @@ fn extract_path(value: &Value) -> BuiltinResult<String> {
 }
 
 fn expand_path(raw: &str) -> BuiltinResult<PathBuf> {
-    let expanded = crate::builtins::common::fs::expand_user_path(raw, BUILTIN_NAME)
-        .map_err(cd_error)?;
+    let expanded =
+        crate::builtins::common::fs::expand_user_path(raw, BUILTIN_NAME).map_err(cd_error)?;
     Ok(PathBuf::from(expanded))
 }
 
@@ -173,7 +173,6 @@ fn path_to_string(path: &Path) -> String {
 fn char_array_value(text: &str) -> Value {
     Value::CharArray(CharArray::new_row(text))
 }
-
 
 #[cfg(test)]
 pub(crate) mod tests {

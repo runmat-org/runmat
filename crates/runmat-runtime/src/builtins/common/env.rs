@@ -1,7 +1,7 @@
-use std::io;
-use std::path::PathBuf;
 #[cfg(target_arch = "wasm32")]
 use std::collections::BTreeMap;
+use std::io;
+use std::path::PathBuf;
 #[cfg(target_arch = "wasm32")]
 use std::sync::RwLock;
 

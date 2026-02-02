@@ -356,7 +356,10 @@ fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileR
 fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileResult {
     let pattern_path = Path::new(pattern);
     let (base_dir, name_pattern) = match pattern_path.file_name() {
-        Some(name) => (pattern_path.parent().unwrap_or_else(|| Path::new(".")), name),
+        Some(name) => (
+            pattern_path.parent().unwrap_or_else(|| Path::new(".")),
+            name,
+        ),
         None => {
             return CopyfileResult::glob_pattern_error(pattern, "pattern has no file name");
         }

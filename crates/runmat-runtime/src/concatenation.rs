@@ -16,17 +16,16 @@ fn concat_error(message: impl Into<String>) -> RuntimeError {
 /// Validates that the value is a finite integer in the valid Unicode code point range,
 /// then constructs a single-character array. The `error_prefix` is prepended to error
 /// messages (e.g., "cat" or "char concat").
-pub fn char_array_from_f64_with_prefix(
-    value: f64,
-    error_prefix: &str,
-) -> BuiltinResult<CharArray> {
+pub fn char_array_from_f64_with_prefix(value: f64, error_prefix: &str) -> BuiltinResult<CharArray> {
     if !value.is_finite() || value.fract() != 0.0 {
         return Err(concat_error(format!(
             "{error_prefix}: expected integer code point"
         )));
     }
     if value < 0.0 || value > u32::MAX as f64 {
-        return Err(concat_error(format!("{error_prefix}: code point out of range")));
+        return Err(concat_error(format!(
+            "{error_prefix}: code point out of range"
+        )));
     }
     let code = value as u32;
     let ch = char::from_u32(code)

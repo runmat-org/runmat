@@ -1,7 +1,7 @@
 //! MATLAB-compatible `tempdir` builtin for RunMat.
 
-use std::convert::TryFrom;
 use crate::builtins::common::env as runtime_env;
+use std::convert::TryFrom;
 use std::path::Path;
 
 use runmat_builtins::{CharArray, Value};

@@ -119,7 +119,6 @@ impl GcRoot for StackRoot {
     }
 }
 
-
 /// A root representing an array of variables
 pub struct VariableArrayRoot {
     /// Reference to the variable array (non-owning)  
@@ -184,7 +183,6 @@ impl GcRoot for VariableArrayRoot {
     }
 }
 
-
 /// A root for global/static values
 pub struct GlobalRoot {
     /// Owned global values
@@ -230,7 +228,6 @@ impl GcRoot for GlobalRoot {
         self.values.len() * std::mem::size_of::<Value>()
     }
 }
-
 
 /// Manages all GC roots in the system
 pub struct RootScanner {

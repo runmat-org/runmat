@@ -11,9 +11,9 @@ use crate::builtins::common::spec::{
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use runmat_filesystem as vfs;
+use std::collections::HashSet;
 #[cfg(test)]
 use std::env;
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 const ERROR_FOLDER_TYPE: &str = "genpath: folder must be a character vector or string scalar";

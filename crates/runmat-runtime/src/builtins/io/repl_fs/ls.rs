@@ -1,9 +1,9 @@
 //! MATLAB-compatible `ls` builtin for RunMat.
 
 use runmat_filesystem as vfs;
+use std::collections::HashSet;
 #[cfg(test)]
 use std::env;
-use std::collections::HashSet;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 

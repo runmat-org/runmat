@@ -253,10 +253,7 @@ fn read_csv_rows(
         } else if buffer.ends_with('\r') {
             buffer.pop();
         }
-        if options.range.is_none()
-            && options.start_row > 0
-            && line_index <= options.start_row
-        {
+        if options.range.is_none() && options.start_row > 0 && line_index <= options.start_row {
             skipped_rows += 1;
             continue;
         }
