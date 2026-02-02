@@ -645,20 +645,15 @@ async fn get_field_value(value: Value, name: &str) -> BuiltinResult<Value> {
                     "Struct contents reference from an empty struct array.",
                 ));
             }
-            let mut values = Vec::with_capacity(cell.data.len());
-            for handle in &cell.data {
-                let entry = unsafe { &*handle.as_raw() };
-                match entry {
-                    Value::Struct(st) => values.push(get_struct_field(st, name)?),
-                    _ => {
-                        return Err(getfield_flow(
-                            "Struct contents reference from a non-struct array object.",
-                        ))
-                    }
-                }
+            // Default to first element when no index is specified
+            let first_handle = &cell.data[0];
+            let first_entry = unsafe { &*first_handle.as_raw() };
+            match first_entry {
+                Value::Struct(st) => get_struct_field(st, name),
+                _ => Err(getfield_flow(
+                    "Struct contents reference from a non-struct array object.",
+                )),
             }
-            make_cell_with_shape(values, cell.shape.clone())
-                .map_err(|err| getfield_flow(format!("getfield: {err}")))
         }
         _ => Err(getfield_flow(
             "Struct contents reference from a non-struct array object.",

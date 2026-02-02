@@ -289,7 +289,7 @@ fn parse_csv_row(line: &str, line_index: usize) -> BuiltinResult<Vec<f64>> {
             "-inf" => f64::NEG_INFINITY,
             _ => unwrapped.parse::<f64>().map_err(|_| {
                 csvread_error(format!(
-                    "csvread: nonnumeric token {} at row {} column {}",
+                    "csvread: nonnumeric token '{}' at row {} column {}",
                     unwrapped,
                     line_index,
                     col_index + 1

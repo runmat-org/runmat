@@ -260,10 +260,8 @@ fn zero_small(value: f64) -> f64 {
 }
 
 fn atanh_real_outside_domain(x: f64) -> (f64, f64) {
-    let ratio = ((1.0 + x) / (1.0 - x)).abs();
-    let re = zero_small(0.5 * ratio.ln());
-    let im = std::f64::consts::FRAC_PI_2;
-    (re, im)
+    let result = Complex64::new(x, 0.0).atanh();
+    (zero_small(result.re), zero_small(result.im))
 }
 
 #[cfg(test)]
