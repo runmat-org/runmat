@@ -110,6 +110,7 @@ pub struct FsMetadata {
     len: u64,
     modified: Option<SystemTime>,
     readonly: bool,
+    hash: Option<String>,
 }
 
 impl FsMetadata {
@@ -124,6 +125,23 @@ impl FsMetadata {
             len,
             modified,
             readonly,
+            hash: None,
+        }
+    }
+
+    pub fn new_with_hash(
+        file_type: FsFileType,
+        len: u64,
+        modified: Option<SystemTime>,
+        readonly: bool,
+        hash: Option<String>,
+    ) -> Self {
+        Self {
+            file_type,
+            len,
+            modified,
+            readonly,
+            hash,
         }
     }
 
@@ -145,6 +163,10 @@ impl FsMetadata {
 
     pub fn len(&self) -> u64 {
         self.len
+    }
+
+    pub fn hash(&self) -> Option<&str> {
+        self.hash.as_deref()
     }
 
     pub fn is_empty(&self) -> bool {

@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::builtins::strings::type_resolvers::unknown_type;
+use crate::builtins::strings::type_resolvers::text_concat_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::join")]
@@ -64,7 +64,7 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     summary = "Combine text across a specified dimension inserting delimiters between elements.",
     keywords = "join,string join,concatenate strings,delimiters,cell array join",
     accel = "none",
-    type_resolver(unknown_type),
+    type_resolver(text_concat_type),
     builtin_path = "crate::builtins::strings::transform::join"
 )]
 async fn join_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -956,7 +956,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn join_type_is_unknown() {
-        assert_eq!(unknown_type(&[Type::String]), Type::Unknown);
+    fn join_type_concatenates_text() {
+        assert_eq!(text_concat_type(&[Type::String]), Type::String);
     }
 }

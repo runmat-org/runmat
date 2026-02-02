@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::builtins::strings::type_resolvers::unknown_type;
+use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::pad")]
@@ -105,7 +105,7 @@ impl PadOptions {
     summary = "Pad strings, character arrays, and cell arrays to a target length.",
     keywords = "pad,align,strings,character array",
     accel = "sink",
-    type_resolver(unknown_type),
+    type_resolver(text_preserve_type),
     builtin_path = "crate::builtins::strings::transform::pad"
 )]
 async fn pad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -701,7 +701,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn pad_type_is_unknown() {
-        assert_eq!(unknown_type(&[Type::String]), Type::Unknown);
+    fn pad_type_preserves_text() {
+        assert_eq!(text_preserve_type(&[Type::String]), Type::String);
     }
 }

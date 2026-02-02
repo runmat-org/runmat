@@ -28,8 +28,8 @@ pub(crate) mod bar;
 pub(crate) mod clf;
 #[path = "ops/close.rs"]
 pub(crate) mod close;
-#[path = "ops/compat_cmds.rs"]
-pub(crate) mod compat_cmds;
+#[path = "ops/cmds.rs"]
+pub(crate) mod cmds;
 #[path = "ops/contour.rs"]
 pub(crate) mod contour;
 #[path = "ops/contourf.rs"]

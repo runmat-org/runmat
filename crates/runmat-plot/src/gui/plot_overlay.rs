@@ -6,6 +6,7 @@
 use crate::core::{plot_utils, PlotRenderer};
 use crate::styling::{ModernDarkTheme, PlotThemeConfig};
 use egui::{Align2, Color32, Context, FontId, Pos2, Rect, Stroke};
+use glam::{Vec3, Vec4};
 
 /// GUI overlay manager for plot annotations and controls
 pub struct PlotOverlay {
@@ -378,14 +379,26 @@ impl PlotOverlay {
             let rects = self.compute_subplot_rects(centered_plot_rect, rows, cols, 8.0, 8.0);
             for (i, r) in rects.iter().enumerate() {
                 // Frame
-                ui.painter()
-                    .rect_stroke(*r, 0.0, Stroke::new(1.5, Color32::from_gray(180)));
-                // Grid
+                if plot_renderer.overlay_show_box() {
+                    ui.painter()
+                        .rect_stroke(*r, 0.0, Stroke::new(1.5, Color32::from_gray(180)));
+                }
+
+                let cam = plot_renderer.axes_camera(i).unwrap_or_else(|| plot_renderer.camera());
+                if matches!(
+                    cam.projection,
+                    crate::core::camera::ProjectionType::Perspective { .. }
+                ) {
+                    self.draw_3d_axes_cube(ui, *r, plot_renderer, i, config.font_scale);
+                    continue;
+                }
+
+                // Grid (2D)
                 if config.show_grid {
                     let b = plot_renderer.view_bounds_for_axes(i);
                     self.draw_grid(ui, *r, plot_renderer, b);
                 }
-                // Axes
+                // Axes (2D)
                 if config.show_axes {
                     let b = plot_renderer.view_bounds_for_axes(i);
                     self.draw_axes(ui, *r, plot_renderer, config, b);
@@ -393,12 +406,21 @@ impl PlotOverlay {
             }
         } else {
             // Draw plot frame
-            ui.painter().rect_stroke(
-                centered_plot_rect,
-                0.0,
-                Stroke::new(1.5, Color32::from_gray(180)),
-            );
+            if plot_renderer.overlay_show_box() {
+                ui.painter().rect_stroke(
+                    centered_plot_rect,
+                    0.0,
+                    Stroke::new(1.5, Color32::from_gray(180)),
+                );
+            }
 
+            let cam = plot_renderer.camera();
+            if matches!(
+                cam.projection,
+                crate::core::camera::ProjectionType::Perspective { .. }
+            ) {
+                self.draw_3d_axes_cube(ui, centered_plot_rect, plot_renderer, 0, config.font_scale);
+            } else {
             // Draw grid if enabled
             if config.show_grid {
                 self.draw_grid(ui, centered_plot_rect, plot_renderer, None);
@@ -408,7 +430,10 @@ impl PlotOverlay {
             if config.show_axes {
                 self.draw_axes(ui, centered_plot_rect, plot_renderer, config, None);
                 // Emphasize zero baseline if within data range
-                if let Some((x_min, x_max, y_min, y_max)) = plot_renderer.data_bounds() {
+                if let Some((x_min, x_max, y_min, y_max)) = plot_renderer
+                    .view_bounds()
+                    .or_else(|| plot_renderer.data_bounds())
+                {
                     let zero_stroke = Stroke::new(1.5, Color32::from_gray(200));
                     if y_min < 0.0 && y_max > 0.0 {
                         let y_screen = centered_plot_rect.max.y
@@ -434,6 +459,7 @@ impl PlotOverlay {
                         );
                     }
                 }
+            }
             }
         }
 
@@ -636,7 +662,10 @@ impl PlotOverlay {
         plot_renderer: &PlotRenderer,
         view_bounds_override: Option<(f64, f64, f64, f64)>,
     ) {
-        if let Some(data_bounds) = view_bounds_override.or_else(|| plot_renderer.data_bounds()) {
+        if let Some(data_bounds) = view_bounds_override
+            .or_else(|| plot_renderer.view_bounds())
+            .or_else(|| plot_renderer.data_bounds())
+        {
             let grid_color_major = Color32::from_gray(80);
             let _grid_color_minor = Color32::from_gray(60);
 
@@ -748,7 +777,10 @@ impl PlotOverlay {
         config: &OverlayConfig,
         view_bounds_override: Option<(f64, f64, f64, f64)>,
     ) {
-        if let Some(data_bounds) = view_bounds_override.or_else(|| plot_renderer.data_bounds()) {
+        if let Some(data_bounds) = view_bounds_override
+            .or_else(|| plot_renderer.view_bounds())
+            .or_else(|| plot_renderer.data_bounds())
+        {
             let (x_min, x_max, y_min, y_max) = data_bounds;
             let x_range = x_max - x_min;
             let y_range = y_max - y_min;
@@ -923,6 +955,159 @@ impl PlotOverlay {
                     );
                     y_val += y_tick_interval;
                 }
+            }
+        }
+    }
+
+    fn draw_3d_axes_cube(
+        &self,
+        ui: &mut egui::Ui,
+        plot_rect: Rect,
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+        font_scale: f32,
+    ) {
+        let Some(bounds) = plot_renderer.axes_bounds(axes_index) else {
+            return;
+        };
+        let cam_ref = plot_renderer
+            .axes_camera(axes_index)
+            .unwrap_or_else(|| plot_renderer.camera());
+        let mut cam = cam_ref.clone();
+        let w = plot_rect.width().max(1.0);
+        let h = plot_rect.height().max(1.0);
+        cam.update_aspect_ratio(w / h);
+        let view_proj = cam.view_proj_matrix();
+
+        let project = |p: Vec3| -> Option<Pos2> {
+            let clip: Vec4 = view_proj * Vec4::new(p.x, p.y, p.z, 1.0);
+            if !clip.w.is_finite() || clip.w.abs() < 1e-6 {
+                return None;
+            }
+            let ndc = clip.truncate() / clip.w;
+            if !(ndc.x.is_finite() && ndc.y.is_finite()) {
+                return None;
+            }
+            let sx = plot_rect.min.x + ((ndc.x + 1.0) * 0.5) * plot_rect.width();
+            let sy = plot_rect.min.y + ((1.0 - ndc.y) * 0.5) * plot_rect.height();
+            Some(Pos2::new(sx, sy))
+        };
+
+        let min = bounds.min;
+        let max = bounds.max;
+        let corners = [
+            Vec3::new(min.x, min.y, min.z),
+            Vec3::new(max.x, min.y, min.z),
+            Vec3::new(max.x, max.y, min.z),
+            Vec3::new(min.x, max.y, min.z),
+            Vec3::new(min.x, min.y, max.z),
+            Vec3::new(max.x, min.y, max.z),
+            Vec3::new(max.x, max.y, max.z),
+            Vec3::new(min.x, max.y, max.z),
+        ];
+        let edges = [
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 0),
+            (4, 5),
+            (5, 6),
+            (6, 7),
+            (7, 4),
+            (0, 4),
+            (1, 5),
+            (2, 6),
+            (3, 7),
+        ];
+
+        let cube_stroke = Stroke::new(1.2, Color32::from_gray(200));
+        for (a, b) in edges {
+            if let (Some(pa), Some(pb)) = (project(corners[a]), project(corners[b])) {
+                ui.painter().line_segment([pa, pb], cube_stroke);
+            }
+        }
+
+        let scale = font_scale.max(0.75);
+        let tick_font = FontId::proportional(10.0 * scale);
+        let tick_stroke = Stroke::new(1.0, Color32::from_gray(220));
+
+        let center = (min + max) * 0.5;
+        let ax_x = if cam.position.x >= center.x { max.x } else { min.x };
+        let ax_y = if cam.position.y >= center.y { max.y } else { min.y };
+        let ax_z = if cam.position.z >= center.z { max.z } else { min.z };
+        let out_x = if ax_x >= center.x { 1.0 } else { -1.0 };
+        let out_y = if ax_y >= center.y { 1.0 } else { -1.0 };
+
+        let x_range = (max.x - min.x).abs() as f64;
+        let y_range = (max.y - min.y).abs() as f64;
+        let z_range = (max.z - min.z).abs() as f64;
+        let x_step = plot_utils::calculate_tick_interval(x_range).max(0.0);
+        let y_step = plot_utils::calculate_tick_interval(y_range).max(0.0);
+        let z_step = plot_utils::calculate_tick_interval(z_range).max(0.0);
+
+        let tick_len_y = ((max.y - min.y).abs() * 0.04).max(1e-4) * out_y;
+        let tick_len_x = ((max.x - min.x).abs() * 0.04).max(1e-4) * out_x;
+
+        if x_step > 0.0 && x_range.is_finite() {
+            let mut v = (min.x as f64 / x_step).ceil() * x_step;
+            while v <= max.x as f64 + (x_step * 0.5) {
+                if v >= min.x as f64 - (x_step * 0.5) {
+                    let p = Vec3::new(v as f32, ax_y, ax_z);
+                    let p2 = p + Vec3::new(0.0, tick_len_y, 0.0);
+                    if let (Some(a), Some(b)) = (project(p), project(p2)) {
+                        ui.painter().line_segment([a, b], tick_stroke);
+                        ui.painter().text(
+                            b,
+                            Align2::LEFT_CENTER,
+                            plot_utils::format_tick_label(v),
+                            tick_font.clone(),
+                            Color32::from_gray(230),
+                        );
+                    }
+                }
+                v += x_step;
+            }
+        }
+
+        if y_step > 0.0 && y_range.is_finite() {
+            let mut v = (min.y as f64 / y_step).ceil() * y_step;
+            while v <= max.y as f64 + (y_step * 0.5) {
+                if v >= min.y as f64 - (y_step * 0.5) {
+                    let p = Vec3::new(ax_x, v as f32, ax_z);
+                    let p2 = p + Vec3::new(tick_len_x, 0.0, 0.0);
+                    if let (Some(a), Some(b)) = (project(p), project(p2)) {
+                        ui.painter().line_segment([a, b], tick_stroke);
+                        ui.painter().text(
+                            b,
+                            Align2::LEFT_CENTER,
+                            plot_utils::format_tick_label(v),
+                            tick_font.clone(),
+                            Color32::from_gray(230),
+                        );
+                    }
+                }
+                v += y_step;
+            }
+        }
+
+        if z_step > 0.0 && z_range.is_finite() {
+            let mut v = (min.z as f64 / z_step).ceil() * z_step;
+            while v <= max.z as f64 + (z_step * 0.5) {
+                if v >= min.z as f64 - (z_step * 0.5) {
+                    let p = Vec3::new(ax_x, ax_y, v as f32);
+                    let p2 = p + Vec3::new(tick_len_x, 0.0, 0.0);
+                    if let (Some(a), Some(b)) = (project(p), project(p2)) {
+                        ui.painter().line_segment([a, b], tick_stroke);
+                        ui.painter().text(
+                            b,
+                            Align2::LEFT_CENTER,
+                            plot_utils::format_tick_label(v),
+                            tick_font.clone(),
+                            Color32::from_gray(230),
+                        );
+                    }
+                }
+                v += z_step;
             }
         }
     }

@@ -13,7 +13,7 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 
 use super::text_utils::{value_to_owned_string, TextCollection, TextElement};
-use crate::builtins::strings::type_resolvers::unknown_type;
+use crate::builtins::strings::type_resolvers::text_search_indices_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::search::strfind")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -51,7 +51,7 @@ const BUILTIN_NAME: &str = "strfind";
     summary = "Return the starting indices of pattern matches in text inputs.",
     keywords = "strfind,substring,index,positions,string search",
     accel = "sink",
-    type_resolver(unknown_type),
+    type_resolver(text_search_indices_type),
     builtin_path = "crate::builtins::strings::search::strfind"
 )]
 async fn strfind_builtin(
@@ -668,7 +668,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn strfind_type_is_unknown() {
-        assert_eq!(unknown_type(&[Type::String]), Type::Unknown);
+    fn strfind_type_for_scalar_text_is_tensor() {
+        assert_eq!(text_search_indices_type(&[Type::String, Type::String]), Type::tensor());
     }
 }

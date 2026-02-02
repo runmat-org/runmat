@@ -9,8 +9,12 @@ use env_logger::Env;
 use log::{debug, error, info, warn};
 use miette::{SourceOffset, SourceSpan};
 use std::env;
+use uuid::Uuid;
 
 mod telemetry;
+#[allow(dead_code)]
+mod public_api;
+mod remote;
 use runmat_accelerate::AccelerateInitOptions;
 use runmat_builtins::Value;
 use runmat_config::{self as config, ConfigLoader, PlotBackend, PlotMode, RunMatConfig};
@@ -438,6 +442,44 @@ enum Commands {
         #[command(subcommand)]
         config_command: ConfigCommand,
     },
+    /// Run against remote filesystem
+    Remote {
+        #[command(subcommand)]
+        remote_command: RemoteCommand,
+    },
+    /// Authenticate with RunMat server
+    Login {
+        /// Server URL
+        #[arg(long)]
+        server: Option<String>,
+        /// API key or access token
+        #[arg(long)]
+        api_key: Option<String>,
+        /// Email for interactive login
+        #[arg(long)]
+        email: Option<String>,
+        /// Default organization id
+        #[arg(long)]
+        org: Option<Uuid>,
+        /// Default project id
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Organization management
+    Org {
+        #[command(subcommand)]
+        org_command: OrgCommand,
+    },
+    /// Project management
+    Project {
+        #[command(subcommand)]
+        project_command: ProjectCommand,
+    },
+    /// Remote filesystem commands
+    Fs {
+        #[command(subcommand)]
+        fs_command: FsCommand,
+    },
     /// Package manager (coming soon)
     Pkg {
         #[command(subcommand)]
@@ -508,6 +550,316 @@ enum ConfigCommand {
     },
     /// Show configuration file locations
     Paths,
+}
+
+#[derive(Subcommand, Clone)]
+enum OrgCommand {
+    /// List organizations
+    List {
+        /// Page size
+        #[arg(long)]
+        limit: Option<u32>,
+        /// Pagination cursor
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Clone)]
+enum ProjectCommand {
+    /// List projects for an organization
+    List {
+        /// Organization id
+        #[arg(long)]
+        org: Option<Uuid>,
+        /// Page size
+        #[arg(long)]
+        limit: Option<u32>,
+        /// Pagination cursor
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+    /// Create a project
+    Create {
+        /// Organization id
+        #[arg(long)]
+        org: Option<Uuid>,
+        /// Project name
+        name: String,
+    },
+    /// Project membership commands
+    Members {
+        #[command(subcommand)]
+        members_command: ProjectMembersCommand,
+    },
+    /// Project retention policy
+    Retention {
+        #[command(subcommand)]
+        retention_command: ProjectRetentionCommand,
+    },
+    /// Set default project
+    Select {
+        /// Project id
+        project: Uuid,
+    },
+}
+
+#[derive(Subcommand, Clone)]
+enum ProjectMembersCommand {
+    /// List project members
+    List {
+        /// Project id
+        #[arg(long)]
+        project: Option<Uuid>,
+        /// Page size
+        #[arg(long)]
+        limit: Option<u32>,
+        /// Pagination cursor
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Clone)]
+enum ProjectRetentionCommand {
+    /// Show retention settings
+    Get {
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Set retention max versions
+    Set {
+        /// Max versions to keep (0 = unlimited)
+        max_versions: usize,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+}
+
+#[derive(Subcommand, Clone)]
+enum FsCommand {
+    /// Read a remote file
+    Read {
+        /// Remote path
+        path: String,
+        /// Output file (stdout when omitted)
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Write a remote file from local input
+    Write {
+        /// Remote path
+        path: String,
+        /// Input file
+        input: PathBuf,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// List directory contents
+    Ls {
+        /// Remote path
+        #[arg(default_value = "/")]
+        path: String,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Create directory
+    Mkdir {
+        /// Remote path
+        path: String,
+        /// Create parent directories
+        #[arg(short, long)]
+        recursive: bool,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Remove file or directory
+    Rm {
+        /// Remote path
+        path: String,
+        /// Remove directory
+        #[arg(long)]
+        dir: bool,
+        /// Remove directory recursively
+        #[arg(short, long)]
+        recursive: bool,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// List file history
+    History {
+        /// Remote path
+        path: String,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Restore file version
+    Restore {
+        /// Version id to restore
+        version: Uuid,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Delete file version
+    HistoryDelete {
+        /// Version id to delete
+        version: Uuid,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// List filesystem snapshots
+    SnapshotList {
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Create filesystem snapshot
+    SnapshotCreate {
+        /// Optional message
+        #[arg(long)]
+        message: Option<String>,
+        /// Parent snapshot override
+        #[arg(long)]
+        parent: Option<Uuid>,
+        /// Optional tag
+        #[arg(long)]
+        tag: Option<String>,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Restore filesystem snapshot
+    SnapshotRestore {
+        /// Snapshot id to restore
+        snapshot: Uuid,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Delete filesystem snapshot
+    SnapshotDelete {
+        /// Snapshot id to delete
+        snapshot: Uuid,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// List snapshot tags
+    SnapshotTagList {
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Set snapshot tag
+    SnapshotTagSet {
+        /// Snapshot id to tag
+        snapshot: Uuid,
+        /// Tag name
+        tag: String,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Delete snapshot tag
+    SnapshotTagDelete {
+        /// Tag name
+        tag: String,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Clone project snapshots into a git repo
+    GitClone {
+        /// Destination directory
+        directory: PathBuf,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+        /// Server override
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Pull latest snapshots into git repo
+    GitPull {
+        /// Repo directory
+        #[arg(default_value = ".")]
+        directory: PathBuf,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+        /// Server override
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Push git repo history into project snapshots
+    GitPush {
+        /// Repo directory
+        #[arg(default_value = ".")]
+        directory: PathBuf,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+        /// Server override
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// List shard manifest history
+    ManifestHistory {
+        /// Remote path
+        path: String,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Restore shard manifest version
+    ManifestRestore {
+        /// Version id to restore
+        version: Uuid,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Update shard manifest with partial edits
+    ManifestUpdate {
+        /// Remote path
+        path: String,
+        /// Base manifest version id
+        #[arg(long)]
+        base_version: Uuid,
+        /// Manifest JSON file
+        #[arg(long)]
+        manifest: PathBuf,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+}
+
+#[derive(Subcommand, Clone)]
+enum RemoteCommand {
+    /// Run a script with remote filesystem
+    Run {
+        /// Script path
+        script: PathBuf,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+        /// Server URL override
+        #[arg(long)]
+        server: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Clone)]
@@ -1042,6 +1394,19 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) ->
             height,
         } => execute_plot_command(mode, width, height, config).await,
         Commands::Config { config_command } => execute_config_command(config_command, config).await,
+        Commands::Login {
+            server,
+            api_key,
+            email,
+            org,
+            project,
+        } => remote::execute_login(server, api_key, email, org, project).await,
+        Commands::Org { org_command } => remote::execute_org_command(org_command).await,
+        Commands::Project { project_command } => {
+            remote::execute_project_command(project_command).await
+        }
+        Commands::Fs { fs_command } => remote::execute_fs_command(fs_command).await,
+        Commands::Remote { remote_command } => remote::execute_remote_command(remote_command).await,
         Commands::Pkg { pkg_command } => execute_pkg_command(pkg_command).await,
     }
 }
@@ -1396,6 +1761,14 @@ async fn execute_script(
     config: &RunMatConfig,
 ) -> Result<()> {
     execute_script_with_args(script, vec![], emit_bytecode_path, cli, config).await
+}
+
+pub(crate) async fn execute_script_with_remote_provider(
+    script: PathBuf,
+    config: &RunMatConfig,
+) -> Result<()> {
+    let cli = Cli::parse();
+    execute_script_with_args(script, vec![], None, &cli, config).await
 }
 
 async fn execute_script_with_args(

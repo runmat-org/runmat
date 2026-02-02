@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::builtins::strings::type_resolvers::unknown_type;
+use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
@@ -71,7 +71,7 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     summary = "Replace substring occurrences with MATLAB-compatible semantics.",
     keywords = "strrep,replace,strings,character array,text",
     accel = "sink",
-    type_resolver(unknown_type),
+    type_resolver(text_preserve_type),
     builtin_path = "crate::builtins::strings::transform::strrep"
 )]
 async fn strrep_builtin(
@@ -521,7 +521,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn strrep_type_is_unknown() {
-        assert_eq!(unknown_type(&[Type::String]), Type::Unknown);
+    fn strrep_type_preserves_text() {
+        assert_eq!(text_preserve_type(&[Type::String]), Type::String);
     }
 }

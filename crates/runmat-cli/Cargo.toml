@@ -19,6 +19,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+chrono = { workspace = true }
 serde_yaml = "0.9"
 toml = "0.8"
 dirs = "5.0"
@@ -28,11 +29,19 @@ log = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 miette = { workspace = true }
-uuid = { workspace = true }
+uuid = { workspace = true, features = ["serde"] }
 crossbeam-channel = "0.5"
 once_cell = "1.19"
 ureq = { version = "2.9", default-features = false, features = ["tls", "json"] }
 rustyline = "14.0"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+progenitor-client = "0.11"
+keyring = "2.3"
+url = "2.5"
+base64 = "0.22"
+rand = "0.8"
+sha2 = "0.10"
+webbrowser = "0.8"
 
 # Ensure vendored OpenSSL can be enabled for cross targets (feature unification)
 openssl = { version = "0.10", optional = true }
@@ -54,6 +63,7 @@ runmat-accelerate = { version = "=0.2.8", path = "../runmat-accelerate" }
 runmat-accelerate-api = { version = "=0.2.8", path = "../runmat-accelerate-api" }
 runmat-config = { version = "=0.2.8", path = "../runmat-config", features = ["accelerate"] }
 runmat-time = { version = "=0.2.8", path = "../runmat-time" }
+runmat-filesystem = { version = "=0.2.8", path = "../runmat-filesystem" }
 
 [features]
 # High-level feature toggles (default build keeps everything enabled)
@@ -68,3 +78,9 @@ vendored-openssl = ["openssl/vendored", "openssl-sys/vendored"]
 [dev-dependencies]
 tempfile = "3.12" 
 serde_json = { workspace = true }
+openapiv3 = "2.0"
+
+[build-dependencies]
+progenitor = "0.11"
+openapiv3 = "2.0"
+serde_yaml = "0.9"

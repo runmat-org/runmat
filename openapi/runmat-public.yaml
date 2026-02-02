@@ -49,6 +49,18 @@ paths:
     get:
       summary: List orgs
       operationId: listOrgs
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - in: query
+          name: cursor
+          required: false
+          schema:
+            type: string
       responses:
         '200':
           description: Org list
@@ -73,6 +85,17 @@ paths:
           schema:
             type: string
             format: uuid
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - in: query
+          name: cursor
+          required: false
+          schema:
+            type: string
       responses:
         '200':
           description: Project list
@@ -126,6 +149,17 @@ paths:
           schema:
             type: string
             format: uuid
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - in: query
+          name: cursor
+          required: false
+          schema:
+            type: string
       responses:
         '200':
           description: Project memberships
@@ -230,6 +264,11 @@ paths:
           required: false
           schema:
             type: boolean
+        - in: query
+          name: hash
+          required: false
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -441,6 +480,586 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FsDownloadUrlResponse'
+  /v1/projects/{projectId}/fs/multipart-upload:
+    post:
+      summary: Start multipart upload
+      operationId: fsMultipartUpload
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsMultipartUploadRequest'
+      responses:
+        '200':
+          description: Multipart upload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsMultipartUploadResponse'
+  /v1/projects/{projectId}/fs/multipart-upload/part:
+    post:
+      summary: Presign multipart part
+      operationId: fsMultipartUploadPart
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsMultipartUploadPartRequest'
+      responses:
+        '200':
+          description: Multipart part
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsMultipartUploadPartResponse'
+  /v1/projects/{projectId}/fs/multipart-upload/complete:
+    post:
+      summary: Complete multipart upload
+      operationId: fsMultipartUploadComplete
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsMultipartUploadCompleteRequest'
+      responses:
+        '200':
+          description: Completed upload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsCommitResponse'
+  /v1/projects/{projectId}/fs/multipart-upload/keepalive:
+    post:
+      summary: Keep multipart upload alive
+      operationId: fsMultipartUploadKeepalive
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsMultipartUploadKeepaliveRequest'
+      responses:
+        '200':
+          description: Keepalive result
+          content:
+            application/json:
+              schema:
+                type: boolean
+  /v1/projects/{projectId}/fs/multipart-upload/parts:
+    post:
+      summary: List multipart upload parts
+      operationId: fsMultipartUploadParts
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsMultipartUploadPartsRequest'
+      responses:
+        '200':
+          description: Multipart parts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsMultipartUploadPartsResponse'
+  /v1/projects/{projectId}/fs/retention:
+    get:
+      summary: Get project retention
+      operationId: fsRetentionGet
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Retention settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsRetentionResponse'
+    post:
+      summary: Update project retention
+      operationId: fsRetentionUpdate
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsRetentionUpdateRequest'
+      responses:
+        '200':
+          description: Retention settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsRetentionResponse'
+  /v1/projects/{projectId}/fs/snapshots:
+    get:
+      summary: List filesystem snapshots
+      operationId: fsSnapshotsList
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Snapshot list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsSnapshotListResponse'
+    post:
+      summary: Create filesystem snapshot
+      operationId: fsSnapshotsCreate
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsSnapshotCreateRequest'
+      responses:
+        '200':
+          description: Snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsSnapshotResponse'
+  /v1/projects/{projectId}/fs/snapshots/tags:
+    get:
+      summary: List snapshot tags
+      operationId: fsSnapshotTagsList
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Tag list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsSnapshotTagListResponse'
+  /v1/projects/{projectId}/fs/snapshots/{snapshotId}/tags:
+    post:
+      summary: Set snapshot tag
+      operationId: fsSnapshotTagsSet
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: snapshotId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsSnapshotTagRequest'
+      responses:
+        '200':
+          description: Tag
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsSnapshotTagResponse'
+  /v1/projects/{projectId}/fs/snapshots/tags/{tag}:
+    delete:
+      summary: Delete snapshot tag
+      operationId: fsSnapshotTagsDelete
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: tag
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: boolean
+  /v1/projects/{projectId}/fs/snapshots/{snapshotId}:
+    delete:
+      summary: Delete filesystem snapshot
+      operationId: fsSnapshotsDelete
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: snapshotId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: boolean
+  /v1/projects/{projectId}/fs/snapshots/{snapshotId}/restore:
+    post:
+      summary: Restore filesystem snapshot
+      operationId: fsSnapshotsRestore
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: snapshotId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema:
+                type: boolean
+  /v1/projects/{projectId}/fs/snapshots/{snapshotId}/git-export:
+    get:
+      summary: Export snapshot as git fast-import stream
+      operationId: fsSnapshotsGitExport
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: snapshotId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Git fast-import stream
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+  /v1/projects/{projectId}/fs/git/refs:
+    get:
+      summary: List git refs for filesystem
+      operationId: fsGitRefs
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Git refs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsGitRefsResponse'
+  /v1/projects/{projectId}/fs/git/upload:
+    get:
+      summary: Export git fast-import stream
+      operationId: fsGitUpload
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Git fast-import stream
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+  /v1/projects/{projectId}/fs/git/receive:
+    post:
+      summary: Receive git fast-import stream
+      operationId: fsGitReceive
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Imported
+          content:
+            application/json:
+              schema:
+                type: boolean
+  /v1/projects/{projectId}/fs/manifest:
+    get:
+      summary: Fetch shard manifest
+      operationId: fsManifest
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: path
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: versionId
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Manifest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsManifestResponse'
+  /v1/projects/{projectId}/fs/manifest/urls:
+    get:
+      summary: Fetch shard manifest URLs
+      operationId: fsManifestUrls
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: path
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: versionId
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Manifest URLs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsManifestUrlsResponse'
+  /v1/projects/{projectId}/fs/manifest/history:
+    get:
+      summary: List shard manifest versions
+      operationId: fsManifestHistory
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Manifest history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsManifestHistoryResponse'
+  /v1/projects/{projectId}/fs/manifest/update:
+    post:
+      summary: Update shard manifest
+      operationId: fsManifestUpdate
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsManifestUpdateRequest'
+      responses:
+        '200':
+          description: Updated manifest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsCommitResponse'
+  /v1/projects/{projectId}/fs/history/{versionId}:
+    delete:
+      summary: Delete file version
+      operationId: fsHistoryDelete
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: versionId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Deleted
+  /v1/projects/{projectId}/history:
+    get:
+      summary: List file history
+      operationId: listProjectHistory
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: History list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsHistoryListResponse'
+  /v1/projects/{projectId}/history/restore:
+    post:
+      summary: Restore file version
+      operationId: restoreProjectHistory
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsHistoryRestoreRequest'
+      responses:
+        '200':
+          description: Restored file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsCommitResponse'
 components:
   schemas:
     AuthResolveRequest:
@@ -574,6 +1193,10 @@ components:
           format: int64
         readonly:
           type: boolean
+        hash:
+          type: string
+        etag:
+          type: string
         modifiedAt:
           type: string
           format: date-time
@@ -612,12 +1235,164 @@ components:
           type: string
         readonly:
           type: boolean
+    FsRetentionUpdateRequest:
+      type: object
+      required: [maxVersions]
+      properties:
+        maxVersions:
+          type: integer
+          format: int64
+    FsRetentionResponse:
+      type: object
+      required: [projectId, maxVersions, isDefault]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        maxVersions:
+          type: integer
+          format: int64
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        isDefault:
+          type: boolean
+    FsSnapshotCreateRequest:
+      type: object
+      properties:
+        message:
+          type: string
+          nullable: true
+        parentId:
+          type: string
+          format: uuid
+          nullable: true
+        tag:
+          type: string
+          nullable: true
+    FsSnapshotResponse:
+      type: object
+      required: [id, projectId, createdAt, tags]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        parentId:
+          type: string
+          format: uuid
+          nullable: true
+        message:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+          format: uuid
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+    FsSnapshotListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsSnapshotResponse'
+    FsSnapshotTagRequest:
+      type: object
+      required: [tag]
+      properties:
+        tag:
+          type: string
+    FsSnapshotTagResponse:
+      type: object
+      required: [tag, snapshotId, createdAt]
+      properties:
+        tag:
+          type: string
+        snapshotId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+          format: uuid
+          nullable: true
+    FsSnapshotTagListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsSnapshotTagResponse'
     FsPathResponse:
       type: object
       required: [path]
       properties:
         path:
           type: string
+    FsShardUrlEntry:
+      type: object
+      required: [path, size, url]
+      properties:
+        path:
+          type: string
+        size:
+          type: integer
+          format: int64
+        url:
+          type: string
+    FsManifestUrlsResponse:
+      type: object
+      required: [version_id, manifest, shards, expiresAt]
+      properties:
+        version_id:
+          type: string
+          format: uuid
+        manifest:
+          $ref: '#/components/schemas/FsShardManifest'
+        shards:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsShardUrlEntry'
+        expiresAt:
+          type: string
+          format: date-time
+    FsGitRefEntry:
+      type: object
+      required: [name, snapshotId, createdAt]
+      properties:
+        name:
+          type: string
+        snapshotId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+    FsGitRefsResponse:
+      type: object
+      required: [refs]
+      properties:
+        head:
+          type: string
+          nullable: true
+        refs:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsGitRefEntry'
     FsUploadSessionRequest:
       type: object
       required: [path, sizeBytes]
@@ -696,6 +1471,199 @@ components:
         expiresAt:
           type: string
           format: date-time
+    FsMultipartUploadRequest:
+      type: object
+      required: [path, sizeBytes]
+      properties:
+        path:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+        contentType:
+          type: string
+    FsMultipartUploadResponse:
+      type: object
+      required: [sessionId, blobKey, uploadId, partSizeBytes]
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+        blobKey:
+          type: string
+        uploadId:
+          type: string
+        partSizeBytes:
+          type: integer
+          format: int64
+    FsMultipartUploadPartRequest:
+      type: object
+      required: [sessionId, blobKey, uploadId, partNumber, sizeBytes]
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+        blobKey:
+          type: string
+        uploadId:
+          type: string
+        partNumber:
+          type: integer
+          format: int32
+        sizeBytes:
+          type: integer
+          format: int64
+    FsMultipartUploadPartResponse:
+      type: object
+      required: [uploadUrl]
+      properties:
+        uploadUrl:
+          type: string
+    FsMultipartUploadCompletePart:
+      type: object
+      required: [partNumber, etag]
+      properties:
+        partNumber:
+          type: integer
+          format: int32
+        etag:
+          type: string
+    FsMultipartUploadCompleteRequest:
+      type: object
+      required: [sessionId, path, blobKey, uploadId, sizeBytes, parts]
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+        path:
+          type: string
+        blobKey:
+          type: string
+        uploadId:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+        hash:
+          type: string
+        parts:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsMultipartUploadCompletePart'
+    FsMultipartUploadKeepaliveRequest:
+      type: object
+      required: [sessionId]
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+    FsMultipartUploadPartsRequest:
+      type: object
+      required: [sessionId, blobKey, uploadId]
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+        blobKey:
+          type: string
+        uploadId:
+          type: string
+    FsMultipartUploadPartsResponse:
+      type: object
+      required: [parts]
+      properties:
+        parts:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsMultipartUploadCompletePart'
+    FsShardEntry:
+      type: object
+      required: [path, size]
+      properties:
+        path:
+          type: string
+        size:
+          type: integer
+          format: int64
+    FsShardManifest:
+      type: object
+      required: [version, total_size, shard_size, shards]
+      properties:
+        version:
+          type: integer
+          format: int32
+        total_size:
+          type: integer
+          format: int64
+        shard_size:
+          type: integer
+          format: int64
+        shards:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsShardEntry'
+    FsManifestResponse:
+      type: object
+      required: [version_id, manifest]
+      properties:
+        version_id:
+          type: string
+          format: uuid
+        manifest:
+          $ref: '#/components/schemas/FsShardManifest'
+    FsManifestHistoryEntry:
+      type: object
+      required: [version_id, created_at, size_bytes, total_size, shard_count]
+      properties:
+        version_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        size_bytes:
+          type: integer
+          format: int64
+        total_size:
+          type: integer
+          format: int64
+        shard_count:
+          type: integer
+          format: int32
+    FsManifestHistoryResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsManifestHistoryEntry'
+    FsManifestUpdateRequest:
+      type: object
+      required: [path, base_version_id, manifest]
+      properties:
+        path:
+          type: string
+        base_version_id:
+          type: string
+          format: uuid
+        manifest:
+          $ref: '#/components/schemas/FsShardManifest'
+    FsHistoryRestoreRequest:
+      type: object
+      required: [versionId]
+      properties:
+        versionId:
+          type: string
+          format: uuid
+    FsHistoryListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsVersion'
     FsEntry:
       type: object
       required: [id, project_id, path, name, kind, size, readonly]

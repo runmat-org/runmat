@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::strings::type_resolvers::unknown_type;
+use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::regex::regexprep")]
@@ -62,7 +62,7 @@ fn with_builtin_context(mut err: RuntimeError) -> RuntimeError {
     summary = "Regular expression replacement with MATLAB-compatible semantics.",
     keywords = "regexprep,regex,replace,substitute",
     accel = "sink",
-    type_resolver(unknown_type),
+    type_resolver(text_preserve_type),
     builtin_path = "crate::builtins::strings::regex::regexprep"
 )]
 async fn regexprep_builtin(
@@ -1213,7 +1213,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn regexprep_type_is_unknown() {
-        assert_eq!(unknown_type(&[Type::String]), Type::Unknown);
+    fn regexprep_type_preserves_text() {
+        assert_eq!(text_preserve_type(&[Type::String]), Type::String);
     }
 }

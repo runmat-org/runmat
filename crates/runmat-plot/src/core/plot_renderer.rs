@@ -21,9 +21,6 @@ pub struct PlotRenderer {
     /// Current scene being rendered
     pub scene: Scene,
 
-    /// Camera for view transformations
-    pub camera: Camera,
-
     /// Current theme configuration  
     pub theme: crate::styling::PlotThemeConfig,
 
@@ -37,6 +34,7 @@ pub struct PlotRenderer {
     figure_y_label: Option<String>,
     figure_show_grid: bool,
     figure_show_legend: bool,
+    figure_show_box: bool,
     figure_x_limits: Option<(f64, f64)>,
     figure_y_limits: Option<(f64, f64)>,
     legend_entries: Vec<LegendEntry>,
@@ -48,7 +46,7 @@ pub struct PlotRenderer {
     // Categorical axis cache
     figure_categorical_is_x: Option<bool>,
     figure_categorical_labels: Option<Vec<String>>,
-    /// Per-axes cameras (for subplots). If empty, use `camera` for single axes.
+    /// Per-axes cameras (for subplots and single-axes figures).
     axes_cameras: Vec<Camera>,
     /// Keep a clone of the last figure set for export/UX operations
     pub(crate) last_figure: Option<crate::plots::Figure>,
@@ -56,6 +54,11 @@ pub struct PlotRenderer {
     /// Last surface extent (in pixels) that was used to build viewport-dependent geometry.
     /// Used so we can rebuild the scene after the canvas is resized (common on wasm).
     last_scene_viewport_px: Option<(u32, u32)>,
+
+    /// If false, do not auto-fit camera when the figure updates (user has interacted).
+    camera_auto_fit: bool,
+    /// Cached flag: whether the current figure contains 3D plots (surf/scatter3).
+    figure_has_3d: bool,
 }
 
 /// Configuration for plot rendering
@@ -171,13 +174,11 @@ impl PlotRenderer {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let wgpu_renderer = WgpuRenderer::new(device, queue, surface_config).await;
         let scene = Scene::new();
-        let camera = Self::create_default_camera();
         let theme = crate::styling::PlotThemeConfig::default();
 
         Ok(Self {
             wgpu_renderer,
             scene,
-            camera,
             theme,
             data_bounds: None,
             needs_update: true,
@@ -186,6 +187,7 @@ impl PlotRenderer {
             figure_y_label: None,
             figure_show_grid: true,
             figure_show_legend: true,
+            figure_show_box: true,
             figure_x_limits: None,
             figure_y_limits: None,
             legend_entries: Vec::new(),
@@ -196,10 +198,20 @@ impl PlotRenderer {
             figure_colorbar_enabled: false,
             figure_categorical_is_x: None,
             figure_categorical_labels: None,
-            axes_cameras: Vec::new(),
+            axes_cameras: vec![Self::create_default_camera()],
             last_figure: None,
             last_scene_viewport_px: None,
+            camera_auto_fit: true,
+            figure_has_3d: false,
         })
+    }
+
+    /// Mark that the user has interacted with the camera (disable auto-fit-on-update).
+    pub fn note_camera_interaction(&mut self) {
+        if self.camera_auto_fit {
+            log::debug!(target: "runmat_plot", "camera_auto_fit disabled (user interaction)");
+        }
+        self.camera_auto_fit = false;
     }
 
     /// Set the figure to render
@@ -208,15 +220,47 @@ impl PlotRenderer {
         self.scene.clear();
 
         // Convert figure to scene nodes
+        let prev_has_3d = self.figure_has_3d;
+        let stats = figure.statistics();
+        let next_has_3d =
+            stats.plot_type_counts.contains_key(&crate::plots::figure::PlotType::Surface)
+                || stats
+                    .plot_type_counts
+                    .contains_key(&crate::plots::figure::PlotType::Scatter3);
+        self.figure_has_3d = next_has_3d;
+
+        // If the plot "mode" changed (2D <-> 3D), reset auto-fit so the new mode gets a sensible
+        // initial camera. Otherwise, switching from a previously-interacted 2D plot could leave us
+        // stuck in an orthographic camera for a 3D surface.
+        if prev_has_3d != next_has_3d {
+            self.camera_auto_fit = true;
+        }
+        // Also, if we are about to render a 3D plot but the current camera is still orthographic,
+        // force a one-time auto-fit to bootstrap the perspective camera.
+        if next_has_3d
+            && matches!(
+                self.camera().projection,
+                crate::core::camera::ProjectionType::Orthographic { .. }
+            )
+        {
+            self.camera_auto_fit = true;
+        }
+
         self.cache_figure_meta(&figure);
         self.last_figure = Some(figure.clone());
         // Initialize axes cameras for subplot grid
         let (rows, cols) = figure.axes_grid();
         let num_axes = rows.max(1) * cols.max(1);
-        if self.axes_cameras.len() != num_axes {
-            self.axes_cameras = (0..num_axes)
-                .map(|_| Self::create_default_camera())
-                .collect();
+        // Ensure per-axes cameras exist and match the plot mode (2D vs 3D).
+        // Subplot rendering prefers `axes_cameras`, so these must be initialized correctly.
+        if self.axes_cameras.len() != num_axes || prev_has_3d != next_has_3d {
+            if next_has_3d {
+                self.axes_cameras = (0..num_axes).map(|_| Camera::new()).collect();
+            } else {
+                self.axes_cameras = (0..num_axes)
+                    .map(|_| Self::create_default_camera())
+                    .collect();
+            }
         }
 
         self.add_figure_to_scene(figure);
@@ -225,7 +269,9 @@ impl PlotRenderer {
         self.needs_update = true;
 
         // Recompute bounds and fit camera immediately
-        self.fit_camera_to_data();
+        if self.camera_auto_fit {
+            self.fit_camera_to_data();
+        }
     }
 
     /// Add a figure to the current scene
@@ -277,10 +323,6 @@ impl PlotRenderer {
             let _ = rows;
             let _ = cols;
         }
-
-        // Update camera to fit data
-        // println!("Scene now has {} visible nodes", self.scene.get_visible_nodes().len());
-        self.fit_camera_to_data();
     }
 
     /// Cache figure metadata for overlay consumption
@@ -290,6 +332,7 @@ impl PlotRenderer {
         self.figure_y_label = figure.y_label.clone();
         self.figure_show_grid = figure.grid_enabled;
         self.figure_show_legend = figure.legend_enabled;
+        self.figure_show_box = figure.box_enabled;
         self.figure_x_limits = figure.x_limits;
         self.figure_y_limits = figure.y_limits;
         self.legend_entries = figure.legend_entries();
@@ -360,48 +403,65 @@ impl PlotRenderer {
 
     /// Fit camera to show all data
     pub fn fit_camera_to_data(&mut self) {
+        if self.figure_has_3d {
+            let Some(fig) = self.last_figure.as_mut() else {
+                return;
+            };
+            let bounds = fig.bounds();
+            let min = bounds.min;
+            let max = bounds.max;
+            // Seed a non-axis-aligned view direction (MATLAB-like az/el) before fitting.
+            let center = (min + max) * 0.5;
+            let mut cam = Camera::new();
+            cam.target = center;
+            cam.up = Vec3::Y;
+            // Direction roughly (az=-37.5°, el=30°): angled in X/Y with positive Z.
+            cam.position = center + Vec3::new(1.0, -1.0, 1.0);
+            cam.fit_bounds(min, max);
+
+            for c in self.axes_cameras.iter_mut() {
+                *c = cam.clone();
+            }
+            return;
+        }
+
         if let Some((x_min, x_max, y_min, y_max)) = self.calculate_data_bounds() {
             // Match the camera bounds exactly to data bounds to align with overlay grid
-            if let crate::core::camera::ProjectionType::Orthographic { .. } = self.camera.projection
+            let mut cam = Self::create_default_camera();
+            let mut l = x_min as f32;
+            let mut r = x_max as f32;
+            let mut b = y_min as f32;
+            let mut t = y_max as f32;
+            if self.figure_axis_equal {
+                let cx = (l + r) * 0.5;
+                let cy = (b + t) * 0.5;
+                let width = (r - l).abs();
+                let height = (t - b).abs();
+                let size = width.max(height);
+                l = cx - size * 0.5;
+                r = cx + size * 0.5;
+                b = cy - size * 0.5;
+                t = cy + size * 0.5;
+            }
+            if let crate::core::camera::ProjectionType::Orthographic {
+                ref mut left,
+                ref mut right,
+                ref mut bottom,
+                ref mut top,
+                ..
+            } = cam.projection
             {
-                let mut l = x_min as f32;
-                let mut r = x_max as f32;
-                let mut b = y_min as f32;
-                let mut t = y_max as f32;
-                if self.figure_axis_equal {
-                    let cx = (l + r) * 0.5;
-                    let cy = (b + t) * 0.5;
-                    let width = (r - l).abs();
-                    let height = (t - b).abs();
-                    let size = width.max(height);
-                    l = cx - size * 0.5;
-                    r = cx + size * 0.5;
-                    b = cy - size * 0.5;
-                    t = cy + size * 0.5;
-                }
-                if let crate::core::camera::ProjectionType::Orthographic {
-                    ref mut left,
-                    ref mut right,
-                    ref mut bottom,
-                    ref mut top,
-                    ..
-                } = self.camera.projection
-                {
-                    *left = l;
-                    *right = r;
-                    *bottom = b;
-                    *top = t;
-                }
-                // Important: for 2D plotting we treat the orthographic projection bounds as
-                // world/data coordinates. That means the view transform must not translate in X/Y,
-                // otherwise we'd effectively offset the view twice (once via view_matrix and once
-                // via projection bounds), causing the plot to appear shifted / partially clipped.
-                //
-                // Keep the camera looking down at the z=0 plane; only adjust Z so the view matrix
-                // stays stable across resizes.
-                self.camera.position.z = 1.0;
-                self.camera.target.z = 0.0;
-                self.camera.mark_dirty();
+                *left = l;
+                *right = r;
+                *bottom = b;
+                *top = t;
+            }
+            cam.position.z = 1.0;
+            cam.target.z = 0.0;
+            cam.mark_dirty();
+
+            for c in self.axes_cameras.iter_mut() {
+                *c = cam.clone();
             }
         }
     }
@@ -449,7 +509,8 @@ impl PlotRenderer {
         }
 
         // Update uniforms
-        let view_proj_matrix = self.camera.view_proj_matrix();
+        let mut cam = self.camera().clone();
+        let view_proj_matrix = cam.view_proj_matrix();
 
         self.wgpu_renderer
             .update_uniforms(view_proj_matrix, Mat4::IDENTITY);
@@ -557,7 +618,8 @@ impl PlotRenderer {
         self.wgpu_renderer.ensure_direct_triangle_pipeline();
 
         // Update camera uniforms for standard rendering path
-        let view_proj_matrix = self.camera.view_proj_matrix();
+        let mut cam = self.camera().clone();
+        let view_proj_matrix = cam.view_proj_matrix();
         self.wgpu_renderer
             .update_uniforms(view_proj_matrix, Mat4::IDENTITY);
 
@@ -857,12 +919,11 @@ impl PlotRenderer {
 
         self.wgpu_renderer.ensure_msaa(config.msaa_samples);
 
-        // Update camera aspect ratio
+        // Update WGPU uniforms from primary axes camera
         let aspect_ratio = config.width as f32 / config.height as f32;
-        self.camera.update_aspect_ratio(aspect_ratio);
-
-        // Update WGPU uniforms
-        let view_proj_matrix = self.camera.view_proj_matrix();
+        let mut cam = self.camera().clone();
+        cam.update_aspect_ratio(aspect_ratio);
+        let view_proj_matrix = cam.view_proj_matrix();
         let model_matrix = Mat4::IDENTITY;
         self.wgpu_renderer
             .update_uniforms(view_proj_matrix, model_matrix);
@@ -1075,6 +1136,7 @@ impl PlotRenderer {
         target_view: &wgpu::TextureView,
         viewport_scissor: (u32, u32, u32, u32),
         config: &PlotRenderConfig,
+        camera: &Camera,
     ) -> Result<RenderResult, Box<dyn std::error::Error>> {
         let start_time = Instant::now();
 
@@ -1086,12 +1148,11 @@ impl PlotRenderer {
         // occlusion in 3D plots (surf/mesh/scatter3).
         let depth_view = self.wgpu_renderer.ensure_depth_view();
 
-        // Update aspect ratio based on provided config (caller should pass plot area aspect)
+        // Update standard uniforms from the provided camera
         let aspect_ratio = (config.width.max(1)) as f32 / (config.height.max(1)) as f32;
-        self.camera.update_aspect_ratio(aspect_ratio);
-
-        // Update standard uniforms
-        let view_proj_matrix = self.camera.view_proj_matrix();
+        let mut cam = camera.clone();
+        cam.update_aspect_ratio(aspect_ratio);
+        let view_proj_matrix = cam.view_proj_matrix();
         self.wgpu_renderer
             .update_uniforms(view_proj_matrix, Mat4::IDENTITY);
 
@@ -1492,9 +1553,11 @@ impl PlotRenderer {
                 }
             }
             // Update camera and bounds
-            if let Some(cam) = self.axes_cameras.get(ax_idx).cloned() {
-                self.camera = cam;
-            }
+            let cam = self
+                .axes_cameras
+                .get(ax_idx)
+                .cloned()
+                .unwrap_or_else(Self::create_default_camera);
             let _ = self.calculate_data_bounds();
 
             // Render this axes into its viewport
@@ -1504,7 +1567,7 @@ impl PlotRenderer {
                 msaa_samples,
                 ..Default::default()
             };
-            let _ = self.render_camera_to_viewport(encoder, target_view, *viewport, &cfg)?;
+            let _ = self.render_camera_to_viewport(encoder, target_view, *viewport, &cfg, &cam)?;
 
             // Restore hidden nodes visibility
             for id in hidden_ids {
@@ -1537,14 +1600,22 @@ impl PlotRenderer {
 
     // Removed simple data_bounds getter in favor of overlay-aware bounds below
 
-    /// Get camera reference
+    /// Get the primary (axes 0) camera.
     pub fn camera(&self) -> &Camera {
-        &self.camera
+        self.axes_cameras
+            .first()
+            .expect("axes_cameras must contain at least one camera")
     }
 
-    /// Get mutable camera reference
+    /// Get mutable reference to the primary (axes 0) camera.
     pub fn camera_mut(&mut self) -> &mut Camera {
-        &mut self.camera
+        self.axes_cameras
+            .first_mut()
+            .expect("axes_cameras must contain at least one camera")
+    }
+
+    pub fn axes_camera(&self, axes_index: usize) -> Option<&Camera> {
+        self.axes_cameras.get(axes_index)
     }
 
     /// Get scene reference
@@ -1559,7 +1630,7 @@ impl PlotRenderer {
 
     /// Get current view bounds (camera frustum) in world/data space for 2D
     pub fn view_bounds(&self) -> Option<(f64, f64, f64, f64)> {
-        match self.camera.projection {
+        match self.camera().projection {
             crate::core::camera::ProjectionType::Orthographic {
                 left,
                 right,
@@ -1574,6 +1645,9 @@ impl PlotRenderer {
     /// Overlay configuration getters
     pub fn overlay_show_grid(&self) -> bool {
         self.figure_show_grid
+    }
+    pub fn overlay_show_box(&self) -> bool {
+        self.figure_show_box
     }
     pub fn overlay_title(&self) -> Option<&String> {
         self.figure_title.as_ref()
@@ -1604,18 +1678,10 @@ impl PlotRenderer {
     }
     /// Subplot grid
     pub fn figure_axes_grid(&self) -> (usize, usize) {
-        self.scene_axes_grid_fallback()
-    }
-
-    fn scene_axes_grid_fallback(&self) -> (usize, usize) {
-        // We don't retain Figure here; infer grid from number of axes cameras if present, else 1x1
-        if !self.axes_cameras.is_empty() {
-            // Try best effort: assume rows*cols == axes_cameras.len() with rows contiguous
-            // Default to 1 x N for now
-            (1, self.axes_cameras.len())
-        } else {
-            (1, 1)
-        }
+        self.last_figure
+            .as_ref()
+            .map(|f| f.axes_grid())
+            .unwrap_or((1, 1))
     }
     /// Return categorical labels if any (is_x_axis, &labels)
     pub fn overlay_categorical_labels(&self) -> Option<(bool, &Vec<String>)> {
@@ -1669,6 +1735,38 @@ impl PlotRenderer {
         None
     }
 
+    pub fn axes_bounds(&self, axes_index: usize) -> Option<crate::core::BoundingBox> {
+        let mut min = Vec3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY);
+        let mut max = Vec3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+        let mut saw_any = false;
+
+        for node in self.scene.get_visible_nodes() {
+            if node.axes_index != axes_index {
+                continue;
+            }
+            let Some(render_data) = &node.render_data else {
+                continue;
+            };
+            if let Some(bounds) = render_data.bounds.as_ref() {
+                min = min.min(bounds.min);
+                max = max.max(bounds.max);
+                saw_any = true;
+                continue;
+            }
+            for v in &render_data.vertices {
+                let p = Vec3::new(v.position[0], v.position[1], v.position[2]);
+                min = min.min(p);
+                max = max.max(p);
+                saw_any = true;
+            }
+        }
+
+        if !saw_any {
+            return None;
+        }
+        Some(crate::core::BoundingBox { min, max })
+    }
+
     /// Prefer exporting the original figure if available
     pub fn export_figure_clone(&self) -> crate::plots::Figure {
         if let Some(f) = &self.last_figure {
@@ -1681,6 +1779,7 @@ impl PlotRenderer {
         fig.y_label = self.figure_y_label.clone();
         fig.legend_enabled = self.figure_show_legend;
         fig.grid_enabled = self.figure_show_grid;
+        fig.box_enabled = self.figure_show_box;
         fig.x_limits = self.figure_x_limits;
         fig.y_limits = self.figure_y_limits;
         fig.x_log = self.figure_x_log;

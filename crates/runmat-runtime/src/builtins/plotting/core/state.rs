@@ -1,5 +1,5 @@
 use once_cell::sync::OnceCell;
-use runmat_plot::plots::{Figure, LineStyle};
+use runmat_plot::plots::{surface::ColorMap, surface::ShadingMode, Figure, LineStyle, PlotElement};
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
@@ -196,6 +196,9 @@ impl Default for PlotRegistry {
 #[cfg(not(target_arch = "wasm32"))]
 static REGISTRY: OnceCell<Mutex<PlotRegistry>> = OnceCell::new();
 
+#[cfg(test)]
+static TEST_PLOT_REGISTRY_LOCK: Mutex<()> = Mutex::new(());
+
 #[cfg(target_arch = "wasm32")]
 runmat_thread_local! {
     static REGISTRY: RefCell<PlotRegistry> = RefCell::new(PlotRegistry::default());
@@ -208,9 +211,17 @@ type RegistryBackendGuard<'a> = std::cell::RefMut<'a, PlotRegistry>;
 
 struct PlotRegistryGuard<'a> {
     inner: RegistryBackendGuard<'a>,
+    #[cfg(test)]
+    _test_lock: std::sync::MutexGuard<'static, ()>,
 }
 
 impl<'a> PlotRegistryGuard<'a> {
+    #[cfg(test)]
+    fn new(inner: RegistryBackendGuard<'a>, _test_lock: std::sync::MutexGuard<'static, ()>) -> Self {
+        Self { inner, _test_lock }
+    }
+
+    #[cfg(not(test))]
     fn new(inner: RegistryBackendGuard<'a>) -> Self {
         Self { inner }
     }
@@ -280,6 +291,163 @@ pub(crate) fn configure_subplot_with_builtin(
     index: usize,
 ) -> BuiltinResult<()> {
     configure_subplot(rows, cols, index).map_err(|err| map_figure_error(builtin, err))
+}
+
+pub fn set_grid_enabled(enabled: bool) {
+    let (handle, figure_clone) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        state.figure.set_grid(enabled);
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone())
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn toggle_grid() -> bool {
+    let (handle, figure_clone, enabled) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        let next = !state.figure.grid_enabled;
+        state.figure.set_grid(next);
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone(), next)
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    enabled
+}
+
+pub fn set_box_enabled(enabled: bool) {
+    let (handle, figure_clone) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        state.figure.box_enabled = enabled;
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone())
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn toggle_box() -> bool {
+    let (handle, figure_clone, enabled) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        let next = !state.figure.box_enabled;
+        state.figure.box_enabled = next;
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone(), next)
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    enabled
+}
+
+pub fn set_axis_equal(enabled: bool) {
+    let (handle, figure_clone) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        state.figure.set_axis_equal(enabled);
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone())
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn set_axis_limits(x: Option<(f64, f64)>, y: Option<(f64, f64)>) {
+    let (handle, figure_clone) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        state.figure.x_limits = x;
+        state.figure.y_limits = y;
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone())
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn clear_current_axes() {
+    let (handle, figure_clone) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        let axes_index = state.active_axes;
+        state.figure.clear_axes(axes_index);
+        state.reset_cycle(axes_index);
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone())
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn set_colorbar_enabled(enabled: bool) {
+    let (handle, figure_clone) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        state.figure.colorbar_enabled = enabled;
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone())
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn toggle_colorbar() -> bool {
+    let (handle, figure_clone, enabled) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        let next = !state.figure.colorbar_enabled;
+        state.figure.colorbar_enabled = next;
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone(), next)
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    enabled
+}
+
+pub fn set_colormap(colormap: ColorMap) {
+    let (handle, figure_clone) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        state.figure.colormap = colormap;
+        // Propagate to existing surface plots (matches expected MATLAB semantics).
+        let plot_count = state.figure.len();
+        for idx in 0..plot_count {
+            if let Some(plot) = state.figure.get_plot_mut(idx) {
+                if let PlotElement::Surface(surface) = plot {
+                    *surface = surface.clone().with_colormap(colormap);
+                }
+            }
+        }
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone())
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn set_surface_shading(mode: ShadingMode) {
+    let (handle, figure_clone) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        let plot_count = state.figure.len();
+        for idx in 0..plot_count {
+            if let Some(plot) = state.figure.get_plot_mut(idx) {
+                if let PlotElement::Surface(surface) = plot {
+                    *surface = surface.clone().with_shading(mode);
+                }
+            }
+        }
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone())
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -370,11 +538,22 @@ pub fn decode_axes_handle(value: f64) -> Result<(FigureHandle, usize), FigureErr
 
 #[cfg(not(target_arch = "wasm32"))]
 fn registry() -> PlotRegistryGuard<'static> {
+    #[cfg(test)]
+    let test_lock = TEST_PLOT_REGISTRY_LOCK
+        .lock()
+        .expect("plot registry test lock poisoned");
     let guard = REGISTRY
         .get_or_init(|| Mutex::new(PlotRegistry::default()))
         .lock()
         .expect("plot registry poisoned");
-    PlotRegistryGuard::new(guard)
+    #[cfg(test)]
+    {
+        PlotRegistryGuard::new(guard, test_lock)
+    }
+    #[cfg(not(test))]
+    {
+        PlotRegistryGuard::new(guard)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -386,7 +565,17 @@ fn registry() -> PlotRegistryGuard<'static> {
         // to 'static is sound.
         let guard_static: std::cell::RefMut<'static, PlotRegistry> =
             unsafe { std::mem::transmute::<std::cell::RefMut<'_, PlotRegistry>, _>(guard) };
-        PlotRegistryGuard::new(guard_static)
+        #[cfg(test)]
+        {
+            let test_lock = TEST_PLOT_REGISTRY_LOCK
+                .lock()
+                .expect("plot registry test lock poisoned");
+            PlotRegistryGuard::new(guard_static, test_lock)
+        }
+        #[cfg(not(test))]
+        {
+            PlotRegistryGuard::new(guard_static)
+        }
     })
 }
 

@@ -171,6 +171,15 @@ pub(crate) mod wasm {
                     "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
                 ))
             })?;
+            match &event {
+                PlotEvent::MousePress { .. }
+                | PlotEvent::MouseRelease { .. }
+                | PlotEvent::MouseWheel { .. } => {
+                    debug!("plot-web: surface_event(surface_id={surface_id}, event={event:?})");
+                }
+                PlotEvent::MouseMove { .. } | PlotEvent::Resize { .. } => {}
+                PlotEvent::KeyPress { .. } | PlotEvent::KeyRelease { .. } => {}
+            }
             // If no figure was ever rendered, there's nothing to manipulate.
             // Still accept the event (no-op) so the host doesn't have to special-case.
             let _ = entry.renderer.handle_event(event);

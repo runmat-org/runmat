@@ -212,20 +212,39 @@ impl Camera {
             return; // Rotation disabled (e.g., for 2D mode)
         }
 
-        let yaw_delta = -delta.x * self.rotate_sensitivity;
-        let pitch_delta = -delta.y * self.rotate_sensitivity;
+        // Orbit-like controls:
+        // - yaw around world up
+        // - pitch around camera right
+        //
+        // This feels closer to typical 3D viewport / game-camera interaction than pitching around
+        // a fixed world X axis.
+        let yaw = -delta.x * self.rotate_sensitivity;
+        let pitch = -delta.y * self.rotate_sensitivity;
 
-        // Create rotation quaternions
-        let yaw_rotation = Quat::from_axis_angle(Vec3::Y, yaw_delta);
-        let pitch_rotation = Quat::from_axis_angle(Vec3::X, pitch_delta);
+        let world_up = Vec3::Y;
+        let mut offset = self.position - self.target;
+        if offset.length_squared() < 1e-9 {
+            offset = Vec3::new(0.0, 0.0, 1.0);
+        }
 
-        // Apply rotations
-        self.rotation = yaw_rotation * self.rotation * pitch_rotation;
+        // Yaw around world up.
+        let yaw_rot = Quat::from_axis_angle(world_up, yaw);
+        offset = yaw_rot * offset;
 
-        // Update position based on rotation
-        let distance = (self.position - self.target).length();
-        let direction = self.rotation * Vec3::new(0.0, 0.0, distance);
-        self.position = self.target + direction;
+        // Pitch around camera right axis after yaw.
+        let forward = (-offset).normalize_or_zero();
+        let right = forward.cross(world_up).normalize_or_zero();
+        if right.length_squared() > 1e-9 {
+            let pitch_rot = Quat::from_axis_angle(right, pitch);
+            let candidate = pitch_rot * offset;
+            // Avoid flipping over the poles (when looking straight up/down).
+            let up_dot = candidate.normalize_or_zero().dot(world_up).abs();
+            if up_dot < 0.995 {
+                offset = candidate;
+            }
+        }
+
+        self.position = self.target + offset;
 
         self.view_proj_dirty = true;
     }
@@ -380,13 +399,64 @@ impl CameraController {
     }
 
     /// Handle mouse movement
-    pub fn mouse_move(&mut self, position: Vec2, camera: &mut Camera) {
-        self.mouse_delta = position - self.last_mouse_pos;
+    ///
+    /// For 3D (perspective) cameras:
+    /// - left drag: orbit/rotate
+    /// - right drag: pan
+    ///
+    /// For 2D (orthographic) cameras, we treat drag as pan by shifting the
+    /// orthographic bounds in data-space. We avoid translating the view matrix in X/Y
+    /// because the ortho bounds already live in data coordinates.
+    pub fn mouse_move(
+        &mut self,
+        position: Vec2,
+        delta: Vec2,
+        viewport_px: (u32, u32),
+        camera: &mut Camera,
+    ) {
+        // Prefer the host-provided delta; fall back to position diff.
+        self.mouse_delta = if delta.length_squared() > 0.0 {
+            delta
+        } else {
+            position - self.last_mouse_pos
+        };
 
-        if self.is_dragging {
-            camera.rotate(self.mouse_delta);
-        } else if self.is_panning {
-            camera.pan(self.mouse_delta);
+        match camera.projection {
+            ProjectionType::Perspective { .. } => {
+                if self.is_dragging {
+                    camera.rotate(self.mouse_delta);
+                } else if self.is_panning {
+                    camera.pan(self.mouse_delta);
+                }
+            }
+            ProjectionType::Orthographic {
+                ref mut left,
+                ref mut right,
+                ref mut bottom,
+                ref mut top,
+                ..
+            } => {
+                // For 2D, treat either drag or "pan mode" as panning the ortho bounds.
+                if self.is_dragging || self.is_panning {
+                    let (vw, vh) = (viewport_px.0.max(1) as f32, viewport_px.1.max(1) as f32);
+                    let width = (*right - *left).abs().max(1e-6);
+                    let height = (*top - *bottom).abs().max(1e-6);
+
+                    // Convert pixel delta to data-space delta.
+                    // Screen +X should move the view right; dragging right should move the data left,
+                    // so we subtract.
+                    let dx = -self.mouse_delta.x * (width / vw);
+                    // Screen +Y is down in most DOM coordinate systems; dragging down should move
+                    // the data up, so we add.
+                    let dy = self.mouse_delta.y * (height / vh);
+
+                    *left += dx;
+                    *right += dx;
+                    *bottom += dy;
+                    *top += dy;
+                    camera.mark_dirty();
+                }
+            }
         }
 
         self.last_mouse_pos = position;

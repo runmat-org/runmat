@@ -11,6 +11,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use url::Url;
+use uuid::Uuid;
+
+const MANIFEST_HASH: &str = "manifest:v1";
+const SHARD_PREFIX: &str = "/.runmat/shards";
 
 static USER_AGENT: Lazy<String> = Lazy::new(|| {
     format!(
@@ -27,7 +31,13 @@ pub struct RemoteFsConfig {
     pub chunk_bytes: usize,
     pub parallel_requests: usize,
     pub direct_read_threshold_bytes: u64,
+    pub direct_write_threshold_bytes: u64,
+    pub shard_threshold_bytes: u64,
+    pub shard_size_bytes: u64,
     pub timeout: Duration,
+    pub retry_max_attempts: usize,
+    pub retry_base_delay: Duration,
+    pub retry_max_delay: Duration,
 }
 
 impl Default for RemoteFsConfig {
@@ -38,7 +48,13 @@ impl Default for RemoteFsConfig {
             chunk_bytes: 16 * 1024 * 1024,
             parallel_requests: 4,
             direct_read_threshold_bytes: 64 * 1024 * 1024,
+            direct_write_threshold_bytes: 64 * 1024 * 1024,
+            shard_threshold_bytes: 4 * 1024 * 1024 * 1024,
+            shard_size_bytes: 512 * 1024 * 1024,
             timeout: Duration::from_secs(120),
+            retry_max_attempts: 5,
+            retry_base_delay: Duration::from_millis(100),
+            retry_max_delay: Duration::from_secs(2),
         }
     }
 }
@@ -50,6 +66,12 @@ struct RemoteInner {
     chunk_bytes: usize,
     parallel_requests: usize,
     direct_read_threshold_bytes: u64,
+    direct_write_threshold_bytes: u64,
+    shard_threshold_bytes: u64,
+    shard_size_bytes: u64,
+    retry_max_attempts: usize,
+    retry_base_delay: Duration,
+    retry_max_delay: Duration,
 }
 
 impl RemoteInner {
@@ -73,7 +95,71 @@ impl RemoteInner {
             chunk_bytes: config.chunk_bytes.max(64 * 1024),
             parallel_requests: config.parallel_requests.max(1),
             direct_read_threshold_bytes: config.direct_read_threshold_bytes,
+            direct_write_threshold_bytes: config.direct_write_threshold_bytes,
+            shard_threshold_bytes: config.shard_threshold_bytes,
+            shard_size_bytes: config.shard_size_bytes.max(8 * 1024 * 1024),
+            retry_max_attempts: config.retry_max_attempts.max(1),
+            retry_base_delay: config.retry_base_delay,
+            retry_max_delay: config.retry_max_delay,
         })
+    }
+
+    fn should_retry(&self, status: StatusCode) -> bool {
+        matches!(
+            status,
+            StatusCode::TOO_MANY_REQUESTS
+                | StatusCode::INTERNAL_SERVER_ERROR
+                | StatusCode::BAD_GATEWAY
+                | StatusCode::SERVICE_UNAVAILABLE
+                | StatusCode::GATEWAY_TIMEOUT
+        )
+    }
+
+    fn retry_delay(&self, attempt: usize) -> Duration {
+        let factor = 1u64.checked_shl(attempt as u32).unwrap_or(u64::MAX);
+        let delay = self.retry_base_delay.as_millis() as u64 * factor;
+        let capped = delay.min(self.retry_max_delay.as_millis() as u64);
+        Duration::from_millis(capped)
+    }
+
+    fn send_with_retry(
+        &self,
+        method: reqwest::Method,
+        route: &str,
+        query: &[(&str, String)],
+    ) -> io::Result<Response> {
+        for attempt in 0..self.retry_max_attempts {
+            let resp = self
+                .request(method.clone(), route, query)
+                .send()
+                .map_err(map_http_err)?;
+            if !self.should_retry(resp.status()) || attempt + 1 == self.retry_max_attempts {
+                return Ok(resp);
+            }
+            std::thread::sleep(self.retry_delay(attempt));
+        }
+        Err(io::Error::new(
+            ErrorKind::Other,
+            "request retries exhausted",
+        ))
+    }
+
+    fn get_url_with_retry(&self, url: &str, range: Option<String>) -> io::Result<Response> {
+        for attempt in 0..self.retry_max_attempts {
+            let mut request = self.client.get(url);
+            if let Some(range) = &range {
+                request = request.header(reqwest::header::RANGE, range);
+            }
+            let resp = request.send().map_err(map_http_err)?;
+            if !self.should_retry(resp.status()) || attempt + 1 == self.retry_max_attempts {
+                return Ok(resp);
+            }
+            std::thread::sleep(self.retry_delay(attempt));
+        }
+        Err(io::Error::new(
+            ErrorKind::Other,
+            "request retries exhausted",
+        ))
     }
 
     fn endpoint(&self, route: &str) -> Url {
@@ -108,9 +194,7 @@ impl RemoteInner {
         query: &[(&str, String)],
     ) -> io::Result<T> {
         let resp = self
-            .request(reqwest::Method::GET, route, query)
-            .send()
-            .map_err(map_http_err)?;
+            .send_with_retry(reqwest::Method::GET, route, query)?;
         handle_error(resp)?.json().map_err(map_http_err)
     }
 
@@ -124,28 +208,36 @@ impl RemoteInner {
         Ok(())
     }
 
-    fn delete_empty(&self, route: &str, query: &[(&str, String)]) -> io::Result<()> {
+    fn post_json<T: for<'a> Deserialize<'a>, B: Serialize>(
+        &self,
+        route: &str,
+        body: &B,
+    ) -> io::Result<T> {
         let resp = self
-            .request(reqwest::Method::DELETE, route, query)
+            .request(reqwest::Method::POST, route, &[])
+            .json(body)
             .send()
             .map_err(map_http_err)?;
+        handle_error(resp)?.json().map_err(map_http_err)
+    }
+
+    fn delete_empty(&self, route: &str, query: &[(&str, String)]) -> io::Result<()> {
+        let resp = self
+            .send_with_retry(reqwest::Method::DELETE, route, query)?;
         handle_error(resp)?;
         Ok(())
     }
 
     fn download_chunk(&self, path: &str, offset: u64, length: usize) -> io::Result<Vec<u8>> {
-        let resp = self
-            .request(
-                reqwest::Method::GET,
-                "/fs/read",
-                &[
-                    ("path", path.to_string()),
-                    ("offset", offset.to_string()),
-                    ("length", length.to_string()),
-                ],
-            )
-            .send()
-            .map_err(map_http_err)?;
+        let resp = self.send_with_retry(
+            reqwest::Method::GET,
+            "/fs/read",
+            &[
+                ("path", path.to_string()),
+                ("offset", offset.to_string()),
+                ("length", length.to_string()),
+            ],
+        )?;
         let mut body = handle_error(resp)?;
         if let Some(content_type) = body.headers().get(reqwest::header::CONTENT_TYPE) {
             if content_type
@@ -172,12 +264,7 @@ impl RemoteInner {
             return Ok(Vec::new());
         }
         let end = offset + length - 1;
-        let resp = self
-            .client
-            .get(url)
-            .header(reqwest::header::RANGE, format!("bytes={offset}-{end}"))
-            .send()
-            .map_err(map_http_err)?;
+        let resp = self.get_url_with_retry(url, Some(format!("bytes={offset}-{end}")))?;
         let mut body = handle_error(resp)?;
         let mut buf = Vec::with_capacity(length as usize);
         body.copy_to(&mut buf).map_err(map_http_err)?;
@@ -195,6 +282,7 @@ impl RemoteInner {
         truncate: bool,
         final_chunk: bool,
         data: &[u8],
+        hash: Option<&str>,
     ) -> io::Result<Option<FsWriteSessionResponse>> {
         let mut query = vec![("path", path.to_string()), ("offset", offset.to_string())];
         if truncate {
@@ -202,6 +290,9 @@ impl RemoteInner {
         }
         if final_chunk {
             query.push(("final", "true".to_string()));
+        }
+        if let Some(hash) = hash {
+            query.push(("hash", hash.to_string()));
         }
         let resp = self
             .request(reqwest::Method::PUT, "/fs/write", &query)
@@ -214,6 +305,81 @@ impl RemoteInner {
         }
         handle_error(resp)?;
         Ok(None)
+    }
+
+    fn multipart_create(&self, path: &str, size_bytes: u64) -> io::Result<MultipartUploadResponse> {
+        self.post_json(
+            "/fs/multipart-upload",
+            &MultipartUploadRequest {
+                path: path.to_string(),
+                size_bytes: size_bytes as i64,
+                content_type: None,
+            },
+        )
+    }
+
+    fn multipart_presign_part(
+        &self,
+        session_id: &str,
+        blob_key: &str,
+        upload_id: &str,
+        part_number: i32,
+        size_bytes: u64,
+    ) -> io::Result<String> {
+        let response: MultipartUploadPartResponse = self.post_json(
+            "/fs/multipart-upload/part",
+            &MultipartUploadPartRequest {
+                session_id: session_id.to_string(),
+                blob_key: blob_key.to_string(),
+                upload_id: upload_id.to_string(),
+                part_number,
+                size_bytes: size_bytes as i64,
+            },
+        )?;
+        Ok(response.upload_url)
+    }
+
+    fn multipart_complete(
+        &self,
+        path: &str,
+        session_id: &str,
+        blob_key: &str,
+        upload_id: &str,
+        size_bytes: u64,
+        parts: Vec<MultipartPart>,
+    ) -> io::Result<()> {
+        let resp = self
+            .request(reqwest::Method::POST, "/fs/multipart-upload/complete", &[])
+            .json(&MultipartUploadCompleteRequest {
+                path: path.to_string(),
+                session_id: session_id.to_string(),
+                blob_key: blob_key.to_string(),
+                upload_id: upload_id.to_string(),
+                size_bytes: size_bytes as i64,
+                hash: None,
+                parts,
+            })
+            .send()
+            .map_err(map_http_err)?;
+        handle_error(resp)?;
+        Ok(())
+    }
+
+    fn put_upload_url_with_etag(&self, url: &str, data: &[u8]) -> io::Result<String> {
+        let resp = self
+            .client
+            .put(url)
+            .body(data.to_vec())
+            .send()
+            .map_err(map_http_err)?;
+        let resp = handle_error(resp)?;
+        let etag = resp
+            .headers()
+            .get(reqwest::header::ETAG)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        Ok(etag)
     }
 
     fn fetch_metadata(&self, path: &str) -> io::Result<MetadataResponse> {
@@ -256,7 +422,7 @@ impl RemoteFsProvider {
         Ok(())
     }
 
-    fn download_entire_file(&self, path: &str, len: u64) -> io::Result<Vec<u8>> {
+    fn download_raw_file(&self, path: &str, len: u64) -> io::Result<Vec<u8>> {
         if len == 0 {
             return Ok(Vec::new());
         }
@@ -337,6 +503,22 @@ impl RemoteFsProvider {
         Ok(buffer)
     }
 
+    fn download_sharded_file(&self, path: &str, len: u64) -> io::Result<Vec<u8>> {
+        let manifest_bytes = self.download_raw_file(path, len)?;
+        let manifest: ShardManifest = serde_json::from_slice(&manifest_bytes)
+            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "invalid shard manifest"))?;
+        if manifest.version != 1 {
+            return Err(io::Error::new(ErrorKind::InvalidData, "unsupported manifest"));
+        }
+        let mut buffer = Vec::with_capacity(manifest.total_size as usize);
+        for shard in manifest.shards {
+            let meta = self.inner.fetch_metadata(&shard.path)?;
+            let bytes = self.download_raw_file(&shard.path, meta.len)?;
+            buffer.extend_from_slice(&bytes);
+        }
+        Ok(buffer)
+    }
+
     fn download_entire_file_from_url(&self, url: &str, len: u64) -> io::Result<Vec<u8>> {
         let chunk = self.inner.chunk_bytes as u64;
         let mut tasks = Vec::new();
@@ -412,8 +594,23 @@ impl RemoteFsProvider {
     }
 
     fn upload_entire_file(&self, path: &str, data: &[u8]) -> io::Result<()> {
+        if data.len() as u64 >= self.inner.shard_threshold_bytes {
+            return self.upload_sharded_file(path, data);
+        }
+        self.upload_unsharded_file(path, data, None)
+    }
+
+    fn upload_unsharded_file(
+        &self,
+        path: &str,
+        data: &[u8],
+        hash: Option<&str>,
+    ) -> io::Result<()> {
+        if data.len() as u64 >= self.inner.direct_write_threshold_bytes {
+            return self.upload_multipart_file(path, data);
+        }
         if data.is_empty() {
-            self.inner.upload_chunk(path, 0, true, true, data)?;
+            self.inner.upload_chunk(path, 0, true, true, data, hash)?;
             return Ok(());
         }
         let chunk = self.inner.chunk_bytes;
@@ -423,7 +620,14 @@ impl RemoteFsProvider {
             let slice = &data[offset..end];
             let truncate = offset == 0;
             let final_chunk = end == data.len();
-            let result = self.inner.upload_chunk(path, offset as u64, truncate, final_chunk, slice)?;
+            let result = self.inner.upload_chunk(
+                path,
+                offset as u64,
+                truncate,
+                final_chunk,
+                slice,
+                hash,
+            )?;
             if let Some(session) = result {
                 let expected = offset as u64 + slice.len() as u64;
                 if session.next_offset as u64 != expected {
@@ -437,6 +641,136 @@ impl RemoteFsProvider {
         }
         Ok(())
     }
+
+    fn upload_sharded_file(&self, path: &str, data: &[u8]) -> io::Result<()> {
+        let shard_size = self.inner.shard_size_bytes as usize;
+        let mut shards = Vec::new();
+        let mut offset = 0usize;
+        while offset < data.len() {
+            let end = std::cmp::min(offset + shard_size, data.len());
+            let slice = &data[offset..end];
+            let shard_path = format!("{}/{}", SHARD_PREFIX, Uuid::new_v4());
+            self.upload_unsharded_file(&shard_path, slice, None)?;
+            shards.push(ShardEntry {
+                path: shard_path,
+                size: slice.len() as u64,
+            });
+            offset = end;
+        }
+        let manifest = ShardManifest {
+            version: 1,
+            total_size: data.len() as u64,
+            shard_size: self.inner.shard_size_bytes,
+            shards,
+        };
+        let bytes = serde_json::to_vec(&manifest)
+            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "invalid manifest"))?;
+        self.upload_unsharded_file(path, &bytes, Some(MANIFEST_HASH))
+    }
+
+    fn upload_multipart_file(&self, path: &str, data: &[u8]) -> io::Result<()> {
+        if data.is_empty() {
+            self.inner.upload_chunk(path, 0, true, true, data, None)?;
+            return Ok(());
+        }
+        let session = self.inner.multipart_create(path, data.len() as u64)?;
+        let part_size = session.part_size_bytes as usize;
+        let mut tasks = std::collections::VecDeque::new();
+        let mut offset = 0usize;
+        let mut part_number = 1;
+        let mut index = 0usize;
+        while offset < data.len() {
+            let end = std::cmp::min(offset + part_size, data.len());
+            let length = end - offset;
+            tasks.push_back(MultipartTask {
+                index,
+                part_number,
+                offset,
+                length,
+            });
+            offset = end;
+            part_number += 1;
+            index += 1;
+        }
+        let tasks = Arc::new(Mutex::new(tasks));
+        let task_len = tasks.lock().unwrap().len();
+        let mut result_vec: Vec<MultipartResult> = Vec::with_capacity(task_len);
+        for _ in 0..task_len {
+            result_vec.push(None);
+        }
+        let results = Arc::new(Mutex::new(result_vec));
+        let error = Arc::new(Mutex::new(None));
+        let data = Arc::new(data.to_vec());
+        thread::scope(|scope| {
+            for _ in 0..self.inner.parallel_requests {
+                let tasks = Arc::clone(&tasks);
+                let results = Arc::clone(&results);
+                let error = Arc::clone(&error);
+                let inner = Arc::clone(&self.inner);
+                let blob_key = session.blob_key.clone();
+                let upload_id = session.upload_id.clone();
+                let session_id = session.session_id.clone();
+                let data = Arc::clone(&data);
+                scope.spawn(move |_| loop {
+                    let task = {
+                        let mut guard = tasks.lock().unwrap();
+                        guard.pop_front()
+                    };
+                    let Some(task) = task else { break };
+                    let slice = &data[task.offset..task.offset + task.length];
+                    let result = (|| {
+                        let url = inner.multipart_presign_part(
+                            &session_id,
+                            &blob_key,
+                            &upload_id,
+                            task.part_number,
+                            task.length as u64,
+                        )?;
+                        let etag = inner.put_upload_url_with_etag(&url, slice)?;
+                        Ok(MultipartPart {
+                            part_number: task.part_number,
+                            etag,
+                        })
+                    })();
+                    let mut guard = results.lock().unwrap();
+                    guard[task.index] = Some(result);
+                    if let Some(Err(err)) = guard[task.index].as_ref() {
+                        let mut err_guard = error.lock().unwrap();
+                        if err_guard.is_none() {
+                            *err_guard = Some(io::Error::new(err.kind(), err.to_string()));
+                        }
+                        break;
+                    }
+                });
+            }
+        })
+        .expect("multipart upload scope");
+        if let Some(err) = error.lock().unwrap().take() {
+            return Err(err);
+        }
+        let mut parts = Vec::with_capacity(results.lock().unwrap().len());
+        for maybe in Arc::try_unwrap(results)
+            .expect("results still in use")
+            .into_inner()
+            .expect("results poisoned")
+        {
+            let part = maybe.expect("missing part result")?;
+            if part.etag.is_empty() {
+                return Err(io::Error::other("missing etag"));
+            }
+            parts.push(part);
+        }
+        parts.sort_by_key(|part| part.part_number);
+        self.inner.multipart_complete(
+            path,
+            &session.session_id,
+            &session.blob_key,
+            &session.upload_id,
+            data.len() as u64,
+            parts,
+        )?;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -444,6 +778,16 @@ struct ChunkTask {
     offset: u64,
     length: usize,
     index: usize,
+}
+
+type MultipartResult = Option<Result<MultipartPart, io::Error>>;
+
+#[derive(Clone, Copy)]
+struct MultipartTask {
+    index: usize,
+    part_number: i32,
+    offset: usize,
+    length: usize,
 }
 
 impl FsProvider for RemoteFsProvider {
@@ -455,7 +799,11 @@ impl FsProvider for RemoteFsProvider {
             if meta.file_type != "file" {
                 return Err(io::Error::other("remote path is not a file"));
             }
-            data = self.download_entire_file(&normalized, meta.len)?;
+            data = if meta.hash.as_deref() == Some(MANIFEST_HASH) {
+                self.download_sharded_file(&normalized, meta.len)?
+            } else {
+                self.download_raw_file(&normalized, meta.len)?
+            };
         }
         if flags.truncate {
             data.clear();
@@ -480,7 +828,11 @@ impl FsProvider for RemoteFsProvider {
         if meta.file_type != "file" {
             return Err(io::Error::other("remote path is not a file"));
         }
-        self.download_entire_file(&normalized, meta.len)
+        if meta.hash.as_deref() == Some(MANIFEST_HASH) {
+            self.download_sharded_file(&normalized, meta.len)
+        } else {
+            self.download_raw_file(&normalized, meta.len)
+        }
     }
 
     fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
@@ -680,18 +1032,20 @@ struct MetadataResponse {
     len: u64,
     modified: Option<u64>,
     readonly: bool,
+    hash: Option<String>,
 }
 
 impl From<MetadataResponse> for FsMetadata {
     fn from(value: MetadataResponse) -> Self {
-        FsMetadata {
-            file_type: value.file_type.into(),
-            len: value.len,
-            modified: value
+        FsMetadata::new_with_hash(
+            value.file_type.into(),
+            value.len,
+            value
                 .modified
                 .map(|secs| std::time::UNIX_EPOCH + Duration::from_secs(secs)),
-            readonly: value.readonly,
-        }
+            value.readonly,
+            value.hash,
+        )
     }
 }
 
@@ -745,6 +1099,83 @@ struct DownloadUrlResponse {
     download_url: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct MultipartUploadRequest {
+    path: String,
+    #[serde(rename = "size_bytes")]
+    size_bytes: i64,
+    #[serde(rename = "content_type")]
+    content_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MultipartUploadResponse {
+    #[serde(rename = "session_id")]
+    session_id: String,
+    #[serde(rename = "blob_key")]
+    blob_key: String,
+    #[serde(rename = "upload_id")]
+    upload_id: String,
+    #[serde(rename = "part_size_bytes")]
+    part_size_bytes: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct MultipartUploadPartRequest {
+    #[serde(rename = "session_id")]
+    session_id: String,
+    #[serde(rename = "blob_key")]
+    blob_key: String,
+    #[serde(rename = "upload_id")]
+    upload_id: String,
+    #[serde(rename = "part_number")]
+    part_number: i32,
+    #[serde(rename = "size_bytes")]
+    size_bytes: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct MultipartUploadPartResponse {
+    #[serde(rename = "upload_url")]
+    upload_url: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct MultipartUploadCompleteRequest {
+    path: String,
+    #[serde(rename = "session_id")]
+    session_id: String,
+    #[serde(rename = "blob_key")]
+    blob_key: String,
+    #[serde(rename = "upload_id")]
+    upload_id: String,
+    #[serde(rename = "size_bytes")]
+    size_bytes: i64,
+    hash: Option<String>,
+    parts: Vec<MultipartPart>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct MultipartPart {
+    #[serde(rename = "part_number")]
+    part_number: i32,
+    etag: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ShardManifest {
+    version: u32,
+    total_size: u64,
+    shard_size: u64,
+    shards: Vec<ShardEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ShardEntry {
+    path: String,
+    size: u64,
+}
+
 #[derive(Debug, Deserialize)]
 struct FsWriteSessionResponse {
     #[serde(rename = "sessionId")]
@@ -787,7 +1218,7 @@ impl fmt::Debug for RemoteFsProvider {
 mod tests {
     use super::*;
     use axum::extract::{Query, State};
-    use axum::http::StatusCode;
+    use axum::http::{HeaderMap, StatusCode};
     use axum::routing::{delete, get, post, put};
     use axum::{Json, Router};
     use serde::Deserialize;
@@ -801,6 +1232,7 @@ mod tests {
     struct Harness {
         root: Arc<PathBuf>,
         _keeper: Arc<tempfile::TempDir>,
+        base_url: Arc<Mutex<Option<String>>>,
     }
 
     impl Harness {
@@ -810,6 +1242,7 @@ mod tests {
             Self {
                 root: Arc::new(path),
                 _keeper: Arc::new(dir),
+                base_url: Arc::new(Mutex::new(None)),
             }
         }
 
@@ -992,6 +1425,52 @@ mod tests {
         Ok(())
     }
 
+    async fn read_with_download_handler(
+        State(harness): State<Harness>,
+        Query(params): Query<PathParams>,
+    ) -> Result<Json<serde_json::Value>, StatusCode> {
+        let base = harness
+            .base_url
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+        let download_url = format!("{base}/download?path={}", params.path);
+        Ok(Json(serde_json::json!({
+            "downloadUrl": download_url,
+            "expiresAt": 0
+        })))
+    }
+
+    async fn download_handler(
+        State(harness): State<Harness>,
+        Query(params): Query<PathParams>,
+        headers: HeaderMap,
+    ) -> Result<Vec<u8>, StatusCode> {
+        let mut data =
+            std::fs::read(harness.resolve(&params.path)).map_err(|_| StatusCode::NOT_FOUND)?;
+        if let Some(range) = headers.get("range").and_then(|value| value.to_str().ok()) {
+            if let Some((start, end)) = parse_range(range) {
+                let start = start.min(data.len());
+                let end = end.min(data.len().saturating_sub(1));
+                if start < data.len() {
+                    data = data[start..=end].to_vec();
+                } else {
+                    data.clear();
+                }
+            }
+        }
+        Ok(data)
+    }
+
+    fn parse_range(value: &str) -> Option<(usize, usize)> {
+        let value = value.strip_prefix("bytes=")?;
+        let (start, end) = value.split_once('-')?;
+        let start = start.parse::<usize>().ok()?;
+        let end = end.parse::<usize>().ok()?;
+        Some((start, end))
+    }
+
     fn spawn_server() -> (String, Harness, Runtime) {
         let harness = Harness::new();
         let router = Router::new()
@@ -1017,6 +1496,34 @@ mod tests {
         (format!("http://{addr}"), harness, rt)
     }
 
+    fn spawn_server_with_download_url() -> (String, Harness, Runtime) {
+        let harness = Harness::new();
+        let router = Router::new()
+            .route("/fs/metadata", get(metadata_handler))
+            .route("/fs/dir", get(dir_handler).delete(delete_dir_handler))
+            .route("/fs/file", delete(delete_file_handler))
+            .route("/fs/canonicalize", get(canonicalize_handler))
+            .route("/fs/read", get(read_with_download_handler))
+            .route("/fs/write", put(write_handler))
+            .route("/fs/mkdir", post(mkdir_handler))
+            .route("/fs/rename", post(rename_handler))
+            .route("/fs/set-readonly", post(set_readonly_handler))
+            .route("/download", get(download_handler))
+            .with_state(harness.clone());
+        let std_listener = StdTcpListener::bind("127.0.0.1:0").unwrap();
+        std_listener.set_nonblocking(true).expect("nonblocking");
+        let addr = std_listener.local_addr().unwrap();
+        let service = router.into_make_service();
+        let rt = Runtime::new().unwrap();
+        let base = format!("http://{addr}");
+        *harness.base_url.lock().unwrap() = Some(base.clone());
+        rt.spawn(async move {
+            let listener = TokioTcpListener::from_std(std_listener).unwrap();
+            axum::serve(listener, service).await.unwrap();
+        });
+        (base, harness, rt)
+    }
+
     #[test]
     fn remote_provider_roundtrip() {
         let (base, harness, _rt) = spawn_server();
@@ -1027,6 +1534,7 @@ mod tests {
             parallel_requests: 4,
             direct_read_threshold_bytes: u64::MAX,
             timeout: Duration::from_secs(30),
+            ..RemoteFsConfig::default()
         })
         .expect("provider");
 
@@ -1042,5 +1550,29 @@ mod tests {
             .remove_file(Path::new("/reports/data.bin"))
             .expect("remove");
         assert!(!harness.resolve("/reports/data.bin").exists());
+    }
+
+    #[test]
+    fn remote_provider_download_url_read() {
+        let (base, harness, _rt) = spawn_server_with_download_url();
+        let provider = RemoteFsProvider::new(RemoteFsConfig {
+            base_url: base,
+            auth_token: None,
+            chunk_bytes: 128,
+            parallel_requests: 2,
+            direct_read_threshold_bytes: u64::MAX,
+            timeout: Duration::from_secs(30),
+            ..RemoteFsConfig::default()
+        })
+        .expect("provider");
+
+        let data = (0..1024u32)
+            .flat_map(|v| v.to_le_bytes())
+            .collect::<Vec<_>>();
+        std::fs::create_dir_all(harness.resolve("/reports")).expect("mkdir");
+        std::fs::write(harness.resolve("/reports/data.bin"), &data).expect("write");
+
+        let read_back = provider.read(Path::new("/reports/data.bin")).expect("read");
+        assert_eq!(data, read_back);
     }
 }

@@ -5,8 +5,12 @@ use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use url::Url;
+use uuid::Uuid;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
+
+const MANIFEST_HASH: &str = "manifest:v1";
+const SHARD_PREFIX: &str = "/.runmat/shards";
 use web_sys::{XmlHttpRequest, XmlHttpRequestResponseType};
 
 #[derive(Clone, Debug)]
@@ -15,7 +19,13 @@ pub struct RemoteFsConfig {
     pub auth_token: Option<String>,
     pub chunk_bytes: usize,
     pub direct_read_threshold_bytes: u64,
+    pub direct_write_threshold_bytes: u64,
+    pub shard_threshold_bytes: u64,
+    pub shard_size_bytes: u64,
     pub timeout_ms: u32,
+    pub retry_max_attempts: usize,
+    pub retry_base_delay_ms: u32,
+    pub retry_max_delay_ms: u32,
 }
 
 impl Default for RemoteFsConfig {
@@ -25,7 +35,13 @@ impl Default for RemoteFsConfig {
             auth_token: None,
             chunk_bytes: 16 * 1024 * 1024,
             direct_read_threshold_bytes: 64 * 1024 * 1024,
+            direct_write_threshold_bytes: 64 * 1024 * 1024,
+            shard_threshold_bytes: 4 * 1024 * 1024 * 1024,
+            shard_size_bytes: 512 * 1024 * 1024,
             timeout_ms: 120_000,
+            retry_max_attempts: 5,
+            retry_base_delay_ms: 100,
+            retry_max_delay_ms: 2_000,
         }
     }
 }
@@ -35,6 +51,8 @@ pub struct RemoteFsProvider {
     auth_header: Option<String>,
     chunk_bytes: usize,
     direct_read_threshold_bytes: u64,
+    shard_threshold_bytes: u64,
+    shard_size_bytes: u64,
     timeout_ms: u32,
 }
 
@@ -52,6 +70,8 @@ impl RemoteFsProvider {
             auth_header: config.auth_token.map(|token| format!("Bearer {token}")),
             chunk_bytes: config.chunk_bytes.max(64 * 1024),
             direct_read_threshold_bytes: config.direct_read_threshold_bytes,
+            shard_threshold_bytes: config.shard_threshold_bytes,
+            shard_size_bytes: config.shard_size_bytes.max(8 * 1024 * 1024),
             timeout_ms: config.timeout_ms.max(1),
         })
     }
@@ -282,6 +302,7 @@ impl RemoteFsProvider {
         truncate: bool,
         final_chunk: bool,
         data: &[u8],
+        hash: Option<&str>,
     ) -> io::Result<Option<FsWriteSessionResponse>> {
         let mut query = vec![("path", path.to_string()), ("offset", offset.to_string())];
         if truncate {
@@ -289,6 +310,9 @@ impl RemoteFsProvider {
         }
         if final_chunk {
             query.push(("final", "true".into()));
+        }
+        if let Some(hash) = hash {
+            query.push(("hash", hash.to_string()));
         }
         let text = self.send_text("PUT", "/fs/write", &query, Some(data), None)?;
         if text.is_empty() {
@@ -312,7 +336,7 @@ impl RemoteFsProvider {
         Ok(())
     }
 
-    fn download_entire_file(&self, path: &str, len: u64) -> io::Result<Vec<u8>> {
+    fn download_raw_file(&self, path: &str, len: u64) -> io::Result<Vec<u8>> {
         if len == 0 {
             return Ok(Vec::new());
         }
@@ -335,9 +359,35 @@ impl RemoteFsProvider {
         Ok(buffer)
     }
 
+    fn download_sharded_file(&self, path: &str, len: u64) -> io::Result<Vec<u8>> {
+        let manifest_bytes = self.download_raw_file(path, len)?;
+        let manifest: ShardManifest = serde_json::from_slice(&manifest_bytes)
+            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "invalid shard manifest"))?;
+        if manifest.version != 1 {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "unsupported manifest",
+            ));
+        }
+        let mut buffer = Vec::with_capacity(manifest.total_size as usize);
+        for shard in manifest.shards {
+            let meta = self.fetch_metadata(&shard.path)?;
+            let bytes = self.download_raw_file(&shard.path, meta.len)?;
+            buffer.extend_from_slice(&bytes);
+        }
+        Ok(buffer)
+    }
+
     fn upload_entire_file(&self, path: &str, data: &[u8]) -> io::Result<()> {
+        if data.len() as u64 >= self.shard_threshold_bytes {
+            return self.upload_sharded_file(path, data);
+        }
+        self.upload_unsharded_file(path, data, None)
+    }
+
+    fn upload_unsharded_file(&self, path: &str, data: &[u8], hash: Option<&str>) -> io::Result<()> {
         if data.is_empty() {
-            self.upload_chunk(path, 0, true, true, data)?;
+            self.upload_chunk(path, 0, true, true, data, hash)?;
             return Ok(());
         }
         let mut offset = 0;
@@ -347,7 +397,8 @@ impl RemoteFsProvider {
             let chunk = &data[offset..end];
             let truncate = index == 0;
             let final_chunk = end == data.len();
-            let session = self.upload_chunk(path, offset as u64, truncate, final_chunk, chunk)?;
+            let session =
+                self.upload_chunk(path, offset as u64, truncate, final_chunk, chunk, hash)?;
             if let Some(session) = session {
                 let expected = offset as u64 + chunk.len() as u64;
                 if session.next_offset as u64 != expected {
@@ -358,6 +409,32 @@ impl RemoteFsProvider {
             index += 1;
         }
         Ok(())
+    }
+
+    fn upload_sharded_file(&self, path: &str, data: &[u8]) -> io::Result<()> {
+        let shard_size = self.shard_size_bytes as usize;
+        let mut shards = Vec::new();
+        let mut offset = 0usize;
+        while offset < data.len() {
+            let end = std::cmp::min(offset + shard_size, data.len());
+            let slice = &data[offset..end];
+            let shard_path = format!("{}/{}", SHARD_PREFIX, Uuid::new_v4());
+            self.upload_unsharded_file(&shard_path, slice, None)?;
+            shards.push(ShardEntry {
+                path: shard_path,
+                size: slice.len() as u64,
+            });
+            offset = end;
+        }
+        let manifest = ShardManifest {
+            version: 1,
+            total_size: data.len() as u64,
+            shard_size: self.shard_size_bytes,
+            shards,
+        };
+        let bytes = serde_json::to_vec(&manifest)
+            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "invalid manifest"))?;
+        self.upload_unsharded_file(path, &bytes, Some(MANIFEST_HASH))
     }
 }
 
@@ -380,7 +457,7 @@ impl FsProvider for RemoteFsProvider {
                             "remote path is not a file",
                         ));
                     }
-                    data = self.download_entire_file(&normalized, meta.len)?;
+                    data = self.download_raw_file(&normalized, meta.len)?;
                     exists = true;
                 }
                 Err(err) if err.kind() == ErrorKind::NotFound => {
@@ -434,7 +511,7 @@ impl FsProvider for RemoteFsProvider {
                 "remote path is not a file",
             ));
         }
-        self.download_entire_file(&normalized, meta.len)
+        self.download_raw_file(&normalized, meta.len)
     }
 
     fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
@@ -657,18 +734,20 @@ struct MetadataResponse {
     len: u64,
     modified: Option<u64>,
     readonly: bool,
+    hash: Option<String>,
 }
 
 impl From<MetadataResponse> for FsMetadata {
     fn from(value: MetadataResponse) -> Self {
-        FsMetadata {
-            file_type: value.file_type.into(),
-            len: value.len,
-            modified: value
+        FsMetadata::new_with_hash(
+            value.file_type.into(),
+            value.len,
+            value
                 .modified
                 .map(|secs| UNIX_EPOCH + Duration::from_secs(secs)),
-            readonly: value.readonly,
-        }
+            value.readonly,
+            value.hash,
+        )
     }
 }
 
@@ -709,6 +788,20 @@ struct RenameRequest {
 struct SetReadonlyRequest {
     path: String,
     readonly: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ShardManifest {
+    version: u32,
+    total_size: u64,
+    shard_size: u64,
+    shards: Vec<ShardEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ShardEntry {
+    path: String,
+    size: u64,
 }
 
 #[derive(Debug, Deserialize)]
