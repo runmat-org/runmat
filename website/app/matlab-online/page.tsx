@@ -245,7 +245,7 @@ export default function MatlabOnlinePage() {
                   variant="outline"
                   size="lg"
                   asChild
-                  className="h-12 px-8 text-base bg-[#0E1B1E] dark:bg-[#0E1B1E] border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100"
+                  className="h-12 px-8 text-base bg-[#0E1B1E] dark:bg-[#0E1B1E] border-gray-200 dark:border-gray-700 text-gray-100 dark:text-gray-100"
                 >
                   <Link href="/docs/desktop-browser-guide">View Getting Started</Link>
                 </Button>
