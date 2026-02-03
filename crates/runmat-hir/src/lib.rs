@@ -12,6 +12,7 @@ pub type Span = runmat_parser::Span;
 
 const DEFAULT_ERROR_NAMESPACE: &str = "MATLAB";
 static ERROR_NAMESPACE: OnceLock<RwLock<String>> = OnceLock::new();
+static CONST_NUM_LOOKUP: OnceLock<HashMap<String, f64>> = OnceLock::new();
 
 fn error_namespace_store() -> &'static RwLock<String> {
     ERROR_NAMESPACE.get_or_init(|| RwLock::new(DEFAULT_ERROR_NAMESPACE.to_string()))
@@ -356,6 +357,95 @@ fn logical_binary_result(lhs: &Type, rhs: &Type) -> Type {
     }
 }
 
+fn eval_const_num(expr: &HirExpr) -> Option<f64> {
+    fn numeric_value(value: &runmat_builtins::Value) -> Option<f64> {
+        use runmat_builtins::IntValue;
+
+        match value {
+            runmat_builtins::Value::Num(v) => Some(*v),
+            runmat_builtins::Value::Int(int_value) => match int_value {
+                IntValue::I8(v) => Some(*v as f64),
+                IntValue::I16(v) => Some(*v as f64),
+                IntValue::I32(v) => Some(*v as f64),
+                IntValue::I64(v) => Some(*v as f64),
+                IntValue::U8(v) => Some(*v as f64),
+                IntValue::U16(v) => Some(*v as f64),
+                IntValue::U32(v) => Some(*v as f64),
+                IntValue::U64(v) => Some(*v as f64),
+            },
+            runmat_builtins::Value::Bool(v) => Some(if *v { 1.0 } else { 0.0 }),
+            _ => None,
+        }
+    }
+
+    fn const_numeric_value(name: &str) -> Option<f64> {
+        let map = CONST_NUM_LOOKUP.get_or_init(|| {
+            let mut out: HashMap<String, f64> = HashMap::new();
+            for constant in runmat_builtins::constants() {
+                if let Some(value) = numeric_value(&constant.value) {
+                    out.insert(constant.name.to_ascii_lowercase(), value);
+                }
+            }
+            out
+        });
+        map.get(&name.to_ascii_lowercase()).copied()
+    }
+
+    match &expr.kind {
+        HirExprKind::Number(text) => text.parse::<f64>().ok(),
+        HirExprKind::Constant(name) => const_numeric_value(name),
+        HirExprKind::Unary(op, inner) => {
+            let value = eval_const_num(inner)?;
+            match op {
+                parser::UnOp::Plus => Some(value),
+                parser::UnOp::Minus => Some(-value),
+                _ => None,
+            }
+        }
+        HirExprKind::Binary(lhs, op, rhs) => {
+            let a = eval_const_num(lhs)?;
+            let b = eval_const_num(rhs)?;
+            match op {
+                parser::BinOp::Add => Some(a + b),
+                parser::BinOp::Sub => Some(a - b),
+                parser::BinOp::Mul | parser::BinOp::ElemMul => Some(a * b),
+                parser::BinOp::Div | parser::BinOp::ElemDiv => Some(a / b),
+                parser::BinOp::LeftDiv | parser::BinOp::ElemLeftDiv => Some(b / a),
+                parser::BinOp::Pow | parser::BinOp::ElemPow => Some(a.powf(b)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn infer_range_shape(start: Option<f64>, step: Option<f64>, end: Option<f64>) -> Option<Type> {
+    match (start, step, end) {
+        (Some(s), Some(step), Some(e)) => {
+            if step == 0.0 {
+                Some(Type::tensor())
+            } else {
+                let len = ((e - s) / step).floor();
+                if len < 0.0 {
+                    Some(Type::tensor_with_shape(vec![1, 0]))
+                } else {
+                    Some(Type::tensor_with_shape(vec![1, len as usize + 1]))
+                }
+            }
+        }
+        (Some(s), None, Some(e)) => {
+            let step = if e >= s { 1.0 } else { -1.0 };
+            let len = ((e - s) / step).floor();
+            if len < 0.0 {
+                Some(Type::tensor_with_shape(vec![1, 0]))
+            } else {
+                Some(Type::tensor_with_shape(vec![1, len as usize + 1]))
+            }
+        }
+        _ => None,
+    }
+}
+
 fn infer_expr_type_with_env(
     expr: &HirExpr,
     env: &std::collections::HashMap<VarId, Type>,
@@ -445,39 +535,6 @@ fn infer_expr_type_with_env(
     }
 
     use HirExprKind as K;
-    fn literal_number(expr: &HirExpr) -> Option<f64> {
-        match &expr.kind {
-            HirExprKind::Number(text) => text.parse::<f64>().ok(),
-            _ => None,
-        }
-    }
-
-    fn range_shape(start: Option<f64>, step: Option<f64>, end: Option<f64>) -> Option<Type> {
-        match (start, step, end) {
-            (Some(s), Some(step), Some(e)) => {
-                if step == 0.0 {
-                    Some(Type::tensor())
-                } else {
-                    let len = ((e - s) / step).floor();
-                    if len < 0.0 {
-                        Some(Type::tensor_with_shape(vec![1, 0]))
-                    } else {
-                        Some(Type::tensor_with_shape(vec![1, len as usize + 1]))
-                    }
-                }
-            }
-            (Some(s), None, Some(e)) => {
-                let step = if e >= s { 1.0 } else { -1.0 };
-                let len = ((e - s) / step).floor();
-                if len < 0.0 {
-                    Some(Type::tensor_with_shape(vec![1, 0]))
-                } else {
-                    Some(Type::tensor_with_shape(vec![1, len as usize + 1]))
-                }
-            }
-            _ => None,
-        }
-    }
 
     match &expr.kind {
         K::Number(_) => Type::Num,
@@ -515,8 +572,10 @@ fn infer_expr_type_with_env(
                 | parser::BinOp::OrOr
                 | parser::BinOp::BitAnd
                 | parser::BinOp::BitOr => logical_binary_result(&ta, &tb),
-                parser::BinOp::Colon => range_shape(literal_number(a), None, literal_number(b))
-                    .unwrap_or_else(Type::tensor),
+                parser::BinOp::Colon => {
+                    infer_range_shape(eval_const_num(a), None, eval_const_num(b))
+                        .unwrap_or_else(Type::tensor)
+                }
             }
         }
         K::Tensor(rows) => {
@@ -571,10 +630,10 @@ fn infer_expr_type_with_env(
                 Type::Unknown
             }
         }
-        K::Range(start, step, end) => range_shape(
-            literal_number(start),
-            step.as_ref().and_then(|s| literal_number(s)),
-            literal_number(end),
+        K::Range(start, step, end) => infer_range_shape(
+            eval_const_num(start),
+            step.as_ref().and_then(|s| eval_const_num(s)),
+            eval_const_num(end),
         )
         .unwrap_or_else(Type::tensor),
         K::FuncCall(name, _args) => {
@@ -1732,62 +1791,12 @@ pub fn infer_global_variable_types(
         returns: &HashMap<String, Vec<Type>>,
         func_defs: &HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)>,
     ) -> Analysis {
-        fn literal_number(expr: &HirExpr) -> Option<f64> {
-            match &expr.kind {
-                HirExprKind::Number(text) => text.parse::<f64>().ok(),
-                _ => None,
-            }
-        }
-
-        fn range_shape(start: Option<f64>, step: Option<f64>, end: Option<f64>) -> Option<Type> {
-            match (start, step, end) {
-                (Some(s), Some(step), Some(e)) => {
-                    if step == 0.0 {
-                        Some(Type::tensor())
-                    } else {
-                        let len = ((e - s) / step).floor();
-                        if len < 0.0 {
-                            Some(Type::tensor_with_shape(vec![1, 0]))
-                        } else {
-                            Some(Type::tensor_with_shape(vec![1, len as usize + 1]))
-                        }
-                    }
-                }
-                (Some(s), None, Some(e)) => {
-                    let step = if e >= s { 1.0 } else { -1.0 };
-                    let len = ((e - s) / step).floor();
-                    if len < 0.0 {
-                        Some(Type::tensor_with_shape(vec![1, 0]))
-                    } else {
-                        Some(Type::tensor_with_shape(vec![1, len as usize + 1]))
-                    }
-                }
-                _ => None,
-            }
-        }
-
-        fn range_literal_type(expr: &HirExpr) -> Option<Type> {
-            match &expr.kind {
-                HirExprKind::Range(start, step, end) => {
-                    let start_num = literal_number(start);
-                    let step_num = step.as_ref().and_then(|s| literal_number(s));
-                    let end_num = literal_number(end);
-                    range_shape(start_num, step_num, end_num)
-                }
-                HirExprKind::Binary(a, parser::BinOp::Colon, b) => {
-                    range_shape(literal_number(a), None, literal_number(b))
-                }
-                _ => None,
-            }
-        }
-
         let mut exits = Vec::new();
         let mut i = 0usize;
         while i < stmts.len() {
             match &stmts[i] {
                 HirStmt::Assign(var, expr, _, _) => {
-                    let t = range_literal_type(expr)
-                        .unwrap_or_else(|| infer_expr_type_with_env(expr, &env, returns));
+                    let t = infer_expr_type_with_env(expr, &env, returns);
                     env.insert(*var, t);
                 }
                 HirStmt::MultiAssign(vars, expr, _, _) => {

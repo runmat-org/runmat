@@ -195,3 +195,27 @@ fn infer_range_shape_in_globals() {
         );
     }
 }
+
+#[test]
+fn infer_range_shape_with_constants() {
+    if !runmat_builtins::constants()
+        .iter()
+        .any(|c| c.name.eq_ignore_ascii_case("pi"))
+    {
+        return;
+    }
+    let result = lower_result("a = 0:pi/100:2*pi;");
+    let a_id = runmat_hir::VarId(*result.variables.get("a").unwrap());
+    let globals =
+        runmat_hir::infer_global_variable_types(&result.hir, &result.inferred_function_returns);
+    let a_ty = globals
+        .get(&a_id)
+        .cloned()
+        .unwrap_or(runmat_builtins::Type::Unknown);
+    assert_eq!(
+        a_ty,
+        runmat_builtins::Type::Tensor {
+            shape: Some(vec![Some(1), Some(201)])
+        }
+    );
+}

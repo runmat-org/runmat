@@ -681,7 +681,31 @@ fn constant_completion(constant: &Constant) -> CompletionItem {
 }
 
 fn format_type(ty: &Type) -> String {
-    format!("{ty:?}")
+    match ty {
+        Type::Tensor { shape } => format!("Tensor {{ {} }}", format_shape(shape)),
+        Type::Logical { shape } => format!("Logical {{ {} }}", format_shape(shape)),
+        _ => format!("{ty:?}"),
+    }
+}
+
+fn format_shape(shape: &Option<Vec<Option<usize>>>) -> String {
+    let Some(shape) = shape else {
+        return "shape: unknown".to_string();
+    };
+    if shape.len() == 2 {
+        let rows = format_dim(shape[0]);
+        let cols = format_dim(shape[1]);
+        return format!("{rows} x {cols}");
+    }
+    let dims: Vec<String> = shape.iter().map(|d| format_dim(*d)).collect();
+    format!("shape: [{}]", dims.join(", "))
+}
+
+fn format_dim(dim: Option<usize>) -> String {
+    match dim {
+        Some(value) => value.to_string(),
+        None => "unknown".to_string(),
+    }
 }
 
 fn format_variable_hover(name: &str, symbol: &VariableSymbol) -> String {
@@ -919,14 +943,8 @@ mod tests {
         let x_value = extract(x_hover);
         let y_value = extract(y_hover);
         assert!(x_value.contains("Tensor"), "unexpected x hover {x_value}");
-        assert!(
-            x_value.contains("Some(101)"),
-            "unexpected x hover {x_value}"
-        );
+        assert!(x_value.contains("1 x 101"), "unexpected x hover {x_value}");
         assert!(y_value.contains("Tensor"), "unexpected y hover {y_value}");
-        assert!(
-            y_value.contains("Some(101)"),
-            "unexpected y hover {y_value}"
-        );
+        assert!(y_value.contains("1 x 101"), "unexpected y hover {y_value}");
     }
 }
