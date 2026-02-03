@@ -86,7 +86,9 @@ type FenceInfo = {
 function renderBuiltinDocBlocks(doc: BuiltinDocEntry): BuiltinDocBlock[] {
   const blocks: BuiltinDocBlock[] = [];
   const title = doc.title.trim();
-  const descriptionHeader = `What does the \`${title}\` function do in MATLAB / RunMat?`;
+  const descriptionHeader = doc.summary?.trim()
+    ? `\`${title}\` — ${doc.summary.trim()}`
+    : `\`${title}\``;
   const behaviorHeader = `How does the \`${title}\` function behave in MATLAB / RunMat?`;
   const examplesHeader = doc.examples && doc.examples.length === 1
     ? `Example of using \`${title}\` in MATLAB / RunMat`

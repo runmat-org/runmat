@@ -211,9 +211,9 @@ export default function MatlabOnlinePage() {
         }}
       />
 
-      <div className="container mx-auto px-4 md:px-6 lg:px-8 py-16 md:py-20">
+      <div className="container mx-auto px-4 md:px-6 lg:px-8">
         {/* Hero */}
-        <section className="w-full mb-16" id="hero">
+        <section className="w-full py-16 md:py-24 lg:py-32" id="hero">
           <div className="grid grid-cols-1 gap-10 lg:grid-cols-2 lg:items-center">
             <div className="flex flex-col space-y-6 text-left items-start">
               <div className="mb-2 p-0 text-lg font-semibold uppercase tracking-wide text-primary">
@@ -245,7 +245,7 @@ export default function MatlabOnlinePage() {
                   variant="outline"
                   size="lg"
                   asChild
-                  className="h-12 px-8 text-base bg-[#0E1B1E] dark:bg-[#0E1B1E] border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100"
+                  className="h-12 px-8 text-base bg-[#0E1B1E] dark:bg-[#0E1B1E] border-gray-200 dark:border-gray-700 text-gray-100 dark:text-gray-100"
                 >
                   <Link href="/docs/desktop-browser-guide">View Getting Started</Link>
                 </Button>
@@ -265,7 +265,7 @@ export default function MatlabOnlinePage() {
         </section>
 
         {/* What is MATLAB Online? */}
-        <section className="mb-16 border-y border-border/60 py-12">
+        <section className="py-16 md:py-24 lg:py-32 border-y border-border/60">
           <div className="mx-auto max-w-4xl text-center space-y-4">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground">What is MATLAB Online?</h2>
             <p className="text-muted-foreground text-lg">
@@ -276,7 +276,7 @@ export default function MatlabOnlinePage() {
         </section>
 
         {/* Challenges with MATLAB Online */}
-        <section className="mb-16">
+        <section className="py-16 md:py-24 lg:py-32">
           <div className="mx-auto max-w-5xl rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-500/15 to-transparent shadow-lg">
             <div className="px-6 py-8">
               <div className="flex flex-col gap-6">
@@ -292,26 +292,26 @@ export default function MatlabOnlinePage() {
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="rounded-lg border border-amber-500/30 bg-[#0E1421] px-5 py-4">
-                    <p className="text-xl font-semibold text-foreground">Account barriers</p>
-                    <p className="text-lg text-muted-foreground mt-2">
+                    <p className="text-xl font-semibold text-gray-100">Account barriers</p>
+                    <p className="text-lg text-gray-300 mt-2">
                       Sign-up process and license requirements create unnecessary friction for quick tasks.
                     </p>
                   </div>
                   <div className="rounded-lg border border-amber-500/30 bg-[#0E1421] px-5 py-4">
-                    <p className="text-xl font-semibold text-foreground">Idle timeouts &amp; hour caps</p>
-                    <p className="text-lg text-muted-foreground mt-2">
+                    <p className="text-xl font-semibold text-gray-100">Idle timeouts &amp; hour caps</p>
+                    <p className="text-lg text-gray-300 mt-2">
                       Sessions timeout after 15 minutes of inactivity. Free tier is capped at 20 hours/month.
                     </p>
                   </div>
                   <div className="rounded-lg border border-amber-500/30 bg-[#0E1421] px-5 py-4">
-                    <p className="text-xl font-semibold text-foreground">Cloud dependency</p>
-                    <p className="text-lg text-muted-foreground mt-2">
+                    <p className="text-xl font-semibold text-gray-100">Cloud dependency</p>
+                    <p className="text-lg text-gray-300 mt-2">
                       Code must be uploaded to remote servers, raising privacy and connectivity concerns.
                     </p>
                   </div>
                   <div className="rounded-lg border border-amber-500/30 bg-[#0E1421] px-5 py-4">
-                    <p className="text-xl font-semibold text-foreground">No local GPU access</p>
-                    <p className="text-lg text-muted-foreground mt-2">
+                    <p className="text-xl font-semibold text-gray-100">No local GPU access</p>
+                    <p className="text-lg text-gray-300 mt-2">
                       Code runs on MathWorks&apos; servers, so you cannot use your own GPU for acceleration.
                     </p>
                   </div>
@@ -322,10 +322,10 @@ export default function MatlabOnlinePage() {
         </section>
 
         {/* RunMat as an alternative */}
-        <section className="mb-16">
+        <section className="py-16 md:py-24 lg:py-32">
           <div className="mx-auto max-w-4xl space-y-4 text-center">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground">
-              Meet RunMat: A Free Alternative
+              Meet RunMat: a free alternative
             </h2>
             <p className="text-muted-foreground text-lg">
               RunMat is an open-source runtime that understands MATLAB syntax and runs it directly in your browser.
@@ -336,7 +336,7 @@ export default function MatlabOnlinePage() {
           <div className="mx-auto mt-10 max-w-5xl space-y-6">
             <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/15 via-[#0E1421] to-[#0A0F1C] p-8 shadow-lg">
               <div className="text-center space-y-2">
-                <h3 className="text-xl md:text-2xl font-semibold text-foreground">
+                <h3 className="text-xl md:text-2xl font-semibold text-gray-100">
                   Key differences from MATLAB Online
                 </h3>
               </div>
@@ -346,8 +346,8 @@ export default function MatlabOnlinePage() {
                     <CheckCircle className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-foreground">No account required</p>
-                    <p className="text-lg text-muted-foreground">Open the sandbox and start coding immediately.</p>
+                    <p className="text-xl font-medium text-gray-100">No account required</p>
+                    <p className="text-lg text-gray-300">Open the sandbox and start coding immediately.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4">
@@ -355,8 +355,8 @@ export default function MatlabOnlinePage() {
                     <Clock className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-foreground">No usage limits</p>
-                    <p className="text-lg text-muted-foreground">
+                    <p className="text-xl font-medium text-gray-100">No usage limits</p>
+                    <p className="text-lg text-gray-300">
                       No monthly caps, no execution timeouts, no idle disconnects.
                     </p>
                   </div>
@@ -366,8 +366,8 @@ export default function MatlabOnlinePage() {
                     <Code2 className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-foreground">Client-side execution</p>
-                    <p className="text-lg text-muted-foreground">
+                    <p className="text-xl font-medium text-gray-100">Client-side execution</p>
+                    <p className="text-lg text-gray-300">
                       Your code runs locally in your browser, not on a remote server.
                     </p>
                   </div>
@@ -377,8 +377,8 @@ export default function MatlabOnlinePage() {
                     <Zap className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-foreground">GPU acceleration</p>
-                    <p className="text-lg text-muted-foreground">
+                    <p className="text-xl font-medium text-gray-100">GPU acceleration</p>
+                    <p className="text-lg text-gray-300">
                       WebGPU-enabled browsers can accelerate computations automatically.
                     </p>
                   </div>
@@ -388,8 +388,8 @@ export default function MatlabOnlinePage() {
                     <Info className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-foreground">Free &amp; open source</p>
-                    <p className="text-lg text-muted-foreground">
+                    <p className="text-xl font-medium text-gray-100">Free &amp; open source</p>
+                    <p className="text-lg text-gray-300">
                       MIT-licensed runtime, community-developed, and always accessible.
                     </p>
                   </div>
@@ -399,8 +399,8 @@ export default function MatlabOnlinePage() {
                     <Globe className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-foreground">Works offline</p>
-                    <p className="text-lg text-muted-foreground">
+                    <p className="text-xl font-medium text-gray-100">Works offline</p>
+                    <p className="text-lg text-gray-300">
                       After initial load, runs without internet connection.
                     </p>
                   </div>
@@ -410,8 +410,8 @@ export default function MatlabOnlinePage() {
                     <AlertTriangle className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-foreground">Live syntax validation</p>
-                    <p className="text-lg text-muted-foreground">Red underlines highlight errors before you run.</p>
+                    <p className="text-xl font-medium text-gray-100">Live syntax validation</p>
+                    <p className="text-lg text-gray-300">Red underlines highlight errors before you run.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4">
@@ -419,8 +419,8 @@ export default function MatlabOnlinePage() {
                     <FileText className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-foreground">Tracing &amp; logging</p>
-                    <p className="text-lg text-muted-foreground">Detailed execution trace and console output.</p>
+                    <p className="text-xl font-medium text-gray-100">Tracing &amp; logging</p>
+                    <p className="text-lg text-gray-300">Detailed execution trace and console output.</p>
                   </div>
                 </div>
               </div>
@@ -444,16 +444,16 @@ export default function MatlabOnlinePage() {
             <div className="grid gap-6 md:grid-cols-2">
               <Card className="border border-border/60 bg-[#0E1421] shadow-lg">
                 <CardHeader className="border-b border-border/60">
-                  <CardTitle className="text-xl">Compatibility and coverage</CardTitle>
+                  <CardTitle className="text-xl text-gray-100">Compatibility and coverage</CardTitle>
                 </CardHeader>
-                <CardContent className="text-lg text-muted-foreground space-y-3">
+                <CardContent className="text-lg text-gray-300 space-y-3">
                   <p>
                     RunMat focuses on MATLAB-compatible syntax for core numerical workflows. See the{" "}
-                    <Link href="/docs/language-coverage" className="underline">
+                    <Link href="/docs/language-coverage" className="underline text-blue-300 hover:text-blue-200">
                       language coverage guide
                     </Link>{" "}
                     and{" "}
-                    <Link href="/docs/matlab-function-reference" className="underline">
+                    <Link href="/docs/matlab-function-reference" className="underline text-blue-300 hover:text-blue-200">
                       function reference
                     </Link>{" "}
                     for current support.
@@ -462,16 +462,16 @@ export default function MatlabOnlinePage() {
               </Card>
               <Card className="border border-border/60 bg-[#0E1421] shadow-lg">
                 <CardHeader className="border-b border-border/60">
-                  <CardTitle className="text-xl">Performance context</CardTitle>
+                  <CardTitle className="text-xl text-gray-100">Performance context</CardTitle>
                 </CardHeader>
-                <CardContent className="text-lg text-muted-foreground space-y-3">
+                <CardContent className="text-lg text-gray-300 space-y-3">
                   <p>
                     Review the{" "}
-                    <Link href="/benchmarks" className="underline">
+                    <Link href="/benchmarks" className="underline text-blue-300 hover:text-blue-200">
                       benchmarks
                     </Link>{" "}
                     and{" "}
-                    <Link href="/docs/how-it-works" className="underline">
+                    <Link href="/docs/how-it-works" className="underline text-blue-300 hover:text-blue-200">
                       how RunMat works
                     </Link>{" "}
                     under the hood for detailed performance insights.
@@ -487,11 +487,11 @@ export default function MatlabOnlinePage() {
                   <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-100">
                     <BookOpen className="h-5 w-5" />
                   </span>
-                  <CardTitle className="flex items-center gap-2">
-                    Docs <span className="text-muted-foreground">→</span>
+                  <CardTitle className="flex items-center gap-2 text-gray-100">
+                    Docs <span className="text-gray-400">→</span>
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="text-lg text-muted-foreground">
+                <CardContent className="text-lg text-gray-300">
                   Language coverage, function reference, and how RunMat works.
                 </CardContent>
               </Card>
@@ -502,11 +502,11 @@ export default function MatlabOnlinePage() {
                   <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-100">
                     <BarChart3 className="h-5 w-5" />
                   </span>
-                  <CardTitle className="flex items-center gap-2">
-                    Benchmarks <span className="text-muted-foreground">→</span>
+                  <CardTitle className="flex items-center gap-2 text-gray-100">
+                    Benchmarks <span className="text-gray-400">→</span>
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="text-lg text-muted-foreground">
+                <CardContent className="text-lg text-gray-300">
                   Reproducible performance results across common math workloads.
                 </CardContent>
               </Card>
@@ -517,11 +517,11 @@ export default function MatlabOnlinePage() {
                   <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-100">
                     <FileText className="h-5 w-5" />
                   </span>
-                  <CardTitle className="flex items-center gap-2">
-                    Blog <span className="text-muted-foreground">→</span>
+                  <CardTitle className="flex items-center gap-2 text-gray-100">
+                    Blog <span className="text-gray-400">→</span>
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="text-lg text-muted-foreground">
+                <CardContent className="text-lg text-gray-300">
                   Practical guides, comparisons, and release notes.
                 </CardContent>
               </Card>
@@ -530,9 +530,9 @@ export default function MatlabOnlinePage() {
         </section>
 
         {/* How it works */}
-        <section className="mb-16">
+        <section className="py-16 md:py-24 lg:py-32">
           <div className="mx-auto max-w-4xl text-center mb-10 space-y-3">
-            <h2 className="text-3xl md:text-4xl font-bold text-foreground">How It Works</h2>
+            <h2 className="text-3xl md:text-4xl font-bold text-foreground">How it works</h2>
             <p className="text-muted-foreground text-lg">Get started in three simple steps.</p>
           </div>
           <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-3 md:items-stretch">
@@ -557,43 +557,47 @@ export default function MatlabOnlinePage() {
                 <div className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-purple-500/40 bg-purple-500/10 text-purple-100 text-base">
                   1
                 </div>
-                <h3 className="text-xl font-semibold text-foreground">Open the Sandbox</h3>
-                <p className="text-lg text-muted-foreground">
+                <h3 className="text-xl font-semibold text-gray-100">Open the sandbox</h3>
+                <p className="text-lg text-gray-300">
                   Click the button to launch RunMat in your browser. No downloads or sign-ups required.
                 </p>
               </CardContent>
             </Card>
             <Card className="border border-border/60 bg-[#0E1421] shadow-lg overflow-hidden flex flex-col h-full">
-              <div className="bg-gradient-to-r from-purple-500/20 to-transparent p-6 flex flex-col items-start justify-start gap-3 h-[200px]">
-                <MatlabInlineCodeBlock
-                  code={"A = [3 1 3 2];\nC = unique(A);"}
-                  showRunButton
-                  preClassName="[&_code]:text-[0.75rem] [&_code]:leading-relaxed"
-                />
+              <div className="bg-gradient-to-r from-purple-500/20 to-transparent p-6 flex flex-col items-start justify-start gap-3 min-h-[200px]">
+                <div className="how-it-works-code w-full rounded-md overflow-hidden bg-[hsl(var(--code-surface))] dark:bg-[hsl(var(--code-surface))]">
+                  <MatlabInlineCodeBlock
+                    code={"A = [3 1 3 2];\nC = unique(A);"}
+                    showRunButton
+                    preClassName="[&_code]:text-[0.75rem] [&_code]:leading-relaxed !bg-transparent"
+                  />
+                </div>
               </div>
               <CardContent className="pt-6 space-y-2 flex-1">
                 <div className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-purple-500/40 bg-purple-500/10 text-purple-100 text-base">
                   2
                 </div>
-                <h3 className="text-xl font-semibold text-foreground">Write or Paste Code</h3>
-                <p className="text-lg text-muted-foreground">
+                <h3 className="text-xl font-semibold text-gray-100">Write or paste code</h3>
+                <p className="text-lg text-gray-300">
                   Type your MATLAB-style code directly, or paste existing scripts from your projects.
                 </p>
               </CardContent>
             </Card>
             <Card className="border border-border/60 bg-[#0E1421] shadow-lg overflow-hidden flex flex-col h-full">
               <div className="bg-gradient-to-r from-purple-500/20 to-transparent p-6 flex items-start justify-start h-[200px]">
-                <MatlabInlineCodeBlock
-                  code={"C =\n\n     1     2     3"}
-                  preClassName="[&_code]:text-[0.75rem] [&_code]:leading-relaxed"
-                />
+                <div className="how-it-works-code w-full rounded-md overflow-hidden bg-[hsl(var(--code-surface))] dark:bg-[hsl(var(--code-surface))]">
+                  <MatlabInlineCodeBlock
+                    code={"C =\n\n     1     2     3"}
+                    preClassName="[&_code]:text-[0.75rem] [&_code]:leading-relaxed !bg-transparent"
+                  />
+                </div>
               </div>
               <CardContent className="pt-6 space-y-2 flex-1">
                 <div className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-purple-500/40 bg-purple-500/10 text-purple-100 text-base">
                   3
                 </div>
-                <h3 className="text-xl font-semibold text-foreground">Run and See Results</h3>
-                <p className="text-lg text-muted-foreground">
+                <h3 className="text-xl font-semibold text-gray-100">Run and see results</h3>
+                <p className="text-lg text-gray-300">
                   Execute your code instantly. View outputs, plots, and results in real time.
                 </p>
               </CardContent>
@@ -602,7 +606,7 @@ export default function MatlabOnlinePage() {
         </section>
 
         {/* Comparison */}
-        <section className="mb-16">
+        <section className="py-16 md:py-24 lg:py-32">
           <div className="mx-auto max-w-5xl text-center mb-10 space-y-3">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground">RunMat vs. MATLAB Online</h2>
             <p className="text-muted-foreground text-lg">A clear comparison of capabilities and requirements.</p>
@@ -612,7 +616,7 @@ export default function MatlabOnlinePage() {
               <CardContent className="p-6 space-y-4">
                 <div>
                   <h3 className="text-xl font-semibold text-purple-200">RunMat</h3>
-                  <p className="text-lg text-muted-foreground">High-performance, open-source runtime for math</p>
+                  <p className="text-lg text-gray-300">High-performance, open-source runtime for math</p>
                 </div>
                 <ul className="space-y-3 text-lg">
                   <li className="flex items-start gap-3 text-green-300">
@@ -663,14 +667,14 @@ export default function MatlabOnlinePage() {
                     </span>
                     Execution tracing &amp; logging
                   </li>
-                  <li className="flex items-start gap-3 text-muted-foreground">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-muted-foreground">
+                  <li className="flex items-start gap-3 text-gray-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-gray-400">
                       –
                     </span>
                     Limited package / toolbox support
                   </li>
-                  <li className="flex items-start gap-3 text-muted-foreground">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-muted-foreground">
+                  <li className="flex items-start gap-3 text-gray-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-gray-400">
                       –
                     </span>
                     Subset of MATLAB functions
@@ -681,8 +685,8 @@ export default function MatlabOnlinePage() {
             <Card className="border border-border/60 bg-[#0E1421] shadow-lg">
               <CardContent className="p-6 space-y-4">
                 <div>
-                  <h3 className="text-xl font-semibold text-foreground">MATLAB Online</h3>
-                  <p className="text-lg text-muted-foreground">MathWorks official platform</p>
+                  <h3 className="text-xl font-semibold text-gray-100">MATLAB Online</h3>
+                  <p className="text-lg text-gray-300">MathWorks official platform</p>
                 </div>
                 <ul className="space-y-3 text-lg">
                   <li className="flex items-start gap-3 text-red-300">
@@ -740,18 +744,18 @@ export default function MatlabOnlinePage() {
         </section>
 
         {/* What works today */}
-        <section className="mb-16">
+        <section className="py-16 md:py-24 lg:py-32">
           <div className="mx-auto max-w-5xl text-center mb-10 space-y-3">
-            <h2 className="text-3xl md:text-4xl font-bold text-foreground">What Works Today</h2>
+            <h2 className="text-3xl md:text-4xl font-bold text-foreground">What works today</h2>
            
           </div>
           <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-2">
             <Card className="border border-green-500/30 bg-[#0E1421] shadow-lg">
               <CardHeader className="flex flex-row items-center gap-3 border-b border-border/60">
                 <CheckCircle className="h-4 w-4 text-green-300" />
-                <CardTitle className="text-xl">Works Well</CardTitle>
+                <CardTitle className="text-xl text-gray-100">Works Well</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2 text-muted-foreground text-lg">
+              <CardContent className="space-y-2 text-gray-300 text-lg">
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-green-300">•</span>
                   <p>Matrix and array operations (indexing, slicing, reshaping)</p>
@@ -797,11 +801,11 @@ export default function MatlabOnlinePage() {
             <Card className="border border-amber-500/30 bg-[#0E1421] shadow-lg">
               <CardHeader className="flex flex-row items-center gap-3 border-b border-border/60">
                 <Clock className="h-4 w-4 text-amber-300" />
-                <CardTitle className="text-xl">Limitations &amp; Future Work</CardTitle>
+                <CardTitle className="text-xl text-gray-100">Limitations &amp; Future Work</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4 text-muted-foreground text-lg">
+              <CardContent className="space-y-4 text-gray-300 text-lg">
                 <div>
-                  <h4 className="text-lg font-semibold text-muted-foreground mb-2">In Progress</h4>
+                  <h4 className="text-lg font-semibold text-gray-100 mb-2">In Progress</h4>
                   <div className="space-y-2">
                     <div className="flex items-start gap-2">
                       <span className="mt-1 text-amber-300">•</span>
@@ -818,7 +822,7 @@ export default function MatlabOnlinePage() {
                   </div>
                 </div>
                 <div className="border-t border-border/60 pt-4">
-                  <h4 className="text-lg font-semibold text-muted-foreground mb-2">Not Supported</h4>
+                  <h4 className="text-lg font-semibold text-gray-100 mb-2">Not Supported</h4>
                   <div className="space-y-2">
                     <div className="flex items-start gap-2">
                       <span className="mt-1 text-slate-300">•</span>
@@ -855,9 +859,9 @@ export default function MatlabOnlinePage() {
         </section>
 
         {/* FAQs */}
-        <section className="mb-16">
+        <section className="py-16 md:py-24 lg:py-32">
           <div className="mx-auto max-w-4xl text-center mb-8 space-y-3">
-            <h2 className="text-3xl md:text-4xl font-bold text-foreground">Frequently Asked Questions</h2>
+            <h2 className="text-3xl md:text-4xl font-bold text-foreground">Frequently asked questions</h2>
             <p className="text-muted-foreground text-lg">
               Common questions about RunMat and MATLAB compatibility.
             </p>
@@ -868,13 +872,13 @@ export default function MatlabOnlinePage() {
                 key={item.question}
                 className="group self-start rounded-xl border border-border/60 bg-[#0E1421] shadow-lg"
               >
-                <summary className="flex cursor-pointer list-none items-center justify-between px-6 py-4 text-foreground">
+                <summary className="flex cursor-pointer list-none items-center justify-between px-6 py-4 text-gray-100">
                   <span className="text-lg font-medium">{item.question}</span>
-                  <span className="text-muted-foreground transition-transform duration-200 group-open:rotate-180">
+                  <span className="text-gray-400 transition-transform duration-200 group-open:rotate-180">
                     ⌄
                   </span>
                 </summary>
-                <div className="px-6 pb-4 text-lg text-muted-foreground">
+                <div className="px-6 pb-4 text-lg text-gray-300">
                   {item.answer}
                 </div>
               </details>
@@ -883,7 +887,7 @@ export default function MatlabOnlinePage() {
         </section>
 
         {/* Final CTA */}
-        <section className="mb-8 text-center">
+        <section className="py-16 md:py-24 lg:py-32 text-center">
           <Card className="mx-auto max-w-3xl border border-purple-500/30 bg-gradient-to-r from-purple-500/10 to-blue-500/10 shadow-lg">
             <CardContent className="py-8 space-y-4">
               <h2 className="text-3xl md:text-4xl font-bold text-foreground">
@@ -892,7 +896,7 @@ export default function MatlabOnlinePage() {
               <p className="text-muted-foreground text-lg">
                 Start running math immediately in your browser.
               </p>
-              <div className="flex justify-center">
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
                 <Button
                   size="lg"
                   asChild
@@ -906,6 +910,14 @@ export default function MatlabOnlinePage() {
                   >
                     Launch the Sandbox
                   </Link>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="lg"
+                  asChild
+                  className="h-12 px-8 text-base bg-[#0E1B1E] dark:bg-[#0E1B1E] border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100"
+                >
+                  <Link href="/download">Other download options</Link>
                 </Button>
               </div>
             </CardContent>

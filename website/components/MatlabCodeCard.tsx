@@ -20,8 +20,14 @@ export function MatlabCodeCard({ code = sampleCode, className }: MatlabCodeCardP
   const highlighted = useMemo(() => Prism.highlight(code, Prism.languages.matlab, "matlab"), [code]);
 
   return (
-    <div className={cn("w-full max-w-3xl rounded-3xl border border-white/10 bg-gradient-to-b from-[#131a2a] to-[#060a12] p-4 shadow-2xl ", className)}>
-      <div className="flex items-center gap-2 rounded-2xl bg-[#0d1422] px-4 py-3">
+    <div
+      className={cn(
+        "matlab-code-card-hero w-full max-w-3xl rounded-3xl p-4 shadow-2xl",
+        "border border-border bg-muted/40 dark:border-white/10 dark:bg-gradient-to-b dark:from-[#131a2a] dark:to-[#060a12]",
+        className
+      )}
+    >
+      <div className="flex items-center gap-2 rounded-2xl bg-muted dark:bg-[#0d1422] px-4 py-3">
         <div className="flex gap-2">
           <span className="h-3.5 w-3.5 rounded-full bg-[#ff5f56]" />
           <span className="h-3.5 w-3.5 rounded-full bg-[#ffbd2e]" />
@@ -33,12 +39,12 @@ export function MatlabCodeCard({ code = sampleCode, className }: MatlabCodeCardP
           <TryInBrowserButton
             code={code}
             size="sm"
-            className="bg-[#0d1422]/80 backdrop-blur-sm"
+            className="bg-muted/90 dark:bg-[#0d1422]/80 backdrop-blur-sm border-border dark:border-transparent"
             source="matlab-code-card"
           />
         </div>
         <pre
-          className="markdown-pre m-0 max-w-full overflow-x-auto rounded-2xl bg-[#0d1422] text-left text-white language-example"
+          className="markdown-pre m-0 max-w-full overflow-x-auto rounded-2xl bg-[hsl(var(--code-surface))] dark:bg-[#0d1422] text-left text-foreground dark:text-white language-example"
           tabIndex={0}
           suppressHydrationWarning
         >

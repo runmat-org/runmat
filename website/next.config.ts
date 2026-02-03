@@ -24,6 +24,11 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       {
+        source: '/run-matlab-online',
+        destination: '/matlab-online',
+        permanent: true,
+      },
+      {
         source: '/blog/matlab-alternatives-runmat-vs-octave-julia-python',
         destination: '/blog/free-matlab-alternatives',
         permanent: true,

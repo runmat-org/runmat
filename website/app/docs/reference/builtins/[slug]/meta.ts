@@ -106,7 +106,6 @@ export function builtinJsonLD(slug: string): string {
                 "proficiencyLevel": "Beginner",
                 "programmingModel": "Procedural",
                 "assemblyVersion": "RunMat 0.1.0",
-                "datePublished": "2025-01-01",
                 "dateModified": new Date().toISOString().split('T')[0],
 
                 "programmingLanguage": {

@@ -2,12 +2,12 @@
 
 import { useEffect } from "react";
 
-export default function AnalyticsBootstrap() {
+export default function AnalyticsBootstrapClient() {
   useEffect(() => {
-    // Dynamically import to ensure client-side execution
     import("@/lib/instrumentation-client").catch(() => {
       // ignore
     });
   }, []);
+
   return null;
 }
