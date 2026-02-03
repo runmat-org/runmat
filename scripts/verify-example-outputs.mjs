@@ -145,6 +145,9 @@ function collectCases(dir) {
             if (!example || typeof example.output !== "string") {
                 continue;
             }
+            if (is_comment_only_output(example.output)) {
+                continue;
+            }
             const description = typeof example.description === "string" && example.description.trim().length > 0
                 ? example.description.trim()
                 : `${parsed.title ?? basename(file, ".json")} example ${i + 1}`;
@@ -161,6 +164,27 @@ function collectCases(dir) {
     }
 
     return cases;
+}
+
+/**
+ * Treat examples with only comment lines as documentation-only.
+ * @param {string} output
+ */
+function is_comment_only_output(output) {
+    const lines = output.split(/\r?\n/);
+    let saw_comment = false;
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+            continue;
+        }
+        if (trimmed.startsWith("%")) {
+            saw_comment = true;
+            continue;
+        }
+        return false;
+    }
+    return saw_comment;
 }
 
 function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
