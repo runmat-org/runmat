@@ -1718,13 +1718,19 @@ async fn run_interpreter_inner(
             Instr::EmitStackTop { label } => {
                 if let Some(value) = stack.last() {
                     let label_text = resolve_emit_label_text(&label, &bytecode.var_names);
-                    runmat_runtime::console::record_value_output(label_text.as_deref(), value);
+                    // Gather GPU tensors so we display actual values, not internal handles
+                    let host_value =
+                        runmat_runtime::dispatcher::gather_if_needed_async(value).await?;
+                    runmat_runtime::console::record_value_output(label_text.as_deref(), &host_value);
                 }
             }
             Instr::EmitVar { var_index, label } => {
                 if let Some(value) = vars.get(var_index) {
                     let label_text = resolve_emit_label_text(&label, &bytecode.var_names);
-                    runmat_runtime::console::record_value_output(label_text.as_deref(), value);
+                    // Gather GPU tensors so we display actual values, not internal handles
+                    let host_value =
+                        runmat_runtime::dispatcher::gather_if_needed_async(value).await?;
+                    runmat_runtime::console::record_value_output(label_text.as_deref(), &host_value);
                 }
             }
             Instr::AndAnd(target) => {
