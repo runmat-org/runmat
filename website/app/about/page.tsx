@@ -433,33 +433,36 @@ export default function AboutPage() {
         </section>
 
         {/* Where We're Headed */}
-        <section className="py-12 md:py-16 lg:py-20">
-          <div className="mx-auto max-w-5xl text-center mb-12 space-y-3">
+        <section className="py-10 md:py-12 lg:py-16">
+          <div className="mx-auto max-w-5xl text-center mb-8 space-y-2">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground">Where we&apos;re headed</h2>
           </div>
-          <div className="mx-auto max-w-5xl rounded-2xl border border-slate-200 bg-white p-8 shadow-lg space-y-6 dark:border-purple-500/30 dark:bg-gradient-to-br dark:from-purple-500/15 dark:via-[#0E1421] dark:to-[#0A0F1C]">
-            <p className="text-lg text-slate-700 dark:text-gray-300">
+          <Card className="mx-auto max-w-4xl rounded-xl border border-border/60 bg-[#0E1421] shadow-lg">
+            <CardContent className="py-6 md:py-8 space-y-4">
+            <p className="text-base md:text-lg text-gray-300">
               You can use RunMat today as a MATLAB-style runtime. Next, we&apos;re building it into a modern
               environment for engineers where:
             </p>
-            <div className="space-y-3 text-lg text-slate-700 dark:text-gray-300">
+            <div className="space-y-2 text-base md:text-lg text-gray-300">
               <div className="flex items-start gap-3">
-                <ArrowUpRight className="mt-1 h-4 w-4 text-blue-600 dark:text-blue-300 shrink-0" />
+                <ArrowUpRight className="mt-1 h-4 w-4 text-blue-300 shrink-0" />
                 <span>You write or generate code faster</span>
               </div>
               <div className="flex items-start gap-3">
-                <ArrowUpRight className="mt-1 h-4 w-4 text-blue-600 dark:text-blue-300 shrink-0" />
+                <ArrowUpRight className="mt-1 h-4 w-4 text-blue-300 shrink-0" />
                 <span>You verify results faster</span>
               </div>
               <div className="flex items-start gap-3">
-                <ArrowUpRight className="mt-1 h-4 w-4 text-blue-600 dark:text-blue-300 shrink-0" />
+                <ArrowUpRight className="mt-1 h-4 w-4 text-blue-300 shrink-0" />
                 <span>You run work from laptop to cloud to secure enterprise setups</span>
               </div>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 text-lg text-slate-700 dark:border-border/60 dark:bg-white/5 dark:text-gray-300">
-              <span className="font-semibold text-slate-900 dark:text-gray-100">The goal:</span> Let engineers focus on math and physics, not programming.
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-base md:text-lg text-gray-300">
+              <span className="font-semibold text-gray-100">The goal:</span>{" "}
+              <span>Let engineers focus on math and physics, not programming.</span>
             </div>
-          </div>
+            </CardContent>
+          </Card>
         </section>
 
         {/* Open Source */}
