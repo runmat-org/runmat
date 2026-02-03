@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::acceleration::gpu::type_resolvers::pagefun_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, PagefunOp, PagefunRequest};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
@@ -53,6 +54,7 @@ fn pagefun_error(message: impl Into<String>) -> RuntimeError {
     summary = "Apply MATLAB operators page-by-page across higher-dimensional arrays.",
     keywords = "pagefun,gpuArray,mtimes,pages,batch",
     accel = "custom",
+    type_resolver(pagefun_type),
     builtin_path = "crate::builtins::acceleration::gpu::pagefun"
 )]
 async fn pagefun_builtin(
@@ -861,7 +863,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, StringArray};
+    use runmat_builtins::{CharArray, StringArray, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1064,6 +1066,11 @@ pub(crate) mod tests {
             err.contains("inner matrix dimensions"),
             "unexpected error message {err}"
         );
+    }
+
+    #[test]
+    fn pagefun_type_is_tensor() {
+        assert_eq!(pagefun_type(&[Type::tensor()]), Type::tensor());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

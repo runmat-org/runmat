@@ -4,6 +4,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::acceleration::gpu::type_resolvers::gather_type;
 use crate::{build_runtime_error, make_cell, RuntimeError};
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
@@ -45,6 +46,7 @@ fn gather_error(message: impl Into<String>) -> RuntimeError {
     summary = "Bring gpuArray data back to host memory.",
     keywords = "gather,gpuArray,accelerate,download",
     accel = "sink",
+    type_resolver(gather_type),
     builtin_path = "crate::builtins::acceleration::gpu::gather"
 )]
 async fn gather_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -119,7 +121,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CellArray, StructValue, Tensor};
+    use runmat_builtins::{CellArray, StructValue, Tensor, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -266,6 +268,11 @@ pub(crate) mod tests {
     fn gather_requires_at_least_one_argument() {
         let err = block_on(gather_builtin(Vec::new())).expect_err("expected error");
         assert_eq!(err.to_string(), "gather: not enough input arguments");
+    }
+
+    #[test]
+    fn gather_type_resolves_multiple_outputs_to_cell() {
+        assert_eq!(gather_type(&[Type::Num, Type::String]), Type::cell());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::acceleration::gpu::type_resolvers::gpuarray_type;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{CharArray, IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -61,6 +62,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "gpuArray,gpu,accelerate,upload,dtype,like",
     examples = "G = gpuArray([1 2 3], 'single');",
     accel = "array_construct",
+    type_resolver(gpuarray_type),
     builtin_path = "crate::builtins::acceleration::gpu::gpuarray"
 )]
 async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -568,7 +570,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, LogicalArray};
+    use runmat_builtins::{IntValue, LogicalArray, Type};
 
     fn call(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(gpu_array_builtin(value, rest))
@@ -938,5 +940,10 @@ pub(crate) mod tests {
             assert_eq!(gathered.shape, vec![1, 1]);
             assert_eq!(gathered.data, vec![7.0]);
         });
+    }
+
+    #[test]
+    fn gpuarray_type_for_logical_is_logical() {
+        assert_eq!(gpuarray_type(&[Type::logical()]), Type::logical());
     }
 }

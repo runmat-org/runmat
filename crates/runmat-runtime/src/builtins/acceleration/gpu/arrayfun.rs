@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::acceleration::gpu::type_resolvers::arrayfun_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
@@ -113,6 +114,7 @@ fn format_handler_error(err: &RuntimeError) -> String {
     summary = "Apply a function element-wise to array inputs.",
     keywords = "arrayfun,gpu,array,map,functional",
     accel = "host",
+    type_resolver(arrayfun_type),
     builtin_path = "crate::builtins::acceleration::gpu::arrayfun"
 )]
 async fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -985,7 +987,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{Tensor, Type};
 
     fn call(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(arrayfun_builtin(func, rest))
@@ -1008,6 +1010,36 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn arrayfun_type_tracks_function_returns() {
+        let func = Type::Function {
+            params: vec![Type::Num],
+            returns: Box::new(Type::Num),
+        };
+        assert_eq!(arrayfun_type(&[func, Type::tensor()]), Type::tensor());
+    }
+
+    #[test]
+    fn arrayfun_type_uses_logical_returns() {
+        let func = Type::Function {
+            params: vec![Type::Num],
+            returns: Box::new(Type::Bool),
+        };
+        assert_eq!(arrayfun_type(&[func, Type::tensor()]), Type::logical());
+    }
+
+    #[test]
+    fn arrayfun_type_with_text_args_stays_unknown() {
+        let func = Type::Function {
+            params: vec![Type::Num],
+            returns: Box::new(Type::Num),
+        };
+        assert_eq!(
+            arrayfun_type(&[func, Type::tensor(), Type::String, Type::Bool]),
+            Type::Unknown
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1312,6 +1344,7 @@ pub(crate) mod tests {
 
     #[runmat_macros::runtime_builtin(
         name = "__arrayfun_test_handler",
+        type_resolver(arrayfun_type),
         builtin_path = "crate::builtins::acceleration::gpu::arrayfun::tests"
     )]
     async fn arrayfun_test_handler(

@@ -1060,6 +1060,64 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FsCommitResponse'
+  /v1/projects/{projectId}/signals:
+    get:
+      summary: List project signals
+      operationId: listProjectSignals
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: cursor
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            format: int32
+      responses:
+        '200':
+          description: Signal list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignalListResponse'
+  /v1/signals/stream:
+    get:
+      summary: Stream signals
+      operationId: streamSignals
+      parameters:
+        - in: query
+          name: orgId
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: projectId
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: cursor
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Signal stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
 components:
   schemas:
     AuthResolveRequest:
@@ -1664,6 +1722,48 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/FsVersion'
+    SignalResponse:
+      type: object
+      required: [id, kind, orgId, createdAt, payload]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+        orgId:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+        actorId:
+          type: string
+          format: uuid
+          nullable: true
+        path:
+          type: string
+          nullable: true
+        etag:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+    SignalListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SignalResponse'
+        nextCursor:
+          type: string
+          nullable: true
     FsEntry:
       type: object
       required: [id, projectId, path, name, kind, size, readonly]

@@ -5,6 +5,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::acceleration::gpu::type_resolvers::gpuinfo_type;
 
 use runmat_builtins::{IntValue, StructValue, Value};
 use runmat_macros::runtime_builtin;
@@ -42,6 +43,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return a formatted status string that describes the active GPU provider.",
     keywords = "gpu,gpuInfo,device,info,accelerate",
     examples = "disp(gpuInfo())",
+    type_resolver(gpuinfo_type),
     builtin_path = "crate::builtins::acceleration::gpu::gpuinfo"
 )]
 async fn gpu_info_builtin() -> crate::BuiltinResult<Value> {
@@ -103,6 +105,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
+    use runmat_builtins::Type;
 
     fn call() -> crate::BuiltinResult<Value> {
         block_on(gpu_info_builtin())
@@ -195,6 +198,11 @@ pub(crate) mod tests {
             !summary.contains("ignored"),
             "unexpected field 'ignored' present in: {summary}"
         );
+    }
+
+    #[test]
+    fn gpuinfo_type_is_string() {
+        assert_eq!(gpuinfo_type(&[]), Type::String);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

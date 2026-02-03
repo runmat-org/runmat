@@ -8,6 +8,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::acceleration::gpu::type_resolvers::gpudevice_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 /// Error used when no acceleration provider is registered.
@@ -59,6 +60,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Query metadata about the active GPU provider and return it as a MATLAB struct.",
     keywords = "gpu,gpuDevice,device,info,accelerate",
     examples = "info = gpuDevice();",
+    type_resolver(gpudevice_type),
     builtin_path = "crate::builtins::acceleration::gpu::gpudevice"
 )]
 async fn gpu_device_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -235,6 +237,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::Type;
 
     fn call(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(gpu_device_builtin(args))
@@ -350,6 +353,11 @@ pub(crate) mod tests {
                 assert_eq!(err, ERR_INVALID_INDEX);
             }
         });
+    }
+
+    #[test]
+    fn gpudevice_type_is_struct() {
+        assert!(matches!(gpudevice_type(&[Type::Num]), Type::Struct { .. }));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

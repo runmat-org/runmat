@@ -79,7 +79,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Import numeric data from delimited text files into a RunMat matrix.",
     keywords = "readmatrix,csv,delimited text,numeric import,table",
     accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::unknown_type),
+    type_resolver(crate::builtins::io::type_resolvers::readmatrix_type),
     builtin_path = "crate::builtins::io::tabular::readmatrix"
 )]
 async fn readmatrix_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

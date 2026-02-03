@@ -290,6 +290,7 @@ pub(crate) mod tests {
 
     #[runtime_builtin(
         name = "__timeit_helper_counter_default",
+        type_resolver(crate::builtins::timing::type_resolvers::timeit_type),
         builtin_path = "crate::builtins::timing::timeit::tests"
     )]
     async fn helper_counter_default() -> crate::BuiltinResult<Value> {
@@ -299,6 +300,7 @@ pub(crate) mod tests {
 
     #[runtime_builtin(
         name = "__timeit_helper_counter_outputs",
+        type_resolver(crate::builtins::timing::type_resolvers::timeit_type),
         builtin_path = "crate::builtins::timing::timeit::tests"
     )]
     async fn helper_counter_outputs() -> crate::BuiltinResult<Value> {
@@ -308,6 +310,7 @@ pub(crate) mod tests {
 
     #[runtime_builtin(
         name = "__timeit_helper_counter_invalid",
+        type_resolver(crate::builtins::timing::type_resolvers::timeit_type),
         builtin_path = "crate::builtins::timing::timeit::tests"
     )]
     async fn helper_counter_invalid() -> crate::BuiltinResult<Value> {
@@ -317,6 +320,7 @@ pub(crate) mod tests {
 
     #[runtime_builtin(
         name = "__timeit_helper_zero_outputs",
+        type_resolver(crate::builtins::timing::type_resolvers::timeit_type),
         builtin_path = "crate::builtins::timing::timeit::tests"
     )]
     async fn helper_counter_zero_outputs() -> crate::BuiltinResult<Value> {

@@ -1,7 +1,28 @@
 use runmat_builtins::Type;
 
-pub fn pause_type(_args: &[Type]) -> Type {
-    Type::Union(vec![Type::String, Type::tensor()])
+use crate::builtins::common::type_shapes::element_count_if_known;
+
+pub fn pause_type(args: &[Type]) -> Type {
+    if args.is_empty() {
+        return Type::tensor_with_shape(vec![0, 0]);
+    }
+    if args.len() > 1 {
+        return Type::Unknown;
+    }
+
+    match &args[0] {
+        Type::String => Type::Union(vec![Type::String, Type::tensor_with_shape(vec![0, 0])]),
+        Type::Num | Type::Int | Type::Bool => Type::tensor_with_shape(vec![0, 0]),
+        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+            match element_count_if_known(shape) {
+                Some(0) | Some(1) => Type::tensor_with_shape(vec![0, 0]),
+                _ => Type::tensor(),
+            }
+        }
+        Type::Tensor { shape: None } | Type::Logical { shape: None } => Type::tensor(),
+        Type::Unknown => Type::Union(vec![Type::String, Type::tensor_with_shape(vec![0, 0])]),
+        _ => Type::Unknown,
+    }
 }
 
 pub fn tic_type(_args: &[Type]) -> Type {
@@ -21,10 +42,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pause_type_reports_union() {
+    fn pause_type_reports_empty_tensor_with_no_args() {
+        assert_eq!(pause_type(&[]), Type::tensor_with_shape(vec![0, 0]));
+    }
+
+    #[test]
+    fn pause_type_reports_empty_tensor_for_numeric_arg() {
         assert_eq!(
-            pause_type(&[]),
-            Type::Union(vec![Type::String, Type::tensor()])
+            pause_type(&[Type::Num]),
+            Type::tensor_with_shape(vec![0, 0])
+        );
+    }
+
+    #[test]
+    fn pause_type_reports_union_for_string_arg() {
+        assert_eq!(
+            pause_type(&[Type::String]),
+            Type::Union(vec![Type::String, Type::tensor_with_shape(vec![0, 0])])
+        );
+    }
+
+    #[test]
+    fn pause_type_reports_empty_tensor_for_scalar_tensor() {
+        assert_eq!(
+            pause_type(&[Type::Tensor {
+                shape: Some(vec![Some(1), Some(1)])
+            }]),
+            Type::tensor_with_shape(vec![0, 0])
         );
     }
 

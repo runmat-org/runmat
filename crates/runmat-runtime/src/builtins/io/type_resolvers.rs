@@ -24,16 +24,13 @@ pub(crate) fn cell_struct_type(_args: &[Type]) -> Type {
     Type::cell_of(Type::Struct { known_fields: None })
 }
 
-pub(crate) fn unknown_type(_args: &[Type]) -> Type {
-    Type::Unknown
-}
-
 pub fn disp_type(args: &[Type]) -> Type {
     tensor_type(args)
 }
 
 pub fn input_type(args: &[Type]) -> Type {
-    unknown_type(args)
+    let _ = args;
+    Type::Union(vec![Type::String, Type::Num, Type::tensor()])
 }
 
 pub fn fclose_type(args: &[Type]) -> Type {
@@ -45,7 +42,8 @@ pub fn feof_type(args: &[Type]) -> Type {
 }
 
 pub fn fgets_type(args: &[Type]) -> Type {
-    unknown_type(args)
+    let _ = args;
+    Type::Union(vec![Type::String, Type::Num])
 }
 
 pub fn fileread_type(args: &[Type]) -> Type {
@@ -57,7 +55,15 @@ pub fn filewrite_type(args: &[Type]) -> Type {
 }
 
 pub fn fopen_type(args: &[Type]) -> Type {
-    unknown_type(args)
+    if args.is_empty() {
+        return Type::tensor();
+    }
+    match args.first() {
+        Some(Type::Num) | Some(Type::Int) => Type::String,
+        Some(Type::String) => Type::Union(vec![Type::Num, Type::tensor()]),
+        Some(Type::Unknown) => Type::Union(vec![Type::String, Type::Num, Type::tensor()]),
+        _ => Type::Union(vec![Type::Num, Type::tensor()]),
+    }
 }
 
 pub fn fprintf_type(args: &[Type]) -> Type {
@@ -65,7 +71,8 @@ pub fn fprintf_type(args: &[Type]) -> Type {
 }
 
 pub fn fread_type(args: &[Type]) -> Type {
-    unknown_type(args)
+    let _ = args;
+    Type::Union(vec![Type::String, Type::tensor(), Type::logical()])
 }
 
 pub fn fwrite_type(args: &[Type]) -> Type {
@@ -77,15 +84,42 @@ pub fn weboptions_type(args: &[Type]) -> Type {
 }
 
 pub fn webread_type(args: &[Type]) -> Type {
-    unknown_type(args)
+    let _ = args;
+    Type::Union(vec![
+        Type::Struct { known_fields: None },
+        Type::cell(),
+        Type::String,
+        Type::tensor(),
+        Type::logical(),
+        Type::Num,
+        Type::Bool,
+    ])
 }
 
 pub fn webwrite_type(args: &[Type]) -> Type {
-    unknown_type(args)
+    let _ = args;
+    Type::Union(vec![
+        Type::Struct { known_fields: None },
+        Type::cell(),
+        Type::String,
+        Type::tensor(),
+        Type::logical(),
+        Type::Num,
+        Type::Bool,
+    ])
 }
 
 pub fn jsondecode_type(args: &[Type]) -> Type {
-    unknown_type(args)
+    let _ = args;
+    Type::Union(vec![
+        Type::Struct { known_fields: None },
+        Type::cell(),
+        Type::String,
+        Type::tensor(),
+        Type::logical(),
+        Type::Num,
+        Type::Bool,
+    ])
 }
 
 pub fn jsonencode_type(args: &[Type]) -> Type {
@@ -109,11 +143,13 @@ pub fn close_type(args: &[Type]) -> Type {
 }
 
 pub fn read_type(args: &[Type]) -> Type {
-    unknown_type(args)
+    let _ = args;
+    Type::Union(vec![Type::String, Type::tensor()])
 }
 
 pub fn readline_type(args: &[Type]) -> Type {
-    unknown_type(args)
+    let _ = args;
+    Type::Union(vec![Type::String, Type::tensor()])
 }
 
 pub fn tcpclient_type(args: &[Type]) -> Type {
@@ -212,6 +248,11 @@ pub fn tempname_type(args: &[Type]) -> Type {
     string_type(args)
 }
 
+pub fn readmatrix_type(args: &[Type]) -> Type {
+    let _ = args;
+    Type::Union(vec![Type::tensor(), Type::logical()])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,16 +267,31 @@ mod tests {
     }
 
     assert_resolver!(disp_type_resolver, disp_type, &[], Type::tensor());
-    assert_resolver!(input_type_resolver, input_type, &[], Type::Unknown);
+    assert_resolver!(
+        input_type_resolver,
+        input_type,
+        &[],
+        Type::Union(vec![Type::String, Type::Num, Type::tensor()])
+    );
 
     assert_resolver!(fclose_type_resolver, fclose_type, &[], Type::Num);
     assert_resolver!(feof_type_resolver, feof_type, &[], Type::Bool);
-    assert_resolver!(fgets_type_resolver, fgets_type, &[], Type::Unknown);
+    assert_resolver!(
+        fgets_type_resolver,
+        fgets_type,
+        &[],
+        Type::Union(vec![Type::String, Type::Num])
+    );
     assert_resolver!(fileread_type_resolver, fileread_type, &[], Type::String);
     assert_resolver!(filewrite_type_resolver, filewrite_type, &[], Type::Num);
-    assert_resolver!(fopen_type_resolver, fopen_type, &[], Type::Unknown);
+    assert_resolver!(fopen_type_resolver, fopen_type, &[], Type::tensor());
     assert_resolver!(fprintf_type_resolver, fprintf_type, &[], Type::Num);
-    assert_resolver!(fread_type_resolver, fread_type, &[], Type::Unknown);
+    assert_resolver!(
+        fread_type_resolver,
+        fread_type,
+        &[],
+        Type::Union(vec![Type::String, Type::tensor(), Type::logical()])
+    );
     assert_resolver!(fwrite_type_resolver, fwrite_type, &[], Type::Num);
 
     assert_resolver!(
@@ -244,14 +300,48 @@ mod tests {
         &[],
         Type::Struct { known_fields: None }
     );
-    assert_resolver!(webread_type_resolver, webread_type, &[], Type::Unknown);
-    assert_resolver!(webwrite_type_resolver, webwrite_type, &[], Type::Unknown);
+    assert_resolver!(
+        webread_type_resolver,
+        webread_type,
+        &[],
+        Type::Union(vec![
+            Type::Struct { known_fields: None },
+            Type::cell(),
+            Type::String,
+            Type::tensor(),
+            Type::logical(),
+            Type::Num,
+            Type::Bool,
+        ])
+    );
+    assert_resolver!(
+        webwrite_type_resolver,
+        webwrite_type,
+        &[],
+        Type::Union(vec![
+            Type::Struct { known_fields: None },
+            Type::cell(),
+            Type::String,
+            Type::tensor(),
+            Type::logical(),
+            Type::Num,
+            Type::Bool,
+        ])
+    );
 
     assert_resolver!(
         jsondecode_type_resolver,
         jsondecode_type,
         &[],
-        Type::Unknown
+        Type::Union(vec![
+            Type::Struct { known_fields: None },
+            Type::cell(),
+            Type::String,
+            Type::tensor(),
+            Type::logical(),
+            Type::Num,
+            Type::Bool,
+        ])
     );
     assert_resolver!(jsonencode_type_resolver, jsonencode_type, &[], Type::String);
 
@@ -270,8 +360,18 @@ mod tests {
         Type::Struct { known_fields: None }
     );
     assert_resolver!(close_type_resolver, close_type, &[], Type::Num);
-    assert_resolver!(read_type_resolver, read_type, &[], Type::Unknown);
-    assert_resolver!(readline_type_resolver, readline_type, &[], Type::Unknown);
+    assert_resolver!(
+        read_type_resolver,
+        read_type,
+        &[],
+        Type::Union(vec![Type::String, Type::tensor()])
+    );
+    assert_resolver!(
+        readline_type_resolver,
+        readline_type,
+        &[],
+        Type::Union(vec![Type::String, Type::tensor()])
+    );
     assert_resolver!(
         tcpclient_type_resolver,
         tcpclient_type,
@@ -320,6 +420,11 @@ mod tests {
     assert_resolver!(csvwrite_type_resolver, num_type, &[], Type::Num);
     assert_resolver!(dlmread_type_resolver, tensor_type, &[], Type::tensor());
     assert_resolver!(dlmwrite_type_resolver, num_type, &[], Type::Num);
-    assert_resolver!(readmatrix_type_resolver, unknown_type, &[], Type::Unknown);
+    assert_resolver!(
+        readmatrix_type_resolver,
+        readmatrix_type,
+        &[],
+        Type::Union(vec![Type::tensor(), Type::logical()])
+    );
     assert_resolver!(writematrix_type_resolver, num_type, &[], Type::Num);
 }

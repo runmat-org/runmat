@@ -1068,6 +1068,7 @@ pub(crate) mod tests {
 
     #[runmat_macros::runtime_builtin(
         name = "__cellfun_test_handler",
+        type_resolver(cellfun_type),
         builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]
     fn cellfun_test_handler(
@@ -1082,6 +1083,7 @@ pub(crate) mod tests {
 
     #[runmat_macros::runtime_builtin(
         name = "__cellfun_add",
+        type_resolver(cellfun_type),
         builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]
     fn cellfun_add(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
@@ -1092,6 +1094,7 @@ pub(crate) mod tests {
 
     #[runmat_macros::runtime_builtin(
         name = "__cellfun_identity",
+        type_resolver(cellfun_type),
         builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]
     fn cellfun_identity(value: Value) -> crate::BuiltinResult<Value> {
