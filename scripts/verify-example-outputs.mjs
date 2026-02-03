@@ -394,7 +394,7 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "      } catch (err) {}",
         "      const execResult = await Promise.resolve(session.execute(testCase.input));",
         "      if (execResult && Array.isArray(execResult.stdout)) {",
-        "        stdoutText = execResult.stdout.map((entry) => entry.text || \"\").join(\"\");",
+        "        stdoutText = execResult.stdout.map((entry) => entry.text || \"\").join(\"\\n\");",
         "      }",
         "      if (execResult && typeof execResult.valueText === \"string\") {",
         "        valueText = execResult.valueText;",
