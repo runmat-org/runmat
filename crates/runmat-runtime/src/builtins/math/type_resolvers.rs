@@ -1,6 +1,6 @@
 use runmat_builtins::Type;
 
-use crate::builtins::common::type_shapes::element_count_if_known;
+use crate::builtins::common::type_shapes::{broadcast_shapes, element_count_if_known};
 
 pub fn numeric_unary_type(args: &[Type]) -> Type {
     let Some(input) = args.first() else {
@@ -35,11 +35,9 @@ fn binary_result_type(lhs: &Type, rhs: &Type) -> Type {
     let lhs_shape = numeric_array_shape(lhs);
     let rhs_shape = numeric_array_shape(rhs);
     if let (Some(a), Some(b)) = (&lhs_shape, &rhs_shape) {
-        if a == b {
-            return Type::Tensor {
-                shape: Some(a.clone()),
-            };
-        }
+        return Type::Tensor {
+            shape: Some(broadcast_shapes(a, b)),
+        };
     }
     if let Some(shape) = lhs_shape.or(rhs_shape) {
         return Type::Tensor { shape: Some(shape) };
@@ -135,6 +133,24 @@ mod tests {
             out,
             Type::Tensor {
                 shape: Some(vec![Some(4), Some(1)])
+            }
+        );
+    }
+
+    #[test]
+    fn numeric_binary_broadcasts_shapes() {
+        let out = numeric_binary_type(&[
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(3)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(1)]),
+            },
+        ]);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
             }
         );
     }

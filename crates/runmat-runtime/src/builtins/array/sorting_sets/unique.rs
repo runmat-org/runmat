@@ -14,7 +14,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{CharArray, ComplexTensor, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use super::type_resolvers::unknown_output_type;
+use super::type_resolvers::set_values_output_type;
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -64,7 +64,7 @@ fn unique_error(message: impl Into<String>) -> crate::RuntimeError {
     keywords = "unique,set,distinct,stable,rows,indices,gpu",
     accel = "array_construct",
     sink = true,
-    type_resolver(unknown_output_type),
+    type_resolver(set_values_output_type),
     builtin_path = "crate::builtins::array::sorting_sets::unique"
 )]
 async fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -1289,8 +1289,16 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn unique_type_resolver_unknown() {
-        assert_eq!(unknown_output_type(&[Type::tensor()]), Type::Unknown);
+    fn unique_type_resolver_numeric() {
+        assert_eq!(set_values_output_type(&[Type::tensor()]), Type::tensor());
+    }
+
+    #[test]
+    fn unique_type_resolver_string_array() {
+        assert_eq!(
+            set_values_output_type(&[Type::cell_of(Type::String)]),
+            Type::cell_of(Type::String)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

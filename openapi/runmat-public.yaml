@@ -1162,13 +1162,31 @@ components:
           nullable: true
     Org:
       type: object
-      required: [id, name]
+      required: [id, name, created_at, updated_at]
       properties:
         id:
           type: string
           format: uuid
         name:
           type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_by:
+          type: string
+          format: uuid
+          nullable: true
+        updated_by:
+          type: string
+          format: uuid
+          nullable: true
     Project:
       type: object
       required: [id, org_id, name, created_at, updated_at]
@@ -1187,11 +1205,26 @@ components:
         updated_at:
           type: string
           format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_by:
+          type: string
+          format: uuid
+          nullable: true
+        updated_by:
+          type: string
+          format: uuid
+          nullable: true
     ProjectMembership:
       type: object
-      required: [id, project_id, user_id, role]
+      required: [id, org_id, project_id, user_id, role, created_at, updated_at]
       properties:
         id:
+          type: string
+          format: uuid
+        org_id:
           type: string
           format: uuid
         project_id:
@@ -1201,6 +1234,24 @@ components:
           type: string
         role:
           type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_by:
+          type: string
+          format: uuid
+          nullable: true
+        updated_by:
+          type: string
+          format: uuid
+          nullable: true
     ProjectCreateRequest:
       type: object
       required: [name]
@@ -1742,6 +1793,9 @@ components:
           type: string
           format: uuid
           nullable: true
+        traceId:
+          type: string
+          nullable: true
         path:
           type: string
           nullable: true
@@ -1764,6 +1818,24 @@ components:
         nextCursor:
           type: string
           nullable: true
+    UsageRollupRequest:
+      type: object
+      required: [scope, windowStart, windowEnd, usage]
+      properties:
+        scope:
+          type: string
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+        windowStart:
+          type: string
+          format: date-time
+        windowEnd:
+          type: string
+          format: date-time
+        usage:
+          type: object
     FsEntry:
       type: object
       required: [id, projectId, path, name, kind, size, readonly]
@@ -1861,3 +1933,27 @@ components:
             traceId:
               type: string
               nullable: true
+  /v1/orgs/{orgId}/usage/rollup:
+    post:
+      summary: Usage rollup
+      operationId: usageRollup
+      parameters:
+        - in: path
+          name: orgId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UsageRollupRequest'
+      responses:
+        '200':
+          description: Usage rollup accepted
+          content:
+            application/json:
+              schema:
+                type: boolean

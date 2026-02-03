@@ -1,5 +1,7 @@
 use runmat_builtins::Type;
 
+use crate::builtins::common::type_shapes::broadcast_shapes;
+
 pub fn logical_like(input: &Type) -> Type {
     match input {
         Type::Tensor { shape: Some(shape) } => Type::Logical {
@@ -26,11 +28,9 @@ pub fn logical_result_for_binary(lhs: &Type, rhs: &Type) -> Type {
         _ => None,
     };
     if let (Some(a), Some(b)) = (&lhs_shape, &rhs_shape) {
-        if a == b {
-            return Type::Logical {
-                shape: Some(a.clone()),
-            };
-        }
+        return Type::Logical {
+            shape: Some(broadcast_shapes(a, b)),
+        };
     }
     if let Some(shape) = lhs_shape {
         return Type::Logical { shape: Some(shape) };
@@ -99,5 +99,21 @@ mod tests {
     #[test]
     fn logical_binary_scalar_defaults_bool() {
         assert_eq!(logical_binary_type(&[Type::Num, Type::Bool]), Type::Bool);
+    }
+
+    #[test]
+    fn logical_binary_broadcasts_shapes() {
+        let lhs = Type::Tensor {
+            shape: Some(vec![Some(1), Some(4)]),
+        };
+        let rhs = Type::Logical {
+            shape: Some(vec![Some(3), Some(1)]),
+        };
+        assert_eq!(
+            logical_binary_type(&[lhs, rhs]),
+            Type::Logical {
+                shape: Some(vec![Some(3), Some(4)])
+            }
+        );
     }
 }

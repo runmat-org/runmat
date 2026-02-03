@@ -21,3 +21,51 @@ pub fn element_count_if_known(shape: &[Option<usize>]) -> Option<usize> {
         None => None,
     })
 }
+
+pub fn broadcast_shapes(lhs: &[Option<usize>], rhs: &[Option<usize>]) -> Vec<Option<usize>> {
+    let max_rank = lhs.len().max(rhs.len());
+    let mut out: Vec<Option<usize>> = Vec::with_capacity(max_rank);
+    for i in 0..max_rank {
+        let lhs_idx = lhs.len().checked_sub(1 + i);
+        let rhs_idx = rhs.len().checked_sub(1 + i);
+        let da = lhs_idx
+            .and_then(|idx| lhs.get(idx))
+            .cloned()
+            .unwrap_or(Some(1));
+        let db = rhs_idx
+            .and_then(|idx| rhs.get(idx))
+            .cloned()
+            .unwrap_or(Some(1));
+        let dim = match (da, db) {
+            (Some(a), Some(b)) => {
+                if a == b {
+                    Some(a)
+                } else if a == 1 {
+                    Some(b)
+                } else if b == 1 {
+                    Some(a)
+                } else {
+                    None
+                }
+            }
+            (Some(a), None) => {
+                if a == 1 {
+                    None
+                } else {
+                    Some(a)
+                }
+            }
+            (None, Some(b)) => {
+                if b == 1 {
+                    None
+                } else {
+                    Some(b)
+                }
+            }
+            (None, None) => None,
+        };
+        out.push(dim);
+    }
+    out.reverse();
+    out
+}

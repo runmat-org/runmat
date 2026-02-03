@@ -284,6 +284,9 @@ pub struct LoweringResult {
     pub functions: HashMap<String, HirStmt>,
     pub var_types: Vec<Type>,
     pub var_names: HashMap<VarId, String>,
+    pub inferred_globals: HashMap<VarId, Type>,
+    pub inferred_function_envs: HashMap<String, HashMap<VarId, Type>>,
+    pub inferred_function_returns: HashMap<String, Vec<Type>>,
 }
 
 pub fn lower(
@@ -327,12 +330,19 @@ pub fn lower(
         }
     }
 
+    let inferred_function_returns = infer_function_output_types(&hir);
+    let inferred_function_envs = infer_function_variable_types(&hir);
+    let inferred_globals = infer_global_variable_types(&hir, &inferred_function_returns);
+
     Ok(LoweringResult {
         hir,
         variables,
         functions: ctx.functions,
         var_types: ctx.var_types,
         var_names,
+        inferred_globals,
+        inferred_function_envs,
+        inferred_function_returns,
     })
 }
 
@@ -343,6 +353,263 @@ fn logical_binary_result(lhs: &Type, rhs: &Type) -> Type {
         Type::logical()
     } else {
         Type::Bool
+    }
+}
+
+fn infer_expr_type_with_env(
+    expr: &HirExpr,
+    env: &std::collections::HashMap<VarId, Type>,
+    func_returns: &std::collections::HashMap<String, Vec<Type>>,
+) -> Type {
+    fn unify_tensor(a: &Type, b: &Type) -> Type {
+        match (a, b) {
+            (Type::Tensor { shape: sa }, Type::Tensor { shape: sb }) => match (sa, sb) {
+                (Some(sa), Some(sb)) => {
+                    let maxr = sa.len().max(sb.len());
+                    let mut out: Vec<Option<usize>> = Vec::with_capacity(maxr);
+                    for i in 0..maxr {
+                        let da = sa.get(i).cloned().unwrap_or(None);
+                        let db = sb.get(i).cloned().unwrap_or(None);
+                        let d = match (da, db) {
+                            (Some(a), Some(b)) => {
+                                if a == b {
+                                    Some(a)
+                                } else if a == 1 {
+                                    Some(b)
+                                } else if b == 1 {
+                                    Some(a)
+                                } else {
+                                    None
+                                }
+                            }
+                            (Some(a), None) => Some(a),
+                            (None, Some(b)) => Some(b),
+                            (None, None) => None,
+                        };
+                        out.push(d);
+                    }
+                    Type::Tensor { shape: Some(out) }
+                }
+                _ => Type::tensor(),
+            },
+            (Type::Tensor { .. }, _) | (_, Type::Tensor { .. }) => Type::tensor(),
+            _ => Type::tensor(),
+        }
+    }
+
+    fn index_tensor_shape(
+        base: &Type,
+        idxs: &[HirExpr],
+        env: &std::collections::HashMap<VarId, Type>,
+        func_returns: &std::collections::HashMap<String, Vec<Type>>,
+    ) -> Type {
+        let idx_types: Vec<Type> = idxs
+            .iter()
+            .map(|e| infer_expr_type_with_env(e, env, func_returns))
+            .collect();
+        match base {
+            Type::Tensor { shape: Some(dims) } => {
+                let rank = dims.len();
+                let mut out: Vec<Option<usize>> = Vec::new();
+                for i in 0..rank {
+                    if i < idx_types.len() {
+                        match idx_types[i] {
+                            Type::Int | Type::Num | Type::Bool => {}
+                            _ => {
+                                out.push(None);
+                            }
+                        }
+                    } else {
+                        out.push(dims[i]);
+                    }
+                }
+                if out.is_empty() {
+                    Type::Num
+                } else {
+                    Type::Tensor { shape: Some(out) }
+                }
+            }
+            Type::Tensor { shape: None } => {
+                let scalar_count = idx_types
+                    .iter()
+                    .filter(|t| matches!(t, Type::Int | Type::Num | Type::Bool))
+                    .count();
+                if scalar_count == idx_types.len() {
+                    Type::Num
+                } else {
+                    Type::tensor()
+                }
+            }
+            _ => Type::Unknown,
+        }
+    }
+
+    use HirExprKind as K;
+    fn literal_number(expr: &HirExpr) -> Option<f64> {
+        match &expr.kind {
+            HirExprKind::Number(text) => text.parse::<f64>().ok(),
+            _ => None,
+        }
+    }
+
+    fn range_shape(start: Option<f64>, step: Option<f64>, end: Option<f64>) -> Option<Type> {
+        match (start, step, end) {
+            (Some(s), Some(step), Some(e)) => {
+                if step == 0.0 {
+                    Some(Type::tensor())
+                } else {
+                    let len = ((e - s) / step).floor();
+                    if len < 0.0 {
+                        Some(Type::tensor_with_shape(vec![1, 0]))
+                    } else {
+                        Some(Type::tensor_with_shape(vec![1, len as usize + 1]))
+                    }
+                }
+            }
+            (Some(s), None, Some(e)) => {
+                let step = if e >= s { 1.0 } else { -1.0 };
+                let len = ((e - s) / step).floor();
+                if len < 0.0 {
+                    Some(Type::tensor_with_shape(vec![1, 0]))
+                } else {
+                    Some(Type::tensor_with_shape(vec![1, len as usize + 1]))
+                }
+            }
+            _ => None,
+        }
+    }
+
+    match &expr.kind {
+        K::Number(_) => Type::Num,
+        K::String(_) => Type::String,
+        K::Constant(_) => Type::Num,
+        K::Var(id) => env.get(id).cloned().unwrap_or(Type::Unknown),
+        K::Unary(_, e) => infer_expr_type_with_env(e, env, func_returns),
+        K::Binary(a, op, b) => {
+            let ta = infer_expr_type_with_env(a, env, func_returns);
+            let tb = infer_expr_type_with_env(b, env, func_returns);
+            match op {
+                parser::BinOp::Add
+                | parser::BinOp::Sub
+                | parser::BinOp::Mul
+                | parser::BinOp::Div
+                | parser::BinOp::Pow
+                | parser::BinOp::LeftDiv
+                | parser::BinOp::ElemMul
+                | parser::BinOp::ElemDiv
+                | parser::BinOp::ElemPow
+                | parser::BinOp::ElemLeftDiv => {
+                    if matches!(ta, Type::Tensor { .. }) || matches!(tb, Type::Tensor { .. }) {
+                        unify_tensor(&ta, &tb)
+                    } else {
+                        Type::Num
+                    }
+                }
+                parser::BinOp::Equal
+                | parser::BinOp::NotEqual
+                | parser::BinOp::Less
+                | parser::BinOp::LessEqual
+                | parser::BinOp::Greater
+                | parser::BinOp::GreaterEqual => logical_binary_result(&ta, &tb),
+                parser::BinOp::AndAnd
+                | parser::BinOp::OrOr
+                | parser::BinOp::BitAnd
+                | parser::BinOp::BitOr => logical_binary_result(&ta, &tb),
+                parser::BinOp::Colon => range_shape(literal_number(a), None, literal_number(b))
+                    .unwrap_or_else(Type::tensor),
+            }
+        }
+        K::Tensor(rows) => {
+            let r = rows.len();
+            let c = rows.iter().map(|row| row.len()).max().unwrap_or(0);
+            if r > 0 && rows.iter().all(|row| row.len() == c) {
+                Type::tensor_with_shape(vec![r, c])
+            } else {
+                Type::tensor()
+            }
+        }
+        K::Cell(rows) => {
+            let mut elem_ty: Option<Type> = None;
+            let mut len: usize = 0;
+            for row in rows {
+                for e in row {
+                    let t = infer_expr_type_with_env(e, env, func_returns);
+                    elem_ty = Some(match elem_ty {
+                        Some(curr) => curr.unify(&t),
+                        None => t,
+                    });
+                    len += 1;
+                }
+            }
+            Type::Cell {
+                element_type: elem_ty.map(Box::new),
+                length: Some(len),
+            }
+        }
+        K::Index(base, idxs) => {
+            let bt = infer_expr_type_with_env(base, env, func_returns);
+            index_tensor_shape(&bt, idxs, env, func_returns)
+        }
+        K::IndexCell(base, idxs) => {
+            let bt = infer_expr_type_with_env(base, env, func_returns);
+            if let Type::Cell {
+                element_type: Some(t),
+                ..
+            } = bt
+            {
+                let scalar = idxs.len() == 1
+                    && matches!(
+                        infer_expr_type_with_env(&idxs[0], env, func_returns),
+                        Type::Int | Type::Num | Type::Bool | Type::Tensor { .. }
+                    );
+                if scalar {
+                    *t
+                } else {
+                    Type::Unknown
+                }
+            } else {
+                Type::Unknown
+            }
+        }
+        K::Range(start, step, end) => range_shape(
+            literal_number(start),
+            step.as_ref().and_then(|s| literal_number(s)),
+            literal_number(end),
+        )
+        .unwrap_or_else(Type::tensor),
+        K::FuncCall(name, _args) => {
+            if let Some(v) = func_returns.get(name) {
+                v.first().cloned().unwrap_or(Type::Unknown)
+            } else {
+                let arg_types: Vec<Type> = _args
+                    .iter()
+                    .map(|arg| infer_expr_type_with_env(arg, env, func_returns))
+                    .collect();
+                let builtins = runmat_builtins::builtin_functions();
+                if let Some(b) = builtins.iter().find(|b| b.name == *name) {
+                    b.infer_return_type(&arg_types)
+                } else {
+                    Type::Unknown
+                }
+            }
+        }
+        K::MethodCall(_, _, _) => Type::Unknown,
+        K::Member(base, _) => {
+            let _bt = infer_expr_type_with_env(base, env, func_returns);
+            Type::Unknown
+        }
+        K::MemberDynamic(_, _) => Type::Unknown,
+        K::AnonFunc { .. } => Type::Function {
+            params: vec![Type::Unknown],
+            returns: Box::new(Type::Unknown),
+        },
+        K::FuncHandle(_) => Type::Function {
+            params: vec![Type::Unknown],
+            returns: Box::new(Type::Unknown),
+        },
+        K::MetaClass(_) => Type::String,
+        K::End => Type::Unknown,
+        K::Colon => Type::tensor(),
     }
 }
 
@@ -358,217 +625,7 @@ pub fn infer_function_output_types(
         env: &HashMap<VarId, Type>,
         func_returns: &HashMap<String, Vec<Type>>,
     ) -> Type {
-        fn unify_tensor(a: &Type, b: &Type) -> Type {
-            match (a, b) {
-                (Type::Tensor { shape: sa }, Type::Tensor { shape: sb }) => match (sa, sb) {
-                    (Some(sa), Some(sb)) => {
-                        let maxr = sa.len().max(sb.len());
-                        let mut out: Vec<Option<usize>> = Vec::with_capacity(maxr);
-                        for i in 0..maxr {
-                            let da = sa.get(i).cloned().unwrap_or(None);
-                            let db = sb.get(i).cloned().unwrap_or(None);
-                            let d = match (da, db) {
-                                (Some(a), Some(b)) => {
-                                    if a == b {
-                                        Some(a)
-                                    } else if a == 1 {
-                                        Some(b)
-                                    } else if b == 1 {
-                                        Some(a)
-                                    } else {
-                                        None
-                                    }
-                                }
-                                (Some(a), None) => Some(a),
-                                (None, Some(b)) => Some(b),
-                                (None, None) => None,
-                            };
-                            out.push(d);
-                        }
-                        Type::Tensor { shape: Some(out) }
-                    }
-                    _ => Type::tensor(),
-                },
-                (Type::Tensor { .. }, _) | (_, Type::Tensor { .. }) => Type::tensor(),
-                _ => Type::tensor(),
-            }
-        }
-        fn index_tensor_shape(
-            base: &Type,
-            idxs: &[HirExpr],
-            env: &HashMap<VarId, Type>,
-            func_returns: &HashMap<String, Vec<Type>>,
-        ) -> Type {
-            // Compute output tensor shape after indexing; conservative unknowns when necessary
-            let idx_types: Vec<Type> = idxs
-                .iter()
-                .map(|e| infer_expr_type(e, env, func_returns))
-                .collect();
-            match base {
-                Type::Tensor { shape: Some(dims) } => {
-                    let rank = dims.len();
-                    let mut out: Vec<Option<usize>> = Vec::new();
-                    for i in 0..rank {
-                        if i < idx_types.len() {
-                            match idx_types[i] {
-                                Type::Int | Type::Num | Type::Bool => { /* drop this dim */ }
-                                _ => {
-                                    out.push(None);
-                                }
-                            }
-                        } else {
-                            out.push(dims[i]);
-                        }
-                    }
-                    if out.is_empty() {
-                        Type::Num
-                    } else {
-                        Type::Tensor { shape: Some(out) }
-                    }
-                }
-                Type::Tensor { shape: None } => {
-                    // If all provided indices are scalar and there would be no remaining dims, return Num, else unknown tensor
-                    let scalar_count = idx_types
-                        .iter()
-                        .filter(|t| matches!(t, Type::Int | Type::Num | Type::Bool))
-                        .count();
-                    if scalar_count == idx_types.len() {
-                        Type::Num
-                    } else {
-                        Type::tensor()
-                    }
-                }
-                _ => Type::Unknown,
-            }
-        }
-        use HirExprKind as K;
-        match &expr.kind {
-            K::Number(_) => Type::Num,
-            K::String(_) => Type::String,
-            K::Constant(_) => Type::Num,
-            K::Var(id) => env.get(id).cloned().unwrap_or(Type::Unknown),
-            K::Unary(_, e) => infer_expr_type(e, env, func_returns),
-            K::Binary(a, op, b) => {
-                let ta = infer_expr_type(a, env, func_returns);
-                let tb = infer_expr_type(b, env, func_returns);
-                match op {
-                    parser::BinOp::Add
-                    | parser::BinOp::Sub
-                    | parser::BinOp::Mul
-                    | parser::BinOp::Div
-                    | parser::BinOp::Pow
-                    | parser::BinOp::LeftDiv
-                    | parser::BinOp::ElemMul
-                    | parser::BinOp::ElemDiv
-                    | parser::BinOp::ElemPow
-                    | parser::BinOp::ElemLeftDiv => {
-                        if matches!(ta, Type::Tensor { .. }) || matches!(tb, Type::Tensor { .. }) {
-                            unify_tensor(&ta, &tb)
-                        } else {
-                            Type::Num
-                        }
-                    }
-                    parser::BinOp::Equal
-                    | parser::BinOp::NotEqual
-                    | parser::BinOp::Less
-                    | parser::BinOp::LessEqual
-                    | parser::BinOp::Greater
-                    | parser::BinOp::GreaterEqual => logical_binary_result(&ta, &tb),
-                    parser::BinOp::AndAnd
-                    | parser::BinOp::OrOr
-                    | parser::BinOp::BitAnd
-                    | parser::BinOp::BitOr => logical_binary_result(&ta, &tb),
-                    parser::BinOp::Colon => Type::tensor(),
-                }
-            }
-            K::Tensor(rows) => {
-                let r = rows.len();
-                let c = rows.iter().map(|row| row.len()).max().unwrap_or(0);
-                if r > 0 && rows.iter().all(|row| row.len() == c) {
-                    Type::tensor_with_shape(vec![r, c])
-                } else {
-                    Type::tensor()
-                }
-            }
-            K::Cell(rows) => {
-                let mut elem_ty: Option<Type> = None;
-                let mut len: usize = 0;
-                for row in rows {
-                    for e in row {
-                        let t = infer_expr_type(e, env, func_returns);
-                        elem_ty = Some(match elem_ty {
-                            Some(curr) => curr.unify(&t),
-                            None => t,
-                        });
-                        len += 1;
-                    }
-                }
-                Type::Cell {
-                    element_type: elem_ty.map(Box::new),
-                    length: Some(len),
-                }
-            }
-            K::Index(base, idxs) => {
-                let bt = infer_expr_type(base, env, func_returns);
-                index_tensor_shape(&bt, idxs, env, func_returns)
-            }
-            K::IndexCell(base, idxs) => {
-                let bt = infer_expr_type(base, env, func_returns);
-                if let Type::Cell {
-                    element_type: Some(t),
-                    ..
-                } = bt
-                {
-                    let scalar = idxs.len() == 1
-                        && matches!(
-                            infer_expr_type(&idxs[0], env, func_returns),
-                            Type::Int | Type::Num | Type::Bool | Type::Tensor { .. }
-                        );
-                    if scalar {
-                        *t
-                    } else {
-                        Type::Unknown
-                    }
-                } else {
-                    Type::Unknown
-                }
-            }
-            K::Range(_, _, _) => Type::tensor(),
-            K::FuncCall(name, _args) => {
-                if let Some(v) = func_returns.get(name) {
-                    v.first().cloned().unwrap_or(Type::Unknown)
-                } else {
-                    let arg_types: Vec<Type> = _args
-                        .iter()
-                        .map(|arg| infer_expr_type(arg, env, func_returns))
-                        .collect();
-                    let builtins = runmat_builtins::builtin_functions();
-                    if let Some(b) = builtins.iter().find(|b| b.name == *name) {
-                        b.infer_return_type(&arg_types)
-                    } else {
-                        Type::Unknown
-                    }
-                }
-            }
-            K::MethodCall(_, _, _) => Type::Unknown,
-            K::Member(base, _) => {
-                // If base appears to be a struct, member read remains Unknown but confirms struct-like usage
-                let _bt = infer_expr_type(base, env, func_returns);
-                Type::Unknown
-            }
-            K::MemberDynamic(_, _) => Type::Unknown,
-            K::AnonFunc { .. } => Type::Function {
-                params: vec![Type::Unknown],
-                returns: Box::new(Type::Unknown),
-            },
-            K::FuncHandle(_) => Type::Function {
-                params: vec![Type::Unknown],
-                returns: Box::new(Type::Unknown),
-            },
-            K::MetaClass(_) => Type::String,
-            K::End => Type::Unknown,
-            K::Colon => Type::tensor(),
-        }
+        infer_expr_type_with_env(expr, env, func_returns)
     }
 
     fn join_env(a: &HashMap<VarId, Type>, b: &HashMap<VarId, Type>) -> HashMap<VarId, Type> {
@@ -1224,148 +1281,7 @@ pub fn infer_function_variable_types(
         env: &HashMap<VarId, Type>,
         returns: &HashMap<String, Vec<Type>>,
     ) -> Type {
-        use HirExprKind as K;
-        match &expr.kind {
-            K::Number(_) => Type::Num,
-            K::String(_) => Type::String,
-            K::Constant(_) => Type::Num,
-            K::Var(id) => env.get(id).cloned().unwrap_or(Type::Unknown),
-            K::Unary(_, e) => infer_expr_type(e, env, returns),
-            K::Binary(a, op, b) => {
-                let ta = infer_expr_type(a, env, returns);
-                let tb = infer_expr_type(b, env, returns);
-                match op {
-                    parser::BinOp::Add
-                    | parser::BinOp::Sub
-                    | parser::BinOp::Mul
-                    | parser::BinOp::Div
-                    | parser::BinOp::Pow
-                    | parser::BinOp::LeftDiv => {
-                        if matches!(ta, Type::Tensor { .. }) || matches!(tb, Type::Tensor { .. }) {
-                            Type::tensor()
-                        } else {
-                            Type::Num
-                        }
-                    }
-                    parser::BinOp::ElemMul
-                    | parser::BinOp::ElemDiv
-                    | parser::BinOp::ElemPow
-                    | parser::BinOp::ElemLeftDiv => {
-                        if matches!(ta, Type::Tensor { .. }) || matches!(tb, Type::Tensor { .. }) {
-                            Type::tensor()
-                        } else {
-                            Type::Num
-                        }
-                    }
-                    parser::BinOp::Equal
-                    | parser::BinOp::NotEqual
-                    | parser::BinOp::Less
-                    | parser::BinOp::LessEqual
-                    | parser::BinOp::Greater
-                    | parser::BinOp::GreaterEqual => logical_binary_result(&ta, &tb),
-                    parser::BinOp::AndAnd
-                    | parser::BinOp::OrOr
-                    | parser::BinOp::BitAnd
-                    | parser::BinOp::BitOr => logical_binary_result(&ta, &tb),
-                    parser::BinOp::Colon => Type::tensor(),
-                }
-            }
-            K::Tensor(rows) => {
-                let r = rows.len();
-                let c = rows.iter().map(|row| row.len()).max().unwrap_or(0);
-                if r > 0 && rows.iter().all(|row| row.len() == c) {
-                    Type::tensor_with_shape(vec![r, c])
-                } else {
-                    Type::tensor()
-                }
-            }
-            K::Cell(rows) => {
-                let mut elem_ty: Option<Type> = None;
-                let mut len: usize = 0;
-                for row in rows {
-                    for e in row {
-                        let t = infer_expr_type(e, env, returns);
-                        elem_ty = Some(match elem_ty {
-                            Some(curr) => curr.unify(&t),
-                            None => t,
-                        });
-                        len += 1;
-                    }
-                }
-                Type::Cell {
-                    element_type: elem_ty.map(Box::new),
-                    length: Some(len),
-                }
-            }
-            K::Index(base, idxs) => {
-                let bt = infer_expr_type(base, env, returns);
-                let scalar_indices = idxs.iter().all(|i| {
-                    matches!(
-                        infer_expr_type(i, env, returns),
-                        Type::Int | Type::Num | Type::Bool
-                    )
-                });
-                if scalar_indices {
-                    Type::Num
-                } else {
-                    bt
-                }
-            }
-            K::IndexCell(base, idxs) => {
-                let bt = infer_expr_type(base, env, returns);
-                if let Type::Cell {
-                    element_type: Some(t),
-                    ..
-                } = bt
-                {
-                    let scalar = idxs.len() == 1
-                        && matches!(
-                            infer_expr_type(&idxs[0], env, returns),
-                            Type::Int | Type::Num | Type::Bool | Type::Tensor { .. }
-                        );
-                    if scalar {
-                        *t
-                    } else {
-                        Type::Unknown
-                    }
-                } else {
-                    Type::Unknown
-                }
-            }
-            K::Range(_, _, _) => Type::tensor(),
-            K::FuncCall(name, _args) => {
-                if let Some(v) = returns.get(name) {
-                    v.first().cloned().unwrap_or(Type::Unknown)
-                } else {
-                    let arg_types: Vec<Type> = _args
-                        .iter()
-                        .map(|arg| infer_expr_type(arg, env, returns))
-                        .collect();
-                    if let Some(b) = runmat_builtins::builtin_functions()
-                        .into_iter()
-                        .find(|b| b.name == *name)
-                    {
-                        b.infer_return_type(&arg_types)
-                    } else {
-                        Type::Unknown
-                    }
-                }
-            }
-            K::MethodCall(_, _, _) => Type::Unknown,
-            K::Member(_, _) => Type::Unknown,
-            K::MemberDynamic(_, _) => Type::Unknown,
-            K::AnonFunc { .. } => Type::Function {
-                params: vec![Type::Unknown],
-                returns: Box::new(Type::Unknown),
-            },
-            K::FuncHandle(_) => Type::Function {
-                params: vec![Type::Unknown],
-                returns: Box::new(Type::Unknown),
-            },
-            K::MetaClass(_) => Type::String,
-            K::End => Type::Unknown,
-            K::Colon => Type::tensor(),
-        }
+        infer_expr_type_with_env(expr, env, returns)
     }
 
     fn join_env(a: &HashMap<VarId, Type>, b: &HashMap<VarId, Type>) -> HashMap<VarId, Type> {
@@ -1782,6 +1698,321 @@ pub fn infer_function_variable_types(
             _ => {}
         }
     }
+    out
+}
+
+/// Infer variable types for top-level (script) statements by performing a flow-sensitive analysis
+/// over the program body. Returns a mapping from VarId to inferred Type.
+pub fn infer_global_variable_types(
+    prog: &HirProgram,
+    returns: &std::collections::HashMap<String, Vec<Type>>,
+) -> std::collections::HashMap<VarId, Type> {
+    use std::collections::HashMap;
+
+    #[derive(Clone)]
+    struct Analysis {
+        exits: Vec<HashMap<VarId, Type>>,
+        fallthrough: Option<HashMap<VarId, Type>>,
+    }
+
+    fn join_env(a: &HashMap<VarId, Type>, b: &HashMap<VarId, Type>) -> HashMap<VarId, Type> {
+        let mut out = a.clone();
+        for (k, v) in b {
+            out.entry(*k)
+                .and_modify(|t| *t = t.unify(v))
+                .or_insert_with(|| v.clone());
+        }
+        out
+    }
+
+    #[allow(clippy::type_complexity, clippy::only_used_in_recursion)]
+    fn analyze_stmts(
+        stmts: &[HirStmt],
+        mut env: HashMap<VarId, Type>,
+        returns: &HashMap<String, Vec<Type>>,
+        func_defs: &HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)>,
+    ) -> Analysis {
+        fn literal_number(expr: &HirExpr) -> Option<f64> {
+            match &expr.kind {
+                HirExprKind::Number(text) => text.parse::<f64>().ok(),
+                _ => None,
+            }
+        }
+
+        fn range_shape(start: Option<f64>, step: Option<f64>, end: Option<f64>) -> Option<Type> {
+            match (start, step, end) {
+                (Some(s), Some(step), Some(e)) => {
+                    if step == 0.0 {
+                        Some(Type::tensor())
+                    } else {
+                        let len = ((e - s) / step).floor();
+                        if len < 0.0 {
+                            Some(Type::tensor_with_shape(vec![1, 0]))
+                        } else {
+                            Some(Type::tensor_with_shape(vec![1, len as usize + 1]))
+                        }
+                    }
+                }
+                (Some(s), None, Some(e)) => {
+                    let step = if e >= s { 1.0 } else { -1.0 };
+                    let len = ((e - s) / step).floor();
+                    if len < 0.0 {
+                        Some(Type::tensor_with_shape(vec![1, 0]))
+                    } else {
+                        Some(Type::tensor_with_shape(vec![1, len as usize + 1]))
+                    }
+                }
+                _ => None,
+            }
+        }
+
+        fn range_literal_type(expr: &HirExpr) -> Option<Type> {
+            match &expr.kind {
+                HirExprKind::Range(start, step, end) => {
+                    let start_num = literal_number(start);
+                    let step_num = step.as_ref().and_then(|s| literal_number(s));
+                    let end_num = literal_number(end);
+                    range_shape(start_num, step_num, end_num)
+                }
+                HirExprKind::Binary(a, parser::BinOp::Colon, b) => {
+                    range_shape(literal_number(a), None, literal_number(b))
+                }
+                _ => None,
+            }
+        }
+
+        let mut exits = Vec::new();
+        let mut i = 0usize;
+        while i < stmts.len() {
+            match &stmts[i] {
+                HirStmt::Assign(var, expr, _, _) => {
+                    let t = range_literal_type(expr)
+                        .unwrap_or_else(|| infer_expr_type_with_env(expr, &env, returns));
+                    env.insert(*var, t);
+                }
+                HirStmt::MultiAssign(vars, expr, _, _) => {
+                    if let HirExprKind::FuncCall(ref name, _) = expr.kind {
+                        let mut per_out: Vec<Type> = returns.get(name).cloned().unwrap_or_default();
+                        let needs_fallback = per_out.is_empty()
+                            || per_out.iter().any(|t| matches!(t, Type::Unknown));
+                        if needs_fallback {
+                            if let Some((params, outs, body)) = func_defs.get(name).cloned() {
+                                let mut penv: HashMap<VarId, Type> = HashMap::new();
+                                for p in params {
+                                    penv.insert(p, Type::Num);
+                                }
+                                let mut out_types: Vec<Type> = vec![Type::Unknown; outs.len()];
+                                for s in &body {
+                                    if let HirStmt::Assign(var, rhs, _, _) = s {
+                                        if let Some(pos) = outs.iter().position(|o| o == var) {
+                                            let t = infer_expr_type_with_env(rhs, &penv, returns);
+                                            out_types[pos] = out_types[pos].unify(&t);
+                                        }
+                                    }
+                                }
+                                if per_out.is_empty() {
+                                    per_out = out_types;
+                                } else {
+                                    for (i, t) in out_types.into_iter().enumerate() {
+                                        if matches!(per_out.get(i), Some(Type::Unknown)) {
+                                            if let Some(slot) = per_out.get_mut(i) {
+                                                *slot = t;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        for (i, v) in vars.iter().enumerate() {
+                            if let Some(id) = v {
+                                env.insert(*id, per_out.get(i).cloned().unwrap_or(Type::Unknown));
+                            }
+                        }
+                    } else {
+                        let t = infer_expr_type_with_env(expr, &env, returns);
+                        for v in vars.iter().flatten() {
+                            env.insert(*v, t.clone());
+                        }
+                    }
+                }
+                HirStmt::ExprStmt(_, _, _) | HirStmt::Break(_) | HirStmt::Continue(_) => {}
+                HirStmt::Return(_) => {
+                    exits.push(env.clone());
+                    return Analysis {
+                        exits,
+                        fallthrough: None,
+                    };
+                }
+                HirStmt::If {
+                    cond,
+                    then_body,
+                    elseif_blocks,
+                    else_body,
+                    span: _,
+                } => {
+                    let _ = infer_expr_type_with_env(cond, &env, returns);
+                    let then_analysis = analyze_stmts(then_body, env.clone(), returns, func_defs);
+                    let mut branch_envs = Vec::new();
+                    if let Some(f) = &then_analysis.fallthrough {
+                        branch_envs.push(f.clone());
+                    }
+                    for e in &then_analysis.exits {
+                        branch_envs.push(e.clone());
+                    }
+                    for (c, b) in elseif_blocks {
+                        let _ = infer_expr_type_with_env(c, &env, returns);
+                        let analysis = analyze_stmts(b, env.clone(), returns, func_defs);
+                        if let Some(f) = &analysis.fallthrough {
+                            branch_envs.push(f.clone());
+                        }
+                        for e in &analysis.exits {
+                            branch_envs.push(e.clone());
+                        }
+                    }
+                    if let Some(else_body) = else_body {
+                        let analysis = analyze_stmts(else_body, env.clone(), returns, func_defs);
+                        if let Some(f) = &analysis.fallthrough {
+                            branch_envs.push(f.clone());
+                        }
+                        for e in &analysis.exits {
+                            branch_envs.push(e.clone());
+                        }
+                    } else {
+                        branch_envs.push(env.clone());
+                    }
+                    if let Some(first) = branch_envs.first().cloned() {
+                        env = branch_envs
+                            .iter()
+                            .skip(1)
+                            .fold(first, |acc, e| join_env(&acc, e));
+                    }
+                }
+                HirStmt::Switch {
+                    expr,
+                    cases,
+                    otherwise,
+                    ..
+                } => {
+                    let _ = infer_expr_type_with_env(expr, &env, returns);
+                    let mut branch_envs = Vec::new();
+                    for (case_expr, case_body) in cases {
+                        let _ = infer_expr_type_with_env(case_expr, &env, returns);
+                        let analysis = analyze_stmts(case_body, env.clone(), returns, func_defs);
+                        if let Some(f) = &analysis.fallthrough {
+                            branch_envs.push(f.clone());
+                        }
+                        for e in &analysis.exits {
+                            branch_envs.push(e.clone());
+                        }
+                    }
+                    if let Some(otherwise_body) = otherwise {
+                        let analysis =
+                            analyze_stmts(otherwise_body, env.clone(), returns, func_defs);
+                        if let Some(f) = &analysis.fallthrough {
+                            branch_envs.push(f.clone());
+                        }
+                        for e in &analysis.exits {
+                            branch_envs.push(e.clone());
+                        }
+                    } else {
+                        branch_envs.push(env.clone());
+                    }
+                    if let Some(first) = branch_envs.first().cloned() {
+                        env = branch_envs
+                            .iter()
+                            .skip(1)
+                            .fold(first, |acc, e| join_env(&acc, e));
+                    }
+                }
+                HirStmt::While { cond, body, .. } => {
+                    let _ = infer_expr_type_with_env(cond, &env, returns);
+                    let body_analysis = analyze_stmts(body, env.clone(), returns, func_defs);
+                    if let Some(f) = &body_analysis.fallthrough {
+                        env = join_env(&env, f);
+                    }
+                    for e in &body_analysis.exits {
+                        env = join_env(&env, e);
+                    }
+                }
+                HirStmt::For { expr, body, .. } => {
+                    let _ = infer_expr_type_with_env(expr, &env, returns);
+                    let body_analysis = analyze_stmts(body, env.clone(), returns, func_defs);
+                    if let Some(f) = &body_analysis.fallthrough {
+                        env = join_env(&env, f);
+                    }
+                    for e in &body_analysis.exits {
+                        env = join_env(&env, e);
+                    }
+                }
+                HirStmt::Function { .. } | HirStmt::ClassDef { .. } => {}
+                HirStmt::Global(_, _)
+                | HirStmt::Persistent(_, _)
+                | HirStmt::Import { .. }
+                | HirStmt::TryCatch { .. }
+                | HirStmt::AssignLValue(_, _, _, _) => {}
+            }
+            i += 1;
+        }
+
+        Analysis {
+            exits,
+            fallthrough: Some(env),
+        }
+    }
+
+    let mut func_defs: HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)> = HashMap::new();
+    for stmt in &prog.body {
+        if let HirStmt::Function {
+            name,
+            params,
+            outputs,
+            body,
+            ..
+        } = stmt
+        {
+            func_defs.insert(
+                name.clone(),
+                (params.clone(), outputs.clone(), body.clone()),
+            );
+        } else if let HirStmt::ClassDef { members, .. } = stmt {
+            for m in members {
+                if let HirClassMember::Methods { body, .. } = m {
+                    for s in body {
+                        if let HirStmt::Function {
+                            name,
+                            params,
+                            outputs,
+                            body,
+                            ..
+                        } = s
+                        {
+                            func_defs.insert(
+                                name.clone(),
+                                (params.clone(), outputs.clone(), body.clone()),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let analysis = analyze_stmts(&prog.body, HashMap::new(), returns, &func_defs);
+    let mut out: HashMap<VarId, Type> = HashMap::new();
+    let mut accumulate = |env: &HashMap<VarId, Type>| {
+        for (k, v) in env {
+            out.entry(*k)
+                .and_modify(|t| *t = t.unify(v))
+                .or_insert_with(|| v.clone());
+        }
+    };
+    if let Some(f) = &analysis.fallthrough {
+        accumulate(f);
+    }
+    for e in &analysis.exits {
+        accumulate(e);
+    }
+
     out
 }
 

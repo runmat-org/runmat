@@ -221,6 +221,21 @@ export interface TraceEvent {
 
 export type TraceEventListener = (entries: TraceEvent[]) => void;
 
+export type SignalTraceHandler = <T>(traceId: string, name: string, fn: () => T) => T;
+
+let signalTraceHandler: SignalTraceHandler | null = null;
+
+export function setSignalTraceHandler(handler: SignalTraceHandler | null): void {
+  signalTraceHandler = handler;
+}
+
+export function withSignalTrace<T>(traceId: string | undefined, name: string, fn: () => T): T {
+  if (traceId && signalTraceHandler) {
+    return signalTraceHandler(traceId, name, fn);
+  }
+  return fn();
+}
+
 export type InputRequest =
   | { kind: "line"; prompt: string; echo: boolean }
   | { kind: "keyPress"; prompt: string; echo: boolean };

@@ -15,7 +15,9 @@ import {
   type GpuStatus,
   type SessionStats,
   type PendingStdinRequest,
-  type InputRequest
+  type InputRequest,
+  setSignalTraceHandler,
+  withSignalTrace
 } from "./index.js";
 
 async function readStream(stream: ReadableStream<Uint8Array> | undefined): Promise<number[]> {
@@ -796,5 +798,30 @@ describe("setFusionPlanEnabled", () => {
     const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
     session.setFusionPlanEnabled(true);
     expect(spy).toHaveBeenCalledWith(true);
+  });
+});
+
+describe("signal trace helpers", () => {
+  afterEach(() => {
+    setSignalTraceHandler(null);
+  });
+
+  it("wraps callbacks with signal trace handler", () => {
+    const handler = vi.fn((traceId: string, _name: string, fn: () => number) => {
+      expect(traceId).toBe("trace-1");
+      return fn();
+    });
+    setSignalTraceHandler(handler);
+    const result = withSignalTrace("trace-1", "signal.process", () => 42);
+    expect(result).toBe(42);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("bypasses trace handler when missing", () => {
+    const handler = vi.fn();
+    setSignalTraceHandler(handler);
+    const result = withSignalTrace(undefined, "signal.process", () => 7);
+    expect(result).toBe(7);
+    expect(handler).not.toHaveBeenCalled();
   });
 });

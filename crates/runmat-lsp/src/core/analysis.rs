@@ -709,9 +709,10 @@ fn build_semantic_model(
 
     for (name, var_id) in &lowering.variables {
         let ty = lowering
-            .var_types
-            .get(*var_id)
+            .inferred_globals
+            .get(&runmat_hir::VarId(*var_id))
             .cloned()
+            .or_else(|| lowering.var_types.get(*var_id).cloned())
             .unwrap_or(Type::Unknown);
         globals.insert(
             name.clone(),
@@ -738,11 +739,11 @@ fn build_semantic_model(
         };
 
         let mut variables = HashMap::new();
+        let inferred_env = lowering.inferred_function_envs.get(&func_name);
         for param in &params {
-            let ty = lowering
-                .var_types
-                .get(param.0)
-                .cloned()
+            let ty = inferred_env
+                .and_then(|env| env.get(param).cloned())
+                .or_else(|| lowering.var_types.get(param.0).cloned())
                 .unwrap_or(Type::Unknown);
             let name = lowering
                 .var_names
@@ -759,10 +760,9 @@ fn build_semantic_model(
             );
         }
         for out in &outputs {
-            let ty = lowering
-                .var_types
-                .get(out.0)
-                .cloned()
+            let ty = inferred_env
+                .and_then(|env| env.get(out).cloned())
+                .or_else(|| lowering.var_types.get(out.0).cloned())
                 .unwrap_or(Type::Unknown);
             let name = lowering
                 .var_names
@@ -807,10 +807,16 @@ fn build_semantic_model(
             range: body_range,
             selection,
             variables,
-            return_types: outputs
-                .iter()
-                .filter_map(|o| lowering.var_types.get(o.0).cloned())
-                .collect(),
+            return_types: lowering
+                .inferred_function_returns
+                .get(&func_name)
+                .cloned()
+                .unwrap_or_else(|| {
+                    outputs
+                        .iter()
+                        .filter_map(|o| lowering.var_types.get(o.0).cloned())
+                        .collect()
+                }),
         };
         functions.push(semantic);
     }
@@ -891,5 +897,36 @@ mod tests {
             }
             other => panic!("expected Markup hover contents, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn hover_includes_inferred_tensor_shape() {
+        let text = "x = 0:1:100; y = sin(x);";
+        let analysis = analyze_document(text);
+        let x_offset = text.find('x').expect("x offset");
+        let y_offset = text.find('y').expect("y offset");
+        let x_position = offset_to_position(text, x_offset);
+        let y_position = offset_to_position(text, y_offset);
+
+        let x_hover = hover_at(text, &analysis, &x_position).expect("x hover");
+        let y_hover = hover_at(text, &analysis, &y_position).expect("y hover");
+
+        let extract = |hover: Hover| match hover.contents {
+            lsp_types::HoverContents::Markup(markup) => markup.value,
+            other => panic!("unexpected hover contents {other:?}"),
+        };
+
+        let x_value = extract(x_hover);
+        let y_value = extract(y_hover);
+        assert!(x_value.contains("Tensor"), "unexpected x hover {x_value}");
+        assert!(
+            x_value.contains("Some(101)"),
+            "unexpected x hover {x_value}"
+        );
+        assert!(y_value.contains("Tensor"), "unexpected y hover {y_value}");
+        assert!(
+            y_value.contains("Some(101)"),
+            "unexpected y hover {y_value}"
+        );
     }
 }

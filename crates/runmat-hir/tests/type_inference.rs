@@ -7,6 +7,11 @@ fn lower(code: &str) -> runmat_hir::HirProgram {
         .unwrap()
 }
 
+fn lower_result(code: &str) -> runmat_hir::LoweringResult {
+    let ast = runmat_parser::parse(code).unwrap();
+    runmat_hir::lower(&ast, &LoweringContext::empty()).unwrap()
+}
+
 #[test]
 fn infer_simple_function_return_types() {
     let prog = lower("function y = f(x); if x>0; y=1; else; y=2.0; end; end");
@@ -117,4 +122,76 @@ fn multi_lhs_resolution_from_summary() {
         .unwrap_or(runmat_builtins::Type::Unknown);
     assert_eq!(u_ty, runmat_builtins::Type::Num);
     assert_eq!(v_ty, runmat_builtins::Type::Num);
+}
+
+#[test]
+fn infer_range_shape_in_globals() {
+    let result = lower_result("x = 0:1:100; y = sin(x);");
+    match &result.hir.body[0] {
+        runmat_hir::HirStmt::Assign(_, expr, _, _) => match &expr.kind {
+            runmat_hir::HirExprKind::Range(start, step, end) => {
+                let start_text = match &start.kind {
+                    runmat_hir::HirExprKind::Number(text) => text.as_str(),
+                    other => panic!("unexpected range start: {other:?}"),
+                };
+                let step_text = match step {
+                    Some(step) => match &step.kind {
+                        runmat_hir::HirExprKind::Number(text) => Some(text.as_str()),
+                        other => panic!("unexpected range step: {other:?}"),
+                    },
+                    None => None,
+                };
+                let end_text = match &end.kind {
+                    runmat_hir::HirExprKind::Number(text) => text.as_str(),
+                    other => panic!("unexpected range end: {other:?}"),
+                };
+                assert_eq!(start_text, "0");
+                assert_eq!(step_text, Some("1"));
+                assert_eq!(end_text, "100");
+            }
+            runmat_hir::HirExprKind::Binary(_, runmat_parser::BinOp::Colon, _) => {}
+            other => panic!("unexpected range expression: {other:?}"),
+        },
+        other => panic!("unexpected statement {other:?}"),
+    }
+    let x_id = runmat_hir::VarId(*result.variables.get("x").unwrap());
+    let y_id = runmat_hir::VarId(*result.variables.get("y").unwrap());
+    if !result.inferred_globals.contains_key(&x_id) {
+        panic!(
+            "missing inferred global for x: {:?}",
+            result.inferred_globals
+        );
+    }
+    let recomputed =
+        runmat_hir::infer_global_variable_types(&result.hir, &result.inferred_function_returns);
+    if !recomputed.contains_key(&x_id) {
+        panic!("missing recomputed global for x: {:?}", recomputed);
+    }
+    let x_ty = recomputed
+        .get(&x_id)
+        .cloned()
+        .unwrap_or(runmat_builtins::Type::Unknown);
+    if matches!(x_ty, runmat_builtins::Type::Unknown) {
+        panic!("x inferred as Unknown: {:?}", recomputed);
+    }
+    let y_ty = recomputed
+        .get(&y_id)
+        .cloned()
+        .unwrap_or(runmat_builtins::Type::Unknown);
+    assert_eq!(
+        x_ty,
+        runmat_builtins::Type::Tensor {
+            shape: Some(vec![Some(1), Some(101)])
+        }
+    );
+    if runmat_builtins::builtin_functions().is_empty() {
+        assert_eq!(y_ty, runmat_builtins::Type::Unknown);
+    } else {
+        assert_eq!(
+            y_ty,
+            runmat_builtins::Type::Tensor {
+                shape: Some(vec![Some(1), Some(101)])
+            }
+        );
+    }
 }
