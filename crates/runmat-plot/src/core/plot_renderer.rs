@@ -1234,9 +1234,13 @@ impl PlotRenderer {
 
         // Precompute optional grid geometry and uniforms so we can draw it under data
         let (sx, sy, sw, sh) = viewport_scissor;
+        let is_2d = matches!(
+            cam.projection,
+            crate::core::camera::ProjectionType::Orthographic { .. }
+        );
         // Grid is drawn only when enabled and in 2D orthographic
         let mut grid_vb_opt: Option<wgpu::Buffer> = None;
-        if self.figure_show_grid {
+        if is_2d && self.figure_show_grid {
             if let Some((l, r, b, t)) = self.view_bounds() {
                 // Update direct uniforms mapping for viewport
                 self.wgpu_renderer.update_direct_uniforms(
@@ -1282,27 +1286,37 @@ impl PlotRenderer {
         }
 
         // Before the pass: configure direct uniforms and ensure pipelines
-        let bounds_opt = self.data_bounds;
-        if let Some((l, r, b, t)) = self.view_bounds() {
-            self.wgpu_renderer.update_direct_uniforms(
-                [l as f32, b as f32],
-                [r as f32, t as f32],
-                [-1.0, -1.0],
-                [1.0, 1.0],
-                [sw.max(1) as f32, sh.max(1) as f32],
-            );
-        } else if let Some((x_min, x_max, y_min, y_max)) = bounds_opt {
-            self.wgpu_renderer.update_direct_uniforms(
-                [x_min as f32, y_min as f32],
-                [x_max as f32, y_max as f32],
-                [-1.0, -1.0],
-                [1.0, 1.0],
-                [sw.max(1) as f32, sh.max(1) as f32],
-            );
+        let bounds_opt = if is_2d { self.data_bounds } else { None };
+        if is_2d {
+            if let Some((l, r, b, t)) = self.view_bounds() {
+                self.wgpu_renderer.update_direct_uniforms(
+                    [l as f32, b as f32],
+                    [r as f32, t as f32],
+                    [-1.0, -1.0],
+                    [1.0, 1.0],
+                    [sw.max(1) as f32, sh.max(1) as f32],
+                );
+            } else if let Some((x_min, x_max, y_min, y_max)) = bounds_opt {
+                self.wgpu_renderer.update_direct_uniforms(
+                    [x_min as f32, y_min as f32],
+                    [x_max as f32, y_max as f32],
+                    [-1.0, -1.0],
+                    [1.0, 1.0],
+                    [sw.max(1) as f32, sh.max(1) as f32],
+                );
+            }
+            self.wgpu_renderer.ensure_direct_triangle_pipeline();
+            self.wgpu_renderer.ensure_direct_line_pipeline();
+            self.wgpu_renderer.ensure_direct_point_pipeline();
+        } else {
+            // 3D: ensure camera-based pipelines exist so surfaces rotate with the camera.
+            self.wgpu_renderer
+                .ensure_pipeline(crate::core::PipelineType::Triangles);
+            self.wgpu_renderer
+                .ensure_pipeline(crate::core::PipelineType::Lines);
+            self.wgpu_renderer
+                .ensure_pipeline(crate::core::PipelineType::Points);
         }
-        self.wgpu_renderer.ensure_direct_triangle_pipeline();
-        self.wgpu_renderer.ensure_direct_line_pipeline();
-        self.wgpu_renderer.ensure_direct_point_pipeline();
 
         // Begin pass with Load (preserve egui)
         {
@@ -1384,8 +1398,8 @@ impl PlotRenderer {
             }
 
             // Use direct pipelines for precise 2D mapping inside the viewport
-            let use_direct_for_triangles = true;
-            let use_direct_for_lines = true;
+            let use_direct_for_triangles = is_2d;
+            let use_direct_for_lines = is_2d;
             let direct_tri_pipeline = if use_direct_for_triangles && bounds_opt.is_some() {
                 self.wgpu_renderer
                     .direct_triangle_pipeline
@@ -1402,7 +1416,7 @@ impl PlotRenderer {
             } else {
                 None
             };
-            let direct_point_pipeline = if bounds_opt.is_some() {
+            let direct_point_pipeline = if is_2d && bounds_opt.is_some() {
                 self.wgpu_renderer
                     .direct_point_pipeline
                     .as_ref()
@@ -1428,9 +1442,10 @@ impl PlotRenderer {
                     crate::core::PipelineType::Textured
                 );
                 // Use direct mapping for lines/triangles/points for correct pixel-sized markers in GUI
-                let use_direct = ((use_direct_for_triangles && is_triangles)
-                    || (use_direct_for_lines && is_lines)
-                    || is_points)
+                let use_direct = is_2d
+                    && ((use_direct_for_triangles && is_triangles)
+                        || (use_direct_for_lines && is_lines)
+                        || is_points)
                     && bounds_opt.is_some();
 
                 if use_direct {

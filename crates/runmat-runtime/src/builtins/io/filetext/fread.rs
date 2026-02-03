@@ -73,6 +73,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Read binary data from a file identifier.",
     keywords = "fread,file,io,binary,precision",
     accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::fread_type),
     builtin_path = "crate::builtins::io::filetext::fread"
 )]
 async fn fread_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

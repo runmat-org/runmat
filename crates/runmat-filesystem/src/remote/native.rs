@@ -1,6 +1,7 @@
 use crate::{DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags};
 use crossbeam_utils::thread;
 use once_cell::sync::Lazy;
+use chrono::DateTime;
 use reqwest::blocking::{Client, Response};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -1030,7 +1031,8 @@ struct MetadataResponse {
     #[serde(rename = "fileType")]
     file_type: String,
     len: u64,
-    modified: Option<u64>,
+    #[serde(rename = "modifiedAt")]
+    modified_at: Option<String>,
     readonly: bool,
     hash: Option<String>,
 }
@@ -1040,9 +1042,7 @@ impl From<MetadataResponse> for FsMetadata {
         FsMetadata::new_with_hash(
             value.file_type.into(),
             value.len,
-            value
-                .modified
-                .map(|secs| std::time::UNIX_EPOCH + Duration::from_secs(secs)),
+            parse_modified_at(value.modified_at.as_deref()),
             value.readonly,
             value.hash,
         )
@@ -1102,35 +1102,35 @@ struct DownloadUrlResponse {
 #[derive(Debug, Serialize, Deserialize)]
 struct MultipartUploadRequest {
     path: String,
-    #[serde(rename = "size_bytes")]
+    #[serde(rename = "sizeBytes")]
     size_bytes: i64,
-    #[serde(rename = "content_type")]
+    #[serde(rename = "contentType")]
     content_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct MultipartUploadResponse {
-    #[serde(rename = "session_id")]
+    #[serde(rename = "sessionId")]
     session_id: String,
-    #[serde(rename = "blob_key")]
+    #[serde(rename = "blobKey")]
     blob_key: String,
-    #[serde(rename = "upload_id")]
+    #[serde(rename = "uploadId")]
     upload_id: String,
-    #[serde(rename = "part_size_bytes")]
+    #[serde(rename = "partSizeBytes")]
     part_size_bytes: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct MultipartUploadPartRequest {
-    #[serde(rename = "session_id")]
+    #[serde(rename = "sessionId")]
     session_id: String,
-    #[serde(rename = "blob_key")]
+    #[serde(rename = "blobKey")]
     blob_key: String,
-    #[serde(rename = "upload_id")]
+    #[serde(rename = "uploadId")]
     upload_id: String,
-    #[serde(rename = "part_number")]
+    #[serde(rename = "partNumber")]
     part_number: i32,
-    #[serde(rename = "size_bytes")]
+    #[serde(rename = "sizeBytes")]
     size_bytes: i64,
 }
 
@@ -1143,13 +1143,13 @@ struct MultipartUploadPartResponse {
 #[derive(Debug, Serialize, Deserialize)]
 struct MultipartUploadCompleteRequest {
     path: String,
-    #[serde(rename = "session_id")]
+    #[serde(rename = "sessionId")]
     session_id: String,
-    #[serde(rename = "blob_key")]
+    #[serde(rename = "blobKey")]
     blob_key: String,
-    #[serde(rename = "upload_id")]
+    #[serde(rename = "uploadId")]
     upload_id: String,
-    #[serde(rename = "size_bytes")]
+    #[serde(rename = "sizeBytes")]
     size_bytes: i64,
     hash: Option<String>,
     parts: Vec<MultipartPart>,
@@ -1157,7 +1157,7 @@ struct MultipartUploadCompleteRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct MultipartPart {
-    #[serde(rename = "part_number")]
+    #[serde(rename = "partNumber")]
     part_number: i32,
     etag: String,
 }
@@ -1186,6 +1186,16 @@ struct FsWriteSessionResponse {
 
 fn map_http_err(err: reqwest::Error) -> io::Error {
     io::Error::other(err)
+}
+
+fn parse_modified_at(value: Option<&str>) -> Option<std::time::SystemTime> {
+    let value = value?;
+    let parsed = DateTime::parse_from_rfc3339(value).ok()?;
+    let millis = parsed.timestamp_millis();
+    if millis < 0 {
+        return None;
+    }
+    Some(std::time::UNIX_EPOCH + Duration::from_millis(millis as u64))
 }
 
 fn map_url_err(err: url::ParseError) -> io::Error {

@@ -9,6 +9,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use super::type_resolvers::tensor_output_type;
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -60,6 +61,7 @@ fn sortrows_error(message: impl Into<String>) -> crate::RuntimeError {
     keywords = "sortrows,row sort,lexicographic,gpu",
     accel = "sink",
     sink = true,
+    type_resolver(tensor_output_type),
     builtin_path = "crate::builtins::array::sorting_sets::sortrows"
 )]
 async fn sortrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -861,7 +863,7 @@ impl SortRowsEvaluation {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, Value};
+    use runmat_builtins::{IntValue, Type, Value};
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
@@ -889,6 +891,11 @@ pub(crate) mod tests {
             Value::Num(_) => panic!("expected tensor indices"),
             other => panic!("unexpected indices {other:?}"),
         }
+    }
+
+    #[test]
+    fn sortrows_type_resolver_tensor() {
+        assert_eq!(tensor_output_type(&[Type::tensor()]), Type::tensor());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

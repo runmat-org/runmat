@@ -766,15 +766,15 @@ struct ManifestHistoryResponse {
 
 #[derive(Deserialize)]
 struct ManifestHistoryEntry {
-    #[serde(rename = "version_id")]
+    #[serde(rename = "versionId")]
     version_id: Uuid,
-    #[serde(rename = "created_at")]
+    #[serde(rename = "createdAt")]
     created_at: chrono::DateTime<chrono::Utc>,
-    #[serde(rename = "size_bytes")]
+    #[serde(rename = "sizeBytes")]
     size_bytes: i64,
-    #[serde(rename = "total_size")]
+    #[serde(rename = "totalSize")]
     total_size: u64,
-    #[serde(rename = "shard_count")]
+    #[serde(rename = "shardCount")]
     shard_count: usize,
 }
 
@@ -801,7 +801,7 @@ struct SnapshotListResponse {
 struct SnapshotResponse {
     id: Uuid,
     #[serde(rename = "projectId")]
-    project_id: Uuid,
+    _project_id: Uuid,
     #[serde(rename = "parentId")]
     parent_id: Option<Uuid>,
     message: Option<String>,
@@ -1052,7 +1052,7 @@ async fn update_manifest(
         .post(&url)
         .json(&serde_json::json!({
             "path": path,
-            "base_version_id": base_version,
+            "baseVersionId": base_version,
             "manifest": manifest,
         }))
         .send()

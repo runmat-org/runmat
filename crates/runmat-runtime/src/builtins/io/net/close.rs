@@ -69,6 +69,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/net",
     summary = "Close TCP clients or servers created by tcpclient, tcpserver, or accept.",
     keywords = "close,tcpclient,tcpserver,networking",
+    type_resolver(crate::builtins::io::type_resolvers::close_type),
     builtin_path = "crate::builtins::io::net::close"
 )]
 async fn close_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

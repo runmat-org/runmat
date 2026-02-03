@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::timing::type_resolvers::tic_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::timing::tic")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -75,6 +76,7 @@ fn stopwatch_error(builtin: &str, message: impl Into<String>) -> crate::RuntimeE
     summary = "Start a stopwatch timer and optionally return a handle for toc.",
     keywords = "tic,timing,profiling,benchmark",
     sink = true,
+    type_resolver(tic_type),
     builtin_path = "crate::builtins::timing::tic"
 )]
 pub async fn tic_builtin() -> crate::BuiltinResult<f64> {

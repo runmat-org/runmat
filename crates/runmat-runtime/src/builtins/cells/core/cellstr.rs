@@ -3,6 +3,7 @@
 use runmat_builtins::{CellArray, CharArray, StringArray, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::cells::type_resolvers::cellstr_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -63,6 +64,7 @@ fn cellstr_error_with_identifier(message: impl Into<String>, identifier: &str) -
     summary = "Convert text to a cell array of character vectors.",
     keywords = "cellstr,text,character,string,conversion",
     accel = "gather",
+    type_resolver(cellstr_type),
     builtin_path = "crate::builtins::cells::core::cellstr"
 )]
 async fn cellstr_builtin(value: Value) -> crate::BuiltinResult<Value> {

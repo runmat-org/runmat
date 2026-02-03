@@ -63,6 +63,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Parse UTF-8 JSON text into MATLAB-compatible RunMat values.",
     keywords = "jsondecode,json,parse json,struct,gpu",
     accel = "sink",
+    type_resolver(crate::builtins::io::type_resolvers::jsondecode_type),
     builtin_path = "crate::builtins::io::json::jsondecode"
 )]
 async fn jsondecode_builtin(text: Value) -> crate::BuiltinResult<Value> {

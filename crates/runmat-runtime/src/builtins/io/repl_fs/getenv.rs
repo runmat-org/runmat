@@ -73,6 +73,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     summary = "Query environment variables as character vectors, strings, or structures.",
     keywords = "getenv,environment variable,env,system variable,process environment",
     accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::getenv_type),
     builtin_path = "crate::builtins::io::repl_fs::getenv"
 )]
 async fn getenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

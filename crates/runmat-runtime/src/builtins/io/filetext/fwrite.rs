@@ -69,6 +69,7 @@ fn map_string_result<T>(result: Result<T, String>) -> BuiltinResult<T> {
     summary = "Write binary data to a file identifier.",
     keywords = "fwrite,file,io,binary,precision",
     accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::fwrite_type),
     builtin_path = "crate::builtins::io::filetext::fwrite"
 )]
 async fn fwrite_builtin(fid: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

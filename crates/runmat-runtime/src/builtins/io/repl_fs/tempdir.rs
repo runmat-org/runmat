@@ -58,6 +58,7 @@ fn tempdir_error(message: impl Into<String>) -> RuntimeError {
     summary = "Return the absolute path to the system temporary folder.",
     keywords = "tempdir,temporary folder,temp directory,system temp",
     accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::tempdir_type),
     builtin_path = "crate::builtins::io::repl_fs::tempdir"
 )]
 async fn tempdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

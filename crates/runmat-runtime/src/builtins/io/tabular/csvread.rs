@@ -81,6 +81,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Read numeric data from a comma-separated text file.",
     keywords = "csvread,csv,dlmread,numeric import,range",
     accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::tensor_type),
     builtin_path = "crate::builtins::io::tabular::csvread"
 )]
 async fn csvread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

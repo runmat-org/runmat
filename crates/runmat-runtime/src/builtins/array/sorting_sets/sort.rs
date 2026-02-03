@@ -8,6 +8,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use super::type_resolvers::tensor_output_type;
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -54,6 +55,7 @@ fn sort_error(message: impl Into<String>) -> crate::RuntimeError {
     keywords = "sort,ascending,descending,indices,comparisonmethod,gpu",
     accel = "sink",
     sink = true,
+    type_resolver(tensor_output_type),
     builtin_path = "crate::builtins::array::sorting_sets::sort"
 )]
 async fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -529,7 +531,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, IntValue, Tensor, Value};
+    use runmat_builtins::{ComplexTensor, IntValue, Tensor, Type, Value};
 
     fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::sort_builtin(value, rest))
@@ -555,6 +557,11 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sort_type_resolver_tensor() {
+        assert_eq!(tensor_output_type(&[Type::tensor()]), Type::tensor());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

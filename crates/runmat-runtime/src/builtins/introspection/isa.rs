@@ -5,6 +5,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::introspection::class::class_name_for_value;
+use crate::builtins::introspection::type_resolvers::isa_type;
 use crate::{build_runtime_error, BuiltinResult};
 use runmat_accelerate_api::handle_is_logical;
 use runmat_builtins::{get_class, Value};
@@ -44,6 +45,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Test whether a value belongs to a specified MATLAB class or abstract category.",
     keywords = "isa,type checking,class comparison,numeric category,gpuArray",
     accel = "metadata",
+    type_resolver(isa_type),
     builtin_path = "crate::builtins::introspection::isa"
 )]
 fn isa_builtin(value: Value, class_designator: Value) -> crate::BuiltinResult<Value> {

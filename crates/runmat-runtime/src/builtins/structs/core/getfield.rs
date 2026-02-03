@@ -5,6 +5,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::structs::type_resolvers::getfield_type;
 use crate::indexing::perform_indexing;
 use crate::make_cell_with_shape;
 use crate::{
@@ -75,6 +76,7 @@ fn is_undefined_function(err: &RuntimeError) -> bool {
     category = "structs/core",
     summary = "Access a field or property from structs, struct arrays, or MATLAB-style objects.",
     keywords = "getfield,struct,object,field access",
+    type_resolver(getfield_type),
     builtin_path = "crate::builtins::structs::core::getfield"
 )]
 async fn getfield_builtin(base: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

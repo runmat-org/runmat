@@ -55,6 +55,7 @@ fn pwd_error(message: impl Into<String>) -> RuntimeError {
     keywords = "pwd,current directory,working folder,present working directory",
     accel = "cpu",
     suppress_auto_output = true,
+    type_resolver(crate::builtins::io::type_resolvers::pwd_type),
     builtin_path = "crate::builtins::io::repl_fs::pwd"
 )]
 async fn pwd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

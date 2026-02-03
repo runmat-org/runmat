@@ -75,6 +75,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     keywords = "rmpath,search path,matlab path,remove folder",
     accel = "cpu",
     suppress_auto_output = true,
+    type_resolver(crate::builtins::io::type_resolvers::rmpath_type),
     builtin_path = "crate::builtins::io::repl_fs::rmpath"
 )]
 async fn rmpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

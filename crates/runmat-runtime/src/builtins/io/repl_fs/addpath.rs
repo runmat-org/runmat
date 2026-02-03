@@ -91,6 +91,7 @@ struct AddPathSpec {
     keywords = "addpath,search path,matlab path,-begin,-end,-frozen",
     accel = "cpu",
     suppress_auto_output = true,
+    type_resolver(crate::builtins::io::type_resolvers::addpath_type),
     builtin_path = "crate::builtins::io::repl_fs::addpath"
 )]
 async fn addpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

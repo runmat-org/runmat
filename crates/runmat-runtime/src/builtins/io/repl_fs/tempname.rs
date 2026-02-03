@@ -77,6 +77,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     summary = "Return a unique temporary file path.",
     keywords = "tempname,temporary file,unique name,temp directory",
     accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::tempname_type),
     builtin_path = "crate::builtins::io::repl_fs::tempname"
 )]
 async fn tempname_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

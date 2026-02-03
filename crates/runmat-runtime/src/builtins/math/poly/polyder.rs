@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{tensor, tensor::tensor_into_value};
+use crate::builtins::math::poly::type_resolvers::polyder_type;
 use crate::dispatcher;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -59,6 +60,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/poly",
     summary = "Differentiate polynomials, products, and ratios with MATLAB-compatible coefficient vectors.",
     keywords = "polyder,polynomial,derivative,product,quotient",
+    type_resolver(polyder_type),
     builtin_path = "crate::builtins::math::poly::polyder"
 )]
 async fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

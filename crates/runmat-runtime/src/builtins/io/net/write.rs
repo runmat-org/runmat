@@ -72,6 +72,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/net",
     summary = "Write numeric or text data to a TCP/IP client.",
     keywords = "write,tcpclient,networking",
+    type_resolver(crate::builtins::io::type_resolvers::write_type),
     builtin_path = "crate::builtins::io::net::write"
 )]
 async fn write_builtin(

@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::poly::type_resolvers::roots_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const LEADING_ZERO_TOL: f64 = 1.0e-12;
@@ -60,6 +61,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Compute the roots of a polynomial specified by its coefficients.",
     keywords = "roots,polynomial,eigenvalues,companion",
     accel = "sink",
+    type_resolver(roots_type),
     builtin_path = "crate::builtins::math::poly::roots"
 )]
 async fn roots_builtin(coefficients: Value) -> crate::BuiltinResult<Value> {

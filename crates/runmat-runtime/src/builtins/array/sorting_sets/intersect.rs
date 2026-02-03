@@ -12,6 +12,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use super::type_resolvers::unknown_output_type;
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -66,6 +67,7 @@ fn intersect_error(message: impl Into<String>) -> crate::RuntimeError {
     keywords = "intersect,set,stable,rows,indices,gpu",
     accel = "array_construct",
     sink = true,
+    type_resolver(unknown_output_type),
     builtin_path = "crate::builtins::array::sorting_sets::intersect"
 )]
 async fn intersect_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -1284,6 +1286,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
+    use runmat_builtins::Type;
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
@@ -1317,6 +1320,11 @@ pub(crate) mod tests {
         let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
         assert_eq!(ia.data, vec![4.0, 2.0]);
         assert_eq!(ib.data, vec![2.0, 1.0]);
+    }
+
+    #[test]
+    fn intersect_type_resolver_unknown() {
+        assert_eq!(unknown_output_type(&[Type::tensor()]), Type::Unknown);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

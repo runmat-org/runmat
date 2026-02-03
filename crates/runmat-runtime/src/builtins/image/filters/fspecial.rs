@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::image::filters::type_resolvers::fspecial_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::fspecial")]
@@ -228,6 +229,7 @@ pub fn spec_from_request(filter: &FspecialFilter) -> BuiltinResult<FspecialFilte
     summary = "Generate classical 2-D correlation kernels used in MATLAB image processing workflows.",
     keywords = "fspecial,filter,gaussian,sobel,motion,laplacian,disk",
     accel = "array_construct",
+    type_resolver(fspecial_type),
     builtin_path = "crate::builtins::image::filters::fspecial"
 )]
 async fn fspecial_builtin(kind: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

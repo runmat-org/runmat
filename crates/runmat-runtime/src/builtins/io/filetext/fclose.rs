@@ -73,6 +73,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Close one file, multiple files, or all files opened with fopen.",
     keywords = "fclose,file,close,io,identifier",
     accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::fclose_type),
     builtin_path = "crate::builtins::io::filetext::fclose"
 )]
 async fn fclose_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

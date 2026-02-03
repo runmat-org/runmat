@@ -1356,9 +1356,9 @@ components:
           type: string
     FsManifestUrlsResponse:
       type: object
-      required: [version_id, manifest, shards, expiresAt]
+      required: [versionId, manifest, shards, expiresAt]
       properties:
-        version_id:
+        versionId:
           type: string
           format: uuid
         manifest:
@@ -1604,30 +1604,30 @@ components:
             $ref: '#/components/schemas/FsShardEntry'
     FsManifestResponse:
       type: object
-      required: [version_id, manifest]
+      required: [versionId, manifest]
       properties:
-        version_id:
+        versionId:
           type: string
           format: uuid
         manifest:
           $ref: '#/components/schemas/FsShardManifest'
     FsManifestHistoryEntry:
       type: object
-      required: [version_id, created_at, size_bytes, total_size, shard_count]
+      required: [versionId, createdAt, sizeBytes, totalSize, shardCount]
       properties:
-        version_id:
+        versionId:
           type: string
           format: uuid
-        created_at:
+        createdAt:
           type: string
           format: date-time
-        size_bytes:
+        sizeBytes:
           type: integer
           format: int64
-        total_size:
+        totalSize:
           type: integer
           format: int64
-        shard_count:
+        shardCount:
           type: integer
           format: int32
     FsManifestHistoryResponse:
@@ -1640,11 +1640,11 @@ components:
             $ref: '#/components/schemas/FsManifestHistoryEntry'
     FsManifestUpdateRequest:
       type: object
-      required: [path, base_version_id, manifest]
+      required: [path, baseVersionId, manifest]
       properties:
         path:
           type: string
-        base_version_id:
+        baseVersionId:
           type: string
           format: uuid
         manifest:
@@ -1666,16 +1666,19 @@ components:
             $ref: '#/components/schemas/FsVersion'
     FsEntry:
       type: object
-      required: [id, project_id, path, name, kind, size, readonly]
+      required: [id, projectId, path, name, kind, size, readonly]
       properties:
         id:
           type: string
           format: uuid
-        project_id:
+        projectId:
           type: string
           format: uuid
         path:
           type: string
+        parentPath:
+          type: string
+          nullable: true
         name:
           type: string
         kind:
@@ -1683,25 +1686,46 @@ components:
         size:
           type: integer
           format: int64
+        etag:
+          type: string
+          nullable: true
         readonly:
           type: boolean
-        current_version_id:
+        currentVersionId:
+          type: string
+          format: uuid
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        deletedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdBy:
+          type: string
+          format: uuid
+          nullable: true
+        updatedBy:
           type: string
           format: uuid
           nullable: true
     FsVersion:
       type: object
-      required: [id, project_id, path, blob_key, size, created_at]
+      required: [id, projectId, path, blobKey, size, createdAt]
       properties:
         id:
           type: string
           format: uuid
-        project_id:
+        projectId:
           type: string
           format: uuid
         path:
           type: string
-        blob_key:
+        blobKey:
           type: string
         size:
           type: integer
@@ -1712,9 +1736,13 @@ components:
         etag:
           type: string
           nullable: true
-        created_at:
+        createdAt:
           type: string
           format: date-time
+        createdBy:
+          type: string
+          format: uuid
+          nullable: true
     ErrorResponse:
       type: object
       required: [error]

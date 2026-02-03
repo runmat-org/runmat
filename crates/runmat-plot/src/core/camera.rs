@@ -177,11 +177,16 @@ impl Camera {
 
         match &mut self.projection {
             ProjectionType::Perspective { .. } => {
-                // For perspective, move camera closer/farther
-                let direction = (self.position - self.target).normalize();
-                let distance = (self.position - self.target).length();
-                let new_distance = distance * (1.0 + delta * self.zoom_sensitivity);
-                self.position = self.target + direction * new_distance.clamp(0.1, 1000.0);
+                // For perspective, dolly camera closer/farther to target.
+                let delta_vec = self.position - self.target;
+                let distance = delta_vec.length();
+                if !distance.is_finite() || distance < 1e-4 {
+                    // Avoid NaNs from normalizing a zero-length vector (which would make the scene vanish).
+                    return;
+                }
+                let direction = delta_vec / distance;
+                let new_distance = (distance * factor).clamp(0.1, 1000.0);
+                self.position = self.target + direction * new_distance;
             }
             ProjectionType::Orthographic {
                 left,
@@ -283,13 +288,23 @@ impl Camera {
         let size = max_bounds - min_bounds;
 
         match &mut self.projection {
-            ProjectionType::Perspective { .. } => {
+            ProjectionType::Perspective { near, far, .. } => {
                 let max_size = size.x.max(size.y).max(size.z);
                 let distance = max_size * 2.0; // Ensure everything fits
 
                 self.target = center;
                 let direction = (self.position - self.target).normalize();
                 self.position = self.target + direction * distance;
+
+                // Keep clip planes sane relative to the new view distance.
+                // Animated surfaces can have very large Z ranges; if `far` is too small,
+                // everything gets clipped and the plot appears to "clear".
+                let radius = (size.length() * 0.5).max(1e-3);
+                let dist = (self.position - self.target).length().max(1e-3);
+                let desired_near = (dist - radius * 4.0).max(0.01);
+                let desired_far = (dist + radius * 4.0).max(desired_near + 1.0);
+                *near = desired_near;
+                *far = desired_far;
             }
             ProjectionType::Orthographic {
                 left,

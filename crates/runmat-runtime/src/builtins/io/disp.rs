@@ -71,6 +71,7 @@ enum Align {
     sink = true,
     accel = "sink",
     suppress_auto_output = true,
+    type_resolver(crate::builtins::io::type_resolvers::disp_type),
     builtin_path = "crate::builtins::io::disp"
 )]
 async fn disp_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

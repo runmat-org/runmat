@@ -5,6 +5,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::cells::type_resolvers::cellfun_type;
 use crate::builtins::common::shape::{dims_to_row_tensor, value_numel};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -63,6 +64,7 @@ fn cellfun_error_with_identifier(message: impl Into<String>, identifier: &str) -
     summary = "Apply a function to the contents of each cell array element.",
     keywords = "cellfun,cell,array,functional",
     accel = "host",
+    type_resolver(cellfun_type),
     builtin_path = "crate::builtins::cells::core::cellfun"
 )]
 async fn cellfun_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

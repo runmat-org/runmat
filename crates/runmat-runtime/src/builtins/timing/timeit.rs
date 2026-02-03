@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::timing::type_resolvers::timeit_type;
 
 const TARGET_BATCH_SECONDS: f64 = 0.005;
 const MAX_BATCH_SECONDS: f64 = 0.25;
@@ -60,6 +61,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Measure the execution time of a zero-argument function handle.",
     keywords = "timeit,benchmark,timing,performance,gpu",
     accel = "helper",
+    type_resolver(timeit_type),
     builtin_path = "crate::builtins::timing::timeit"
 )]
 async fn timeit_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

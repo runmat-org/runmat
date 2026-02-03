@@ -86,6 +86,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Write numeric matrices to delimiter-separated text files.",
     keywords = "dlmwrite,delimiter,precision,append,roffset,coffset",
     accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::num_type),
     builtin_path = "crate::builtins::io::tabular::dlmwrite"
 )]
 async fn dlmwrite_builtin(

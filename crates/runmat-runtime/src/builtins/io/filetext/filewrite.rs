@@ -131,6 +131,7 @@ impl Default for FilewriteOptions {
     summary = "Write text or raw bytes to a file.",
     keywords = "filewrite,io,write file,text file,append,encoding",
     accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::filewrite_type),
     builtin_path = "crate::builtins::io::filetext::filewrite"
 )]
 async fn filewrite_builtin(

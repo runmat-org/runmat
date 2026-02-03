@@ -136,3 +136,13 @@ fn is_numeric_scalar(ty: &Type) -> bool {
         _ => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rng_type_is_struct() {
+        assert!(matches!(rng_type(&[]), Type::Struct { .. }));
+    }
+}

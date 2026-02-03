@@ -69,6 +69,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/net",
     summary = "Open a TCP client socket that connects to MATLAB-compatible servers.",
     keywords = "tcpclient,tcp,network,client",
+    type_resolver(crate::builtins::io::type_resolvers::tcpclient_type),
     builtin_path = "crate::builtins::io::net::tcpclient"
 )]
 pub(crate) async fn tcpclient_builtin(

@@ -79,6 +79,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     keywords = "setenv,environment variable,status,message,unset",
     accel = "cpu",
     suppress_auto_output = true,
+    type_resolver(crate::builtins::io::type_resolvers::setenv_type),
     builtin_path = "crate::builtins::io::repl_fs::setenv"
 )]
 async fn setenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

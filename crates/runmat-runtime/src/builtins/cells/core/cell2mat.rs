@@ -3,6 +3,7 @@
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::cells::type_resolvers::cell2mat_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ReductionNaN, ResidencyPolicy, ScalarType,
@@ -67,6 +68,7 @@ fn cell2mat_error_with_identifier(message: impl Into<String>, identifier: &str) 
     summary = "Convert a cell array of numeric, logical, complex, or character blocks into a dense MATLAB array.",
     keywords = "cell2mat,cell,matrix,concatenation",
     accel = "gather",
+    type_resolver(cell2mat_type),
     builtin_path = "crate::builtins::cells::core::cell2mat"
 )]
 async fn cell2mat_builtin(value: Value) -> crate::BuiltinResult<Value> {
