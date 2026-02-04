@@ -802,6 +802,7 @@ function normalizeOutput(text) {
     const lines = text.replace(/\r\n/g, "\n").split("\n");
     const stripped = lines.map((line) =>
         line.replace(/^\s*\d+(?:\s*[x×]\s*\d+)+\s+\w+(?:\s+\w+)*(?:\s+array)?\s*$/i, "")
+            .replace(/^\s*\d+(?:\s*[x×]\s*\d+)+\s*$/i, "")
             .replace(/^\s*[A-Za-z_]\w*(?:\([^)]*\))?\s*=\s*/, "")
     );
     const joined = stripped.join(" ");

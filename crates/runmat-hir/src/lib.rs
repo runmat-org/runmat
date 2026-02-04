@@ -3251,6 +3251,14 @@ impl Ctx {
                 // Check if base is an identifier that should be treated as a class reference
                 // for static property access (e.g., `gpuArray.zeros` → `?gpuArray.zeros`)
                 if let Ident(class_name, _) = &**base {
+                    let dotted_name = format!("{class_name}.{name}");
+                    if self.is_builtin_function(&dotted_name) {
+                        return Ok(HirExpr {
+                            kind: HirExprKind::FuncCall(dotted_name, Vec::new()),
+                            ty: Type::Unknown,
+                            span,
+                        });
+                    }
                     if self.is_static_method_class(class_name) {
                         let metaclass = HirExpr {
                             kind: HirExprKind::MetaClass(class_name.clone()),
@@ -3282,6 +3290,17 @@ impl Ctx {
                 // Check if base is an identifier that should be treated as a class reference
                 // for static method calls (e.g., `gpuArray.zeros(1,1)` → `?gpuArray.zeros(1,1)`)
                 if let Ident(class_name, _) = &**base {
+                    let dotted_name = format!("{class_name}.{name}");
+                    if self.is_builtin_function(&dotted_name) {
+                        let lowered_args: Result<Vec<_>, _> =
+                            args.iter().map(|arg| self.lower_expr(arg)).collect();
+                        let lowered_args = lowered_args?;
+                        return Ok(HirExpr {
+                            kind: HirExprKind::FuncCall(dotted_name, lowered_args),
+                            ty: Type::Unknown,
+                            span,
+                        });
+                    }
                     if self.is_static_method_class(class_name) {
                         let metaclass = HirExpr {
                             kind: HirExprKind::MetaClass(class_name.clone()),

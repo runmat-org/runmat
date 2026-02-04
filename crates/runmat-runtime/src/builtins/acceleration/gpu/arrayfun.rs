@@ -580,7 +580,7 @@ impl Callable {
                 }
             }
             Value::StringArray(sa) if sa.data.len() == 1 => Self::from_text(&sa.data[0]),
-            Value::FunctionHandle(name) => Ok(Callable::Builtin { name }),
+            Value::FunctionHandle(name) => Self::from_text(&name),
             Value::Closure(closure) => Ok(Callable::Closure(closure)),
             Value::Num(_) | Value::Int(_) | Value::Bool(_) => Err(arrayfun_flow(
                 "arrayfun: expected function handle or builtin name, not a scalar value",
@@ -623,7 +623,12 @@ impl Callable {
 
     async fn call(&self, args: &[Value]) -> crate::BuiltinResult<Value> {
         match self {
-            Callable::Builtin { name } => crate::call_builtin_async(name, args).await,
+            Callable::Builtin { name } => {
+                if let Some(result) = user_functions::try_call_user_function(name, args).await {
+                    return result;
+                }
+                crate::call_builtin_async(name, args).await
+            }
             Callable::Closure(c) => {
                 let mut merged = c.captures.clone();
                 merged.extend_from_slice(args);

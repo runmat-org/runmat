@@ -3,6 +3,7 @@ mod test_helpers;
 use runmat_parser::parse;
 use std::collections::HashMap;
 use std::thread;
+use std::convert::TryFrom;
 use test_helpers::lower;
 use test_helpers::{execute, interpret};
 
@@ -170,10 +171,40 @@ fn function_handle_anon_round_trip() {
     let vars = execute(&hir).unwrap();
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s.starts_with("@"))));
+        .any(|v| matches!(v, runmat_builtins::Value::FunctionHandle(_))));
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::String(s) if s.starts_with("@anon"))));
+}
+
+#[test]
+fn cellfun_upper_function_handle_round_trip() {
+    let input =
+        "names = {'Ada', 'Linus', 'Katherine'}; upper = cellfun(@upper, names, 'UniformOutput', false);";
+    let ast = parse(input).unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+
+    let mut found = false;
+    for value in vars {
+        if let runmat_builtins::Value::Cell(ca) = value {
+            if ca.data.len() != 3 {
+                continue;
+            }
+            let texts: Vec<String> = ca
+                .data
+                .iter()
+                .map(|ptr| String::try_from(&**ptr))
+                .collect::<Result<_, _>>()
+                .unwrap_or_default();
+            if texts == vec!["ADA", "LINUS", "KATHERINE"] {
+                found = true;
+                break;
+            }
+        }
+    }
+
+    assert!(found);
 }
 
 #[test]

@@ -445,7 +445,7 @@ async fn set_p_builtin(obj: Value, val: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(name = "make_handle", builtin_path = "crate")]
 async fn make_handle_builtin(name: String) -> crate::BuiltinResult<Value> {
-    Ok(Value::String(format!("@{name}")))
+    Ok(Value::FunctionHandle(name))
 }
 
 #[runmat_macros::runtime_builtin(name = "make_anon", builtin_path = "crate")]
@@ -1011,11 +1011,18 @@ async fn overidx_xor(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(name = "feval", builtin_path = "crate")]
 async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    async fn call_by_name(name: &str, args: &[Value]) -> crate::BuiltinResult<Value> {
+        if let Some(result) = crate::user_functions::try_call_user_function(name, args).await {
+            return result;
+        }
+        Ok(crate::call_builtin_async(name, args).await?)
+    }
+
     match f {
-        // Current handles are strings like "@sin"
+        // Function handle strings like "@sin"
         Value::String(s) => {
             if let Some(name) = s.strip_prefix('@') {
-                Ok(crate::call_builtin_async(name, &rest).await?)
+                call_by_name(name, &rest).await
             } else {
                 Err(
                     (format!("feval: expected function handle string starting with '@', got {s}"))
@@ -1028,7 +1035,7 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             if ca.rows == 1 {
                 let s: String = ca.data.iter().collect();
                 if let Some(name) = s.strip_prefix('@') {
-                    Ok(crate::call_builtin_async(name, &rest).await?)
+                    call_by_name(name, &rest).await
                 } else {
                     Err((format!(
                         "feval: expected function handle string starting with '@', got {s}"
@@ -1039,12 +1046,12 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
                 Err(("feval: function handle char array must be a row vector".to_string()).into())
             }
         }
+        Value::FunctionHandle(name) => call_by_name(&name, &rest).await,
         Value::Closure(c) => {
             let mut args = c.captures.clone();
             args.extend(rest);
-            Ok(crate::call_builtin_async(&c.function_name, &args).await?)
+            call_by_name(&c.function_name, &args).await
         }
-        // Future: support Value::Function variants
         other => Err((format!("feval: unsupported function value {other:?}")).into()),
     }
 }
