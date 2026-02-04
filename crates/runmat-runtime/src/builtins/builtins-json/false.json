@@ -1,0 +1,101 @@
+{
+  "title": "false",
+  "category": "array/creation",
+  "keywords": [
+    "false",
+    "logical",
+    "array",
+    "mask"
+  ],
+  "summary": "Create logical arrays filled with false values.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Always constructs a host logical array; gpuArray inputs are used only for sizing."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::true_false::tests",
+    "integration": null
+  },
+  "description": "`false` creates logical arrays filled with false values. RunMat mirrors MATLAB sizing semantics across scalar, vector, matrix, and N-D forms.",
+  "behaviors": [
+    "`false()` returns the scalar logical `false`.",
+    "`false(n)` returns an n x n logical array of false values.",
+    "`false(m, n, ...)` returns a logical array with the requested dimensions.",
+    "`false(sz)` accepts a size vector (row or column) and returns an array with prod(sz) elements arranged using MATLAB column-major ordering.",
+    "`false(A)` returns a logical array of false with the same size as `A`.",
+    "`false(___, 'like', prototype)` uses the prototype only for sizing; the result is still a host logical array.",
+    "`false(___, 'logical')` is accepted for MATLAB compatibility and has no effect."
+  ],
+  "examples": [
+    {
+      "description": "Creating a 2x3 logical array of false values",
+      "input": "mask = false(2, 3)",
+      "output": "mask = [0 0 0; 0 0 0];"
+    },
+    {
+      "description": "Creating a logical array from a size vector",
+      "input": "dims = [1 4 2];\nmask = false(dims)",
+      "output": "mask =\n  1x4x2 logical array\n     0     0     0     0\n     0     0     0     0"
+    },
+    {
+      "description": "Creating a false mask with the same size as an existing array",
+      "input": "A = rand(2, 2);\nmask = false(A)",
+      "output": "mask =\n  2x2 logical array\n     0     0\n     0     0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does `false()` return?",
+      "answer": "It returns the logical scalar `false`."
+    },
+    {
+      "question": "Does `false(n)` create a square array?",
+      "answer": "Yes. `false(n)` returns an n x n logical array of false values, matching MATLAB behavior."
+    },
+    {
+      "question": "How does `false(sz)` interpret a size vector?",
+      "answer": "A row or column vector is treated as the full set of dimensions, so `false([2 3 4])` yields a 2x3x4 logical array."
+    },
+    {
+      "question": "Does `false` keep results on the GPU?",
+      "answer": "No. The builtin always returns a host logical array. gpuArray inputs are only used to infer the output size."
+    },
+    {
+      "question": "Is the `'logical'` option required?",
+      "answer": "No. `false` always returns logical values; the `'logical'` option is accepted only for MATLAB compatibility."
+    }
+  ],
+  "links": [
+    {
+      "label": "true",
+      "url": "./true"
+    },
+    {
+      "label": "logical",
+      "url": "./logical"
+    },
+    {
+      "label": "islogical",
+      "url": "./islogical"
+    },
+    {
+      "label": "zeros",
+      "url": "./zeros"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/true_false.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/true_false.rs"
+  }
+}

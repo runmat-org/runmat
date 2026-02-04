@@ -10,4 +10,5 @@ pub(crate) mod randi;
 pub(crate) mod randn;
 pub(crate) mod randperm;
 pub(crate) mod range;
+pub(crate) mod true_false;
 pub(crate) mod zeros;

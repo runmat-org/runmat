@@ -1,0 +1,124 @@
+{
+  "title": "isequal",
+  "category": "logical/rel",
+  "keywords": [
+    "isequal",
+    "equality",
+    "comparison",
+    "logical",
+    "array comparison"
+  ],
+  "summary": "Test arrays for equality in size, class, and content.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "GPU tensors are gathered to the host before comparison. Future versions may add native GPU comparison paths."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::rel::isequal::tests",
+    "integration": null
+  },
+  "description": "`isequal` compares two or more arrays and returns `true` (logical 1) if they all have the same size, class, and content, and `false` (logical 0) otherwise. NaN values are NOT considered equal; use `isequaln` to treat NaN values as equal.",
+  "behaviors": [
+    "`isequal(A, B)` compares two values for equality.",
+    "`isequal(A, B, C, ...)` compares all inputs against each other; returns `true` only if all are equal.",
+    "Arrays must have identical shape (size) to be equal.",
+    "Arrays must have matching data types (class) to be equal.",
+    "All corresponding elements must be identical for arrays to be equal.",
+    "NaN values are NOT equal to each other (NaN ~= NaN).",
+    "Empty arrays `[]` are equal to other empty arrays with the same shape.",
+    "Cell arrays are compared element-by-element recursively.",
+    "Structs are compared field-by-field."
+  ],
+  "examples": [
+    {
+      "description": "Comparing two identical scalars",
+      "input": "isequal(5, 5)",
+      "output": "ans = logical\n     1"
+    },
+    {
+      "description": "Comparing two different scalars",
+      "input": "isequal(5, 6)",
+      "output": "ans = logical\n     0"
+    },
+    {
+      "description": "Comparing identical matrices",
+      "input": "A = [1 2; 3 4];\nB = [1 2; 3 4];\nisequal(A, B)",
+      "output": "ans = logical\n     1"
+    },
+    {
+      "description": "Comparing matrices with different shapes",
+      "input": "A = [1 2 3];\nB = [1; 2; 3];\nisequal(A, B)",
+      "output": "ans = logical\n     0"
+    },
+    {
+      "description": "Comparing multiple arrays at once",
+      "input": "isequal([1 2], [1 2], [1 2])",
+      "output": "ans = logical\n     1"
+    },
+    {
+      "description": "NaN values are not equal",
+      "input": "isequal(NaN, NaN)",
+      "output": "ans = logical\n     0"
+    },
+    {
+      "description": "Verifying that every cell starts with `[]`",
+      "input": "C = cell(2, 2);\nisequal(C{1,1}, [], C{2,2}, [])",
+      "output": "ans = logical\n     1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `isequal` different from `==`?",
+      "answer": "`isequal` returns a single logical value indicating whether all inputs are completely identical. The `==` operator performs element-wise comparison and returns an array of the same size as the inputs."
+    },
+    {
+      "question": "How does `isequal` handle NaN values?",
+      "answer": "NaN values are NOT considered equal. `isequal(NaN, NaN)` returns `false`. Use `isequaln` if you want NaN values to be treated as equal."
+    },
+    {
+      "question": "Can I compare more than two arrays?",
+      "answer": "Yes. `isequal(A, B, C, ...)` accepts any number of inputs and returns `true` only if all inputs are equal to each other."
+    },
+    {
+      "question": "Are empty arrays equal?",
+      "answer": "Empty arrays with the same shape are equal. For example, `isequal([], [])` returns `true`, and `isequal(zeros(0,3), zeros(0,3))` returns `true`."
+    },
+    {
+      "question": "How are cell arrays compared?",
+      "answer": "Cell arrays are compared element-by-element. Each corresponding pair of cells must contain equal values for the cell arrays to be equal."
+    },
+    {
+      "question": "What happens with different data types?",
+      "answer": "Values of different classes are generally not equal. However, compatible numeric types (like `double` and `single`, or `double` and `logical`) may be compared after appropriate promotion."
+    }
+  ],
+  "links": [
+    {
+      "label": "eq",
+      "url": "./eq"
+    },
+    {
+      "label": "strcmp",
+      "url": "./strcmp"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/logical/rel/isequal.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/rel/isequal.rs"
+  },
+  "gpu_residency": "None. `isequal` gathers GPU tensors to the host for comparison. The result is always a host logical scalar.",
+  "gpu_behavior": [
+    "When comparing gpuArray inputs, `isequal` gathers all tensors to the host before performing the comparison. The result is a scalar logical value on the host."
+  ]
+}

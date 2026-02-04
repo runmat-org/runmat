@@ -61,7 +61,7 @@
     {
       "description": "Handling errors with a custom error handler",
       "input": "vals = [-1 0 1];\nhandler = @(err, x) err.identifier;\nsafe = arrayfun(@(x) sqrt(x), vals, 'ErrorHandler', handler, 'UniformOutput', false)",
-      "output": "safe =\n  1\u00d73 cell array\n    {'MATLAB:arrayfun:FunctionError'}    {[0]}    {[1]}"
+      "output": "safe =\n  1\u00d73 cell array\n    {[0+1i]}    {[0]}    {[1]}"
     },
     {
       "description": "Working with `gpuArray` inputs",
