@@ -811,7 +811,11 @@ function normalizeOutput(text) {
         /\b[A-Za-z_]\w*(?:\([^)]*\))?\s*=\s*/g,
         ""
     );
-    const withoutHeaders = withoutAssignments.replace(
+    const withoutInlineDims = withoutAssignments.replace(
+        /(^|\s)\d+\s*[x×]\s*\d+(?:\s*[x×]\s*\d+)*\s+(?=(?:[-+]?(?:\d|\.\d)|NaN|Inf|-Inf))/gi,
+        "$1"
+    );
+    const withoutHeaders = withoutInlineDims.replace(
         /\b\d+\s*[x×]\s*\d+(?:\s*[x×]\s*\d+)*\s+(?:gpuArray\s*)?(?:sparse\s+)?(?:complex\s+)?(?:logical\s+)?(?:logical|double|single|char|string|cell|struct|table|categorical|datetime|duration)(?:\s+array)?\b/gi,
         " "
     );
