@@ -1,6 +1,6 @@
 use runmat_builtins::Type;
 
-use crate::builtins::common::type_shapes::{broadcast_shapes, element_count_if_known};
+use runmat_builtins::shape_rules::{broadcast_shapes, element_count_if_known};
 
 pub fn numeric_unary_type(args: &[Type]) -> Type {
     let Some(input) = args.first() else {

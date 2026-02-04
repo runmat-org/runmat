@@ -6,7 +6,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::common::type_shapes::element_count_if_known;
+use runmat_builtins::shape_rules::element_count_if_known;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
     CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
@@ -72,7 +72,7 @@ fn reshape_type(args: &[Type]) -> Type {
         None => return Type::Unknown,
     };
     let rank = reshape_rank_from_args(args);
-    let shape = rank.map(crate::builtins::common::type_shapes::unknown_shape);
+    let shape = rank.map(runmat_builtins::shape_rules::unknown_shape);
     match input {
         Type::Tensor { .. } => Type::Tensor { shape },
         Type::Logical { .. } => Type::Logical { shape },

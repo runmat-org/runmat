@@ -1,6 +1,6 @@
 use runmat_builtins::Type;
 
-use crate::builtins::common::type_shapes::{element_count_if_known, unknown_shape};
+use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
 
 pub fn fft_type(args: &[Type]) -> Type {
     fft_like_type(args, 1)

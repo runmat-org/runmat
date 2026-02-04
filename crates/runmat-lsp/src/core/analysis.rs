@@ -7,7 +7,9 @@ use lsp_types::{
     SignatureHelp,
 };
 use runmat_builtins::{self, BuiltinFunction, Constant, Type};
-use runmat_hir::{HirStmt, LoweringContext, LoweringResult, SemanticError};
+use runmat_hir::{
+    HirDiagnostic, HirDiagnosticSeverity, HirStmt, LoweringContext, LoweringResult, SemanticError,
+};
 use runmat_ignition::{compile, CompileError};
 use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
 pub use runmat_parser::CompatMode;
@@ -155,8 +157,13 @@ pub fn diagnostics_for_document(text: &str, analysis: &DocumentAnalysis) -> Vec<
         return vec![diagnostic_for_compile_error(compile_err, text)];
     }
     if let Some(semantic) = &analysis.semantic {
+        let mut diags: Vec<Diagnostic> = semantic
+            .diagnostics
+            .iter()
+            .map(|diag| diagnostic_for_hir_lint(diag, text))
+            .collect();
         if !semantic.status_message.is_empty() {
-            return vec![Diagnostic {
+            diags.push(Diagnostic {
                 range: Range {
                     start: Position::new(0, 0),
                     end: Position::new(0, 1),
@@ -169,8 +176,9 @@ pub fn diagnostics_for_document(text: &str, analysis: &DocumentAnalysis) -> Vec<
                 related_information: None,
                 tags: None,
                 data: None,
-            }];
+            });
         }
+        return diags;
     }
     Vec::new()
 }
@@ -494,6 +502,30 @@ fn diagnostic_for_compile_error(error: &CompileError, text: &str) -> Diagnostic 
     }
 }
 
+fn diagnostic_for_hir_lint(diag: &HirDiagnostic, text: &str) -> Diagnostic {
+    let end = diag.span.end.max(diag.span.start + 1);
+    let range = TextRange {
+        start: diag.span.start,
+        end,
+    }
+    .to_lsp_range(text);
+    let severity = match diag.severity {
+        HirDiagnosticSeverity::Warning => DiagnosticSeverity::WARNING,
+        HirDiagnosticSeverity::Information => DiagnosticSeverity::INFORMATION,
+    };
+    Diagnostic {
+        range,
+        severity: Some(severity),
+        code: Some(lsp_types::NumberOrString::String(diag.code.to_string())),
+        code_description: None,
+        source: Some("runmat-hir".into()),
+        message: diag.message.clone(),
+        related_information: None,
+        tags: None,
+        data: None,
+    }
+}
+
 fn token_at_offset(tokens: &[SpannedToken], offset: usize) -> Option<&SpannedToken> {
     if tokens.is_empty() {
         return None;
@@ -597,6 +629,7 @@ pub struct SemanticModel {
     pub functions: Vec<FunctionSemantic>,
     pub function_lookup: HashMap<String, Vec<usize>>,
     pub status_message: String,
+    pub diagnostics: Vec<HirDiagnostic>,
 }
 
 impl SemanticModel {
@@ -690,7 +723,7 @@ fn format_type(ty: &Type) -> String {
 
 fn format_shape(shape: &Option<Vec<Option<usize>>>) -> String {
     let Some(shape) = shape else {
-        return "shape: unknown".to_string();
+        return "unknown".to_string();
     };
     if shape.len() == 2 {
         let rows = format_dim(shape[0]);
@@ -852,11 +885,14 @@ fn build_semantic_model(
             .push(idx);
     }
 
+    let diagnostics = runmat_hir::lint_shapes(&lowering);
+
     SemanticModel {
         globals,
         functions,
         function_lookup,
         status_message: String::new(),
+        diagnostics,
     }
 }
 
@@ -946,5 +982,22 @@ mod tests {
         assert!(x_value.contains("1 x 101"), "unexpected x hover {x_value}");
         assert!(y_value.contains("Tensor"), "unexpected y hover {y_value}");
         assert!(y_value.contains("1 x 101"), "unexpected y hover {y_value}");
+    }
+
+    #[test]
+    fn diagnostics_include_shape_lints() {
+        let text = "a = ones(2,3); b = ones(4,2); c = a * b;";
+        let analysis = analyze_document(text);
+        let diags = diagnostics_for_document(text, &analysis);
+        let diag = diags.iter().find(|d| match &d.code {
+            Some(lsp_types::NumberOrString::String(code)) => code == "lint.shape.matmul",
+            _ => false,
+        });
+        let diag = diag.expect("expected matmul lint");
+        assert!(
+            diag.message.contains("inner dimensions") && diag.message.contains("must match"),
+            "unexpected lint message: {}",
+            diag.message
+        );
     }
 }

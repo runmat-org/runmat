@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::common::type_shapes::element_count_if_known;
+use runmat_builtins::shape_rules::element_count_if_known;
 use crate::{build_runtime_error, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::indexing::sub2ind")]

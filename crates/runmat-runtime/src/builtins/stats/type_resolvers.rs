@@ -1,7 +1,7 @@
 use runmat_builtins::Type;
 
 use crate::builtins::array::type_resolvers::{row_vector_type, size_vector_len};
-use crate::builtins::common::type_shapes::{element_count_if_known, unknown_shape};
+use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
 
 pub fn cov_type(args: &[Type]) -> Type {
     square_summary_type(args)

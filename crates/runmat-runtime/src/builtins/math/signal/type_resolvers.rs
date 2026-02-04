@@ -1,6 +1,6 @@
 use runmat_builtins::Type;
 
-use crate::builtins::common::type_shapes::element_count_if_known;
+use runmat_builtins::shape_rules::element_count_if_known;
 
 pub fn conv_type(args: &[Type]) -> Type {
     conv_like_type(args)

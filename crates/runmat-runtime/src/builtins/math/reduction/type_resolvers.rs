@@ -1,4 +1,4 @@
-use crate::builtins::common::type_shapes::{scalar_tensor_shape, unknown_shape};
+use runmat_builtins::shape_rules::{scalar_tensor_shape, unknown_shape};
 use runmat_builtins::Type;
 
 fn reduction_shape_from_args(args: &[Type]) -> Option<Vec<Option<usize>>> {

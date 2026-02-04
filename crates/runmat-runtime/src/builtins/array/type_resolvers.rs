@@ -1,6 +1,6 @@
 use runmat_builtins::Type;
 
-use crate::builtins::common::type_shapes::{element_count_if_known, unknown_shape};
+use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
 
 pub fn rank_from_dims_args(args: &[Type]) -> Option<usize> {
     if args.is_empty() {

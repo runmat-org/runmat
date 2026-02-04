@@ -4,7 +4,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::type_shapes::scalar_tensor_shape;
+use runmat_builtins::shape_rules::scalar_tensor_shape;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{IntValue, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;

@@ -1073,6 +1073,8 @@ pub struct Constant {
     pub value: Value,
 }
 
+pub mod shape_rules;
+
 impl std::fmt::Debug for Constant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(

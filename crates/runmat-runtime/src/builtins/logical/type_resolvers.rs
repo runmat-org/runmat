@@ -1,6 +1,6 @@
 use runmat_builtins::Type;
 
-use crate::builtins::common::type_shapes::broadcast_shapes;
+use runmat_builtins::shape_rules::broadcast_shapes;
 
 pub fn logical_like(input: &Type) -> Type {
     match input {

@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::common::type_shapes::element_count_if_known;
+use runmat_builtins::shape_rules::element_count_if_known;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value};
@@ -64,7 +64,7 @@ fn permute_type(args: &[Type]) -> Type {
     }
     let input = &args[0];
     let order_len = permute_order_len(&args[1]);
-    let shape = order_len.map(crate::builtins::common::type_shapes::unknown_shape);
+    let shape = order_len.map(runmat_builtins::shape_rules::unknown_shape);
     match input {
         Type::Tensor { .. } => Type::Tensor { shape },
         Type::Logical { .. } => Type::Logical { shape },

@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::type_shapes::scalar_tensor_shape;
+use runmat_builtins::shape_rules::scalar_tensor_shape;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::horzcat")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
