@@ -71,7 +71,7 @@ fn eye_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
     summary = "Identity matrix or N-D identity tensor.",
     keywords = "eye,identity,matrix,gpu,like,logical",
     accel = "array_construct",
-    type_resolver_ctx(eye_type_with_ctx),
+    type_resolver(eye_type_with_ctx),
     builtin_path = "crate::builtins::array::creation::eye"
 )]
 async fn eye_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {

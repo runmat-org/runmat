@@ -8,7 +8,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(test)]
 use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::ResolveContext;
 use crate::{build_runtime_error, RuntimeError};
@@ -49,7 +48,6 @@ fn repmat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("repmat").build()
 }
 
-#[cfg(test)]
 fn array_shape(ty: &Type) -> Option<&[Option<usize>]> {
     match ty {
         Type::Tensor { shape: Some(shape) } => Some(shape.as_slice()),
@@ -58,7 +56,6 @@ fn array_shape(ty: &Type) -> Option<&[Option<usize>]> {
     }
 }
 
-#[cfg(test)]
 fn repmat_reps_len(args: &[Type]) -> Option<usize> {
     if args.len() < 2 {
         return None;
@@ -75,7 +72,6 @@ fn repmat_reps_len(args: &[Type]) -> Option<usize> {
     }
 }
 
-#[cfg(test)]
 fn repmat_output_shape(
     input_shape: &[Option<usize>],
     reps_len: usize,
@@ -101,7 +97,6 @@ fn repmat_output_shape(
     Some(output)
 }
 
-#[cfg(test)]
 fn repmat_type(args: &[Type]) -> Type {
     let input = match args.first() {
         Some(value) => value,
@@ -156,7 +151,7 @@ fn repmat_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
     summary = "Replicate arrays by tiling an input across one or more dimensions.",
     keywords = "repmat,tile,replicate,array,gpu",
     accel = "array_construct",
-    type_resolver_ctx(repmat_type_with_ctx),
+    type_resolver(repmat_type_with_ctx),
     builtin_path = "crate::builtins::array::shape::repmat"
 )]
 async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

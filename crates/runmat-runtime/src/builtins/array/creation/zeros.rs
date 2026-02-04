@@ -92,7 +92,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Create arrays filled with zeros.",
     keywords = "zeros,array,logical,gpu,like",
     accel = "array_construct",
-    type_resolver_ctx(zeros_type_with_ctx),
+    type_resolver(zeros_type_with_ctx),
     builtin_path = "crate::builtins::array::creation::zeros"
 )]
 async fn zeros_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
