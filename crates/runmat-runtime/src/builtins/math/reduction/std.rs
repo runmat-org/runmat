@@ -6,8 +6,10 @@ use runmat_accelerate_api::{
 use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Type, Value};
 const NAME: &str = "std";
 
-fn std_type(args: &[Type]) -> Type {
-    reduce_numeric_type_legacy(args)
+use runmat_builtins::ResolveContext;
+
+fn std_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    reduce_numeric_type(args, ctx)
 }
 
 use runmat_macros::runtime_builtin;
@@ -22,7 +24,7 @@ use crate::builtins::common::{
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
-use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type_legacy;
+use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::dispatcher;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -219,6 +221,7 @@ enum NormParse {
     keywords = "std,standard deviation,statistics,gpu,omitnan,all,like,native",
     accel = "reduction",
     type_resolver(std_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::std"
 )]
 async fn std_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -1014,9 +1017,12 @@ pub(crate) mod tests {
 
     #[test]
     fn std_type_reduces_first_dim() {
-        let out = std_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(2)]),
-        }]);
+        let out = std_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(2)]),
+            }],
+            &ResolveContext::empty(),
+        );
         assert_eq!(
             out,
             Type::Tensor {

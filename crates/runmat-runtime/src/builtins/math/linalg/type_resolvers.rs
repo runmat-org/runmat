@@ -211,26 +211,6 @@ pub fn symrcm_type(args: &[Type]) -> Type {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use runmat_builtins::LiteralValue;
-
-    #[test]
-    fn dot_type_uses_literal_dim_for_vector() {
-        let vec_type = Type::Tensor {
-            shape: Some(vec![Some(3), Some(1)]),
-        };
-        let ctx = ResolveContext::new(vec![
-            LiteralValue::Unknown,
-            LiteralValue::Unknown,
-            LiteralValue::Number(1.0),
-        ]);
-        let out = dot_type(&[vec_type.clone(), vec_type, Type::Num], &ctx);
-        assert_eq!(out, Type::Num);
-    }
-}
-
 pub fn bandwidth_type(args: &[Type]) -> Type {
     if args.len() > 1 {
         return Type::Num;
@@ -298,6 +278,7 @@ fn min_dim(lhs: Option<usize>, rhs: Option<usize>) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::LiteralValue;
 
     #[test]
     fn transpose_swaps_first_two_dims() {
@@ -343,5 +324,19 @@ mod tests {
                 shape: Some(vec![Some(2), Some(2)])
             }
         );
+    }
+
+    #[test]
+    fn dot_type_uses_literal_dim_for_vector() {
+        let vec_type = Type::Tensor {
+            shape: Some(vec![Some(3), Some(1)]),
+        };
+        let ctx = ResolveContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Number(1.0),
+        ]);
+        let out = dot_type(&[vec_type.clone(), vec_type, Type::Num], &ctx);
+        assert_eq!(out, Type::Num);
     }
 }

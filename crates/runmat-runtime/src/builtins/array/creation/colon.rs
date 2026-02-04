@@ -73,7 +73,8 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     summary = "Arithmetic progression that mirrors MATLAB's colon operator.",
     keywords = "colon,sequence,range,step,gpu",
     accel = "array_construct",
-    type_resolver_ctx(colon_type),
+    type_resolver(colon_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::colon"
 )]
 async fn colon_builtin(
@@ -475,7 +476,7 @@ pub(crate) mod tests {
     #[test]
     fn colon_type_is_row_vector() {
         assert_eq!(
-            colon_type(&[Type::Num, Type::Num]),
+            colon_type(&[Type::Num, Type::Num], &ResolveContext::empty()),
             Type::Tensor {
                 shape: Some(vec![Some(1), None])
             }

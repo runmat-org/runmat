@@ -6,8 +6,10 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Type, Value};
 const NAME: &str = "prod";
 
-fn prod_type(args: &[Type]) -> Type {
-    reduce_numeric_type_legacy(args)
+use runmat_builtins::ResolveContext;
+
+fn prod_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    reduce_numeric_type(args, ctx)
 }
 
 use runmat_macros::runtime_builtin;
@@ -23,7 +25,7 @@ use crate::builtins::common::{
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
-use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type_legacy;
+use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::prod")]
@@ -81,6 +83,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "prod,product,reduction,gpu,omitnan",
     accel = "reduction",
     type_resolver(prod_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::prod"
 )]
 async fn prod_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -845,9 +848,12 @@ pub(crate) mod tests {
 
     #[test]
     fn prod_type_reduces_first_dim() {
-        let out = prod_type(&[Type::Tensor {
-            shape: Some(vec![Some(3), Some(2)]),
-        }]);
+        let out = prod_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(3), Some(2)]),
+            }],
+            &ResolveContext::empty(),
+        );
         assert_eq!(
             out,
             Type::Tensor {

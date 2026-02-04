@@ -4,8 +4,10 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, Prov
 use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Type, Value};
 const NAME: &str = "mean";
 
-fn mean_type(args: &[Type]) -> Type {
-    reduce_numeric_type_legacy(args)
+use runmat_builtins::ResolveContext;
+
+fn mean_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    reduce_numeric_type(args, ctx)
 }
 
 use runmat_macros::runtime_builtin;
@@ -22,7 +24,7 @@ use crate::builtins::common::{
     shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
-use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type_legacy;
+use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::dispatcher;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::mean")]
@@ -209,6 +211,7 @@ enum MeanAxes {
     keywords = "mean,average,reduction,gpu,omitnan",
     accel = "reduction",
     type_resolver(mean_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::mean"
 )]
 async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -1304,9 +1307,12 @@ pub(crate) mod tests {
 
     #[test]
     fn mean_type_reduces_first_dim() {
-        let out = mean_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(4)]),
-        }]);
+        let out = mean_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(4)]),
+            }],
+            &ResolveContext::empty(),
+        );
         assert_eq!(
             out,
             Type::Tensor {

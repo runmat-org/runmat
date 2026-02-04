@@ -42,7 +42,7 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("rand").build()
 }
 
-fn rand_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
+fn rand_type(args: &[Type], ctx: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::Num;
     }
@@ -69,7 +69,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Uniform random numbers on (0, 1).",
     keywords = "rand,random,uniform,gpu,like",
     accel = "array_construct",
-    type_resolver_ctx(rand_type_with_ctx),
+    type_resolver(rand_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::rand"
 )]
 async fn rand_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -364,13 +365,13 @@ pub(crate) mod tests {
 
     #[test]
     fn rand_type_defaults_to_num() {
-        assert_eq!(rand_type(&[]), Type::Num);
+        assert_eq!(rand_type(&[], &ResolveContext::empty()), Type::Num);
     }
 
     #[test]
     fn rand_type_infers_rank_from_scalar_dim() {
         assert_eq!(
-            rand_type(&[Type::Num]),
+            rand_type(&[Type::Num], &ResolveContext::empty()),
             Type::Tensor {
                 shape: Some(vec![None, None])
             }

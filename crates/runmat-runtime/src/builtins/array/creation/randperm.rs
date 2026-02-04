@@ -70,7 +70,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Random permutations of 1:n.",
     keywords = "randperm,permutation,random,indices,gpu,like",
     accel = "array_construct",
-    type_resolver_ctx(randperm_type),
+    type_resolver(randperm_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::randperm"
 )]
 async fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -385,7 +386,7 @@ pub(crate) mod tests {
     #[test]
     fn randperm_type_is_row_vector() {
         assert_eq!(
-            randperm_type(&[Type::Num]),
+            randperm_type(&[Type::Num], &ResolveContext::empty()),
             Type::Tensor {
                 shape: Some(vec![Some(1), None])
             }

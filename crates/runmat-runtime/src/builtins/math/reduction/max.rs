@@ -4,15 +4,15 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ReduceDimResult};
-use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
+use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "max";
 
-fn max_type(args: &[Type]) -> Type {
-    min_max_type(args)
+fn max_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    min_max_type(args, ctx)
 }
 
 fn max_error(message: impl Into<String>) -> RuntimeError {
@@ -105,6 +105,7 @@ impl MaxEvaluation {
     keywords = "max,maximum,reduction,gpu,comparisonmethod,omitnan",
     accel = "reduction",
     type_resolver(max_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::max"
 )]
 async fn max_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1742,7 +1743,10 @@ pub(crate) mod tests {
 
     #[test]
     fn max_type_with_two_args_returns_tensor() {
-        let out = max_type(&[Type::Tensor { shape: None }, Type::Tensor { shape: None }]);
+        let out = max_type(
+            &[Type::Tensor { shape: None }, Type::Tensor { shape: None }],
+            &ResolveContext::empty(),
+        );
         assert_eq!(out, Type::tensor());
     }
 

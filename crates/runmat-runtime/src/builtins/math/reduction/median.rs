@@ -10,8 +10,10 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "median";
 
-fn median_type(args: &[Type]) -> Type {
-    reduce_numeric_type_legacy(args)
+use runmat_builtins::ResolveContext;
+
+fn median_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    reduce_numeric_type(args, ctx)
 }
 
 use crate::builtins::common::random_args::keyword_of;
@@ -20,7 +22,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type_legacy;
+use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::median")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -82,6 +84,7 @@ struct ParsedArguments {
     keywords = "median,reduction,omitnan,includenan,statistics,gpu",
     accel = "reduction",
     type_resolver(median_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::median"
 )]
 async fn median_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -540,9 +543,12 @@ pub(crate) mod tests {
 
     #[test]
     fn median_type_reduces_first_dim() {
-        let out = median_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(5)]),
-        }]);
+        let out = median_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(5)]),
+            }],
+            &ResolveContext::empty(),
+        );
         assert_eq!(
             out,
             Type::Tensor {

@@ -26,15 +26,13 @@ use runmat_core::{
 use runmat_logging::{
     init_logging, set_runtime_log_hook, LoggingGuard, LoggingOptions, RuntimeLogRecord,
 };
-use runmat_telemetry::{
-    RuntimeFinishedEnvelope, RuntimeFinishedPayload, RuntimeStartedEnvelope, RuntimeStartedPayload,
-    EVENT_RUNTIME_FINISHED, EVENT_RUNTIME_STARTED,
-};
 use runmat_runtime::build_runtime_error;
 use runmat_thread_local::runmat_thread_local;
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 use std::backtrace::Backtrace;
 use tracing::{info, info_span};
+use runmat_core::{TelemetryPlatformInfo, TelemetryRunConfig, TelemetryRunFinish, TelemetrySink};
+use runmat_telemetry::TelemetryRunKind;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
@@ -202,7 +200,7 @@ struct SessionConfig {
     verbose: bool,
     telemetry_consent: bool,
     telemetry_client_id: Option<String>,
-    telemetry_run_kind: String,
+    telemetry_run_kind: TelemetryRunKind,
     enable_gpu: bool,
     wgpu_power_preference: AccelPowerPreference,
     wgpu_force_fallback_adapter: bool,
@@ -221,12 +219,7 @@ impl SessionConfig {
             verbose: opts.verbose.unwrap_or(false),
             telemetry_consent: opts.telemetry_consent.unwrap_or(true),
             telemetry_client_id: opts.telemetry_id.clone(),
-            telemetry_run_kind: opts
-                .telemetry_run_kind
-                .as_deref()
-                .map(|s| s.trim().to_ascii_lowercase())
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "repl".to_string()),
+            telemetry_run_kind: parse_telemetry_run_kind(opts.telemetry_run_kind.as_deref()),
             enable_gpu: opts.enable_gpu.unwrap_or(true),
             wgpu_power_preference: parse_power_preference(opts.wgpu_power_preference.as_deref()),
             wgpu_force_fallback_adapter: opts.wgpu_force_fallback_adapter.unwrap_or(false),
@@ -275,99 +268,11 @@ pub struct RunMatWasm {
     gpu_status: GpuStatus,
     disposed: Cell<bool>,
     active_interrupt: RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>,
-    telemetry_session_id: String,
-    #[cfg(target_arch = "wasm32")]
-    telemetry_emitter: Option<js_sys::Function>,
+    telemetry_sink: Option<Arc<dyn TelemetrySink>>,
 }
 
 #[wasm_bindgen]
 impl RunMatWasm {
-    fn telemetry_enabled(&self) -> bool {
-        if self.disposed.get() {
-            return false;
-        }
-        let cfg = self.config.borrow();
-        cfg.telemetry_consent && self.telemetry_emitter.is_some()
-    }
-
-    fn maybe_emit_runtime_started(&self) {
-        if !self.telemetry_enabled() {
-            return;
-        }
-        let cfg = self.config.borrow();
-        let envelope: RuntimeStartedEnvelope = RuntimeStartedEnvelope {
-            event_label: EVENT_RUNTIME_STARTED,
-            cid: cfg.telemetry_client_id.clone(),
-            session_id: self.telemetry_session_id.clone(),
-            os: Some("web".to_string()),
-            arch: Some("wasm32".to_string()),
-            release: Some(env!("CARGO_PKG_VERSION").to_string()),
-            run_kind: cfg.telemetry_run_kind.clone(),
-            payload: RuntimeStartedPayload {
-                jit_enabled: cfg.enable_jit,
-                accelerate_enabled: self.gpu_status.active,
-                timestamp_ms: Some(js_sys::Date::now() as u64),
-            },
-        };
-        if let Ok(js_value) = serde_wasm_bindgen::to_value(&envelope) {
-            if let Some(cb) = self.telemetry_emitter.as_ref() {
-                let _ = cb.call1(&JsValue::NULL, &js_value);
-            }
-        }
-    }
-
-    fn maybe_emit_runtime_finished(&self, payload: &ExecutionPayload) {
-        if !self.telemetry_enabled() {
-            return;
-        }
-        let cfg = self.config.borrow();
-        let duration_us = payload.execution_time_ms.saturating_mul(1000);
-        let (success, error) = match payload.error.as_ref() {
-            None => (true, None),
-            Some(err) => {
-                let class = err
-                    .identifier
-                    .as_deref()
-                    .map(|s| s.to_string())
-                    .or_else(|| Some("runtime_error".to_string()));
-                (false, class)
-            }
-        };
-        let envelope: RuntimeFinishedEnvelope = RuntimeFinishedEnvelope {
-            event_label: EVENT_RUNTIME_FINISHED,
-            cid: cfg.telemetry_client_id.clone(),
-            session_id: self.telemetry_session_id.clone(),
-            os: Some("web".to_string()),
-            arch: Some("wasm32".to_string()),
-            release: Some(env!("CARGO_PKG_VERSION").to_string()),
-            run_kind: cfg.telemetry_run_kind.clone(),
-            payload: RuntimeFinishedPayload {
-                duration_us: Some(duration_us),
-                success,
-                jit_enabled: cfg.enable_jit,
-                jit_used: payload.used_jit,
-                accelerate_enabled: self.gpu_status.active,
-                timestamp_ms: Some(js_sys::Date::now() as u64),
-                error,
-                counters: None,
-                provider: None,
-                gpu_wall_ns: None,
-                gpu_ratio: None,
-                gpu_dispatches: None,
-                gpu_upload_bytes: None,
-                gpu_download_bytes: None,
-                fusion_cache_hits: None,
-                fusion_cache_misses: None,
-                fusion_hit_ratio: None,
-            },
-        };
-        if let Ok(js_value) = serde_wasm_bindgen::to_value(&envelope) {
-            if let Some(cb) = self.telemetry_emitter.as_ref() {
-                let _ = cb.call1(&JsValue::NULL, &js_value);
-            }
-        }
-    }
-
     #[wasm_bindgen(js_name = execute)]
     pub async fn execute(&self, source: String) -> Result<JsValue, JsValue> {
         init_logging_once();
@@ -385,6 +290,23 @@ impl RunMatWasm {
             .collect();
         // Reset hold state so a previous `hold on` doesn't cause subsequent runs to keep appending.
         runtime_reset_hold_state_for_run();
+
+        let telemetry_run = {
+            if self.disposed.get() {
+                None
+            } else {
+                let cfg = self.config.borrow();
+                if !cfg.telemetry_consent {
+                    None
+                } else {
+                    self.session.borrow().telemetry_run(TelemetryRunConfig {
+                        kind: cfg.telemetry_run_kind.clone(),
+                        jit_enabled: cfg.enable_jit,
+                        accelerate_enabled: self.gpu_status.active,
+                    })
+                }
+            }
+        };
 
         // Ensure `cancelExecution()` can interrupt the *active* session even while we temporarily
         // move it out of `self.session` to avoid holding a RefCell borrow across `.await`.
@@ -462,7 +384,27 @@ impl RunMatWasm {
                 .unwrap_or(""),
             "Execution finished"
         );
-        self.maybe_emit_runtime_finished(&payload);
+        if let Some(run) = telemetry_run {
+            let duration = std::time::Duration::from_millis(payload.execution_time_ms);
+            let (success, error) = match payload.error.as_ref() {
+                None => (true, None),
+                Some(err) => (
+                    false,
+                    err.identifier
+                        .as_deref()
+                        .map(|s| s.to_string())
+                        .or_else(|| Some("runtime_error".to_string())),
+                ),
+            };
+            run.finish(TelemetryRunFinish {
+                duration: Some(duration),
+                success,
+                jit_used: payload.used_jit,
+                error,
+                counters: None,
+                provider: None,
+            });
+        }
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize execution result: {err}")))
     }
@@ -495,6 +437,13 @@ impl RunMatWasm {
         session.set_callstack_limit(config.callstack_limit);
         session.set_error_namespace(config.error_namespace.clone());
         session.set_source_name_override(Some("<wasm>".to_string()));
+        if self.telemetry_sink.is_some() {
+            session.set_telemetry_platform_info(TelemetryPlatformInfo {
+                os: Some("web".to_string()),
+                arch: Some("wasm32".to_string()),
+            });
+            session.set_telemetry_sink(self.telemetry_sink.clone());
+        }
         let mut slot = self.session.borrow_mut();
         *slot = session;
         Ok(())
@@ -1394,11 +1343,36 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         install_cpu_provider(&config);
     }
 
-    let telemetry_session_id = Uuid::new_v4().to_string();
-    let telemetry_emitter = parsed_opts
-        .telemetry_emitter
-        .as_ref()
-        .and_then(|value| value.clone().dyn_into::<js_sys::Function>().ok());
+    let telemetry_sink: Option<Arc<dyn TelemetrySink>> = {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if config.telemetry_consent {
+                if let Some(callback) = parsed_opts
+                    .telemetry_emitter
+                    .as_ref()
+                    .and_then(|value| value.clone().dyn_into::<js_sys::Function>().ok())
+                {
+                    Some(Arc::new(WasmTelemetrySink { callback }) as Arc<dyn TelemetrySink>)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            None
+        }
+    };
+
+    if telemetry_sink.is_some() {
+        session.set_telemetry_platform_info(TelemetryPlatformInfo {
+            os: Some("web".to_string()),
+            arch: Some("wasm32".to_string()),
+        });
+        session.set_telemetry_sink(telemetry_sink.clone());
+    }
 
     let instance = RunMatWasm {
         session: RefCell::new(session),
@@ -1407,10 +1381,8 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         gpu_status,
         disposed: Cell::new(false),
         active_interrupt: RefCell::new(None),
-        telemetry_session_id,
-        telemetry_emitter,
+        telemetry_sink,
     };
-    instance.maybe_emit_runtime_started();
     Ok(instance)
 }
 
@@ -1419,6 +1391,25 @@ fn ensure_getrandom_js() {
     let mut buf = [0u8; 1];
     if let Err(err) = getrandom::getrandom(&mut buf) {
         warn!("RunMat wasm: failed to initialize JS randomness source: {err}");
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct WasmTelemetrySink {
+    callback: js_sys::Function,
+}
+
+#[cfg(target_arch = "wasm32")]
+unsafe impl Send for WasmTelemetrySink {}
+
+#[cfg(target_arch = "wasm32")]
+unsafe impl Sync for WasmTelemetrySink {}
+
+#[cfg(target_arch = "wasm32")]
+impl TelemetrySink for WasmTelemetrySink {
+    fn emit(&self, payload_json: String) {
+        let value = js_sys::JSON::parse(&payload_json).unwrap_or_else(|_| payload_json.into());
+        let _ = self.callback.call1(&JsValue::NULL, &value);
     }
 }
 
@@ -1435,6 +1426,15 @@ fn parse_language_compat(input: Option<&str>) -> CompatMode {
     input
         .and_then(parse_language_compat_from_str)
         .unwrap_or(CompatMode::Matlab)
+}
+
+fn parse_telemetry_run_kind(value: Option<&str>) -> TelemetryRunKind {
+    match value.unwrap_or("repl").trim().to_ascii_lowercase().as_str() {
+        "script" => TelemetryRunKind::Script,
+        "benchmark" => TelemetryRunKind::Benchmark,
+        "install" => TelemetryRunKind::Install,
+        _ => TelemetryRunKind::Repl,
+    }
 }
 
 fn parse_language_compat_from_str(value: &str) -> Option<CompatMode> {

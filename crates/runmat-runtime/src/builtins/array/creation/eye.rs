@@ -42,7 +42,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Identity tensors are materialised directly; fusion planner treats eye() as a standalone allocation.",
 };
 
-fn eye_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
+fn eye_type(args: &[Type], ctx: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::Num;
     }
@@ -58,7 +58,8 @@ fn eye_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
     summary = "Identity matrix or N-D identity tensor.",
     keywords = "eye,identity,matrix,gpu,like,logical",
     accel = "array_construct",
-    type_resolver_ctx(eye_type_with_ctx),
+    type_resolver(eye_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::eye"
 )]
 async fn eye_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -398,13 +399,13 @@ pub(crate) mod tests {
 
     #[test]
     fn eye_type_defaults_to_num() {
-        assert_eq!(eye_type(&[]), Type::Num);
+        assert_eq!(eye_type(&[], &ResolveContext::empty()), Type::Num);
     }
 
     #[test]
     fn eye_type_infers_rank_from_scalar_dim() {
         assert_eq!(
-            eye_type(&[Type::Num]),
+            eye_type(&[Type::Num], &ResolveContext::empty()),
             Type::Tensor {
                 shape: Some(vec![None, None])
             }

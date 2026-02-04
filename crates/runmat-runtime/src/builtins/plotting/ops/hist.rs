@@ -1312,7 +1312,7 @@ pub(crate) mod tests {
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_builtins::Type;
-    use crate::builtins::array::type_resolvers::row_vector_type;
+    use crate::builtins::array::type_resolvers::row_vector_type_legacy;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();

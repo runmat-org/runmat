@@ -66,7 +66,8 @@ fn logspace_type(_args: &[Type], ctx: &ResolveContext) -> Type {
     keywords = "logspace,logarithmic,vector,gpu",
     examples = "x = logspace(1, 3, 3)  % [10 100 1000]",
     accel = "array_construct",
-    type_resolver_ctx(logspace_type),
+    type_resolver(logspace_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::logspace"
 )]
 async fn logspace_builtin(
@@ -392,7 +393,7 @@ pub(crate) mod tests {
     #[test]
     fn logspace_type_is_row_vector() {
         assert_eq!(
-            logspace_type(&[Type::Num, Type::Num]),
+            logspace_type(&[Type::Num, Type::Num], &ResolveContext::empty()),
             Type::Tensor {
                 shape: Some(vec![Some(1), None])
             }

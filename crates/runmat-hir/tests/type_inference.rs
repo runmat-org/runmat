@@ -1,5 +1,7 @@
 use runmat_hir::*;
 
+use runmat_runtime as _;
+
 fn lower(code: &str) -> runmat_hir::HirProgram {
     let ast = runmat_parser::parse(code).unwrap();
     runmat_hir::lower(&ast, &LoweringContext::empty())

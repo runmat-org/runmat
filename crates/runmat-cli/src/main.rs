@@ -11,14 +11,16 @@ use miette::{SourceOffset, SourceSpan};
 use std::env;
 use uuid::Uuid;
 
-mod telemetry;
-#[allow(dead_code)]
+mod telemetry_sink;
 mod public_api;
 mod remote;
 use runmat_accelerate::AccelerateInitOptions;
 use runmat_builtins::Value;
 use runmat_config::{self as config, ConfigLoader, PlotBackend, PlotMode, RunMatConfig};
-use runmat_core::{ExecutionStreamEntry, ExecutionStreamKind, RunError, RunMatSession};
+use runmat_core::{
+    ExecutionStreamEntry, ExecutionStreamKind, RunError, RunMatSession, TelemetryRunConfig,
+    TelemetryRunFinish,
+};
 use runmat_gc::{
     gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats, GcConfig,
 };
@@ -36,9 +38,9 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::time::Duration;
-use telemetry::{
-    capture_provider_snapshot, emit_runtime_value, emit_session_start, telemetry_client_id,
-    RuntimeExecutionCounters, RuntimeTelemetryRecord, TelemetryRunKind, TelemetrySessionEvent,
+use telemetry_sink::{
+    capture_provider_snapshot, sink as telemetry_sink, telemetry_client_id, RuntimeExecutionCounters,
+    TelemetryRunKind,
 };
 
 fn parser_compat(mode: config::LanguageCompatMode) -> runmat_parser::CompatMode {
@@ -1003,7 +1005,7 @@ async fn main() -> Result<()> {
     };
     apply_cli_overrides(&mut config, &cli);
 
-    telemetry::init(&config.telemetry);
+    telemetry_sink::init(&config.telemetry);
 
     // Initialize logging based on final config
     let log_level = if config.logging.debug || cli.debug {
@@ -1416,12 +1418,6 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     if config.runtime.verbose {
         info!("Verbose mode enabled");
     }
-
-    emit_session_start(TelemetrySessionEvent {
-        kind: TelemetryRunKind::Repl,
-        jit_enabled: config.jit.enabled,
-        accelerate_enabled: config.accelerate.enabled,
-    });
     let session_start = Instant::now();
 
     let enable_jit = config.jit.enabled;
@@ -1438,12 +1434,18 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     )
     .context("Failed to create REPL engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
+    engine.set_telemetry_sink(telemetry_sink());
     engine.set_compat_mode(parser_compat(config.language.compat));
     engine.set_callstack_limit(config.runtime.callstack_limit);
     engine.set_error_namespace(config.runtime.error_namespace.clone());
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
+    let repl_run = engine.telemetry_run(TelemetryRunConfig {
+        kind: TelemetryRunKind::Repl,
+        jit_enabled: config.jit.enabled,
+        accelerate_enabled: config.accelerate.enabled,
+    });
 
     info!("RunMat REPL ready");
 
@@ -1464,7 +1466,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
                 break;
             }
         }
-        finalize_repl_session(&engine, config, session_start);
+        finalize_repl_session(&engine, config, session_start, repl_run);
         return Ok(());
     }
 
@@ -1525,7 +1527,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
         }
     }
 
-    finalize_repl_session(&engine, config, session_start);
+    finalize_repl_session(&engine, config, session_start, repl_run);
     Ok(())
 }
 
@@ -1626,24 +1628,28 @@ fn emit_execution_streams(streams: &[ExecutionStreamEntry]) {
     }
 }
 
-fn finalize_repl_session(engine: &RunMatSession, config: &RunMatConfig, session_start: Instant) {
+fn finalize_repl_session(
+    engine: &RunMatSession,
+    config: &RunMatConfig,
+    session_start: Instant,
+    repl_run: Option<runmat_core::TelemetryRunGuard>,
+) {
     let stats = engine.stats();
     let counters = RuntimeExecutionCounters {
         total_executions: stats.total_executions as u64,
         jit_compiled: stats.jit_compiled as u64,
         interpreter_fallback: stats.interpreter_fallback as u64,
     };
-    emit_runtime_value(RuntimeTelemetryRecord {
-        kind: TelemetryRunKind::Repl,
-        duration: Some(session_start.elapsed()),
-        success: true,
-        error: None,
-        jit_enabled: config.jit.enabled,
-        jit_used: stats.jit_compiled > 0,
-        accelerate_enabled: config.accelerate.enabled,
-        counters: Some(counters),
-        provider: capture_provider_snapshot(),
-    });
+    if let Some(run) = repl_run {
+        run.finish(TelemetryRunFinish {
+            duration: Some(session_start.elapsed()),
+            success: true,
+            jit_used: stats.jit_compiled > 0,
+            error: None,
+            counters: Some(counters),
+            provider: capture_provider_snapshot(),
+        });
+    }
 
     info!("RunMat REPL exiting");
 }
@@ -1780,12 +1786,6 @@ async fn execute_script_with_args(
 ) -> Result<()> {
     info!("Executing script: {script:?}");
 
-    emit_session_start(TelemetrySessionEvent {
-        kind: TelemetryRunKind::Script,
-        jit_enabled: config.jit.enabled,
-        accelerate_enabled: config.accelerate.enabled,
-    });
-
     let content = fs::read_to_string(&script)
         .with_context(|| format!("Failed to read script file: {script:?}"))?;
 
@@ -1804,6 +1804,7 @@ async fn execute_script_with_args(
     )
     .context("Failed to create execution engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
+    engine.set_telemetry_sink(telemetry_sink());
     engine.set_compat_mode(parser_compat(config.language.compat));
     engine.set_callstack_limit(config.runtime.callstack_limit);
     engine.set_error_namespace(config.runtime.error_namespace.clone());
@@ -1811,10 +1812,25 @@ async fn execute_script_with_args(
         engine.set_telemetry_client_id(Some(cid));
     }
     engine.set_source_name_override(Some(script.to_string_lossy().to_string()));
+    let mut script_run = engine.telemetry_run(TelemetryRunConfig {
+        kind: TelemetryRunKind::Script,
+        jit_enabled: config.jit.enabled,
+        accelerate_enabled: config.accelerate.enabled,
+    });
     let start_time = Instant::now();
     let result = match engine.execute(&content).await {
         Ok(result) => result,
         Err(err) => {
+            if let Some(run) = script_run.take() {
+                run.finish(TelemetryRunFinish {
+                    duration: Some(start_time.elapsed()),
+                    success: false,
+                    jit_used: false,
+                    error: Some("runtime_error".to_string()),
+                    counters: None,
+                    provider: capture_provider_snapshot(),
+                });
+            }
             if let Some(diag) =
                 format_frontend_error(&err, script.to_string_lossy().as_ref(), &content)
             {
@@ -1836,17 +1852,16 @@ async fn execute_script_with_args(
         .and_then(|err| err.identifier().map(|value| value.to_string()))
         .or_else(|| result.error.as_ref().map(|_| "runtime_error".to_string()));
     let success = error_payload.is_none();
-    emit_runtime_value(RuntimeTelemetryRecord {
-        kind: TelemetryRunKind::Script,
-        duration: Some(execution_time),
-        success,
-        error: error_payload.clone(),
-        jit_enabled: config.jit.enabled,
-        jit_used: result.used_jit,
-        accelerate_enabled: config.accelerate.enabled,
-        counters: None,
-        provider: provider_snapshot,
-    });
+    if let Some(run) = script_run.take() {
+        run.finish(TelemetryRunFinish {
+            duration: Some(execution_time),
+            success,
+            jit_used: result.used_jit,
+            error: error_payload.clone(),
+            counters: None,
+            provider: provider_snapshot,
+        });
+    }
 
     if let Some(error) = error_payload {
         eprintln!("{error}");
@@ -2159,18 +2174,13 @@ async fn execute_benchmark(
 ) -> Result<()> {
     info!("Benchmarking script: {file:?} ({iterations} iterations, JIT: {jit})");
 
-    emit_session_start(TelemetrySessionEvent {
-        kind: TelemetryRunKind::Benchmark,
-        jit_enabled: jit,
-        accelerate_enabled: config.accelerate.enabled,
-    });
-
     let content = fs::read_to_string(&file)
         .with_context(|| format!("Failed to read script file: {file:?}"))?;
 
     let mut engine = RunMatSession::with_snapshot(jit, false, _cli.snapshot.as_ref())
         .context("Failed to create execution engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
+    engine.set_telemetry_sink(telemetry_sink());
     engine.set_compat_mode(parser_compat(config.language.compat));
     engine.set_callstack_limit(config.runtime.callstack_limit);
     engine.set_error_namespace(config.runtime.error_namespace.clone());
@@ -2178,6 +2188,11 @@ async fn execute_benchmark(
         engine.set_telemetry_client_id(Some(cid));
     }
     engine.set_source_name_override(Some(file.to_string_lossy().to_string()));
+    let mut bench_run = engine.telemetry_run(TelemetryRunConfig {
+        kind: TelemetryRunKind::Benchmark,
+        jit_enabled: jit,
+        accelerate_enabled: config.accelerate.enabled,
+    });
 
     let mut total_time = Duration::ZERO;
     let mut jit_executions: u64 = 0;
@@ -2206,17 +2221,16 @@ async fn execute_benchmark(
                 jit_compiled: jit_executions + if result.used_jit { 1 } else { 0 },
                 interpreter_fallback: interpreter_executions + if result.used_jit { 0 } else { 1 },
             };
-            emit_runtime_value(RuntimeTelemetryRecord {
-                kind: TelemetryRunKind::Benchmark,
-                duration: Some(total_time),
-                success: false,
-                error: Some(error.clone()),
-                jit_enabled: jit,
-                jit_used: result.used_jit,
-                accelerate_enabled: config.accelerate.enabled,
-                counters: Some(counters),
-                provider: capture_provider_snapshot(),
-            });
+            if let Some(run) = bench_run.take() {
+                run.finish(TelemetryRunFinish {
+                    duration: Some(total_time),
+                    success: false,
+                    jit_used: result.used_jit,
+                    error: Some(error.clone()),
+                    counters: Some(counters),
+                    provider: capture_provider_snapshot(),
+                });
+            }
             error!("Benchmark iteration {i} failed: {error}");
             std::process::exit(1);
         }
@@ -2250,17 +2264,16 @@ async fn execute_benchmark(
         jit_compiled: jit_executions,
         interpreter_fallback: interpreter_executions,
     };
-    emit_runtime_value(RuntimeTelemetryRecord {
-        kind: TelemetryRunKind::Benchmark,
-        duration: Some(total_time),
-        success: true,
-        error: None,
-        jit_enabled: jit,
-        jit_used: jit_executions > 0,
-        accelerate_enabled: config.accelerate.enabled,
-        counters: Some(counters),
-        provider: capture_provider_snapshot(),
-    });
+    if let Some(run) = bench_run.take() {
+        run.finish(TelemetryRunFinish {
+            duration: Some(total_time),
+            success: true,
+            jit_used: jit_executions > 0,
+            error: None,
+            counters: Some(counters),
+            provider: capture_provider_snapshot(),
+        });
+    }
 
     engine.set_source_name_override(None);
 

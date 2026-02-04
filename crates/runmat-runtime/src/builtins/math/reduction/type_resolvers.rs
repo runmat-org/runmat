@@ -30,10 +30,6 @@ fn reduction_shape_from_args(args: &[Type], ctx: &ResolveContext) -> Option<Vec<
     }
 }
 
-fn reduction_shape_from_args_legacy(args: &[Type]) -> Option<Vec<Option<usize>>> {
-    reduction_shape_from_args(args, &ResolveContext::empty())
-}
-
 pub fn reduce_first_nonsingleton(shape: &[Option<usize>]) -> Vec<Option<usize>> {
     if shape.is_empty() {
         return scalar_tensor_shape();
@@ -89,10 +85,6 @@ pub fn reduce_logical_type(args: &[Type], ctx: &ResolveContext) -> Type {
         Type::Bool | Type::Num | Type::Int => Type::Bool,
         _ => Type::Unknown,
     }
-}
-
-pub fn reduce_logical_type_legacy(args: &[Type]) -> Type {
-    reduce_logical_type(args, &ResolveContext::empty())
 }
 
 pub fn cumulative_numeric_type(args: &[Type]) -> Type {
@@ -161,9 +153,9 @@ pub fn count_nonzero_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn min_max_type(args: &[Type]) -> Type {
+pub fn min_max_type(args: &[Type], ctx: &ResolveContext) -> Type {
     if args.len() <= 1 {
-        return reduce_numeric_type_legacy(args);
+        return reduce_numeric_type(args, ctx);
     }
     let mut has_array = false;
     let mut has_unknown = false;
@@ -208,7 +200,7 @@ mod tests {
             shape: Some(vec![Some(3), Some(4)]),
         };
         let ctx = ResolveContext::new(vec![LiteralValue::Unknown, LiteralValue::Number(2.0)]);
-        let out = reduce_numeric_type(&[ty], &ctx);
+        let out = reduce_numeric_type(&[ty, Type::Num], &ctx);
         assert_eq!(
             out,
             Type::Tensor {
@@ -246,16 +238,10 @@ mod tests {
     }
 
     #[test]
-    fn reduction_shape_legacy_matches_first_nonsingleton() {
-        let ty = Type::Tensor {
-            shape: Some(vec![Some(3), Some(4)]),
-        };
-        let out = reduction_shape_from_args_legacy(&[ty]);
-        assert_eq!(out, Some(vec![Some(1), Some(4)]));
-    }
-
-    #[test]
     fn min_max_two_args_scalar() {
-        assert_eq!(min_max_type(&[Type::Num, Type::Num]), Type::Num);
+        assert_eq!(
+            min_max_type(&[Type::Num, Type::Num], &ResolveContext::empty()),
+            Type::Num
+        );
     }
 }

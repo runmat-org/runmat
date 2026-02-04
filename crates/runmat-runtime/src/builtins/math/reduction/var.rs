@@ -15,13 +15,14 @@ use crate::builtins::common::{
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
-use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type_legacy;
+use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
+use runmat_builtins::ResolveContext;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "var";
 
-fn var_type(args: &[Type]) -> Type {
-    reduce_numeric_type_legacy(args)
+fn var_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    reduce_numeric_type(args, ctx)
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::var")]
@@ -97,6 +98,7 @@ enum NormParse {
     keywords = "var,variance,statistics,gpu,omitnan,all",
     accel = "reduction",
     type_resolver(var_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::var"
 )]
 async fn var_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -611,9 +613,12 @@ pub(crate) mod tests {
 
     #[test]
     fn var_type_reduces_first_dim() {
-        let out = var_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(2)]),
-        }]);
+        let out = var_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(2)]),
+            }],
+            &ResolveContext::empty(),
+        );
         assert_eq!(
             out,
             Type::Tensor {

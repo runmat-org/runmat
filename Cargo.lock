@@ -6391,6 +6391,7 @@ dependencies = [
  "runmat-parser",
  "runmat-runtime",
  "runmat-snapshot",
+ "runmat-telemetry",
  "runmat-time",
  "runmat-turbine",
  "tracing",
@@ -6454,6 +6455,7 @@ dependencies = [
  "runmat-builtins",
  "runmat-lexer",
  "runmat-parser",
+ "runmat-runtime",
  "serde",
 ]
 

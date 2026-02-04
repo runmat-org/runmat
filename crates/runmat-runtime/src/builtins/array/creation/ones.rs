@@ -40,7 +40,7 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("ones").build()
 }
 
-fn ones_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
+fn ones_type(args: &[Type], ctx: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::Num;
     }
@@ -78,7 +78,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Create arrays filled with ones.",
     keywords = "ones,array,logical,gpu,like",
     accel = "array_construct",
-    type_resolver_ctx(ones_type_with_ctx),
+    type_resolver(ones_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::ones"
 )]
 async fn ones_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -374,13 +375,13 @@ pub(crate) mod tests {
 
     #[test]
     fn ones_type_defaults_to_num() {
-        assert_eq!(ones_type(&[]), Type::Num);
+        assert_eq!(ones_type(&[], &ResolveContext::empty()), Type::Num);
     }
 
     #[test]
     fn ones_type_infers_rank_from_scalar_dim() {
         assert_eq!(
-            ones_type(&[Type::Num]),
+            ones_type(&[Type::Num], &ResolveContext::empty()),
             Type::Tensor {
                 shape: Some(vec![None, None])
             }
@@ -393,7 +394,7 @@ pub(crate) mod tests {
             shape: Some(vec![Some(1), Some(4)]),
         };
         assert_eq!(
-            ones_type(&[size_vec]),
+            ones_type(&[size_vec], &ResolveContext::empty()),
             Type::Tensor {
                 shape: Some(vec![None, None, None, None])
             }

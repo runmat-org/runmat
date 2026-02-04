@@ -6,11 +6,12 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use runmat_builtins::shape_rules::element_count_if_known;
+use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
     CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
 };
+use runmat_builtins::ResolveContext;
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::reshape")]
@@ -66,13 +67,18 @@ fn reshape_rank_from_args(args: &[Type]) -> Option<usize> {
     }
 }
 
-fn reshape_type(args: &[Type]) -> Type {
+fn reshape_type(args: &[Type], ctx: &ResolveContext) -> Type {
     let input = match args.first() {
         Some(value) => value,
         None => return Type::Unknown,
     };
-    let rank = reshape_rank_from_args(args);
-    let shape = rank.map(runmat_builtins::shape_rules::unknown_shape);
+    let dims = ctx.numeric_dims_from(1);
+    let shape = if !dims.is_empty() {
+        runmat_builtins::shape_rules::constructor_shape_from_dims(&dims)
+    } else {
+        let rank = reshape_rank_from_args(args);
+        rank.map(unknown_shape)
+    };
     match input {
         Type::Tensor { .. } => Type::Tensor { shape },
         Type::Logical { .. } => Type::Logical { shape },
@@ -93,6 +99,7 @@ fn reshape_type(args: &[Type]) -> Type {
     keywords = "reshape,resize,dimensions,gpu,auto",
     accel = "shape",
     type_resolver(reshape_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::shape::reshape"
 )]
 async fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -433,7 +440,10 @@ pub(crate) mod tests {
         let size_vec = Type::Tensor {
             shape: Some(vec![Some(1), Some(2)]),
         };
-        let out = reshape_type(&[Type::Tensor { shape: None }, size_vec]);
+        let out = reshape_type(
+            &[Type::Tensor { shape: None }, size_vec],
+            &ResolveContext::empty(),
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -444,13 +454,16 @@ pub(crate) mod tests {
 
     #[test]
     fn reshape_type_preserves_logical_kind() {
-        let out = reshape_type(&[
-            Type::Logical {
-                shape: Some(vec![Some(2), Some(2)]),
-            },
-            Type::Num,
-            Type::Num,
-        ]);
+        let out = reshape_type(
+            &[
+                Type::Logical {
+                    shape: Some(vec![Some(2), Some(2)]),
+                },
+                Type::Num,
+                Type::Num,
+            ],
+            &ResolveContext::empty(),
+        );
         assert_eq!(
             out,
             Type::Logical {

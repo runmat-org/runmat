@@ -41,7 +41,7 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("randn").build()
 }
 
-fn randn_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
+fn randn_type(args: &[Type], ctx: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::Num;
     }
@@ -68,7 +68,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Standard normal random numbers.",
     keywords = "randn,random,normal,gaussian,gpu,like",
     accel = "array_construct",
-    type_resolver_ctx(randn_type_with_ctx),
+    type_resolver(randn_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::randn"
 )]
 async fn randn_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -292,13 +293,13 @@ pub(crate) mod tests {
 
     #[test]
     fn randn_type_defaults_to_num() {
-        assert_eq!(randn_type(&[]), Type::Num);
+        assert_eq!(randn_type(&[], &ResolveContext::empty()), Type::Num);
     }
 
     #[test]
     fn randn_type_infers_rank_from_scalar_dim() {
         assert_eq!(
-            randn_type(&[Type::Num]),
+            randn_type(&[Type::Num], &ResolveContext::empty()),
             Type::Tensor {
                 shape: Some(vec![None, None])
             }

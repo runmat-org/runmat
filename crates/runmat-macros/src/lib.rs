@@ -44,6 +44,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut builtin_path_lit: Option<LitStr> = None;
     let mut type_resolver_path: Option<syn::Path> = None;
     let mut type_resolver_ctx_path: Option<syn::Path> = None;
+    let mut type_resolver_context_flag = false;
     let mut sink_flag = false;
     let mut suppress_auto_output_flag = false;
     for arg in args {
@@ -104,6 +105,12 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                         type_resolver_ctx_path = Some(parsed);
                     } else {
                         panic!("type_resolver_ctx must be a string literal path");
+                    }
+                } else if path.is_ident("type_resolver_context") {
+                    if let Lit::Bool(flag) = lit {
+                        type_resolver_context_flag = flag.value;
+                    } else {
+                        panic!("type_resolver_context must be a boolean literal");
                     }
                 } else {
                     // Gracefully ignore unknown parameters for better IDE experience
@@ -329,7 +336,11 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let type_resolver_expr = if let Some(path) = type_resolver_ctx_path.as_ref() {
         quote! { Some(runmat_builtins::type_resolver_kind_ctx(#path)) }
     } else if let Some(path) = type_resolver_path.as_ref() {
-        quote! { Some(runmat_builtins::type_resolver_kind(#path)) }
+        if type_resolver_context_flag {
+            quote! { Some(runmat_builtins::type_resolver_kind_ctx(#path)) }
+        } else {
+            quote! { Some(runmat_builtins::type_resolver_kind(#path)) }
+        }
     } else {
         quote! { None }
     };

@@ -8,8 +8,10 @@ use runmat_accelerate_api::{
 use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Type, Value};
 const NAME: &str = "sum";
 
-fn sum_type(args: &[Type]) -> Type {
-    reduce_numeric_type_legacy(args)
+use runmat_builtins::ResolveContext;
+
+fn sum_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    reduce_numeric_type(args, ctx)
 }
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
@@ -23,7 +25,7 @@ use crate::builtins::common::{
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
-use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type_legacy;
+use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_macros::runtime_builtin;
 
@@ -77,6 +79,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "sum,reduction,gpu,omitnan,all,like",
     accel = "reduction",
     type_resolver(sum_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::sum"
 )]
 async fn sum_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -1073,9 +1076,12 @@ pub(crate) mod tests {
 
     #[test]
     fn sum_type_reduces_first_dim() {
-        let out = sum_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(3)]),
-        }]);
+        let out = sum_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::empty(),
+        );
         assert_eq!(
             out,
             Type::Tensor {

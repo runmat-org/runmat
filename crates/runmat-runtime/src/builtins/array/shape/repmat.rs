@@ -97,7 +97,7 @@ fn repmat_output_shape(
     Some(output)
 }
 
-fn repmat_type(args: &[Type]) -> Type {
+fn repmat_type_legacy(args: &[Type]) -> Type {
     let input = match args.first() {
         Some(value) => value,
         None => return Type::Unknown,
@@ -119,10 +119,10 @@ fn repmat_type(args: &[Type]) -> Type {
     }
 }
 
-fn repmat_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
+fn repmat_type(args: &[Type], ctx: &ResolveContext) -> Type {
     let reps = ctx.numeric_dims_from(1);
     if reps.is_empty() {
-        return repmat_type(args);
+        return repmat_type_legacy(args);
     }
     let input = match args.first() {
         Some(value) => value,
@@ -154,7 +154,8 @@ fn repmat_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
     summary = "Replicate arrays by tiling an input across one or more dimensions.",
     keywords = "repmat,tile,replicate,array,gpu",
     accel = "array_construct",
-    type_resolver_ctx(repmat_type_with_ctx),
+    type_resolver(repmat_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::shape::repmat"
 )]
 async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -588,12 +589,15 @@ pub(crate) mod tests {
 
     #[test]
     fn repmat_type_preserves_logical_kind() {
-        let out = repmat_type(&[
+        let out = repmat_type(
+            &[
             Type::Logical {
                 shape: Some(vec![Some(2), Some(2)]),
             },
             Type::Num,
-        ]);
+            ],
+            &ResolveContext::empty(),
+        );
         assert_eq!(out, Type::Logical { shape: Some(vec![None, None]) });
     }
 

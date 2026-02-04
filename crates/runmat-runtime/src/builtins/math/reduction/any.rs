@@ -10,7 +10,8 @@ use crate::builtins::common::{
     shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
-use crate::builtins::math::reduction::type_resolvers::reduce_logical_type_legacy;
+use crate::builtins::math::reduction::type_resolvers::reduce_logical_type;
+use runmat_builtins::ResolveContext;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
@@ -19,8 +20,8 @@ use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResul
 
 const NAME: &str = "any";
 
-fn any_type(args: &[Type]) -> Type {
-    reduce_logical_type_legacy(args)
+fn any_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    reduce_logical_type(args, ctx)
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::any")]
@@ -76,6 +77,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "any,logical,reduction,omitnan,all,gpu",
     accel = "reduction",
     type_resolver(any_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::any"
 )]
 async fn any_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -736,9 +738,12 @@ pub(crate) mod tests {
 
     #[test]
     fn any_type_returns_logical() {
-        let out = any_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(2)]),
-        }]);
+        let out = any_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(2)]),
+            }],
+            &ResolveContext::empty(),
+        );
         assert_eq!(
             out,
             Type::Logical {

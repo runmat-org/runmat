@@ -4,15 +4,15 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use runmat_accelerate_api::{GpuTensorHandle, ReduceDimResult};
-use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
+use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "min";
 
-fn min_type(args: &[Type]) -> Type {
-    min_max_type(args)
+fn min_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    min_max_type(args, ctx)
 }
 
 use crate::builtins::common::broadcast::BroadcastPlan;
@@ -110,6 +110,7 @@ impl MinEvaluation {
     keywords = "min,minimum,reduction,gpu,comparisonmethod,omitnan",
     accel = "reduction",
     type_resolver(min_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::min"
 )]
 async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1617,7 +1618,10 @@ pub(crate) mod tests {
 
     #[test]
     fn min_type_with_two_args_returns_tensor() {
-        let out = min_type(&[Type::Tensor { shape: None }, Type::Tensor { shape: None }]);
+        let out = min_type(
+            &[Type::Tensor { shape: None }, Type::Tensor { shape: None }],
+            &ResolveContext::empty(),
+        );
         assert_eq!(out, Type::tensor());
     }
 

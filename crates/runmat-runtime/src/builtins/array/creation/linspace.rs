@@ -59,7 +59,8 @@ fn linspace_type(_args: &[Type], ctx: &ResolveContext) -> Type {
     keywords = "linspace,range,vector,gpu",
     examples = "x = linspace(0, 1, 5)  % [0 0.25 0.5 0.75 1]",
     accel = "array_construct",
-    type_resolver_ctx(linspace_type),
+    type_resolver(linspace_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::linspace"
 )]
 async fn linspace_builtin(
@@ -374,7 +375,7 @@ pub(crate) mod tests {
     #[test]
     fn linspace_type_is_row_vector() {
         assert_eq!(
-            linspace_type(&[Type::Num, Type::Num]),
+            linspace_type(&[Type::Num, Type::Num], &ResolveContext::empty()),
             Type::Tensor {
                 shape: Some(vec![Some(1), None])
             }
