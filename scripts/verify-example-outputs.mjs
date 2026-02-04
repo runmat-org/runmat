@@ -889,8 +889,20 @@ function formatWasmOutput(result) {
     if (result.stdoutText && result.valueText) {
         const normalizedStdout = normalizeOutput(result.stdoutText);
         const normalizedValue = normalizeOutput(result.valueText);
+        if (!normalizedValue) {
+            return result.stdoutText;
+        }
         if (normalizedStdout && normalizedStdout === normalizedValue) {
             return result.valueText;
+        }
+        if (normalizedStdout) {
+            const suffixIndex = normalizedStdout.lastIndexOf(normalizedValue);
+            const isSuffix = suffixIndex >= 0
+                && suffixIndex + normalizedValue.length === normalizedStdout.length
+                && (suffixIndex === 0 || normalizedStdout[suffixIndex - 1] === " ");
+            if (isSuffix) {
+                return result.stdoutText;
+            }
         }
         return `${result.stdoutText}\n${result.valueText}`;
     }
