@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
@@ -160,6 +161,12 @@ fn parse_flip_spec(args: &[Value]) -> crate::BuiltinResult<FlipSpec> {
     match args.len() {
         0 => Ok(FlipSpec::Default),
         1 => {
+            let tokens = tokens_from_values(args);
+            if let Some(token) = tokens.first() {
+                if let Some(direction_dims) = parse_direction_token(token)? {
+                    return Ok(FlipSpec::Dims(direction_dims));
+                }
+            }
             if let Some(direction_dims) = parse_direction(&args[0])? {
                 return Ok(FlipSpec::Dims(direction_dims));
             }
@@ -168,6 +175,26 @@ fn parse_flip_spec(args: &[Value]) -> crate::BuiltinResult<FlipSpec> {
         }
         _ => unreachable!(),
     }
+}
+
+fn parse_direction_token(token: &ArgToken) -> crate::BuiltinResult<Option<Vec<usize>>> {
+    let ArgToken::String(text) = token else {
+        return Ok(None);
+    };
+    let dims = match text.as_str() {
+        "horizontal" | "left-right" | "leftright" | "lr" | "right-left" | "righthoriz" => {
+            vec![2]
+        }
+        "vertical" | "up-down" | "updown" | "ud" | "down-up" => vec![1],
+        "both" => vec![1, 2],
+        other => {
+            return Err(flip_error_for(
+                "flip",
+                format!("flip: unknown direction '{other}'"),
+            ));
+        }
+    };
+    Ok(Some(dims))
 }
 
 fn parse_direction(value: &Value) -> crate::BuiltinResult<Option<Vec<usize>>> {

@@ -1,10 +1,11 @@
 //! MATLAB-compatible `ind2sub` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{Tensor, Type, Value};
+use runmat_builtins::{ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
-use super::common::{build_strides, materialize_value, parse_dims, total_elements};
+use super::common::{build_strides, dims_from_tokens, materialize_value, parse_dims, total_elements};
+use crate::builtins::common::arg_tokens::tokens_from_context;
 use crate::builtins::array::type_resolvers::size_vector_len;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -40,11 +41,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Index conversion is eager and does not participate in fusion today.",
 };
 
-fn ind2sub_type(args: &[Type]) -> Type {
+fn ind2sub_type(args: &[Type], ctx: &ResolveContext) -> Type {
     let Some(dims) = args.first() else {
         return Type::Unknown;
     };
-    let length = size_vector_len(dims);
+    let length = dims_from_tokens(&tokens_from_context(ctx))
+        .map(|values| values.len())
+        .or_else(|| size_vector_len(dims));
     Type::Cell {
         element_type: Some(Box::new(Type::tensor())),
         length,
@@ -58,6 +61,7 @@ fn ind2sub_type(args: &[Type]) -> Type {
     keywords = "ind2sub,linear index,subscripts,column major,gpu indexing",
     accel = "custom",
     type_resolver(ind2sub_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::indexing::ind2sub"
 )]
 async fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinResult<Value> {
@@ -260,7 +264,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{Tensor, Type, Value};
+    use runmat_builtins::{ResolveContext, Tensor, Type, Value};
 
     fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinResult<Value> {
         block_on(super::ind2sub_builtin(dims_val, indices_val))
@@ -292,7 +296,7 @@ pub(crate) mod tests {
             shape: Some(vec![Some(1), Some(3)]),
         };
         assert_eq!(
-            super::ind2sub_type(&[dims, Type::Num]),
+            super::ind2sub_type(&[dims, Type::Num], &ResolveContext::empty()),
             Type::Cell {
                 element_type: Some(Box::new(Type::tensor())),
                 length: Some(3)

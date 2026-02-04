@@ -4,9 +4,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use runmat_builtins::shape_rules::scalar_tensor_shape;
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{IntValue, Tensor, Type, Value};
+use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::vertcat")]
@@ -36,13 +35,20 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Concatenation materialises outputs immediately, terminating fusion pipelines.",
 };
 
-fn concat_input_shape(ty: &Type) -> Option<Vec<Option<usize>>> {
-    match ty {
-        Type::Tensor { shape: Some(shape) } => Some(shape.clone()),
-        Type::Logical { shape: Some(shape) } => Some(shape.clone()),
-        Type::Num | Type::Int | Type::Bool => Some(scalar_tensor_shape()),
-        _ => None,
+fn cell_element_type(inputs: &[Type]) -> Option<Box<Type>> {
+    let mut element: Option<Type> = None;
+    for ty in inputs {
+        let Type::Cell { element_type, .. } = ty else {
+            return None;
+        };
+        match (&element, element_type.as_deref()) {
+            (None, Some(current)) => element = Some(current.clone()),
+            (Some(existing), Some(current)) if existing == current => {}
+            (Some(_), Some(_)) => return None,
+            _ => {}
+        }
     }
+    element.map(Box::new)
 }
 
 fn concat_shape(shapes: &[Vec<Option<usize>>], dim_1based: usize) -> Option<Vec<Option<usize>>> {
@@ -106,22 +112,6 @@ fn concat_shape(shapes: &[Vec<Option<usize>>], dim_1based: usize) -> Option<Vec<
     Some(output)
 }
 
-fn cell_element_type(inputs: &[Type]) -> Option<Box<Type>> {
-    let mut element: Option<Type> = None;
-    for ty in inputs {
-        let Type::Cell { element_type, .. } = ty else {
-            return None;
-        };
-        match (&element, element_type.as_deref()) {
-            (None, Some(current)) => element = Some(current.clone()),
-            (Some(existing), Some(current)) if existing == current => {}
-            (Some(_), Some(_)) => return None,
-            _ => {}
-        }
-    }
-    element.map(Box::new)
-}
-
 fn concat_type_with_dim(args: &[Type], dim_1based: usize) -> Type {
     if args.is_empty() {
         return Type::tensor();
@@ -150,23 +140,39 @@ fn concat_type_with_dim(args: &[Type], dim_1based: usize) -> Type {
         .any(|arg| matches!(arg, Type::Logical { .. } | Type::Bool));
 
     if has_numeric {
-        let shapes: Option<Vec<Vec<Option<usize>>>> = args.iter().map(concat_input_shape).collect();
-        return Type::Tensor {
-            shape: shapes.as_ref().and_then(|s| concat_shape(s, dim_1based)),
-        };
+        let shapes: Option<Vec<Vec<Option<usize>>>> = args
+            .iter()
+            .map(|ty| match ty {
+                Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+                    Some(shape.clone())
+                }
+                Type::Num | Type::Int | Type::Bool => Some(vec![Some(1), Some(1)]),
+                _ => None,
+            })
+            .collect();
+        let shape = shapes.as_ref().and_then(|s| concat_shape(s, dim_1based));
+        return Type::Tensor { shape };
     }
 
     if has_logical {
-        let shapes: Option<Vec<Vec<Option<usize>>>> = args.iter().map(concat_input_shape).collect();
-        return Type::Logical {
-            shape: shapes.as_ref().and_then(|s| concat_shape(s, dim_1based)),
-        };
+        let shapes: Option<Vec<Vec<Option<usize>>>> = args
+            .iter()
+            .map(|ty| match ty {
+                Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+                    Some(shape.clone())
+                }
+                Type::Num | Type::Int | Type::Bool => Some(vec![Some(1), Some(1)]),
+                _ => None,
+            })
+            .collect();
+        let shape = shapes.as_ref().and_then(|s| concat_shape(s, dim_1based));
+        return Type::Logical { shape };
     }
 
     Type::Unknown
 }
 
-fn vertcat_type(args: &[Type]) -> Type {
+fn vertcat_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     concat_type_with_dim(args, 1)
 }
 
@@ -181,6 +187,7 @@ fn vertcat_error(message: impl Into<String>) -> RuntimeError {
     keywords = "vertcat,vertical concatenation,array,gpu",
     accel = "array_construct",
     type_resolver(vertcat_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::shape::vertcat"
 )]
 async fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -236,14 +243,17 @@ pub(crate) mod tests {
 
     #[test]
     fn vertcat_type_combines_shapes() {
-        let out = vertcat_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(3)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            },
-        ]);
+        let out = vertcat_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(3)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+            ],
+            &ResolveContext::empty(),
+        );
         assert_eq!(
             out,
             Type::Tensor {

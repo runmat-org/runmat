@@ -1,6 +1,6 @@
-use runmat_builtins::Type;
+use runmat_builtins::{ResolveContext, Type};
 
-use crate::builtins::array::type_resolvers::{row_vector_type_legacy, size_vector_len};
+use crate::builtins::array::type_resolvers::{row_vector_type, size_vector_len};
 
 pub fn string_type(_args: &[Type]) -> Type {
     Type::String
@@ -25,12 +25,12 @@ pub fn gca_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn hist_type(args: &[Type]) -> Type {
+pub fn hist_type(args: &[Type], ctx: &ResolveContext) -> Type {
     let bins_len = args.get(1).and_then(size_vector_len).filter(|len| *len > 1);
     match bins_len {
         Some(len) => Type::Tensor {
             shape: Some(vec![Some(1), Some(len)]),
         },
-        None => row_vector_type_legacy(),
+        None => row_vector_type(ctx),
     }
 }

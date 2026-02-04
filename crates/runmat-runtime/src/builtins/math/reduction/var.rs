@@ -5,6 +5,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::random_args::{extract_dims, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -118,10 +119,40 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut normalization = VarNormalization::Sample;
     let mut normalization_consumed = false;
     let mut nan_mode = ReductionNaN::Include;
+    let tokens = tokens_from_values(args);
 
     let mut idx = 0;
     while idx < args.len() {
         let arg = &args[idx];
+
+        if let Some(token) = tokens.get(idx) {
+            if let crate::builtins::common::arg_tokens::ArgToken::String(text) = token {
+                match text.as_str() {
+                    "omitnan" => {
+                        nan_mode = ReductionNaN::Omit;
+                        idx += 1;
+                        continue;
+                    }
+                    "includenan" => {
+                        nan_mode = ReductionNaN::Include;
+                        idx += 1;
+                        continue;
+                    }
+                    "all" => {
+                        if axes_set && !matches!(axes, VarAxes::Default) {
+                            return Err(var_error(
+                                "var: 'all' cannot be combined with an explicit dimension",
+                            ));
+                        }
+                        axes = VarAxes::All;
+                        axes_set = true;
+                        idx += 1;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+        }
 
         if let Some(keyword) = keyword_of(arg) {
             match keyword.as_str() {

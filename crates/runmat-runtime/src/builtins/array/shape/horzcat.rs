@@ -1,6 +1,7 @@
 //! MATLAB-compatible `horzcat` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::{IntValue, Tensor, Type, Value};
+use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::shape_rules::scalar_tensor_shape;
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, RuntimeError};
@@ -9,7 +10,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use runmat_builtins::shape_rules::scalar_tensor_shape;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::horzcat")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -157,22 +157,20 @@ fn concat_type_with_dim(args: &[Type], dim_1based: usize) -> Type {
 
     if has_numeric {
         let shapes: Option<Vec<Vec<Option<usize>>>> = args.iter().map(concat_input_shape).collect();
-        return Type::Tensor {
-            shape: shapes.as_ref().and_then(|s| concat_shape(s, dim_1based)),
-        };
+        let shape = shapes.as_ref().and_then(|s| concat_shape(s, dim_1based));
+        return Type::Tensor { shape };
     }
 
     if has_logical {
         let shapes: Option<Vec<Vec<Option<usize>>>> = args.iter().map(concat_input_shape).collect();
-        return Type::Logical {
-            shape: shapes.as_ref().and_then(|s| concat_shape(s, dim_1based)),
-        };
+        let shape = shapes.as_ref().and_then(|s| concat_shape(s, dim_1based));
+        return Type::Logical { shape };
     }
 
     Type::Unknown
 }
 
-fn horzcat_type(args: &[Type]) -> Type {
+fn horzcat_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     concat_type_with_dim(args, 2)
 }
 
@@ -183,6 +181,7 @@ fn horzcat_type(args: &[Type]) -> Type {
     keywords = "horzcat,horizontal concatenation,array,gpu",
     accel = "array_construct",
     type_resolver(horzcat_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::shape::horzcat"
 )]
 async fn horzcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -238,14 +237,17 @@ pub(crate) mod tests {
 
     #[test]
     fn horzcat_type_combines_shapes() {
-        let out = horzcat_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(1)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            },
-        ]);
+        let out = horzcat_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(1)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+            ],
+            &ResolveContext::empty(),
+        );
         assert_eq!(
             out,
             Type::Tensor {

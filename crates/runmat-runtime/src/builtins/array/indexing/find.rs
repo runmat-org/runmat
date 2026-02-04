@@ -1,7 +1,7 @@
 //! MATLAB-compatible `find` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{HostTensorView, ProviderFindResult};
-use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
+use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::arg_tokens::ArgToken;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 
@@ -40,8 +41,55 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Find drives control flow and currently bypasses fusion; metadata is present for completeness only.",
 };
 
-fn find_type(_args: &[Type]) -> Type {
+fn find_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     column_vector_type()
+}
+
+fn parse_find_tokens(tokens: &[ArgToken]) -> crate::BuiltinResult<FindOptions> {
+    match tokens.len() {
+        0 => Ok(FindOptions::default()),
+        1 => {
+            if let Some(direction) = token_to_direction(&tokens[0])? {
+                let limit = if matches!(direction, FindDirection::Last) {
+                    Some(1)
+                } else {
+                    None
+                };
+                Ok(FindOptions { limit, direction })
+            } else {
+                let limit = token_to_limit(&tokens[0])?;
+                Ok(FindOptions {
+                    limit: Some(limit),
+                    direction: FindDirection::First,
+                })
+            }
+        }
+        2 => {
+            let limit = token_to_limit(&tokens[0])?;
+            let direction = token_to_direction(&tokens[1])?
+                .ok_or_else(|| find_error("find: third argument must be 'first' or 'last'"))?;
+            Ok(FindOptions { limit: Some(limit), direction })
+        }
+        _ => Err(find_error("find: too many input arguments")),
+    }
+}
+
+fn token_to_direction(token: &ArgToken) -> crate::BuiltinResult<Option<FindDirection>> {
+    match token {
+        ArgToken::String(text) => match text.as_str() {
+            "first" => Ok(Some(FindDirection::First)),
+            "last" => Ok(Some(FindDirection::Last)),
+            _ => Err(find_error("find: direction must be 'first' or 'last'")),
+        },
+        _ => Ok(None),
+    }
+}
+
+fn token_to_limit(token: &ArgToken) -> crate::BuiltinResult<usize> {
+    match token {
+        ArgToken::Number(value) => parse_limit_scalar(*value),
+        _ => Err(find_error("find: second argument must be a scalar")),
+    }
 }
 
 #[runtime_builtin(
@@ -51,6 +99,7 @@ fn find_type(_args: &[Type]) -> Type {
     keywords = "find,nonzero,indices,row,column,gpu",
     accel = "custom",
     type_resolver(find_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::indexing::find"
 )]
 async fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -227,80 +276,10 @@ impl FindEval {
 }
 
 async fn parse_options(args: &[Value]) -> crate::BuiltinResult<FindOptions> {
-    match args.len() {
-        0 => Ok(FindOptions::default()),
-        1 => {
-            if is_direction_like(&args[0]) {
-                let direction_opt = parse_direction(&args[0])?;
-                let limit = if matches!(direction_opt, Some(FindDirection::Last)) {
-                    Some(1)
-                } else {
-                    None
-                };
-                let direction = direction_opt.unwrap_or(FindDirection::First);
-                Ok(FindOptions { limit, direction })
-            } else {
-                let limit = parse_limit(&args[0]).await?;
-                Ok(FindOptions {
-                    limit: Some(limit),
-                    direction: FindDirection::First,
-                })
-            }
-        }
-        2 => {
-            let limit = parse_limit(&args[0]).await?;
-            let direction = parse_direction(&args[1])?
-                .ok_or_else(|| find_error("find: third argument must be 'first' or 'last'"))?;
-            Ok(FindOptions {
-                limit: Some(limit),
-                direction,
-            })
-        }
-        _ => Err(find_error("find: too many input arguments")),
-    }
+    parse_find_tokens(&crate::builtins::common::arg_tokens::tokens_from_values(args))
 }
 
-fn parse_direction(value: &Value) -> crate::BuiltinResult<Option<FindDirection>> {
-    if let Some(text) = tensor::value_to_string(value) {
-        let lowered = text.trim().to_ascii_lowercase();
-        match lowered.as_str() {
-            "first" => Ok(Some(FindDirection::First)),
-            "last" => Ok(Some(FindDirection::Last)),
-            _ => Err(find_error("find: direction must be 'first' or 'last'")),
-        }
-    } else {
-        Ok(None)
-    }
-}
 
-fn is_direction_like(value: &Value) -> bool {
-    match value {
-        Value::String(_) => true,
-        Value::StringArray(sa) => sa.data.len() == 1,
-        Value::CharArray(ca) => ca.rows == 1,
-        _ => false,
-    }
-}
-
-async fn parse_limit(value: &Value) -> crate::BuiltinResult<usize> {
-    match value {
-        Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor_async(handle).await?;
-            parse_limit_tensor(&tensor)
-        }
-        _ => {
-            let tensor = tensor::value_to_tensor(value).map_err(|message| find_error(message))?;
-            parse_limit_tensor(&tensor)
-        }
-    }
-}
-
-fn parse_limit_tensor(tensor: &Tensor) -> crate::BuiltinResult<usize> {
-    if tensor.data.len() != 1 {
-        return Err(find_error("find: second argument must be a scalar"));
-    }
-    parse_limit_scalar(tensor.data[0])
-}
 
 fn parse_limit_scalar(value: f64) -> crate::BuiltinResult<usize> {
     if !value.is_finite() {
@@ -556,7 +535,7 @@ pub(crate) mod tests {
     #[test]
     fn find_type_is_column_vector() {
         assert_eq!(
-            find_type(&[Type::Tensor { shape: None }]),
+            find_type(&[Type::Tensor { shape: None }], &ResolveContext::empty()),
             Type::Tensor {
                 shape: Some(vec![None, Some(1)])
             }

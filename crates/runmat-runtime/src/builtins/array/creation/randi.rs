@@ -10,10 +10,8 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{random, tensor};
-use crate::builtins::array::type_resolvers::{
-    rank_from_dims_args_legacy, tensor_type_from_rank_legacy,
-};
-use runmat_builtins::Type;
+use crate::builtins::array::type_resolvers::tensor_type_from_rank;
+use runmat_builtins::{ResolveContext, Type};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::randi")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -38,7 +36,7 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("randi").build()
 }
 
-fn randi_type(args: &[Type]) -> Type {
+fn randi_type(args: &[Type], ctx: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::Unknown;
     }
@@ -49,8 +47,8 @@ fn randi_type(args: &[Type]) -> Type {
     if rest.iter().any(|arg| matches!(arg, Type::String)) {
         return Type::Unknown;
     }
-    let rank = rank_from_dims_args_legacy(rest);
-    tensor_type_from_rank_legacy(rank)
+    let rest_ctx = ResolveContext::new(ctx.literal_args.get(1..).unwrap_or(&[]).to_vec());
+    tensor_type_from_rank(rest, &rest_ctx)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randi")]
@@ -71,6 +69,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "randi,random,integer,gpu,like",
     accel = "array_construct",
     type_resolver(randi_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::randi"
 )]
 async fn randi_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -584,13 +583,14 @@ pub(crate) mod tests {
 
     #[test]
     fn randi_type_single_bound_is_num() {
-        assert_eq!(randi_type(&[Type::Num]), Type::Num);
+        assert_eq!(randi_type(&[Type::Num], &ResolveContext::new(Vec::new())), Type::Num);
     }
 
     #[test]
     fn randi_type_infers_rank_from_dims() {
+        let ctx = ResolveContext::new(Vec::new());
         assert_eq!(
-            randi_type(&[Type::Num, Type::Num, Type::Num]),
+            randi_type(&[Type::Num, Type::Num, Type::Num], &ctx),
             Type::Tensor {
                 shape: Some(vec![None, None])
             }

@@ -14,6 +14,7 @@ fn prod_type(args: &[Type], ctx: &ResolveContext) -> Type {
 
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -260,10 +261,39 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut nan_mode = ReductionNaN::Include;
     let mut output = OutputTemplate::Double;
     let mut output_set = false;
+    let tokens = tokens_from_values(args);
 
     let mut idx = 0;
     while idx < args.len() {
         let arg = &args[idx];
+        if let Some(token) = tokens.get(idx) {
+            if let crate::builtins::common::arg_tokens::ArgToken::String(text) = token {
+                match text.as_str() {
+                    "omitnan" => {
+                        nan_mode = ReductionNaN::Omit;
+                        idx += 1;
+                        continue;
+                    }
+                    "includenan" => {
+                        nan_mode = ReductionNaN::Include;
+                        idx += 1;
+                        continue;
+                    }
+                    "all" => {
+                        if selection_set && !matches!(selection, DimSelection::Auto) {
+                            return Err(prod_error(
+                                "prod: 'all' cannot be combined with an explicit dimension",
+                            ));
+                        }
+                        selection = DimSelection::All;
+                        selection_set = true;
+                        idx += 1;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+        }
         if let Some(keyword) = keyword_of(arg) {
             match keyword.as_str() {
                 "omitnan" => {

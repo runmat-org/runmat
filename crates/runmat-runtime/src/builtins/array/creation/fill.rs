@@ -3,12 +3,11 @@
 //! The implementation mirrors the modern RunMat builtin blueprint with GPU-aware semantics.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Type, Value};
+use runmat_builtins::{ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::array::type_resolvers::{
-    is_scalar_type, logical_type_from_rank, rank_from_dims_args_legacy,
-    tensor_type_from_rank_legacy,
+    is_scalar_type, logical_type_from_rank, rank_from_dims_args, tensor_type_from_rank,
 };
 use crate::builtins::common::random_args::{extract_dims, keyword_of, shape_from_value};
 use crate::builtins::common::spec::{
@@ -57,7 +56,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner treats fill as a constant generator backed by a uniform parameter.",
 };
 
-fn fill_type(args: &[Type]) -> Type {
+fn fill_type(args: &[Type], ctx: &ResolveContext) -> Type {
     let Some((fill_value, rest)) = args.split_first() else {
         return Type::Unknown;
     };
@@ -76,11 +75,12 @@ fn fill_type(args: &[Type]) -> Type {
         }
         return Type::tensor();
     }
-    let rank = rank_from_dims_args_legacy(rest);
+    let rest_ctx = ResolveContext::new(ctx.literal_args.get(1..).unwrap_or(&[]).to_vec());
+    let rank = rank_from_dims_args(rest, &rest_ctx);
     if wants_logical {
         logical_type_from_rank(rank)
     } else {
-        tensor_type_from_rank_legacy(rank)
+        tensor_type_from_rank(rest, &rest_ctx)
     }
 }
 
@@ -91,6 +91,7 @@ fn fill_type(args: &[Type]) -> Type {
     keywords = "fill,constant,array,gpu,like",
     accel = "array_construct",
     type_resolver(fill_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::fill"
 )]
 async fn fill_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -455,13 +456,14 @@ pub(crate) mod tests {
 
     #[test]
     fn fill_type_scalar_numeric_is_num() {
-        assert_eq!(fill_type(&[Type::Num]), Type::Num);
+        assert_eq!(fill_type(&[Type::Num], &ResolveContext::new(Vec::new())), Type::Num);
     }
 
     #[test]
     fn fill_type_logical_dims_returns_logical_tensor() {
+        let ctx = ResolveContext::new(Vec::new());
         assert_eq!(
-            fill_type(&[Type::Bool, Type::Num, Type::Num]),
+            fill_type(&[Type::Bool, Type::Num, Type::Num], &ctx),
             Type::Logical {
                 shape: Some(vec![None, None])
             }

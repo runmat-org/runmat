@@ -1156,7 +1156,14 @@ impl PlotRenderer {
         self.wgpu_renderer
             .update_uniforms(view_proj_matrix, Mat4::IDENTITY);
 
+        let (sx, sy, sw, sh) = viewport_scissor;
+        let is_2d = matches!(
+            cam.projection,
+            crate::core::camera::ProjectionType::Orthographic { .. }
+        );
+
         // Prepare render items outside the pass
+        let mut owned_render_data: Vec<Box<crate::core::RenderData>> = Vec::new();
         let mut render_items = Vec::new();
         let mut total_vertices = 0usize;
         let mut total_triangles = 0usize;
@@ -1171,6 +1178,259 @@ impl PlotRenderer {
                     }
                     render_items.push((render_data, vb, ib));
                 }
+            }
+        }
+
+        // 3D helpers: CAD-style XY grid at Z=0 (grid on/off) + origin triad (always).
+        // These are generated per-frame so they can adapt to zoom level.
+        if !is_2d {
+            let view_proj = view_proj_matrix;
+            let inv_view_proj = view_proj.inverse();
+
+            let unproject = |ndc_x: f32, ndc_y: f32, ndc_z: f32| -> Option<Vec3> {
+                let clip = Vec4::new(ndc_x, ndc_y, ndc_z, 1.0);
+                let world = inv_view_proj * clip;
+                if !world.w.is_finite() || world.w.abs() < 1e-6 {
+                    return None;
+                }
+                let p = world.truncate() / world.w;
+                if p.x.is_finite() && p.y.is_finite() && p.z.is_finite() {
+                    Some(p)
+                } else {
+                    None
+                }
+            };
+
+            let ray_intersect_z0 = |ndc_x: f32, ndc_y: f32| -> Option<Vec3> {
+                // Use a near/far pair in clip space to form a ray.
+                let p0 = unproject(ndc_x, ndc_y, -1.0)?;
+                let p1 = unproject(ndc_x, ndc_y, 1.0)?;
+                let dir = p1 - p0;
+                if !dir.z.is_finite() || dir.z.abs() < 1e-8 {
+                    return None;
+                }
+                let t = (-p0.z) / dir.z;
+                if !t.is_finite() || t <= 0.0 {
+                    return None;
+                }
+                Some(p0 + dir * t)
+            };
+
+            let mut plane_pts: Vec<Vec3> = Vec::new();
+            for (nx, ny) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+                if let Some(p) = ray_intersect_z0(nx, ny) {
+                    plane_pts.push(p);
+                }
+            }
+
+            // Fallback region if we couldn't intersect enough rays (camera nearly parallel to plane).
+            let mut min_x = 0.0_f32;
+            let mut max_x = 1.0_f32;
+            let mut min_y = 0.0_f32;
+            let mut max_y = 1.0_f32;
+
+            if plane_pts.len() >= 2 {
+                min_x = plane_pts.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
+                max_x = plane_pts.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max);
+                min_y = plane_pts.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
+                max_y = plane_pts.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
+            } else if let crate::core::camera::ProjectionType::Perspective { fov, .. } = cam.projection
+            {
+                let dist = (cam.position - cam.target).length().max(1e-3);
+                let extent = (dist * (0.5 * fov).tan() * 1.25).max(0.5);
+                let center = Vec3::new(cam.target.x, cam.target.y, 0.0);
+                min_x = center.x - extent;
+                max_x = center.x + extent;
+                min_y = center.y - extent;
+                max_y = center.y + extent;
+            }
+
+            // Expand a bit so grid lines don't pop at edges.
+            let dx = (max_x - min_x).abs().max(1e-3);
+            let dy = (max_y - min_y).abs().max(1e-3);
+            let margin_x = dx * 0.10;
+            let margin_y = dy * 0.10;
+            min_x -= margin_x;
+            max_x += margin_x;
+            min_y -= margin_y;
+            max_y += margin_y;
+
+            let project_to_px = |p: Vec3| -> Option<(f32, f32)> {
+                let clip = view_proj * Vec4::new(p.x, p.y, p.z, 1.0);
+                if !clip.w.is_finite() || clip.w.abs() < 1e-6 {
+                    return None;
+                }
+                let ndc = clip.truncate() / clip.w;
+                if !(ndc.x.is_finite() && ndc.y.is_finite()) {
+                    return None;
+                }
+                let px = ((ndc.x + 1.0) * 0.5) * (sw.max(1) as f32);
+                let py = ((1.0 - ndc.y) * 0.5) * (sh.max(1) as f32);
+                Some((px, py))
+            };
+
+            let nice_step = |raw: f64| -> f64 {
+                if !raw.is_finite() || raw <= 0.0 {
+                    return 1.0;
+                }
+                let pow10 = 10.0_f64.powf(raw.log10().floor());
+                let norm = raw / pow10;
+                let mult = if norm <= 1.0 {
+                    1.0
+                } else if norm <= 2.0 {
+                    2.0
+                } else if norm <= 5.0 {
+                    5.0
+                } else {
+                    10.0
+                };
+                mult * pow10
+            };
+
+            // Determine grid scale from projection at the plane center.
+            let cx = (min_x + max_x) * 0.5;
+            let cy = (min_y + max_y) * 0.5;
+            let center = Vec3::new(cx, cy, 0.0);
+            let px_per_world = {
+                let a = project_to_px(center);
+                let b = project_to_px(center + Vec3::new(1.0, 0.0, 0.0));
+                match (a, b) {
+                    (Some((ax, ay)), Some((bx, by))) => ((bx - ax).hypot(by - ay)).max(1e-3),
+                    _ => 1.0,
+                }
+            };
+            let desired_major_px = 120.0_f64;
+            let major_step = nice_step((desired_major_px / (px_per_world as f64)).max(1e-6));
+            let mut minor_step = major_step / 10.0;
+            if !minor_step.is_finite() || minor_step <= 0.0 {
+                minor_step = major_step.max(1.0);
+            }
+
+            // Cap minor line density to avoid noisy/perf-heavy grids.
+            let max_minor_lines = 180.0;
+            let minor_count_x = (dx as f64 / minor_step).abs();
+            let minor_count_y = (dy as f64 / minor_step).abs();
+            if minor_count_x > max_minor_lines || minor_count_y > max_minor_lines {
+                minor_step = (major_step / 5.0).max(major_step); // effectively disable minors
+            }
+
+            let mut helper_vertices: Vec<Vertex> = Vec::new();
+            let mut push_line = |a: Vec3, b: Vec3, color: Vec4| {
+                helper_vertices.push(Vertex::new(a, color));
+                helper_vertices.push(Vertex::new(b, color));
+            };
+
+            // Slightly offset the grid plane to reduce z-fighting with geometry on z=0.
+            let z_grid = -1e-4_f32;
+
+            if self.figure_show_grid {
+                // Slightly stronger than the 2D grid because 3D perspective + depth cues
+                // can make thin lines hard to perceive.
+                let minor_col = Vec4::new(0.82, 0.84, 0.88, 0.18);
+                let major_col = Vec4::new(0.90, 0.92, 0.96, 0.30);
+
+                let is_major = |v: f64| -> bool {
+                    if !v.is_finite() {
+                        return false;
+                    }
+                    let q = v / major_step;
+                    (q - q.round()).abs() < 1e-6
+                };
+
+                // Vertical grid lines (constant X)
+                if minor_step.is_finite() && minor_step > 0.0 {
+                    let start = ((min_x as f64 / minor_step).floor() * minor_step) as f64;
+                    let end = ((max_x as f64 / minor_step).ceil() * minor_step) as f64;
+                    let mut x = start;
+                    while x <= end + minor_step * 0.5 {
+                        let col = if is_major(x) { major_col } else { minor_col };
+                        let xf = x as f32;
+                        push_line(
+                            Vec3::new(xf, min_y, z_grid),
+                            Vec3::new(xf, max_y, z_grid),
+                            col,
+                        );
+                        x += minor_step;
+                    }
+                }
+                // Horizontal grid lines (constant Y)
+                if minor_step.is_finite() && minor_step > 0.0 {
+                    let start = ((min_y as f64 / minor_step).floor() * minor_step) as f64;
+                    let end = ((max_y as f64 / minor_step).ceil() * minor_step) as f64;
+                    let mut y = start;
+                    while y <= end + minor_step * 0.5 {
+                        let col = if is_major(y) { major_col } else { minor_col };
+                        let yf = y as f32;
+                        push_line(
+                            Vec3::new(min_x, yf, z_grid),
+                            Vec3::new(max_x, yf, z_grid),
+                            col,
+                        );
+                        y += minor_step;
+                    }
+                }
+            }
+
+            // Origin triad (always, for spatial awareness).
+            let axis_len = (major_step as f32 * 5.0).clamp(0.5, (dx.max(dy) * 0.6).max(0.5));
+            let origin = Vec3::new(0.0, 0.0, 0.0);
+            let col_x = Vec4::new(0.92, 0.25, 0.25, 0.85);
+            let col_y = Vec4::new(0.35, 0.90, 0.45, 0.85);
+            let col_z = Vec4::new(0.35, 0.62, 0.98, 0.85);
+            push_line(origin, origin + Vec3::new(axis_len, 0.0, 0.0), col_x);
+            push_line(origin, origin + Vec3::new(0.0, axis_len, 0.0), col_y);
+            push_line(origin, origin + Vec3::new(0.0, 0.0, axis_len), col_z);
+
+            // Dynamic tick marks on the origin triad (major step only). Labels are drawn in the
+            // overlay so they stay crisp; these marks provide a depth-correct anchor in the scene.
+            let tick_len = (axis_len * 0.04).clamp(0.01, major_step as f32 * 0.25);
+            let max_ticks = 6usize;
+            let mut add_ticks = |axis: Vec3, perp: Vec3, col: Vec4| {
+                if major_step <= 0.0 {
+                    return;
+                }
+                for i in 1..=max_ticks {
+                    let t = (i as f32) * (major_step as f32);
+                    if t >= axis_len * 0.999 {
+                        break;
+                    }
+                    let p = origin + axis * t;
+                    push_line(p - perp * tick_len, p + perp * tick_len, Vec4::new(col.x, col.y, col.z, col.w * 0.85));
+                }
+            };
+            add_ticks(Vec3::X, Vec3::Y, col_x);
+            add_ticks(Vec3::Y, Vec3::X, col_y);
+            add_ticks(Vec3::Z, Vec3::X, col_z);
+
+            if !helper_vertices.is_empty() {
+                let rd = Box::new(crate::core::RenderData {
+                    pipeline_type: crate::core::PipelineType::Lines,
+                    vertices: helper_vertices,
+                    indices: None,
+                    gpu_vertices: None,
+                    bounds: None,
+                    material: crate::core::Material::default(),
+                    draw_calls: vec![crate::core::DrawCall {
+                        vertex_offset: 0,
+                        vertex_count: 0, // filled below
+                        index_offset: None,
+                        index_count: None,
+                        instance_count: 1,
+                    }],
+                    image: None,
+                });
+                owned_render_data.push(rd);
+                let idx = owned_render_data.len() - 1;
+                // Fill vertex_count now that vertices are owned.
+                let vcount = owned_render_data[idx].vertices.len();
+                if let Some(dc) = owned_render_data[idx].draw_calls.get_mut(0) {
+                    dc.vertex_count = vcount;
+                }
+                let vb = Arc::new(self.wgpu_renderer.create_vertex_buffer(&owned_render_data[idx].vertices));
+                // Draw helpers first (under data, depth-tested).
+                let rd_ref: &crate::core::RenderData = &owned_render_data[idx];
+                render_items.insert(0, (rd_ref, vb, None));
+                total_vertices += vcount;
             }
         }
 
@@ -1233,11 +1493,6 @@ impl PlotRenderer {
         }
 
         // Precompute optional grid geometry and uniforms so we can draw it under data
-        let (sx, sy, sw, sh) = viewport_scissor;
-        let is_2d = matches!(
-            cam.projection,
-            crate::core::camera::ProjectionType::Orthographic { .. }
-        );
         // Grid is drawn only when enabled and in 2D orthographic
         let mut grid_vb_opt: Option<wgpu::Buffer> = None;
         if is_2d && self.figure_show_grid {

@@ -97,37 +97,29 @@ fn repmat_output_shape(
     Some(output)
 }
 
-fn repmat_type_legacy(args: &[Type]) -> Type {
-    let input = match args.first() {
-        Some(value) => value,
-        None => return Type::Unknown,
-    };
-    let reps_len = repmat_reps_len(args);
-    let shape = array_shape(input)
-        .and_then(|shape| reps_len.and_then(|len| repmat_output_shape(shape, len)));
-    match input {
-        Type::Tensor { .. } => Type::Tensor { shape },
-        Type::Logical { .. } => Type::Logical { shape },
-        Type::Bool => Type::logical(),
-        Type::Num | Type::Int => Type::tensor(),
-        Type::Cell { element_type, .. } => Type::Cell {
-            element_type: element_type.clone(),
-            length: None,
-        },
-        Type::Unknown => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
 fn repmat_type(args: &[Type], ctx: &ResolveContext) -> Type {
     let reps = ctx.numeric_dims_from(1);
-    if reps.is_empty() {
-        return repmat_type_legacy(args);
-    }
     let input = match args.first() {
         Some(value) => value,
         None => return Type::Unknown,
     };
+    if reps.is_empty() {
+        let reps_len = repmat_reps_len(args);
+        let shape = array_shape(input)
+            .and_then(|shape| reps_len.and_then(|len| repmat_output_shape(shape, len)));
+        return match input {
+            Type::Tensor { .. } => Type::Tensor { shape },
+            Type::Logical { .. } => Type::Logical { shape },
+            Type::Bool => Type::logical(),
+            Type::Num | Type::Int => Type::tensor(),
+            Type::Cell { element_type, .. } => Type::Cell {
+                element_type: element_type.clone(),
+                length: None,
+            },
+            Type::Unknown => Type::Unknown,
+            _ => Type::Unknown,
+        };
+    }
     let shape = match input {
         Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
             runmat_builtins::shape_rules::repmat_shape(shape, &reps)
@@ -596,7 +588,7 @@ pub(crate) mod tests {
             },
             Type::Num,
             ],
-            &ResolveContext::empty(),
+            &ResolveContext::new(Vec::new()),
         );
         assert_eq!(out, Type::Logical { shape: Some(vec![None, None]) });
     }

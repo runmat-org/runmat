@@ -17,7 +17,7 @@ use crate::builtins::common::tensor;
 use runmat_builtins::shape_rules::element_count_if_known;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Type, Value};
+use runmat_builtins::{ResolveContext, Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::ipermute")]
@@ -63,12 +63,15 @@ fn permute_order_len(ty: &Type) -> Option<usize> {
     }
 }
 
-fn ipermute_type(args: &[Type]) -> Type {
+fn ipermute_type(args: &[Type], ctx: &ResolveContext) -> Type {
     if args.len() < 2 {
         return Type::Unknown;
     }
     let input = &args[0];
-    let order_len = permute_order_len(&args[1]);
+    let order_len = ctx
+        .numeric_vector_at(1)
+        .map(|values| values.len())
+        .or_else(|| permute_order_len(&args[1]));
     let shape = order_len.map(runmat_builtins::shape_rules::unknown_shape);
     match input {
         Type::Tensor { .. } => Type::Tensor { shape },
@@ -93,6 +96,7 @@ fn ipermute_error(message: impl Into<String>) -> RuntimeError {
     keywords = "ipermute,inverse permute,dimension reorder,gpu",
     accel = "custom",
     type_resolver(ipermute_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::shape::ipermute"
 )]
 async fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
@@ -164,7 +168,7 @@ fn inverse_permutation(order: &[usize]) -> Vec<usize> {
 #[cfg(test)]
 pub(crate) mod tests {
     use futures::executor::block_on;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
         block_on(super::ipermute_builtin(value, order))
@@ -181,7 +185,10 @@ pub(crate) mod tests {
         let order = Type::Tensor {
             shape: Some(vec![Some(1), Some(3)]),
         };
-        let out = super::ipermute_type(&[Type::Tensor { shape: None }, order]);
+        let out = super::ipermute_type(
+            &[Type::Tensor { shape: None }, order],
+            &ResolveContext::empty(),
+        );
         assert_eq!(
             out,
             Type::Tensor {

@@ -60,6 +60,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     sink = true,
     type_resolver(histcounts_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::stats::hist::histcounts"
 )]
 async fn histcounts_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -950,7 +951,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor, Type, Value};
+    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
 
     fn values_from_tensor(value: Value) -> Vec<f64> {
         match value {
@@ -962,9 +963,13 @@ pub(crate) mod tests {
 
     #[test]
     fn histcounts_type_defaults_to_row_vector() {
-        let out = histcounts_type(&[Type::Tensor {
-            shape: Some(vec![Some(5), Some(1)]),
-        }]);
+        let ctx = ResolveContext::new(Vec::new());
+        let out = histcounts_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(5), Some(1)]),
+            }],
+            &ctx,
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -975,14 +980,18 @@ pub(crate) mod tests {
 
     #[test]
     fn histcounts_type_uses_edge_vector_length() {
-        let out = histcounts_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(5), Some(1)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(6)]),
-            },
-        ]);
+        let ctx = ResolveContext::new(Vec::new());
+        let out = histcounts_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(5), Some(1)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(6)]),
+                },
+            ],
+            &ctx,
+        );
         assert_eq!(
             out,
             Type::Tensor {

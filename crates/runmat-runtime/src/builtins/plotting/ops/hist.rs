@@ -300,6 +300,7 @@ impl HistWeightsInput {
     sink = true,
     suppress_auto_output = true,
     type_resolver(hist_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::plotting::hist"
 )]
 pub async fn hist_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -1311,8 +1312,8 @@ pub(crate) mod tests {
     use crate::builtins::plotting::tests::ensure_plot_test_env;
     use crate::RuntimeError;
     use futures::executor::block_on;
-    use runmat_builtins::Type;
-    use crate::builtins::array::type_resolvers::row_vector_type_legacy;
+    use runmat_builtins::{ResolveContext, Type};
+    use crate::builtins::array::type_resolvers::row_vector_type;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -1510,17 +1511,22 @@ pub(crate) mod tests {
 
     #[test]
     fn hist_type_defaults_to_row_vector() {
-        assert_eq!(hist_type(&[Type::tensor()]), row_vector_type_legacy());
+        let ctx = ResolveContext::new(Vec::new());
+        assert_eq!(hist_type(&[Type::tensor()], &ctx), row_vector_type(&ctx));
     }
 
     #[test]
     fn hist_type_uses_bin_centers_length() {
-        let out = hist_type(&[
-            Type::tensor(),
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(5)]),
-            },
-        ]);
+        let ctx = ResolveContext::new(Vec::new());
+        let out = hist_type(
+            &[
+                Type::tensor(),
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(5)]),
+                },
+            ],
+            &ctx,
+        );
         assert_eq!(
             out,
             Type::Tensor {

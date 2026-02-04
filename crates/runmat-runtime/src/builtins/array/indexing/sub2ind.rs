@@ -3,10 +3,11 @@
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{Tensor, Type, Value};
+use runmat_builtins::{ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
-use super::common::{build_strides, materialize_value, parse_dims};
+use super::common::{build_strides, dims_from_tokens, materialize_value, parse_dims};
+use crate::builtins::common::arg_tokens::tokens_from_context;
 use crate::builtins::array::type_resolvers::is_scalar_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -43,9 +44,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Index conversion executes eagerly on the host; fusion does not apply.",
 };
 
-fn sub2ind_type(args: &[Type]) -> Type {
+fn sub2ind_type(args: &[Type], ctx: &ResolveContext) -> Type {
     if args.len() < 2 {
         return Type::Unknown;
+    }
+    if let Some(dims) = dims_from_tokens(&tokens_from_context(ctx)) {
+        if args.len() - 1 != dims.len() {
+            return Type::Unknown;
+        }
     }
     let subscripts = &args[1..];
     if subscripts.iter().all(|ty| is_scalar_type(ty)) {
@@ -70,6 +76,7 @@ fn sub2ind_type(args: &[Type]) -> Type {
     keywords = "sub2ind,linear index,column major,gpu indexing",
     accel = "custom",
     type_resolver(sub2ind_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::indexing::sub2ind"
 )]
 async fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -357,7 +364,10 @@ pub(crate) mod tests {
     #[test]
     fn sub2ind_type_scalar_outputs_num() {
         assert_eq!(
-            sub2ind_type(&[Type::Tensor { shape: None }, Type::Num, Type::Int]),
+            sub2ind_type(
+                &[Type::Tensor { shape: None }, Type::Num, Type::Int],
+                &ResolveContext::empty(),
+            ),
             Type::Num
         );
     }
@@ -368,7 +378,10 @@ pub(crate) mod tests {
             shape: Some(vec![Some(3), Some(1)]),
         };
         assert_eq!(
-            sub2ind_type(&[Type::Tensor { shape: None }, subs.clone(), Type::Num]),
+            sub2ind_type(
+                &[Type::Tensor { shape: None }, subs.clone(), Type::Num],
+                &ResolveContext::empty(),
+            ),
             Type::Tensor {
                 shape: Some(vec![Some(3), Some(1)])
             }

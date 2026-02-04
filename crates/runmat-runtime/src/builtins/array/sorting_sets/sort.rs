@@ -10,6 +10,7 @@ use runmat_macros::runtime_builtin;
 
 use super::type_resolvers::tensor_output_type;
 use crate::build_runtime_error;
+use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -412,6 +413,7 @@ struct SortArgs {
 impl SortArgs {
     fn parse(rest: &[Value]) -> crate::BuiltinResult<Self> {
         let mut args = SortArgs::default();
+        let tokens = tokens_from_values(rest);
         let mut i = 0usize;
         while i < rest.len() {
             if args.dimension.is_none() {
@@ -429,6 +431,58 @@ impl SortArgs {
                         if matches!(rest[i], Value::Int(_) | Value::Num(_)) {
                             return Err(sort_error(err));
                         }
+                    }
+                }
+            }
+            if let Some(token) = tokens.get(i) {
+                if let ArgToken::String(text) = token {
+                    match text.as_str() {
+                        "ascend" | "ascending" => {
+                            args.direction = SortDirection::Ascend;
+                            i += 1;
+                            continue;
+                        }
+                        "descend" | "descending" => {
+                            args.direction = SortDirection::Descend;
+                            i += 1;
+                            continue;
+                        }
+                        "comparisonmethod" => {
+                            i += 1;
+                            if i >= rest.len() {
+                                return Err(sort_error(
+                                    "sort: expected a value for 'ComparisonMethod'",
+                                ));
+                            }
+                            let value = match tokens.get(i) {
+                                Some(ArgToken::String(value)) => value.as_str(),
+                                _ => {
+                                    return Err(sort_error(
+                                        "sort: 'ComparisonMethod' requires a string value",
+                                    ))
+                                }
+                            };
+                            args.comparison = match value {
+                                "auto" => ComparisonMethod::Auto,
+                                "real" => ComparisonMethod::Real,
+                                "abs" | "magnitude" => ComparisonMethod::Abs,
+                                other => {
+                                    return Err(sort_error(format!(
+                                        "sort: unsupported ComparisonMethod '{other}'"
+                                    ))
+                                    .into())
+                                }
+                            };
+                            i += 1;
+                            continue;
+                        }
+                        "missingplacement" => {
+                            return Err(sort_error(
+                                "sort: the 'MissingPlacement' option is not supported yet",
+                            )
+                            .into());
+                        }
+                        _ => {}
                     }
                 }
             }

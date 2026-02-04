@@ -7,11 +7,11 @@ use runmat_builtins::{Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
-use crate::builtins::array::type_resolvers::tensor_type_from_rank_legacy;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::{gpu_helpers, tensor};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::range")]
@@ -57,7 +57,7 @@ fn range_type(args: &[Type]) -> Type {
     };
     match input {
         Type::Num | Type::Int | Type::Bool => Type::Num,
-        Type::Tensor { .. } | Type::Logical { .. } => tensor_type_from_rank_legacy(None),
+        Type::Tensor { .. } | Type::Logical { .. } => Type::tensor(),
         _ => Type::tensor(),
     }
 }
@@ -116,7 +116,32 @@ fn parse_arguments(args: &[Value]) -> crate::BuiltinResult<(DimSelection, NanMod
     let mut nan_mode = NanMode::Include;
     let mut selection_set = false;
 
-    for arg in args {
+    let tokens = tokens_from_values(args);
+    for (arg, token) in args.iter().zip(tokens.iter()) {
+        if let crate::builtins::common::arg_tokens::ArgToken::String(text) = token {
+            match text.as_str() {
+                "omitnan" => {
+                    nan_mode = NanMode::Omit;
+                    continue;
+                }
+                "includenan" => {
+                    nan_mode = NanMode::Include;
+                    continue;
+                }
+                "all" => {
+                    if selection_set && !matches!(selection, DimSelection::Auto) {
+                        return Err(builtin_error(
+                            "range: 'all' cannot be combined with an explicit dimension",
+                        ));
+                    }
+                    selection = DimSelection::All;
+                    selection_set = true;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+
         if let Some(mode) = parse_nan_flag(arg)? {
             nan_mode = mode;
             continue;

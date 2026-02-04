@@ -7,7 +7,9 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value};
+use runmat_builtins::{
+    ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::squeeze")]
@@ -64,7 +66,7 @@ fn squeeze_shape_options(shape: &[Option<usize>]) -> Vec<Option<usize>> {
     squeezed
 }
 
-fn squeeze_type(args: &[Type]) -> Type {
+fn squeeze_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let input = match args.first() {
         Some(value) => value,
         None => return Type::Unknown,
@@ -92,6 +94,7 @@ fn squeeze_type(args: &[Type]) -> Type {
     keywords = "squeeze,singleton dimensions,array reshape,gpu",
     accel = "shape",
     type_resolver(squeeze_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::shape::squeeze"
 )]
 async fn squeeze_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -224,9 +227,12 @@ pub(crate) mod tests {
 
     #[test]
     fn squeeze_type_preserves_logical_shape() {
-        let out = squeeze_type(&[Type::Logical {
-            shape: Some(vec![Some(1), Some(3), Some(1)]),
-        }]);
+        let out = squeeze_type(
+            &[Type::Logical {
+                shape: Some(vec![Some(1), Some(3), Some(1)]),
+            }],
+            &ResolveContext::empty(),
+        );
         assert_eq!(
             out,
             Type::Logical {

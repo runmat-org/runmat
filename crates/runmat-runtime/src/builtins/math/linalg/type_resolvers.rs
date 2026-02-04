@@ -134,10 +134,6 @@ pub fn dot_type(args: &[Type], ctx: &ResolveContext) -> Type {
     numeric_tensor_from_shape(out_shape)
 }
 
-pub fn dot_type_legacy(args: &[Type]) -> Type {
-    dot_type(args, &ResolveContext::empty())
-}
-
 pub fn pinv_type(args: &[Type]) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;

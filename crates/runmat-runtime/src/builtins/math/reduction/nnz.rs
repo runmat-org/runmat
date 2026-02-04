@@ -14,13 +14,15 @@ use crate::builtins::math::reduction::type_resolvers::count_nonzero_type;
 use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Type, Value};
+use runmat_builtins::{
+    CharArray, ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 const NAME: &str = "nnz";
 
-fn nnz_type(args: &[Type]) -> Type {
-    count_nonzero_type(args)
+fn nnz_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    count_nonzero_type(args, ctx)
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::nnz")]
@@ -84,6 +86,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "nnz,nonzero,count,sparsity,gpu",
     accel = "reduction",
     type_resolver(nnz_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::nnz"
 )]
 async fn nnz_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -402,7 +405,10 @@ pub(crate) mod tests {
 
     #[test]
     fn nnz_type_returns_num() {
-        assert_eq!(nnz_type(&[Type::Tensor { shape: None }]), Type::Num);
+        assert_eq!(
+            nnz_type(&[Type::Tensor { shape: None }], &ResolveContext::empty()),
+            Type::Num
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -13,13 +13,6 @@ pub fn rank_from_dims_args(args: &[Type], ctx: &ResolveContext) -> Option<usize>
     if !dims.is_empty() {
         return Some(dims.len());
     }
-    rank_from_dims_args_legacy(args)
-}
-
-pub fn rank_from_dims_args_legacy(args: &[Type]) -> Option<usize> {
-    if args.is_empty() {
-        return None;
-    }
     if args.len() >= 2 {
         return Some(args.len());
     }
@@ -38,10 +31,6 @@ pub fn tensor_type_from_rank(args: &[Type], ctx: &ResolveContext) -> Type {
         return ty;
     }
     let rank = rank_from_dims_args(args, ctx);
-    tensor_type_from_rank_legacy(rank)
-}
-
-pub fn tensor_type_from_rank_legacy(rank: Option<usize>) -> Type {
     match rank {
         Some(rank) => Type::Tensor {
             shape: Some(unknown_shape(rank)),
@@ -79,10 +68,6 @@ pub fn row_vector_type(ctx: &ResolveContext) -> Type {
             shape: Some(vec![Some(1), Some(*len)]),
         };
     }
-    row_vector_type_legacy()
-}
-
-pub fn row_vector_type_legacy() -> Type {
     Type::Tensor {
         shape: Some(vec![Some(1), None]),
     }

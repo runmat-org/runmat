@@ -1,7 +1,8 @@
 //! MATLAB-compatible `cat` builtin with GPU-aware semantics for RunMat.
 
+use crate::builtins::common::arg_tokens::{ArgToken, tokens_from_context, tokens_from_values};
 use crate::builtins::common::gpu_helpers;
-use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
+use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -10,7 +11,8 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
+    CellArray, CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -45,6 +47,42 @@ fn cat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("cat").build()
 }
 
+#[derive(Clone, Copy, Debug)]
+struct ParsedCatTokens {
+    dim: Option<usize>,
+    like_index: Option<usize>,
+}
+
+fn parse_cat_tokens(tokens: &[ArgToken]) -> ParsedCatTokens {
+    let dim = match tokens.first() {
+        Some(ArgToken::Number(value)) => coerce_positive_dim(*value),
+        _ => None,
+    };
+    let like_index = if tokens.len() >= 3 {
+        match &tokens[tokens.len() - 2] {
+            ArgToken::String(text) if text == "like" => Some(tokens.len() - 2),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    ParsedCatTokens { dim, like_index }
+}
+
+fn coerce_positive_dim(value: f64) -> Option<usize> {
+    if !value.is_finite() {
+        return None;
+    }
+    let rounded = value.round();
+    if (rounded - value).abs() > f64::EPSILON {
+        return None;
+    }
+    if rounded < 1.0 {
+        return None;
+    }
+    Some(rounded as usize)
+}
+
 fn cell_element_type(inputs: &[Type]) -> Option<Box<Type>> {
     let mut element: Option<Type> = None;
     for ty in inputs {
@@ -61,10 +99,84 @@ fn cell_element_type(inputs: &[Type]) -> Option<Box<Type>> {
     element.map(Box::new)
 }
 
-fn cat_type(args: &[Type]) -> Type {
+fn cat_input_shape(ty: &Type) -> Option<Vec<Option<usize>>> {
+    match ty {
+        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+            Some(shape.clone())
+        }
+        Type::Num | Type::Int | Type::Bool => Some(vec![Some(1), Some(1)]),
+        _ => None,
+    }
+}
+
+fn cat_concat_shape(inputs: &[Type], dim_1based: usize) -> Option<Vec<Option<usize>>> {
+    if inputs.is_empty() || dim_1based == 0 {
+        return None;
+    }
+    let mut shapes = Vec::with_capacity(inputs.len());
+    for ty in inputs {
+        shapes.push(cat_input_shape(ty)?);
+    }
+    let rank = shapes
+        .iter()
+        .map(|shape| shape.len())
+        .max()?
+        .max(dim_1based);
+    let mut padded = Vec::with_capacity(shapes.len());
+    for shape in shapes {
+        let mut current = shape;
+        while current.len() < rank {
+            current.push(Some(1));
+        }
+        padded.push(current);
+    }
+    let mut output = vec![None; rank];
+    let dim_zero = dim_1based - 1;
+    for axis in 0..rank {
+        if axis == dim_zero {
+            let mut total: Option<usize> = Some(0);
+            for shape in &padded {
+                match (total, shape[axis]) {
+                    (Some(acc), Some(value)) => total = acc.checked_add(value),
+                    _ => {
+                        total = None;
+                        break;
+                    }
+                }
+            }
+            output[axis] = total;
+        } else {
+            let mut shared: Option<usize> = None;
+            let mut mismatch = false;
+            for shape in &padded {
+                match (shared, shape[axis]) {
+                    (None, value) => shared = value,
+                    (Some(current), Some(value)) if current == value => {}
+                    (Some(_), Some(_)) => {
+                        mismatch = true;
+                        break;
+                    }
+                    _ => {
+                        shared = None;
+                        break;
+                    }
+                }
+            }
+            output[axis] = if mismatch { None } else { shared };
+        }
+    }
+    let min_len = dim_1based.max(2).min(output.len());
+    while output.len() > min_len && matches!(output.last(), Some(Some(1))) {
+        output.pop();
+    }
+    Some(output)
+}
+
+fn cat_type(args: &[Type], ctx: &ResolveContext) -> Type {
     if args.len() < 3 {
         return Type::Unknown;
     }
+    let parsed = parse_cat_tokens(&tokens_from_context(ctx));
     let inputs = &args[1..];
     let all_cells = inputs.iter().all(|arg| matches!(arg, Type::Cell { .. }));
     if all_cells {
@@ -73,24 +185,35 @@ fn cat_type(args: &[Type]) -> Type {
             length: None,
         };
     }
-
     let all_strings = inputs.iter().all(|arg| matches!(arg, Type::String));
     if all_strings {
         return Type::cell_of(Type::String);
     }
-
     let has_numeric = inputs
         .iter()
         .any(|arg| matches!(arg, Type::Tensor { .. } | Type::Num | Type::Int));
     let has_logical = inputs
         .iter()
         .any(|arg| matches!(arg, Type::Logical { .. } | Type::Bool));
-
+    let dim = match parsed.dim {
+        Some(value) if value > 0 => value,
+        Some(_) => return Type::Unknown,
+        None => {
+            if has_numeric {
+                return Type::tensor();
+            }
+            if has_logical {
+                return Type::logical();
+            }
+            return Type::Unknown;
+        }
+    };
+    let shape = cat_concat_shape(inputs, dim);
     if has_numeric {
-        return Type::tensor();
+        return Type::Tensor { shape };
     }
     if has_logical {
-        return Type::logical();
+        return Type::Logical { shape };
     }
     Type::Unknown
 }
@@ -167,22 +290,22 @@ impl LikeSpec {
 
 fn extract_like(mut inputs: Vec<Value>) -> BuiltinResult<(Vec<Value>, LikeSpec)> {
     if inputs.len() >= 2 {
-        if let Some(keyword) = keyword_of(&inputs[inputs.len() - 2]) {
-            if keyword == "like" {
-                let prototype = inputs.last().cloned().unwrap();
-                if matches!(
-                    prototype,
-                    Value::CharArray(_) | Value::String(_) | Value::StringArray(_) | Value::Cell(_)
-                ) {
-                    // Treat as data to avoid colliding with textual concatenation cases.
-                } else if inputs.len() < 4 {
-                    // Removing the pair would leave fewer than two inputs; treat as data.
-                } else {
-                    let spec = LikeSpec::from_prototype(prototype)?;
-                    inputs.pop();
-                    inputs.pop();
-                    return Ok((inputs, spec));
-                }
+        let tokens = tokens_from_values(&inputs);
+        let parsed = parse_cat_tokens(&tokens);
+        if parsed.like_index == Some(inputs.len() - 2) {
+            let prototype = inputs.last().cloned().unwrap();
+            if matches!(
+                prototype,
+                Value::CharArray(_) | Value::String(_) | Value::StringArray(_) | Value::Cell(_)
+            ) {
+                // Treat as data to avoid colliding with textual concatenation cases.
+            } else if inputs.len() < 4 {
+                // Removing the pair would leave fewer than two inputs; treat as data.
+            } else {
+                let spec = LikeSpec::from_prototype(prototype)?;
+                inputs.pop();
+                inputs.pop();
+                return Ok((inputs, spec));
             }
         }
     }
@@ -196,6 +319,7 @@ fn extract_like(mut inputs: Vec<Value>) -> BuiltinResult<(Vec<Value>, LikeSpec)>
     keywords = "cat,concatenate,array,dimension,gpu",
     accel = "array_construct",
     type_resolver(cat_type),
+    type_resolver_context = true,
     builtin_path = "crate::builtins::array::shape::cat"
 )]
 async fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -868,7 +992,8 @@ pub(crate) mod tests {
 
     #[test]
     fn cat_type_prefers_cell() {
-        let out = cat_type(&[
+        let out = cat_type(
+            &[
             Type::Int,
             Type::Cell {
                 element_type: Some(Box::new(Type::Num)),
@@ -878,13 +1003,18 @@ pub(crate) mod tests {
                 element_type: Some(Box::new(Type::Num)),
                 length: None,
             },
-        ]);
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
         assert!(matches!(out, Type::Cell { .. }));
     }
 
     #[test]
     fn cat_type_numeric_falls_back_tensor() {
-        let out = cat_type(&[Type::Int, Type::Num, Type::Num]);
+        let out = cat_type(
+            &[Type::Int, Type::Num, Type::Num],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(out, Type::tensor());
     }
 

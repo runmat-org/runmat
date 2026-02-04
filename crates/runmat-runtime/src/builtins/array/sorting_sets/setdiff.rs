@@ -16,6 +16,7 @@ use runmat_macros::runtime_builtin;
 
 use super::type_resolvers::set_values_output_type;
 use crate::build_runtime_error;
+use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -99,32 +100,51 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<SetdiffOptions> {
     };
     let mut seen_order: Option<SetdiffOrder> = None;
 
-    for arg in rest {
-        let text = tensor::value_to_string(arg)
-            .ok_or_else(|| setdiff_error("setdiff: expected string option arguments"))?;
-        let lowered = text.trim().to_ascii_lowercase();
-        match lowered.as_str() {
+    let tokens = tokens_from_values(rest);
+    for (arg, token) in rest.iter().zip(tokens.iter()) {
+        let text = match token {
+            crate::builtins::common::arg_tokens::ArgToken::String(text) => text.as_str(),
+            _ => {
+                let text = tensor::value_to_string(arg)
+                    .ok_or_else(|| setdiff_error("setdiff: expected string option arguments"))?;
+                let lowered = text.trim().to_ascii_lowercase();
+                parse_setdiff_option(&mut opts, &mut seen_order, &lowered)?;
+                continue;
+            }
+        };
+        parse_setdiff_option(&mut opts, &mut seen_order, text)?;
+    }
+
+    Ok(opts)
+}
+
+fn parse_setdiff_option(
+    opts: &mut SetdiffOptions,
+    seen_order: &mut Option<SetdiffOrder>,
+    lowered: &str,
+) -> crate::BuiltinResult<()> {
+        match lowered {
             "rows" => opts.rows = true,
             "sorted" => {
                 if let Some(prev) = seen_order {
-                    if prev != SetdiffOrder::Sorted {
+                    if *prev != SetdiffOrder::Sorted {
                         return Err(setdiff_error(
                             "setdiff: cannot combine 'sorted' with 'stable'",
                         ));
                     }
                 }
-                seen_order = Some(SetdiffOrder::Sorted);
+                *seen_order = Some(SetdiffOrder::Sorted);
                 opts.order = SetdiffOrder::Sorted;
             }
             "stable" => {
                 if let Some(prev) = seen_order {
-                    if prev != SetdiffOrder::Stable {
+                    if *prev != SetdiffOrder::Stable {
                         return Err(setdiff_error(
                             "setdiff: cannot combine 'sorted' with 'stable'",
                         ));
                     }
                 }
-                seen_order = Some(SetdiffOrder::Stable);
+                *seen_order = Some(SetdiffOrder::Stable);
                 opts.order = SetdiffOrder::Stable;
             }
             "legacy" | "r2012a" => {
@@ -138,9 +158,7 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<SetdiffOptions> {
                 )))
             }
         }
-    }
-
-    Ok(opts)
+    Ok(())
 }
 
 async fn setdiff_gpu_pair(

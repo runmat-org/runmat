@@ -606,8 +606,9 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, Reduct
     let mut spec = ReductionSpec::Default;
     let mut nan_mode = ReductionNaN::Include;
 
-    for arg in args {
-        if is_all_token(arg) {
+    let tokens = crate::builtins::common::arg_tokens::tokens_from_values(args);
+    for (arg, token) in args.iter().zip(tokens.iter()) {
+        if is_all_token_token(token) {
             if !matches!(spec, ReductionSpec::Default) {
                 return Err(any_error(
                     "any: 'all' cannot be combined with dimension arguments",
@@ -616,7 +617,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, Reduct
             spec = ReductionSpec::All;
             continue;
         }
-        if let Some(mode) = parse_nan_mode(arg)? {
+        if let Some(mode) = parse_nan_mode_token(token)? {
             if !matches!(nan_mode, ReductionNaN::Include) {
                 return Err(any_error("any: multiple NaN handling options specified"));
             }
@@ -649,22 +650,21 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, Reduct
     Ok((spec, nan_mode))
 }
 
-fn parse_nan_mode(value: &Value) -> BuiltinResult<Option<ReductionNaN>> {
-    let Some(text) = extract_text_token(value) else {
-        return Ok(None);
-    };
-    let lowered = text.trim().to_ascii_lowercase();
-    match lowered.as_str() {
-        "omitnan" => Ok(Some(ReductionNaN::Omit)),
-        "includenan" => Ok(Some(ReductionNaN::Include)),
-        _ => Err(any_error(format!("any: unknown option '{}'", text.trim()))),
+fn parse_nan_mode_token(
+    token: &crate::builtins::common::arg_tokens::ArgToken,
+) -> BuiltinResult<Option<ReductionNaN>> {
+    match token {
+        crate::builtins::common::arg_tokens::ArgToken::String(text) => match text.as_str() {
+            "omitnan" => Ok(Some(ReductionNaN::Omit)),
+            "includenan" => Ok(Some(ReductionNaN::Include)),
+            _ => Err(any_error(format!("any: unknown option '{}'", text))),
+        },
+        _ => Ok(None),
     }
 }
 
-fn is_all_token(value: &Value) -> bool {
-    extract_text_token(value)
-        .map(|s| s.trim().eq_ignore_ascii_case("all"))
-        .unwrap_or(false)
+fn is_all_token_token(token: &crate::builtins::common::arg_tokens::ArgToken) -> bool {
+    matches!(token, crate::builtins::common::arg_tokens::ArgToken::String(text) if text == "all")
 }
 
 async fn parse_dimensions(value: &Value) -> BuiltinResult<Vec<usize>> {
@@ -707,15 +707,6 @@ fn map_dims_error(message: String) -> RuntimeError {
         return any_error("any: dimension values must be >= 1");
     }
     any_error(message)
-}
-
-fn extract_text_token(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
-        _ => None,
-    }
 }
 
 fn product(dims: &[usize]) -> usize {

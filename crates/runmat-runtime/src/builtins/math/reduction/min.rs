@@ -16,6 +16,7 @@ fn min_type(args: &[Type], ctx: &ResolveContext) -> Type {
 }
 
 use crate::builtins::common::broadcast::BroadcastPlan;
+use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -206,7 +207,36 @@ async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Bu
     let mut idx = 0usize;
     let mut selection_set = !matches!(args.selection, DimSelection::Auto);
     let mut comparison_set = matches!(args.comparison, ComparisonMethod::Auto);
+    let tokens = tokens_from_values(rest);
     while idx < rest.len() {
+        if let Some(token) = tokens.get(idx) {
+            if let crate::builtins::common::arg_tokens::ArgToken::String(text) = token {
+                match text.as_str() {
+                    "omitnan" => {
+                        args.nan_mode = ReductionNaN::Omit;
+                        idx += 1;
+                        continue;
+                    }
+                    "includenan" => {
+                        args.nan_mode = ReductionNaN::Include;
+                        idx += 1;
+                        continue;
+                    }
+                    "all" => {
+                        if selection_set {
+                            return Err(min_error(
+                                "min: 'all' cannot be combined with an explicit dimension",
+                            ));
+                        }
+                        args.selection = DimSelection::All;
+                        selection_set = true;
+                        idx += 1;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+        }
         if let Some(keyword) = keyword_of(&rest[idx]) {
             match keyword.as_str() {
                 "omitnan" => {

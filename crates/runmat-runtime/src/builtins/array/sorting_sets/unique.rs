@@ -16,6 +16,7 @@ use runmat_macros::runtime_builtin;
 
 use super::type_resolvers::set_values_output_type;
 use crate::build_runtime_error;
+use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -89,31 +90,51 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<UniqueOptions> {
     let mut seen_order: Option<UniqueOrder> = None;
     let mut seen_occurrence: Option<UniqueOccurrence> = None;
 
-    for arg in rest {
-        let text = tensor::value_to_string(arg)
-            .ok_or_else(|| unique_error("unique: expected string option arguments"))?;
-        let lowered = text.trim().to_ascii_lowercase();
-        match lowered.as_str() {
+    let tokens = tokens_from_values(rest);
+    for (arg, token) in rest.iter().zip(tokens.iter()) {
+        let text = match token {
+            crate::builtins::common::arg_tokens::ArgToken::String(text) => text.as_str(),
+            _ => {
+                let text = tensor::value_to_string(arg)
+                    .ok_or_else(|| unique_error("unique: expected string option arguments"))?;
+                let lowered = text.trim().to_ascii_lowercase();
+                parse_unique_option(&mut opts, &mut seen_order, &mut seen_occurrence, &lowered)?;
+                continue;
+            }
+        };
+        parse_unique_option(&mut opts, &mut seen_order, &mut seen_occurrence, text)?;
+    }
+
+    Ok(opts)
+}
+
+fn parse_unique_option(
+    opts: &mut UniqueOptions,
+    seen_order: &mut Option<UniqueOrder>,
+    seen_occurrence: &mut Option<UniqueOccurrence>,
+    lowered: &str,
+) -> crate::BuiltinResult<()> {
+        match lowered {
             "sorted" => {
                 if let Some(prev) = seen_order {
-                    if prev != UniqueOrder::Sorted {
+                    if *prev != UniqueOrder::Sorted {
                         return Err(unique_error(
                             "unique: cannot combine 'sorted' with 'stable'",
                         ));
                     }
                 }
-                seen_order = Some(UniqueOrder::Sorted);
+                *seen_order = Some(UniqueOrder::Sorted);
                 opts.order = UniqueOrder::Sorted;
             }
             "stable" => {
                 if let Some(prev) = seen_order {
-                    if prev != UniqueOrder::Stable {
+                    if *prev != UniqueOrder::Stable {
                         return Err(unique_error(
                             "unique: cannot combine 'sorted' with 'stable'",
                         ));
                     }
                 }
-                seen_order = Some(UniqueOrder::Stable);
+                *seen_order = Some(UniqueOrder::Stable);
                 opts.order = UniqueOrder::Stable;
             }
             "rows" => {
@@ -121,20 +142,20 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<UniqueOptions> {
             }
             "first" => {
                 if let Some(prev) = seen_occurrence {
-                    if prev != UniqueOccurrence::First {
+                    if *prev != UniqueOccurrence::First {
                         return Err(unique_error("unique: cannot combine 'first' with 'last'"));
                     }
                 }
-                seen_occurrence = Some(UniqueOccurrence::First);
+                *seen_occurrence = Some(UniqueOccurrence::First);
                 opts.occurrence = UniqueOccurrence::First;
             }
             "last" => {
                 if let Some(prev) = seen_occurrence {
-                    if prev != UniqueOccurrence::Last {
+                    if *prev != UniqueOccurrence::Last {
                         return Err(unique_error("unique: cannot combine 'first' with 'last'"));
                     }
                 }
-                seen_occurrence = Some(UniqueOccurrence::Last);
+                *seen_occurrence = Some(UniqueOccurrence::Last);
                 opts.occurrence = UniqueOccurrence::Last;
             }
             "legacy" | "r2012a" => {
@@ -148,9 +169,7 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<UniqueOptions> {
                 )));
             }
         }
-    }
-
-    Ok(opts)
+    Ok(())
 }
 
 async fn unique_gpu(

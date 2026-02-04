@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
@@ -154,13 +155,33 @@ fn parse_circshift_spec(shift: &Value, rest: &[Value]) -> crate::BuiltinResult<C
     let dims: Vec<usize> = if rest.is_empty() {
         (0..shifts.len()).collect()
     } else {
-        let dims_vec = value_to_dims_vector(&rest[0])?;
-        if dims_vec.len() != shifts.len() {
-            return Err(circshift_error(
-                "circshift: shift and dimension vectors must have the same length",
-            ));
+        let tokens = tokens_from_values(rest);
+        if let Some(token) = tokens.first() {
+            if let Some(dims_vec) = dims_from_token(token) {
+                if dims_vec.len() != shifts.len() {
+                    return Err(circshift_error(
+                        "circshift: shift and dimension vectors must have the same length",
+                    ));
+                }
+                dims_vec.into_iter().map(|dim| dim - 1).collect()
+            } else {
+                let dims_vec = value_to_dims_vector(&rest[0])?;
+                if dims_vec.len() != shifts.len() {
+                    return Err(circshift_error(
+                        "circshift: shift and dimension vectors must have the same length",
+                    ));
+                }
+                dims_vec.into_iter().map(|dim| dim - 1).collect()
+            }
+        } else {
+            let dims_vec = value_to_dims_vector(&rest[0])?;
+            if dims_vec.len() != shifts.len() {
+                return Err(circshift_error(
+                    "circshift: shift and dimension vectors must have the same length",
+                ));
+            }
+            dims_vec.into_iter().map(|dim| dim - 1).collect()
         }
-        dims_vec.into_iter().map(|dim| dim - 1).collect()
     };
 
     if dims.len() != shifts.len() {
@@ -179,6 +200,41 @@ fn parse_circshift_spec(shift: &Value, rest: &[Value]) -> crate::BuiltinResult<C
     }
 
     Ok(CircshiftSpec { dims, shifts })
+}
+
+fn dims_from_token(token: &ArgToken) -> Option<Vec<usize>> {
+    match token {
+        ArgToken::Number(value) => coerce_dim_value(*value).map(|dim| vec![dim]),
+        ArgToken::Vector(values) => {
+            if values.is_empty() {
+                return None;
+            }
+            let mut dims = Vec::with_capacity(values.len());
+            for value in values {
+                let dim = match value {
+                    ArgToken::Number(num) => coerce_dim_value(*num)?,
+                    _ => return None,
+                };
+                dims.push(dim);
+            }
+            Some(dims)
+        }
+        _ => None,
+    }
+}
+
+fn coerce_dim_value(value: f64) -> Option<usize> {
+    if !value.is_finite() {
+        return None;
+    }
+    let rounded = value.round();
+    if (rounded - value).abs() > f64::EPSILON {
+        return None;
+    }
+    if rounded < 1.0 {
+        return None;
+    }
+    Some(rounded as usize)
 }
 
 fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
