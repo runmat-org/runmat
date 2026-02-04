@@ -164,12 +164,20 @@ export type PlotSurfaceEvent =
       x: number;
       y: number;
       button: number;
+      shiftKey?: boolean;
+      ctrlKey?: boolean;
+      altKey?: boolean;
+      metaKey?: boolean;
     }
   | {
       kind: "mouseUp";
       x: number;
       y: number;
       button: number;
+      shiftKey?: boolean;
+      ctrlKey?: boolean;
+      altKey?: boolean;
+      metaKey?: boolean;
     }
   | {
       kind: "mouseMove";
@@ -177,12 +185,21 @@ export type PlotSurfaceEvent =
       y: number;
       dx: number;
       dy: number;
+      shiftKey?: boolean;
+      ctrlKey?: boolean;
+      altKey?: boolean;
+      metaKey?: boolean;
     }
   | {
       kind: "wheel";
       x: number;
       y: number;
       wheelDelta: number;
+      wheelDeltaMode?: number;
+      shiftKey?: boolean;
+      ctrlKey?: boolean;
+      altKey?: boolean;
+      metaKey?: boolean;
     };
 
 export type StdoutStreamKind = "stdout" | "stderr";

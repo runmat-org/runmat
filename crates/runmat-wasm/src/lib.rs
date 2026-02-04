@@ -786,12 +786,23 @@ struct PlotSurfaceEventPayload {
     button: i32,
     #[serde(default)]
     wheel_delta: f32,
+    #[serde(default)]
+    wheel_delta_mode: u32,
+    #[serde(default)]
+    shift_key: bool,
+    #[serde(default)]
+    ctrl_key: bool,
+    #[serde(default)]
+    alt_key: bool,
+    #[serde(default)]
+    meta_key: bool,
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = handlePlotSurfaceEvent)]
 pub fn handle_plot_surface_event(surface_id: u32, event: JsValue) -> Result<(), JsValue> {
     use runmat_plot::core::interaction::MouseButton as PlotMouseButton;
+    use runmat_plot::core::interaction::Modifiers as PlotModifiers;
     use runmat_plot::core::PlotEvent;
 
     let payload: PlotSurfaceEventPayload =
@@ -803,14 +814,57 @@ pub fn handle_plot_surface_event(surface_id: u32, event: JsValue) -> Result<(), 
         1 => PlotMouseButton::Middle,
         _ => PlotMouseButton::Left,
     };
+    let modifiers = PlotModifiers {
+        shift: payload.shift_key,
+        ctrl: payload.ctrl_key,
+        alt: payload.alt_key,
+        meta: payload.meta_key,
+    };
 
     let event = match payload.kind.as_str() {
-        "mouseDown" => PlotEvent::MousePress { position, button },
-        "mouseUp" => PlotEvent::MouseRelease { position, button },
-        "mouseMove" => PlotEvent::MouseMove { position, delta },
-        "wheel" => PlotEvent::MouseWheel {
-            delta: payload.wheel_delta,
+        "mouseDown" => PlotEvent::MousePress {
+            position,
+            button,
+            modifiers,
         },
+        "mouseUp" => PlotEvent::MouseRelease {
+            position,
+            button,
+            modifiers,
+        },
+        "mouseMove" => PlotEvent::MouseMove {
+            position,
+            delta,
+            modifiers,
+        },
+        "wheel" => {
+            // Normalize DOM wheel delta (pixel/line/page) into a roughly "lines" scale.
+            // - Pixel deltas (trackpads) tend to be large; scale them down.
+            // - Page deltas are rare; scale them up.
+            let mut wheel_delta = payload.wheel_delta;
+            match payload.wheel_delta_mode {
+                0 => {
+                    // pixels
+                    wheel_delta /= 100.0;
+                }
+                1 => {
+                    // lines
+                }
+                2 => {
+                    // pages
+                    wheel_delta *= 10.0;
+                }
+                _ => {}
+            }
+            // Align with the native path + common CAD conventions:
+            // positive delta = zoom in (wheel up / away from user).
+            wheel_delta = -wheel_delta;
+            PlotEvent::MouseWheel {
+                position,
+                delta: wheel_delta,
+                modifiers,
+            }
+        }
         other => {
             let message = format!("Unknown plot event kind '{other}'");
             return Err(js_error(&message));

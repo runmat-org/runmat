@@ -3,6 +3,7 @@
 //! Provides both perspective and orthographic cameras with smooth
 //! navigation controls for interactive plotting.
 
+use crate::core::interaction::Modifiers;
 use glam::{Mat4, Quat, Vec2, Vec3};
 
 /// Camera projection type
@@ -70,9 +71,10 @@ impl Camera {
     /// Create a new camera with default 3D settings
     pub fn new() -> Self {
         let mut camera = Self {
-            position: Vec3::new(0.0, 0.0, 5.0),
+            // CAD-like default: Z-up, with an isometric-ish starting view.
+            position: Vec3::new(3.5, 3.5, 3.5),
             target: Vec3::ZERO,
-            up: Vec3::Y,
+            up: Vec3::Z,
             projection: ProjectionType::default(),
             aspect_ratio: 16.0 / 9.0,
             zoom: 1.0,
@@ -94,6 +96,7 @@ impl Camera {
         let mut camera = Self {
             position: Vec3::new(0.0, 0.0, 1.0),
             target: Vec3::new((left + right) / 2.0, (bottom + top) / 2.0, 0.0),
+            // For 2D views we look down -Z; keep a stable screen-up (+Y).
             up: Vec3::Y,
             projection: ProjectionType::Orthographic {
                 left,
@@ -154,10 +157,14 @@ impl Camera {
 
     /// Pan the camera (screen-space movement)
     pub fn pan(&mut self, delta: Vec2) {
-        let right = self.view_matrix.x_axis.truncate();
-        let up = self.view_matrix.y_axis.truncate();
+        // Ensure view axes are up-to-date before using them.
+        let view = self.view_matrix();
+        let right = view.x_axis.truncate();
+        let up = view.y_axis.truncate();
 
-        let pan_amount = delta * self.pan_sensitivity * self.zoom;
+        // Scale pan by camera distance in 3D so it feels consistent while zooming.
+        let dist = (self.position - self.target).length().max(1e-3);
+        let pan_amount = delta * self.pan_sensitivity * dist;
         let world_delta = right * pan_amount.x + up * pan_amount.y;
 
         self.position += world_delta;
@@ -226,7 +233,7 @@ impl Camera {
         let yaw = -delta.x * self.rotate_sensitivity;
         let pitch = -delta.y * self.rotate_sensitivity;
 
-        let world_up = Vec3::Y;
+        let world_up = self.up.normalize_or_zero();
         let mut offset = self.position - self.target;
         if offset.length_squared() < 1e-9 {
             offset = Vec3::new(0.0, 0.0, 1.0);
@@ -270,9 +277,10 @@ impl Camera {
     pub fn reset(&mut self) {
         match self.projection {
             ProjectionType::Perspective { .. } => {
-                self.position = Vec3::new(0.0, 0.0, 5.0);
+                self.position = Vec3::new(3.5, 3.5, 3.5);
                 self.target = Vec3::ZERO;
                 self.rotation = Quat::IDENTITY;
+                self.up = Vec3::Z;
             }
             ProjectionType::Orthographic { .. } => {
                 self.zoom = 1.0;
@@ -334,7 +342,10 @@ impl Camera {
     }
 
     /// Convert screen coordinates to world coordinates (for picking)
-    pub fn screen_to_world(&self, screen_pos: Vec2, screen_size: Vec2, depth: f32) -> Vec3 {
+    pub fn screen_to_world(&mut self, screen_pos: Vec2, screen_size: Vec2, depth: f32) -> Vec3 {
+        if self.view_proj_dirty {
+            self.update_matrices();
+        }
         // Convert screen coordinates to normalized device coordinates
         let ndc_x = (2.0 * screen_pos.x) / screen_size.x - 1.0;
         let ndc_y = 1.0 - (2.0 * screen_pos.y) / screen_size.y;
@@ -386,8 +397,7 @@ impl Camera {
 /// Camera controller for handling input events
 #[derive(Debug, Default)]
 pub struct CameraController {
-    pub is_dragging: bool,
-    pub is_panning: bool,
+    pub active_button: Option<MouseButton>,
     pub last_mouse_pos: Vec2,
     pub mouse_delta: Vec2,
 }
@@ -398,19 +408,16 @@ impl CameraController {
     }
 
     /// Handle mouse press
-    pub fn mouse_press(&mut self, position: Vec2, button: MouseButton) {
+    pub fn mouse_press(&mut self, position: Vec2, button: MouseButton, _modifiers: Modifiers) {
         self.last_mouse_pos = position;
-        match button {
-            MouseButton::Left => self.is_dragging = true,
-            MouseButton::Right => self.is_panning = true,
-            _ => {}
-        }
+        self.active_button = Some(button);
     }
 
     /// Handle mouse release
-    pub fn mouse_release(&mut self, _button: MouseButton) {
-        self.is_dragging = false;
-        self.is_panning = false;
+    pub fn mouse_release(&mut self, _position: Vec2, button: MouseButton, _modifiers: Modifiers) {
+        if self.active_button == Some(button) {
+            self.active_button = None;
+        }
     }
 
     /// Handle mouse movement
@@ -427,8 +434,13 @@ impl CameraController {
         position: Vec2,
         delta: Vec2,
         viewport_px: (u32, u32),
+        modifiers: Modifiers,
         camera: &mut Camera,
     ) {
+        let Some(button) = self.active_button else {
+            self.last_mouse_pos = position;
+            return;
+        };
         // Prefer the host-provided delta; fall back to position diff.
         self.mouse_delta = if delta.length_squared() > 0.0 {
             delta
@@ -438,10 +450,49 @@ impl CameraController {
 
         match camera.projection {
             ProjectionType::Perspective { .. } => {
-                if self.is_dragging {
-                    camera.rotate(self.mouse_delta);
-                } else if self.is_panning {
-                    camera.pan(self.mouse_delta);
+                // CAD-like bindings (support common schemes simultaneously):
+                // - MMB drag: orbit; Shift+MMB: pan
+                // - RMB drag: orbit; Shift+RMB: pan
+                // - Alt+LMB: orbit; Alt+MMB: pan; Alt+RMB: dolly/zoom
+                //
+                // Also keep LMB orbit + Shift+LMB pan as a convenient fallback.
+                let fine = if modifiers.ctrl || modifiers.meta { 0.35 } else { 1.0 };
+                let d = self.mouse_delta * fine;
+
+                if modifiers.alt {
+                    match button {
+                        MouseButton::Left => camera.rotate(d),
+                        MouseButton::Middle => camera.pan(d),
+                        MouseButton::Right => {
+                            // Alt+RMB drag zoom (dolly). Positive drag up should zoom in.
+                            let zoom_delta = (-d.y / 120.0).clamp(-5.0, 5.0);
+                            self.mouse_wheel(
+                                zoom_delta,
+                                position,
+                                viewport_px,
+                                modifiers,
+                                camera,
+                            );
+                        }
+                    }
+                } else {
+                    let want_pan = modifiers.shift;
+                    match button {
+                        MouseButton::Middle | MouseButton::Right => {
+                            if want_pan {
+                                camera.pan(d);
+                            } else {
+                                camera.rotate(d);
+                            }
+                        }
+                        MouseButton::Left => {
+                            if want_pan {
+                                camera.pan(d);
+                            } else {
+                                camera.rotate(d);
+                            }
+                        }
+                    }
                 }
             }
             ProjectionType::Orthographic {
@@ -451,8 +502,9 @@ impl CameraController {
                 ref mut top,
                 ..
             } => {
-                // For 2D, treat either drag or "pan mode" as panning the ortho bounds.
-                if self.is_dragging || self.is_panning {
+                // For 2D, treat any drag (and Shift-drag) as panning the ortho bounds.
+                let _ = (button, modifiers);
+                {
                     let (vw, vh) = (viewport_px.0.max(1) as f32, viewport_px.1.max(1) as f32);
                     let width = (*right - *left).abs().max(1e-6);
                     let height = (*top - *bottom).abs().max(1e-6);
@@ -478,8 +530,96 @@ impl CameraController {
     }
 
     /// Handle mouse wheel
-    pub fn mouse_wheel(&mut self, delta: f32, camera: &mut Camera) {
-        camera.zoom(delta);
+    pub fn mouse_wheel(
+        &mut self,
+        delta: f32,
+        position_px: Vec2,
+        viewport_px: (u32, u32),
+        modifiers: Modifiers,
+        camera: &mut Camera,
+    ) {
+        let fine = if modifiers.ctrl || modifiers.meta { 0.35 } else { 1.0 };
+        let sens = camera.zoom_sensitivity * fine;
+        let mut factor = 1.0 - delta * sens;
+        if factor.abs() < 1e-3 {
+            return;
+        }
+        factor = factor.clamp(0.2, 5.0);
+
+        match &mut camera.projection {
+            ProjectionType::Perspective { .. } => {
+                let (vw, vh) = (viewport_px.0.max(1) as f32, viewport_px.1.max(1) as f32);
+                let screen_size = Vec2::new(vw, vh);
+                let pos = Vec2::new(position_px.x.clamp(0.0, vw), position_px.y.clamp(0.0, vh));
+
+                // Build a ray from the cursor through the view frustum.
+                let p_near = camera.screen_to_world(pos, screen_size, 0.0);
+                let p_far = camera.screen_to_world(pos, screen_size, 1.0);
+                let dir = (p_far - p_near).normalize_or_zero();
+                if dir.length_squared() < 1e-9 {
+                    return;
+                }
+
+                // Prefer anchoring to the XY plane (Z=0). If near-parallel, fall back to a plane
+                // through the current target perpendicular to the view direction.
+                let origin = camera.position;
+                let mut pivot = None;
+                if dir.z.abs() > 1e-6 {
+                    let t = (-origin.z) / dir.z;
+                    if t.is_finite() && t > 0.0 {
+                        pivot = Some(origin + dir * t);
+                    }
+                }
+                if pivot.is_none() {
+                    let forward = (camera.target - camera.position).normalize_or_zero();
+                    let denom = dir.dot(forward);
+                    if denom.abs() > 1e-6 {
+                        let t = (camera.target - origin).dot(forward) / denom;
+                        if t.is_finite() && t > 0.0 {
+                            pivot = Some(origin + dir * t);
+                        }
+                    }
+                }
+                let pivot = pivot.unwrap_or(camera.target);
+
+                let s = (pivot - origin).length().max(1e-3);
+                let new_s = (s * factor).clamp(0.05, 1.0e9);
+                let delta_dist = s - new_s;
+                let translate = dir * delta_dist;
+
+                // Dolly along the cursor ray while keeping orientation stable (translate both
+                // position + target so the cursor stays anchored).
+                camera.position += translate;
+                camera.target += translate;
+                camera.view_proj_dirty = true;
+            }
+            ProjectionType::Orthographic {
+                left,
+                right,
+                bottom,
+                top,
+                ..
+            } => {
+                // Cursor-anchored 2D zoom: scale the ortho bounds around the cursor.
+                let w = (*right - *left).max(1e-6);
+                let h = (*top - *bottom).max(1e-6);
+                let vw = viewport_px.0.max(1) as f32;
+                let vh = viewport_px.1.max(1) as f32;
+                let tx = (position_px.x / vw).clamp(0.0, 1.0);
+                let ty = (position_px.y / vh).clamp(0.0, 1.0);
+                let pivot_x = *left + tx * w;
+                let pivot_y = *top - ty * h;
+                let new_left = pivot_x - (pivot_x - *left) * factor;
+                let new_right = pivot_x + (*right - pivot_x) * factor;
+                let new_bottom = pivot_y - (pivot_y - *bottom) * factor;
+                let new_top = pivot_y + (*top - pivot_y) * factor;
+                *left = new_left;
+                *right = new_right;
+                *bottom = new_bottom;
+                *top = new_top;
+                camera.mark_dirty();
+            }
+        }
     }
 }
 
@@ -498,8 +638,9 @@ mod tests {
     #[test]
     fn test_camera_creation() {
         let camera = Camera::new();
-        assert_eq!(camera.position, Vec3::new(0.0, 0.0, 5.0));
+        assert_eq!(camera.position, Vec3::new(3.5, 3.5, 3.5));
         assert_eq!(camera.target, Vec3::ZERO);
+        assert_eq!(camera.up, Vec3::Z);
     }
 
     #[test]

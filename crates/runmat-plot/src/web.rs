@@ -283,7 +283,11 @@ impl WebRenderer {
     /// Returns `true` when a re-render is recommended.
     pub fn handle_event(&mut self, event: PlotEvent) -> bool {
         match event {
-            PlotEvent::MousePress { position, button } => {
+            PlotEvent::MousePress {
+                position,
+                button,
+                modifiers,
+            } => {
                 #[cfg(target_arch = "wasm32")]
                 log::debug!(
                     target: "runmat_plot",
@@ -293,19 +297,27 @@ impl WebRenderer {
                     button
                 );
                 self.camera_controller
-                    .mouse_press(position, map_mouse_button(button));
+                    .mouse_press(position, map_mouse_button(button), modifiers);
                 self.last_pointer_position = position;
                 self.plot_renderer.note_camera_interaction();
                 true
             }
-            PlotEvent::MouseRelease { button, .. } => {
+            PlotEvent::MouseRelease {
+                position,
+                button,
+                modifiers,
+            } => {
                 #[cfg(target_arch = "wasm32")]
                 log::debug!(target: "runmat_plot", "web.handle_event MouseRelease button={:?}", button);
                 self.camera_controller
-                    .mouse_release(map_mouse_button(button));
+                    .mouse_release(position, map_mouse_button(button), modifiers);
                 true
             }
-            PlotEvent::MouseMove { position, delta } => {
+            PlotEvent::MouseMove {
+                position,
+                delta,
+                modifiers,
+            } => {
                 #[cfg(target_arch = "wasm32")]
                 log::debug!(
                     target: "runmat_plot",
@@ -316,20 +328,31 @@ impl WebRenderer {
                     delta.y
                 );
                 let axes_index = self.pick_axes_index(position);
-                let viewport = self
+                let (vx, vy, vw, vh) = self
                     .last_axes_viewports_px
                     .get(axes_index)
-                    .map(|v| (v.2.max(1), v.3.max(1)))
-                    .unwrap_or((self.render_config.width, self.render_config.height));
+                    .copied()
+                    .unwrap_or((0, 0, self.render_config.width.max(1), self.render_config.height.max(1)));
+                let viewport = (vw.max(1), vh.max(1));
                 if let Some(cam) = self.plot_renderer.axes_camera_mut(axes_index) {
                     self.camera_controller
-                        .mouse_move(position, delta, viewport, cam);
+                        .mouse_move(
+                            glam::Vec2::new(position.x - (vx as f32), position.y - (vy as f32)),
+                            delta,
+                            viewport,
+                            modifiers,
+                            cam,
+                        );
                 }
                 self.last_pointer_position = position;
                 self.plot_renderer.note_camera_interaction();
                 true
             }
-            PlotEvent::MouseWheel { delta } => {
+            PlotEvent::MouseWheel {
+                position,
+                delta,
+                modifiers,
+            } => {
                 #[cfg(target_arch = "wasm32")]
                 {
                     let (proj, pos, target) = match self.plot_renderer.camera().projection {
@@ -357,10 +380,18 @@ impl WebRenderer {
                         target.z
                     );
                 }
-                let axes_index = self.pick_axes_index(self.last_pointer_position);
+                let axes_index = self.pick_axes_index(position);
                 if let Some(cam) = self.plot_renderer.axes_camera_mut(axes_index) {
-                    self.camera_controller.mouse_wheel(delta, cam);
+                    let (vx, vy, vw, vh) = self
+                        .last_axes_viewports_px
+                        .get(axes_index)
+                        .copied()
+                        .unwrap_or((0, 0, self.render_config.width.max(1), self.render_config.height.max(1)));
+                    let local = glam::Vec2::new(position.x - (vx as f32), position.y - (vy as f32));
+                    self.camera_controller
+                        .mouse_wheel(delta, local, (vw.max(1), vh.max(1)), modifiers, cam);
                 }
+                self.last_pointer_position = position;
                 self.plot_renderer.note_camera_interaction();
                 true
             }

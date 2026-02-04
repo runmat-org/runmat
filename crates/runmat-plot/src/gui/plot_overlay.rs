@@ -339,9 +339,10 @@ impl PlotOverlay {
 
                 // Plot controls
                 ui.collapsing("🔧 Controls", |ui| {
-                    ui.label("🖱️ Left drag: Rotate");
-                    ui.label("🖱️ Right drag: Pan");
-                    ui.label("🖱️ Scroll: Zoom");
+                    ui.label("🖱️ Orbit: MMB drag (or RMB drag)");
+                    ui.label("🖱️ Pan: Shift + MMB drag (or Shift + RMB drag)");
+                    ui.label("🖱️ Zoom: Scroll wheel (zooms to cursor)");
+                    ui.label("🖱️ Alt + LMB/MMB/RMB: Orbit/Pan/Zoom");
                     ui.label("📱 Touch: Pinch to zoom");
                 });
             });
