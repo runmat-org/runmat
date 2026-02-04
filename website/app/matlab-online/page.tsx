@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +23,9 @@ export const metadata: Metadata = {
     "Run MATLAB-style code online with RunMat. Browser-native execution, GPU acceleration, and no license required. Try the sandbox in seconds.",
   alternates: { canonical: "https://runmat.org/matlab-online" },
 };
+
+const heroVideoSrc = "https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4";
+const heroPosterSrc = "https://web.runmatstatic.com/matlab-online-product-screenshot.png";
 
 const faqItems = [
   {
@@ -252,14 +254,18 @@ export default function MatlabOnlinePage() {
               </div>
             </div>
             <div className="rounded-xl border border-border bg-muted/40 p-2 bg-[radial-gradient(ellipse_at_top,_rgba(124,58,237,0.25),_transparent_60%)]">
-              <Image
-                src="https://web.runmatstatic.com/matlab-online-product-screenshot.png"
-                alt="RunMat MATLAB-style code example"
-                width={1200}
-                height={800}
+              <video
                 className="w-full h-auto rounded-lg"
-                priority
-              />
+                autoPlay
+                muted
+                loop
+                playsInline
+                preload="metadata"
+                poster={heroPosterSrc}
+                aria-label="RunMat MATLAB-style code example demo"
+              >
+                <source src={heroVideoSrc} type="video/mp4" />
+              </video>
             </div>
           </div>
         </section>
