@@ -172,7 +172,10 @@ class RemoteHttpClient {
       offset: String(offset),
       length: String(length)
     }, "arraybuffer");
-    const contentType = xhr.getResponseHeader("Content-Type") ?? "";
+    const contentType =
+      typeof (xhr as any).getResponseHeader === "function"
+        ? (xhr as any).getResponseHeader("Content-Type") ?? ""
+        : "";
     if (contentType.includes("application/json")) {
       const payload = JSON.parse(arrayBufferToString(xhr.response as ArrayBuffer)) as DownloadUrlPayload;
       return this.downloadRange(payload.downloadUrl, offset, length);

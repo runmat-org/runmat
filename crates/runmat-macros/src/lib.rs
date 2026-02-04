@@ -43,6 +43,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut accel_values: Vec<String> = Vec::new();
     let mut builtin_path_lit: Option<LitStr> = None;
     let mut type_resolver_path: Option<syn::Path> = None;
+    let mut type_resolver_ctx_path: Option<syn::Path> = None;
     let mut sink_flag = false;
     let mut suppress_auto_output_flag = false;
     for arg in args {
@@ -96,6 +97,14 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                     } else {
                         panic!("type_resolver must be a string literal path");
                     }
+                } else if path.is_ident("type_resolver_ctx") {
+                    if let Lit::Str(ls) = lit {
+                        let parsed: syn::Path =
+                            ls.parse().expect("type_resolver_ctx must be a path");
+                        type_resolver_ctx_path = Some(parsed);
+                    } else {
+                        panic!("type_resolver_ctx must be a string literal path");
+                    }
                 } else {
                     // Gracefully ignore unknown parameters for better IDE experience
                 }
@@ -109,6 +118,17 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                     type_resolver_path = Some(path.clone());
                 } else {
                     panic!("type_resolver expects a path argument");
+                }
+            }
+            NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("type_resolver_ctx") => {
+                if list.nested.len() != 1 {
+                    panic!("type_resolver_ctx expects exactly one path argument");
+                }
+                let nested = list.nested.first().unwrap();
+                if let NestedMeta::Meta(Meta::Path(path)) = nested {
+                    type_resolver_ctx_path = Some(path.clone());
+                } else {
+                    panic!("type_resolver_ctx expects a path argument");
                 }
             }
             _ => {}
@@ -306,8 +326,10 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     } else {
         quote! { &[#(#accel_tokens),*] }
     };
-    let type_resolver_expr = if let Some(path) = &type_resolver_path {
-        quote! { Some(#path) }
+    let type_resolver_expr = if let Some(path) = type_resolver_ctx_path.as_ref() {
+        quote! { Some(runmat_builtins::type_resolver_kind_ctx(#path)) }
+    } else if let Some(path) = type_resolver_path.as_ref() {
+        quote! { Some(runmat_builtins::type_resolver_kind(#path)) }
     } else {
         quote! { None }
     };

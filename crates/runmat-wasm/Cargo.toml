@@ -42,6 +42,7 @@ uuid = { version = "1", features = ["v4", "js"], default-features = false }
 runmat-logging = { path = "../runmat-logging", version = "0.1.0" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "registry"] }
+runmat-telemetry = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 runmat-runtime = { workspace = true, features = ["plot-web"] }

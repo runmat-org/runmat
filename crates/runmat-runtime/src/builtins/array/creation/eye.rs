@@ -9,7 +9,10 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::array::type_resolvers::{rank_from_dims_args, tensor_type_from_rank};
+use crate::builtins::array::type_resolvers::{
+    rank_from_dims_args, tensor_type_from_literal_dims, tensor_type_from_rank,
+};
+use runmat_builtins::ResolveContext;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::eye")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -52,13 +55,23 @@ fn eye_type(args: &[Type]) -> Type {
     tensor_type_from_rank(rank)
 }
 
+fn eye_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
+    if args.is_empty() {
+        return Type::Num;
+    }
+    if let Some(ty) = tensor_type_from_literal_dims(args, ctx) {
+        return ty;
+    }
+    eye_type(args)
+}
+
 #[runtime_builtin(
     name = "eye",
     category = "array/creation",
     summary = "Identity matrix or N-D identity tensor.",
     keywords = "eye,identity,matrix,gpu,like,logical",
     accel = "array_construct",
-    type_resolver(eye_type),
+    type_resolver_ctx(eye_type_with_ctx),
     builtin_path = "crate::builtins::array::creation::eye"
 )]
 async fn eye_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {

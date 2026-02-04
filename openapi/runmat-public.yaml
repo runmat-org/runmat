@@ -2370,6 +2370,73 @@ components:
       - admin
       - member
       - viewer
+    server_org.Org:
+      allOf:
+      - $ref: '#/components/schemas/Org'
+    server_org.OrgRole:
+      allOf:
+      - $ref: '#/components/schemas/OrgRole'
+    server_org.Project:
+      allOf:
+      - $ref: '#/components/schemas/Project'
+    server_org.ProjectMembership:
+      allOf:
+      - $ref: '#/components/schemas/ProjectMembership'
+    server_org.ProjectRole:
+      allOf:
+      - $ref: '#/components/schemas/ProjectRole'
+    server_org.Membership:
+      allOf:
+      - $ref: '#/components/schemas/Membership'
+    server_org.ApiKeySummary:
+      allOf:
+      - $ref: '#/components/schemas/ApiKeySummary'
+    server_identity.UserProfile:
+      type: object
+      required:
+      - id
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          nullable: true
+        name:
+          type: string
+          nullable: true
+    server_filesystem.FsVersion:
+      type: string
+      description: Opaque filesystem version token.
+    server_filesystem.FsEntry:
+      type: object
+      required:
+      - path
+      - fileName
+      - fileType
+      properties:
+        path:
+          type: string
+        fileName:
+          type: string
+        fileType:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+          nullable: true
+    ErrorBody:
+      type: object
+      required:
+      - error
+      properties:
+        error:
+          type: string
+        detail:
+          nullable: true
+    crate.errors.ErrorResponse:
+      allOf:
+      - $ref: '#/components/schemas/ErrorResponse'
     OrgUpdateRequest:
       type: object
       required:

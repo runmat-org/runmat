@@ -465,6 +465,21 @@ fn infer_expr_type_with_env(
     env: &std::collections::HashMap<VarId, Type>,
     func_returns: &std::collections::HashMap<String, Vec<Type>>,
 ) -> Type {
+    fn resolve_context_from_args(args: &[HirExpr]) -> runmat_builtins::ResolveContext {
+        use runmat_builtins::LiteralValue;
+
+        let literal_args = args
+            .iter()
+            .map(|arg| {
+                if let Some(value) = eval_const_num(arg) {
+                    LiteralValue::Number(value)
+                } else {
+                    LiteralValue::Unknown
+                }
+            })
+            .collect();
+        runmat_builtins::ResolveContext::new(literal_args)
+    }
     fn unify_tensor(a: &Type, b: &Type) -> Type {
         match (a, b) {
             (Type::Tensor { shape: sa }, Type::Tensor { shape: sb }) => match (sa, sb) {
@@ -627,59 +642,6 @@ fn infer_expr_type_with_env(
         .map(|shape| Type::Tensor { shape: Some(shape) })
         .unwrap_or_else(Type::tensor),
         K::FuncCall(name, _args) => {
-            let lower_name = name.to_ascii_lowercase();
-            if matches!(
-                lower_name.as_str(),
-                "zeros" | "ones" | "rand" | "randn" | "eye"
-            ) {
-                let mut dims: Vec<Option<usize>> = Vec::with_capacity(_args.len());
-                for arg in _args {
-                    if let Some(value) = eval_const_num(arg) {
-                        if value.is_finite() {
-                            let rounded = value.round();
-                            if (value - rounded).abs() <= 1e-9 && rounded >= 0.0 {
-                                dims.push(Some(rounded as usize));
-                                continue;
-                            }
-                        }
-                    }
-                    dims.push(None);
-                }
-                if let Some(shape) =
-                    runmat_builtins::shape_rules::constructor_shape_from_dims(&dims)
-                {
-                    return Type::Tensor { shape: Some(shape) };
-                }
-            }
-            if lower_name == "repmat" && _args.len() >= 2 {
-                let input_ty = infer_expr_type_with_env(&_args[0], env, func_returns);
-                let input_shape = match input_ty {
-                    Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
-                        Some(shape)
-                    }
-                    _ => None,
-                };
-                if let Some(input_shape) = input_shape {
-                    let mut reps: Vec<Option<usize>> = Vec::new();
-                    for arg in _args.iter().skip(1) {
-                        if let Some(value) = eval_const_num(arg) {
-                            if value.is_finite() {
-                                let rounded = value.round();
-                                if (value - rounded).abs() <= 1e-9 && rounded >= 0.0 {
-                                    reps.push(Some(rounded as usize));
-                                    continue;
-                                }
-                            }
-                        }
-                        reps.push(None);
-                    }
-                    if let Some(shape) =
-                        runmat_builtins::shape_rules::repmat_shape(&input_shape, &reps)
-                    {
-                        return Type::Tensor { shape: Some(shape) };
-                    }
-                }
-            }
             if let Some(v) = func_returns.get(name) {
                 v.first().cloned().unwrap_or(Type::Unknown)
             } else {
@@ -687,9 +649,10 @@ fn infer_expr_type_with_env(
                     .iter()
                     .map(|arg| infer_expr_type_with_env(arg, env, func_returns))
                     .collect();
+                let ctx = resolve_context_from_args(_args);
                 let builtins = runmat_builtins::builtin_functions();
                 if let Some(b) = builtins.iter().find(|b| b.name == *name) {
-                    b.infer_return_type(&arg_types)
+                    b.infer_return_type_with_context(&arg_types, &ctx)
                 } else {
                     Type::Unknown
                 }
@@ -4274,7 +4237,18 @@ impl Ctx {
         for builtin in builtin_functions {
             if builtin.name == func_name {
                 let arg_types: Vec<Type> = args.iter().map(|arg| arg.ty.clone()).collect();
-                return builtin.infer_return_type(&arg_types);
+                let ctx = runmat_builtins::ResolveContext::new(
+                    args.iter()
+                        .map(|arg| {
+                            if let Some(value) = eval_const_num(arg) {
+                                runmat_builtins::LiteralValue::Number(value)
+                            } else {
+                                runmat_builtins::LiteralValue::Unknown
+                            }
+                        })
+                        .collect(),
+                );
+                return builtin.infer_return_type_with_context(&arg_types, &ctx);
             }
         }
 

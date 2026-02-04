@@ -1007,7 +1007,62 @@ pub type BuiltinControlFlow = runmat_async::RuntimeError;
 /// Async result type for builtins.
 pub type BuiltinFuture = Pin<Box<dyn Future<Output = Result<Value, BuiltinControlFlow>> + 'static>>;
 
+#[derive(Clone, Debug, Default)]
+pub struct ResolveContext {
+    pub literal_args: Vec<LiteralValue>,
+}
+
+#[derive(Clone, Debug)]
+pub enum LiteralValue {
+    Number(f64),
+    Unknown,
+}
+
+impl ResolveContext {
+    pub fn new(literal_args: Vec<LiteralValue>) -> Self {
+        Self { literal_args }
+    }
+
+    pub fn numeric_dims(&self) -> Vec<Option<usize>> {
+        self.numeric_dims_from(0)
+    }
+
+    pub fn numeric_dims_from(&self, start: usize) -> Vec<Option<usize>> {
+        self.literal_args
+            .iter()
+            .skip(start)
+            .map(|value| match value {
+                LiteralValue::Number(num) => {
+                    if num.is_finite() {
+                        let rounded = num.round();
+                        if (num - rounded).abs() <= 1e-9 && rounded >= 0.0 {
+                            return Some(rounded as usize);
+                        }
+                    }
+                    None
+                }
+                LiteralValue::Unknown => None,
+            })
+            .collect()
+    }
+}
+
 pub type TypeResolver = fn(args: &[Type]) -> Type;
+pub type TypeResolverWithContext = fn(args: &[Type], ctx: &ResolveContext) -> Type;
+
+#[derive(Clone, Copy, Debug)]
+pub enum TypeResolverKind {
+    Legacy(TypeResolver),
+    WithContext(TypeResolverWithContext),
+}
+
+pub fn type_resolver_kind(resolver: TypeResolver) -> TypeResolverKind {
+    TypeResolverKind::Legacy(resolver)
+}
+
+pub fn type_resolver_kind_ctx(resolver: TypeResolverWithContext) -> TypeResolverKind {
+    TypeResolverKind::WithContext(resolver)
+}
 
 /// Simple builtin function definition using the unified type system
 #[derive(Debug, Clone)]
@@ -1019,7 +1074,7 @@ pub struct BuiltinFunction {
     pub examples: &'static str,
     pub param_types: Vec<Type>,
     pub return_type: Type,
-    pub type_resolver: Option<TypeResolver>,
+    pub type_resolver: Option<TypeResolverKind>,
     pub implementation: fn(&[Value]) -> BuiltinFuture,
     pub accel_tags: &'static [AccelTag],
     pub is_sink: bool,
@@ -1036,7 +1091,7 @@ impl BuiltinFunction {
         examples: &'static str,
         param_types: Vec<Type>,
         return_type: Type,
-        type_resolver: Option<TypeResolver>,
+        type_resolver: Option<TypeResolverKind>,
         implementation: fn(&[Value]) -> BuiltinFuture,
         accel_tags: &'static [AccelTag],
         is_sink: bool,
@@ -1059,8 +1114,15 @@ impl BuiltinFunction {
     }
 
     pub fn infer_return_type(&self, args: &[Type]) -> Type {
+        self.infer_return_type_with_context(args, &ResolveContext::default())
+    }
+
+    pub fn infer_return_type_with_context(&self, args: &[Type], ctx: &ResolveContext) -> Type {
         if let Some(resolver) = self.type_resolver {
-            return resolver(args);
+            return match resolver {
+                TypeResolverKind::Legacy(resolver) => resolver(args),
+                TypeResolverKind::WithContext(resolver) => resolver(args, ctx),
+            };
         }
         self.return_type.clone()
     }

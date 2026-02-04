@@ -64,6 +64,7 @@ runmat-accelerate-api = { version = "=0.2.8", path = "../runmat-accelerate-api" 
 runmat-config = { version = "=0.2.8", path = "../runmat-config", features = ["accelerate"] }
 runmat-time = { version = "=0.2.8", path = "../runmat-time" }
 runmat-filesystem = { version = "=0.2.8", path = "../runmat-filesystem" }
+runmat-telemetry = { version = "=0.2.8", path = "../runmat-telemetry" }
 
 [features]
 # High-level feature toggles (default build keeps everything enabled)

@@ -1,6 +1,9 @@
 use runmat_builtins::Type;
 
-use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
+use runmat_builtins::shape_rules::{
+    constructor_shape_from_dims, element_count_if_known, unknown_shape,
+};
+use runmat_builtins::ResolveContext;
 
 pub fn rank_from_dims_args(args: &[Type]) -> Option<usize> {
     if args.is_empty() {
@@ -26,6 +29,20 @@ pub fn tensor_type_from_rank(rank: Option<usize>) -> Type {
         },
         None => Type::tensor(),
     }
+}
+
+pub fn tensor_type_from_literal_dims(args: &[Type], ctx: &ResolveContext) -> Option<Type> {
+    if args.is_empty() {
+        return None;
+    }
+    if args.iter().any(|arg| matches!(arg, Type::String)) {
+        return Some(Type::Unknown);
+    }
+    let dims = ctx.numeric_dims();
+    if dims.is_empty() {
+        return None;
+    }
+    constructor_shape_from_dims(&dims).map(|shape| Type::Tensor { shape: Some(shape) })
 }
 
 pub fn logical_type_from_rank(rank: Option<usize>) -> Type {

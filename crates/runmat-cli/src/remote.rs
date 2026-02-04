@@ -420,7 +420,7 @@ async fn list_orgs(limit: Option<u32>, cursor: Option<String>) -> Result<()> {
     let token = resolve_auth_token(&mut config, &server_url).await?;
     let client = build_public_client(&server_url, &token)?;
     let response = client
-        .list_orgs(cursor.as_deref(), limit.map(|value| value as i32))
+        .list_orgs(cursor.as_deref(), limit.map(|value| value as u64))
         .await
         .map_err(map_public_error)?
         .into_inner();
@@ -444,7 +444,7 @@ async fn list_projects(
     let token = resolve_auth_token(&mut config, &server_url).await?;
     let client = build_public_client(&server_url, &token)?;
     let response = client
-        .list_projects(&org_id, cursor.as_deref(), limit.map(|value| value as i32))
+        .list_projects(&org_id, cursor.as_deref(), limit.map(|value| value as u64))
         .await
         .map_err(map_public_error)?
         .into_inner();
@@ -486,7 +486,7 @@ async fn list_project_members(
     let token = resolve_auth_token(&mut config, &server_url).await?;
     let client = build_public_client(&server_url, &token)?;
     let response = client
-        .list_project_memberships(&project_id, cursor.as_deref(), limit.map(|value| value as i32))
+        .list_project_memberships(&project_id, cursor.as_deref(), limit.map(|value| value as u64))
         .await
         .map_err(map_public_error)?
         .into_inner();

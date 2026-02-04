@@ -1,9 +1,13 @@
 use crate::config::TelemetryConfig as RuntimeTelemetryConfig;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use once_cell::sync::OnceCell;
-use runmat_accelerate_api::{provider, ApiDeviceInfo, ProviderTelemetry};
+use runmat_accelerate_api::provider;
 use runmat_time::{system_time_now, Instant};
-use serde::Serialize;
+use runmat_telemetry::{
+    serialize_envelope, RuntimeFinishedEnvelope,
+    RuntimeFinishedPayload, RuntimeStartedEnvelope, RuntimeStartedPayload,
+    EVENT_RUNTIME_FINISHED, EVENT_RUNTIME_STARTED,
+};
 use std::fs;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -17,6 +21,8 @@ const MIN_QUEUE_SIZE: usize = 8;
 const DEFAULT_DRAIN_TIMEOUT_MS: u64 = 50;
 
 static CLIENT: OnceCell<TelemetryClient> = OnceCell::new();
+
+pub use runmat_telemetry::{ProviderSnapshot, RuntimeExecutionCounters, TelemetryRunKind};
 
 fn parse_env_bool(key: &str) -> Option<bool> {
     match std::env::var(key) {
@@ -66,50 +72,6 @@ pub fn capture_provider_snapshot() -> Option<ProviderSnapshot> {
 /// Surface the stable client id used for analytics so other components can reuse it.
 pub fn telemetry_client_id() -> Option<String> {
     stable_client_id()
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RuntimeExecutionCounters {
-    pub total_executions: u64,
-    pub jit_compiled: u64,
-    pub interpreter_fallback: u64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ProviderSnapshot {
-    pub device: ApiDeviceInfo,
-    pub telemetry: ProviderTelemetry,
-}
-
-impl ProviderSnapshot {
-    fn gpu_wall_ns(&self) -> u64 {
-        self.telemetry.fused_elementwise.total_wall_time_ns
-            + self.telemetry.fused_reduction.total_wall_time_ns
-            + self.telemetry.matmul.total_wall_time_ns
-    }
-
-    fn gpu_dispatches(&self) -> u64 {
-        self.telemetry.fused_elementwise.count
-            + self.telemetry.fused_reduction.count
-            + self.telemetry.matmul.count
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum TelemetryRunKind {
-    Script,
-    Repl,
-    Benchmark,
-}
-
-impl TelemetryRunKind {
-    fn as_str(&self) -> &'static str {
-        match self {
-            TelemetryRunKind::Script => "script",
-            TelemetryRunKind::Repl => "repl",
-            TelemetryRunKind::Benchmark => "benchmark",
-        }
-    }
 }
 
 pub struct TelemetrySessionEvent {
@@ -245,44 +207,119 @@ impl TelemetryClient {
         if !self.enabled {
             return;
         }
-        let payload = SessionStartEnvelope::new(&self.context, event);
-        self.enqueue(payload, TelemetryJobKind::SessionStart);
+        let envelope: RuntimeStartedEnvelope = RuntimeStartedEnvelope {
+            event_label: EVENT_RUNTIME_STARTED,
+            cid: self.context.cid.clone(),
+            session_id: self.context.session_id.clone(),
+            os: Some(std::env::consts::OS.to_string()),
+            arch: Some(std::env::consts::ARCH.to_string()),
+            release: Some(env!("CARGO_PKG_VERSION").to_string()),
+            run_kind: event.kind.as_str().to_string(),
+            payload: RuntimeStartedPayload {
+                jit_enabled: event.jit_enabled,
+                accelerate_enabled: event.accelerate_enabled,
+                timestamp_ms: Some(now_timestamp_ms()),
+            },
+        };
+        if let Some(serialized) = serialize_envelope(&envelope) {
+            self.enqueue_serialized(serialized, TelemetryJobKind::SessionStart);
+        }
     }
 
     fn emit_runtime_value(&self, record: RuntimeTelemetryRecord) {
         if !self.enabled {
             return;
         }
-        let payload = RuntimeValueEnvelope::new(&self.context, record);
-        self.enqueue(payload, TelemetryJobKind::RuntimeValue);
+        let duration_us = record.duration.map(duration_to_micros);
+        let (gpu_wall_ns, gpu_dispatches, upload_bytes, download_bytes, fusion_hits, fusion_misses) =
+            record
+                .provider
+                .as_ref()
+                .map_or((None, None, None, None, None, None), |snapshot| {
+                    (
+                        Some(snapshot.gpu_wall_ns()),
+                        Some(snapshot.gpu_dispatches()),
+                        Some(snapshot.telemetry.upload_bytes),
+                        Some(snapshot.telemetry.download_bytes),
+                        Some(snapshot.telemetry.fusion_cache_hits),
+                        Some(snapshot.telemetry.fusion_cache_misses),
+                    )
+                });
+
+        let gpu_ratio = match (gpu_wall_ns, duration_us) {
+            (Some(wall_ns), Some(us)) if us > 0 => {
+                Some(clamp_ratio(wall_ns as f64 / (us as f64 * 1000.0)))
+            }
+            _ => None,
+        };
+
+        let error = record.error.map(|mut e| {
+            if e.len() > 256 {
+                e.truncate(256);
+            }
+            e
+        });
+
+        let fusion_hit_ratio = match (fusion_hits, fusion_misses) {
+            (Some(h), Some(m)) if h + m > 0 => Some(h as f64 / (h + m) as f64),
+            _ => None,
+        };
+
+        let envelope: RuntimeFinishedEnvelope = RuntimeFinishedEnvelope {
+            event_label: EVENT_RUNTIME_FINISHED,
+            cid: self.context.cid.clone(),
+            session_id: self.context.session_id.clone(),
+            os: Some(std::env::consts::OS.to_string()),
+            arch: Some(std::env::consts::ARCH.to_string()),
+            release: Some(env!("CARGO_PKG_VERSION").to_string()),
+            run_kind: record.kind.as_str().to_string(),
+            payload: RuntimeFinishedPayload {
+                duration_us,
+                success: record.success,
+                jit_enabled: record.jit_enabled,
+                jit_used: record.jit_used,
+                accelerate_enabled: record.accelerate_enabled,
+                timestamp_ms: Some(now_timestamp_ms()),
+                error,
+                counters: record.counters,
+                provider: record.provider,
+                gpu_wall_ns,
+                gpu_ratio,
+                gpu_dispatches,
+                gpu_upload_bytes: upload_bytes,
+                gpu_download_bytes: download_bytes,
+                fusion_cache_hits: fusion_hits,
+                fusion_cache_misses: fusion_misses,
+                fusion_hit_ratio,
+            },
+        };
+
+        if let Some(serialized) = serialize_envelope(&envelope) {
+            self.enqueue_serialized(serialized, TelemetryJobKind::RuntimeValue);
+        }
     }
 
-    fn enqueue<T: Serialize>(&self, value: T, kind: TelemetryJobKind) {
+    fn enqueue_serialized(&self, serialized: String, kind: TelemetryJobKind) {
         if !self.enabled {
             return;
         }
-        match serde_json::to_string(&value) {
-            Ok(serialized) => {
-                if self.show_payloads {
-                    println!("[runmat telemetry] {serialized}");
-                }
-                if self.sync_mode {
-                    self.transport.send(&serialized);
-                } else if let Some(sender) = &self.sender {
-                    self.increment_counters(kind);
-                    if sender
-                        .try_send(TelemetryJob {
-                            payload: serialized,
-                            kind,
-                        })
-                        .is_err()
-                    {
-                        self.decrement_counters(kind);
-                    }
-                }
-            }
-            Err(err) => {
-                log::debug!("failed to serialize telemetry payload: {err}");
+        if self.show_payloads {
+            println!("[runmat telemetry] {serialized}");
+        }
+        if self.sync_mode {
+            self.transport.send(&serialized);
+            return;
+        }
+        if let Some(sender) = &self.sender {
+            self.increment_counters(kind);
+            if sender
+                .try_send(TelemetryJob {
+                    payload: serialized,
+                    kind,
+                })
+                .is_err()
+            {
+                self.decrement_counters(kind);
             }
         }
     }
@@ -493,143 +530,4 @@ enum TelemetryDrainMode {
     None,
     Started,
     All,
-}
-
-#[derive(Serialize)]
-struct SessionStartEnvelope<'a> {
-    #[serde(rename = "event_label")]
-    event_label: &'static str,
-    cid: Option<&'a str>,
-    session_id: &'a str,
-    os: &'static str,
-    arch: &'static str,
-    release: &'static str,
-    run_kind: &'a str,
-    payload: SessionStartPayload,
-}
-
-#[derive(Serialize)]
-struct SessionStartPayload {
-    jit_enabled: bool,
-    accelerate_enabled: bool,
-    timestamp_ms: u64,
-}
-
-impl<'a> SessionStartEnvelope<'a> {
-    fn new(context: &'a TelemetryContext, event: TelemetrySessionEvent) -> Self {
-        Self {
-            event_label: "runtime_started",
-            cid: context.cid.as_deref(),
-            session_id: &context.session_id,
-            os: std::env::consts::OS,
-            arch: std::env::consts::ARCH,
-            release: env!("CARGO_PKG_VERSION"),
-            run_kind: event.kind.as_str(),
-            payload: SessionStartPayload {
-                jit_enabled: event.jit_enabled,
-                accelerate_enabled: event.accelerate_enabled,
-                timestamp_ms: now_timestamp_ms(),
-            },
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct RuntimeValueEnvelope<'a> {
-    #[serde(rename = "event_label")]
-    event_label: &'static str,
-    cid: Option<&'a str>,
-    session_id: &'a str,
-    os: &'static str,
-    arch: &'static str,
-    release: &'static str,
-    run_kind: &'a str,
-    payload: RuntimeValuePayload,
-}
-
-#[derive(Serialize)]
-struct RuntimeValuePayload {
-    duration_us: Option<u64>,
-    success: bool,
-    jit_enabled: bool,
-    jit_used: bool,
-    accelerate_enabled: bool,
-    timestamp_ms: u64,
-    error: Option<String>,
-    counters: Option<RuntimeExecutionCounters>,
-    provider: Option<ProviderSnapshot>,
-    gpu_wall_ns: Option<u64>,
-    gpu_ratio: Option<f64>,
-    gpu_dispatches: Option<u64>,
-    gpu_upload_bytes: Option<u64>,
-    gpu_download_bytes: Option<u64>,
-    fusion_cache_hits: Option<u64>,
-    fusion_cache_misses: Option<u64>,
-    fusion_hit_ratio: Option<f64>,
-}
-
-impl<'a> RuntimeValueEnvelope<'a> {
-    fn new(context: &'a TelemetryContext, record: RuntimeTelemetryRecord) -> Self {
-        let duration_us = record.duration.map(duration_to_micros);
-        let (gpu_wall_ns, gpu_dispatches, upload_bytes, download_bytes, fusion_hits, fusion_misses) =
-            record
-                .provider
-                .as_ref()
-                .map_or((None, None, None, None, None, None), |snapshot| {
-                    (
-                        Some(snapshot.gpu_wall_ns()),
-                        Some(snapshot.gpu_dispatches()),
-                        Some(snapshot.telemetry.upload_bytes),
-                        Some(snapshot.telemetry.download_bytes),
-                        Some(snapshot.telemetry.fusion_cache_hits),
-                        Some(snapshot.telemetry.fusion_cache_misses),
-                    )
-                });
-
-        let gpu_ratio = match (gpu_wall_ns, duration_us) {
-            (Some(wall_ns), Some(us)) if us > 0 => {
-                Some(clamp_ratio(wall_ns as f64 / (us as f64 * 1000.0)))
-            }
-            _ => None,
-        };
-
-        let error = record.error.map(|mut e| {
-            if e.len() > 256 {
-                e.truncate(256);
-            }
-            e
-        });
-
-        Self {
-            event_label: "runtime_finished",
-            cid: context.cid.as_deref(),
-            session_id: &context.session_id,
-            os: std::env::consts::OS,
-            arch: std::env::consts::ARCH,
-            release: env!("CARGO_PKG_VERSION"),
-            run_kind: record.kind.as_str(),
-            payload: RuntimeValuePayload {
-                duration_us,
-                success: record.success,
-                jit_enabled: record.jit_enabled,
-                jit_used: record.jit_used,
-                accelerate_enabled: record.accelerate_enabled,
-                timestamp_ms: now_timestamp_ms(),
-                error,
-                counters: record.counters,
-                provider: record.provider,
-                gpu_wall_ns,
-                gpu_ratio,
-                gpu_dispatches,
-                gpu_upload_bytes: upload_bytes,
-                gpu_download_bytes: download_bytes,
-                fusion_cache_hits: fusion_hits,
-                fusion_cache_misses: fusion_misses,
-                fusion_hit_ratio: match (fusion_hits, fusion_misses) {
-                    (Some(h), Some(m)) if h + m > 0 => Some(h as f64 / (h + m) as f64),
-                    _ => None,
-                },
-            },
-        }
-    }
 }

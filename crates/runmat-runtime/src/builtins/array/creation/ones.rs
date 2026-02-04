@@ -14,7 +14,10 @@ use crate::builtins::common::tensor;
 use runmat_builtins::NumericDType;
 use runmat_builtins::Type;
 
-use crate::builtins::array::type_resolvers::{rank_from_dims_args, tensor_type_from_rank};
+use crate::builtins::array::type_resolvers::{
+    rank_from_dims_args, tensor_type_from_literal_dims, tensor_type_from_rank,
+};
+use runmat_builtins::ResolveContext;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::ones")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -50,6 +53,16 @@ fn ones_type(args: &[Type]) -> Type {
     tensor_type_from_rank(rank)
 }
 
+fn ones_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
+    if args.is_empty() {
+        return Type::Num;
+    }
+    if let Some(ty) = tensor_type_from_literal_dims(args, ctx) {
+        return ty;
+    }
+    ones_type(args)
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::ones")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ones",
@@ -78,7 +91,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Create arrays filled with ones.",
     keywords = "ones,array,logical,gpu,like",
     accel = "array_construct",
-    type_resolver(ones_type),
+    type_resolver_ctx(ones_type_with_ctx),
     builtin_path = "crate::builtins::array::creation::ones"
 )]
 async fn ones_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {

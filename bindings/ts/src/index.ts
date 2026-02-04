@@ -74,6 +74,8 @@ export interface RunMatInitOptions {
   gpuBufferPoolMaxPerKey?: number;
   telemetryConsent?: boolean;
   telemetryId?: string;
+  telemetryRunKind?: "script" | "repl" | "benchmark" | "install";
+  telemetryEmitter?: (envelope: unknown) => void;
   wgpuPowerPreference?: "auto" | "high-performance" | "low-power";
   wgpuForceFallbackAdapter?: boolean;
   wasmModule?: WasmInitInput;
@@ -502,6 +504,8 @@ interface NativeInitOptions {
   gpuBufferPoolMaxPerKey?: number;
   telemetryConsent?: boolean;
   telemetryId?: string;
+  telemetryRunKind?: string;
+  telemetryEmitter?: (envelope: unknown) => void;
   wgpuPowerPreference?: string;
   wgpuForceFallbackAdapter?: boolean;
   scatterTargetPoints?: number;
@@ -554,6 +558,11 @@ interface RunMatNativeModule {
   default: (module?: WasmInitInput | Promise<WasmInitInput>) => Promise<unknown>;
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
   registerFsProvider?: (provider: RunMatFilesystemProvider) => void;
+  // Legacy plot canvas bindings (handle-based).
+  registerPlotCanvas?: (canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<void>;
+  deregisterPlotCanvas?: () => void;
+  registerFigureCanvas?: (handle: number, canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<void>;
+  deregisterFigureCanvas?: (handle: number) => void;
   plotRendererReady?: () => boolean;
   renderCurrentFigureScene?: (handle: number) => void;
   createPlotSurface?: (canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<number>;
@@ -620,11 +629,19 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     native.registerFsProvider(fsProvider);
   }
   if (options.plotCanvas) {
-    if (typeof native.createPlotSurface !== "function") {
-      throw new Error("The loaded runmat-wasm module does not support WebGPU plotting surfaces yet.");
+    if (typeof native.registerPlotCanvas === "function") {
+      // Legacy binding: register the default plot canvas before initializing the session.
+      await native.registerPlotCanvas(options.plotCanvas);
+    } else if (typeof native.createPlotSurface === "function") {
+      // New binding: create a surface for the provided canvas. The caller is responsible for binding/presenting.
+      await native.createPlotSurface(options.plotCanvas);
+    } else {
+      const err = new Error(
+        "The loaded runmat-wasm module does not support WebGPU plotting surfaces yet."
+      ) as Error & { code?: string };
+      err.code = "PlotCanvas";
+      throw err;
     }
-    // Create a surface for the provided canvas. The caller is responsible for binding/presenting.
-    await native.createPlotSurface(options.plotCanvas);
   }
   const supportsWebGpu = typeof navigator !== "undefined" && typeof (navigator as any).gpu !== "undefined";
   const hasExplicitEnableFlag = Object.prototype.hasOwnProperty.call(options, "enableGpu");
@@ -656,6 +673,8 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     gpuBufferPoolMaxPerKey: options.gpuBufferPoolMaxPerKey,
     telemetryConsent: options.telemetryConsent ?? true,
     telemetryId: options.telemetryId,
+    telemetryRunKind: options.telemetryRunKind,
+    telemetryEmitter: options.telemetryEmitter,
     wgpuPowerPreference: options.wgpuPowerPreference ?? "auto",
     wgpuForceFallbackAdapter: options.wgpuForceFallbackAdapter ?? false,
     scatterTargetPoints: options.scatterTargetPoints,
@@ -674,6 +693,22 @@ export async function plotRendererReady(): Promise<boolean> {
     return false;
   }
   return native.plotRendererReady();
+}
+
+export async function deregisterPlotCanvas(): Promise<void> {
+  const native = await loadNativeModule();
+  if (typeof native.deregisterPlotCanvas !== "function") {
+    throw new Error("The loaded runmat-wasm module does not expose deregisterPlotCanvas.");
+  }
+  native.deregisterPlotCanvas();
+}
+
+export async function deregisterFigureCanvas(handle: number): Promise<void> {
+  const native = await loadNativeModule();
+  if (typeof native.deregisterFigureCanvas !== "function") {
+    throw new Error("The loaded runmat-wasm module does not expose deregisterFigureCanvas.");
+  }
+  native.deregisterFigureCanvas(handle);
 }
 
 export async function createPlotSurface(canvas: HTMLCanvasElement | OffscreenCanvas): Promise<number> {
@@ -1345,10 +1380,32 @@ function normalizeSliceVector(values?: number[], requirePositive = false): numbe
   return normalized;
 }
 
+function normalizeResumeInputValue(value: ResumeInputValue): ResumeInputPayload {
+  if (value && typeof value === "object") {
+    const payload = value as ResumeInputPayload;
+    if (payload.error) {
+      return { error: String(payload.error) };
+    }
+    if (payload.kind === "keyPress") {
+      return { kind: "keyPress" };
+    }
+    if (payload.kind === "line") {
+      const raw = payload.value ?? payload.line ?? "";
+      return { kind: "line", value: String(raw ?? "") };
+    }
+  }
+  // Scalars and nulls are treated as line inputs.
+  if (value === null || value === undefined) {
+    return { kind: "line", value: "" };
+  }
+  return { kind: "line", value: String(value) };
+}
+
 export const __internals = {
   resolveSnapshotSource,
   fetchSnapshotFromUrl,
   coerceFigureError,
+  normalizeResumeInputValue,
   workspaceHover: workspaceHoverInternals as unknown as Record<string, unknown>,
   setNativeModuleOverride(module: RunMatNativeModule | RunMatNativeSession | null): void {
     nativeModuleOverride = module;

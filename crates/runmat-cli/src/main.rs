@@ -1830,9 +1830,11 @@ async fn execute_script_with_args(
     emit_execution_streams(&result.streams);
 
     let provider_snapshot = capture_provider_snapshot();
-    let error_payload = result.error.as_ref().map(|err| {
-        err.format_diagnostic_with_source(Some(script.to_string_lossy().as_ref()), Some(&content))
-    });
+    let error_payload = result
+        .error
+        .as_ref()
+        .and_then(|err| err.identifier().map(|value| value.to_string()))
+        .or_else(|| result.error.as_ref().map(|_| "runtime_error".to_string()));
     let success = error_payload.is_none();
     emit_runtime_value(RuntimeTelemetryRecord {
         kind: TelemetryRunKind::Script,
@@ -2192,9 +2194,12 @@ async fn execute_benchmark(
         let result = engine.execute(&content).await.map_err(anyhow::Error::new)?;
 
         let iter_duration = Duration::from_millis(result.execution_time_ms);
-        if let Some(error) = result.error.as_ref().map(|err| {
-            err.format_diagnostic_with_source(Some(file.to_string_lossy().as_ref()), Some(&content))
-        }) {
+        if let Some(error) = result
+            .error
+            .as_ref()
+            .and_then(|err| err.identifier().map(|value| value.to_string()))
+            .or_else(|| result.error.as_ref().map(|_| "runtime_error".to_string()))
+        {
             total_time += iter_duration;
             let counters = RuntimeExecutionCounters {
                 total_executions: i as u64,

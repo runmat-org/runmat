@@ -6270,6 +6270,7 @@ dependencies = [
  "runmat-plot",
  "runmat-runtime",
  "runmat-snapshot",
+ "runmat-telemetry",
  "runmat-time",
  "runmat-turbine",
  "rustyline",
@@ -6736,6 +6737,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-telemetry"
+version = "0.2.8"
+dependencies = [
+ "runmat-accelerate-api",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "runmat-thread-local"
 version = "0.1.0"
 
@@ -6794,6 +6804,7 @@ dependencies = [
  "runmat-logging",
  "runmat-plot",
  "runmat-runtime",
+ "runmat-telemetry",
  "runmat-thread-local",
  "serde",
  "serde-wasm-bindgen",

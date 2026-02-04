@@ -9,7 +9,10 @@ use crate::builtins::common::random;
 use crate::builtins::common::random_args::{
     complex_tensor_into_value, extract_dims, keyword_of, shape_from_value,
 };
-use crate::builtins::array::type_resolvers::{rank_from_dims_args, tensor_type_from_rank};
+use crate::builtins::array::type_resolvers::{
+    rank_from_dims_args, tensor_type_from_literal_dims, tensor_type_from_rank,
+};
+use runmat_builtins::ResolveContext;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -51,6 +54,16 @@ fn randn_type(args: &[Type]) -> Type {
     tensor_type_from_rank(rank)
 }
 
+fn randn_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
+    if args.is_empty() {
+        return Type::Num;
+    }
+    if let Some(ty) = tensor_type_from_literal_dims(args, ctx) {
+        return ty;
+    }
+    randn_type(args)
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randn")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "randn",
@@ -68,7 +81,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Standard normal random numbers.",
     keywords = "randn,random,normal,gaussian,gpu,like",
     accel = "array_construct",
-    type_resolver(randn_type),
+    type_resolver_ctx(randn_type_with_ctx),
     builtin_path = "crate::builtins::array::creation::randn"
 )]
 async fn randn_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
