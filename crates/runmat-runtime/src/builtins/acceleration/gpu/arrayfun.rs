@@ -11,10 +11,11 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::{
-    build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
+    build_runtime_error, gather_if_needed_async, make_cell_with_shape, user_functions,
+    BuiltinResult, RuntimeError,
 };
 use runmat_accelerate_api::{set_handle_logical, GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, Closure, ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{CharArray, Closure, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::arrayfun")]
@@ -436,6 +437,7 @@ enum ArrayData {
     Logical(LogicalArray),
     Complex(ComplexTensor),
     Char(CharArray),
+    String(StringArray),
     Scalar(Value),
 }
 
@@ -446,11 +448,16 @@ impl ArrayData {
             Value::LogicalArray(l) => Ok(ArrayData::Logical(l)),
             Value::ComplexTensor(c) => Ok(ArrayData::Complex(c)),
             Value::CharArray(ca) => Ok(ArrayData::Char(ca)),
-            Value::Num(_) | Value::Bool(_) | Value::Int(_) | Value::Complex(_, _) => {
+            Value::StringArray(sa) => Ok(ArrayData::String(sa)),
+            Value::Num(_)
+            | Value::Bool(_)
+            | Value::Int(_)
+            | Value::Complex(_, _)
+            | Value::String(_) => {
                 Ok(ArrayData::Scalar(value))
             }
             other => Err(arrayfun_flow(format!(
-                "arrayfun: unsupported input type {other:?} (expected numeric, logical, complex, or char arrays)"
+                "arrayfun: unsupported input type {other:?} (expected numeric, logical, complex, char, or string arrays)"
             ))),
         }
     }
@@ -461,6 +468,7 @@ impl ArrayData {
             ArrayData::Logical(l) => l.data.len(),
             ArrayData::Complex(c) => c.data.len(),
             ArrayData::Char(ca) => ca.rows * ca.cols,
+            ArrayData::String(sa) => sa.data.len(),
             ArrayData::Scalar(_) => 1,
         }
     }
@@ -489,6 +497,13 @@ impl ArrayData {
                 }
             }
             ArrayData::Char(ca) => vec![ca.rows, ca.cols],
+            ArrayData::String(sa) => {
+                if sa.shape.is_empty() {
+                    vec![1, 1]
+                } else {
+                    sa.shape.clone()
+                }
+            }
             ArrayData::Scalar(_) => vec![1, 1],
         }
     }
@@ -533,6 +548,12 @@ impl ArrayData {
                     .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
                 Ok(Value::CharArray(char_array))
             }
+            ArrayData::String(sa) => Ok(Value::String(
+                sa.data
+                    .get(idx)
+                    .cloned()
+                    .ok_or_else(|| arrayfun_flow("arrayfun: index out of bounds"))?,
+            )),
             ArrayData::Scalar(v) => Ok(v.clone()),
         }
     }
@@ -606,6 +627,11 @@ impl Callable {
             Callable::Closure(c) => {
                 let mut merged = c.captures.clone();
                 merged.extend_from_slice(args);
+                if let Some(result) =
+                    user_functions::try_call_user_function(&c.function_name, &merged).await
+                {
+                    return result;
+                }
                 crate::call_builtin_async(&c.function_name, &merged).await
             }
         }

@@ -32,6 +32,7 @@ pub mod indexing;
 pub mod matrix;
 pub mod plotting_hooks;
 pub mod runtime_error;
+pub mod user_functions;
 pub mod warning_store;
 pub mod workspace;
 

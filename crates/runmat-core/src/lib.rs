@@ -1687,8 +1687,8 @@ impl RunMatSession {
             self.populate_callstack(runtime_error);
         }
 
-        let suppress_public_value = is_expression_stmt
-            && matches!(final_stmt_emit, FinalStmtEmitDisposition::Suppressed);
+        let suppress_public_value =
+            is_expression_stmt && matches!(final_stmt_emit, FinalStmtEmitDisposition::Suppressed);
         let public_value = if is_semicolon_suppressed || suppress_public_value {
             None
         } else {

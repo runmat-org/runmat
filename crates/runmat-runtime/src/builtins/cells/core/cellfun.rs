@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
 };
 use crate::{
     build_runtime_error, call_builtin_async, gather_if_needed_async, make_cell_with_shape,
-    BuiltinResult, RuntimeError,
+    user_functions, BuiltinResult, RuntimeError,
 };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::cells::core::cellfun")]
@@ -494,6 +494,11 @@ impl Callable {
             Callable::Closure(c) => {
                 let mut captures = c.captures.clone();
                 captures.extend_from_slice(args);
+                if let Some(result) =
+                    user_functions::try_call_user_function(&c.function_name, &captures).await
+                {
+                    return result;
+                }
                 call_builtin_async(&c.function_name, &captures).await
             }
             Callable::Special(special) => special.call(args).await,

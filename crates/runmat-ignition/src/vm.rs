@@ -24,7 +24,7 @@ use runmat_runtime::{
     builtins::common::shape::is_scalar_shape,
     builtins::common::tensor,
     builtins::stats::random::stochastic_evolution::stochastic_evolution_host,
-    gather_if_needed,
+    gather_if_needed, user_functions,
     workspace::{self as runtime_workspace, WorkspaceResolver},
     CallFrame, RuntimeError,
 };
@@ -36,7 +36,6 @@ type Instant = ();
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
-#[cfg(feature = "native-accel")]
 use std::sync::Arc;
 use std::sync::Once;
 #[cfg(feature = "native-accel")]
@@ -1348,6 +1347,29 @@ runmat_thread_local! {
     };
 }
 
+runmat_thread_local! {
+    static USER_FUNCTION_VARS: RefCell<Option<*mut Vec<Value>>> = const { RefCell::new(None) };
+}
+
+struct UserFunctionVarsGuard {
+    previous: Option<*mut Vec<Value>>,
+}
+
+impl Drop for UserFunctionVarsGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        USER_FUNCTION_VARS.with(|slot| {
+            *slot.borrow_mut() = previous;
+        });
+    }
+}
+
+fn install_user_function_vars(vars: &mut Vec<Value>) -> UserFunctionVarsGuard {
+    let vars_ptr = vars as *mut Vec<Value>;
+    let previous = USER_FUNCTION_VARS.with(|slot| slot.borrow_mut().replace(vars_ptr));
+    UserFunctionVarsGuard { previous }
+}
+
 #[derive(Debug)]
 pub enum InterpreterOutcome {
     Completed(Vec<Value>),
@@ -1512,6 +1534,25 @@ async fn run_interpreter_inner(
             fusion_plan: _,
         bytecode,
     } = state;
+    let functions = Arc::new(context.functions.clone());
+    let _user_function_vars_guard = install_user_function_vars(&mut vars);
+    let _user_function_guard = user_functions::install_user_function_invoker(Some(Arc::new(
+        move |name: &str, args: &[Value]| {
+            let name = name.to_string();
+            let args = args.to_vec();
+            let functions = Arc::clone(&functions);
+            Box::pin(async move {
+                let vars_ptr = USER_FUNCTION_VARS.with(|slot| *slot.borrow());
+                let Some(vars_ptr) = vars_ptr else {
+                    return Err(RuntimeError::new(
+                        "user function vars not installed".to_string(),
+                    ));
+                };
+                let vars = unsafe { &mut *vars_ptr };
+                invoke_user_function_value(&name, &args, &functions, vars).await
+            })
+        },
+    )));
     CALL_COUNTS.with(|cc| {
         *cc.borrow_mut() = call_counts.clone();
     });
@@ -1721,7 +1762,10 @@ async fn run_interpreter_inner(
                     // Gather GPU tensors so we display actual values, not internal handles
                     let host_value =
                         runmat_runtime::dispatcher::gather_if_needed_async(value).await?;
-                    runmat_runtime::console::record_value_output(label_text.as_deref(), &host_value);
+                    runmat_runtime::console::record_value_output(
+                        label_text.as_deref(),
+                        &host_value,
+                    );
                 }
             }
             Instr::EmitVar { var_index, label } => {
@@ -1730,7 +1774,10 @@ async fn run_interpreter_inner(
                     // Gather GPU tensors so we display actual values, not internal handles
                     let host_value =
                         runmat_runtime::dispatcher::gather_if_needed_async(value).await?;
-                    runmat_runtime::console::record_value_output(label_text.as_deref(), &host_value);
+                    runmat_runtime::console::record_value_output(
+                        label_text.as_deref(),
+                        &host_value,
+                    );
                 }
             }
             Instr::AndAnd(target) => {
@@ -12128,6 +12175,172 @@ pub async fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, RuntimeError> 
         Ok(InterpreterOutcome::Completed(values)) => Ok(values),
         Err(e) => Err(e),
     }
+}
+
+async fn invoke_user_function_value(
+    name: &str,
+    args: &[Value],
+    functions: &HashMap<String, UserFunction>,
+    vars: &mut [Value],
+) -> Result<Value, RuntimeError> {
+    let func: UserFunction = match functions.get(name) {
+        Some(f) => f.clone(),
+        None => {
+            return Err(mex(
+                "UndefinedFunction",
+                &format!("Undefined function: {name}"),
+            ))
+        }
+    };
+
+    let arg_count = args.len();
+    if !func.has_varargin {
+        if arg_count < func.params.len() {
+            return Err(mex(
+                "NotEnoughInputs",
+                &format!(
+                    "Function '{name}' expects {} inputs, got {arg_count}",
+                    func.params.len()
+                ),
+            ));
+        }
+        if arg_count > func.params.len() {
+            return Err(mex(
+                "TooManyInputs",
+                &format!(
+                    "Function '{name}' expects {} inputs, got {arg_count}",
+                    func.params.len()
+                ),
+            ));
+        }
+    } else if arg_count + 1 < func.params.len() {
+        return Err(mex(
+            "NotEnoughInputs",
+            &format!(
+                "Function '{name}' expects at least {} inputs, got {arg_count}",
+                func.params.len() - 1
+            ),
+        ));
+    }
+
+    let var_map = runmat_hir::remapping::create_complete_function_var_map(
+        &func.params,
+        &func.outputs,
+        &func.body,
+    );
+    let local_var_count = var_map.len();
+    let remapped_body = runmat_hir::remapping::remap_function_body(&func.body, &var_map);
+    let func_vars_count = local_var_count.max(func.params.len());
+    let mut func_vars = vec![Value::Num(0.0); func_vars_count];
+
+    if func.has_varargin {
+        let fixed = func.params.len().saturating_sub(1);
+        for i in 0..fixed {
+            if i < args.len() && i < func_vars.len() {
+                func_vars[i] = args[i].clone();
+            }
+        }
+        let mut rest: Vec<Value> = if args.len() > fixed {
+            args[fixed..].to_vec()
+        } else {
+            Vec::new()
+        };
+        let cell = runmat_builtins::CellArray::new(
+            std::mem::take(&mut rest),
+            1,
+            if args.len() > fixed {
+                args.len() - fixed
+            } else {
+                0
+            },
+        )
+        .map_err(|e| RuntimeError::new(format!("varargin: {e}")))?;
+        if fixed < func_vars.len() {
+            func_vars[fixed] = Value::Cell(cell);
+        }
+    } else {
+        for (i, _param_id) in func.params.iter().enumerate() {
+            if i < args.len() && i < func_vars.len() {
+                func_vars[i] = args[i].clone();
+            }
+        }
+    }
+
+    for (original_var_id, local_var_id) in &var_map {
+        let local_index = local_var_id.0;
+        let global_index = original_var_id.0;
+        if local_index < func_vars.len() && global_index < vars.len() {
+            let is_parameter = func
+                .params
+                .iter()
+                .any(|param_id| param_id == original_var_id);
+            if !is_parameter {
+                func_vars[local_index] = vars[global_index].clone();
+            }
+        }
+    }
+
+    if func.has_varargout {
+        if let Some(varargout_oid) = func.outputs.last() {
+            if let Some(local_id) = var_map.get(varargout_oid) {
+                if local_id.0 < func_vars.len() {
+                    let empty = runmat_builtins::CellArray::new(vec![], 1, 0)
+                        .map_err(|e| RuntimeError::new(format!("varargout init: {e}")))?;
+                    func_vars[local_id.0] = Value::Cell(empty);
+                }
+            }
+        }
+    }
+
+    let mut func_var_types = func.var_types.clone();
+    if func_var_types.len() < local_var_count {
+        func_var_types.resize(local_var_count, Type::Unknown);
+    }
+    let func_program = runmat_hir::HirProgram {
+        body: remapped_body,
+        var_types: func_var_types,
+    };
+    let func_bytecode = crate::compile(&func_program, functions)?;
+    let func_result_vars =
+        interpret_function_with_counts(&func_bytecode, func_vars, name, 1, arg_count).await?;
+
+    if func.outputs.is_empty() {
+        return Ok(Value::Num(0.0));
+    }
+
+    if func.has_varargout {
+        let total_named = func.outputs.len().saturating_sub(1);
+        if total_named > 0 {
+            if let Some(oid) = func.outputs.first() {
+                if let Some(local_id) = var_map.get(oid) {
+                    if let Some(value) = func_result_vars.get(local_id.0) {
+                        return Ok(value.clone());
+                    }
+                }
+            }
+        }
+        if let Some(varargout_oid) = func.outputs.last() {
+            if let Some(local_id) = var_map.get(varargout_oid) {
+                if let Some(Value::Cell(ca)) = func_result_vars.get(local_id.0) {
+                    if let Some(first) = ca.data.first() {
+                        return Ok((**first).clone());
+                    }
+                }
+            }
+        }
+        return Ok(Value::Num(0.0));
+    }
+
+    let Some(output_id) = func.outputs.first() else {
+        return Ok(Value::Num(0.0));
+    };
+    let Some(local_id) = var_map.get(output_id) else {
+        return Ok(Value::Num(0.0));
+    };
+    Ok(func_result_vars
+        .get(local_id.0)
+        .cloned()
+        .unwrap_or(Value::Num(0.0)))
 }
 
 pub async fn interpret_function(
