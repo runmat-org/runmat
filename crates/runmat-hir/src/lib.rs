@@ -2736,6 +2736,30 @@ impl Ctx {
         self.is_user_defined_function(name) || self.is_builtin_function(name)
     }
 
+    /// Check if a name is a class-like type that should support static method syntax
+    /// (e.g., `gpuArray.zeros(...)` instead of requiring `?gpuArray.zeros(...)`).
+    fn is_static_method_class(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "gpuArray"
+                | "logical"
+                | "double"
+                | "single"
+                | "int8"
+                | "int16"
+                | "int32"
+                | "int64"
+                | "uint8"
+                | "uint16"
+                | "uint32"
+                | "uint64"
+                | "char"
+                | "string"
+                | "cell"
+                | "struct"
+        )
+    }
+
     fn lower_stmts(&mut self, stmts: &[AstStmt]) -> Result<Vec<HirStmt>, SemanticError> {
         stmts.iter().map(|s| self.lower_stmt(s)).collect()
     }
@@ -3224,6 +3248,22 @@ impl Ctx {
             Colon(_) => (HirExprKind::Colon, Type::tensor()),
             EndKeyword(_) => (HirExprKind::End, Type::Unknown),
             Member(base, name, _) => {
+                // Check if base is an identifier that should be treated as a class reference
+                // for static property access (e.g., `gpuArray.zeros` → `?gpuArray.zeros`)
+                if let Ident(class_name, _) = &**base {
+                    if self.is_static_method_class(class_name) {
+                        let metaclass = HirExpr {
+                            kind: HirExprKind::MetaClass(class_name.clone()),
+                            ty: Type::String,
+                            span: base.span(),
+                        };
+                        return Ok(HirExpr {
+                            kind: HirExprKind::Member(Box::new(metaclass), name.clone()),
+                            ty: Type::Unknown,
+                            span,
+                        });
+                    }
+                }
                 let b = self.lower_expr(base)?;
                 (
                     HirExprKind::Member(Box::new(b), name.clone()),
@@ -3239,6 +3279,28 @@ impl Ctx {
                 )
             }
             MethodCall(base, name, args, _) => {
+                // Check if base is an identifier that should be treated as a class reference
+                // for static method calls (e.g., `gpuArray.zeros(1,1)` → `?gpuArray.zeros(1,1)`)
+                if let Ident(class_name, _) = &**base {
+                    if self.is_static_method_class(class_name) {
+                        let metaclass = HirExpr {
+                            kind: HirExprKind::MetaClass(class_name.clone()),
+                            ty: Type::String,
+                            span: base.span(),
+                        };
+                        let lowered_args: Result<Vec<_>, _> =
+                            args.iter().map(|a| self.lower_expr(a)).collect();
+                        return Ok(HirExpr {
+                            kind: HirExprKind::MethodCall(
+                                Box::new(metaclass),
+                                name.clone(),
+                                lowered_args?,
+                            ),
+                            ty: Type::Unknown,
+                            span,
+                        });
+                    }
+                }
                 let b = self.lower_expr(base)?;
                 let lowered_args: Result<Vec<_>, _> =
                     args.iter().map(|a| self.lower_expr(a)).collect();

@@ -1443,3 +1443,40 @@ fn import_specific_vs_wildcard_same_name_prefers_specific_under_nesting() {
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-10.0).abs()<1e-9)));
 }
+
+#[test]
+fn type_class_static_method_zeros() {
+    // Test that double.zeros(2, 3) is lowered to zeros(2, 3, 'double')
+    let program = r#"
+        A = double.zeros(2, 3);
+        s = size(A);
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    // The result should be a 2x3 matrix of zeros
+    assert!(vars.iter().any(|v| {
+        if let runmat_builtins::Value::Tensor(t) = v {
+            t.shape == vec![2, 3] && t.data.iter().all(|&x| x == 0.0)
+        } else {
+            false
+        }
+    }));
+}
+
+#[test]
+fn type_class_static_method_logical_zeros() {
+    // Test that logical.zeros(2, 2) is lowered to zeros(2, 2, 'logical')
+    let program = r#"
+        A = logical.zeros(2, 2);
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    // The result should be a 2x2 logical array of zeros
+    assert!(vars.iter().any(|v| {
+        if let runmat_builtins::Value::LogicalArray(l) = v {
+            l.shape == vec![2, 2] && l.data.iter().all(|&x| x == 0)
+        } else {
+            false
+        }
+    }));
+}

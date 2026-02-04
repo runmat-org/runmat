@@ -11005,10 +11005,42 @@ async fn run_interpreter_inner(
                     };
                     stack.push(v);
                 } else {
-                    vm_bail!(format!(
-                        "Unknown static method '{}' on class {}",
-                        method, class_name
-                    ));
+                    // Fallback for type-class static methods like gpuArray.zeros(m, n)
+                    // These are equivalent to calling the builtin with the class name appended:
+                    // e.g., gpuArray.zeros(2, 3) → zeros(2, 3, 'gpuArray')
+                    let is_type_class = matches!(
+                        class_name.as_str(),
+                        "gpuArray"
+                            | "logical"
+                            | "double"
+                            | "single"
+                            | "int8"
+                            | "int16"
+                            | "int32"
+                            | "int64"
+                            | "uint8"
+                            | "uint16"
+                            | "uint32"
+                            | "uint64"
+                            | "char"
+                            | "string"
+                            | "cell"
+                            | "struct"
+                    );
+                    if is_type_class {
+                        // Append the class name as a string argument
+                        args.push(Value::from(class_name.as_str()));
+                        let v = match call_builtin_vm!(&method, &args) {
+                            Ok(v) => v,
+                            Err(e) => vm_bail!(e),
+                        };
+                        stack.push(v);
+                    } else {
+                        vm_bail!(format!(
+                            "Unknown static method '{}' on class {}",
+                            method, class_name
+                        ));
+                    }
                 }
             }
             Instr::RegisterClass {
