@@ -7,6 +7,7 @@ use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
 use crate::builtins::array::type_resolvers::row_vector_type;
+use runmat_builtins::ResolveContext;
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -47,8 +48,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Sequence generation is treated as a sink and is not fused with other operations.",
 };
 
-fn linspace_type(_args: &[Type]) -> Type {
-    row_vector_type()
+fn linspace_type(_args: &[Type], ctx: &ResolveContext) -> Type {
+    row_vector_type(ctx)
 }
 
 #[runtime_builtin(
@@ -58,7 +59,7 @@ fn linspace_type(_args: &[Type]) -> Type {
     keywords = "linspace,range,vector,gpu",
     examples = "x = linspace(0, 1, 5)  % [0 0.25 0.5 0.75 1]",
     accel = "array_construct",
-    type_resolver(linspace_type),
+    type_resolver_ctx(linspace_type),
     builtin_path = "crate::builtins::array::creation::linspace"
 )]
 async fn linspace_builtin(

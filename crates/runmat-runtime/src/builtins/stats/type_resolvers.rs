@@ -1,6 +1,6 @@
 use runmat_builtins::Type;
 
-use crate::builtins::array::type_resolvers::{row_vector_type, size_vector_len};
+use crate::builtins::array::type_resolvers::{row_vector_type_legacy, size_vector_len};
 use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
 
 pub fn cov_type(args: &[Type]) -> Type {
@@ -25,7 +25,7 @@ pub fn histcounts_type(args: &[Type]) -> Type {
         Some(len) if len > 1 => Type::Tensor {
             shape: Some(vec![Some(1), Some(len - 1)]),
         },
-        _ => row_vector_type(),
+        _ => row_vector_type_legacy(),
     }
 }
 

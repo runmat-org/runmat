@@ -8,7 +8,7 @@ use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
-use crate::builtins::array::type_resolvers::tensor_type_from_rank;
+use crate::builtins::array::type_resolvers::tensor_type_from_rank_legacy;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
@@ -64,7 +64,7 @@ fn meshgrid_type(args: &[Type]) -> Type {
         return Type::Unknown;
     }
     let rank = if axis_count >= 3 { 3 } else { 2 };
-    tensor_type_from_rank(Some(rank))
+    tensor_type_from_rank_legacy(Some(rank))
 }
 
 #[runtime_builtin(

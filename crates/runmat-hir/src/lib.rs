@@ -460,26 +460,64 @@ fn eval_const_num(expr: &HirExpr) -> Option<f64> {
     }
 }
 
+fn literal_value_from_expr(expr: &HirExpr) -> runmat_builtins::LiteralValue {
+    use runmat_builtins::LiteralValue;
+
+    if let Some(value) = eval_const_num(expr) {
+        return LiteralValue::Number(value);
+    }
+
+    match &expr.kind {
+        HirExprKind::String(text) => LiteralValue::String(text.clone()),
+        HirExprKind::Constant(name) => match name.to_ascii_lowercase().as_str() {
+            "true" => LiteralValue::Bool(true),
+            "false" => LiteralValue::Bool(false),
+            _ => LiteralValue::Unknown,
+        },
+        HirExprKind::Tensor(rows) => literal_vector_from_tensor(rows),
+        _ => LiteralValue::Unknown,
+    }
+}
+
+fn literal_vector_from_tensor(rows: &[Vec<HirExpr>]) -> runmat_builtins::LiteralValue {
+    use runmat_builtins::LiteralValue;
+
+    if rows.is_empty() {
+        return LiteralValue::Vector(Vec::new());
+    }
+    let is_row = rows.len() == 1;
+    let is_column = rows.iter().all(|row| row.len() == 1);
+
+    if is_row {
+        let values = rows[0].iter().map(literal_value_from_expr).collect();
+        return LiteralValue::Vector(values);
+    }
+
+    if is_column {
+        let values = rows
+            .iter()
+            .map(|row| literal_value_from_expr(&row[0]))
+            .collect();
+        return LiteralValue::Vector(values);
+    }
+
+    let values = rows
+        .iter()
+        .map(|row| LiteralValue::Vector(row.iter().map(literal_value_from_expr).collect()))
+        .collect();
+    LiteralValue::Vector(values)
+}
+
+fn resolve_context_from_args(args: &[HirExpr]) -> runmat_builtins::ResolveContext {
+    let literal_args = args.iter().map(literal_value_from_expr).collect();
+    runmat_builtins::ResolveContext::new(literal_args)
+}
+
 fn infer_expr_type_with_env(
     expr: &HirExpr,
     env: &std::collections::HashMap<VarId, Type>,
     func_returns: &std::collections::HashMap<String, Vec<Type>>,
 ) -> Type {
-    fn resolve_context_from_args(args: &[HirExpr]) -> runmat_builtins::ResolveContext {
-        use runmat_builtins::LiteralValue;
-
-        let literal_args = args
-            .iter()
-            .map(|arg| {
-                if let Some(value) = eval_const_num(arg) {
-                    LiteralValue::Number(value)
-                } else {
-                    LiteralValue::Unknown
-                }
-            })
-            .collect();
-        runmat_builtins::ResolveContext::new(literal_args)
-    }
     fn unify_tensor(a: &Type, b: &Type) -> Type {
         match (a, b) {
             (Type::Tensor { shape: sa }, Type::Tensor { shape: sb }) => match (sa, sb) {
@@ -4237,17 +4275,7 @@ impl Ctx {
         for builtin in builtin_functions {
             if builtin.name == func_name {
                 let arg_types: Vec<Type> = args.iter().map(|arg| arg.ty.clone()).collect();
-                let ctx = runmat_builtins::ResolveContext::new(
-                    args.iter()
-                        .map(|arg| {
-                            if let Some(value) = eval_const_num(arg) {
-                                runmat_builtins::LiteralValue::Number(value)
-                            } else {
-                                runmat_builtins::LiteralValue::Unknown
-                            }
-                        })
-                        .collect(),
-                );
+                let ctx = resolve_context_from_args(args);
                 return builtin.infer_return_type_with_context(&arg_types, &ctx);
             }
         }
@@ -4474,5 +4502,103 @@ impl Ctx {
             accumulate(f);
         }
         per_output
+    }
+}
+
+#[cfg(test)]
+mod literal_context_tests {
+    use super::*;
+    use runmat_builtins::LiteralValue;
+
+    fn expr(kind: HirExprKind) -> HirExpr {
+        HirExpr {
+            kind,
+            ty: Type::Unknown,
+            span: parser::Span::default(),
+        }
+    }
+
+    #[test]
+    fn literal_from_number() {
+        let value = expr(HirExprKind::Number("3.5".to_string()));
+        assert_eq!(literal_value_from_expr(&value), LiteralValue::Number(3.5));
+    }
+
+    #[test]
+    fn literal_from_string() {
+        let value = expr(HirExprKind::String("All".to_string()));
+        assert_eq!(
+            literal_value_from_expr(&value),
+            LiteralValue::String("All".to_string())
+        );
+    }
+
+    #[test]
+    fn literal_from_bool_constant() {
+        let value = expr(HirExprKind::Constant("true".to_string()));
+        assert_eq!(literal_value_from_expr(&value), LiteralValue::Bool(true));
+    }
+
+    #[test]
+    fn literal_from_row_vector() {
+        let value = expr(HirExprKind::Tensor(vec![vec![
+            expr(HirExprKind::Number("1".to_string())),
+            expr(HirExprKind::Number("2".to_string())),
+        ]]));
+        assert_eq!(
+            literal_value_from_expr(&value),
+            LiteralValue::Vector(vec![LiteralValue::Number(1.0), LiteralValue::Number(2.0)])
+        );
+    }
+
+    #[test]
+    fn literal_from_column_vector() {
+        let value = expr(HirExprKind::Tensor(vec![
+            vec![expr(HirExprKind::Number("1".to_string()))],
+            vec![expr(HirExprKind::Number("2".to_string()))],
+        ]));
+        assert_eq!(
+            literal_value_from_expr(&value),
+            LiteralValue::Vector(vec![LiteralValue::Number(1.0), LiteralValue::Number(2.0)])
+        );
+    }
+
+    #[test]
+    fn literal_from_matrix_literal_is_nested_vector() {
+        let value = expr(HirExprKind::Tensor(vec![
+            vec![
+                expr(HirExprKind::Number("1".to_string())),
+                expr(HirExprKind::Number("2".to_string())),
+            ],
+            vec![
+                expr(HirExprKind::Number("3".to_string())),
+                expr(HirExprKind::Number("4".to_string())),
+            ],
+        ]));
+        assert_eq!(
+            literal_value_from_expr(&value),
+            LiteralValue::Vector(vec![
+                LiteralValue::Vector(vec![LiteralValue::Number(1.0), LiteralValue::Number(2.0)]),
+                LiteralValue::Vector(vec![LiteralValue::Number(3.0), LiteralValue::Number(4.0)]),
+            ])
+        );
+    }
+
+    #[test]
+    fn resolve_context_tracks_literals() {
+        let args = vec![
+            expr(HirExprKind::Number("4".to_string())),
+            expr(HirExprKind::String("omitnan".to_string())),
+            expr(HirExprKind::Constant("false".to_string())),
+        ];
+        let ctx = resolve_context_from_args(&args);
+        assert_eq!(
+            ctx.literal_args,
+            vec![
+                LiteralValue::Number(4.0),
+                LiteralValue::String("omitnan".to_string()),
+                LiteralValue::Bool(false),
+            ]
+        );
     }
 }

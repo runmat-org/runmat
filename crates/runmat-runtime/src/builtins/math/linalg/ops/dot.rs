@@ -92,7 +92,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Dot product (inner product) of matching tensors along a specified dimension.",
     keywords = "dot,inner product,gpu,linear algebra",
     accel = "reduction",
-    type_resolver(dot_type),
+    type_resolver_ctx(dot_type),
     builtin_path = "crate::builtins::math::linalg::ops::dot"
 )]
 async fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -402,7 +402,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, Type};
+    use runmat_builtins::{IntValue, LiteralValue, LogicalArray, ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -421,14 +421,17 @@ pub(crate) mod tests {
 
     #[test]
     fn dot_type_reduces_first_dimension() {
-        let out = dot_type(&[
+        let out = dot_type(
+            &[
             Type::Tensor {
                 shape: Some(vec![Some(3), Some(2)]),
             },
             Type::Tensor {
                 shape: Some(vec![Some(3), Some(2)]),
             },
-        ]);
+            ],
+            &ResolveContext::empty(),
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -439,15 +442,23 @@ pub(crate) mod tests {
 
     #[test]
     fn dot_type_vector_with_dim_returns_scalar() {
-        let out = dot_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(4)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(4)]),
-            },
-            Type::Int,
+        let ctx = ResolveContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Number(1.0),
         ]);
+        let out = dot_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(4)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(4)]),
+                },
+                Type::Int,
+            ],
+            &ctx,
+        );
         assert_eq!(out, Type::Num);
     }
 

@@ -15,9 +15,7 @@ use crate::builtins::common::{shape::normalize_scalar_shape, tensor};
 use runmat_builtins::NumericDType;
 use runmat_builtins::Type;
 
-use crate::builtins::array::type_resolvers::{
-    rank_from_dims_args, tensor_type_from_literal_dims, tensor_type_from_rank,
-};
+use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use runmat_builtins::ResolveContext;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::zeros")]
@@ -43,25 +41,14 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("zeros").build()
 }
 
-fn zeros_type(args: &[Type]) -> Type {
+fn zeros_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::Num;
     }
     if args.iter().any(|arg| matches!(arg, Type::String)) {
         return Type::Unknown;
     }
-    let rank = rank_from_dims_args(args);
-    tensor_type_from_rank(rank)
-}
-
-fn zeros_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
-    if args.is_empty() {
-        return Type::Num;
-    }
-    if let Some(ty) = tensor_type_from_literal_dims(args, ctx) {
-        return ty;
-    }
-    zeros_type(args)
+    tensor_type_from_rank(args, ctx)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::zeros")]
@@ -92,7 +79,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Create arrays filled with zeros.",
     keywords = "zeros,array,logical,gpu,like",
     accel = "array_construct",
-    type_resolver(zeros_type_with_ctx),
+    type_resolver_ctx(zeros_type_with_ctx),
     builtin_path = "crate::builtins::array::creation::zeros"
 )]
 async fn zeros_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {

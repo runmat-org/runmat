@@ -9,9 +9,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::array::type_resolvers::{
-    rank_from_dims_args, tensor_type_from_literal_dims, tensor_type_from_rank,
-};
+use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use runmat_builtins::ResolveContext;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::eye")]
@@ -44,25 +42,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Identity tensors are materialised directly; fusion planner treats eye() as a standalone allocation.",
 };
 
-fn eye_type(args: &[Type]) -> Type {
+fn eye_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::Num;
     }
     if args.iter().any(|arg| matches!(arg, Type::String)) {
         return Type::Unknown;
     }
-    let rank = rank_from_dims_args(args);
-    tensor_type_from_rank(rank)
-}
-
-fn eye_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
-    if args.is_empty() {
-        return Type::Num;
-    }
-    if let Some(ty) = tensor_type_from_literal_dims(args, ctx) {
-        return ty;
-    }
-    eye_type(args)
+    tensor_type_from_rank(args, ctx)
 }
 
 #[runtime_builtin(
@@ -71,7 +58,7 @@ fn eye_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
     summary = "Identity matrix or N-D identity tensor.",
     keywords = "eye,identity,matrix,gpu,like,logical",
     accel = "array_construct",
-    type_resolver(eye_type_with_ctx),
+    type_resolver_ctx(eye_type_with_ctx),
     builtin_path = "crate::builtins::array::creation::eye"
 )]
 async fn eye_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {

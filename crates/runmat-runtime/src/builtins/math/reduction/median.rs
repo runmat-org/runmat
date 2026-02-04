@@ -11,7 +11,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const NAME: &str = "median";
 
 fn median_type(args: &[Type]) -> Type {
-    reduce_numeric_type(args)
+    reduce_numeric_type_legacy(args)
 }
 
 use crate::builtins::common::random_args::keyword_of;
@@ -20,7 +20,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
+use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type_legacy;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::median")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

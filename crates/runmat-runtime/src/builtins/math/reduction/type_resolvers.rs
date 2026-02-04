@@ -1,7 +1,7 @@
 use runmat_builtins::shape_rules::{scalar_tensor_shape, unknown_shape};
-use runmat_builtins::Type;
+use runmat_builtins::{ResolveContext, Type};
 
-fn reduction_shape_from_args(args: &[Type]) -> Option<Vec<Option<usize>>> {
+fn reduction_shape_from_args(args: &[Type], ctx: &ResolveContext) -> Option<Vec<Option<usize>>> {
     let input = args.first()?;
     let shape = match input {
         Type::Tensor { shape } => shape.clone(),
@@ -12,8 +12,26 @@ fn reduction_shape_from_args(args: &[Type]) -> Option<Vec<Option<usize>>> {
     if args.len() == 1 {
         Some(reduce_first_nonsingleton(&shape))
     } else {
+        let dims = ctx.numeric_dims_from(1);
+        let literal_dim = dims.first().and_then(|value| *value);
+        if let Some(dim_1based) = literal_dim {
+            if dim_1based >= 1 {
+                let mut out = shape.clone();
+                let index = dim_1based - 1;
+                if index < out.len() {
+                    out[index] = Some(1);
+                } else {
+                    out = unknown_shape(out.len());
+                }
+                return Some(out);
+            }
+        }
         Some(unknown_shape(shape.len()))
     }
+}
+
+fn reduction_shape_from_args_legacy(args: &[Type]) -> Option<Vec<Option<usize>>> {
+    reduction_shape_from_args(args, &ResolveContext::empty())
 }
 
 pub fn reduce_first_nonsingleton(shape: &[Option<usize>]) -> Vec<Option<usize>> {
@@ -39,14 +57,14 @@ pub fn reduce_first_nonsingleton(shape: &[Option<usize>]) -> Vec<Option<usize>> 
     out
 }
 
-pub fn reduce_numeric_type(args: &[Type]) -> Type {
+pub fn reduce_numeric_type(args: &[Type], ctx: &ResolveContext) -> Type {
     let input = match args.first() {
         Some(value) => value,
         None => return Type::Unknown,
     };
     match input {
         Type::Tensor { shape: Some(_) } | Type::Logical { shape: Some(_) } => Type::Tensor {
-            shape: reduction_shape_from_args(args),
+            shape: reduction_shape_from_args(args, ctx),
         },
         Type::Tensor { shape: None } | Type::Logical { shape: None } => Type::tensor(),
         Type::Bool | Type::Num | Type::Int => Type::Num,
@@ -54,19 +72,27 @@ pub fn reduce_numeric_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn reduce_logical_type(args: &[Type]) -> Type {
+pub fn reduce_numeric_type_legacy(args: &[Type]) -> Type {
+    reduce_numeric_type(args, &ResolveContext::empty())
+}
+
+pub fn reduce_logical_type(args: &[Type], ctx: &ResolveContext) -> Type {
     let input = match args.first() {
         Some(value) => value,
         None => return Type::Unknown,
     };
     match input {
         Type::Tensor { shape: Some(_) } | Type::Logical { shape: Some(_) } => Type::Logical {
-            shape: reduction_shape_from_args(args),
+            shape: reduction_shape_from_args(args, ctx),
         },
         Type::Tensor { shape: None } | Type::Logical { shape: None } => Type::logical(),
         Type::Bool | Type::Num | Type::Int => Type::Bool,
         _ => Type::Unknown,
     }
+}
+
+pub fn reduce_logical_type_legacy(args: &[Type]) -> Type {
+    reduce_logical_type(args, &ResolveContext::empty())
 }
 
 pub fn cumulative_numeric_type(args: &[Type]) -> Type {
@@ -131,13 +157,13 @@ pub fn count_nonzero_type(args: &[Type]) -> Type {
             _ => Type::Unknown,
         }
     } else {
-        reduce_numeric_type(args)
+        reduce_numeric_type_legacy(args)
     }
 }
 
 pub fn min_max_type(args: &[Type]) -> Type {
     if args.len() <= 1 {
-        return reduce_numeric_type(args);
+        return reduce_numeric_type_legacy(args);
     }
     let mut has_array = false;
     let mut has_unknown = false;
@@ -160,13 +186,14 @@ pub fn min_max_type(args: &[Type]) -> Type {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::LiteralValue;
 
     #[test]
     fn reduce_numeric_preserves_rank() {
         let ty = Type::Tensor {
             shape: Some(vec![Some(3), Some(4)]),
         };
-        let out = reduce_numeric_type(&[ty]);
+        let out = reduce_numeric_type(&[ty], &ResolveContext::empty());
         assert_eq!(
             out,
             Type::Tensor {
@@ -176,11 +203,26 @@ mod tests {
     }
 
     #[test]
+    fn reduce_numeric_uses_literal_dim() {
+        let ty = Type::Tensor {
+            shape: Some(vec![Some(3), Some(4)]),
+        };
+        let ctx = ResolveContext::new(vec![LiteralValue::Unknown, LiteralValue::Number(2.0)]);
+        let out = reduce_numeric_type(&[ty], &ctx);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(1)])
+            }
+        );
+    }
+
+    #[test]
     fn reduce_logical_returns_logical() {
         let ty = Type::Logical {
             shape: Some(vec![Some(2), Some(2)]),
         };
-        let out = reduce_logical_type(&[ty]);
+        let out = reduce_logical_type(&[ty], &ResolveContext::empty());
         assert_eq!(
             out,
             Type::Logical {
@@ -201,6 +243,15 @@ mod tests {
                 shape: Some(vec![Some(5), Some(1)])
             }
         );
+    }
+
+    #[test]
+    fn reduction_shape_legacy_matches_first_nonsingleton() {
+        let ty = Type::Tensor {
+            shape: Some(vec![Some(3), Some(4)]),
+        };
+        let out = reduction_shape_from_args_legacy(&[ty]);
+        assert_eq!(out, Some(vec![Some(1), Some(4)]));
     }
 
     #[test]

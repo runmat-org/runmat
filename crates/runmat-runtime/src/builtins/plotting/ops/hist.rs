@@ -1510,7 +1510,7 @@ pub(crate) mod tests {
 
     #[test]
     fn hist_type_defaults_to_row_vector() {
-        assert_eq!(hist_type(&[Type::tensor()]), row_vector_type());
+        assert_eq!(hist_type(&[Type::tensor()]), row_vector_type_legacy());
     }
 
     #[test]

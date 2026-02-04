@@ -6,6 +6,7 @@ use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
 use runmat_builtins::shape_rules::{
     left_divide_output_type, matmul_output_type, right_divide_output_type,
 };
+use runmat_builtins::ResolveContext;
 
 pub fn numeric_scalar_type(args: &[Type]) -> Type {
     let Some(input) = args.first() else {
@@ -102,7 +103,7 @@ pub fn right_divide_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn dot_type(args: &[Type]) -> Type {
+pub fn dot_type(args: &[Type], ctx: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
     };
@@ -116,8 +117,14 @@ pub fn dot_type(args: &[Type]) -> Type {
         Type::Unknown => return Type::Unknown,
         _ => return Type::Unknown,
     };
-    if args.len() > 2 && is_vector_shape(shape) {
-        return Type::Num;
+    if args.len() > 2 {
+        if let Some(dim) = ctx.numeric_dims_from(2).first().and_then(|value| *value) {
+            if is_vector_shape(shape) {
+                return Type::Num;
+            }
+            let out_shape = unknown_shape(shape.len().max(dim));
+            return numeric_tensor_from_shape(out_shape);
+        }
     }
     let out_shape = if args.len() > 2 {
         unknown_shape(shape.len().max(2))
@@ -125,6 +132,10 @@ pub fn dot_type(args: &[Type]) -> Type {
         reduce_first_nonsingleton(shape)
     };
     numeric_tensor_from_shape(out_shape)
+}
+
+pub fn dot_type_legacy(args: &[Type]) -> Type {
+    dot_type(args, &ResolveContext::empty())
 }
 
 pub fn pinv_type(args: &[Type]) -> Type {
@@ -197,6 +208,26 @@ pub fn symrcm_type(args: &[Type]) -> Type {
     };
     Type::Tensor {
         shape: Some(vec![Some(1), rows]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::LiteralValue;
+
+    #[test]
+    fn dot_type_uses_literal_dim_for_vector() {
+        let vec_type = Type::Tensor {
+            shape: Some(vec![Some(3), Some(1)]),
+        };
+        let ctx = ResolveContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Number(1.0),
+        ]);
+        let out = dot_type(&[vec_type.clone(), vec_type, Type::Num], &ctx);
+        assert_eq!(out, Type::Num);
     }
 }
 

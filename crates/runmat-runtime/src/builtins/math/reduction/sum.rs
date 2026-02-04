@@ -9,7 +9,7 @@ use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Type, Value
 const NAME: &str = "sum";
 
 fn sum_type(args: &[Type]) -> Type {
-    reduce_numeric_type(args)
+    reduce_numeric_type_legacy(args)
 }
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
@@ -23,7 +23,7 @@ use crate::builtins::common::{
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
-use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
+use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type_legacy;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_macros::runtime_builtin;
 

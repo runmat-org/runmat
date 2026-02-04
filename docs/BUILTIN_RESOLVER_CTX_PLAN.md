@@ -23,6 +23,10 @@ This migration is repository-wide and will not be partially shipped. All changes
 7. Keep behavior conservative: if literal context is unavailable or ambiguous, return `Unknown` or unknown shapes rather than guessing.
 8. Use a single canonical resolver implementation: context-aware helpers use the original function names, and legacy adapters (only while migrating) are explicitly suffixed `_legacy`.
 
+Temporary resolver annotation rule:
+- While both resolver signatures exist, use `type_resolver(...)` plus `type_resolver_context = true` to indicate a context-aware resolver.
+- This flag is temporary and must be removed in Phase 5 once all resolvers accept `ResolveContext`.
+
 ## Naming Rules
 
 - Canonical ctx-aware helpers keep the original function name (no suffixes).
@@ -268,6 +272,7 @@ This sequence must be followed to keep the system consistent and minimize churn.
 - Ensure `type_resolver(...)` accepts both resolver signatures.
 - Ensure `BuiltinFunction` uses `TypeResolverKind` and `infer_return_type_with_context`.
 - Ensure `type_resolver_ctx(...)` is not used in builtins.
+- Add temporary attribute flag `type_resolver_context = true` for context-aware resolver paths.
 
 ### Phase 2: Add ctx-aware helper variants (no builtin edits yet)
 
@@ -397,6 +402,7 @@ Legacy cleanup checklist (must be completed before finish):
 - Remove all `_legacy` adapters from helper modules.
 - Replace any remaining `_legacy` call sites with canonical ctx-aware helpers.
 - Ensure `ResolveContext::empty()` is only used in deleted adapters (i.e., no production code references).
+- Remove `type_resolver_context = true` flags and rely on `type_resolver(...)` only.
 
 ## Subagent Usage Rules
 

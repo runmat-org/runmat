@@ -7,7 +7,8 @@ use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::array::type_resolvers::{
-    is_scalar_type, logical_type_from_rank, rank_from_dims_args, tensor_type_from_rank,
+    is_scalar_type, logical_type_from_rank, rank_from_dims_args_legacy,
+    tensor_type_from_rank_legacy,
 };
 use crate::builtins::common::random_args::{extract_dims, keyword_of, shape_from_value};
 use crate::builtins::common::spec::{
@@ -75,11 +76,11 @@ fn fill_type(args: &[Type]) -> Type {
         }
         return Type::tensor();
     }
-    let rank = rank_from_dims_args(rest);
+    let rank = rank_from_dims_args_legacy(rest);
     if wants_logical {
         logical_type_from_rank(rank)
     } else {
-        tensor_type_from_rank(rank)
+        tensor_type_from_rank_legacy(rank)
     }
 }
 

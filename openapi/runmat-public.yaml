@@ -2229,6 +2229,97 @@ components:
       properties:
         status:
           type: string
+    LicenseRefreshRequest:
+      type: object
+      required:
+      - org_id
+      - payload
+      - signature
+      properties:
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        issued_at:
+          type: string
+          format: date-time
+          nullable: true
+        org_id:
+          type: string
+          format: uuid
+        payload: {}
+        signature:
+          type: string
+    LicenseRefreshResponse:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+    LlmModelOverrideResponse:
+      type: object
+      required:
+      - plan_key
+      - model_key
+      - updated_at
+      properties:
+        input_token_amount:
+          type: number
+          format: double
+          nullable: true
+        is_allowed:
+          type: boolean
+          nullable: true
+        margin_multiplier:
+          type: number
+          format: double
+          nullable: true
+        model_key:
+          type: string
+        output_token_amount:
+          type: number
+          format: double
+          nullable: true
+        plan_key:
+          type: string
+        price_currency:
+          type: string
+          nullable: true
+        pricing_strategy:
+          type: string
+          nullable: true
+        rate_limits:
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+    LlmModelOverrideUpsertRequest:
+      type: object
+      properties:
+        input_token_amount:
+          type: number
+          format: double
+          nullable: true
+        is_allowed:
+          type: boolean
+          nullable: true
+        margin_multiplier:
+          type: number
+          format: double
+          nullable: true
+        output_token_amount:
+          type: number
+          format: double
+          nullable: true
+        price_currency:
+          type: string
+          nullable: true
+        pricing_strategy:
+          type: string
+          nullable: true
+        rate_limits:
+          nullable: true
     Membership:
       type: object
       required:
@@ -2370,79 +2461,95 @@ components:
       - admin
       - member
       - viewer
-    server_org.Org:
-      allOf:
-      - $ref: '#/components/schemas/Org'
-    server_org.OrgRole:
-      allOf:
-      - $ref: '#/components/schemas/OrgRole'
-    server_org.Project:
-      allOf:
-      - $ref: '#/components/schemas/Project'
-    server_org.ProjectMembership:
-      allOf:
-      - $ref: '#/components/schemas/ProjectMembership'
-    server_org.ProjectRole:
-      allOf:
-      - $ref: '#/components/schemas/ProjectRole'
-    server_org.Membership:
-      allOf:
-      - $ref: '#/components/schemas/Membership'
-    server_org.ApiKeySummary:
-      allOf:
-      - $ref: '#/components/schemas/ApiKeySummary'
-    server_identity.UserProfile:
-      type: object
-      required:
-      - id
-      properties:
-        id:
-          type: string
-          format: uuid
-        email:
-          type: string
-          nullable: true
-        name:
-          type: string
-          nullable: true
-    server_filesystem.FsVersion:
-      type: string
-      description: Opaque filesystem version token.
-    server_filesystem.FsEntry:
-      type: object
-      required:
-      - path
-      - fileName
-      - fileType
-      properties:
-        path:
-          type: string
-        fileName:
-          type: string
-        fileType:
-          type: string
-        sizeBytes:
-          type: integer
-          format: int64
-          nullable: true
-    ErrorBody:
-      type: object
-      required:
-      - error
-      properties:
-        error:
-          type: string
-        detail:
-          nullable: true
-    crate.errors.ErrorResponse:
-      allOf:
-      - $ref: '#/components/schemas/ErrorResponse'
     OrgUpdateRequest:
       type: object
       required:
       - name
       properties:
         name:
+          type: string
+    PlanCatalogResponse:
+      type: object
+      required:
+      - plan_key
+      - tier_name
+      - is_active
+      properties:
+        default_currency:
+          type: string
+          nullable: true
+        is_active:
+          type: boolean
+        metadata:
+          nullable: true
+        plan_key:
+          type: string
+        stripe_product_id:
+          type: string
+          nullable: true
+        tier_name:
+          type: string
+    PlanCatalogUpsertRequest:
+      type: object
+      required:
+      - tier_name
+      - is_active
+      properties:
+        default_currency:
+          type: string
+          nullable: true
+        is_active:
+          type: boolean
+        metadata:
+          nullable: true
+        stripe_product_id:
+          type: string
+          nullable: true
+        tier_name:
+          type: string
+    PlanExperimentResponse:
+      type: object
+      required:
+      - experiment_id
+      - plan_key
+      - stripe_price_id
+      properties:
+        end_at:
+          type: string
+          format: date-time
+          nullable: true
+        experiment_id:
+          type: string
+          format: uuid
+        plan_key:
+          type: string
+        segment_rules:
+          nullable: true
+        start_at:
+          type: string
+          format: date-time
+          nullable: true
+        stripe_price_id:
+          type: string
+    PlanExperimentUpsertRequest:
+      type: object
+      required:
+      - plan_key
+      - stripe_price_id
+      properties:
+        end_at:
+          type: string
+          format: date-time
+          nullable: true
+        plan_key:
+          type: string
+        segment_rules:
+          nullable: true
+        start_at:
+          type: string
+          format: date-time
+          nullable: true
+        stripe_price_id:
           type: string
     PolicyResponse:
       type: object
@@ -2478,9 +2585,12 @@ components:
         updatedAt:
           type: string
           format: date-time
-        usageCapUsd:
+        usageCapAmount:
           type: number
           format: double
+          nullable: true
+        usageCapCurrency:
+          type: string
           nullable: true
     Project:
       type: object
@@ -2975,14 +3085,36 @@ components:
             type: string
         status:
           type: string
+    StripeWebhookRequest:
+      type: object
+      required:
+      - event_id
+      - event_type
+      - payload
+      properties:
+        event_id:
+          type: string
+        event_type:
+          type: string
+        payload: {}
+    StripeWebhookResponse:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
     UsageCapRequest:
       type: object
       required:
-      - capUsd
+      - capAmount
+      - capCurrency
       properties:
-        capUsd:
+        capAmount:
           type: number
           format: double
+        capCurrency:
+          type: string
         reason:
           type: string
           nullable: true
@@ -2990,12 +3122,15 @@ components:
       type: object
       required:
       - orgId
-      - capUsd
+      - capAmount
+      - capCurrency
       - effectiveAt
       properties:
-        capUsd:
+        capAmount:
           type: number
           format: double
+        capCurrency:
+          type: string
         createdBy:
           type: string
           format: uuid
@@ -3017,9 +3152,12 @@ components:
       - periodEnd
       - updatedAt
       properties:
-        costUsd:
+        costAmount:
           type: number
           format: double
+          nullable: true
+        costCurrency:
+          type: string
           nullable: true
         egressGb:
           type: number

@@ -1012,9 +1012,12 @@ pub struct ResolveContext {
     pub literal_args: Vec<LiteralValue>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum LiteralValue {
     Number(f64),
+    Bool(bool),
+    String(String),
+    Vector(Vec<LiteralValue>),
     Unknown,
 }
 
@@ -1023,27 +1026,148 @@ impl ResolveContext {
         Self { literal_args }
     }
 
+    pub fn empty() -> Self {
+        Self {
+            literal_args: Vec::new(),
+        }
+    }
+
     pub fn numeric_dims(&self) -> Vec<Option<usize>> {
         self.numeric_dims_from(0)
     }
 
     pub fn numeric_dims_from(&self, start: usize) -> Vec<Option<usize>> {
-        self.literal_args
+        let slice = self.literal_args.get(start..).unwrap_or(&[]);
+        if let Some(LiteralValue::Vector(values)) = slice.first() {
+            return values
+                .iter()
+                .map(Self::numeric_dimension_from_literal)
+                .collect();
+        }
+        slice
             .iter()
-            .skip(start)
-            .map(|value| match value {
-                LiteralValue::Number(num) => {
-                    if num.is_finite() {
-                        let rounded = num.round();
-                        if (num - rounded).abs() <= 1e-9 && rounded >= 0.0 {
-                            return Some(rounded as usize);
-                        }
-                    }
-                    None
-                }
-                LiteralValue::Unknown => None,
-            })
+            .map(Self::numeric_dimension_from_literal)
             .collect()
+    }
+
+    pub fn literal_string_at(&self, index: usize) -> Option<String> {
+        match self.literal_args.get(index) {
+            Some(LiteralValue::String(value)) => Some(value.to_ascii_lowercase()),
+            _ => None,
+        }
+    }
+
+    pub fn literal_bool_at(&self, index: usize) -> Option<bool> {
+        match self.literal_args.get(index) {
+            Some(LiteralValue::Bool(value)) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub fn literal_vector_at(&self, index: usize) -> Option<Vec<LiteralValue>> {
+        match self.literal_args.get(index) {
+            Some(LiteralValue::Vector(values)) => Some(values.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn numeric_vector_at(&self, index: usize) -> Option<Vec<Option<usize>>> {
+        let values = match self.literal_args.get(index) {
+            Some(LiteralValue::Vector(values)) => values,
+            _ => return None,
+        };
+        if values
+            .iter()
+            .any(|value| matches!(value, LiteralValue::Vector(_)))
+        {
+            return None;
+        }
+        Some(
+            values
+                .iter()
+                .map(Self::numeric_dimension_from_literal)
+                .collect(),
+        )
+    }
+
+    fn numeric_dimension_from_literal(value: &LiteralValue) -> Option<usize> {
+        match value {
+            LiteralValue::Number(num) => {
+                if num.is_finite() {
+                    let rounded = num.round();
+                    if (num - rounded).abs() <= 1e-9 && rounded >= 0.0 {
+                        return Some(rounded as usize);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod resolve_context_tests {
+    use super::{LiteralValue, ResolveContext};
+
+    #[test]
+    fn numeric_dims_reads_vector_literal() {
+        let ctx = ResolveContext::new(vec![LiteralValue::Vector(vec![
+            LiteralValue::Number(2.0),
+            LiteralValue::Number(3.0),
+        ])]);
+        assert_eq!(ctx.numeric_dims(), vec![Some(2), Some(3)]);
+    }
+
+    #[test]
+    fn numeric_dims_skips_non_numeric_entries() {
+        let ctx = ResolveContext::new(vec![
+            LiteralValue::Number(4.0),
+            LiteralValue::String("like".to_string()),
+            LiteralValue::Unknown,
+        ]);
+        assert_eq!(ctx.numeric_dims(), vec![Some(4), None, None]);
+    }
+
+    #[test]
+    fn numeric_dims_prefers_vector_even_with_trailing_args() {
+        let ctx = ResolveContext::new(vec![
+            LiteralValue::Vector(vec![LiteralValue::Number(1.0), LiteralValue::Number(5.0)]),
+            LiteralValue::String("like".to_string()),
+        ]);
+        assert_eq!(ctx.numeric_dims(), vec![Some(1), Some(5)]);
+    }
+
+    #[test]
+    fn literal_string_is_lowercased() {
+        let ctx = ResolveContext::new(vec![LiteralValue::String("OmItNaN".to_string())]);
+        assert_eq!(ctx.literal_string_at(0), Some("omitnan".to_string()));
+    }
+
+    #[test]
+    fn literal_bool_is_available() {
+        let ctx = ResolveContext::new(vec![LiteralValue::Bool(true)]);
+        assert_eq!(ctx.literal_bool_at(0), Some(true));
+    }
+
+    #[test]
+    fn literal_vector_at_returns_clone() {
+        let ctx = ResolveContext::new(vec![LiteralValue::Vector(vec![
+            LiteralValue::Number(7.0),
+            LiteralValue::Unknown,
+        ])]);
+        assert_eq!(
+            ctx.literal_vector_at(0),
+            Some(vec![LiteralValue::Number(7.0), LiteralValue::Unknown])
+        );
+    }
+
+    #[test]
+    fn numeric_vector_at_rejects_nested_vectors() {
+        let ctx = ResolveContext::new(vec![LiteralValue::Vector(vec![LiteralValue::Vector(
+            vec![LiteralValue::Number(1.0)],
+        )])]);
+        assert_eq!(ctx.numeric_vector_at(0), None);
     }
 }
 

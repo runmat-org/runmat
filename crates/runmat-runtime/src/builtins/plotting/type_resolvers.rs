@@ -1,6 +1,6 @@
 use runmat_builtins::Type;
 
-use crate::builtins::array::type_resolvers::{row_vector_type, size_vector_len};
+use crate::builtins::array::type_resolvers::{row_vector_type_legacy, size_vector_len};
 
 pub fn string_type(_args: &[Type]) -> Type {
     Type::String
@@ -31,6 +31,6 @@ pub fn hist_type(args: &[Type]) -> Type {
         Some(len) => Type::Tensor {
             shape: Some(vec![Some(1), Some(len)]),
         },
-        None => row_vector_type(),
+        None => row_vector_type_legacy(),
     }
 }

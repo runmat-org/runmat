@@ -8,6 +8,7 @@ use crate::build_runtime_error;
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::array::type_resolvers::row_vector_type;
+use runmat_builtins::ResolveContext;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -42,14 +43,14 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
         .build()
 }
 
-fn randperm_type(args: &[Type]) -> Type {
+fn randperm_type(args: &[Type], ctx: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::Unknown;
     }
     if args.iter().any(|arg| matches!(arg, Type::String)) {
         return Type::Unknown;
     }
-    row_vector_type()
+    row_vector_type(ctx)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randperm")]
@@ -69,7 +70,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Random permutations of 1:n.",
     keywords = "randperm,permutation,random,indices,gpu,like",
     accel = "array_construct",
-    type_resolver(randperm_type),
+    type_resolver_ctx(randperm_type),
     builtin_path = "crate::builtins::array::creation::randperm"
 )]
 async fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

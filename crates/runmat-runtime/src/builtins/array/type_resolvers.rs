@@ -5,7 +5,18 @@ use runmat_builtins::shape_rules::{
 };
 use runmat_builtins::ResolveContext;
 
-pub fn rank_from_dims_args(args: &[Type]) -> Option<usize> {
+pub fn rank_from_dims_args(args: &[Type], ctx: &ResolveContext) -> Option<usize> {
+    if args.is_empty() {
+        return None;
+    }
+    let dims = ctx.numeric_dims();
+    if !dims.is_empty() {
+        return Some(dims.len());
+    }
+    rank_from_dims_args_legacy(args)
+}
+
+pub fn rank_from_dims_args_legacy(args: &[Type]) -> Option<usize> {
     if args.is_empty() {
         return None;
     }
@@ -22,7 +33,15 @@ pub fn rank_from_dims_args(args: &[Type]) -> Option<usize> {
     }
 }
 
-pub fn tensor_type_from_rank(rank: Option<usize>) -> Type {
+pub fn tensor_type_from_rank(args: &[Type], ctx: &ResolveContext) -> Type {
+    if let Some(ty) = tensor_type_from_literal_dims(args, ctx) {
+        return ty;
+    }
+    let rank = rank_from_dims_args(args, ctx);
+    tensor_type_from_rank_legacy(rank)
+}
+
+pub fn tensor_type_from_rank_legacy(rank: Option<usize>) -> Type {
     match rank {
         Some(rank) => Type::Tensor {
             shape: Some(unknown_shape(rank)),
@@ -54,7 +73,16 @@ pub fn logical_type_from_rank(rank: Option<usize>) -> Type {
     }
 }
 
-pub fn row_vector_type() -> Type {
+pub fn row_vector_type(ctx: &ResolveContext) -> Type {
+    if let Some(Some(len)) = ctx.numeric_dims().get(0) {
+        return Type::Tensor {
+            shape: Some(vec![Some(1), Some(*len)]),
+        };
+    }
+    row_vector_type_legacy()
+}
+
+pub fn row_vector_type_legacy() -> Type {
     Type::Tensor {
         shape: Some(vec![Some(1), None]),
     }
@@ -83,5 +111,48 @@ pub fn is_scalar_type(ty: &Type) -> bool {
             element_count_if_known(shape) == Some(1)
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::LiteralValue;
+
+    #[test]
+    fn rank_from_dims_args_uses_literal_vector() {
+        let ctx = ResolveContext::new(vec![LiteralValue::Vector(vec![
+            LiteralValue::Number(2.0),
+            LiteralValue::Number(3.0),
+        ])]);
+        let rank = rank_from_dims_args(&[Type::Num], &ctx);
+        assert_eq!(rank, Some(2));
+    }
+
+    #[test]
+    fn tensor_type_from_rank_uses_literal_dims() {
+        let ctx = ResolveContext::new(vec![LiteralValue::Vector(vec![
+            LiteralValue::Number(2.0),
+            LiteralValue::Number(3.0),
+        ])]);
+        let out = tensor_type_from_rank(&[Type::Num], &ctx);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
+
+    #[test]
+    fn row_vector_type_uses_literal_length() {
+        let ctx = ResolveContext::new(vec![LiteralValue::Number(4.0)]);
+        let out = row_vector_type(&ctx);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(4)])
+            }
+        );
     }
 }

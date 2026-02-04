@@ -6,6 +6,7 @@ use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
 use crate::builtins::array::type_resolvers::row_vector_type;
+use runmat_builtins::ResolveContext;
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -58,8 +59,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Sequence generation is treated as a sink; it does not participate in fusion.",
 };
 
-fn colon_type(_args: &[Type]) -> Type {
-    row_vector_type()
+fn colon_type(_args: &[Type], ctx: &ResolveContext) -> Type {
+    row_vector_type(ctx)
 }
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
@@ -72,7 +73,7 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     summary = "Arithmetic progression that mirrors MATLAB's colon operator.",
     keywords = "colon,sequence,range,step,gpu",
     accel = "array_construct",
-    type_resolver(colon_type),
+    type_resolver_ctx(colon_type),
     builtin_path = "crate::builtins::array::creation::colon"
 )]
 async fn colon_builtin(

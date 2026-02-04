@@ -326,10 +326,9 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     } else {
         quote! { &[#(#accel_tokens),*] }
     };
-    let type_resolver_path = type_resolver_ctx_path
-        .as_ref()
-        .or(type_resolver_path.as_ref());
-    let type_resolver_expr = if let Some(path) = type_resolver_path {
+    let type_resolver_expr = if let Some(path) = type_resolver_ctx_path.as_ref() {
+        quote! { Some(runmat_builtins::type_resolver_kind_ctx(#path)) }
+    } else if let Some(path) = type_resolver_path.as_ref() {
         quote! { Some(runmat_builtins::type_resolver_kind(#path)) }
     } else {
         quote! { None }

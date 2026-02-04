@@ -10,7 +10,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{random, tensor};
-use crate::builtins::array::type_resolvers::{rank_from_dims_args, tensor_type_from_rank};
+use crate::builtins::array::type_resolvers::{
+    rank_from_dims_args_legacy, tensor_type_from_rank_legacy,
+};
 use runmat_builtins::Type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::randi")]
@@ -47,8 +49,8 @@ fn randi_type(args: &[Type]) -> Type {
     if rest.iter().any(|arg| matches!(arg, Type::String)) {
         return Type::Unknown;
     }
-    let rank = rank_from_dims_args(rest);
-    tensor_type_from_rank(rank)
+    let rank = rank_from_dims_args_legacy(rest);
+    tensor_type_from_rank_legacy(rank)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randi")]

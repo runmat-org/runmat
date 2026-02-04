@@ -6,6 +6,7 @@ use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
 use crate::builtins::array::type_resolvers::row_vector_type;
+use runmat_builtins::ResolveContext;
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -54,8 +55,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Sequence generation is treated as a sink and is not fused with other operations.",
 };
 
-fn logspace_type(_args: &[Type]) -> Type {
-    row_vector_type()
+fn logspace_type(_args: &[Type], ctx: &ResolveContext) -> Type {
+    row_vector_type(ctx)
 }
 
 #[runtime_builtin(
@@ -65,7 +66,7 @@ fn logspace_type(_args: &[Type]) -> Type {
     keywords = "logspace,logarithmic,vector,gpu",
     examples = "x = logspace(1, 3, 3)  % [10 100 1000]",
     accel = "array_construct",
-    type_resolver(logspace_type),
+    type_resolver_ctx(logspace_type),
     builtin_path = "crate::builtins::array::creation::logspace"
 )]
 async fn logspace_builtin(

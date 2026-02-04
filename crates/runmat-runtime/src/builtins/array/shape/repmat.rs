@@ -120,11 +120,14 @@ fn repmat_type(args: &[Type]) -> Type {
 }
 
 fn repmat_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
+    let reps = ctx.numeric_dims_from(1);
+    if reps.is_empty() {
+        return repmat_type(args);
+    }
     let input = match args.first() {
         Some(value) => value,
         None => return Type::Unknown,
     };
-    let reps = ctx.numeric_dims_from(1);
     let shape = match input {
         Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
             runmat_builtins::shape_rules::repmat_shape(shape, &reps)
@@ -151,7 +154,7 @@ fn repmat_type_with_ctx(args: &[Type], ctx: &ResolveContext) -> Type {
     summary = "Replicate arrays by tiling an input across one or more dimensions.",
     keywords = "repmat,tile,replicate,array,gpu",
     accel = "array_construct",
-    type_resolver(repmat_type_with_ctx),
+    type_resolver_ctx(repmat_type_with_ctx),
     builtin_path = "crate::builtins::array::shape::repmat"
 )]
 async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
