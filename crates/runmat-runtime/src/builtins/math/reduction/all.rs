@@ -591,9 +591,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, Reduct
         }
         let dims = parse_dimensions(arg).await?;
         if dims.is_empty() {
-            return Err(all_error(
-                "all: dimension vector must contain at least one entry",
-            ));
+            continue;
         }
         if dims.len() == 1 {
             if matches!(spec, ReductionSpec::Default) {

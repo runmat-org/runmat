@@ -44,12 +44,12 @@
   "examples": [
     {
       "description": "Rotating a matrix 90 degrees counterclockwise",
-      "input": "A = [1 2 3; 4 5 6];\nB = rot90(A);",
+      "input": "A = [1 2 3; 4 5 6];\nB = rot90(A)",
       "output": "B =\n     3     6\n     2     5\n     1     4"
     },
     {
       "description": "Rotating a matrix clockwise using a direction keyword",
-      "input": "A = magic(3);\nC = rot90(A, 'clockwise');",
+      "input": "A = magic(3);\nC = rot90(A, 'clockwise')",
       "output": "C =\n     6     1     8\n     7     5     3\n     2     9     4"
     },
     {
@@ -64,7 +64,7 @@
     },
     {
       "description": "Rotating character data to reorganise text",
-      "input": "C = ['r','u','n'; 'm','a','t'; ' ','A','I'];\nR = rot90(C);",
+      "input": "C = ['r','u','n'; 'm','a','t'; ' ','A','I'];\nR = rot90(C)",
       "output": "R =\n    'ntI'\n    'uaA'\n    'rm '"
     },
     {

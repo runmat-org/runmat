@@ -44,32 +44,32 @@
   "examples": [
     {
       "description": "Computing base-2 logarithms of powers of two",
-      "input": "values = [1 2 4 8];\npowers = log2(values);",
+      "input": "values = [1 2 4 8];\npowers = log2(values)",
       "output": "powers = [0 1 2 3];"
     },
     {
       "description": "Understanding how `log2` handles zero",
-      "input": "z = log2(0);",
+      "input": "z = log2(0)",
       "output": "z = -Inf;"
     },
     {
       "description": "Working with negative inputs using complex results",
-      "input": "neg = [-1 -2];\nout = log2(neg);",
+      "input": "neg = [-1 -2];\nout = log2(neg)",
       "output": "out = [0.0000 + 4.5324i  1.0000 + 4.5324i];"
     },
     {
       "description": "Checking power-of-two exponents for matrix sizes",
-      "input": "A = [64 128; 256 512];\nexponents = log2(A);",
+      "input": "A = [64 128; 256 512];\nexponents = log2(A)",
       "output": "exponents = [6 7; 8 9];"
     },
     {
       "description": "Running `log2` on GPU-resident data",
-      "input": "G = gpuArray([1 4 16 64]);\nresult = log2(G);\nhost = gather(result);",
+      "input": "G = gpuArray([1 4 16 64]);\nresult = log2(G);\nhost = gather(result)",
       "output": "host = [0 2 4 6];"
     },
     {
       "description": "Applying `log2` to character codes",
-      "input": "C = 'ABC';\nvalues = log2(C);",
+      "input": "C = 'ABC';\nvalues = log2(C)",
       "output": "values = [6.0224 6.1293 6.1990];"
     }
   ],

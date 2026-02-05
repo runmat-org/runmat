@@ -41,7 +41,7 @@
   "examples": [
     {
       "description": "",
-      "input": "data = randn(1, 1000);\nhist(data, 20);"
+      "input": "data = randn(1, 1000);\nhist(data, 20)"
     }
   ],
   "faqs": [],

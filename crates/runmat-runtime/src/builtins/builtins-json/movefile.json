@@ -47,32 +47,32 @@
   "examples": [
     {
       "description": "Rename a file in the same folder",
-      "input": "fid = fopen(\"results.txt\", \"w\"); fclose(fid);\nstatus = movefile(\"results.txt\", \"archive.txt\");",
+      "input": "fid = fopen(\"results.txt\", \"w\"); fclose(fid);\nstatus = movefile(\"results.txt\", \"archive.txt\")",
       "output": "status =\n     1"
     },
     {
       "description": "Move a file into an existing folder",
-      "input": "mkdir(\"reports\");\nfid = fopen(\"summary.txt\", \"w\"); fclose(fid);\nstatus = movefile(\"summary.txt\", \"reports\");",
+      "input": "mkdir(\"reports\");\nfid = fopen(\"summary.txt\", \"w\"); fclose(fid);\nstatus = movefile(\"summary.txt\", \"reports\")",
       "output": "status =\n     1"
     },
     {
       "description": "Force overwrite an existing destination",
-      "input": "fid = fopen(\"draft.txt\", \"w\"); fclose(fid);\nfid = fopen(\"final.txt\", \"w\"); fclose(fid);\n[status, message, messageID] = movefile(\"draft.txt\", \"final.txt\", \"f\");",
+      "input": "fid = fopen(\"draft.txt\", \"w\"); fclose(fid);\nfid = fopen(\"final.txt\", \"w\"); fclose(fid);\n[status, message, messageID] = movefile(\"draft.txt\", \"final.txt\", \"f\")",
       "output": "status =\n     1\nmessage =\n\nmessageID ="
     },
     {
       "description": "Move multiple files with a wildcard",
-      "input": "mkdir(\"data\");\nfid = fopen(\"a.log\", \"w\"); fclose(fid);\nfid = fopen(\"b.log\", \"w\"); fclose(fid);\nstatus = movefile(\"*.log\", \"data\");",
+      "input": "mkdir(\"data\");\nfid = fopen(\"a.log\", \"w\"); fclose(fid);\nfid = fopen(\"b.log\", \"w\"); fclose(fid);\nstatus = movefile(\"*.log\", \"data\")",
       "output": "status =\n     1"
     },
     {
       "description": "Handle missing sources gracefully",
-      "input": "[status, message, messageID] = movefile(\"missing.txt\", \"dest.txt\");",
+      "input": "[status, message, messageID] = movefile(\"missing.txt\", \"dest.txt\")",
       "output": "status =\n     0\nmessage =\nSource \"missing.txt\" does not exist.\nmessageID =\nMATLAB:MOVEFILE:FileDoesNotExist"
     },
     {
       "description": "Use gpuArray inputs for paths",
-      "input": "fid = fopen(\"draft.txt\", \"w\"); fclose(fid);\nstatus = movefile(gpuArray(\"draft.txt\"), gpuArray(\"final.txt\"));",
+      "input": "fid = fopen(\"draft.txt\", \"w\"); fclose(fid);\nstatus = movefile(gpuArray(\"draft.txt\"), gpuArray(\"final.txt\"))",
       "output": "status =\n     1"
     }
   ],

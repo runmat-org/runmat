@@ -8,6 +8,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::concatenation::char_array_from_f64_with_prefix;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
@@ -475,7 +476,7 @@ fn infer_category(inputs: &[Value]) -> BuiltinResult<CatCategory> {
     if has_string && (has_char || has_cell || has_complex || (has_numeric && !all_logical)) {
         return Err(cat_err("cat: cannot mix string arrays with other classes"));
     }
-    if has_char && (has_cell || has_complex || (has_numeric && !all_logical) || has_string) {
+    if has_char && (has_cell || has_complex || has_string) {
         return Err(cat_err("cat: cannot mix char arrays with other classes"));
     }
     if has_cell && (has_complex || (has_numeric && !all_logical) || has_string || has_char) {
@@ -596,15 +597,23 @@ fn cat_char_arrays(dim_zero: usize, values: Vec<Value>) -> BuiltinResult<Value> 
     }
     let mut arrays = Vec::with_capacity(values.len());
     for value in values {
-        if let Value::CharArray(ca) = value {
-            arrays.push(ca);
-        } else {
-            return Err(cat_err("cat: expected char arrays"));
-        }
+        arrays.push(char_array_from_value(value)?);
     }
     match dim_zero {
         0 => concat_char_rows(arrays),
         _ => concat_char_cols(arrays),
+    }
+}
+
+fn char_array_from_value(value: Value) -> BuiltinResult<CharArray> {
+    match value {
+        Value::CharArray(ca) => Ok(ca),
+        Value::Num(n) => char_array_from_f64_with_prefix(n, "cat"),
+        Value::Int(i) => char_array_from_f64_with_prefix(i.to_f64(), "cat"),
+        Value::Bool(flag) => char_array_from_f64_with_prefix(if flag { 1.0 } else { 0.0 }, "cat"),
+        other => Err(cat_err(format!(
+            "cat: expected char arrays or scalar code points, got {other:?}"
+        ))),
     }
 }
 

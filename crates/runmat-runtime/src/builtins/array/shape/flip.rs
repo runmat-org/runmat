@@ -173,7 +173,11 @@ fn parse_flip_spec(args: &[Value]) -> crate::BuiltinResult<FlipSpec> {
                 return Ok(FlipSpec::Dims(direction_dims));
             }
             let dims = parse_dims_value(&args[0])?;
-            Ok(FlipSpec::Dims(dims))
+            if dims.is_empty() {
+                Ok(FlipSpec::Default)
+            } else {
+                Ok(FlipSpec::Dims(dims))
+            }
         }
         _ => unreachable!(),
     }

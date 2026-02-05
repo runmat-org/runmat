@@ -1,13 +1,14 @@
 //! MATLAB-compatible `ls` builtin for RunMat.
 
+use runmat_filesystem as vfs;
 use std::collections::HashSet;
+#[cfg(test)]
 use std::env;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use glob::glob;
 use runmat_builtins::{CharArray, StringArray, Value};
-use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::{
@@ -116,7 +117,7 @@ fn list_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
 }
 
 fn list_current_directory() -> BuiltinResult<Vec<String>> {
-    let cwd = env::current_dir()
+    let cwd = vfs::current_dir()
         .map_err(|err| ls_error(format!("ls: unable to determine current directory ({err})")))?;
     list_directory(&cwd)
 }

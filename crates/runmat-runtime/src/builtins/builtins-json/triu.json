@@ -42,22 +42,22 @@
   "examples": [
     {
       "description": "Extracting the upper triangular part of a matrix",
-      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nU = triu(A);",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nU = triu(A)",
       "output": "U =\n     1     2     3\n     0     5     6\n     0     0     9"
     },
     {
       "description": "Keeping one sub-diagonal beneath the main diagonal",
-      "input": "A = magic(4);\nU = triu(A, -1);",
+      "input": "A = magic(4);\nU = triu(A, -1)",
       "output": "U =\n    16     2     3     13\n     5    11    10     8\n     0     7     6    12\n     0     0    15     1"
     },
     {
       "description": "Dropping the main diagonal with a positive offset",
-      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nstrict = triu(A, 1);",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nstrict = triu(A, 1)",
       "output": "strict =\n     0     2     3\n     0     0     6\n     0     0     0"
     },
     {
       "description": "Applying `triu` to every page of a 3-D array",
-      "input": "T = reshape(1:18, [3 3 2]);\nU = triu(T);",
+      "input": "T = reshape(1:18, [3 3 2]);\nU = triu(T)",
       "output": "U(:, :, 1) =\n     1     2     3\n     0     5     6\n     0     0     9\n\nU(:, :, 2) =\n    10    11    12\n     0    14    15\n     0     0    18"
     },
     {

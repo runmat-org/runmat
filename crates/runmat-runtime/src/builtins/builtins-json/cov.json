@@ -45,32 +45,32 @@
   "examples": [
     {
       "description": "Computing covariance of columns in a matrix",
-      "input": "X = [4.0 2.0 0.60;\n     4.2 2.1 0.59;\n     3.9 2.0 0.58;\n     4.3 2.1 0.62;\n     4.1 2.2 0.63];\nC = cov(X);",
+      "input": "X = [4.0 2.0 0.60;\n     4.2 2.1 0.59;\n     3.9 2.0 0.58;\n     4.3 2.1 0.62;\n     4.1 2.2 0.63];\nC = cov(X)",
       "output": "C =\n    0.0250    0.0075    0.0018\n    0.0075    0.0070    0.0014\n    0.0018    0.0014    0.0004"
     },
     {
       "description": "Covariance between two vectors",
-      "input": "x = [1 2 3 4]';\ny = [10 11 9 12]';\nC = cov(x, y);",
-      "output": "C =\n    1.6667    1.5000\n    1.5000    1.6667"
+      "input": "x = [1 2 3 4]';\ny = [10 11 9 12]';\nC = cov(x, y)",
+      "output": "C =\n    1.6667    0.6667\n    0.6667    1.6667"
     },
     {
       "description": "Weighted covariance with observation weights",
-      "input": "X = [4.0 2.0;\n     4.2 2.1;\n     3.9 2.0;\n     4.3 2.1;\n     4.1 2.2];\nw = [1 1 1 2 2];\nCw = cov(X, w);",
+      "input": "X = [4.0 2.0;\n     4.2 2.1;\n     3.9 2.0;\n     4.3 2.1;\n     4.1 2.2];\nw = [1 1 1 2 2];\nCw = cov(X, w)",
       "output": "Cw =\n    0.0224    0.0050\n    0.0050    0.0067"
     },
     {
       "description": "Ignoring rows that contain missing values",
-      "input": "X = [1   NaN 2;\n     3   4   5;\n     NaN 6   7;\n     8   9   10];\nC = cov(X, 'omitrows');",
+      "input": "X = [1   NaN 2;\n     3   4   5;\n     NaN 6   7;\n     8   9   10];\nC = cov(X, 'omitrows')",
       "output": "C =\n   12.5000   12.5000   12.5000\n   12.5000   12.5000   12.5000\n   12.5000   12.5000   12.5000"
     },
     {
       "description": "Pairwise covariance with staggered NaNs",
-      "input": "X = [ 1   2   NaN;\n      4   NaN 6;\n      7   8   9];\nC = cov(X, 'partialrows');",
+      "input": "X = [ 1   2   NaN;\n      4   NaN 6;\n      7   8   9];\nC = cov(X, 'partialrows')",
       "output": "C =\n    9.0000   18.0000    4.5000\n   18.0000   18.0000       NaN\n    4.5000       NaN    4.5000"
     },
     {
       "description": "Running covariance on `gpuArray` inputs",
-      "input": "G = gpuArray(X);        % reuse matrix from earlier examples\nCG = cov(G);\nCG_host = gather(CG);",
+      "input": "X = [4.0 2.0 0.60;\n     4.2 2.1 0.59;\n     3.9 2.0 0.58;\n     4.3 2.1 0.62;\n     4.1 2.2 0.63];\nG = gpuArray(X);\nCG = cov(G);\nCG_host = gather(CG)",
       "output": "CG_host =\n    0.0250    0.0075    0.0018\n    0.0075    0.0070    0.0014\n    0.0018    0.0014    0.0004"
     }
   ],

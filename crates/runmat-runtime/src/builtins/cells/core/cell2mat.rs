@@ -129,7 +129,7 @@ async fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<
         return Ok(Value::Tensor(tensor));
     }
 
-    let cell_shape = vec![ca.rows, ca.cols];
+    let cell_shape = ca.shape.clone();
     let rank = cell_shape.len();
 
     let mut entries: Vec<CellEntry> = Vec::with_capacity(ca.data.len());
@@ -168,10 +168,15 @@ async fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<
         let tile_dims = extend_shape(&entry.shape, rank);
         for dim in 0..rank {
             let size = tile_dims[dim];
-            let slot = block_sizes
+            let Some(slot) = block_sizes
                 .get_mut(dim)
                 .and_then(|v| v.get_mut(indices[dim]))
-                .expect("valid cell dimension index");
+            else {
+                return Err(cell2mat_error_with_identifier(
+                    "cell2mat: cell index is out of bounds for the provided shape",
+                    IDENT_INVALID_CONTENTS,
+                ));
+            };
             if *slot == 0 {
                 *slot = size;
             } else if *slot != size {
@@ -331,7 +336,14 @@ fn copy_numeric(
         for (linear, value) in data.iter().enumerate() {
             let local_index = linear_to_multi_column_major(linear, &padded_shape);
             let dest_linear = accumulate_linear(&base_offsets, &local_index, &dest_strides);
-            output[dest_linear] = *value;
+            if let Some(slot) = output.get_mut(dest_linear) {
+                *slot = *value;
+            } else {
+                return Err(cell2mat_error_with_identifier(
+                    "cell2mat: resulting character array exceeds supported size",
+                    IDENT_SIZE_LIMIT,
+                ));
+            }
         }
     }
     Ok(())
@@ -555,7 +567,7 @@ fn prefix_sums(values: &[usize]) -> Vec<usize> {
     let mut accum = 0usize;
     for &v in values {
         out.push(accum);
-        accum += v;
+        accum = accum.saturating_add(v);
     }
     out
 }

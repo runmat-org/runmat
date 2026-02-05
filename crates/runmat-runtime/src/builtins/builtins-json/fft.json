@@ -45,29 +45,29 @@
   "examples": [
     {
       "description": "Computing the FFT of a real time-domain vector",
-      "input": "x = [1 2 3 4];\nY = fft(x);",
+      "input": "x = [1 2 3 4];\nY = fft(x)",
       "output": "Y =\n  Columns 1 through 4\n   10 + 0i  -2 + 2i  -2 + 0i  -2 - 2i"
     },
     {
       "description": "Applying fft column-wise to a matrix",
-      "input": "A = [1 2 3; 4 5 6];\nF = fft(A);",
+      "input": "A = [1 2 3; 4 5 6];\nF = fft(A)",
       "output": "F =\n   5 + 0i   7 + 0i   9 + 0i\n  -3 + 3i  -3 + 3i  -3 + 3i"
     },
     {
       "description": "Zero-padding before the FFT",
-      "input": "x = [1 2 3];\nY = fft(x, 5);"
+      "input": "x = [1 2 3];\nY = fft(x, 5)"
     },
     {
       "description": "Selecting the transform dimension for a row vector",
-      "input": "x = [1 2 3 4];\nY = fft(x, [], 2);"
+      "input": "x = [1 2 3 4];\nY = fft(x, [], 2)"
     },
     {
       "description": "FFT of a complex-valued signal",
-      "input": "t = 0:3;\nx = exp(1i * pi/2 * t);\nY = fft(x);"
+      "input": "t = 0:3;\nx = exp(1i * pi/2 * t);\nY = fft(x)"
     },
     {
       "description": "FFT with gpuArray inputs",
-      "input": "g = gpuArray(rand(1, 1024));  % Residency is on the GPU\nG = fft(g);                   % Falls back to host if provider FFT hooks are unavailable\nresult = gather(G);"
+      "input": "g = gpuArray(rand(1, 1024));  % Residency is on the GPU\nG = fft(g);                   % Falls back to host if provider FFT hooks are unavailable\nresult = gather(G)"
     }
   ],
   "faqs": [

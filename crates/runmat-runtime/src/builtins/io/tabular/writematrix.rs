@@ -7,6 +7,7 @@ use runmat_builtins::{Tensor, Value};
 use runmat_filesystem::OpenOptions;
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -651,7 +652,8 @@ fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
     if raw.trim().is_empty() {
         return Err(writematrix_error("writematrix: filename must not be empty"));
     }
-    Ok(Path::new(raw).to_path_buf())
+    let expanded = expand_user_path(raw, BUILTIN_NAME).map_err(writematrix_error)?;
+    Ok(Path::new(&expanded).to_path_buf())
 }
 
 #[cfg(test)]

@@ -44,37 +44,37 @@
   "examples": [
     {
       "description": "Reverse Columns of a Matrix",
-      "input": "A = [1 2 3; 4 5 6];\nB = fliplr(A);",
+      "input": "A = [1 2 3; 4 5 6];\nB = fliplr(A)",
       "output": "B =\n     3     2     1\n     6     5     4"
     },
     {
       "description": "Mirror an Image Matrix Horizontally",
-      "input": "img = reshape(1:16, 4, 4);\nmirrored = fliplr(img);",
+      "input": "img = reshape(1:16, 4, 4);\nmirrored = fliplr(img)",
       "output": "mirrored =\n    4     3     2     1\n    8     7     6     5\n   12    11    10     9\n   16    15    14    13"
     },
     {
       "description": "Flip the Order of Polynomial Coefficients",
-      "input": "c = [1 0 -2 5];\nrev = fliplr(c);",
+      "input": "c = [1 0 -2 5];\nrev = fliplr(c)",
       "output": "rev = [5  -2  0  1];"
     },
     {
       "description": "Reverse Each Slice in a 3-D Array Along Columns",
-      "input": "T = reshape(1:24, [3 4 2]);\nF = fliplr(T);",
+      "input": "T = reshape(1:24, [3 4 2]);\nF = fliplr(T)",
       "output": "F(:,:,1) =\n     4     3     2     1\n     8     7     6     5\n    12    11    10     9\n\nF(:,:,2) =\n    16    15    14    13\n    20    19    18    17\n    24    23    22    21"
     },
     {
       "description": "Preserve Column Vector Orientation",
-      "input": "col = (1:4)';\nsame = fliplr(col);",
+      "input": "col = (1:4)';\nsame = fliplr(col)",
       "output": "same =\n     1\n     2\n     3\n     4"
     },
     {
       "description": "Flip Characters in a Two-Row Char Array",
-      "input": "C = ['r','u','n'; 'm','a','t'];\nCt = fliplr(C);",
+      "input": "C = ['r','u','n'; 'm','a','t'];\nCt = fliplr(C)",
       "output": "Ct =\n    'nur'\n    'tam'"
     },
     {
       "description": "Keep gpuArray Results on the Device While Flipping Columns",
-      "input": "G = gpuArray(rand(8, 8));\nH = fliplr(G);"
+      "input": "G = gpuArray(rand(8, 8));\nH = fliplr(G)"
     }
   ],
   "faqs": [

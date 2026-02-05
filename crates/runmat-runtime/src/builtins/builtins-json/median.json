@@ -48,32 +48,32 @@
   "examples": [
     {
       "description": "Finding the median of an odd-length vector",
-      "input": "x = [7 2 9 4 5];\nm = median(x);",
+      "input": "x = [7 2 9 4 5];\nm = median(x)",
       "output": "m = 5;"
     },
     {
       "description": "Computing the median of an even-length vector with averaging",
-      "input": "x = [1 4 9 10];\nm = median(x);",
+      "input": "x = [1 4 9 10];\nm = median(x)",
       "output": "m = 6.5;"
     },
     {
       "description": "Column-wise median of a matrix",
-      "input": "A = [1 3 5; 7 9 11; 2 4 6];\ncolMedians = median(A);",
+      "input": "A = [1 3 5; 7 9 11; 2 4 6];\ncolMedians = median(A)",
       "output": "colMedians = [2 4 6];"
     },
     {
       "description": "Row medians while ignoring NaN values",
-      "input": "A = [1 NaN 3; 4 5 NaN];\nrowMedians = median(A, 2, 'omitnan');",
+      "input": "A = [1 NaN 3; 4 5 NaN];\nrowMedians = median(A, 2, 'omitnan')",
       "output": "rowMedians = [2; 4.5];"
     },
     {
       "description": "Median of all elements in a matrix",
-      "input": "A = reshape(1:6, [3 2]);\noverall = median(A, 'all');",
+      "input": "A = reshape(1:6, [3 2]);\noverall = median(A, 'all')",
       "output": "overall = 3.5;"
     },
     {
       "description": "Median of all elements on a GPU-backed tensor",
-      "input": "G = gpuArray(randn(2048, 2048));\noverall = median(G, 'omitnan');\nresult = gather(overall);"
+      "input": "G = gpuArray(randn(2048, 2048));\noverall = median(G, 'omitnan');\nresult = gather(overall)"
     }
   ],
   "faqs": [

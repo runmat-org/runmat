@@ -44,32 +44,32 @@
   "examples": [
     {
       "description": "Fitting a straight line through noisy samples",
-      "input": "x = 0:5;\ny = 2.5 * x + 1 + 0.05 * randn(size(x));\np = polyfit(x, y, 1);",
-      "output": "p ≈ [2.5 1.0];   % slope and intercept recovered from noisy data"
+      "input": "x = 0:5;\ny = 2.5 * x + 1 + 0.05 * randn(size(x));\np = polyfit(x, y, 1)",
+      "output": "p \u2248 [2.5 1.0];   % slope and intercept recovered from noisy data"
     },
     {
       "description": "Computing a quadratic fit and reusing `mu`",
-      "input": "x = -3:3;\ny = x.^2 - 2 * x + 4;\n[p, S, mu] = polyfit(x, y, 2);\nsmoothed = polyval(p, x, [], mu);",
+      "input": "x = -3:3;\ny = x.^2 - 2 * x + 4;\n[p, S, mu] = polyfit(x, y, 2);\nsmoothed = polyval(p, x, [], mu)",
       "output": "smoothed matches y exactly because the quadratic model fits perfectly."
     },
     {
       "description": "Retrieving the structure `S` for prediction intervals",
-      "input": "t = linspace(0, 2*pi, 25);\ny = sin(t) + 0.1 * randn(size(t));\n[p, S, mu] = polyfit(t, y, 3);\n[fitted, delta] = polyval(p, t, S, mu);",
+      "input": "t = linspace(0, 2*pi, 25);\ny = sin(t) + 0.1 * randn(size(t));\n[p, S, mu] = polyfit(t, y, 3);\n[fitted, delta] = polyval(p, t, S, mu)",
       "output": "delta contains the one-standard-deviation prediction interval for each fitted sample."
     },
     {
       "description": "Weighted polynomial fit",
-      "input": "x = linspace(-1, 1, 7);\ny = [1.1 0.4 0.2 0.0 0.1 0.5 1.4];\nw = [1 2 2 4 2 2 1];\np = polyfit(x, y, 2, w);",
+      "input": "x = linspace(-1, 1, 7);\ny = [1.1 0.4 0.2 0.0 0.1 0.5 1.4];\nw = [1 2 2 4 2 2 1];\np = polyfit(x, y, 2, w)",
       "output": "Central samples influence the fit more heavily, matching MATLAB's weighting semantics."
     },
     {
       "description": "Using `polyfit` with `gpuArray` inputs",
-      "input": "x = gpuArray.linspace(-2, 2, 50);\ny = gpuArray((x - 0.5).^3);\np = polyfit(x, y, 3);",
+      "input": "x = gpuArray.linspace(-2, 2, 50);\ny = gpuArray((x - 0.5).^3);\np = polyfit(x, y, 3)",
       "output": "p is returned on the host today; convert it back to gpuArray if desired."
     },
     {
       "description": "Complex-valued data with `polyfit`",
-      "input": "x = 0:4;\ny = exp(1i * x);\np = polyfit(x, y, 2);",
+      "input": "x = 0:4;\ny = exp(1i * x);\np = polyfit(x, y, 2)",
       "output": "p is complex-valued and matches MATLAB's complex least-squares solution."
     }
   ],
@@ -122,6 +122,6 @@
     "url": "https://github.com/runmat-org/runmat/issues/new/choose"
   },
   "gpu_behavior": [
-    "RunMat’s acceleration layer exposes a dedicated `polyfit` provider hook. The WGPU provider routes requests through this hook, gathers inputs to the host, executes the shared Householder QR solver, and returns MATLAB-compatible outputs while preserving residency metadata. Providers that have not implemented the hook yet fall back to the same host code path automatically, so results stay correct even when the inputs originated on the GPU."
+    "RunMat\u2019s acceleration layer exposes a dedicated `polyfit` provider hook. The WGPU provider routes requests through this hook, gathers inputs to the host, executes the shared Householder QR solver, and returns MATLAB-compatible outputs while preserving residency metadata. Providers that have not implemented the hook yet fall back to the same host code path automatically, so results stay correct even when the inputs originated on the GPU."
   ]
 }

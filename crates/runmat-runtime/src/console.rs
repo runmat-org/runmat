@@ -24,6 +24,7 @@ type StreamForwarder = dyn Fn(&ConsoleEntry) + Send + Sync + 'static;
 
 runmat_thread_local! {
     static THREAD_BUFFER: RefCell<Vec<ConsoleEntry>> = const { RefCell::new(Vec::new()) };
+    static LAST_VALUE_OUTPUT: RefCell<Option<Value>> = const { RefCell::new(None) };
 }
 
 static FORWARDER: OnceCell<RwLock<Option<Arc<StreamForwarder>>>> = OnceCell::new();
@@ -55,6 +56,7 @@ pub fn record_console_output(stream: ConsoleStream, text: impl Into<String>) {
 /// each run only returns fresh output.
 pub fn reset_thread_buffer() {
     THREAD_BUFFER.with(|buf| buf.borrow_mut().clear());
+    LAST_VALUE_OUTPUT.with(|value| value.borrow_mut().take());
 }
 
 /// Drain (and return) the buffered console entries for the current thread.
@@ -73,6 +75,9 @@ pub fn install_forwarder(forwarder: Option<Arc<StreamForwarder>>) {
 
 /// Convenience helper to record formatted value output (matching MATLAB's `name = value` layout).
 pub fn record_value_output(label: Option<&str>, value: &Value) {
+    LAST_VALUE_OUTPUT.with(|last| {
+        *last.borrow_mut() = Some(value.clone());
+    });
     let value_text = value.to_string();
     let text = if let Some(name) = label {
         if value_text.contains('\n') {
@@ -84,4 +89,8 @@ pub fn record_value_output(label: Option<&str>, value: &Value) {
         value_text
     };
     record_console_output(ConsoleStream::Stdout, text);
+}
+
+pub fn take_last_value_output() -> Option<Value> {
+    LAST_VALUE_OUTPUT.with(|value| value.borrow_mut().take())
 }

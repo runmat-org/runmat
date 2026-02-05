@@ -42,12 +42,12 @@
   "examples": [
     {
       "description": "Save The Current Search Path To The Default Location",
-      "input": "status = savepath();",
+      "input": "status = savepath()",
       "output": "status =\n     0"
     },
     {
       "description": "Persist A Project-Specific Pathdef File",
-      "input": "status = savepath(\"config/project_pathdef.m\");",
+      "input": "status = savepath(\"config/project_pathdef.m\")",
       "output": "status =\n     0"
     },
     {
@@ -56,26 +56,26 @@
     },
     {
       "description": "Append Genpath Output And Persist The Result",
-      "input": "tooling = genpath(\"third_party/toolchain\");\naddpath(tooling, \"-end\");\nsavepath();"
+      "input": "tooling = genpath(\"third_party/toolchain\");\naddpath(tooling, \"-end\");\nsavepath()"
     },
     {
       "description": "Save A Pathdef Using A Directory Argument",
-      "input": "mkdir(\"~/.runmat/projectA\");\nsavepath(\"~/.runmat/projectA/\");",
+      "input": "mkdir(\"~/.runmat/projectA\");\nsavepath(\"~/.runmat/projectA/\")",
       "output": "% Creates ~/.runmat/projectA/pathdef.m with the current search path."
     },
     {
       "description": "Override The Target File With RUNMAT_PATHDEF",
-      "input": "setenv(\"RUNMAT_PATHDEF\", fullfile(tempdir, \"pathdef-dev.m\"));\nsavepath();",
+      "input": "setenv(\"RUNMAT_PATHDEF\", fullfile(tempdir, \"pathdef-dev.m\"));\nsavepath()",
       "output": "% The file tempdir/pathdef-dev.m now contains the MATLAB path definition."
     },
     {
       "description": "Use gpuArray Inputs Transparently",
-      "input": "status = savepath(gpuArray(\"pathdefs/pathdef_gpu.m\"));",
+      "input": "status = savepath(gpuArray(\"pathdefs/pathdef_gpu.m\"))",
       "output": "status =\n     0"
     },
     {
       "description": "Inspect The Generated pathdef.m File",
-      "input": "savepath(\"toolbox/pathdef.m\");\ntype toolbox/pathdef.m;",
+      "input": "savepath(\"toolbox/pathdef.m\");\ntype toolbox/pathdef.m",
       "output": "% Displays the MATLAB function that reproduces the saved search path."
     }
   ],

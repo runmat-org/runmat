@@ -45,15 +45,15 @@
   "examples": [
     {
       "description": "Deleting a single temporary file",
-      "input": "fname = \"scratch.txt\";\nfid = fopen(fname, \"w\");\nfclose(fid);\ndelete(fname);"
+      "input": "fname = \"scratch.txt\";\nfid = fopen(fname, \"w\");\nfclose(fid);\ndelete(fname)"
     },
     {
       "description": "Removing multiple files with a wildcard pattern",
-      "input": "logs = [\"log-01.txt\", \"log-02.txt\"];\nfor name = logs\n    fid = fopen(name, \"w\");\n    fclose(fid);\nend\ndelete(\"log-*.txt\");"
+      "input": "logs = [\"log-01.txt\", \"log-02.txt\"];\nfor name = logs\n    fid = fopen(name, \"w\");\n    fclose(fid);\nend\ndelete(\"log-*.txt\")"
     },
     {
       "description": "Deleting files listed in a string array",
-      "input": "files = [\"stageA.dat\", \"stageB.dat\"];\nfor name = files\n    fid = fopen(name, \"w\");\n    fclose(fid);\nend\ndelete(files);"
+      "input": "files = [\"stageA.dat\", \"stageB.dat\"];\nfor name = files\n    fid = fopen(name, \"w\");\n    fclose(fid);\nend\ndelete(files)"
     },
     {
       "description": "Handling missing files safely with try/catch",
@@ -61,15 +61,15 @@
     },
     {
       "description": "Cleaning up build artifacts stored under your home folder",
-      "input": "delete(\"~/runmat/build/*.o\");"
+      "input": "delete(\"~/runmat/build/*.o\")"
     },
     {
       "description": "Deleting char-matrix filenames generated programmatically",
-      "input": "names = char(\"stage1.tmp\", \"stage2.tmp\");\nfor row = 1:size(names, 1)\n    fname = strtrim(names(row, :));\n    fid = fopen(fname, \"w\");\n    fclose(fid);\nend\ndelete(names);"
+      "input": "names = char(\"stage1.tmp\", \"stage2.tmp\");\nfor row = 1:size(names, 1)\n    fname = strtrim(names(row, :));\n    fid = fopen(fname, \"w\");\n    fclose(fid);\nend\ndelete(names)"
     },
     {
       "description": "Deleting graphics handles after use",
-      "input": "fig = figure;\ndelete(fig);\ntf = isvalid(fig);",
+      "input": "fig = figure;\ndelete(fig);\ntf = isvalid(fig)",
       "output": "tf =\n     0"
     }
   ],

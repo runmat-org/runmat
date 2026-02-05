@@ -671,6 +671,9 @@ fn format_type_info(value: &Value) -> String {
             // MATLAB displays string arrays as m x n string array; for test's purpose, we classify scalar string arrays as "string"
             if sa.shape == vec![1, 1] {
                 "string".to_string()
+            } else if sa.shape.len() > 2 {
+                let dims: Vec<String> = sa.shape.iter().map(|d| d.to_string()).collect();
+                format!("{} string array", dims.join("x"))
             } else {
                 format!("{}x{} string array", sa.rows(), sa.cols())
             }
@@ -1493,6 +1496,32 @@ impl RunMatSession {
             }
         }
 
+        let last_assign_var = last_unsuppressed_assign_var(&hir.body);
+        let last_expr_emits = last_expr_emits_value(&hir.body);
+        if !is_semicolon_suppressed && result_value.is_none() {
+            if last_assign_var.is_some() || last_expr_emits {
+                if let Some(value) = runmat_runtime::console::take_last_value_output() {
+                    result_value = Some(value);
+                }
+            }
+            if result_value.is_none() {
+                if last_assign_var.is_some() {
+                    if let Some(var_id) = last_emit_var_index(&bytecode) {
+                        if var_id < self.variable_array.len() {
+                            result_value = Some(self.variable_array[var_id].clone());
+                        }
+                    }
+                }
+                if result_value.is_none() {
+                    if let Some(var_id) = last_assign_var {
+                        if var_id < self.variable_array.len() {
+                            result_value = Some(self.variable_array[var_id].clone());
+                        }
+                    }
+                }
+            }
+        }
+
         let execution_time = start_time.elapsed();
         let execution_time_ms = execution_time.as_millis() as u64;
 
@@ -1667,7 +1696,9 @@ impl RunMatSession {
             self.populate_callstack(runtime_error);
         }
 
-        let public_value = if is_semicolon_suppressed {
+        let suppress_public_value =
+            is_expression_stmt && matches!(final_stmt_emit, FinalStmtEmitDisposition::Suppressed);
+        let public_value = if is_semicolon_suppressed || suppress_public_value {
             None
         } else {
             result_value
@@ -2030,6 +2061,55 @@ fn last_displayable_statement_emit_disposition(
         }
     }
     FinalStmtEmitDisposition::Suppressed
+}
+
+fn last_unsuppressed_assign_var(body: &[runmat_hir::HirStmt]) -> Option<usize> {
+    use runmat_hir::HirStmt;
+
+    for stmt in body.iter().rev() {
+        match stmt {
+            HirStmt::Assign(var_id, _, suppressed, _) => {
+                return if *suppressed { None } else { Some(var_id.0) };
+            }
+            HirStmt::ExprStmt(_, _, _)
+            | HirStmt::MultiAssign(_, _, _, _)
+            | HirStmt::AssignLValue(_, _, _, _) => return None,
+            _ => continue,
+        }
+    }
+    None
+}
+
+fn last_expr_emits_value(body: &[runmat_hir::HirStmt]) -> bool {
+    use runmat_hir::HirStmt;
+
+    for stmt in body.iter().rev() {
+        match stmt {
+            HirStmt::ExprStmt(expr, suppressed, _) => {
+                if *suppressed {
+                    return false;
+                }
+                return matches!(
+                    expr_emit_disposition(expr),
+                    FinalStmtEmitDisposition::Inline
+                );
+            }
+            HirStmt::Assign(_, _, _, _)
+            | HirStmt::MultiAssign(_, _, _, _)
+            | HirStmt::AssignLValue(_, _, _, _) => return false,
+            _ => continue,
+        }
+    }
+    false
+}
+
+fn last_emit_var_index(bytecode: &runmat_ignition::Bytecode) -> Option<usize> {
+    for instr in bytecode.instructions.iter().rev() {
+        if let runmat_ignition::Instr::EmitVar { var_index, .. } = instr {
+            return Some(*var_index);
+        }
+    }
+    None
 }
 
 fn expr_emit_disposition(expr: &runmat_hir::HirExpr) -> FinalStmtEmitDisposition {

@@ -81,7 +81,8 @@ impl OpenOptions {
     }
 
     pub fn open(&self, path: impl AsRef<Path>) -> io::Result<File> {
-        with_provider(|provider| provider.open(path.as_ref(), &self.flags)).map(File::from_handle)
+        let resolved = resolve_path(path.as_ref());
+        with_provider(|provider| provider.open(&resolved, &self.flags)).map(File::from_handle)
     }
 
     pub fn flags(&self) -> &OpenFlags {
@@ -283,9 +284,16 @@ impl Seek for File {
 }
 
 static PROVIDER: OnceCell<RwLock<Arc<dyn FsProvider>>> = OnceCell::new();
+#[cfg(target_arch = "wasm32")]
+static CURRENT_DIR: OnceCell<RwLock<PathBuf>> = OnceCell::new();
 
 fn provider_lock() -> &'static RwLock<Arc<dyn FsProvider>> {
     PROVIDER.get_or_init(|| RwLock::new(default_provider()))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn current_dir_lock() -> &'static RwLock<PathBuf> {
+    CURRENT_DIR.get_or_init(|| RwLock::new(PathBuf::from("/")))
 }
 
 fn with_provider<T>(f: impl FnOnce(&dyn FsProvider) -> T) -> T {
@@ -293,6 +301,23 @@ fn with_provider<T>(f: impl FnOnce(&dyn FsProvider) -> T) -> T {
         .read()
         .expect("filesystem provider lock poisoned");
     f(&**guard)
+}
+
+fn resolve_path(path: &Path) -> PathBuf {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if path.is_absolute() {
+            return path.to_path_buf();
+        }
+        if let Ok(base) = current_dir() {
+            return base.join(path);
+        }
+        return PathBuf::from("/").join(path);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        path.to_path_buf()
+    }
 }
 
 pub fn set_provider(provider: Arc<dyn FsProvider>) {
@@ -331,6 +356,48 @@ pub fn current_provider() -> Arc<dyn FsProvider> {
         .clone()
 }
 
+pub fn current_dir() -> io::Result<PathBuf> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        return Ok(current_dir_lock()
+            .read()
+            .expect("filesystem current dir lock poisoned")
+            .clone());
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::env::current_dir()
+    }
+}
+
+pub fn set_current_dir(path: impl AsRef<Path>) -> io::Result<()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut target = PathBuf::from(path.as_ref());
+        if !target.is_absolute() {
+            let base = current_dir()?;
+            target = base.join(target);
+        }
+        let canonical = canonicalize(&target).unwrap_or(target.clone());
+        let metadata = metadata(&canonical)?;
+        if !metadata.is_dir() {
+            return Err(io::Error::new(
+                ErrorKind::NotFound,
+                format!("Not a directory: {}", canonical.display()),
+            ));
+        }
+        let mut guard = current_dir_lock()
+            .write()
+            .expect("filesystem current dir lock poisoned");
+        *guard = canonical;
+        return Ok(());
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::env::set_current_dir(path)
+    }
+}
+
 pub struct ProviderGuard {
     previous: Arc<dyn FsProvider>,
 }
@@ -342,7 +409,8 @@ impl Drop for ProviderGuard {
 }
 
 pub fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
-    with_provider(|provider| provider.read(path.as_ref()))
+    let resolved = resolve_path(path.as_ref());
+    with_provider(|provider| provider.read(&resolved))
 }
 
 pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
@@ -351,52 +419,65 @@ pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
 }
 
 pub fn write(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Result<()> {
-    with_provider(|provider| provider.write(path.as_ref(), data.as_ref()))
+    let resolved = resolve_path(path.as_ref());
+    with_provider(|provider| provider.write(&resolved, data.as_ref()))
 }
 
 pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
-    with_provider(|provider| provider.remove_file(path.as_ref()))
+    let resolved = resolve_path(path.as_ref());
+    with_provider(|provider| provider.remove_file(&resolved))
 }
 
 pub fn metadata(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
-    with_provider(|provider| provider.metadata(path.as_ref()))
+    let resolved = resolve_path(path.as_ref());
+    with_provider(|provider| provider.metadata(&resolved))
 }
 
 pub fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
-    with_provider(|provider| provider.symlink_metadata(path.as_ref()))
+    let resolved = resolve_path(path.as_ref());
+    with_provider(|provider| provider.symlink_metadata(&resolved))
 }
 
 pub fn read_dir(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>> {
-    with_provider(|provider| provider.read_dir(path.as_ref()))
+    let resolved = resolve_path(path.as_ref());
+    with_provider(|provider| provider.read_dir(&resolved))
 }
 
 pub fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
-    with_provider(|provider| provider.canonicalize(path.as_ref()))
+    let resolved = resolve_path(path.as_ref());
+    with_provider(|provider| provider.canonicalize(&resolved))
 }
 
 pub fn create_dir(path: impl AsRef<Path>) -> io::Result<()> {
-    with_provider(|provider| provider.create_dir(path.as_ref()))
+    let resolved = resolve_path(path.as_ref());
+    with_provider(|provider| provider.create_dir(&resolved))
 }
 
 pub fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
-    with_provider(|provider| provider.create_dir_all(path.as_ref()))
+    let resolved = resolve_path(path.as_ref());
+    with_provider(|provider| provider.create_dir_all(&resolved))
 }
 
 pub fn remove_dir(path: impl AsRef<Path>) -> io::Result<()> {
-    with_provider(|provider| provider.remove_dir(path.as_ref()))
+    let resolved = resolve_path(path.as_ref());
+    with_provider(|provider| provider.remove_dir(&resolved))
 }
 
 pub fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
-    with_provider(|provider| provider.remove_dir_all(path.as_ref()))
+    let resolved = resolve_path(path.as_ref());
+    with_provider(|provider| provider.remove_dir_all(&resolved))
 }
 
 pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
-    with_provider(|provider| provider.rename(from.as_ref(), to.as_ref()))
+    let resolved_from = resolve_path(from.as_ref());
+    let resolved_to = resolve_path(to.as_ref());
+    with_provider(|provider| provider.rename(&resolved_from, &resolved_to))
 }
 
 /// Update the readonly flag for a file or directory if the provider supports it.
 pub fn set_readonly(path: impl AsRef<Path>, readonly: bool) -> io::Result<()> {
-    with_provider(|provider| provider.set_readonly(path.as_ref(), readonly))
+    let resolved = resolve_path(path.as_ref());
+    with_provider(|provider| provider.set_readonly(&resolved, readonly))
 }
 
 /// Copy a file from `from` to `to`, truncating the destination when it exists.

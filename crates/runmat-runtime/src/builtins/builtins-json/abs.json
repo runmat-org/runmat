@@ -43,36 +43,36 @@
   "examples": [
     {
       "description": "Getting the absolute value of a scalar",
-      "input": "y = abs(-42);",
+      "input": "y = abs(-42)",
       "output": "y = 42;"
     },
     {
       "description": "Taking the absolute value of a vector",
-      "input": "v = [-2 -1 0 1 2];\nresult = abs(v);",
+      "input": "v = [-2 -1 0 1 2];\nresult = abs(v)",
       "output": "result = [2 1 0 1 2];"
     },
     {
       "description": "Measuring complex magnitudes",
-      "input": "z = [3+4i, 1-1i];\nmagnitudes = abs(z);",
+      "input": "z = [3+4i, 1-1i];\nmagnitudes = abs(z)",
       "output": "magnitudes = [5 1.4142];"
     },
     {
       "description": "Working with matrices on the GPU",
-      "input": "G = randn(2048, 2048, \"gpuArray\");\npositive = abs(G);"
+      "input": "G = randn(2048, 2048, \"gpuArray\");\npositive = abs(G)"
     },
     {
       "description": "Using `abs` with logical arrays",
-      "input": "mask = logical([0 1 0; 1 0 1]);\nnumeric = abs(mask);",
+      "input": "mask = logical([0 1 0; 1 0 1]);\nnumeric = abs(mask)",
       "output": "numeric = [0 1 0; 1 0 1];"
     },
     {
       "description": "Converting characters to numeric codes",
-      "input": "c = 'ABC';\ncodes = abs(c);",
+      "input": "c = 'ABC';\ncodes = abs(c)",
       "output": "codes = [65 66 67];"
     },
     {
       "description": "Chaining `abs` inside fused expressions",
-      "input": "x = linspace(-2, 2, 5);\ny = abs(x) + x.^2;"
+      "input": "x = linspace(-2, 2, 5);\ny = abs(x) + x.^2"
     }
   ],
   "faqs": [

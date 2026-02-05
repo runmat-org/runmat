@@ -43,32 +43,32 @@
   "examples": [
     {
       "description": "Determine Whether One Scalar Exceeds Another",
-      "input": "flag = gt(42, 17);",
+      "input": "flag = gt(42, 17)",
       "output": "flag =\n     1"
     },
     {
       "description": "Filter Matrix Elements Greater Than a Threshold",
-      "input": "M = [1 2 3; 4 5 6];\nmask = gt(M, 3);",
+      "input": "M = [1 2 3; 4 5 6];\nmask = gt(M, 3)",
       "output": "mask =\n  2\u00d73 logical array\n     0     0     0\n     1     1     1"
     },
     {
       "description": "Apply Greater-Than With Implicit Expansion",
-      "input": "v = [1 3 5 7];\nmask = gt(v, [2 6]);",
+      "input": "v = [1 3 5 7];\nmask = gt(v, [2 6])",
       "output": "mask =\n  1\u00d74 logical array\n     0     0     1     1"
     },
     {
       "description": "Compare Character Data to Numeric Codes",
-      "input": "letters = ['A' 'B' 'C'];\nisAfterB = gt(letters, 66);",
+      "input": "letters = ['A' 'B' 'C'];\nisAfterB = gt(letters, 66)",
       "output": "isAfterB =\n  1\u00d73 logical array\n     0     0     1"
     },
     {
       "description": "Compare String Arrays Lexicographically",
-      "input": "names = [\"alice\" \"charlie\" \"bob\"];\nlater = gt(names, \"bob\");",
+      "input": "names = [\"alice\" \"charlie\" \"bob\"];\nlater = gt(names, \"bob\")",
       "output": "later =\n  1\u00d73 logical array\n     0     1     0"
     },
     {
       "description": "Run `gt` Directly On `gpuArray` Inputs",
-      "input": "G1 = gpuArray([1 4 7]);\nG2 = gpuArray([0 5 6]);\ndeviceResult = gt(G1, G2);\nhostResult = gather(deviceResult);",
+      "input": "G1 = gpuArray([1 4 7]);\nG2 = gpuArray([0 5 6]);\ndeviceResult = gt(G1, G2);\nhostResult = gather(deviceResult)",
       "output": "deviceResult =\n  1\u00d73 gpuArray logical array\n     1     0     1\nhostResult =\n  1\u00d73 logical array\n     1     0     1"
     }
   ],

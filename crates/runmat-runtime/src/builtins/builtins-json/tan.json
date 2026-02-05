@@ -46,42 +46,42 @@
   "examples": [
     {
       "description": "Getting the tangent of 45 degrees expressed in radians",
-      "input": "y = tan(pi/4);",
+      "input": "y = tan(pi/4)",
       "output": "y = 1"
     },
     {
       "description": "Applying tangent to a vector of sample angles",
-      "input": "theta = linspace(-pi/2 + 0.1, pi/2 - 0.1, 5);\nwave = tan(theta);",
+      "input": "theta = linspace(-pi/2 + 0.1, pi/2 - 0.1, 5);\nwave = tan(theta)",
       "output": "wave = [-9.9666   -0.9047         0    0.9047    9.9666]"
     },
     {
       "description": "Evaluating the tangent of a matrix on the GPU",
-      "input": "G = gpuArray([0 pi/6; pi/4 pi/3]);\nT = tan(G);\nresult = gather(T);",
+      "input": "G = gpuArray([0 pi/6; pi/4 pi/3]);\nT = tan(G);\nresult = gather(T)",
       "output": "result =\n         0    0.5774\n    1.0000    1.7321"
     },
     {
       "description": "Computing the tangent of complex angles",
-      "input": "z = 1 + 0.5i;\ntz = tan(z);",
+      "input": "z = 1 + 0.5i;\ntz = tan(z)",
       "output": "tz = 0.9654 + 0.2718i"
     },
     {
       "description": "Using tangent to linearise small-angle approximations",
-      "input": "eps = [-1e-6 0 1e-6];\napprox = tan(eps);",
+      "input": "eps = [-1e-6 0 1e-6];\napprox = tan(eps)",
       "output": "approx = [-1.0000e-06         0    1.0000e-06]"
     },
     {
       "description": "Converting degrees to radians before using `tan`",
-      "input": "angles_in_deg = [0 30 60 89];\nradians = deg2rad(angles_in_deg);\nresult = tan(radians);",
+      "input": "angles_in_deg = [0 30 60 89];\nradians = deg2rad(angles_in_deg);\nresult = tan(radians)",
       "output": "result = [0    0.5774    1.7321   57.2899]"
     },
     {
       "description": "Keeping the result on the GPU with `'like'`",
-      "input": "proto = gpuArray.zeros(1, 1, 'single');\nangles = gpuArray([0 pi/6 pi/4]);\ndeviceResult = tan(angles, 'like', proto);\ngathered = gather(deviceResult);",
+      "input": "proto = gpuArray.zeros(1, 1, 'single');\nangles = gpuArray([0 pi/6 pi/4]);\ndeviceResult = tan(angles, 'like', proto);\ngathered = gather(deviceResult)",
       "output": "gathered =\n  1x3 single\n         0    0.5774    1.0000"
     },
     {
       "description": "Inspecting character codes with tangent",
-      "input": "codes = tan('ABC');",
+      "input": "codes = tan('ABC')",
       "output": "codes =\n   -1.4700    0.0266    1.6523"
     }
   ],

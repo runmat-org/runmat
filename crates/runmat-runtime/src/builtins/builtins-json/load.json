@@ -47,31 +47,31 @@
   "examples": [
     {
       "description": "Load the entire file into the workspace",
-      "input": "load('results.mat');\ndisp(norm(weights));"
+      "input": "load('results.mat');\ndisp(norm(weights))"
     },
     {
       "description": "Load a subset of variables by name",
-      "input": "load('sim_state.mat', 'state', 'time');\nplot(time, state);"
+      "input": "load('sim_state.mat', 'state', 'time');\nplot(time, state)"
     },
     {
       "description": "Load variables using regular expressions",
-      "input": "load('checkpoint.mat', '-regexp', '^layer_\\\\d+$');"
+      "input": "load('checkpoint.mat', '-regexp', '^layer_\\\\d+$')"
     },
     {
       "description": "Capture loaded variables in a struct without altering the workspace",
-      "input": "S = load('snapshot.mat');\ndisp(fieldnames(S));"
+      "input": "S = load('snapshot.mat');\ndisp(fieldnames(S))"
     },
     {
       "description": "Combine explicit names and regex filters",
-      "input": "model = load('model.mat', 'config', '-regexp', '^weights_(conv|fc)');"
+      "input": "model = load('model.mat', 'config', '-regexp', '^weights_(conv|fc)')"
     },
     {
       "description": "Honour a custom default filename",
-      "input": "setenv('RUNMAT_LOAD_DEFAULT_PATH', fullfile(tempdir, 'autosave.mat'));\nload();"
+      "input": "setenv('RUNMAT_LOAD_DEFAULT_PATH', fullfile(tempdir, 'autosave.mat'));\nload()"
     },
     {
       "description": "Load character and string data",
-      "input": "values = load('strings.mat', 'labels');\ndisp(values.labels(1));"
+      "input": "values = load('strings.mat', 'labels');\ndisp(values.labels(1))"
     }
   ],
   "faqs": [

@@ -43,27 +43,27 @@
   "examples": [
     {
       "description": "List Files In The Current Folder",
-      "input": "ls",
+      "input": "fid = fopen(\"README.md\", \"w\"); fclose(fid);\nmkdir(\"src\");\nmkdir(\"tests\");\nls",
       "output": "README.md\nsrc/\ntests/"
     },
     {
       "description": "List Only MATLAB Files Using Wildcards",
-      "input": "ls(\"*.m\")",
+      "input": "fid = fopen(\"script.m\", \"w\"); fclose(fid);\nfid = fopen(\"solver.m\", \"w\"); fclose(fid);\nfid = fopen(\"test_helper.m\", \"w\"); fclose(fid);\nls(\"*.m\")",
       "output": "script.m\nsolver.m\ntest_helper.m"
     },
     {
       "description": "Capture A Directory Listing In A Variable",
-      "input": "listing = ls;\ndisp(listing(1, :));  % Display the first entry",
+      "input": "fid = fopen(\"README.md\", \"w\"); fclose(fid);\nlisting = ls;\ndisp(listing(1, :));  % Display the first entry",
       "output": "README.md"
     },
     {
       "description": "List The Contents Of A Specific Folder",
-      "input": "tempDir = fullfile(pwd, \"tmp\");\nls(tempDir);",
+      "input": "mkdir(\"tmp\");\nfid = fopen(fullfile(\"tmp\", \"tmpfile.txt\"), \"w\"); fclose(fid);\nmkdir(fullfile(\"tmp\", \"subdir\"));\ntempDir = fullfile(pwd, \"tmp\");\nls(tempDir)",
       "output": "tmpfile.txt\nsubdir/"
     },
     {
       "description": "Use Wildcards With Nested Paths",
-      "input": "ls(\"src/**/*.rs\")",
+      "input": "mkdir(fullfile(\"src\", \"utils\"));\nfid = fopen(fullfile(\"src\", \"main.rs\"), \"w\"); fclose(fid);\nfid = fopen(fullfile(\"src\", \"utils\", \"helpers.rs\"), \"w\"); fclose(fid);\nls(\"src/**/*.rs\")",
       "output": "src/main.rs\nsrc/utils/helpers.rs"
     },
     {
@@ -73,7 +73,7 @@
     },
     {
       "description": "Combine `ls` With `cd` For Temporary Directory Changes",
-      "input": "start = cd(\"examples\");\ncleanup = onCleanup(@() cd(start));\nfiles = ls(\"*.m\");",
+      "input": "mkdir(\"examples\");\nfid = fopen(fullfile(\"examples\", \"animation.m\"), \"w\"); fclose(fid);\nfid = fopen(fullfile(\"examples\", \"plot_surface.m\"), \"w\"); fclose(fid);\nstart = cd(\"examples\");\ncleanup = onCleanup(@() cd(start));\nfiles = ls(\"*.m\")",
       "output": "animation.m\nplot_surface.m"
     }
   ],

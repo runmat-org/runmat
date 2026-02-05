@@ -4,7 +4,7 @@ use runmat_filesystem as vfs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use glob::PatternError;
+use glob::Pattern;
 use runmat_builtins::{CharArray, Value};
 use runmat_macros::runtime_builtin;
 
@@ -329,19 +329,34 @@ fn move_single_source(source: &str, destination: &str, force: bool) -> MovefileR
 }
 
 fn move_with_pattern(pattern: &str, destination: &str, force: bool) -> MovefileResult {
-    let paths = match glob::glob(pattern) {
-        Ok(iter) => iter,
-        Err(PatternError { msg, .. }) => return MovefileResult::glob_pattern_error(pattern, msg),
+    let pattern_path = Path::new(pattern);
+    let (base_dir, name_pattern) = match pattern_path.file_name() {
+        Some(name) => (
+            pattern_path.parent().unwrap_or_else(|| Path::new(".")),
+            name,
+        ),
+        None => {
+            return MovefileResult::glob_pattern_error(pattern, "pattern has no file name");
+        }
+    };
+    let matcher = match Pattern::new(&name_pattern.to_string_lossy()) {
+        Ok(matcher) => matcher,
+        Err(err) => return MovefileResult::glob_pattern_error(pattern, err.msg),
     };
 
     let mut matches = Vec::new();
-    for entry in paths {
-        match entry {
-            Ok(path) => matches.push(path),
-            Err(err) => {
-                let path_display = path_to_display(err.path());
-                return MovefileResult::os_error(&path_display, destination, err.error());
-            }
+    let entries = match vfs::read_dir(base_dir) {
+        Ok(entries) => entries,
+        Err(err) => {
+            let display = path_to_display(base_dir);
+            return MovefileResult::os_error(&display, destination, &err);
+        }
+    };
+
+    for entry in entries {
+        let file_name = entry.file_name().to_string_lossy();
+        if matcher.matches(&file_name) {
+            matches.push(entry.path().to_path_buf());
         }
     }
 

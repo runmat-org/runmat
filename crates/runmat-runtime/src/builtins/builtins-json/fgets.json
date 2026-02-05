@@ -59,7 +59,7 @@
     },
     {
       "description": "Detect end of file using the return value",
-      "input": "fname = tempname;\nfid = fopen(fname, 'w');\nfprintf(fid, 'one\\n');\nfprintf(fid, 'two\\n');\nfclose(fid);\n\nfid = fopen(fname, 'r');\ntline = fgets(fid);\nwhile tline ~= -1\n    fprintf('> %s', tline);\n    tline = fgets(fid);\nend\nfclose(fid);\ndelete(fname);",
+      "input": "fname = tempname;\nfid = fopen(fname, 'w');\nfprintf(fid, 'one\\n');\nfprintf(fid, 'two\\n');\nfclose(fid);\n\nfid = fopen(fname, 'r');\ntline = fgets(fid);\nwhile tline ~= -1\n    fprintf('> %s', tline);\n    tline = fgets(fid);\nend\nfclose(fid);\ndelete(fname)",
       "output": "> one\n> two"
     },
     {

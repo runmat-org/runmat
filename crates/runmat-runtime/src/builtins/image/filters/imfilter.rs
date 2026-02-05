@@ -353,10 +353,14 @@ pub fn build_imfilter_plan(
     let kernel_points = build_kernel_points(kernel, &kernel_ext, &origin, options.mode);
     let zero_offset = vec![0isize; rank];
     let origin_signed: Vec<isize> = origin.iter().map(|&o| o as isize).collect();
-    let neg_origin: Vec<isize> = origin.iter().map(|&o| -(o as isize)).collect();
+    let full_offset: Vec<isize> = origin
+        .iter()
+        .zip(kernel_ext.iter())
+        .map(|(&orig, &dim)| orig as isize - (dim as isize - 1))
+        .collect();
 
     let (target_shape_ext, base_offset) = match options.shape {
-        ImfilterShape::Full => (full_shape.clone(), neg_origin),
+        ImfilterShape::Full => (full_shape.clone(), full_offset),
         ImfilterShape::Same => (image_ext.clone(), zero_offset),
         ImfilterShape::Valid => {
             let target: Vec<usize> = image_ext
@@ -685,7 +689,7 @@ pub(crate) mod tests {
         let result =
             apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         assert_eq!(result.shape, vec![3, 3]);
-        let expected = [0.0, 0.0, 0.0, 0.0, 4.0, 14.0, 0.0, 11.0, 30.0];
+        let expected = [4.0, 14.0, 6.0, 11.0, 30.0, 11.0, 6.0, 14.0, 4.0];
         for (got, exp) in result.data.iter().zip(expected.iter()) {
             assert!((got - exp).abs() < 1e-12);
         }

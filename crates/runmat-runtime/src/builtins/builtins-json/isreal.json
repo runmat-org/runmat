@@ -42,32 +42,32 @@
   "examples": [
     {
       "description": "Checking if a real-valued matrix is stored as real",
-      "input": "A = [7 3 2; 2 1 12; 52 108 78];\ntf = isreal(A);",
+      "input": "A = [7 3 2; 2 1 12; 52 108 78];\ntf = isreal(A)",
       "output": "tf =\n     1"
     },
     {
       "description": "Detecting complex entries inside an array",
-      "input": "B = [1 3+4i 2; 2i 1 12];\ntf = isreal(B);",
+      "input": "B = [1 3+4i 2; 2i 1 12];\ntf = isreal(B)",
       "output": "tf =\n     0"
     },
     {
       "description": "Complex storage with zero-valued imaginary parts still reports false",
-      "input": "C = complex(12);   % Stored as complex double with 0 imaginary part\ntf = isreal(C);",
+      "input": "C = complex(12);   % Stored as complex double with 0 imaginary part\ntf = isreal(C)",
       "output": "tf =\n     0"
     },
     {
       "description": "Logical and character data are considered real",
-      "input": "mask = logical([1 0 1]);\nchars = ['R' 'u' 'n'];\ntf_mask = isreal(mask);\ntf_chars = isreal(chars);",
+      "input": "mask = logical([1 0 1]);\nchars = ['R' 'u' 'n'];\ntf_mask = isreal(mask);\ntf_chars = isreal(chars)",
       "output": "tf_mask =\n     1\n\ntf_chars =\n     1"
     },
     {
       "description": "Strings, cells, and structs are never real",
-      "input": "txt = \"RunMat\";\nvec = {1, 2};\nperson = struct(\"name\", \"Ada\");\ntf_txt = isreal(txt);\ntf_vec = isreal(vec);\ntf_person = isreal(person);",
+      "input": "txt = \"RunMat\";\nvec = {1, 2};\nperson = struct(\"name\", \"Ada\");\ntf_txt = isreal(txt);\ntf_vec = isreal(vec);\ntf_person = isreal(person)",
       "output": "tf_txt =\n     0\n\ntf_vec =\n     0\n\ntf_person =\n     0"
     },
     {
       "description": "Querying `gpuArray` storage without gathering data",
-      "input": "G = gpuArray(rand(1024, 1024));\ntf_gpu = isreal(G);",
+      "input": "G = gpuArray(rand(1024, 1024));\ntf_gpu = isreal(G)",
       "output": "tf_gpu =\n     1"
     }
   ],

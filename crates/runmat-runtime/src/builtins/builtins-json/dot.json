@@ -45,12 +45,12 @@
   "examples": [
     {
       "description": "Computing the dot product of row vectors",
-      "input": "A = [1 2 3];\nB = [4 5 6];\nval = dot(A, B);",
+      "input": "A = [1 2 3];\nB = [4 5 6];\nval = dot(A, B)",
       "output": "val = 32"
     },
     {
       "description": "Dotting column vectors to obtain a scalar",
-      "input": "u = [1; 3; 5];\nv = [2; 4; 6];\nval = dot(u, v);",
+      "input": "u = [1; 3; 5];\nv = [2; 4; 6];\nval = dot(u, v)",
       "output": "val = 44"
     },
     {
@@ -60,12 +60,12 @@
     },
     {
       "description": "Dotting complex vectors uses conjugation on the first input",
-      "input": "a = [1+2i, 3-4i];\nb = [2-3i, -1+5i];\nval = dot(a, b);",
+      "input": "a = [1+2i, 3-4i];\nb = [2-3i, -1+5i];\nval = dot(a, b)",
       "output": "val = -27 + 4i"
     },
     {
       "description": "Evaluating `dot` on `gpuArray` inputs",
-      "input": "G1 = gpuArray([1 2 3 4]);\nG2 = gpuArray([4 3 2 1]);\nG = dot(G1, G2);\nresult = gather(G);",
+      "input": "G1 = gpuArray([1 2 3 4]);\nG2 = gpuArray([4 3 2 1]);\nG = dot(G1, G2);\nresult = gather(G)",
       "output": "isa(G, 'gpuArray')   % logical 1\nresult = 20"
     }
   ],
@@ -125,8 +125,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/linalg/ops/dot.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/dot.rs"
   },
-  "gpu_residency": "You rarely need to call `gpuArray` explicitly for `dot`. If the provider lacks a dedicated dot kernel, RunMat will gather the operands, compute the host result, and—when the output is real—upload it back to the provider automatically. Complex outputs remain on the host until GPU complex datatypes are implemented; in mixed pipelines consider reintroducing `gpuArray` explicitly after the call if residency is critical.",
+  "gpu_residency": "You rarely need to call `gpuArray` explicitly for `dot`. If the provider lacks a dedicated dot kernel, RunMat will gather the operands, compute the host result, and\u2014when the output is real\u2014upload it back to the provider automatically. Complex outputs remain on the host until GPU complex datatypes are implemented; in mixed pipelines consider reintroducing `gpuArray` explicitly after the call if residency is critical.",
   "gpu_behavior": [
-    "RunMat Accelerate keeps GPU-resident tensors on the device whenever the active provider exposes a `dot` hook. When the hook is missing, RunMat gathers both operands to the host, evaluates the reference path, and—when the result is real—uploads it back to the provider so downstream GPU code continues without manual transfers. Complex outputs remain on the host until provider support lands."
+    "RunMat Accelerate keeps GPU-resident tensors on the device whenever the active provider exposes a `dot` hook. When the hook is missing, RunMat gathers both operands to the host, evaluates the reference path, and\u2014when the result is real\u2014uploads it back to the provider so downstream GPU code continues without manual transfers. Complex outputs remain on the host until provider support lands."
   ]
 }

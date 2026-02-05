@@ -100,6 +100,8 @@ enum OutputTemplate {
     /// single precision when allocating on GPU via 'like' or provider hooks.
     Single,
     Logical,
+    /// GPU-resident zeros array request via 'gpuArray' keyword or gpuArray.zeros() static method
+    GpuArray,
     Like(Value),
 }
 
@@ -165,6 +167,16 @@ impl ParsedZeros {
                             ));
                         }
                         class_override = Some(OutputTemplate::Single);
+                        idx += 1;
+                        continue;
+                    }
+                    "gpuArray" | "gpuarray" => {
+                        if like_proto.is_some() {
+                            return Err(builtin_error(
+                                "zeros: cannot combine 'like' with 'gpuArray'",
+                            ));
+                        }
+                        class_override = Some(OutputTemplate::GpuArray);
                         idx += 1;
                         continue;
                     }
@@ -245,6 +257,7 @@ async fn build_output(parsed: ParsedZeros) -> crate::BuiltinResult<Value> {
         OutputTemplate::Double => zeros_double(&parsed.shape),
         OutputTemplate::Single => zeros_single(&parsed.shape),
         OutputTemplate::Logical => zeros_logical(&parsed.shape),
+        OutputTemplate::GpuArray => zeros_gpu(&parsed.shape).await,
         OutputTemplate::Like(proto) => zeros_like(&proto, &parsed.shape).await,
     }
 }
@@ -300,6 +313,36 @@ fn force_host_allocation(shape: &[usize]) -> bool {
 
 fn zeros_logical(shape: &[usize]) -> crate::BuiltinResult<Value> {
     Ok(Value::LogicalArray(LogicalArray::zeros(shape.to_vec())))
+}
+
+/// Create a GPU-resident zeros array. Falls back to host tensor if no GPU provider.
+async fn zeros_gpu(shape: &[usize]) -> crate::BuiltinResult<Value> {
+    // Try to allocate on GPU with default precision (usually F32)
+    if let Some(provider) = runmat_accelerate_api::provider() {
+        let precision = provider.precision();
+        let dtype = dtype_from_precision(precision);
+        match provider.zeros(shape) {
+            Ok(handle) => {
+                runmat_accelerate_api::set_handle_precision(&handle, precision);
+                return Ok(Value::GpuTensor(handle));
+            }
+            Err(err) => {
+                log::debug!("zeros_gpu: provider.zeros failed ({err}); falling back to host upload");
+            }
+        }
+        // Fallback: build a host tensor and upload
+        let host = tensor::zeros_with_dtype(shape, dtype)?;
+        let view = HostTensorView {
+            data: &host.data,
+            shape: &host.shape,
+        };
+        if let Ok(gpu) = provider.upload(&view) {
+            runmat_accelerate_api::set_handle_precision(&gpu, precision);
+            return Ok(Value::GpuTensor(gpu));
+        }
+    }
+    // No GPU provider: fall back to host double tensor
+    zeros_double(shape)
 }
 
 #[async_recursion::async_recursion(?Send)]

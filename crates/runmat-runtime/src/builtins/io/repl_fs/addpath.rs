@@ -17,7 +17,6 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 use runmat_filesystem as vfs;
 use std::collections::HashSet;
-use std::env;
 use std::path::{Component, Path, PathBuf};
 
 const ERROR_ARG_TYPE: &str =
@@ -222,6 +221,11 @@ fn apply_addpath(spec: AddPathSpec) -> BuiltinResult<()> {
         }
     };
 
+    let final_segments = final_segments
+        .into_iter()
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+
     // Preserve empty path (clears search path) if all entries were removed.
     let new_path = if final_segments.is_empty() {
         String::new()
@@ -266,7 +270,7 @@ async fn collect_strings(value: &Value, output: &mut Vec<String>) -> BuiltinResu
         }
         Value::Cell(cell) => {
             for ptr in &cell.data {
-                let inner = (*ptr).clone();
+                let inner = (**ptr).clone();
                 let gathered = gather_if_needed_async(&inner)
                     .await
                     .map_err(map_control_flow)?;
@@ -304,7 +308,7 @@ fn normalize_directory(raw: &str) -> BuiltinResult<String> {
     let joined = if path.is_absolute() {
         path.to_path_buf()
     } else {
-        env::current_dir()
+        vfs::current_dir()
             .map_err(|_| addpath_error("addpath: unable to resolve current directory"))?
             .join(path)
     };
@@ -406,7 +410,6 @@ pub(crate) mod tests {
     use crate::builtins::common::path_state::set_path_string;
     use crate::builtins::common::path_state::{current_path_segments, PATH_LIST_SEPARATOR};
     use std::convert::TryFrom;
-    use std::env;
     use std::fs;
     use tempfile::tempdir;
 
@@ -688,7 +691,7 @@ pub(crate) mod tests {
 
         set_path_string("");
 
-        let cwd = env::current_dir().expect("cwd");
+        let cwd = vfs::current_dir().expect("cwd");
         let string_array = StringArray::new(vec![cwd.to_string_lossy().into_owned()], vec![1, 1])
             .expect("string array");
         addpath_builtin(vec![Value::StringArray(string_array)]).expect("addpath");

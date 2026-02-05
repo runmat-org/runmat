@@ -47,42 +47,42 @@
   "examples": [
     {
       "description": "Rounding values up to the next integer",
-      "input": "x = [-2.7, -0.3, 0, 0.8, 3.2];\ny = ceil(x);",
+      "input": "x = [-2.7, -0.3, 0, 0.8, 3.2];\ny = ceil(x)",
       "output": "y = [-2, 0, 0, 1, 4];"
     },
     {
       "description": "Rounding a matrix up element-wise",
-      "input": "A = [1.2 4.7; -3.4 5.0];\nB = ceil(A);",
+      "input": "A = [1.2 4.7; -3.4 5.0];\nB = ceil(A)",
       "output": "B = [2 5; -3 5];"
     },
     {
       "description": "Rounding fractions upward in a tensor",
-      "input": "t = reshape([-1.8, -0.2, 0.4, 1.1, 2.1, 3.6], [3, 2]);\nup = ceil(t);",
+      "input": "t = reshape([-1.8, -0.2, 0.4, 1.1, 2.1, 3.6], [3, 2]);\nup = ceil(t)",
       "output": "up =\n    [-1  2;\n      0  3;\n      1  4]"
     },
     {
       "description": "Rounding up to two decimal places",
-      "input": "temps = [21.452 19.991 22.501];\nrounded = ceil(temps, 2);",
-      "output": "rounded = [21.46 19.99 22.51];"
+      "input": "temps = [21.452 19.991 22.501];\nrounded = ceil(temps, 2)",
+      "output": "rounded = [21.46 20 22.51];"
     },
     {
       "description": "Rounding to significant digits",
-      "input": "measurements = [0.001234 12.3456 98765];\nsig2 = ceil(measurements, 2, 'significant');",
+      "input": "measurements = [0.001234 12.3456 98765];\nsig2 = ceil(measurements, 2, 'significant')",
       "output": "sig2 = [0.0013 13.0 99000];"
     },
     {
       "description": "Rounding complex numbers toward positive infinity",
-      "input": "z = [1.2 + 2.1i, -0.2 - 3.9i];\nresult = ceil(z);",
+      "input": "z = [1.2 + 2.1i, -0.2 - 3.9i];\nresult = ceil(z)",
       "output": "result = [2 + 3i, 0 - 3i];"
     },
     {
       "description": "Keeping GPU results on-device with `unary_ceil`",
-      "input": "G = gpuArray([1.8 -0.2 0.0; -1.1 2.5 -3.4]);\nup = ceil(G);\ngather(up);",
+      "input": "G = gpuArray([1.8 -0.2 0.0; -1.1 2.5 -3.4]);\nup = ceil(G);\ngather(up)",
       "output": "ans =\n    [ 2  0  0;\n     -1  3 -3]"
     },
     {
       "description": "Forcing GPU residency with a `'like'` prototype",
-      "input": "A = [1.8 -0.2; 2.7 3.4];\nproto = gpuArray(0);\nG = ceil(A, 'like', proto);   % Result remains on the GPU\nresult = gather(G);",
+      "input": "A = [1.8 -0.2; 2.7 3.4];\nproto = gpuArray(0);\nG = ceil(A, 'like', proto);   % Result remains on the GPU\nresult = gather(G)",
       "output": "result =\n    [ 2  0;\n      3  4]"
     }
   ],

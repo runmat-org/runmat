@@ -45,37 +45,37 @@
   "examples": [
     {
       "description": "Create A New Folder In The Current Directory",
-      "input": "status = mkdir(\"results\");",
+      "input": "status = mkdir(\"results\")",
       "output": "status =\n     1"
     },
     {
       "description": "Create A Nested Folder Using Parent And Child Arguments",
-      "input": "status = mkdir(\"data\", \"archive/2024\");",
+      "input": "mkdir(\"data\");\nstatus = mkdir(\"data\", \"archive/2024\")",
       "output": "status =\n     1"
     },
     {
       "description": "Detect When A Folder Already Exists",
-      "input": "mkdir(\"logs\");\n[status, message, messageID] = mkdir(\"logs\");",
+      "input": "mkdir(\"logs\");\n[status, message, messageID] = mkdir(\"logs\")",
       "output": "status =\n     1\n\nmessage =\nDirectory already exists.\n\nmessageID =\nMATLAB:MKDIR:DirectoryExists"
     },
     {
       "description": "Handle Missing Parent Folder Gracefully",
-      "input": "[status, message, messageID] = mkdir(\"missing-parent\", \"child\");",
+      "input": "[status, message, messageID] = mkdir(\"missing-parent\", \"child\")",
       "output": "status =\n     0\nmessage =\nParent folder \"missing-parent\" does not exist.\nmessageID =\nMATLAB:MKDIR:ParentDirectoryDoesNotExist"
     },
     {
       "description": "Capture Detailed Status And Messages",
-      "input": "[status, message, messageID] = mkdir(\"reports\");",
+      "input": "[status, message, messageID] = mkdir(\"reports\")",
       "output": "status =\n     1\nmessage =\n\nmessageID ="
     },
     {
       "description": "Create A Folder In Your Home Directory With Tilde Expansion",
-      "input": "status = mkdir(\"~\", \"RunMatProjects\");",
+      "input": "status = mkdir(\"~\", \"RunMatProjects\")",
       "output": "status =\n     1"
     },
     {
       "description": "Use gpuArray Inputs For Paths",
-      "input": "status = mkdir(gpuArray(\"gpu-output\"));",
+      "input": "status = mkdir(gpuArray(\"gpu-output\"))",
       "output": "status =\n     1"
     }
   ],

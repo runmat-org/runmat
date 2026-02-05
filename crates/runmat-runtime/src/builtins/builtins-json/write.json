@@ -41,20 +41,20 @@
   "examples": [
     {
       "description": "Sending an array of bytes to an echo service",
-      "input": "client = tcpclient(\"127.0.0.1\", 50000);\ncount = write(client, uint8(1:4));",
+      "input": "client = tcpclient(\"127.0.0.1\", 50000);\ncount = write(client, uint8(1:4))",
       "output": "count =\n     4"
     },
     {
       "description": "Writing doubles with explicit byte order",
-      "input": "client = tcpclient(\"localhost\", 50001, \"ByteOrder\", \"big-endian\");\nvalues = [1.5 2.5 3.5];\nwrite(client, values, \"double\");"
+      "input": "client = tcpclient(\"localhost\", 50001, \"ByteOrder\", \"big-endian\");\nvalues = [1.5 2.5 3.5];\nwrite(client, values, \"double\")"
     },
     {
       "description": "Transmitting ASCII text",
-      "input": "client = tcpclient(\"127.0.0.1\", 50002);\nwrite(client, \"RunMat TCP\", \"char\");"
+      "input": "client = tcpclient(\"127.0.0.1\", 50002);\nwrite(client, \"RunMat TCP\", \"char\")"
     },
     {
       "description": "Sending UTF-8 encoded strings",
-      "input": "client = tcpclient(\"127.0.0.1\", 50003);\nwrite(client, \"\u0394\u03b9\u03b1\u03ba\u03c1\u03b9\u03c4\u03cc\", \"string\");"
+      "input": "client = tcpclient(\"127.0.0.1\", 50003);\nwrite(client, \"\u0394\u03b9\u03b1\u03ba\u03c1\u03b9\u03c4\u03cc\", \"string\")"
     },
     {
       "description": "Handling connection closures",

@@ -317,11 +317,10 @@ fn format_logical_array(logical: &LogicalArray) -> Vec<String> {
     if logical.data.is_empty() {
         return vec!["[]".to_string()];
     }
-    let tensor = match tensor::logical_to_tensor(logical) {
-        Ok(t) => t,
-        Err(_) => return vec!["[]".to_string()],
-    };
-    format_numeric_tensor(&tensor)
+    match tensor::logical_to_tensor(logical) {
+        Ok(tensor) => format_numeric_tensor(&tensor),
+        Err(_) => split_lines(&logical.to_string()),
+    }
 }
 
 fn format_logical_array_nested(logical: &LogicalArray) -> Vec<String> {

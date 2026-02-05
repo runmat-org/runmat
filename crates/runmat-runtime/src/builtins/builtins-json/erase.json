@@ -42,32 +42,32 @@
   "examples": [
     {
       "description": "Remove a single word from a string scalar",
-      "input": "txt = \"RunMat accelerates MATLAB code\";\nclean = erase(txt, \"accelerates \");",
+      "input": "txt = \"RunMat accelerates MATLAB code\";\nclean = erase(txt, \"accelerates \")",
       "output": "clean = \"RunMat MATLAB code\""
     },
     {
       "description": "Remove multiple substrings from each element of a string array",
-      "input": "labels = [\"GPU pipeline\"; \"CPU pipeline\"];\nresult = erase(labels, [\"GPU \", \"CPU \"]);",
+      "input": "labels = [\"GPU pipeline\"; \"CPU pipeline\"];\nresult = erase(labels, [\"GPU \", \"CPU \"])",
       "output": "result = 2\u00d71 string\n    \"pipeline\"\n    \"pipeline\""
     },
     {
       "description": "Erase characters from a character array while preserving padding",
-      "input": "chars = char(\"workspace\", \"snapshots\");\ntrimmed = erase(chars, \"s\");",
+      "input": "chars = char(\"workspace\", \"snapshots\");\ntrimmed = erase(chars, \"s\")",
       "output": "trimmed =\n\n  2\u00d78 char array\n\n    'workpace'\n    'napshot '"
     },
     {
       "description": "Remove substrings from a cell array of text",
-      "input": "C = {'Kernel Planner', \"GPU Fusion\"};\nout = erase(C, [\"Kernel \", \"GPU \"]);",
+      "input": "C = {'Kernel Planner', \"GPU Fusion\"};\nout = erase(C, [\"Kernel \", \"GPU \"])",
       "output": "out = 1\u00d72 cell array\n    {'Planner'}    {\"Fusion\"}"
     },
     {
       "description": "Provide an empty pattern list to leave the text unchanged",
-      "input": "data = [\"alpha\", \"beta\"];\nunchanged = erase(data, string.empty);",
+      "input": "data = [\"alpha\", \"beta\"];\nunchanged = erase(data, string.empty)",
       "output": "unchanged = 1\u00d72 string\n    \"alpha\"    \"beta\""
     },
     {
       "description": "Remove delimiters before splitting text",
-      "input": "path = \"runmat/bin:runmat/lib\";\nclean = erase(path, \":\");\nparts = split(clean, \"runmat/\");",
+      "input": "path = \"runmat/bin:runmat/lib\";\nclean = erase(path, \":\");\nparts = split(clean, \"runmat/\")",
       "output": "clean = \"runmat/binrunmat/lib\"\nparts = 1\u00d73 string\n    \"\"    \"bin\"    \"lib\""
     }
   ],

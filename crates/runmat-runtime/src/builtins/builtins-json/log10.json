@@ -44,27 +44,27 @@
   "examples": [
     {
       "description": "Finding the order of magnitude of a number",
-      "input": "value = log10(1000);",
+      "input": "value = log10(1000)",
       "output": "value = 3;"
     },
     {
       "description": "Computing base-10 logarithms of a matrix",
-      "input": "A = [1 10 100; 0.1 0.01 0.001];\nB = log10(A);",
+      "input": "A = [1 10 100; 0.1 0.01 0.001];\nB = log10(A)",
       "output": "B = [0 1 2; -1 -2 -3];"
     },
     {
       "description": "Understanding how `log10` handles zero",
-      "input": "z = log10(0);",
+      "input": "z = log10(0)",
       "output": "z = -Inf;"
     },
     {
       "description": "Working with negative inputs using complex results",
-      "input": "neg = [-10 -100];\nout = log10(neg);",
+      "input": "neg = [-10 -100];\nout = log10(neg)",
       "output": "out = [1.0000 + 1.3644i, 2.0000 + 1.3644i];"
     },
     {
       "description": "Running `log10` on GPU-resident data",
-      "input": "G = gpuArray([1 10 1000]);\nresult = log10(G);\nhost = gather(result);",
+      "input": "G = gpuArray([1 10 1000]);\nresult = log10(G);\nhost = gather(result)",
       "output": "host = [0 1 3];"
     }
   ],

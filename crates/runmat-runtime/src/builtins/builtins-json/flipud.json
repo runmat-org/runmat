@@ -45,27 +45,27 @@
   "examples": [
     {
       "description": "Reverse Rows of a Matrix",
-      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nB = flipud(A);",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nB = flipud(A)",
       "output": "B =\n     7     8     9\n     4     5     6\n     1     2     3"
     },
     {
       "description": "Reverse a Column Vector",
-      "input": "col = (1:4)';\nrev = flipud(col);",
+      "input": "col = (1:4)';\nrev = flipud(col)",
       "output": "rev =\n     4\n     3\n     2\n     1"
     },
     {
       "description": "Flip the First Dimension of a 3-D Tensor",
-      "input": "T = reshape(1:24, [3 4 2]);\nF = flipud(T);",
+      "input": "T = reshape(1:24, [3 4 2]);\nF = flipud(T)",
       "output": "F(:,:,1) =\n     3     6     9    12\n     2     5     8    11\n     1     4     7    10\n\nF(:,:,2) =\n    15    18    21    24\n    14    17    20    23\n    13    16    19    22"
     },
     {
       "description": "Flip Characters in a Char Array Vertically",
-      "input": "C = ['run'; 'mat'];\nCv = flipud(C);",
+      "input": "C = ['run'; 'mat'];\nCv = flipud(C)",
       "output": "Cv =\n    'mat'\n    'run'"
     },
     {
       "description": "Preserve Row Vector Orientation",
-      "input": "row = 1:5;\nsame = flipud(row);",
+      "input": "row = 1:5;\nsame = flipud(row)",
       "output": "same = [1 2 3 4 5];"
     },
     {

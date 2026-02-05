@@ -48,52 +48,52 @@
   "examples": [
     {
       "description": "Read Comma-Separated Values With Automatic Delimiter Detection",
-      "input": "M = readmatrix(\"data/scores.csv\");",
+      "input": "M = readmatrix(\"data/scores.csv\")",
       "output": "% Returns a numeric matrix containing the CSV data."
     },
     {
       "description": "Skip Header Lines Before Reading Numeric Data",
-      "input": "M = readmatrix(\"data/sensor_log.txt\", 'NumHeaderLines', 2);",
+      "input": "M = readmatrix(\"data/sensor_log.txt\", 'NumHeaderLines', 2)",
       "output": "% The first two lines are skipped; the remaining numeric rows are returned."
     },
     {
       "description": "Import Tab-Delimited Text By Specifying The Delimiter",
-      "input": "M = readmatrix(\"data/report.tsv\", 'Delimiter', 'tab');",
+      "input": "M = readmatrix(\"data/report.tsv\", 'Delimiter', 'tab')",
       "output": "% Numeric matrix representing the tab-delimited values."
     },
     {
       "description": "Treat Custom Tokens As Missing Values",
-      "input": "M = readmatrix(\"data/results.csv\", 'TreatAsMissing', [\"NA\", \"missing\"]);",
+      "input": "M = readmatrix(\"data/results.csv\", 'TreatAsMissing', [\"NA\", \"missing\"])",
       "output": "% Entries equal to \"NA\" or \"missing\" become NaN in the output matrix."
     },
     {
       "description": "Use European Decimal And Thousands Separators",
-      "input": "M = readmatrix(\"data/europe.csv\", 'Delimiter', ';', 'DecimalSeparator', ',', 'ThousandsSeparator', '.');",
+      "input": "M = readmatrix(\"data/europe.csv\", 'Delimiter', ';', 'DecimalSeparator', ',', 'ThousandsSeparator', '.')",
       "output": "% Values like \"1.234,56\" are interpreted as 1234.56."
     },
     {
       "description": "Replace Empty Numeric Fields With A Custom Value",
-      "input": "M = readmatrix(\"data/with_blanks.csv\", 'EmptyValue', 0);",
+      "input": "M = readmatrix(\"data/with_blanks.csv\", 'EmptyValue', 0)",
       "output": "% Blank entries become 0 instead of NaN."
     },
     {
       "description": "Import A Specific Range Of Cells",
-      "input": "M = readmatrix(\"data/quarterly.csv\", 'Range', 'B2:D5');",
+      "input": "M = readmatrix(\"data/quarterly.csv\", 'Range', 'B2:D5')",
       "output": "% Returns only the rows and columns covered by the specified range."
     },
     {
       "description": "Convert The Result To A Logical Matrix",
-      "input": "flags = readmatrix(\"data/thresholds.csv\", 'OutputType', 'logical');",
+      "input": "flags = readmatrix(\"data/thresholds.csv\", 'OutputType', 'logical')",
       "output": "% Non-zero entries (including NaN) become logical true, zero stays false."
     },
     {
       "description": "Keep The Result On The GPU By Matching A Prototype",
-      "input": "proto = gpuArray.zeros(1);        % simple prototype to establish residency\nG = readmatrix(\"data/heavy.csv\", 'Like', proto);",
+      "input": "proto = gpuArray.zeros(1);        % simple prototype to establish residency\nG = readmatrix(\"data/heavy.csv\", 'Like', proto)",
       "output": "% The parsed matrix is uploaded to the same GPU device as the prototype."
     },
     {
       "description": "Provide Options Using A Struct From detectImportOptions",
-      "input": "opts = struct('Delimiter', ',', 'NumHeaderLines', 1);\nM = readmatrix(\"data/measurements.csv\", opts);",
+      "input": "opts = struct('Delimiter', ',', 'NumHeaderLines', 1);\nM = readmatrix(\"data/measurements.csv\", opts)",
       "output": "% Reads the file using the supplied options struct."
     }
   ],
