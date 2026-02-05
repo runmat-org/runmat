@@ -5,7 +5,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use runmat_builtins::{Type, Value};
+use runmat_builtins::{ResolveContext, Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::isempty")]
@@ -51,7 +51,7 @@ async fn isempty_builtin(value: Value) -> crate::BuiltinResult<Value> {
     Ok(Value::Bool(is_empty))
 }
 
-fn bool_scalar_type(_: &[Type]) -> Type {
+fn bool_scalar_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
 }
 

@@ -7,7 +7,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{Tensor, Type, Value};
+use runmat_builtins::{ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::size")]
@@ -60,7 +60,7 @@ fn normalized_rank(shape: &[Option<usize>]) -> usize {
     shape.len().max(2)
 }
 
-fn size_type(args: &[Type]) -> Type {
+fn size_type(args: &[Type], _context: &ResolveContext) -> Type {
     let input = match args.first() {
         Some(value) => value,
         None => return Type::Unknown,
@@ -199,9 +199,12 @@ pub(crate) mod tests {
 
     #[test]
     fn size_type_infers_row_vector_rank() {
-        let out = size_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(3), Some(4)]),
-        }]);
+        let out = size_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3), Some(4)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

@@ -1,6 +1,7 @@
 use runmat_builtins::Type;
 
 use runmat_builtins::shape_rules::broadcast_shapes;
+use runmat_builtins::{ResolveContext, Type};
 
 pub fn logical_like(input: &Type) -> Type {
     match input {
@@ -49,7 +50,7 @@ pub fn logical_result_for_binary(lhs: &Type, rhs: &Type) -> Type {
     }
 }
 
-pub fn logical_binary_type(args: &[Type]) -> Type {
+pub fn logical_binary_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.len() >= 2 {
         logical_result_for_binary(&args[0], &args[1])
     } else if let Some(first) = args.first() {
@@ -59,7 +60,7 @@ pub fn logical_binary_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn logical_unary_type(args: &[Type]) -> Type {
+pub fn logical_unary_type(args: &[Type], _context: &ResolveContext) -> Type {
     args.first().map(logical_like).unwrap_or(Type::logical())
 }
 
@@ -88,8 +89,9 @@ mod tests {
         let rhs = Type::Logical {
             shape: Some(vec![Some(2), Some(2)]),
         };
+        let out = logical_binary_type(&[lhs, rhs], &ResolveContext::new(Vec::new()));
         assert_eq!(
-            logical_binary_type(&[lhs, rhs]),
+            out,
             Type::Logical {
                 shape: Some(vec![Some(2), Some(2)])
             }
@@ -98,7 +100,8 @@ mod tests {
 
     #[test]
     fn logical_binary_scalar_defaults_bool() {
-        assert_eq!(logical_binary_type(&[Type::Num, Type::Bool]), Type::Bool);
+        let out = logical_binary_type(&[Type::Num, Type::Bool], &ResolveContext::new(Vec::new()));
+        assert_eq!(out, Type::Bool);
     }
 
     #[test]
@@ -109,8 +112,9 @@ mod tests {
         let rhs = Type::Logical {
             shape: Some(vec![Some(3), Some(1)]),
         };
+        let out = logical_binary_type(&[lhs, rhs], &ResolveContext::new(Vec::new()));
         assert_eq!(
-            logical_binary_type(&[lhs, rhs]),
+            out,
             Type::Logical {
                 shape: Some(vec![Some(3), Some(4)])
             }

@@ -7,7 +7,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::containers::map::map_length;
 use crate::runtime_error::RuntimeError;
-use runmat_builtins::{Type, Value};
+use runmat_builtins::{ResolveContext, Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::length")]
@@ -39,7 +39,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata query; fusion planner treats this as a host scalar lookup.",
 };
 
-fn length_type(args: &[Type]) -> Type {
+fn length_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.is_empty() {
         Type::Unknown
     } else {
@@ -83,7 +83,10 @@ pub(crate) mod tests {
 
     #[test]
     fn length_type_returns_int() {
-        assert_eq!(super::length_type(&[Type::Tensor { shape: None }]), Type::Int);
+        assert_eq!(
+            super::length_type(&[Type::Tensor { shape: None }], &ResolveContext::new(Vec::new())),
+            Type::Int
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

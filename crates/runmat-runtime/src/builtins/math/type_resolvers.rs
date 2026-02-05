@@ -1,8 +1,9 @@
 use runmat_builtins::Type;
 
 use runmat_builtins::shape_rules::{broadcast_shapes, element_count_if_known};
+use runmat_builtins::{ResolveContext, Type};
 
-pub fn numeric_unary_type(args: &[Type]) -> Type {
+pub fn numeric_unary_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
     };
@@ -15,13 +16,13 @@ pub fn numeric_unary_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn numeric_binary_type(args: &[Type]) -> Type {
+pub fn numeric_binary_type(args: &[Type], context: &ResolveContext) -> Type {
     let lhs = args.get(0);
     let rhs = args.get(1);
     match (lhs, rhs) {
         (Some(left), Some(right)) => binary_result_type(left, right),
         (Some(single), None) | (None, Some(single)) => {
-            numeric_unary_type(std::slice::from_ref(single))
+            numeric_unary_type(std::slice::from_ref(single), context)
         }
         (None, None) => Type::Unknown,
     }
@@ -96,9 +97,13 @@ mod tests {
 
     #[test]
     fn numeric_unary_preserves_shape() {
-        let out = numeric_unary_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(3)]),
-        }]);
+        let ctx = ResolveContext::new(Vec::new());
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ctx,
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -109,26 +114,33 @@ mod tests {
 
     #[test]
     fn numeric_unary_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(&[Type::Tensor {
-            shape: Some(vec![Some(1), Some(1)]),
-        }]);
+        let ctx = ResolveContext::new(Vec::new());
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(1), Some(1)]),
+            }],
+            &ctx,
+        );
         assert_eq!(out, Type::Num);
     }
 
     #[test]
     fn numeric_binary_scalar_returns_num() {
-        let out = numeric_binary_type(&[Type::Num, Type::Int]);
+        let out = numeric_binary_type(&[Type::Num, Type::Int], &ResolveContext::new(Vec::new()));
         assert_eq!(out, Type::Num);
     }
 
     #[test]
     fn numeric_binary_prefers_tensor_shape() {
-        let out = numeric_binary_type(&[
-            Type::Num,
-            Type::Tensor {
-                shape: Some(vec![Some(4), Some(1)]),
-            },
-        ]);
+        let out = numeric_binary_type(
+            &[
+                Type::Num,
+                Type::Tensor {
+                    shape: Some(vec![Some(4), Some(1)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -139,14 +151,17 @@ mod tests {
 
     #[test]
     fn numeric_binary_broadcasts_shapes() {
-        let out = numeric_binary_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(3)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(1)]),
-            },
-        ]);
+        let out = numeric_binary_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(3)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(1)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

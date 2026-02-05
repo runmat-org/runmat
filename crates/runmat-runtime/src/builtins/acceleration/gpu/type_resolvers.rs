@@ -1,6 +1,6 @@
-use runmat_builtins::Type;
+use runmat_builtins::{ResolveContext, Type};
 
-pub fn arrayfun_type(args: &[Type]) -> Type {
+pub fn arrayfun_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.len() < 2 {
         return Type::Unknown;
     }
@@ -16,7 +16,7 @@ pub fn arrayfun_type(args: &[Type]) -> Type {
     arrayfun_output_type(returns)
 }
 
-pub fn gather_type(args: &[Type]) -> Type {
+pub fn gather_type(args: &[Type], _context: &ResolveContext) -> Type {
     match args.len() {
         0 => Type::Unknown,
         1 => args[0].clone(),
@@ -24,7 +24,7 @@ pub fn gather_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn gpuarray_type(args: &[Type]) -> Type {
+pub fn gpuarray_type(args: &[Type], _context: &ResolveContext) -> Type {
     match args.first() {
         Some(Type::Logical { shape }) => logical_type_from_shape(shape.as_ref()),
         Some(Type::Bool) => Type::logical_with_shape(vec![1, 1]),
@@ -36,7 +36,7 @@ pub fn gpuarray_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn gpudevice_type(_args: &[Type]) -> Type {
+pub fn gpudevice_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Struct {
         known_fields: Some(vec![
             "backend".to_string(),
@@ -51,11 +51,11 @@ pub fn gpudevice_type(_args: &[Type]) -> Type {
     }
 }
 
-pub fn gpuinfo_type(_args: &[Type]) -> Type {
+pub fn gpuinfo_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::String
 }
 
-pub fn pagefun_type(_args: &[Type]) -> Type {
+pub fn pagefun_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::tensor()
 }
 

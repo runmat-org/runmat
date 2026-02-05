@@ -5,7 +5,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use runmat_builtins::{Type, Value};
+use runmat_builtins::{ResolveContext, Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(
@@ -52,7 +52,7 @@ async fn isscalar_builtin(value: Value) -> crate::BuiltinResult<Value> {
     Ok(Value::Bool(value_is_scalar(&value).await?))
 }
 
-fn bool_scalar_type(_: &[Type]) -> Type {
+fn bool_scalar_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
 }
 

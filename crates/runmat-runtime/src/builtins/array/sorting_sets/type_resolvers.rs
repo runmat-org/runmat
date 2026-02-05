@@ -1,6 +1,8 @@
 use runmat_builtins::Type;
 
-pub fn index_output_type(_args: &[Type]) -> Type {
+use runmat_builtins::{ResolveContext, Type};
+
+pub fn index_output_type(_args: &[Type], _context: &ResolveContext) -> Type {
     match _args.first() {
         Some(Type::Tensor { shape: Some(shape) }) => Type::Tensor {
             shape: Some(shape.clone()),
@@ -14,7 +16,7 @@ pub fn index_output_type(_args: &[Type]) -> Type {
     }
 }
 
-pub fn logical_output_type(_args: &[Type]) -> Type {
+pub fn logical_output_type(_args: &[Type], _context: &ResolveContext) -> Type {
     match _args.first() {
         Some(Type::Tensor { shape: Some(shape) }) => Type::Logical {
             shape: Some(shape.clone()),
@@ -28,11 +30,11 @@ pub fn logical_output_type(_args: &[Type]) -> Type {
     }
 }
 
-pub fn bool_output_type(_args: &[Type]) -> Type {
+pub fn bool_output_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
 }
 
-pub fn tensor_output_type(args: &[Type]) -> Type {
+pub fn tensor_output_type(args: &[Type], _context: &ResolveContext) -> Type {
     match args.first() {
         Some(Type::Tensor { shape: Some(shape) }) => Type::Tensor {
             shape: Some(shape.clone()),
@@ -50,7 +52,7 @@ pub fn tensor_output_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn set_values_output_type(args: &[Type]) -> Type {
+pub fn set_values_output_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::Unknown;
     }

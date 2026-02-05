@@ -1,14 +1,16 @@
 use runmat_builtins::Type;
 
-pub fn string_array_type(_args: &[Type]) -> Type {
+use runmat_builtins::{ResolveContext, Type};
+
+pub fn string_array_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::cell_of(Type::String)
 }
 
-pub fn string_scalar_type(_args: &[Type]) -> Type {
+pub fn string_scalar_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::String
 }
 
-pub fn numeric_text_scalar_or_tensor_type(args: &[Type]) -> Type {
+pub fn numeric_text_scalar_or_tensor_type(args: &[Type], _context: &ResolveContext) -> Type {
     match args.first() {
         Some(Type::String) => Type::Num,
         Some(Type::Unknown) | None => Type::Unknown,
@@ -16,7 +18,7 @@ pub fn numeric_text_scalar_or_tensor_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn logical_text_match_type(args: &[Type]) -> Type {
+pub fn logical_text_match_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.len() >= 2 && args[0] == Type::String && args[1] == Type::String {
         Type::Bool
     } else if args.iter().any(|ty| matches!(ty, Type::Unknown)) {
@@ -26,7 +28,7 @@ pub fn logical_text_match_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn text_preserve_type(args: &[Type]) -> Type {
+pub fn text_preserve_type(args: &[Type], _context: &ResolveContext) -> Type {
     match args.first() {
         Some(Type::String) => Type::String,
         Some(Type::Cell {
@@ -38,7 +40,7 @@ pub fn text_preserve_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn text_concat_type(args: &[Type]) -> Type {
+pub fn text_concat_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.iter().any(|ty| matches!(ty, Type::Unknown)) {
         return Type::Unknown;
     }
@@ -62,7 +64,7 @@ pub fn text_concat_type(args: &[Type]) -> Type {
     Type::Unknown
 }
 
-pub fn text_search_indices_type(args: &[Type]) -> Type {
+pub fn text_search_indices_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.iter().any(|ty| matches!(ty, Type::Unknown)) {
         return Type::Unknown;
     }
@@ -77,6 +79,6 @@ pub fn text_search_indices_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn unknown_type(_args: &[Type]) -> Type {
+pub fn unknown_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Unknown
 }

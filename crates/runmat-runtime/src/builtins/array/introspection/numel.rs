@@ -7,7 +7,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{Tensor, Type, Value};
+use runmat_builtins::{ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::numel")]
@@ -44,7 +44,7 @@ fn numel_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("numel").build()
 }
 
-fn numel_type(args: &[Type]) -> Type {
+fn numel_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.is_empty() {
         Type::Unknown
     } else {
@@ -156,7 +156,10 @@ pub(crate) mod tests {
 
     #[test]
     fn numel_type_returns_int() {
-        assert_eq!(numel_type(&[Type::Tensor { shape: None }]), Type::Int);
+        assert_eq!(
+            numel_type(&[Type::Tensor { shape: None }], &ResolveContext::new(Vec::new())),
+            Type::Int
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
