@@ -1026,12 +1026,6 @@ impl ResolveContext {
         Self { literal_args }
     }
 
-    pub fn empty() -> Self {
-        Self {
-            literal_args: Vec::new(),
-        }
-    }
-
     pub fn numeric_dims(&self) -> Vec<Option<usize>> {
         self.numeric_dims_from(0)
     }

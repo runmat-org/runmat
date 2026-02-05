@@ -262,7 +262,7 @@ mod tests {
         ($name:ident, $resolver:expr, $args:expr, $expected:expr) => {
             #[test]
             fn $name() {
-                let ctx = ResolveContext::empty();
+                let ctx = ResolveContext::new(Vec::new());
                 assert_eq!($resolver($args, &ctx), $expected);
             }
         };
