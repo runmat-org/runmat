@@ -10,6 +10,11 @@ The core design principle is:
 
 This keeps semantics clean for modelling/physics code while unlocking smooth GPU-resident animation.
 
+## 3D depth + clipping
+
+For details on depth modes (standard vs reversed‑Z), clip plane policies, and the 3D grid helper,
+see `docs/PLOTTING_DEPTH.md`.
+
 ## Semantics: state vs presentation
 
 ### `plot`, `scatter`, `hist`, …

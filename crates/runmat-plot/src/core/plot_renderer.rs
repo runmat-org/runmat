@@ -5,7 +5,7 @@
 //! high-quality output across all use cases.
 
 use crate::core::renderer::Vertex;
-use crate::core::{Camera, Scene, WgpuRenderer};
+use crate::core::{Camera, ClipPolicy, DepthMode, Scene, WgpuRenderer};
 use crate::plots::figure::LegendEntry;
 use crate::plots::surface::ColorMap;
 use crate::plots::Figure;
@@ -83,6 +83,12 @@ pub struct PlotRenderConfig {
     /// Anti-aliasing samples
     pub msaa_samples: u32,
 
+    /// Depth mode for 3D rendering (standard vs reversed-Z).
+    pub depth_mode: DepthMode,
+
+    /// Clip plane policy for 3D rendering.
+    pub clip_policy: ClipPolicy,
+
     /// Theme to use
     pub theme: crate::styling::PlotThemeConfig,
 }
@@ -97,6 +103,8 @@ impl Default for PlotRenderConfig {
             show_axes: true,
             show_title: true,
             msaa_samples: 4,
+            depth_mode: DepthMode::default(),
+            clip_policy: ClipPolicy::default(),
             theme: crate::styling::PlotThemeConfig::default(),
         }
     }
@@ -1189,6 +1197,7 @@ impl PlotRenderer {
 
         // Apply MSAA preference into pipelines
         self.wgpu_renderer.ensure_msaa(config.msaa_samples);
+        self.wgpu_renderer.set_depth_mode(config.depth_mode);
 
         // Ensure a depth attachment exists for camera-based 3D rendering.
         // This is a no-op for pure 2D direct-mapped pipelines, but is required for correct
@@ -1199,6 +1208,23 @@ impl PlotRenderer {
         let aspect_ratio = (config.width.max(1)) as f32 / (config.height.max(1)) as f32;
         let mut cam = camera.clone();
         cam.update_aspect_ratio(aspect_ratio);
+        cam.depth_mode = config.depth_mode;
+
+        // Dynamic clip planes (CAD-like): keep near/far tight to visible bounds to avoid
+        // clipping surprises and depth precision collapse on huge datasets.
+        if config.clip_policy.dynamic {
+            let mut bounds: Option<crate::core::scene::BoundingBox> = None;
+            for node in self.scene.get_visible_nodes() {
+                if let Some(rd) = &node.render_data {
+                    if let Some(b) = rd.bounds {
+                        bounds = Some(bounds.map_or(b, |acc| acc.union(&b)));
+                    }
+                }
+            }
+            if let Some(b) = bounds {
+                cam.update_clip_planes_from_world_aabb(b.min, b.max, &config.clip_policy);
+            }
+        }
         let view_proj_matrix = cam.view_proj_matrix();
         self.wgpu_renderer
             .update_uniforms(view_proj_matrix, Mat4::IDENTITY);
@@ -1212,6 +1238,7 @@ impl PlotRenderer {
         // Prepare render items outside the pass
         let mut owned_render_data: Vec<Box<crate::core::RenderData>> = Vec::new();
         let mut render_items = Vec::new();
+        let mut grid_plane_buffers: Option<(wgpu::Buffer, wgpu::Buffer)> = None;
         let mut total_vertices = 0usize;
         let mut total_triangles = 0usize;
         for node in self.scene.get_visible_nodes() {
@@ -1370,52 +1397,33 @@ impl PlotRenderer {
             // Slightly offset the grid plane to reduce z-fighting with geometry on z=0.
             let z_grid = -1e-4_f32;
 
+            // Procedural XY grid plane (depth-tested, no depth writes). This avoids far-plane
+            // popping and keeps line density stable via shader derivatives.
             if self.figure_show_grid {
-                // Slightly stronger than the 2D grid because 3D perspective + depth cues
-                // can make thin lines hard to perceive.
-                let minor_col = Vec4::new(0.82, 0.84, 0.88, 0.18);
-                let major_col = Vec4::new(0.90, 0.92, 0.96, 0.30);
+                self.wgpu_renderer.ensure_grid_plane_pipeline();
+                self.wgpu_renderer.update_grid_uniforms(crate::core::renderer::GridUniforms {
+                    major_step: major_step as f32,
+                    minor_step: minor_step as f32,
+                    fade_start: (0.60 * dx.max(dy)).max(major_step as f32),
+                    fade_end: (0.95 * dx.max(dy)).max((major_step as f32) * 2.0),
+                    camera_pos: cam.position.to_array(),
+                    _pad0: 0.0,
+                    target_pos: Vec3::new(cam.target.x, cam.target.y, 0.0).to_array(),
+                    _pad1: 0.0,
+                    major_color: [0.90, 0.92, 0.96, 0.30],
+                    minor_color: [0.82, 0.84, 0.88, 0.18],
+                });
 
-                let is_major = |v: f64| -> bool {
-                    if !v.is_finite() {
-                        return false;
-                    }
-                    let q = v / major_step;
-                    (q - q.round()).abs() < 1e-6
-                };
-
-                // Vertical grid lines (constant X)
-                if minor_step.is_finite() && minor_step > 0.0 {
-                    let start = ((min_x as f64 / minor_step).floor() * minor_step) as f64;
-                    let end = ((max_x as f64 / minor_step).ceil() * minor_step) as f64;
-                    let mut x = start;
-                    while x <= end + minor_step * 0.5 {
-                        let col = if is_major(x) { major_col } else { minor_col };
-                        let xf = x as f32;
-                        push_line(
-                            Vec3::new(xf, min_y, z_grid),
-                            Vec3::new(xf, max_y, z_grid),
-                            col,
-                        );
-                        x += minor_step;
-                    }
-                }
-                // Horizontal grid lines (constant Y)
-                if minor_step.is_finite() && minor_step > 0.0 {
-                    let start = ((min_y as f64 / minor_step).floor() * minor_step) as f64;
-                    let end = ((max_y as f64 / minor_step).ceil() * minor_step) as f64;
-                    let mut y = start;
-                    while y <= end + minor_step * 0.5 {
-                        let col = if is_major(y) { major_col } else { minor_col };
-                        let yf = y as f32;
-                        push_line(
-                            Vec3::new(min_x, yf, z_grid),
-                            Vec3::new(max_x, yf, z_grid),
-                            col,
-                        );
-                        y += minor_step;
-                    }
-                }
+                let quad_vertices = [
+                    Vertex::new(Vec3::new(min_x, min_y, z_grid), Vec4::ONE),
+                    Vertex::new(Vec3::new(max_x, min_y, z_grid), Vec4::ONE),
+                    Vertex::new(Vec3::new(max_x, max_y, z_grid), Vec4::ONE),
+                    Vertex::new(Vec3::new(min_x, max_y, z_grid), Vec4::ONE),
+                ];
+                let quad_indices: [u32; 6] = [0, 1, 2, 0, 2, 3];
+                let vb = self.wgpu_renderer.create_vertex_buffer(&quad_vertices);
+                let ib = self.wgpu_renderer.create_index_buffer(&quad_indices);
+                grid_plane_buffers = Some((vb, ib));
             }
 
             // Origin triad (always, for spatial awareness).
@@ -1660,7 +1668,10 @@ impl PlotRenderer {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: depth_view.as_ref(),
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
+                        load: wgpu::LoadOp::Clear(match config.depth_mode {
+                            DepthMode::Standard => 1.0,
+                            DepthMode::ReversedZ => 0.0,
+                        }),
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -1809,6 +1820,18 @@ impl PlotRenderer {
                     }
                 }
             }
+
+            // Draw procedural 3D grid plane after data, depth-tested (no depth writes).
+            if let Some((ref vb, ref ib)) = grid_plane_buffers {
+                if let Some(pipeline) = self.wgpu_renderer.grid_plane_pipeline() {
+                    render_pass.set_pipeline(pipeline);
+                    render_pass.set_bind_group(0, self.wgpu_renderer.get_uniform_bind_group(), &[]);
+                    render_pass.set_bind_group(1, &self.wgpu_renderer.grid_uniform_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, vb.slice(..));
+                    render_pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.draw_indexed(0..6, 0, 0..1);
+                }
+            }
         }
 
         Ok(RenderResult {
@@ -1908,6 +1931,7 @@ impl PlotRenderer {
             near: -10.0,
             far: 10.0,
         };
+        camera.depth_mode = DepthMode::default();
         // For 2D plotting we keep the camera close to the z=0 plane.
         camera.position = Vec3::new(0.0, 0.0, 1.0);
         camera.target = Vec3::new(0.0, 0.0, 0.0);

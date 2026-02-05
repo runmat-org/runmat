@@ -4,6 +4,7 @@
 //! navigation controls for interactive plotting.
 
 use crate::core::interaction::Modifiers;
+use crate::core::{ClipPolicy, DepthMode};
 use glam::{Mat4, Quat, Vec2, Vec3};
 
 /// Camera projection type
@@ -45,6 +46,8 @@ pub struct Camera {
     // Projection parameters
     pub projection: ProjectionType,
     pub aspect_ratio: f32,
+    /// Depth mapping mode used when building projection matrices.
+    pub depth_mode: DepthMode,
 
     // Navigation state
     pub zoom: f32,
@@ -77,6 +80,7 @@ impl Camera {
             up: Vec3::Z,
             projection: ProjectionType::default(),
             aspect_ratio: 16.0 / 9.0,
+            depth_mode: DepthMode::default(),
             zoom: 1.0,
             rotation: Quat::IDENTITY,
             pan_sensitivity: 0.01,
@@ -107,6 +111,7 @@ impl Camera {
                 far: 1.0,
             },
             aspect_ratio: (right - left) / (top - bottom),
+            depth_mode: DepthMode::default(),
             zoom: 1.0,
             rotation: Quat::IDENTITY,
             pan_sensitivity: 0.01,
@@ -346,6 +351,81 @@ impl Camera {
         self.view_proj_dirty = true;
     }
 
+    pub fn set_clip_planes(&mut self, near: f32, far: f32) {
+        match &mut self.projection {
+            ProjectionType::Perspective { near: n, far: f, .. } => {
+                *n = near.max(1e-4);
+                *f = far.max(*n + 1e-3);
+                self.view_proj_dirty = true;
+            }
+            ProjectionType::Orthographic { near: n, far: f, .. } => {
+                *n = near;
+                *f = far;
+                self.view_proj_dirty = true;
+            }
+        }
+    }
+
+    /// Update near/far clip planes from a world-space AABB using a policy.
+    ///
+    /// This is meant to be run per-frame for 3D (CAD-like) robustness: keep near as large as
+    /// possible without slicing the scene, and keep far just large enough to contain it.
+    pub fn update_clip_planes_from_world_aabb(
+        &mut self,
+        world_min: Vec3,
+        world_max: Vec3,
+        policy: &ClipPolicy,
+    ) {
+        if !policy.dynamic {
+            return;
+        }
+        let ProjectionType::Perspective { .. } = self.projection else {
+            return;
+        };
+
+        // View space from current pose (independent of projection).
+        let view = Mat4::look_at_rh(self.position, self.target, self.up);
+        let corners = [
+            Vec3::new(world_min.x, world_min.y, world_min.z),
+            Vec3::new(world_max.x, world_min.y, world_min.z),
+            Vec3::new(world_min.x, world_max.y, world_min.z),
+            Vec3::new(world_max.x, world_max.y, world_min.z),
+            Vec3::new(world_min.x, world_min.y, world_max.z),
+            Vec3::new(world_max.x, world_min.y, world_max.z),
+            Vec3::new(world_min.x, world_max.y, world_max.z),
+            Vec3::new(world_max.x, world_max.y, world_max.z),
+        ];
+
+        let mut min_depth = f32::INFINITY;
+        let mut max_depth = f32::NEG_INFINITY;
+        for c in corners {
+            let v = (view * c.extend(1.0)).truncate();
+            if !(v.x.is_finite() && v.y.is_finite() && v.z.is_finite()) {
+                continue;
+            }
+            // RH look-at: camera looks down -Z; points in front have negative z.
+            let depth = (-v.z).max(0.0);
+            if depth > 0.0 {
+                min_depth = min_depth.min(depth);
+                max_depth = max_depth.max(depth);
+            }
+        }
+        if !min_depth.is_finite() || !max_depth.is_finite() || max_depth <= 0.0 {
+            return;
+        }
+
+        let mut near = (min_depth * policy.near_padding).max(policy.min_near);
+        let mut far = (max_depth * policy.far_padding).max(near + 1.0);
+        if far > policy.max_far {
+            far = policy.max_far.max(near + 1.0);
+        }
+        // Keep a modest ratio when possible to preserve precision (avoid near->0).
+        if (far / near).is_finite() && far / near > 1.0e6 {
+            near = (far / 1.0e6).max(policy.min_near);
+        }
+        self.set_clip_planes(near, far);
+    }
+
     /// Convert screen coordinates to world coordinates (for picking)
     pub fn screen_to_world(&mut self, screen_pos: Vec2, screen_size: Vec2, depth: f32) -> Vec3 {
         if self.view_proj_dirty {
@@ -375,7 +455,28 @@ impl Camera {
         // Update projection matrix
         self.projection_matrix = match self.projection {
             ProjectionType::Perspective { fov, near, far } => {
-                Mat4::perspective_rh(fov, self.aspect_ratio, near, far)
+                match self.depth_mode {
+                    DepthMode::Standard => Mat4::perspective_rh(fov, self.aspect_ratio, near, far),
+                    DepthMode::ReversedZ => {
+                        // Right-handed, depth range 0..1, reversed-Z mapping.
+                        // This keeps the same clip volume but flips the depth distribution so
+                        // far distances retain more precision (game-engine style).
+                        let f = 1.0 / (0.5 * fov).tan();
+                        let a = self.aspect_ratio.max(1e-6);
+                        let nf = (far - near).max(1e-6);
+                        let m00 = f / a;
+                        let m11 = f;
+                        // Reversed-Z: near->1, far->0
+                        let m22 = near / nf;
+                        let m32 = (near * far) / nf;
+                        Mat4::from_cols_array(&[
+                            m00, 0.0, 0.0, 0.0, //
+                            0.0, m11, 0.0, 0.0, //
+                            0.0, 0.0, m22, -1.0, //
+                            0.0, 0.0, m32, 0.0, //
+                        ])
+                    }
+                }
             }
             ProjectionType::Orthographic {
                 left,

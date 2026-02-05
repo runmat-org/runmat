@@ -9,6 +9,11 @@ async function copyTree(src, dest) {
     console.warn(`[runmat] wasm artifacts missing at ${src}; did the wasm build succeed?`);
     return false;
   }
+  if (srcStat.isFile()) {
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.copyFile(src, dest);
+    return true;
+  }
   await fs.rm(dest, { recursive: true, force: true });
   await fs.mkdir(dest, { recursive: true });
   const entries = await fs.readdir(src, { withFileTypes: true });
@@ -42,15 +47,24 @@ async function main() {
       src: path.join(repoRoot, "lsp-web"),
       dest: path.join(repoRoot, "dist", "lsp"),
     },
+    {
+      src: path.join(repoRoot, "stdlib.snapshot"),
+      dest: path.join(repoRoot, "dist", "runtime", "stdlib.snapshot"),
+      required: true,
+    },
   ];
 
   let copiedAny = false;
-  for (const { src, dest } of copies) {
+  let missingRequired = false;
+  for (const { src, dest, required } of copies) {
     const ok = await copyTree(src, dest);
     copiedAny = copiedAny || ok;
+    if (ok === false && required) {
+      missingRequired = true;
+    }
   }
 
-  if (!copiedAny) {
+  if (!copiedAny || missingRequired) {
     process.exitCode = 1;
   }
 }
@@ -59,4 +73,3 @@ main().catch((err) => {
   console.error("[runmat] failed to copy wasm artifacts:", err);
   process.exitCode = 1;
 });
-
