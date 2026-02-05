@@ -1,10 +1,10 @@
-use runmat_builtins::Type;
+use runmat_builtins::{ResolveContext, Type};
 
-pub fn cell_type(_args: &[Type]) -> Type {
+pub fn cell_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::cell()
 }
 
-pub fn cell2mat_type(args: &[Type]) -> Type {
+pub fn cell2mat_type(args: &[Type], _context: &ResolveContext) -> Type {
     match args.first() {
         Some(Type::Cell {
             element_type: Some(element_type),
@@ -16,15 +16,15 @@ pub fn cell2mat_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn cellfun_type(_args: &[Type]) -> Type {
+pub fn cellfun_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Unknown
 }
 
-pub fn cellstr_type(_args: &[Type]) -> Type {
+pub fn cellstr_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::cell_of(Type::String)
 }
 
-pub fn mat2cell_type(args: &[Type]) -> Type {
+pub fn mat2cell_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::cell();
     };
@@ -117,18 +117,30 @@ mod tests {
 
     #[test]
     fn cell_type_returns_cell() {
-        assert_eq!(cell_type(&[]), Type::cell());
+        assert_eq!(
+            cell_type(&[], &ResolveContext::new(Vec::new())),
+            Type::cell()
+        );
     }
 
     #[test]
     fn cell2mat_type_numeric_cells_return_tensor() {
-        assert_eq!(cell2mat_type(&[Type::cell_of(Type::Num)]), Type::tensor());
+        assert_eq!(
+            cell2mat_type(
+                &[Type::cell_of(Type::Num)],
+                &ResolveContext::new(Vec::new())
+            ),
+            Type::tensor()
+        );
     }
 
     #[test]
     fn cell2mat_type_union_numeric_returns_tensor() {
         assert_eq!(
-            cell2mat_type(&[Type::cell_of(Type::Union(vec![Type::Num, Type::Int]))]),
+            cell2mat_type(
+                &[Type::cell_of(Type::Union(vec![Type::Num, Type::Int]))],
+                &ResolveContext::new(Vec::new())
+            ),
             Type::tensor()
         );
     }
@@ -136,25 +148,34 @@ mod tests {
     #[test]
     fn cell2mat_type_union_mixed_returns_union() {
         assert_eq!(
-            cell2mat_type(&[Type::cell_of(Type::Union(vec![Type::Num, Type::Bool]))]),
+            cell2mat_type(
+                &[Type::cell_of(Type::Union(vec![Type::Num, Type::Bool]))],
+                &ResolveContext::new(Vec::new())
+            ),
             Type::Union(vec![Type::tensor(), Type::logical()])
         );
     }
 
     #[test]
     fn cellfun_type_is_unknown() {
-        assert_eq!(cellfun_type(&[]), Type::Unknown);
+        assert_eq!(
+            cellfun_type(&[], &ResolveContext::new(Vec::new())),
+            Type::Unknown
+        );
     }
 
     #[test]
     fn cellstr_type_is_string_cell() {
-        assert_eq!(cellstr_type(&[Type::String]), Type::cell_of(Type::String));
+        assert_eq!(
+            cellstr_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::cell_of(Type::String)
+        );
     }
 
     #[test]
     fn mat2cell_type_is_cell() {
         assert_eq!(
-            mat2cell_type(&[Type::tensor()]),
+            mat2cell_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
             Type::cell_of(Type::Union(vec![Type::Num, Type::tensor()]))
         );
     }
@@ -162,7 +183,7 @@ mod tests {
     #[test]
     fn mat2cell_type_logical_returns_cell_union() {
         assert_eq!(
-            mat2cell_type(&[Type::logical()]),
+            mat2cell_type(&[Type::logical()], &ResolveContext::new(Vec::new())),
             Type::cell_of(Type::Union(vec![Type::Bool, Type::logical()]))
         );
     }
@@ -170,7 +191,7 @@ mod tests {
     #[test]
     fn mat2cell_type_string_returns_cell_union() {
         assert_eq!(
-            mat2cell_type(&[Type::String]),
+            mat2cell_type(&[Type::String], &ResolveContext::new(Vec::new())),
             Type::cell_of(Type::Union(vec![Type::String, Type::cell_of(Type::String)]))
         );
     }

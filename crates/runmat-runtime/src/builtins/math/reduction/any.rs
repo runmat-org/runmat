@@ -77,7 +77,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "any,logical,reduction,omitnan,all,gpu",
     accel = "reduction",
     type_resolver(any_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::any"
 )]
 async fn any_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

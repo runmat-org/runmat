@@ -85,7 +85,6 @@ struct ParsedArguments {
     keywords = "median,reduction,omitnan,includenan,statistics,gpu",
     accel = "reduction",
     type_resolver(median_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::median"
 )]
 async fn median_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

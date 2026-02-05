@@ -300,7 +300,6 @@ impl HistWeightsInput {
     sink = true,
     suppress_auto_output = true,
     type_resolver(hist_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::plotting::hist"
 )]
 pub async fn hist_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

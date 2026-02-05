@@ -222,7 +222,6 @@ enum NormParse {
     keywords = "std,standard deviation,statistics,gpu,omitnan,all,like,native",
     accel = "reduction",
     type_resolver(std_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::std"
 )]
 async fn std_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

@@ -329,7 +329,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, Tensor, Type};
+    use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type};
 
     fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::assert_builtin(args))
@@ -590,6 +590,9 @@ pub(crate) mod tests {
 
     #[test]
     fn assert_type_is_numeric() {
-        assert_eq!(assert_type(&[Type::Bool]), Type::Num);
+        assert_eq!(
+            assert_type(&[Type::Bool], &ResolveContext::new(Vec::new())),
+            Type::Num
+        );
     }
 }

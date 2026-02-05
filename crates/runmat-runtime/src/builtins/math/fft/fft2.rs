@@ -211,7 +211,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor, Type};
+    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
 
     fn approx_eq(a: (f64, f64), b: (f64, f64), tol: f64) -> bool {
         (a.0 - b.0).abs() <= tol && (a.1 - b.1).abs() <= tol
@@ -223,9 +223,12 @@ pub(crate) mod tests {
 
     #[test]
     fn fft2_type_pads_rank() {
-        let out = fft2_type(&[Type::Tensor {
-            shape: Some(vec![Some(4)]),
-        }]);
+        let out = fft2_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(4)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

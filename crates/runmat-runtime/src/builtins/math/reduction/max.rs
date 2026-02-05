@@ -106,7 +106,6 @@ impl MaxEvaluation {
     keywords = "max,maximum,reduction,gpu,comparisonmethod,omitnan",
     accel = "reduction",
     type_resolver(max_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::max"
 )]
 async fn max_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

@@ -153,7 +153,7 @@ pub fn reduce_logical_type(args: &[Type], ctx: &ResolveContext) -> Type {
     }
 }
 
-pub fn cumulative_numeric_type(args: &[Type]) -> Type {
+pub fn cumulative_numeric_type(args: &[Type], _context: &ResolveContext) -> Type {
     let input = match args.first() {
         Some(value) => value,
         None => return Type::Unknown,
@@ -172,7 +172,7 @@ pub fn cumulative_numeric_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn diff_numeric_type(args: &[Type]) -> Type {
+pub fn diff_numeric_type(args: &[Type], _context: &ResolveContext) -> Type {
     let input = match args.first() {
         Some(value) => value,
         None => return Type::Unknown,
@@ -330,7 +330,7 @@ mod tests {
         let ty = Type::Tensor {
             shape: Some(vec![Some(5), Some(1)]),
         };
-        let out = cumulative_numeric_type(&[ty]);
+        let out = cumulative_numeric_type(&[ty], &ResolveContext::new(Vec::new()));
         assert_eq!(
             out,
             Type::Tensor {

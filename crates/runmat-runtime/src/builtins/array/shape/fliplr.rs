@@ -10,12 +10,12 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{ComplexTensor, Type, Value};
+use runmat_builtins::{ComplexTensor, ResolveContext, Type, Value};
 use runmat_macros::runtime_builtin;
 
 const LR_DIM: [usize; 1] = [2];
 
-fn preserve_matrix_type(args: &[Type]) -> Type {
+fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
     let input = match args.first() {
         Some(value) => value,
         None => return Type::Unknown,
@@ -159,9 +159,12 @@ pub(crate) mod tests {
 
     #[test]
     fn fliplr_type_keeps_matrix_shape() {
-        let out = preserve_matrix_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(4)]),
-        }]);
+        let out = preserve_matrix_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(4)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

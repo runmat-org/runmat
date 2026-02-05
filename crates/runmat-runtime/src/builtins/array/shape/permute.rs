@@ -91,7 +91,6 @@ fn permute_error(builtin: &'static str, message: impl Into<String>) -> RuntimeEr
     keywords = "permute,dimension reorder,swap axes,gpu",
     accel = "custom",
     type_resolver(permute_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::shape::permute"
 )]
 async fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {

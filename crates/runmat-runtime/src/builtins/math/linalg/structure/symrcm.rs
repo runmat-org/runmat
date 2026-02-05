@@ -5,7 +5,7 @@ use std::collections::{HashSet, VecDeque};
 
 use log::debug;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{ComplexTensor, LogicalArray, ResolveContext, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -20,7 +20,9 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 // attribute arguments, which does not currently count as a "use" for Rust's
 // unused-import lint. Keep a small reference so `-D unused-imports` builds.
 #[allow(dead_code)]
-const _SYMR_CM_TYPE_RESOLVER: fn(&[runmat_builtins::Type]) -> runmat_builtins::Type = symrcm_type;
+const _SYMR_CM_TYPE_RESOLVER: fn(&[runmat_builtins::Type], &ResolveContext) ->
+    runmat_builtins::Type =
+    symrcm_type;
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::linalg::structure::symrcm"
 )]
@@ -338,9 +340,12 @@ pub(crate) mod tests {
 
     #[test]
     fn symrcm_type_returns_row_vector() {
-        let out = symrcm_type(&[Type::Tensor {
-            shape: Some(vec![Some(4), Some(4)]),
-        }]);
+        let out = symrcm_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(4), Some(4)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

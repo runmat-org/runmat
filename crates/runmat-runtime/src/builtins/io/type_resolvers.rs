@@ -1,60 +1,60 @@
-use runmat_builtins::Type;
+use runmat_builtins::{ResolveContext, Type};
 
-pub(crate) fn string_type(_args: &[Type]) -> Type {
+pub(crate) fn string_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::String
 }
 
-pub(crate) fn num_type(_args: &[Type]) -> Type {
+pub(crate) fn num_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Num
 }
 
-pub(crate) fn bool_type(_args: &[Type]) -> Type {
+pub(crate) fn bool_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Bool
 }
 
-pub(crate) fn tensor_type(_args: &[Type]) -> Type {
+pub(crate) fn tensor_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::tensor()
 }
 
-pub(crate) fn struct_type(_args: &[Type]) -> Type {
+pub(crate) fn struct_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Struct { known_fields: None }
 }
 
-pub(crate) fn cell_struct_type(_args: &[Type]) -> Type {
+pub(crate) fn cell_struct_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::cell_of(Type::Struct { known_fields: None })
 }
 
-pub fn disp_type(args: &[Type]) -> Type {
-    tensor_type(args)
+pub fn disp_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    tensor_type(args, ctx)
 }
 
-pub fn input_type(args: &[Type]) -> Type {
+pub fn input_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::String, Type::Num, Type::tensor()])
 }
 
-pub fn fclose_type(args: &[Type]) -> Type {
-    num_type(args)
+pub fn fclose_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    num_type(args, ctx)
 }
 
-pub fn feof_type(args: &[Type]) -> Type {
-    bool_type(args)
+pub fn feof_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    bool_type(args, ctx)
 }
 
-pub fn fgets_type(args: &[Type]) -> Type {
+pub fn fgets_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::String, Type::Num])
 }
 
-pub fn fileread_type(args: &[Type]) -> Type {
-    string_type(args)
+pub fn fileread_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    string_type(args, ctx)
 }
 
-pub fn filewrite_type(args: &[Type]) -> Type {
-    num_type(args)
+pub fn filewrite_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    num_type(args, ctx)
 }
 
-pub fn fopen_type(args: &[Type]) -> Type {
+pub fn fopen_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::tensor();
     }
@@ -66,24 +66,24 @@ pub fn fopen_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn fprintf_type(args: &[Type]) -> Type {
-    num_type(args)
+pub fn fprintf_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    num_type(args, ctx)
 }
 
-pub fn fread_type(args: &[Type]) -> Type {
+pub fn fread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::String, Type::tensor(), Type::logical()])
 }
 
-pub fn fwrite_type(args: &[Type]) -> Type {
-    num_type(args)
+pub fn fwrite_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    num_type(args, ctx)
 }
 
-pub fn weboptions_type(args: &[Type]) -> Type {
-    struct_type(args)
+pub fn weboptions_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    struct_type(args, ctx)
 }
 
-pub fn webread_type(args: &[Type]) -> Type {
+pub fn webread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![
         Type::Struct { known_fields: None },
@@ -96,7 +96,7 @@ pub fn webread_type(args: &[Type]) -> Type {
     ])
 }
 
-pub fn webwrite_type(args: &[Type]) -> Type {
+pub fn webwrite_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![
         Type::Struct { known_fields: None },
@@ -109,7 +109,7 @@ pub fn webwrite_type(args: &[Type]) -> Type {
     ])
 }
 
-pub fn jsondecode_type(args: &[Type]) -> Type {
+pub fn jsondecode_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![
         Type::Struct { known_fields: None },
@@ -122,79 +122,79 @@ pub fn jsondecode_type(args: &[Type]) -> Type {
     ])
 }
 
-pub fn jsonencode_type(args: &[Type]) -> Type {
-    string_type(args)
+pub fn jsonencode_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    string_type(args, ctx)
 }
 
-pub fn load_type(args: &[Type]) -> Type {
-    struct_type(args)
+pub fn load_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    struct_type(args, ctx)
 }
 
-pub fn save_type(args: &[Type]) -> Type {
-    num_type(args)
+pub fn save_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    num_type(args, ctx)
 }
 
-pub fn accept_type(args: &[Type]) -> Type {
-    struct_type(args)
+pub fn accept_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    struct_type(args, ctx)
 }
 
-pub fn close_type(args: &[Type]) -> Type {
-    num_type(args)
+pub fn close_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    num_type(args, ctx)
 }
 
-pub fn read_type(args: &[Type]) -> Type {
+pub fn read_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::String, Type::tensor()])
 }
 
-pub fn readline_type(args: &[Type]) -> Type {
+pub fn readline_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::String, Type::tensor()])
 }
 
-pub fn tcpclient_type(args: &[Type]) -> Type {
-    struct_type(args)
+pub fn tcpclient_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    struct_type(args, ctx)
 }
 
-pub fn tcpserver_type(args: &[Type]) -> Type {
-    struct_type(args)
+pub fn tcpserver_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    struct_type(args, ctx)
 }
 
-pub fn write_type(args: &[Type]) -> Type {
-    num_type(args)
+pub fn write_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    num_type(args, ctx)
 }
 
-pub fn addpath_type(args: &[Type]) -> Type {
-    string_type(args)
+pub fn addpath_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    string_type(args, ctx)
 }
 
-pub fn cd_type(args: &[Type]) -> Type {
-    string_type(args)
+pub fn cd_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    string_type(args, ctx)
 }
 
-pub fn copyfile_type(args: &[Type]) -> Type {
-    num_type(args)
+pub fn copyfile_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    num_type(args, ctx)
 }
 
-pub fn delete_type(args: &[Type]) -> Type {
-    num_type(args)
+pub fn delete_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    num_type(args, ctx)
 }
 
-pub fn dir_type(args: &[Type]) -> Type {
-    cell_struct_type(args)
+pub fn dir_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    cell_struct_type(args, ctx)
 }
 
-pub fn exist_type(args: &[Type]) -> Type {
-    num_type(args)
+pub fn exist_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    num_type(args, ctx)
 }
 
-pub fn genpath_type(args: &[Type]) -> Type {
-    string_type(args)
+pub fn genpath_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    string_type(args, ctx)
 }
 
-pub fn getenv_type(args: &[Type]) -> Type {
+pub fn getenv_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     if args.is_empty() {
-        return struct_type(args);
+        return struct_type(args, _ctx);
     }
     match args.first() {
         Some(Type::Cell { .. }) => Type::cell_of(Type::String),
@@ -204,51 +204,51 @@ pub fn getenv_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn ls_type(args: &[Type]) -> Type {
-    string_type(args)
+pub fn ls_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    string_type(args, ctx)
 }
 
-pub fn mkdir_type(args: &[Type]) -> Type {
-    num_type(args)
+pub fn mkdir_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    num_type(args, ctx)
 }
 
-pub fn movefile_type(args: &[Type]) -> Type {
-    num_type(args)
+pub fn movefile_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    num_type(args, ctx)
 }
 
-pub fn path_type(args: &[Type]) -> Type {
-    string_type(args)
+pub fn path_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    string_type(args, ctx)
 }
 
-pub fn pwd_type(args: &[Type]) -> Type {
-    string_type(args)
+pub fn pwd_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    string_type(args, ctx)
 }
 
-pub fn rmdir_type(args: &[Type]) -> Type {
-    num_type(args)
+pub fn rmdir_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    num_type(args, ctx)
 }
 
-pub fn rmpath_type(args: &[Type]) -> Type {
-    string_type(args)
+pub fn rmpath_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    string_type(args, ctx)
 }
 
-pub fn savepath_type(args: &[Type]) -> Type {
-    num_type(args)
+pub fn savepath_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    num_type(args, ctx)
 }
 
-pub fn setenv_type(args: &[Type]) -> Type {
-    num_type(args)
+pub fn setenv_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    num_type(args, ctx)
 }
 
-pub fn tempdir_type(args: &[Type]) -> Type {
-    string_type(args)
+pub fn tempdir_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    string_type(args, ctx)
 }
 
-pub fn tempname_type(args: &[Type]) -> Type {
-    string_type(args)
+pub fn tempname_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    string_type(args, ctx)
 }
 
-pub fn readmatrix_type(args: &[Type]) -> Type {
+pub fn readmatrix_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::tensor(), Type::logical()])
 }
@@ -256,12 +256,14 @@ pub fn readmatrix_type(args: &[Type]) -> Type {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::ResolveContext;
 
     macro_rules! assert_resolver {
         ($name:ident, $resolver:expr, $args:expr, $expected:expr) => {
             #[test]
             fn $name() {
-                assert_eq!($resolver($args), $expected);
+                let ctx = ResolveContext::empty();
+                assert_eq!($resolver($args, &ctx), $expected);
             }
         };
     }

@@ -426,7 +426,7 @@ pub(crate) mod tests {
     }
 
     use num_complex::Complex64;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -440,14 +440,17 @@ pub(crate) mod tests {
 
     #[test]
     fn mldivide_type_uses_rhs_columns() {
-        let out = left_divide_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            },
-        ]);
+        let out = left_divide_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(2)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

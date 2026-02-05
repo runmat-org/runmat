@@ -76,7 +76,6 @@ fn sub2ind_type(args: &[Type], ctx: &ResolveContext) -> Type {
     keywords = "sub2ind,linear index,column major,gpu indexing",
     accel = "custom",
     type_resolver(sub2ind_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::indexing::sub2ind"
 )]
 async fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

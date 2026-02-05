@@ -57,7 +57,7 @@ fn axes_struct_response(state: FigureAxesState) -> Value {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -84,12 +84,12 @@ pub(crate) mod tests {
 
     #[test]
     fn gca_type_no_args_returns_num() {
-        assert_eq!(gca_type(&[]), Type::Num);
+        assert_eq!(gca_type(&[], &ResolveContext::new(Vec::new())), Type::Num);
     }
 
     #[test]
     fn gca_type_with_args_returns_struct() {
-        let out = gca_type(&[Type::String]);
+        let out = gca_type(&[Type::String], &ResolveContext::new(Vec::new()));
         assert!(matches!(out, Type::Struct { .. }));
     }
 }

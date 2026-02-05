@@ -5,15 +5,15 @@ use std::cmp::Ordering;
 use runmat_accelerate_api::{
     GpuTensorHandle, ProviderCumminResult, ProviderNanMode, ProviderScanDirection,
 };
-use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
+use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cummin";
 
-fn cummin_type(args: &[Type]) -> Type {
-    cumulative_numeric_type(args)
+fn cummin_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    cumulative_numeric_type(args, ctx)
 }
 
 use crate::builtins::common::spec::{
@@ -702,9 +702,12 @@ pub(crate) mod tests {
 
     #[test]
     fn cummin_type_keeps_shape() {
-        let out = cummin_type(&[Type::Tensor {
-            shape: Some(vec![Some(3), Some(1)]),
-        }]);
+        let out = cummin_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(3), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Tensor, Type, Value};
+use runmat_builtins::{ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
@@ -51,7 +51,7 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("range").build()
 }
 
-fn range_type(args: &[Type]) -> Type {
+fn range_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
     };
@@ -650,12 +650,18 @@ pub(crate) mod tests {
 
     #[test]
     fn range_type_scalar_returns_num() {
-        assert_eq!(range_type(&[Type::Num]), Type::Num);
+        assert_eq!(
+            range_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::Num
+        );
     }
 
     #[test]
     fn range_type_tensor_returns_tensor() {
-        let out = range_type(&[Type::Tensor { shape: None }]);
+        let out = range_type(
+            &[Type::Tensor { shape: None }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(out, Type::tensor());
     }
 

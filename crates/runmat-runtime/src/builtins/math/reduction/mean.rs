@@ -212,7 +212,6 @@ enum MeanAxes {
     keywords = "mean,average,reduction,gpu,omitnan",
     accel = "reduction",
     type_resolver(mean_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::mean"
 )]
 async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

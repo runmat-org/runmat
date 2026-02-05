@@ -4,7 +4,7 @@
 //! component. Unlike `isfinite`/`isnan`, it returns a single logical scalar.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Type, Value};
+use runmat_builtins::{ResolveContext, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -60,7 +60,7 @@ async fn isreal_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn bool_scalar_type(_: &[Type]) -> Type {
+fn bool_scalar_type(_: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
 }
 
@@ -120,7 +120,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::{
         CellArray, CharArray, Closure, ComplexTensor, HandleRef, Listener, LogicalArray,
-        MException, ObjectInstance, StructValue, Tensor, Type,
+        MException, ObjectInstance, ResolveContext, StructValue, Tensor, Type,
     };
     use runmat_gc_api::GcPtr;
 
@@ -130,7 +130,10 @@ pub(crate) mod tests {
 
     #[test]
     fn isreal_type_returns_bool() {
-        assert_eq!(bool_scalar_type(&[Type::Num]), Type::Bool);
+        assert_eq!(
+            bool_scalar_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::Bool
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

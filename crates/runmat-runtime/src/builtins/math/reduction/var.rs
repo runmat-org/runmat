@@ -99,7 +99,6 @@ enum NormParse {
     keywords = "var,variance,statistics,gpu,omitnan,all",
     accel = "reduction",
     type_resolver(var_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::var"
 )]
 async fn var_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

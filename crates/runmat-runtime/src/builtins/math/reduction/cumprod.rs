@@ -1,15 +1,15 @@
 //! MATLAB-compatible `cumprod` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, ProviderNanMode, ProviderScanDirection};
-use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
+use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cumprod";
 
-fn cumprod_type(args: &[Type]) -> Type {
-    cumulative_numeric_type(args)
+fn cumprod_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    cumulative_numeric_type(args, ctx)
 }
 
 use crate::builtins::common::spec::{
@@ -490,9 +490,12 @@ pub(crate) mod tests {
 
     #[test]
     fn cumprod_type_keeps_shape() {
-        let out = cumprod_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(2)]),
-        }]);
+        let out = cumprod_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(2)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

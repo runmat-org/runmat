@@ -79,7 +79,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "ones,array,logical,gpu,like",
     accel = "array_construct",
     type_resolver(ones_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::ones"
 )]
 async fn ones_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {

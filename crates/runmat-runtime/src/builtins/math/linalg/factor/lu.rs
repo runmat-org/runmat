@@ -485,7 +485,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor as CMatrix, Tensor as Matrix, Type};
+    use runmat_builtins::{ComplexTensor as CMatrix, ResolveContext, Tensor as Matrix, Type};
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
@@ -510,9 +510,12 @@ pub(crate) mod tests {
 
     #[test]
     fn lu_type_preserves_matrix_shape() {
-        let out = matrix_unary_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(3)]),
-        }]);
+        let out = matrix_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

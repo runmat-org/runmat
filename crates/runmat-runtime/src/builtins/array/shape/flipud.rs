@@ -10,12 +10,12 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{CellArray, ComplexTensor, Type, Value};
+use runmat_builtins::{CellArray, ComplexTensor, ResolveContext, Type, Value};
 use runmat_macros::runtime_builtin;
 
 const UD_DIM: [usize; 1] = [1];
 
-fn preserve_matrix_type(args: &[Type]) -> Type {
+fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
     let input = match args.first() {
         Some(value) => value,
         None => return Type::Unknown,
@@ -182,9 +182,12 @@ pub(crate) mod tests {
 
     #[test]
     fn flipud_type_keeps_matrix_shape() {
-        let out = preserve_matrix_type(&[Type::Tensor {
-            shape: Some(vec![Some(3), Some(1)]),
-        }]);
+        let out = preserve_matrix_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(3), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

@@ -15,7 +15,9 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value};
+use runmat_builtins::{
+    CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::rot90")]
@@ -50,7 +52,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Rotations only reorder data; fusion planner treats rot90 as a residency-preserving boundary.",
 };
 
-fn preserve_matrix_type(args: &[Type]) -> Type {
+fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
     let input = match args.first() {
         Some(value) => value,
         None => return Type::Unknown,
@@ -475,9 +477,12 @@ pub(crate) mod tests {
 
     #[test]
     fn rot90_type_preserves_matrix_shape() {
-        let out = preserve_matrix_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(3)]),
-        }]);
+        let out = preserve_matrix_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

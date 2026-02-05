@@ -314,7 +314,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor, Type};
+    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -336,9 +336,12 @@ pub(crate) mod tests {
 
     #[test]
     fn mpower_type_preserves_matrix_shape() {
-        let out = matrix_unary_type(&[Type::Tensor {
-            shape: Some(vec![Some(3), Some(3)]),
-        }]);
+        let out = matrix_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(3), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

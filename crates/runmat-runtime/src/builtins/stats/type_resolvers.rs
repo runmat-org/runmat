@@ -1,13 +1,12 @@
-use runmat_builtins::{ResolveContext, Type};
-
 use crate::builtins::array::type_resolvers::{row_vector_type, size_vector_len};
 use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
+use runmat_builtins::{ResolveContext, Type};
 
-pub fn cov_type(args: &[Type]) -> Type {
+pub fn cov_type(args: &[Type], _context: &ResolveContext) -> Type {
     square_summary_type(args)
 }
 
-pub fn corrcoef_type(args: &[Type]) -> Type {
+pub fn corrcoef_type(args: &[Type], _context: &ResolveContext) -> Type {
     square_summary_type(args)
 }
 
@@ -29,7 +28,7 @@ pub fn histcounts_type(args: &[Type], ctx: &ResolveContext) -> Type {
     }
 }
 
-pub fn histcounts2_type(args: &[Type]) -> Type {
+pub fn histcounts2_type(args: &[Type], _context: &ResolveContext) -> Type {
     let mut edges_lens: Vec<usize> = Vec::new();
     for arg in args.iter().skip(2) {
         if let Some(len) = size_vector_len(arg) {
@@ -48,7 +47,7 @@ pub fn histcounts2_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn rng_type(_args: &[Type]) -> Type {
+pub fn rng_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Struct {
         known_fields: Some(vec![
             "Seed".to_string(),

@@ -290,7 +290,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{LogicalArray, Type};
+    use runmat_builtins::{LogicalArray, ResolveContext, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -309,9 +309,12 @@ pub(crate) mod tests {
 
     #[test]
     fn bandwidth_type_defaults_to_two_element_tensor() {
-        let out = bandwidth_type(&[Type::Tensor {
-            shape: Some(vec![Some(3), Some(3)]),
-        }]);
+        let out = bandwidth_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(3), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

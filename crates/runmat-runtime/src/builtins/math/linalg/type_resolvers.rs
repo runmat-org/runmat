@@ -8,7 +8,7 @@ use runmat_builtins::shape_rules::{
 };
 use runmat_builtins::ResolveContext;
 
-pub fn numeric_scalar_type(args: &[Type]) -> Type {
+pub fn numeric_scalar_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
     };
@@ -21,7 +21,7 @@ pub fn numeric_scalar_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn logical_scalar_type(args: &[Type]) -> Type {
+pub fn logical_scalar_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
     };
@@ -34,14 +34,14 @@ pub fn logical_scalar_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn matrix_unary_type(args: &[Type]) -> Type {
+pub fn matrix_unary_type(args: &[Type], ctx: &ResolveContext) -> Type {
     match args.first() {
-        Some(first) => numeric_unary_type(std::slice::from_ref(first)),
+        Some(first) => numeric_unary_type(std::slice::from_ref(first), ctx),
         None => Type::Unknown,
     }
 }
 
-pub fn transpose_type(args: &[Type]) -> Type {
+pub fn transpose_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
     };
@@ -67,37 +67,37 @@ pub fn transpose_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn matmul_type(args: &[Type]) -> Type {
+pub fn matmul_type(args: &[Type], ctx: &ResolveContext) -> Type {
     let lhs = args.get(0);
     let rhs = args.get(1);
     match (lhs, rhs) {
         (Some(left), Some(right)) => matmul_output_type(left, right),
         (Some(single), None) | (None, Some(single)) => {
-            numeric_unary_type(std::slice::from_ref(single))
+            numeric_unary_type(std::slice::from_ref(single), ctx)
         }
         (None, None) => Type::Unknown,
     }
 }
 
-pub fn left_divide_type(args: &[Type]) -> Type {
+pub fn left_divide_type(args: &[Type], ctx: &ResolveContext) -> Type {
     let lhs = args.get(0);
     let rhs = args.get(1);
     match (lhs, rhs) {
         (Some(left), Some(right)) => left_divide_output_type(left, right),
         (Some(single), None) | (None, Some(single)) => {
-            numeric_unary_type(std::slice::from_ref(single))
+            numeric_unary_type(std::slice::from_ref(single), ctx)
         }
         (None, None) => Type::Unknown,
     }
 }
 
-pub fn right_divide_type(args: &[Type]) -> Type {
+pub fn right_divide_type(args: &[Type], ctx: &ResolveContext) -> Type {
     let lhs = args.get(0);
     let rhs = args.get(1);
     match (lhs, rhs) {
         (Some(left), Some(right)) => right_divide_output_type(left, right),
         (Some(single), None) | (None, Some(single)) => {
-            numeric_unary_type(std::slice::from_ref(single))
+            numeric_unary_type(std::slice::from_ref(single), ctx)
         }
         (None, None) => Type::Unknown,
     }
@@ -134,7 +134,7 @@ pub fn dot_type(args: &[Type], ctx: &ResolveContext) -> Type {
     numeric_tensor_from_shape(out_shape)
 }
 
-pub fn pinv_type(args: &[Type]) -> Type {
+pub fn pinv_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
     };
@@ -154,7 +154,7 @@ pub fn pinv_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn eig_type(args: &[Type]) -> Type {
+pub fn eig_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
     };
@@ -171,7 +171,7 @@ pub fn eig_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn svd_type(args: &[Type]) -> Type {
+pub fn svd_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
     };
@@ -189,7 +189,7 @@ pub fn svd_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn symrcm_type(args: &[Type]) -> Type {
+pub fn symrcm_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
     };
@@ -207,7 +207,7 @@ pub fn symrcm_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn bandwidth_type(args: &[Type]) -> Type {
+pub fn bandwidth_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.len() > 1 {
         return Type::Num;
     }
@@ -281,7 +281,7 @@ mod tests {
         let ty = Type::Tensor {
             shape: Some(vec![Some(2), Some(3), Some(4)]),
         };
-        let out = transpose_type(&[ty]);
+        let out = transpose_type(&[ty], &ResolveContext::new(Vec::new()));
         assert_eq!(
             out,
             Type::Tensor {
@@ -298,7 +298,7 @@ mod tests {
         let rhs = Type::Tensor {
             shape: Some(vec![Some(3), Some(4)]),
         };
-        let out = matmul_type(&[lhs, rhs]);
+        let out = matmul_type(&[lhs, rhs], &ResolveContext::new(Vec::new()));
         assert_eq!(
             out,
             Type::Tensor {
@@ -313,7 +313,7 @@ mod tests {
         let rhs = Type::Tensor {
             shape: Some(vec![Some(2), Some(2)]),
         };
-        let out = right_divide_type(&[lhs, rhs]);
+        let out = right_divide_type(&[lhs, rhs], &ResolveContext::new(Vec::new()));
         assert_eq!(
             out,
             Type::Tensor {

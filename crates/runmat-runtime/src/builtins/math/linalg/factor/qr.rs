@@ -10,7 +10,7 @@ use crate::builtins::math::linalg::type_resolvers::{matrix_dims, numeric_tensor_
 use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
+use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use super::lu::PivotMode;
@@ -39,7 +39,7 @@ fn qr_error(message: impl Into<String>) -> RuntimeError {
         .build()
 }
 
-fn qr_type(args: &[Type]) -> Type {
+fn qr_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
     };
@@ -802,7 +802,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{Tensor as Matrix, Type};
+    use runmat_builtins::{ResolveContext, Tensor as Matrix, Type};
 
     fn tensor_from_value(value: Value) -> Matrix {
         match value {
@@ -822,9 +822,12 @@ pub(crate) mod tests {
 
     #[test]
     fn qr_type_returns_tensor_for_arrays() {
-        let out = qr_type(&[Type::Tensor {
-            shape: Some(vec![Some(3), Some(2)]),
-        }]);
+        let out = qr_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(3), Some(2)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

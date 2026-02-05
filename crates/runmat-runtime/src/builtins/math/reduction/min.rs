@@ -111,7 +111,6 @@ impl MinEvaluation {
     keywords = "min,minimum,reduction,gpu,comparisonmethod,omitnan",
     accel = "reduction",
     type_resolver(min_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::min"
 )]
 async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

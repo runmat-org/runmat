@@ -1,8 +1,7 @@
-use runmat_builtins::Type;
-
 use runmat_builtins::shape_rules::element_count_if_known;
+use runmat_builtins::{ResolveContext, Type};
 
-pub fn pause_type(args: &[Type]) -> Type {
+pub fn pause_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::tensor_with_shape(vec![0, 0]);
     }
@@ -25,15 +24,15 @@ pub fn pause_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn tic_type(_args: &[Type]) -> Type {
+pub fn tic_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Num
 }
 
-pub fn timeit_type(_args: &[Type]) -> Type {
+pub fn timeit_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Num
 }
 
-pub fn toc_type(_args: &[Type]) -> Type {
+pub fn toc_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Num
 }
 
@@ -43,13 +42,16 @@ mod tests {
 
     #[test]
     fn pause_type_reports_empty_tensor_with_no_args() {
-        assert_eq!(pause_type(&[]), Type::tensor_with_shape(vec![0, 0]));
+        assert_eq!(
+            pause_type(&[], &ResolveContext::new(Vec::new())),
+            Type::tensor_with_shape(vec![0, 0])
+        );
     }
 
     #[test]
     fn pause_type_reports_empty_tensor_for_numeric_arg() {
         assert_eq!(
-            pause_type(&[Type::Num]),
+            pause_type(&[Type::Num], &ResolveContext::new(Vec::new())),
             Type::tensor_with_shape(vec![0, 0])
         );
     }
@@ -57,7 +59,7 @@ mod tests {
     #[test]
     fn pause_type_reports_union_for_string_arg() {
         assert_eq!(
-            pause_type(&[Type::String]),
+            pause_type(&[Type::String], &ResolveContext::new(Vec::new())),
             Type::Union(vec![Type::String, Type::tensor_with_shape(vec![0, 0])])
         );
     }
@@ -65,25 +67,31 @@ mod tests {
     #[test]
     fn pause_type_reports_empty_tensor_for_scalar_tensor() {
         assert_eq!(
-            pause_type(&[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)])
-            }]),
+            pause_type(
+                &[Type::Tensor {
+                    shape: Some(vec![Some(1), Some(1)])
+                }],
+                &ResolveContext::new(Vec::new()),
+            ),
             Type::tensor_with_shape(vec![0, 0])
         );
     }
 
     #[test]
     fn tic_type_reports_num() {
-        assert_eq!(tic_type(&[]), Type::Num);
+        assert_eq!(tic_type(&[], &ResolveContext::new(Vec::new())), Type::Num);
     }
 
     #[test]
     fn timeit_type_reports_num() {
-        assert_eq!(timeit_type(&[]), Type::Num);
+        assert_eq!(
+            timeit_type(&[], &ResolveContext::new(Vec::new())),
+            Type::Num
+        );
     }
 
     #[test]
     fn toc_type_reports_num() {
-        assert_eq!(toc_type(&[]), Type::Num);
+        assert_eq!(toc_type(&[], &ResolveContext::new(Vec::new())), Type::Num);
     }
 }

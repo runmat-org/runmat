@@ -1440,7 +1440,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message.clone()
@@ -1512,10 +1512,11 @@ pub(crate) mod tests {
 
     #[test]
     fn map_type_resolvers_basics() {
-        assert_eq!(map_handle_type(&[Type::Unknown]), Type::Unknown);
-        assert_eq!(map_cell_type(&[]), Type::cell());
-        assert_eq!(map_is_key_type(&[Type::String]), Type::logical());
-        assert_eq!(map_unknown_type(&[]), Type::Unknown);
+        let ctx = ResolveContext::new(Vec::new());
+        assert_eq!(map_handle_type(&[Type::Unknown], &ctx), Type::Unknown);
+        assert_eq!(map_cell_type(&[], &ctx), Type::cell());
+        assert_eq!(map_is_key_type(&[Type::String], &ctx), Type::logical());
+        assert_eq!(map_unknown_type(&[], &ctx), Type::Unknown);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

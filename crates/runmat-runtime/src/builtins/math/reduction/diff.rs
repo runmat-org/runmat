@@ -1,7 +1,7 @@
 //! MATLAB-compatible `diff` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Type, Value};
+use runmat_builtins::{CharArray, ComplexTensor, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -15,8 +15,8 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "diff";
 
-fn diff_type(args: &[Type]) -> Type {
-    diff_numeric_type(args)
+fn diff_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    diff_numeric_type(args, ctx)
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::diff")]
@@ -352,9 +352,12 @@ pub(crate) mod tests {
 
     #[test]
     fn diff_type_defaults_tensor() {
-        let out = diff_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(3)]),
-        }]);
+        let out = diff_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(out, Type::Tensor { shape: Some(vec![None, None]) });
     }
 

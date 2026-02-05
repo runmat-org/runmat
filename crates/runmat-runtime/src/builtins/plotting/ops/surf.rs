@@ -351,7 +351,7 @@ pub(crate) fn build_color_lut(colormap: ColorMap, samples: usize, alpha: f32) ->
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -389,7 +389,10 @@ pub(crate) mod tests {
     #[test]
     fn surf_type_is_string() {
         assert_eq!(
-            string_type(&[Type::tensor(), Type::tensor(), Type::tensor()]),
+            string_type(
+                &[Type::tensor(), Type::tensor(), Type::tensor()],
+                &ResolveContext::new(Vec::new())
+            ),
             Type::String
         );
     }
@@ -432,6 +435,9 @@ pub(crate) mod tests {
 
         // With extracted axes, Z should validate and reshape into a surface grid.
         let grid = tensor_to_surface_grid(z, x_axis.len(), y_axis.len(), BUILTIN_NAME);
-        assert!(grid.is_ok(), "expected Z to be compatible with extracted axes");
+        assert!(
+            grid.is_ok(),
+            "expected Z to be compatible with extracted axes"
+        );
     }
 }

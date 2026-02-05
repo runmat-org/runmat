@@ -931,7 +931,7 @@ pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, StructValue, Type};
+    use runmat_builtins::{CharArray, ResolveContext, StructValue, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -946,14 +946,17 @@ pub(crate) mod tests {
 
     #[test]
     fn linsolve_type_uses_rhs_columns() {
-        let out = left_divide_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            },
-        ]);
+        let out = left_divide_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(2)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

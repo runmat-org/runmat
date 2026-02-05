@@ -94,7 +94,6 @@ fn squeeze_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     keywords = "squeeze,singleton dimensions,array reshape,gpu",
     accel = "shape",
     type_resolver(squeeze_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::shape::squeeze"
 )]
 async fn squeeze_builtin(value: Value) -> crate::BuiltinResult<Value> {

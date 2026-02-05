@@ -86,7 +86,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "nnz,nonzero,count,sparsity,gpu",
     accel = "reduction",
     type_resolver(nnz_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::nnz"
 )]
 async fn nnz_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

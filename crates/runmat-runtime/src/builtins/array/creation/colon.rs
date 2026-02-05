@@ -74,7 +74,6 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     keywords = "colon,sequence,range,step,gpu",
     accel = "array_construct",
     type_resolver(colon_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::colon"
 )]
 async fn colon_builtin(

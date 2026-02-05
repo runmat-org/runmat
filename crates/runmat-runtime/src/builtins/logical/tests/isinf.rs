@@ -184,11 +184,11 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     #[test]
     fn isinf_type_returns_logical() {
-        let out = logical_unary_type(&[Type::Tensor { shape: None }]);
+        let out = logical_unary_type(&[Type::Tensor { shape: None }], &ResolveContext::new(Vec::new()));
         assert_eq!(out, Type::logical());
     }
     use runmat_builtins::IntValue;

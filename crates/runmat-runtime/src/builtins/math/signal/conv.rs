@@ -399,7 +399,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, LogicalArray, Tensor, Type};
+    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Tensor, Type};
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
@@ -407,14 +407,17 @@ pub(crate) mod tests {
 
     #[test]
     fn conv_type_full_uses_lengths() {
-        let out = conv_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(3)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(2)]),
-            },
-        ]);
+        let out = conv_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(3)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(2)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

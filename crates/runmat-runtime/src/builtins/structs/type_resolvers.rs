@@ -1,14 +1,14 @@
-use runmat_builtins::Type;
+use runmat_builtins::{ResolveContext, Type};
 
-pub fn fieldnames_type(_args: &[Type]) -> Type {
+pub fn fieldnames_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::cell_of(Type::String)
 }
 
-pub fn getfield_type(_args: &[Type]) -> Type {
+pub fn getfield_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Unknown
 }
 
-pub fn isfield_type(args: &[Type]) -> Type {
+pub fn isfield_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(name_type) = args.get(1) else {
         return Type::Unknown;
     };
@@ -21,27 +21,27 @@ pub fn isfield_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn orderfields_type(args: &[Type]) -> Type {
+pub fn orderfields_type(args: &[Type], _context: &ResolveContext) -> Type {
     args.first()
         .and_then(struct_container_type)
         .unwrap_or(Type::Unknown)
 }
 
-pub fn rmfield_type(args: &[Type]) -> Type {
-    args.first()
-        .and_then(struct_container_type)
-        .map(drop_struct_fields)
-        .unwrap_or(Type::Unknown)
-}
-
-pub fn setfield_type(args: &[Type]) -> Type {
+pub fn rmfield_type(args: &[Type], _context: &ResolveContext) -> Type {
     args.first()
         .and_then(struct_container_type)
         .map(drop_struct_fields)
         .unwrap_or(Type::Unknown)
 }
 
-pub fn struct_type(args: &[Type]) -> Type {
+pub fn setfield_type(args: &[Type], _context: &ResolveContext) -> Type {
+    args.first()
+        .and_then(struct_container_type)
+        .map(drop_struct_fields)
+        .unwrap_or(Type::Unknown)
+}
+
+pub fn struct_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::Struct { known_fields: None };
     }

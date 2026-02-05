@@ -1,19 +1,18 @@
-use runmat_builtins::Type;
-
 use runmat_builtins::shape_rules::element_count_if_known;
+use runmat_builtins::{ResolveContext, Type};
 
-pub fn filter2_type(args: &[Type]) -> Type {
+pub fn filter2_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.len() != 2 {
         return Type::tensor();
     }
     image_shape_output(&args[1]).unwrap_or_else(Type::tensor)
 }
 
-pub fn fspecial_type(_args: &[Type]) -> Type {
+pub fn fspecial_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::tensor()
 }
 
-pub fn imfilter_type(args: &[Type]) -> Type {
+pub fn imfilter_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.len() != 2 {
         return Type::tensor();
     }
@@ -42,18 +41,24 @@ mod tests {
 
     #[test]
     fn filter2_type_reports_tensor_without_args() {
-        assert_eq!(filter2_type(&[]), Type::tensor());
+        assert_eq!(
+            filter2_type(&[], &ResolveContext::new(Vec::new())),
+            Type::tensor()
+        );
     }
 
     #[test]
     fn filter2_type_preserves_image_shape_when_defaulted() {
         assert_eq!(
-            filter2_type(&[
-                Type::tensor(),
-                Type::Tensor {
-                    shape: Some(vec![Some(4), Some(5)])
-                }
-            ]),
+            filter2_type(
+                &[
+                    Type::tensor(),
+                    Type::Tensor {
+                        shape: Some(vec![Some(4), Some(5)])
+                    }
+                ],
+                &ResolveContext::new(Vec::new()),
+            ),
             Type::Tensor {
                 shape: Some(vec![Some(4), Some(5)])
             }
@@ -62,18 +67,24 @@ mod tests {
 
     #[test]
     fn fspecial_type_reports_tensor() {
-        assert_eq!(fspecial_type(&[]), Type::tensor());
+        assert_eq!(
+            fspecial_type(&[], &ResolveContext::new(Vec::new())),
+            Type::tensor()
+        );
     }
 
     #[test]
     fn imfilter_type_preserves_image_shape_when_defaulted() {
         assert_eq!(
-            imfilter_type(&[
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(3)])
-                },
-                Type::tensor()
-            ]),
+            imfilter_type(
+                &[
+                    Type::Tensor {
+                        shape: Some(vec![Some(2), Some(3)])
+                    },
+                    Type::tensor()
+                ],
+                &ResolveContext::new(Vec::new()),
+            ),
             Type::Tensor {
                 shape: Some(vec![Some(2), Some(3)])
             }

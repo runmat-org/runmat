@@ -60,7 +60,6 @@ fn linspace_type(_args: &[Type], ctx: &ResolveContext) -> Type {
     examples = "x = linspace(0, 1, 5)  % [0 0.25 0.5 0.75 1]",
     accel = "array_construct",
     type_resolver(linspace_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::linspace"
 )]
 async fn linspace_builtin(

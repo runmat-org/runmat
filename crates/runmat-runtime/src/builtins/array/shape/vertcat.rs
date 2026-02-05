@@ -187,7 +187,6 @@ fn vertcat_error(message: impl Into<String>) -> RuntimeError {
     keywords = "vertcat,vertical concatenation,array,gpu",
     accel = "array_construct",
     type_resolver(vertcat_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::shape::vertcat"
 )]
 async fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

@@ -15,7 +15,9 @@ use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value};
+use runmat_builtins::{
+    CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
 
@@ -53,7 +55,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Circshift reorders data; fusion planners treat it as a residency boundary between kernels.",
 };
 
-fn preserve_array_type(args: &[Type]) -> Type {
+fn preserve_array_type(args: &[Type], _context: &ResolveContext) -> Type {
     let input = match args.first() {
         Some(value) => value,
         None => return Type::Unknown,
@@ -758,9 +760,12 @@ pub(crate) mod tests {
 
     #[test]
     fn circshift_type_preserves_tensor_shape() {
-        let out = preserve_array_type(&[Type::Tensor {
-            shape: Some(vec![Some(3), Some(2)]),
-        }]);
+        let out = preserve_array_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(3), Some(2)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

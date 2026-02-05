@@ -1132,7 +1132,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
     use runmat_builtins::NumericDType;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -1297,6 +1297,9 @@ pub(crate) mod tests {
 
     #[test]
     fn contour_type_is_string() {
-        assert_eq!(string_type(&[Type::tensor()]), Type::String);
+        assert_eq!(
+            string_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
     }
 }

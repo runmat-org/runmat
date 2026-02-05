@@ -477,7 +477,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, Type};
+    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -493,9 +493,12 @@ pub(crate) mod tests {
 
     #[test]
     fn ishermitian_type_returns_bool() {
-        let out = logical_scalar_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(2)]),
-        }]);
+        let out = logical_scalar_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(2)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(out, Type::Bool);
     }
 

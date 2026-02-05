@@ -91,7 +91,6 @@ fn fill_type(args: &[Type], ctx: &ResolveContext) -> Type {
     keywords = "fill,constant,array,gpu,like",
     accel = "array_construct",
     type_resolver(fill_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::fill"
 )]
 async fn fill_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

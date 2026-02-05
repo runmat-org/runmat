@@ -150,7 +150,7 @@ pub(crate) fn build_mesh_surface(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -188,7 +188,10 @@ pub(crate) mod tests {
     #[test]
     fn mesh_type_is_string() {
         assert_eq!(
-            string_type(&[Type::tensor(), Type::tensor(), Type::tensor()]),
+            string_type(
+                &[Type::tensor(), Type::tensor(), Type::tensor()],
+                &ResolveContext::new(Vec::new())
+            ),
             Type::String
         );
     }

@@ -8,12 +8,12 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Type, Value};
+use runmat_builtins::{CharArray, ComplexTensor, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 type AlignedShapes = (Vec<usize>, Vec<usize>, Vec<usize>);
 
-fn kron_type(args: &[Type]) -> Type {
+fn kron_type(args: &[Type], _context: &ResolveContext) -> Type {
     let input = match args.first() {
         Some(value) => value,
         None => return Type::Unknown,
@@ -422,7 +422,10 @@ pub(crate) mod tests {
 
     #[test]
     fn kron_type_logical_returns_logical() {
-        let out = kron_type(&[Type::Logical { shape: None }, Type::Logical { shape: None }]);
+        let out = kron_type(
+            &[Type::Logical { shape: None }, Type::Logical { shape: None }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(out, Type::logical());
     }
 

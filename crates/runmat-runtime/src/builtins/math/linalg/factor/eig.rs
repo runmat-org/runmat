@@ -556,7 +556,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Type};
+    use runmat_builtins::{IntValue, ResolveContext, Type};
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
@@ -572,9 +572,12 @@ pub(crate) mod tests {
 
     #[test]
     fn eig_type_returns_eigenvalue_vector() {
-        let out = eig_type(&[Type::Tensor {
-            shape: Some(vec![Some(3), Some(3)]),
-        }]);
+        let out = eig_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(3), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

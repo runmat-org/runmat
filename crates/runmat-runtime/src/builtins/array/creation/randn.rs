@@ -69,7 +69,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "randn,random,normal,gaussian,gpu,like",
     accel = "array_construct",
     type_resolver(randn_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::randn"
 )]
 async fn randn_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {

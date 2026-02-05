@@ -99,7 +99,6 @@ fn token_to_limit(token: &ArgToken) -> crate::BuiltinResult<usize> {
     keywords = "find,nonzero,indices,row,column,gpu",
     accel = "custom",
     type_resolver(find_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::indexing::find"
 )]
 async fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

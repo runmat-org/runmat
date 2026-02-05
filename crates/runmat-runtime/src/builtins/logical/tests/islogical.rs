@@ -1,7 +1,7 @@
 //! MATLAB-compatible `islogical` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Type, Value};
+use runmat_builtins::{ResolveContext, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -58,7 +58,7 @@ async fn islogical_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn bool_scalar_type(_: &[Type]) -> Type {
+fn bool_scalar_type(_: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
 }
 

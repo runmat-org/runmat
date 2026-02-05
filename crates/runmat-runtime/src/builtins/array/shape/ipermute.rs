@@ -96,7 +96,6 @@ fn ipermute_error(message: impl Into<String>) -> RuntimeError {
     keywords = "ipermute,inverse permute,dimension reorder,gpu",
     accel = "custom",
     type_resolver(ipermute_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::shape::ipermute"
 )]
 async fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {

@@ -84,7 +84,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "prod,product,reduction,gpu,omitnan",
     accel = "reduction",
     type_resolver(prod_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::prod"
 )]
 async fn prod_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

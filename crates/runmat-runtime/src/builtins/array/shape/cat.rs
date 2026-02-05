@@ -319,7 +319,6 @@ fn extract_like(mut inputs: Vec<Value>) -> BuiltinResult<(Vec<Value>, LikeSpec)>
     keywords = "cat,concatenate,array,dimension,gpu",
     accel = "array_construct",
     type_resolver(cat_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::shape::cat"
 )]
 async fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

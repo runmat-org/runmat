@@ -426,7 +426,7 @@ pub(crate) mod tests {
     use crate::builtins::common::{tensor, test_support};
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{LogicalArray, Type};
+    use runmat_builtins::{LogicalArray, ResolveContext, Type};
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
@@ -446,14 +446,17 @@ pub(crate) mod tests {
 
     #[test]
     fn conv2_type_full_uses_dimensions() {
-        let out = conv2_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(3), Some(2)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(1)]),
-            },
-        ]);
+        let out = conv2_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(3), Some(2)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(1)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

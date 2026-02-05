@@ -93,7 +93,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "dot,inner product,gpu,linear algebra",
     accel = "reduction",
     type_resolver(dot_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::math::linalg::ops::dot"
 )]
 async fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

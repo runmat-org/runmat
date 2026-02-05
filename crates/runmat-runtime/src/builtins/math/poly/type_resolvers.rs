@@ -1,8 +1,8 @@
-use runmat_builtins::Type;
+use runmat_builtins::{ResolveContext, Type};
 
 use runmat_builtins::shape_rules::element_count_if_known;
 
-pub fn polyder_type(args: &[Type]) -> Type {
+pub fn polyder_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::tensor();
     }
@@ -22,11 +22,11 @@ pub fn polyder_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn polyfit_type(_args: &[Type]) -> Type {
+pub fn polyfit_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::tensor()
 }
 
-pub fn polyint_type(args: &[Type]) -> Type {
+pub fn polyint_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::tensor();
     };
@@ -44,7 +44,7 @@ pub fn polyint_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn polyval_type(args: &[Type]) -> Type {
+pub fn polyval_type(args: &[Type], _context: &ResolveContext) -> Type {
     let points = args.get(1);
     match points {
         Some(Type::Num | Type::Int | Type::Bool) => Type::Num,
@@ -62,7 +62,7 @@ pub fn polyval_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn roots_type(args: &[Type]) -> Type {
+pub fn roots_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::tensor();
     };
@@ -95,51 +95,72 @@ mod tests {
 
     #[test]
     fn polyder_type_reports_num_for_scalar() {
-        assert_eq!(polyder_type(&[Type::Num]), Type::Num);
+        assert_eq!(
+            polyder_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::Num
+        );
     }
 
     #[test]
     fn polyder_type_reports_num_for_scalar_tensor() {
         assert_eq!(
-            polyder_type(&[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)])
-            }]),
+            polyder_type(
+                &[Type::Tensor {
+                    shape: Some(vec![Some(1), Some(1)])
+                }],
+                &ResolveContext::new(Vec::new())
+            ),
             Type::Num
         );
     }
 
     #[test]
     fn polyder_type_reports_num_for_scalar_product() {
-        assert_eq!(polyder_type(&[Type::Num, Type::Int]), Type::Num);
+        assert_eq!(
+            polyder_type(&[Type::Num, Type::Int], &ResolveContext::new(Vec::new())),
+            Type::Num
+        );
     }
 
     #[test]
     fn polyfit_type_reports_tensor() {
-        assert_eq!(polyfit_type(&[]), Type::tensor());
+        assert_eq!(
+            polyfit_type(&[], &ResolveContext::new(Vec::new())),
+            Type::tensor()
+        );
     }
 
     #[test]
     fn polyint_type_reports_row_for_scalar() {
         assert_eq!(
-            polyint_type(&[Type::Num]),
+            polyint_type(&[Type::Num], &ResolveContext::new(Vec::new())),
             Type::tensor_with_shape(vec![1, 2])
         );
     }
 
     #[test]
     fn polyval_type_reports_num_for_scalar_points() {
-        assert_eq!(polyval_type(&[Type::tensor(), Type::Num]), Type::Num);
+        assert_eq!(
+            polyval_type(
+                &[Type::tensor(), Type::Num],
+                &ResolveContext::new(Vec::new())
+            ),
+            Type::Num
+        );
     }
 
     #[test]
     fn polyval_type_preserves_tensor_shape() {
         assert_eq!(
-            polyval_type(&[
-                Type::tensor(),
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(3)])
-                }
-            ]),
+            polyval_type(
+                &[
+                    Type::tensor(),
+                    Type::Tensor {
+                        shape: Some(vec![Some(2), Some(3)])
+                    }
+                ],
+                &ResolveContext::new(Vec::new())
+            ),
             Type::Tensor {
                 shape: Some(vec![Some(2), Some(3)])
             }
@@ -149,7 +170,7 @@ mod tests {
     #[test]
     fn roots_type_reports_empty_column_for_scalar() {
         assert_eq!(
-            roots_type(&[Type::Num]),
+            roots_type(&[Type::Num], &ResolveContext::new(Vec::new())),
             Type::tensor_with_shape(vec![0, 1])
         );
     }

@@ -200,7 +200,7 @@ fn looks_like_unqualified_identifier(text: &str) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{IntValue, MException, Type};
+    use runmat_builtins::{IntValue, MException, ResolveContext, Type};
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -316,6 +316,9 @@ pub(crate) mod tests {
 
     #[test]
     fn error_type_is_unknown() {
-        assert_eq!(error_type(&[Type::String]), Type::Unknown);
+        assert_eq!(
+            error_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::Unknown
+        );
     }
 }

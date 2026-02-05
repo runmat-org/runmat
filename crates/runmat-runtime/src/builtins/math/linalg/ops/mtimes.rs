@@ -366,7 +366,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, Tensor, Type};
+    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Tensor, Type};
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -389,14 +389,17 @@ pub(crate) mod tests {
 
     #[test]
     fn mtimes_type_infers_output_shape() {
-        let out = matmul_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(3), Some(1)]),
-            },
-        ]);
+        let out = matmul_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(3), Some(1)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

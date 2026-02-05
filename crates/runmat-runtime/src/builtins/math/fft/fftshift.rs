@@ -199,7 +199,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, Tensor, Type};
+    use runmat_builtins::{
+        ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type,
+    };
 
     fn error_message(error: crate::RuntimeError) -> String {
         error.message().to_string()
@@ -207,9 +209,12 @@ pub(crate) mod tests {
 
     #[test]
     fn fftshift_type_preserves_tensor_shape() {
-        let out = fftshift_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(5)]),
-        }]);
+        let out = fftshift_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(5)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

@@ -412,7 +412,9 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, LogicalArray, StringArray, StructValue, Tensor, Type};
+    use runmat_builtins::{
+        IntValue, LogicalArray, ResolveContext, StringArray, StructValue, Tensor, Type,
+    };
 
     fn call_ctranspose(value: Value) -> BuiltinResult<Value> {
         block_on(super::ctranspose_builtin(vec![value]))
@@ -611,9 +613,12 @@ pub(crate) mod tests {
 
     #[test]
     fn ctranspose_type_swaps_dims() {
-        let out = transpose_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(5)]),
-        }]);
+        let out = transpose_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(5)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

@@ -285,7 +285,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use num_complex::Complex;
-    use runmat_builtins::{ComplexTensor as HostComplexTensor, IntValue, Tensor, Type};
+    use runmat_builtins::{
+        ComplexTensor as HostComplexTensor, IntValue, ResolveContext, Tensor, Type,
+    };
     use rustfft::FftPlanner;
 
     fn approx_eq(a: (f64, f64), b: (f64, f64), tol: f64) -> bool {
@@ -310,9 +312,12 @@ pub(crate) mod tests {
 
     #[test]
     fn fft_type_preserves_shape() {
-        let out = fft_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(3)]),
-        }]);
+        let out = fft_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

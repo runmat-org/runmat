@@ -2,7 +2,9 @@
 
 use log::trace;
 use runmat_accelerate_api::{self, AccelProvider, GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value};
+use runmat_builtins::{
+    CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::{
@@ -50,7 +52,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "logical";
 
-fn logical_type(args: &[Type]) -> Type {
+fn logical_type(args: &[Type], _context: &ResolveContext) -> Type {
     args.first().map(logical_like).unwrap_or(Type::logical())
 }
 

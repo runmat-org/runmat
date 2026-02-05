@@ -405,7 +405,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
@@ -417,14 +417,17 @@ pub(crate) mod tests {
 
     #[test]
     fn deconv_type_uses_numerator_orientation() {
-        let out = deconv_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(5)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(3)]),
-            },
-        ]);
+        let out = deconv_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(5)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(3)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

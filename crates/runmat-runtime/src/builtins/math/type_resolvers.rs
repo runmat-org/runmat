@@ -1,5 +1,3 @@
-use runmat_builtins::Type;
-
 use runmat_builtins::shape_rules::{broadcast_shapes, element_count_if_known};
 use runmat_builtins::{ResolveContext, Type};
 

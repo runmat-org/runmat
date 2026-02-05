@@ -1,5 +1,3 @@
-use runmat_builtins::Type;
-
 use runmat_builtins::{ResolveContext, Type};
 
 pub fn index_output_type(_args: &[Type], _context: &ResolveContext) -> Type {

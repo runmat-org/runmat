@@ -1,28 +1,28 @@
-use runmat_builtins::Type;
+use runmat_builtins::{ResolveContext, Type};
 
 use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
 
-pub fn fft_type(args: &[Type]) -> Type {
+pub fn fft_type(args: &[Type], _context: &ResolveContext) -> Type {
     fft_like_type(args, 1)
 }
 
-pub fn ifft_type(args: &[Type]) -> Type {
+pub fn ifft_type(args: &[Type], _context: &ResolveContext) -> Type {
     fft_like_type(args, 1)
 }
 
-pub fn fft2_type(args: &[Type]) -> Type {
+pub fn fft2_type(args: &[Type], _context: &ResolveContext) -> Type {
     fft_like_type(args, 2)
 }
 
-pub fn ifft2_type(args: &[Type]) -> Type {
+pub fn ifft2_type(args: &[Type], _context: &ResolveContext) -> Type {
     fft_like_type(args, 2)
 }
 
-pub fn fftshift_type(args: &[Type]) -> Type {
+pub fn fftshift_type(args: &[Type], _context: &ResolveContext) -> Type {
     preserve_input_type(args)
 }
 
-pub fn ifftshift_type(args: &[Type]) -> Type {
+pub fn ifftshift_type(args: &[Type], _context: &ResolveContext) -> Type {
     preserve_input_type(args)
 }
 
@@ -84,9 +84,12 @@ mod tests {
 
     #[test]
     fn fft_like_preserves_shape_without_args() {
-        let out = fft_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(3)]),
-        }]);
+        let out = fft_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -97,9 +100,12 @@ mod tests {
 
     #[test]
     fn fft2_pads_rank() {
-        let out = fft2_type(&[Type::Tensor {
-            shape: Some(vec![Some(4)]),
-        }]);
+        let out = fft2_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(4)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

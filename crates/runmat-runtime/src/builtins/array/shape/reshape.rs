@@ -99,7 +99,6 @@ fn reshape_type(args: &[Type], ctx: &ResolveContext) -> Type {
     keywords = "reshape,resize,dimensions,gpu,auto",
     accel = "shape",
     type_resolver(reshape_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::shape::reshape"
 )]
 async fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

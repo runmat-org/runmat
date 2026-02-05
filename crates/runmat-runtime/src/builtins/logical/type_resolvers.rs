@@ -1,5 +1,3 @@
-use runmat_builtins::Type;
-
 use runmat_builtins::shape_rules::broadcast_shapes;
 use runmat_builtins::{ResolveContext, Type};
 

@@ -67,7 +67,6 @@ fn logspace_type(_args: &[Type], ctx: &ResolveContext) -> Type {
     examples = "x = logspace(1, 3, 3)  % [10 100 1000]",
     accel = "array_construct",
     type_resolver(logspace_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::logspace"
 )]
 async fn logspace_builtin(

@@ -15,7 +15,9 @@ use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value};
+use runmat_builtins::{
+    CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::flip")]
@@ -50,7 +52,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Flip is a data-reordering boundary; fusion planner treats it as a residency-preserving barrier.",
 };
 
-fn preserve_array_type(args: &[Type]) -> Type {
+fn preserve_array_type(args: &[Type], _context: &ResolveContext) -> Type {
     let input = match args.first() {
         Some(value) => value,
         None => return Type::Unknown,
@@ -591,9 +593,12 @@ pub(crate) mod tests {
 
     #[test]
     fn flip_type_preserves_logical_shape() {
-        let out = preserve_array_type(&[Type::Logical {
-            shape: Some(vec![Some(2), Some(1)]),
-        }]);
+        let out = preserve_array_type(
+            &[Type::Logical {
+                shape: Some(vec![Some(2), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Logical {

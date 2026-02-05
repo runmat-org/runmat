@@ -71,7 +71,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "randperm,permutation,random,indices,gpu,like",
     accel = "array_construct",
     type_resolver(randperm_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::randperm"
 )]
 async fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

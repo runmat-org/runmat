@@ -80,7 +80,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "sum,reduction,gpu,omitnan,all,like",
     accel = "reduction",
     type_resolver(sum_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::math::reduction::sum"
 )]
 async fn sum_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

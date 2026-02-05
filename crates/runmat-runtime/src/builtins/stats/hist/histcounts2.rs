@@ -1181,7 +1181,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn tensor_from_value(value: Value) -> Tensor {
         match value {
@@ -1193,14 +1193,18 @@ pub(crate) mod tests {
 
     #[test]
     fn histcounts2_type_defaults_to_unknown_matrix() {
-        let out = histcounts2_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(5), Some(1)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(5), Some(1)]),
-            },
-        ]);
+        let ctx = ResolveContext::new(Vec::new());
+        let out = histcounts2_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(5), Some(1)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(5), Some(1)]),
+                },
+            ],
+            &ctx,
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -1211,20 +1215,24 @@ pub(crate) mod tests {
 
     #[test]
     fn histcounts2_type_uses_edge_vectors() {
-        let out = histcounts2_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(5), Some(1)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(5), Some(1)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(4)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(6)]),
-            },
-        ]);
+        let ctx = ResolveContext::new(Vec::new());
+        let out = histcounts2_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(5), Some(1)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(5), Some(1)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(4)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(6)]),
+                },
+            ],
+            &ctx,
+        );
         assert_eq!(
             out,
             Type::Tensor {

@@ -5,7 +5,7 @@ use std::cmp::max;
 use log::warn;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, MeshgridAxisView};
 use runmat_builtins::shape_rules::unknown_shape;
-use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
+use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
@@ -52,7 +52,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Meshgrid explicitly materialises dense coordinate arrays and therefore bypasses fusion.",
 };
 
-fn meshgrid_type(args: &[Type]) -> Type {
+fn meshgrid_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::Unknown;
     }
@@ -883,14 +883,15 @@ pub(crate) mod tests {
 
     #[test]
     fn meshgrid_type_infers_rank_from_axis_count() {
+        let ctx = ResolveContext::new(Vec::new());
         assert_eq!(
-            meshgrid_type(&[Type::Num, Type::Num]),
+            meshgrid_type(&[Type::Num, Type::Num], &ctx),
             Type::Tensor {
                 shape: Some(vec![None, None])
             }
         );
         assert_eq!(
-            meshgrid_type(&[Type::Num, Type::Num, Type::Num]),
+            meshgrid_type(&[Type::Num, Type::Num, Type::Num], &ctx),
             Type::Tensor {
                 shape: Some(vec![None, None, None])
             }

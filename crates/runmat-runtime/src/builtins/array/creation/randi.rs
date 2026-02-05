@@ -69,7 +69,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "randi,random,integer,gpu,like",
     accel = "array_construct",
     type_resolver(randi_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::randi"
 )]
 async fn randi_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

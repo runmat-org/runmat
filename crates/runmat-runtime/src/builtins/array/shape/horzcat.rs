@@ -181,7 +181,6 @@ fn horzcat_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     keywords = "horzcat,horizontal concatenation,array,gpu",
     accel = "array_construct",
     type_resolver(horzcat_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::shape::horzcat"
 )]
 async fn horzcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

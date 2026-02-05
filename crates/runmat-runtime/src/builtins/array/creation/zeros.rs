@@ -80,7 +80,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "zeros,array,logical,gpu,like",
     accel = "array_construct",
     type_resolver(zeros_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::zeros"
 )]
 async fn zeros_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {

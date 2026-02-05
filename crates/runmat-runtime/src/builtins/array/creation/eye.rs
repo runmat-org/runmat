@@ -59,7 +59,6 @@ fn eye_type(args: &[Type], ctx: &ResolveContext) -> Type {
     keywords = "eye,identity,matrix,gpu,like,logical",
     accel = "array_construct",
     type_resolver(eye_type),
-    type_resolver_context = true,
     builtin_path = "crate::builtins::array::creation::eye"
 )]
 async fn eye_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {

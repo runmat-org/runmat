@@ -627,7 +627,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{LogicalArray, Type};
+    use runmat_builtins::{LogicalArray, ResolveContext, Type};
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
     }
@@ -642,9 +642,12 @@ pub(crate) mod tests {
 
     #[test]
     fn svd_type_returns_singular_value_vector() {
-        let out = svd_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(3)]),
-        }]);
+        let out = svd_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

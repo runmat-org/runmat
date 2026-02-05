@@ -1,5 +1,3 @@
-use runmat_builtins::Type;
-
 use runmat_builtins::{ResolveContext, Type};
 
 pub fn string_array_type(_args: &[Type], _context: &ResolveContext) -> Type {

@@ -1,12 +1,12 @@
-use runmat_builtins::Type;
+use runmat_builtins::{ResolveContext, Type};
 
 use runmat_builtins::shape_rules::element_count_if_known;
 
-pub fn conv_type(args: &[Type]) -> Type {
+pub fn conv_type(args: &[Type], _context: &ResolveContext) -> Type {
     conv_like_type(args)
 }
 
-pub fn conv2_type(args: &[Type]) -> Type {
+pub fn conv2_type(args: &[Type], _context: &ResolveContext) -> Type {
     let lhs = args.get(0);
     let rhs = args.get(1);
     match (lhs, rhs) {
@@ -15,7 +15,7 @@ pub fn conv2_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn deconv_type(args: &[Type]) -> Type {
+pub fn deconv_type(args: &[Type], _context: &ResolveContext) -> Type {
     let numerator = args.get(0);
     let denominator = args.get(1);
     match (numerator, denominator) {
@@ -24,7 +24,7 @@ pub fn deconv_type(args: &[Type]) -> Type {
     }
 }
 
-pub fn filter_type(args: &[Type]) -> Type {
+pub fn filter_type(args: &[Type], _context: &ResolveContext) -> Type {
     let signal = args.get(2);
     match signal {
         Some(ty) => numeric_like(ty),
@@ -242,14 +242,17 @@ mod tests {
 
     #[test]
     fn conv_full_uses_length_sum() {
-        let out = conv_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(3)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(2)]),
-            },
-        ]);
+        let out = conv_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(3)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(2)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -260,13 +263,16 @@ mod tests {
 
     #[test]
     fn filter_preserves_signal_shape() {
-        let out = filter_type(&[
-            Type::Num,
-            Type::Num,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)]),
-            },
-        ]);
+        let out = filter_type(
+            &[
+                Type::Num,
+                Type::Num,
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(2)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

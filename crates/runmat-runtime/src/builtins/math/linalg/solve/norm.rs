@@ -637,7 +637,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, Type};
+    use runmat_builtins::{CharArray, ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -655,9 +655,12 @@ pub(crate) mod tests {
 
     #[test]
     fn norm_type_returns_scalar() {
-        let out = numeric_scalar_type(&[Type::Tensor {
-            shape: Some(vec![Some(4), Some(1)]),
-        }]);
+        let out = numeric_scalar_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(4), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(out, Type::Num);
     }
 

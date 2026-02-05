@@ -523,7 +523,7 @@ pub(crate) mod tests {
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_builtins::Value;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -622,6 +622,12 @@ pub(crate) mod tests {
 
     #[test]
     fn scatter3_type_is_string() {
-        assert_eq!(string_type(&[Type::tensor(), Type::tensor(), Type::tensor()]), Type::String);
+        assert_eq!(
+            string_type(
+                &[Type::tensor(), Type::tensor(), Type::tensor()],
+                &ResolveContext::new(Vec::new())
+            ),
+            Type::String
+        );
     }
 }

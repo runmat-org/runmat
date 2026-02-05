@@ -880,7 +880,7 @@ fn structs_to_cell(structs: Vec<StructValue>) -> crate::BuiltinResult<Value> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     static TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
@@ -1210,7 +1210,10 @@ pub(crate) mod tests {
 
     #[test]
     fn warning_type_is_unknown() {
-        assert_eq!(warning_type(&[Type::String]), Type::Unknown);
+        assert_eq!(
+            warning_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::Unknown
+        );
     }
 
     trait ExpectStruct {
