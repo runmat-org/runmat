@@ -37,7 +37,7 @@
   "examples": [
     {
       "description": "",
-      "input": "x = linspace(-2, 2, 50);\ny = linspace(-2, 2, 50);\nz = meshgrid(x, y);\nsurf(x, y, sin(x)' * cos(y));"
+      "input": "x = linspace(-2, 2, 50);\ny = linspace(-2, 2, 50);\nz = meshgrid(x, y);\nsurf(x, y, sin(x)' * cos(y))"
     }
   ],
   "faqs": [],

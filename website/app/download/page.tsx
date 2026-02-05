@@ -46,7 +46,7 @@ export default function DownloadPage() {
         {/* Alternative Installation Methods */}
         <section className="mb-12">
           <h2 className="text-3xl font-bold mb-8 text-center text-foreground">
-            Alternative Installation Methods
+            Alternative installation methods
           </h2>
           
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -98,7 +98,7 @@ export default function DownloadPage() {
                   </div>
                   
                   <div>
-                    <h4 className="font-semibold text-foreground mb-2">From Source (Latest)</h4>
+                    <h4 className="font-semibold text-foreground mb-2">From source (latest)</h4>
                     <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-foreground dark:text-foreground">
                       cargo install --git https://github.com/runmat-org/runmat
                     </div>
@@ -116,7 +116,7 @@ export default function DownloadPage() {
         {/* Development Setup */}
         <section className="mb-12">
           <h2 className="text-3xl font-bold mb-8 text-center text-foreground">
-            Development Environment
+            Development environment
           </h2>
           
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -169,7 +169,7 @@ export default function DownloadPage() {
         {/* Next Steps */}
         <section className="mb-12">
           <h2 className="text-3xl font-bold mb-8 text-center text-foreground">
-            Next Steps
+            Next steps
           </h2>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -178,13 +178,13 @@ export default function DownloadPage() {
                 <div className="flex items-center mb-4">
                   <Code className="h-6 w-6 mr-3 text-green-600" />
                   <h3 className="text-xl font-bold text-foreground">
-                    Start Coding
+                    Start coding
                   </h3>
                 </div>
                 <p className="text-muted-foreground mb-4">
-                  Jump into the interactive REPL or run your existing MATLAB scripts by typing <code>runmat</code> in your terminal.
+                  Jump into the interactive REPL or run your existing MATLAB scripts by typing <code className="rounded bg-muted px-1 py-0.5 text-foreground">runmat</code> in your terminal.
                 </p>
-                <div className="bg-muted rounded-md p-3 font-mono text-sm text-muted-foreground mb-4">
+                <div className="bg-muted rounded-md p-3 font-mono text-sm text-foreground border border-border mb-4">
                   runmat
                 </div>
                 <Button variant="outline" size="sm" asChild className="w-full">
@@ -205,7 +205,7 @@ export default function DownloadPage() {
                 <p className="text-muted-foreground mb-4">
                   Use RunMat as a Jupyter kernel for interactive notebooks with 150x speedup over GNU Octave.
                 </p>
-                <div className="bg-muted rounded-md p-3 font-mono text-sm text-muted-foreground mb-4">
+                <div className="bg-muted rounded-md p-3 font-mono text-sm text-foreground border border-border mb-4">
                   runmat --install-kernel
                 </div>
                 <Button variant="outline" size="sm" asChild className="w-full">

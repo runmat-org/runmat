@@ -100,7 +100,7 @@ jsonLd:
 ## 🫰 Why are engineers searching for MATLAB alternatives?
 MATLAB is powerful but expensive, with licenses costing over $2,000 per seat. For engineers in mechanical, electrical, and aerospace fields, that barrier drives the search for free alternatives. This guide compares the top four options, RunMat, Octave, Julia, and Python, with a focus on real engineering use cases, performance, compatibility, and ecosystem support.
 
-## TL;DR Summary
+## TL;DR summary
 - **RunMat** → Best for running MATLAB code directly, with JIT-accelerated performance and automatic GPU acceleration across NVIDIA, AMD, Intel, and Apple hardware. Also runs in browsers with WebGPU support.
 - **GNU Octave** → Reliable drop-in alternative for MATLAB scripts, slower but mature and widely used.
 - **Python (NumPy/SciPy)** → Huge ecosystem and ML integration, but requires rewriting code. Browser options exist (Colab, Pyodide) with trade-offs.
@@ -112,9 +112,9 @@ Ready to try RunMat? Follow the [Getting Started guide](/docs/getting-started) t
 
 ---
 
-## 📐 Practical Use Cases for MATLAB Alternatives
+## 📐 Practical use cases for MATLAB alternatives
 
-### 📶 Data Analysis and Visualization
+### 📶 Data analysis and visualization
 For decades, MATLAB has been used for dataset wrangling, statistics, and plots. The free alternatives each take a different approach:
 
 - **RunMat** is in pre-release and focuses on core MATLAB semantics with GPU acceleration. Familiar commands such as `plot`, `hist`, and matrix indexing largely work, but plotting currently covers only simple 2D line/scatter outputs and richer chart types are still in progress. Toolbox coverage is expanding, so expect some gaps while the project matures.
@@ -125,7 +125,7 @@ For decades, MATLAB has been used for dataset wrangling, statistics, and plots. 
 
 - **Julia** combines math-friendly syntax with high performance. Packages like DataFrames.jl support structured data handling, while Plots.jl and related libraries enable visualization. It's 1-based indexing and matrix-oriented design feel familiar to MATLAB users, easing the transition. The key advantage is speed: large computations or heavy numerical analysis often run close to C performance. While Julia’s ecosystem is smaller than Python’s, it continues to grow rapidly and already covers most core data analysis needs.
 
-### 🔌 Simulation and System Modeling
+### 🔌 Simulation and system modeling
 For many engineers, simulation is a core activity that encompasses mechanical dynamics, electrical circuits, and control systems. MATLAB typically facilitates this through Simulink, its widely recognized drag-and-drop block diagram environment. As highlighted earlier, none of the free options here fully replicates Simulink’s graphical modeling environment. What they do offer is script-based simulation, which involves solving ODEs, modeling control systems, and running discrete-time simulations in code.
 
 - **RunMat** runs MATLAB simulation scripts (e.g., ODEs, discrete-time models) at near-native speed. Monte Carlo simulations and batch parameter sweeps benefit from automatic GPU acceleration. While toolbox coverage is still expanding, the roadmap includes packages for control systems and related domains, extending its capabilities into transfer-function and state-space analysis.
@@ -133,7 +133,7 @@ For many engineers, simulation is a core activity that encompasses mechanical dy
 - **Python**, with libraries like SciPy and python-control, offers robust tools for system simulation and modeling, akin to MATLAB. Performance is good when using optimized SciPy solvers or NumPy operations.
 - **Julia** excels in simulations and modeling, particularly with its **DifferentialEquations.jl** library, offering performance comparable to or surpassing MATLAB's solvers for ODEs, SDEs, and DAE systems. **ControlSystems.jl** mirrors MATLAB's control toolbox. Julia's code, similar to MATLAB, allows natural math expressions and vector/matrix use, supporting clean modeling with Unicode and efficient small functions. Initial simulation runs may experience a short pause due to JIT compilation, but subsequent runs are much faster, benefiting iterative design.
 
-### 📡 Signal Processing and Numerical Computation
+### 📡 Signal processing and numerical computation
 Signal processing and numerical computation sit at the heart of MATLAB’s identity. Engineers lean on it for everything from designing digital filters and running FFTs to solving large systems of equations, optimizing models, and doing the heavy lifting of linear algebra.
 
 When looking at alternatives, the same themes come up:
@@ -149,20 +149,20 @@ See how your workflows map to RunMat? <a href="/sandbox" data-ph-capture-attribu
 
 ## Performance
 
-### 🏎️ Execution Speed
+### 🏎️ Execution speed
 RunMat and Julia both leverage JIT (just-in-time) compilation to reach near-native C performance on many workloads. RunMat uses a tiered model inspired by Google’s V8 engine: code starts running immediately in an interpreter, then “hot” paths are compiled into optimized machine code. The result is a system that feels fast from the first run and often gets faster as it executes. Julia compiles functions the first time they’re called, which introduces a brief pause up front, but subsequent runs execute at full speed. In practice, both tools rival or surpass MATLAB’s own JIT in handling loop-heavy or custom algorithms.
 
 GNU Octave, by contrast, runs purely as an interpreter. For vectorized operations, it performs reasonably, but in loop-dominated code, the lack of a JIT can make it dramatically slower, often 100× or more, compared to MATLAB or RunMat. For engineers running small to medium workloads, this may be acceptable, but Octave struggles with large-scale or real-time simulation.
 
 Python sits between these extremes. With NumPy and SciPy, array operations execute at C speed so that well-vectorized code can match MATLAB, RunMat, or Julia. However, pure Python loops are slower in some cases, often slower than Octave, unless the user applies tools like Numba or Cython. This makes Python highly performant in the hands of an experienced developer, but less forgiving for those new to its ecosystem.
 
-### 🏃 Startup & Responsiveness
+### 🏃 Startup & responsiveness
 - **RunMat** is designed for immediacy. Its snapshot-based startup system allows it to launch in under 5 ms, meaning engineers can fire up a REPL or run a script almost instantly. Combined with its JIT profiling, this makes RunMat feel highly interactive; you can tweak code and rerun without waiting for the environment itself to catch up.
 - **Octave**, while lightweight compared to MATLAB, still feels slower to start and less responsive in interactive use. Its GUI can lag when rendering plots or processing large commands, which is noticeable if you’re working in short, iterative bursts. Engineers coming from MATLAB will find it usable, but not snappy.
 - **Python** strikes a balance: the interpreter starts quickly, but importing heavy scientific libraries (NumPy, SciPy, Pandas) can add noticeable delay. Once a Jupyter notebook session is running, however, responsiveness is generally smooth, especially if you avoid re-importing libraries.
 - **Julia's** REPL launches in a second or two, but its "time to first use" is the bigger issue; calling a function or library for the first time may take several seconds as it compiles. Once past that, responsiveness is excellent, with subsequent runs executing instantly.
 
-### ⚡ GPU Acceleration
+### ⚡ GPU acceleration
 
 Modern engineering workloads like Monte Carlo simulations, image processing, and large matrix operations increasingly benefit from GPU parallelism. Each alternative takes a different approach to GPU computing:
 
@@ -185,7 +185,7 @@ For workloads where GPU acceleration matters, RunMat's automatic cross-vendor ap
 
 ---
 
-## 🖥️ Code Comparisons for Common Tasks
+## 🖥️ Code comparisons for common tasks
 To illustrate how familiar MATLAB code translates into other environments, let’s look at a single example: plotting a sine wave. This highlights where your MATLAB knowledge is directly applicable and where new syntax or libraries are required.
 
 ### RunMat / Octave (MATLAB syntax)
@@ -235,7 +235,7 @@ Julia’s syntax is very close to MATLAB’s, with minor differences like the br
 
 ---
 
-## 🎬 Set Up Experience and OS Compatibility
+## 🎬 Set up experience and OS compatibility
 One of MATLAB's most significant drawbacks is its heavy installation and license setup, which can slow down adoption across teams. By contrast, most free MATLAB alternatives install quickly and run on Windows, Linux, and macOS without license servers or account sign-ins.
 
 
@@ -249,7 +249,7 @@ One of MATLAB's most significant drawbacks is its heavy installation and license
 
 **Julia** offers easy cross-platform installation via downloads or package managers. While initial setup (editor, precompilation) may take time, VS Code with the Julia extension is recommended. Julia is self-contained, but users add packages (e.g., for plotting) and may need C/Fortran binaries. After setup, it's stable and consistent.
 
-## 🌐 Browser-Based Computing
+## 🌐 Browser-based computing
 
 For engineers who need to run computations without installing software (on locked-down corporate machines, Chromebooks, or while traveling), browser-based platforms offer immediate access.
 
@@ -266,7 +266,7 @@ For engineers who need to run computations without installing software (on locke
 
 Worth noting: RunMat is currently the only option that combines browser-native execution, GPU acceleration, and MATLAB syntax without server dependencies or usage quotas.
 
-## 🤝 Compatibility with Existing MATLAB Code
+## 🤝 Compatibility with existing MATLAB code
 One of the biggest concerns when migrating away from MATLAB is simple: Can I keep running my old .m files, or will I have to rewrite everything? Each alternative handles compatibility differently.
 
 - **RunMat** targets high compatibility with MATLAB’s core language in its pre-release, and many `.m` files already run unmodified. Some edge semantics, toolbox functions, and advanced plotting remain under construction, so early adopters should expect occasional gaps while still benefiting from the published performance gains.
@@ -274,7 +274,7 @@ One of the biggest concerns when migrating away from MATLAB is simple: Can I kee
 - **Python** cannot run MATLAB code directly. Tools like SMOP can auto-translate .m files, but results often require manual cleanup. Large codebases usually need to be rewritten by hand, which is a significant investment. Many teams instead maintain MATLAB for legacy projects and start new development in Python. The upside is flexibility. Once translated, Python code benefits from its vast ecosystem, but direct reuse of MATLAB code is not realistic.
 - **Julia**, like Python, requires rewriting MATLAB code. The transition is somewhat easier because Julia shares MATLAB’s 1-based indexing, column-major arrays, and many familiar function names. Numeric code often translates line by line, though plotting, specialized toolboxes, or GUI code require Julia equivalents. Rewriting in Julia can pay off with higher performance and cleaner code design, but reuse is limited to manual porting.
 
-## 👩‍🏫 Learning Curve and Community Support
+## 👩‍🏫 Learning curve and community support
 Switching from MATLAB means not just a new tool. Still, a new set of habits and the availability of tutorials, forums, and documentation often determine whether the transition feels smooth or painful. Here’s how the main alternatives compare:
 
 - **RunMat** has almost no learning curve for MATLAB users since it preserves MATLAB syntax and semantics. While its user community is still small, MATLAB resources indirectly address many common problems, and RunMat’s open-source model allows engineers to interact directly with developers on GitHub. The official documentation is concise and practical, with guides for setup, CLI usage, and architecture. For someone fluent in MATLAB, the adjustment is minimal.
@@ -282,22 +282,22 @@ Switching from MATLAB means not just a new tool. Still, a new set of habits and 
 - **Python** poses a steeper transition. Engineers must adapt to indentation rules, 0-based indexing, and a modular ecosystem (NumPy, SciPy, Matplotlib, Pandas). The payoff is access to a vast, active community and countless tutorials, cheat sheets, and courses. Python is now widely taught in universities, which lowers the barrier for new graduates. Tools like Jupyter notebooks ease experimentation, but mastering the ecosystem requires more time than RunMat or Octave. After the initial learning curve, many engineers find Python more intuitive for general-purpose coding beyond numerical work.
 - **Julia** offers a middle ground. Julia’s community is smaller than Python’s but highly engaged, with strong official documentation and tutorials tailored to MATLAB switchers. The most significant adjustment isn’t syntax but mindset. MATLAB veterans must unlearn habits like forced vectorization, since Julia’s loops are already efficient. Once that shift is made, Julia becomes a natural and powerful environment.
 
-## 🛠️ Trade-offs and Choosing the Right Tool
+## 🛠️ Trade-offs and choosing the right tool
 No free alternative matches MATLAB feature-for-feature, so the right choice depends on what you value most: compatibility, performance, or ecosystem.
 
-### Minimal Transition (RunMat & Octave)
+### Minimal transition (RunMat & Octave)
 If you want to keep running MATLAB scripts with almost no changes, RunMat and Octave are your main options. RunMat is newer but offers faster performance, modern JIT compilation, and growing toolbox support. Octave is slower, but it is long-standing and widely used in academia.
 
-### Performance & Scalability (Julia & RunMat)
+### Performance & scalability (Julia & RunMat)
 For cutting-edge computation, Julia stands out with its ability to scale from single-core to multi-threaded and GPU workloads. RunMat matches this with automatic GPU offloading across all major vendors: write MATLAB code, get GPU performance without rewrites. Python can also perform well if written with NumPy/SciPy, but requires more care.
 
-### Ecosystem & Libraries (Python leads)
+### Ecosystem & libraries (Python leads)
 Python dominates in ecosystem breadth, offering libraries for machine learning, data science, web development, automation, and APIs, among others. Julia excels in scientific niches (differential equations, optimization), but coverage is still smaller. Octave sticks close to MATLAB’s core, while RunMat inherits whatever MATLAB scripts you already have, though its toolbox ecosystem is still emerging.
 
-### Longevity & Support
+### Longevity & support
 Python and Julia both have strong momentum and active development. Octave is stable but evolves slowly. RunMat, backed by Dystr and open-source contributors, is relatively new but has significant potential as adoption grows.
 
-## ⛙ Decision Guide
+## ⛙ Decision guide
 | Priority                        | Best Choice     | Why                                                               |
 |---------------------------------|-----------------|-------------------------------------------------------------------|
 | Reuse MATLAB code directly      | RunMat / Octave | Drop-in compatibility; RunMat is faster/newer, Octave is mature   |
