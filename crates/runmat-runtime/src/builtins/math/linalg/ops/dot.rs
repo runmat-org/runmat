@@ -431,7 +431,7 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(3), Some(2)]),
             },
             ],
-            &ResolveContext::empty(),
+            &ResolveContext::new(Vec::new()),
         );
         assert_eq!(
             out,

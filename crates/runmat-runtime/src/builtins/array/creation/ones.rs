@@ -375,13 +375,13 @@ pub(crate) mod tests {
 
     #[test]
     fn ones_type_defaults_to_num() {
-        assert_eq!(ones_type(&[], &ResolveContext::empty()), Type::Num);
+        assert_eq!(ones_type(&[], &ResolveContext::new(Vec::new())), Type::Num);
     }
 
     #[test]
     fn ones_type_infers_rank_from_scalar_dim() {
         assert_eq!(
-            ones_type(&[Type::Num], &ResolveContext::empty()),
+            ones_type(&[Type::Num], &ResolveContext::new(Vec::new())),
             Type::Tensor {
                 shape: Some(vec![None, None])
             }
@@ -394,7 +394,7 @@ pub(crate) mod tests {
             shape: Some(vec![Some(1), Some(4)]),
         };
         assert_eq!(
-            ones_type(&[size_vec], &ResolveContext::empty()),
+            ones_type(&[size_vec], &ResolveContext::new(Vec::new())),
             Type::Tensor {
                 shape: Some(vec![None, None, None, None])
             }

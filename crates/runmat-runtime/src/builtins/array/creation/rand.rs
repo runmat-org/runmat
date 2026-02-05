@@ -365,13 +365,13 @@ pub(crate) mod tests {
 
     #[test]
     fn rand_type_defaults_to_num() {
-        assert_eq!(rand_type(&[], &ResolveContext::empty()), Type::Num);
+        assert_eq!(rand_type(&[], &ResolveContext::new(Vec::new())), Type::Num);
     }
 
     #[test]
     fn rand_type_infers_rank_from_scalar_dim() {
         assert_eq!(
-            rand_type(&[Type::Num], &ResolveContext::empty()),
+            rand_type(&[Type::Num], &ResolveContext::new(Vec::new())),
             Type::Tensor {
                 shape: Some(vec![None, None])
             }

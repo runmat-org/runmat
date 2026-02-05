@@ -296,7 +296,7 @@ pub(crate) mod tests {
             shape: Some(vec![Some(1), Some(3)]),
         };
         assert_eq!(
-            super::ind2sub_type(&[dims, Type::Num], &ResolveContext::empty()),
+            super::ind2sub_type(&[dims, Type::Num], &ResolveContext::new(Vec::new())),
             Type::Cell {
                 element_type: Some(Box::new(Type::tensor())),
                 length: Some(3)

@@ -393,7 +393,7 @@ pub(crate) mod tests {
     #[test]
     fn logspace_type_is_row_vector() {
         assert_eq!(
-            logspace_type(&[Type::Num, Type::Num], &ResolveContext::empty()),
+            logspace_type(&[Type::Num, Type::Num], &ResolveContext::new(Vec::new())),
             Type::Tensor {
                 shape: Some(vec![Some(1), None])
             }

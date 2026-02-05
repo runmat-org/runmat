@@ -535,7 +535,10 @@ pub(crate) mod tests {
     #[test]
     fn find_type_is_column_vector() {
         assert_eq!(
-            find_type(&[Type::Tensor { shape: None }], &ResolveContext::empty()),
+            find_type(
+                &[Type::Tensor { shape: None }],
+                &ResolveContext::new(Vec::new()),
+            ),
             Type::Tensor {
                 shape: Some(vec![None, Some(1)])
             }

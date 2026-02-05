@@ -164,6 +164,9 @@ impl Camera {
 
         // Scale pan by camera distance in 3D so it feels consistent while zooming.
         let dist = (self.position - self.target).length().max(1e-3);
+        // CAD-style "grab": dragging right moves the scene right (camera left).
+        // Screen Y increases downward, so we keep the Y sign (drag down pans down).
+        let delta = Vec2::new(-delta.x, delta.y);
         let pan_amount = delta * self.pan_sensitivity * dist;
         let world_delta = right * pan_amount.x + up * pan_amount.y;
 
@@ -467,7 +470,7 @@ impl CameraController {
                             // Alt+RMB drag zoom (dolly). Positive drag up should zoom in.
                             let zoom_delta = (-d.y / 120.0).clamp(-5.0, 5.0);
                             self.mouse_wheel(
-                                zoom_delta,
+                                Vec2::new(0.0, zoom_delta),
                                 position,
                                 viewport_px,
                                 modifiers,
@@ -481,6 +484,16 @@ impl CameraController {
                         MouseButton::Middle | MouseButton::Right => {
                             if want_pan {
                                 camera.pan(d);
+                            } else if modifiers.ctrl || modifiers.meta {
+                                // Ctrl/Cmd + (MMB/RMB) drag: zoom/dolly (very common in CAD/DCC).
+                                let zoom_delta = (-d.y / 120.0).clamp(-5.0, 5.0);
+                                self.mouse_wheel(
+                                    Vec2::new(0.0, zoom_delta),
+                                    position,
+                                    viewport_px,
+                                    modifiers,
+                                    camera,
+                                );
                             } else {
                                 camera.rotate(d);
                             }
@@ -488,6 +501,15 @@ impl CameraController {
                         MouseButton::Left => {
                             if want_pan {
                                 camera.pan(d);
+                            } else if modifiers.ctrl || modifiers.meta {
+                                let zoom_delta = (-d.y / 120.0).clamp(-5.0, 5.0);
+                                self.mouse_wheel(
+                                    Vec2::new(0.0, zoom_delta),
+                                    position,
+                                    viewport_px,
+                                    modifiers,
+                                    camera,
+                                );
                             } else {
                                 camera.rotate(d);
                             }
@@ -532,22 +554,38 @@ impl CameraController {
     /// Handle mouse wheel
     pub fn mouse_wheel(
         &mut self,
-        delta: f32,
+        delta: Vec2,
         position_px: Vec2,
         viewport_px: (u32, u32),
         modifiers: Modifiers,
         camera: &mut Camera,
     ) {
-        let fine = if modifiers.ctrl || modifiers.meta { 0.35 } else { 1.0 };
-        let sens = camera.zoom_sensitivity * fine;
-        let mut factor = 1.0 - delta * sens;
-        if factor.abs() < 1e-3 {
-            return;
-        }
-        factor = factor.clamp(0.2, 5.0);
+        // CAD-ish wheel semantics:
+        // - default: zoom/dolly to cursor using vertical wheel component
+        // - Shift: pan (screen-space) using both wheel components
+        //
+        // Don't treat Ctrl/Cmd as "fine wheel" because macOS trackpad pinch-to-zoom gestures
+        // report Ctrl as pressed. Keeping wheel zoom consistent feels more natural.
+        let delta_y = delta.y;
 
         match &mut camera.projection {
             ProjectionType::Perspective { .. } => {
+                if modifiers.shift {
+                    // Wheel-pan in the view plane. Scale by distance for a consistent feel.
+                    // Positive wheel deltas should pan "with" the gesture (down scroll moves view down).
+                    // NOTE: `Camera::pan` already scales by camera distance; don't multiply by distance here.
+                    let pan_px = Vec2::new(delta.x, -delta.y);
+                    camera.pan(pan_px * 6.0);
+                    return;
+                }
+
+                let sens = camera.zoom_sensitivity;
+                let mut factor = 1.0 - delta_y * sens;
+                if factor.abs() < 1e-3 {
+                    return;
+                }
+                factor = factor.clamp(0.2, 5.0);
+
                 let (vw, vh) = (viewport_px.0.max(1) as f32, viewport_px.1.max(1) as f32);
                 let screen_size = Vec2::new(vw, vh);
                 let pos = Vec2::new(position_px.x.clamp(0.0, vw), position_px.y.clamp(0.0, vh));
@@ -600,6 +638,29 @@ impl CameraController {
                 top,
                 ..
             } => {
+                if modifiers.shift {
+                    // Wheel-pan in 2D (treat wheel deltas as pixel-ish movement).
+                    let vw = viewport_px.0.max(1) as f32;
+                    let vh = viewport_px.1.max(1) as f32;
+                    let w = (*right - *left).max(1e-6);
+                    let h = (*top - *bottom).max(1e-6);
+                    let dx = -delta.x * (w / vw);
+                    let dy = delta.y * (h / vh);
+                    *left += dx;
+                    *right += dx;
+                    *bottom += dy;
+                    *top += dy;
+                    camera.mark_dirty();
+                    return;
+                }
+
+                let sens = camera.zoom_sensitivity;
+                let mut factor = 1.0 - delta_y * sens;
+                if factor.abs() < 1e-3 {
+                    return;
+                }
+                factor = factor.clamp(0.2, 5.0);
+
                 // Cursor-anchored 2D zoom: scale the ortho bounds around the cursor.
                 let w = (*right - *left).max(1e-6);
                 let h = (*top - *bottom).max(1e-6);

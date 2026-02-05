@@ -386,7 +386,7 @@ pub(crate) mod tests {
     #[test]
     fn randperm_type_is_row_vector() {
         assert_eq!(
-            randperm_type(&[Type::Num], &ResolveContext::empty()),
+            randperm_type(&[Type::Num], &ResolveContext::new(Vec::new())),
             Type::Tensor {
                 shape: Some(vec![Some(1), None])
             }

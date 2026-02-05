@@ -1650,7 +1650,7 @@ pub(crate) mod tests {
     fn min_type_with_two_args_returns_tensor() {
         let out = min_type(
             &[Type::Tensor { shape: None }, Type::Tensor { shape: None }],
-            &ResolveContext::empty(),
+            &ResolveContext::new(Vec::new()),
         );
         assert_eq!(out, Type::tensor());
     }

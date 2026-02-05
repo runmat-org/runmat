@@ -442,7 +442,7 @@ pub(crate) mod tests {
         };
         let out = reshape_type(
             &[Type::Tensor { shape: None }, size_vec],
-            &ResolveContext::empty(),
+            &ResolveContext::new(Vec::new()),
         );
         assert_eq!(
             out,
@@ -462,7 +462,7 @@ pub(crate) mod tests {
                 Type::Num,
                 Type::Num,
             ],
-            &ResolveContext::empty(),
+            &ResolveContext::new(Vec::new()),
         );
         assert_eq!(
             out,

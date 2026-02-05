@@ -194,7 +194,8 @@ export type PlotSurfaceEvent =
       kind: "wheel";
       x: number;
       y: number;
-      wheelDelta: number;
+    wheelDeltaX: number;
+    wheelDeltaY: number;
       wheelDeltaMode?: number;
       shiftKey?: boolean;
       ctrlKey?: boolean;

@@ -476,7 +476,7 @@ pub(crate) mod tests {
     #[test]
     fn colon_type_is_row_vector() {
         assert_eq!(
-            colon_type(&[Type::Num, Type::Num], &ResolveContext::empty()),
+            colon_type(&[Type::Num, Type::Num], &ResolveContext::new(Vec::new())),
             Type::Tensor {
                 shape: Some(vec![Some(1), None])
             }

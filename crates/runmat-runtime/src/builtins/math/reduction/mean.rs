@@ -1341,7 +1341,7 @@ pub(crate) mod tests {
             &[Type::Tensor {
                 shape: Some(vec![Some(2), Some(4)]),
             }],
-            &ResolveContext::empty(),
+            &ResolveContext::new(Vec::new()),
         );
         assert_eq!(
             out,

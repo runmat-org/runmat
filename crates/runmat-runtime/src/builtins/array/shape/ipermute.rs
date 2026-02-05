@@ -187,7 +187,7 @@ pub(crate) mod tests {
         };
         let out = super::ipermute_type(
             &[Type::Tensor { shape: None }, order],
-            &ResolveContext::empty(),
+            &ResolveContext::new(Vec::new()),
         );
         assert_eq!(
             out,

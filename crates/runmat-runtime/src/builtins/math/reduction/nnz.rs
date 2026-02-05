@@ -406,7 +406,10 @@ pub(crate) mod tests {
     #[test]
     fn nnz_type_returns_num() {
         assert_eq!(
-            nnz_type(&[Type::Tensor { shape: None }], &ResolveContext::empty()),
+            nnz_type(
+                &[Type::Tensor { shape: None }],
+                &ResolveContext::new(Vec::new()),
+            ),
             Type::Num
         );
     }

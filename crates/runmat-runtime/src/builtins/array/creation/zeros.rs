@@ -485,13 +485,13 @@ pub(crate) mod tests {
 
     #[test]
     fn zeros_type_defaults_to_num() {
-        assert_eq!(zeros_type(&[], &ResolveContext::empty()), Type::Num);
+        assert_eq!(zeros_type(&[], &ResolveContext::new(Vec::new())), Type::Num);
     }
 
     #[test]
     fn zeros_type_infers_rank_from_scalar_dim() {
         assert_eq!(
-            zeros_type(&[Type::Num], &ResolveContext::empty()),
+            zeros_type(&[Type::Num], &ResolveContext::new(Vec::new())),
             Type::Tensor {
                 shape: Some(vec![None, None])
             }
@@ -504,7 +504,7 @@ pub(crate) mod tests {
             shape: Some(vec![Some(1), Some(3)]),
         };
         assert_eq!(
-            zeros_type(&[size_vec], &ResolveContext::empty()),
+            zeros_type(&[size_vec], &ResolveContext::new(Vec::new())),
             Type::Tensor {
                 shape: Some(vec![None, None, None])
             }

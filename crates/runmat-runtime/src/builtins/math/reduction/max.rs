@@ -1775,7 +1775,7 @@ pub(crate) mod tests {
     fn max_type_with_two_args_returns_tensor() {
         let out = max_type(
             &[Type::Tensor { shape: None }, Type::Tensor { shape: None }],
-            &ResolveContext::empty(),
+            &ResolveContext::new(Vec::new()),
         );
         assert_eq!(out, Type::tensor());
     }

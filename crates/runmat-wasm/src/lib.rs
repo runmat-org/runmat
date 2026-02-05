@@ -785,7 +785,9 @@ struct PlotSurfaceEventPayload {
     #[serde(default)]
     button: i32,
     #[serde(default)]
-    wheel_delta: f32,
+    wheel_delta_x: f32,
+    #[serde(default)]
+    wheel_delta_y: f32,
     #[serde(default)]
     wheel_delta_mode: u32,
     #[serde(default)]
@@ -841,27 +843,31 @@ pub fn handle_plot_surface_event(surface_id: u32, event: JsValue) -> Result<(), 
             // Normalize DOM wheel delta (pixel/line/page) into a roughly "lines" scale.
             // - Pixel deltas (trackpads) tend to be large; scale them down.
             // - Page deltas are rare; scale them up.
-            let mut wheel_delta = payload.wheel_delta;
+            let mut wheel_delta_x = payload.wheel_delta_x;
+            let mut wheel_delta_y = payload.wheel_delta_y;
             match payload.wheel_delta_mode {
                 0 => {
                     // pixels
-                    wheel_delta /= 100.0;
+                    wheel_delta_x /= 100.0;
+                    wheel_delta_y /= 100.0;
                 }
                 1 => {
                     // lines
                 }
                 2 => {
                     // pages
-                    wheel_delta *= 10.0;
+                    wheel_delta_x *= 10.0;
+                    wheel_delta_y *= 10.0;
                 }
                 _ => {}
             }
             // Align with the native path + common CAD conventions:
             // positive delta = zoom in (wheel up / away from user).
-            wheel_delta = -wheel_delta;
+            wheel_delta_x = -wheel_delta_x;
+            wheel_delta_y = -wheel_delta_y;
             PlotEvent::MouseWheel {
                 position,
-                delta: wheel_delta,
+                delta: Vec2::new(wheel_delta_x, wheel_delta_y),
                 modifiers,
             }
         }

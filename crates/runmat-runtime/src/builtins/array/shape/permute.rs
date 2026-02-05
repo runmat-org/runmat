@@ -494,7 +494,8 @@ pub(crate) mod tests {
         let order = Type::Tensor {
             shape: Some(vec![Some(1), Some(2)]),
         };
-        let out = permute_type(&[Type::Tensor { shape: None }, order], &ResolveContext::empty());
+        let out =
+            permute_type(&[Type::Tensor { shape: None }, order], &ResolveContext::new(Vec::new()));
         assert_eq!(
             out,
             Type::Tensor {

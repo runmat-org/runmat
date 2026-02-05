@@ -293,13 +293,13 @@ pub(crate) mod tests {
 
     #[test]
     fn randn_type_defaults_to_num() {
-        assert_eq!(randn_type(&[], &ResolveContext::empty()), Type::Num);
+        assert_eq!(randn_type(&[], &ResolveContext::new(Vec::new())), Type::Num);
     }
 
     #[test]
     fn randn_type_infers_rank_from_scalar_dim() {
         assert_eq!(
-            randn_type(&[Type::Num], &ResolveContext::empty()),
+            randn_type(&[Type::Num], &ResolveContext::new(Vec::new())),
             Type::Tensor {
                 shape: Some(vec![None, None])
             }

@@ -251,7 +251,7 @@ mod tests {
         let ty = Type::Tensor {
             shape: Some(vec![Some(3), Some(4)]),
         };
-        let out = reduce_numeric_type(&[ty], &ResolveContext::empty());
+        let out = reduce_numeric_type(&[ty], &ResolveContext::new(Vec::new()));
         assert_eq!(
             out,
             Type::Tensor {
@@ -316,7 +316,7 @@ mod tests {
         let ty = Type::Logical {
             shape: Some(vec![Some(2), Some(2)]),
         };
-        let out = reduce_logical_type(&[ty], &ResolveContext::empty());
+        let out = reduce_logical_type(&[ty], &ResolveContext::new(Vec::new()));
         assert_eq!(
             out,
             Type::Logical {
@@ -342,7 +342,7 @@ mod tests {
     #[test]
     fn min_max_two_args_scalar() {
         assert_eq!(
-            min_max_type(&[Type::Num, Type::Num], &ResolveContext::empty()),
+            min_max_type(&[Type::Num, Type::Num], &ResolveContext::new(Vec::new())),
             Type::Num
         );
     }

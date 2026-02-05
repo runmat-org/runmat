@@ -399,13 +399,13 @@ pub(crate) mod tests {
 
     #[test]
     fn eye_type_defaults_to_num() {
-        assert_eq!(eye_type(&[], &ResolveContext::empty()), Type::Num);
+        assert_eq!(eye_type(&[], &ResolveContext::new(Vec::new())), Type::Num);
     }
 
     #[test]
     fn eye_type_infers_rank_from_scalar_dim() {
         assert_eq!(
-            eye_type(&[Type::Num], &ResolveContext::empty()),
+            eye_type(&[Type::Num], &ResolveContext::new(Vec::new())),
             Type::Tensor {
                 shape: Some(vec![None, None])
             }

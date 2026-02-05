@@ -37,7 +37,7 @@ pub enum PlotEvent {
     /// `position` is the pointer location in the same coordinate space as other mouse events.
     MouseWheel {
         position: Vec2,
-        delta: f32,
+        delta: Vec2,
         modifiers: Modifiers,
     },
     KeyPress { key: KeyCode },

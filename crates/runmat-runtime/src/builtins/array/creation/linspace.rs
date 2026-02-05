@@ -375,7 +375,7 @@ pub(crate) mod tests {
     #[test]
     fn linspace_type_is_row_vector() {
         assert_eq!(
-            linspace_type(&[Type::Num, Type::Num], &ResolveContext::empty()),
+            linspace_type(&[Type::Num, Type::Num], &ResolveContext::new(Vec::new())),
             Type::Tensor {
                 shape: Some(vec![Some(1), None])
             }

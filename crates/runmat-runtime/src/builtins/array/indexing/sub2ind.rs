@@ -366,7 +366,7 @@ pub(crate) mod tests {
         assert_eq!(
             sub2ind_type(
                 &[Type::Tensor { shape: None }, Type::Num, Type::Int],
-                &ResolveContext::empty(),
+                &ResolveContext::new(Vec::new()),
             ),
             Type::Num
         );
@@ -380,7 +380,7 @@ pub(crate) mod tests {
         assert_eq!(
             sub2ind_type(
                 &[Type::Tensor { shape: None }, subs.clone(), Type::Num],
-                &ResolveContext::empty(),
+                &ResolveContext::new(Vec::new()),
             ),
             Type::Tensor {
                 shape: Some(vec![Some(3), Some(1)])
