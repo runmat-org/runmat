@@ -320,7 +320,7 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn strings_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strings_builtin(rest))
@@ -633,7 +633,10 @@ pub(crate) mod tests {
 
     #[test]
     fn strings_type_is_string_array() {
-        assert_eq!(string_array_type(&[Type::Num]), Type::cell_of(Type::String));
+        assert_eq!(
+            string_array_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::cell_of(Type::String)
+        );
     }
 
     #[cfg(feature = "wgpu")]

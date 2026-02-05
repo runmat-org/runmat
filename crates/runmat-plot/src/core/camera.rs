@@ -236,7 +236,9 @@ impl Camera {
         let yaw = -delta.x * self.rotate_sensitivity;
         let pitch = -delta.y * self.rotate_sensitivity;
 
-        let world_up = self.up.normalize_or_zero();
+        // Keep orbit constraints aligned to true world-up (+Z) even if the camera
+        // is rolled for a CAD-like default orientation.
+        let world_up = Vec3::Z;
         let mut offset = self.position - self.target;
         if offset.length_squared() < 1e-9 {
             offset = Vec3::new(0.0, 0.0, 1.0);
@@ -395,6 +397,7 @@ impl Camera {
 
         self.view_proj_dirty = false;
     }
+
 }
 
 /// Camera controller for handling input events

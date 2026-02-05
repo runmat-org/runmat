@@ -121,7 +121,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CellArray, StructValue, Tensor, Type};
+    use runmat_builtins::{CellArray, ResolveContext, StructValue, Tensor, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -272,7 +272,10 @@ pub(crate) mod tests {
 
     #[test]
     fn gather_type_resolves_multiple_outputs_to_cell() {
-        assert_eq!(gather_type(&[Type::Num, Type::String]), Type::cell());
+        assert_eq!(
+            gather_type(&[Type::Num, Type::String], &ResolveContext::new(Vec::new())),
+            Type::cell()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

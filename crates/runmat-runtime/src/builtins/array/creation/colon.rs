@@ -1,11 +1,12 @@
 //! MATLAB-compatible `colon` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Type, Value};
+use runmat_builtins::{CharArray, ComplexTensor, LiteralValue, LogicalArray, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
 use crate::builtins::array::type_resolvers::row_vector_type;
+use runmat_builtins::shape_rules::infer_range_shape;
 use runmat_builtins::ResolveContext;
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
@@ -60,7 +61,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn colon_type(_args: &[Type], ctx: &ResolveContext) -> Type {
-    row_vector_type(ctx)
+    let (start, step, end) = match ctx.literal_args.as_slice() {
+        [LiteralValue::Number(start), LiteralValue::Number(end)] => (Some(*start), None, Some(*end)),
+        [LiteralValue::Number(start), LiteralValue::Number(step), LiteralValue::Number(end)] => {
+            (Some(*start), Some(*step), Some(*end))
+        }
+        _ => (None, None, None),
+    };
+    infer_range_shape(start, step, end)
+        .map(|shape| Type::Tensor { shape: Some(shape) })
+        .unwrap_or_else(|| row_vector_type(ctx))
 }
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
@@ -478,6 +488,21 @@ pub(crate) mod tests {
             colon_type(&[Type::Num, Type::Num], &ResolveContext::new(Vec::new())),
             Type::Tensor {
                 shape: Some(vec![Some(1), None])
+            }
+        );
+    }
+
+    #[test]
+    fn colon_type_infers_literal_length() {
+        let ctx = ResolveContext::new(vec![
+            LiteralValue::Number(-2.0),
+            LiteralValue::Number(0.02),
+            LiteralValue::Number(2.0),
+        ]);
+        assert_eq!(
+            colon_type(&[Type::Num, Type::Num, Type::Num], &ctx),
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(201)])
             }
         );
     }

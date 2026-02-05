@@ -114,21 +114,31 @@ fn drop_struct_fields(ty: Type) -> Type {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::ResolveContext;
 
     #[test]
     fn fieldnames_type_is_string_cell() {
-        assert_eq!(fieldnames_type(&[]), Type::cell_of(Type::String));
+        assert_eq!(
+            fieldnames_type(&[], &ResolveContext::new(Vec::new())),
+            Type::cell_of(Type::String)
+        );
     }
 
     #[test]
     fn getfield_type_is_unknown() {
-        assert_eq!(getfield_type(&[]), Type::Unknown);
+        assert_eq!(
+            getfield_type(&[], &ResolveContext::new(Vec::new())),
+            Type::Unknown
+        );
     }
 
     #[test]
     fn isfield_type_string_scalar_returns_bool() {
         assert_eq!(
-            isfield_type(&[Type::Struct { known_fields: None }, Type::String]),
+            isfield_type(
+                &[Type::Struct { known_fields: None }, Type::String],
+                &ResolveContext::new(Vec::new()),
+            ),
             Type::Bool
         );
     }
@@ -136,7 +146,10 @@ mod tests {
     #[test]
     fn orderfields_type_preserves_struct() {
         assert_eq!(
-            orderfields_type(&[Type::Struct { known_fields: None }]),
+            orderfields_type(
+                &[Type::Struct { known_fields: None }],
+                &ResolveContext::new(Vec::new()),
+            ),
             Type::Struct { known_fields: None }
         );
     }
@@ -144,7 +157,10 @@ mod tests {
     #[test]
     fn rmfield_type_preserves_struct_array_container() {
         assert_eq!(
-            rmfield_type(&[Type::cell_of(Type::Struct { known_fields: None })]),
+            rmfield_type(
+                &[Type::cell_of(Type::Struct { known_fields: None })],
+                &ResolveContext::new(Vec::new()),
+            ),
             Type::cell_of(Type::Struct { known_fields: None })
         );
     }
@@ -152,15 +168,21 @@ mod tests {
     #[test]
     fn setfield_type_drops_known_fields() {
         assert_eq!(
-            setfield_type(&[Type::Struct {
-                known_fields: Some(vec!["a".to_string()])
-            }]),
+            setfield_type(
+                &[Type::Struct {
+                    known_fields: Some(vec!["a".to_string()])
+                }],
+                &ResolveContext::new(Vec::new()),
+            ),
             Type::Struct { known_fields: None }
         );
     }
 
     #[test]
     fn struct_type_empty_args_returns_struct() {
-        assert_eq!(struct_type(&[]), Type::Struct { known_fields: None });
+        assert_eq!(
+            struct_type(&[], &ResolveContext::new(Vec::new())),
+            Type::Struct { known_fields: None }
+        );
     }
 }

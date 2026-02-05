@@ -585,7 +585,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, IntValue, Tensor, Type, Value};
+    use runmat_builtins::{ComplexTensor, IntValue, ResolveContext, Tensor, Type, Value};
 
     fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::sort_builtin(value, rest))
@@ -615,7 +615,10 @@ pub(crate) mod tests {
 
     #[test]
     fn sort_type_resolver_tensor() {
-        assert_eq!(tensor_output_type(&[Type::tensor()]), Type::tensor());
+        assert_eq!(
+            tensor_output_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::tensor()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

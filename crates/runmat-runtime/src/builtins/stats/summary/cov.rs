@@ -785,7 +785,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{Tensor, Type};
+    use runmat_builtins::{ResolveContext, Tensor, Type};
 
     fn assert_tensor_close(actual: &Tensor, expected: &[f64], tol: f64) {
         let dim = (expected.len() as f64).sqrt() as usize;
@@ -807,9 +807,12 @@ pub(crate) mod tests {
 
     #[test]
     fn cov_type_preserves_column_count() {
-        let out = cov_type(&[Type::Tensor {
-            shape: Some(vec![Some(5), Some(3)]),
-        }]);
+        let out = cov_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(5), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -820,9 +823,12 @@ pub(crate) mod tests {
 
     #[test]
     fn cov_type_vector_returns_scalar() {
-        let out = cov_type(&[Type::Tensor {
-            shape: Some(vec![Some(1), Some(4)]),
-        }]);
+        let out = cov_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(1), Some(4)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(out, Type::Num);
     }
 

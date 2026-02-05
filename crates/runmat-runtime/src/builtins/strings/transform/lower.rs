@@ -147,7 +147,7 @@ fn lower_cell_element(value: &Value) -> BuiltinResult<Value> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn run_lower(value: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(lower_builtin(value))
@@ -324,6 +324,9 @@ pub(crate) mod tests {
 
     #[test]
     fn lower_type_preserves_text() {
-        assert_eq!(text_preserve_type(&[Type::String]), Type::String);
+        assert_eq!(
+            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
     }
 }

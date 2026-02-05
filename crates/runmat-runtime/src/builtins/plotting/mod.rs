@@ -77,6 +77,7 @@ pub use state::{
 pub use web::{
     bind_surface_to_figure, detach_surface, install_surface, present_figure_on_surface,
     present_surface, render_current_scene, resize_surface, web_renderer_ready,
+    fit_surface_extents, reset_surface_camera,
 };
 
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]

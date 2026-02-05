@@ -268,9 +268,13 @@ impl PlotRenderer {
         // Mark for update
         self.needs_update = true;
 
-        // Recompute bounds and fit camera immediately
+        // Recompute bounds and fit camera immediately (only once per initial dataset).
         if self.camera_auto_fit {
-            self.fit_camera_to_data();
+            if self.fit_camera_to_data() {
+                // Freeze the initial fit (CAD-like): don't re-fit as data updates (e.g. animations)
+                // unless the user explicitly asks (Fit Extents / Reset View) or we change plot mode.
+                self.camera_auto_fit = false;
+            }
         }
     }
 
@@ -401,11 +405,13 @@ impl PlotRenderer {
         }
     }
 
-    /// Fit camera to show all data
-    pub fn fit_camera_to_data(&mut self) {
+    /// Fit camera to show all data.
+    ///
+    /// Returns `true` if a fit was applied (i.e. bounds existed).
+    pub fn fit_camera_to_data(&mut self) -> bool {
         if self.figure_has_3d {
             let Some(fig) = self.last_figure.as_mut() else {
-                return;
+                return false;
             };
             let bounds = fig.bounds();
             let min = bounds.min;
@@ -414,7 +420,9 @@ impl PlotRenderer {
             let center = (min + max) * 0.5;
             let mut cam = Camera::new();
             cam.target = center;
-            cam.up = Vec3::Y;
+            // Z-up default (CAD-like). This must match `Camera::new()`; otherwise auto-fit
+            // will override the user's expected default orientation.
+            cam.up = Vec3::Z;
             // Direction roughly (az=-37.5°, el=30°): angled in X/Y with positive Z.
             cam.position = center + Vec3::new(1.0, -1.0, 1.0);
             cam.fit_bounds(min, max);
@@ -422,7 +430,7 @@ impl PlotRenderer {
             for c in self.axes_cameras.iter_mut() {
                 *c = cam.clone();
             }
-            return;
+            return true;
         }
 
         if let Some((x_min, x_max, y_min, y_max)) = self.calculate_data_bounds() {
@@ -463,7 +471,46 @@ impl PlotRenderer {
             for c in self.axes_cameras.iter_mut() {
                 *c = cam.clone();
             }
+            return true;
         }
+        false
+    }
+
+    /// Explicit "Fit Extents" action (CAD-like). Fits the camera to current data once.
+    pub fn fit_extents(&mut self) {
+        let _ = self.fit_camera_to_data();
+        self.camera_auto_fit = false;
+        self.needs_update = true;
+    }
+
+    /// Explicit "Reset Camera" action. Restores the default orientation without re-framing.
+    ///
+    /// For 3D, this resets the view direction around the current data center (or current target)
+    /// while preserving the current zoom distance.
+    /// For 2D, this is equivalent to Fit Extents (since "home" without data bounds is rarely useful).
+    pub fn reset_camera_position(&mut self) {
+        if self.figure_has_3d {
+            let data_center = self
+                .last_figure
+                .as_mut()
+                .map(|f| {
+                    let b = f.bounds();
+                    (b.min + b.max) * 0.5
+                })
+                .unwrap_or_else(|| Vec3::ZERO);
+            let dir = Vec3::new(1.0, -1.0, 1.0).normalize_or_zero();
+            for c in self.axes_cameras.iter_mut() {
+                let dist = (c.position - c.target).length().max(0.1);
+                c.target = data_center;
+                c.up = Vec3::Z;
+                c.position = data_center + dir * dist;
+                c.mark_dirty();
+            }
+        } else {
+            self.fit_extents();
+        }
+        self.camera_auto_fit = false;
+        self.needs_update = true;
     }
 
     /// Render the current scene to a specific viewport within a texture/surface

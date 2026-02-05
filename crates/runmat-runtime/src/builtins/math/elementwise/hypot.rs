@@ -181,7 +181,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor, Type, Value};
+    use runmat_builtins::{
+        CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type, Value,
+    };
 
     fn hypot_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         block_on(super::hypot_builtin(lhs, rhs))
@@ -189,14 +191,17 @@ pub(crate) mod tests {
 
     #[test]
     fn hypot_type_preserves_tensor_shape() {
-        let out = numeric_binary_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            },
-        ]);
+        let out = numeric_binary_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -207,7 +212,7 @@ pub(crate) mod tests {
 
     #[test]
     fn hypot_type_scalar_returns_num() {
-        let out = numeric_binary_type(&[Type::Num, Type::Int]);
+        let out = numeric_binary_type(&[Type::Num, Type::Int], &ResolveContext::new(Vec::new()));
         assert_eq!(out, Type::Num);
     }
 

@@ -3986,6 +3986,50 @@ impl Ctx {
         }
     }
 
+    fn lower_colon_expr(
+        &mut self,
+        start: &AstExpr,
+        end: &AstExpr,
+    ) -> Result<(HirExprKind, Type), SemanticError> {
+        use parser::Expr;
+
+        let start_hir = self.lower_expr(start)?;
+
+        match end {
+            Expr::Binary(mid, parser::BinOp::Colon, final_end, _) => {
+                let mid_hir = self.lower_expr(mid)?;
+                let end_hir = self.lower_expr(final_end)?;
+                Ok((
+                    HirExprKind::Range(
+                        Box::new(start_hir),
+                        Some(Box::new(mid_hir)),
+                        Box::new(end_hir),
+                    ),
+                    Type::tensor(),
+                ))
+            }
+            Expr::Range(mid, step, final_end, _) if step.is_none() => {
+                let mid_hir = self.lower_expr(mid)?;
+                let end_hir = self.lower_expr(final_end)?;
+                Ok((
+                    HirExprKind::Range(
+                        Box::new(start_hir),
+                        Some(Box::new(mid_hir)),
+                        Box::new(end_hir),
+                    ),
+                    Type::tensor(),
+                ))
+            }
+            _ => {
+                let end_hir = self.lower_expr(end)?;
+                Ok((
+                    HirExprKind::Range(Box::new(start_hir), None, Box::new(end_hir)),
+                    Type::tensor(),
+                ))
+            }
+        }
+    }
+
     fn lower_expr(&mut self, expr: &AstExpr) -> Result<HirExpr, SemanticError> {
         use parser::Expr::*;
         let span = expr.span();
@@ -4022,6 +4066,10 @@ impl Ctx {
                 (HirExprKind::Unary(*op, Box::new(inner)), ty)
             }
             Binary(a, op, b, _) => {
+                if matches!(op, BinOp::Colon) {
+                    let (kind, ty) = self.lower_colon_expr(a, b)?;
+                    return Ok(HirExpr { kind, ty, span });
+                }
                 let left = self.lower_expr(a)?;
                 let left_ty = left.ty.clone();
                 let right = self.lower_expr(b)?;

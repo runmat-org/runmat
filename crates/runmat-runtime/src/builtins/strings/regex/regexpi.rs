@@ -115,7 +115,7 @@ fn option_name(value: &Value) -> Option<String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, StringArray, Type};
+    use runmat_builtins::{CellArray, ResolveContext, StringArray, Type};
 
     fn evaluate(subject: Value, pattern: Value, rest: &[Value]) -> BuiltinResult<RegexpEvaluation> {
         futures::executor::block_on(super::evaluate(subject, pattern, rest))
@@ -396,6 +396,9 @@ pub(crate) mod tests {
 
     #[test]
     fn regexpi_type_is_unknown() {
-        assert_eq!(unknown_type(&[Type::String]), Type::Unknown);
+        assert_eq!(
+            unknown_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::Unknown
+        );
     }
 }

@@ -204,7 +204,9 @@ pub(crate) mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::{CellArray, CharArray, IntValue, LogicalArray, StringArray, Tensor, Type};
+    use runmat_builtins::{
+        CellArray, CharArray, IntValue, LogicalArray, ResolveContext, StringArray, Tensor, Type,
+    };
 
     fn strncmp_builtin(a: Value, b: Value, n: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strncmp_builtin(a, b, n))
@@ -487,6 +489,12 @@ pub(crate) mod tests {
 
     #[test]
     fn strncmp_type_is_logical_match() {
-        assert_eq!(logical_text_match_type(&[Type::String, Type::String]), Type::Bool);
+        assert_eq!(
+            logical_text_match_type(
+                &[Type::String, Type::String],
+                &ResolveContext::new(Vec::new()),
+            ),
+            Type::Bool
+        );
     }
 }

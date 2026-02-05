@@ -215,7 +215,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, StringArray, Tensor, Type, Value};
+    use runmat_builtins::{
+        IntValue, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    };
 
     fn log10_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::log10_builtin(value))
@@ -223,9 +225,12 @@ pub(crate) mod tests {
 
     #[test]
     fn log10_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(3)]),
-        }]);
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -236,9 +241,12 @@ pub(crate) mod tests {
 
     #[test]
     fn log10_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(&[Type::Tensor {
-            shape: Some(vec![Some(1), Some(1)]),
-        }]);
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(1), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(out, Type::Num);
     }
 

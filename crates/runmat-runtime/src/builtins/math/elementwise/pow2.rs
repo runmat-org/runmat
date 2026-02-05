@@ -360,7 +360,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor, Type};
+    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
 
     fn pow2_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::pow2_builtin(first, rest))
@@ -368,14 +368,17 @@ pub(crate) mod tests {
 
     #[test]
     fn pow2_type_preserves_tensor_shape() {
-        let out = numeric_binary_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            },
-        ]);
+        let out = numeric_binary_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -386,7 +389,7 @@ pub(crate) mod tests {
 
     #[test]
     fn pow2_type_scalar_returns_num() {
-        let out = numeric_binary_type(&[Type::Num, Type::Int]);
+        let out = numeric_binary_type(&[Type::Num, Type::Int], &ResolveContext::new(Vec::new()));
         assert_eq!(out, Type::Num);
     }
 

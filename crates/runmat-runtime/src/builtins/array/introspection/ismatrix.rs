@@ -70,13 +70,16 @@ pub(crate) mod tests {
         block_on(super::ismatrix_builtin(value))
     }
     use runmat_builtins::{
-        CellArray, CharArray, LogicalArray, ObjectInstance, StringArray, StructValue, Tensor,
-        Type,
+        CellArray, CharArray, LogicalArray, ObjectInstance, ResolveContext, StringArray,
+        StructValue, Tensor, Type,
     };
 
     #[test]
     fn ismatrix_type_returns_bool() {
-        assert_eq!(super::bool_scalar_type(&[Type::Num]), Type::Bool);
+        assert_eq!(
+            super::bool_scalar_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::Bool
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

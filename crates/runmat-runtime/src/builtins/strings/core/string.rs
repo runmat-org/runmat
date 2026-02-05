@@ -741,7 +741,7 @@ fn int_value_to_string(value: &IntValue) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{CellArray, IntValue, StringArray, StructValue, Type};
+    use runmat_builtins::{CellArray, IntValue, ResolveContext, StringArray, StructValue, Type};
 
     fn string_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::string_builtin(value, rest))
@@ -1073,6 +1073,9 @@ pub(crate) mod tests {
 
     #[test]
     fn string_type_is_string_array() {
-        assert_eq!(string_array_type(&[Type::Num]), Type::cell_of(Type::String));
+        assert_eq!(
+            string_array_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::cell_of(Type::String)
+        );
     }
 }

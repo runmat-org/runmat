@@ -651,7 +651,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor, Type};
+    use runmat_builtins::{
+        CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type,
+    };
 
     const EPS: f64 = 1e-12;
 
@@ -661,14 +663,17 @@ pub(crate) mod tests {
 
     #[test]
     fn times_type_preserves_tensor_shape() {
-        let out = numeric_binary_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            },
-        ]);
+        let out = numeric_binary_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -679,7 +684,7 @@ pub(crate) mod tests {
 
     #[test]
     fn times_type_scalar_returns_num() {
-        let out = numeric_binary_type(&[Type::Num, Type::Int]);
+        let out = numeric_binary_type(&[Type::Num, Type::Int], &ResolveContext::new(Vec::new()));
         assert_eq!(out, Type::Num);
     }
 

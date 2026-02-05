@@ -142,6 +142,9 @@ mod tests {
 
     #[test]
     fn rng_type_is_struct() {
-        assert!(matches!(rng_type(&[]), Type::Struct { .. }));
+        assert!(matches!(
+            rng_type(&[], &ResolveContext::new(Vec::new())),
+            Type::Struct { .. }
+        ));
     }
 }

@@ -987,7 +987,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{Tensor, Type};
+    use runmat_builtins::{ResolveContext, Tensor, Type};
 
     fn call(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(arrayfun_builtin(func, rest))
@@ -1018,7 +1018,10 @@ pub(crate) mod tests {
             params: vec![Type::Num],
             returns: Box::new(Type::Num),
         };
-        assert_eq!(arrayfun_type(&[func, Type::tensor()]), Type::tensor());
+        assert_eq!(
+            arrayfun_type(&[func, Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::tensor()
+        );
     }
 
     #[test]
@@ -1027,7 +1030,10 @@ pub(crate) mod tests {
             params: vec![Type::Num],
             returns: Box::new(Type::Bool),
         };
-        assert_eq!(arrayfun_type(&[func, Type::tensor()]), Type::logical());
+        assert_eq!(
+            arrayfun_type(&[func, Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::logical()
+        );
     }
 
     #[test]
@@ -1037,7 +1043,10 @@ pub(crate) mod tests {
             returns: Box::new(Type::Num),
         };
         assert_eq!(
-            arrayfun_type(&[func, Type::tensor(), Type::String, Type::Bool]),
+            arrayfun_type(
+                &[func, Type::tensor(), Type::String, Type::Bool],
+                &ResolveContext::new(Vec::new()),
+            ),
             Type::Unknown
         );
     }

@@ -145,7 +145,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, Tensor, Type};
+    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Tensor, Type};
 
     fn exp_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::exp_builtin(value))
@@ -153,9 +153,12 @@ pub(crate) mod tests {
 
     #[test]
     fn exp_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(3)]),
-        }]);
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -166,9 +169,12 @@ pub(crate) mod tests {
 
     #[test]
     fn exp_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(&[Type::Tensor {
-            shape: Some(vec![Some(1), Some(1)]),
-        }]);
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(1), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(out, Type::Num);
     }
 

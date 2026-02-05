@@ -342,7 +342,7 @@ pub(crate) mod tests {
     use crate::builtins::common::{random, test_support};
     use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Type};
+    use runmat_builtins::{IntValue, ResolveContext, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -360,7 +360,7 @@ pub(crate) mod tests {
 
     #[test]
     fn rng_type_returns_struct() {
-        let out = rng_type(&[]);
+        let out = rng_type(&[], &ResolveContext::new(Vec::new()));
         assert_eq!(
             out,
             Type::Struct {

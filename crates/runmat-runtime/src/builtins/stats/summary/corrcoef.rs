@@ -619,7 +619,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor, Type, Value};
+    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
 
     fn assert_tensor_close(actual: &Tensor, expected: &[f64], tol: f64) {
         let dim = (expected.len() as f64).sqrt() as usize;
@@ -641,9 +641,12 @@ pub(crate) mod tests {
 
     #[test]
     fn corrcoef_type_preserves_column_count() {
-        let out = corrcoef_type(&[Type::Tensor {
-            shape: Some(vec![Some(6), Some(2)]),
-        }]);
+        let out = corrcoef_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(6), Some(2)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -654,9 +657,12 @@ pub(crate) mod tests {
 
     #[test]
     fn corrcoef_type_vector_returns_scalar() {
-        let out = corrcoef_type(&[Type::Tensor {
-            shape: Some(vec![Some(4), Some(1)]),
-        }]);
+        let out = corrcoef_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(4), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(out, Type::Num);
     }
 

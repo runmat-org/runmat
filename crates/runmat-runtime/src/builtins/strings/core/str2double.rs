@@ -162,7 +162,7 @@ fn parse_numeric_scalar(text: &str) -> f64 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn str2double_builtin(value: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::str2double_builtin(value))
@@ -308,6 +308,9 @@ pub(crate) mod tests {
 
     #[test]
     fn str2double_type_is_numeric_text_scalar_or_tensor() {
-        assert_eq!(numeric_text_scalar_or_tensor_type(&[Type::String]), Type::Num);
+        assert_eq!(
+            numeric_text_scalar_or_tensor_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::Num
+        );
     }
 }

@@ -104,7 +104,9 @@ fn evaluate_strcmpi(left: &TextCollection, right: &TextCollection) -> BuiltinRes
 pub(crate) mod tests {
     use super::*;
     use crate::RuntimeError;
-    use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray, Type};
+    use runmat_builtins::{
+        CellArray, CharArray, LogicalArray, ResolveContext, StringArray, Type,
+    };
 
     fn strcmpi_builtin(a: Value, b: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strcmpi_builtin(a, b))
@@ -295,6 +297,12 @@ pub(crate) mod tests {
 
     #[test]
     fn strcmpi_type_is_logical_match() {
-        assert_eq!(logical_text_match_type(&[Type::String, Type::String]), Type::Bool);
+        assert_eq!(
+            logical_text_match_type(
+                &[Type::String, Type::String],
+                &ResolveContext::new(Vec::new()),
+            ),
+            Type::Bool
+        );
     }
 }

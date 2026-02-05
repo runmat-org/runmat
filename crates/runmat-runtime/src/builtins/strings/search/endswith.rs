@@ -133,7 +133,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CellArray, CharArray, IntValue, LogicalArray, StringArray, Tensor, Type};
+    use runmat_builtins::{
+        CellArray, CharArray, IntValue, LogicalArray, ResolveContext, StringArray, Tensor, Type,
+    };
 
     fn run_endswith(text: Value, pattern: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(endswith_builtin(text, pattern, rest))
@@ -548,6 +550,12 @@ pub(crate) mod tests {
 
     #[test]
     fn endswith_type_is_logical_match() {
-        assert_eq!(logical_text_match_type(&[Type::String, Type::String]), Type::Bool);
+        assert_eq!(
+            logical_text_match_type(
+                &[Type::String, Type::String],
+                &ResolveContext::new(Vec::new()),
+            ),
+            Type::Bool
+        );
     }
 }

@@ -724,7 +724,7 @@ fn logical_array_into_value(logical: LogicalArray) -> Value {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{Tensor, Type};
+    use runmat_builtins::{ResolveContext, Tensor, Type};
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
@@ -753,7 +753,13 @@ pub(crate) mod tests {
 
     #[test]
     fn ismember_type_resolver_logical() {
-        assert_eq!(logical_output_type(&[Type::tensor(), Type::tensor()]), Type::logical());
+        assert_eq!(
+            logical_output_type(
+                &[Type::tensor(), Type::tensor()],
+                &ResolveContext::new(Vec::new()),
+            ),
+            Type::logical()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

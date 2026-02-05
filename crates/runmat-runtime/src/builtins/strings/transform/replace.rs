@@ -274,7 +274,7 @@ impl ReplacementSpec {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn replace_builtin(text: Value, old: Value, new: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::replace_builtin(text, old, new))
@@ -459,6 +459,9 @@ pub(crate) mod tests {
 
     #[test]
     fn replace_type_preserves_text() {
-        assert_eq!(text_preserve_type(&[Type::String]), Type::String);
+        assert_eq!(
+            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
     }
 }

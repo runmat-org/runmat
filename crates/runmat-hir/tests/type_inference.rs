@@ -151,7 +151,6 @@ fn infer_range_shape_in_globals() {
                 assert_eq!(step_text, Some("1"));
                 assert_eq!(end_text, "100");
             }
-            runmat_hir::HirExprKind::Binary(_, runmat_parser::BinOp::Colon, _) => {}
             other => panic!("unexpected range expression: {other:?}"),
         },
         other => panic!("unexpected statement {other:?}"),
@@ -216,6 +215,24 @@ fn infer_range_shape_with_constants() {
         .unwrap_or(runmat_builtins::Type::Unknown);
     assert_eq!(
         a_ty,
+        runmat_builtins::Type::Tensor {
+            shape: Some(vec![Some(1), Some(201)])
+        }
+    );
+}
+
+#[test]
+fn infer_range_shape_with_negative_start() {
+    let result = lower_result("x = -2:0.02:2;");
+    let x_id = runmat_hir::VarId(*result.variables.get("x").unwrap());
+    let globals =
+        runmat_hir::infer_global_variable_types(&result.hir, &result.inferred_function_returns);
+    let x_ty = globals
+        .get(&x_id)
+        .cloned()
+        .unwrap_or(runmat_builtins::Type::Unknown);
+    assert_eq!(
+        x_ty,
         runmat_builtins::Type::Tensor {
             shape: Some(vec![Some(1), Some(201)])
         }

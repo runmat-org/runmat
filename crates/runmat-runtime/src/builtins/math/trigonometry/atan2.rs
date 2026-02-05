@@ -162,7 +162,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, LogicalArray, Tensor, Type, Value};
+    use runmat_builtins::{CharArray, LogicalArray, ResolveContext, Tensor, Type, Value};
     use std::f64::consts::PI;
 
     const EPS: f64 = 1e-12;
@@ -177,14 +177,17 @@ pub(crate) mod tests {
 
     #[test]
     fn atan2_type_preserves_tensor_shape() {
-        let out = numeric_binary_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            },
-        ]);
+        let out = numeric_binary_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -195,7 +198,7 @@ pub(crate) mod tests {
 
     #[test]
     fn atan2_type_scalar_returns_num() {
-        let out = numeric_binary_type(&[Type::Num, Type::Int]);
+        let out = numeric_binary_type(&[Type::Num, Type::Int], &ResolveContext::new(Vec::new()));
         assert_eq!(out, Type::Num);
     }
 

@@ -863,7 +863,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, StringArray, Type};
+    use runmat_builtins::{CharArray, ResolveContext, StringArray, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1070,7 +1070,10 @@ pub(crate) mod tests {
 
     #[test]
     fn pagefun_type_is_tensor() {
-        assert_eq!(pagefun_type(&[Type::tensor()]), Type::tensor());
+        assert_eq!(
+            pagefun_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::tensor()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

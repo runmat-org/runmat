@@ -387,7 +387,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_builtins::Tensor;
-    use runmat_builtins::{CellArray, CharArray, IntValue, StringArray, Type};
+    use runmat_builtins::{
+        CellArray, CharArray, IntValue, ResolveContext, StringArray, Type,
+    };
 
     fn run_strcat(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(strcat_builtin(rest))
@@ -656,6 +658,9 @@ pub(crate) mod tests {
 
     #[test]
     fn strcat_type_concatenates_text() {
-        assert_eq!(text_concat_type(&[Type::String]), Type::String);
+        assert_eq!(
+            text_concat_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
     }
 }

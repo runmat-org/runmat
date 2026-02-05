@@ -985,6 +985,23 @@ mod tests {
     }
 
     #[test]
+    fn hover_includes_inferred_tensor_shape_for_negative_range() {
+        let text = "XRange = -2:0.02:2;";
+        let analysis = analyze_document(text);
+        let x_offset = text.find("XRange").expect("XRange offset");
+        let x_position = offset_to_position(text, x_offset);
+
+        let x_hover = hover_at(text, &analysis, &x_position).expect("XRange hover");
+        let x_value = match x_hover.contents {
+            lsp_types::HoverContents::Markup(markup) => markup.value,
+            other => panic!("unexpected hover contents {other:?}"),
+        };
+
+        assert!(x_value.contains("Tensor"), "unexpected hover {x_value}");
+        assert!(x_value.contains("1 x 201"), "unexpected hover {x_value}");
+    }
+
+    #[test]
     fn diagnostics_include_shape_lints() {
         let text = "a = ones(2,3); b = ones(4,2); c = a * b;";
         let analysis = analyze_document(text);

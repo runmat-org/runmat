@@ -570,7 +570,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, LogicalArray, Type};
+    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
 
     fn call(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(gpu_array_builtin(value, rest))
@@ -944,6 +944,9 @@ pub(crate) mod tests {
 
     #[test]
     fn gpuarray_type_for_logical_is_logical() {
-        assert_eq!(gpuarray_type(&[Type::logical()]), Type::logical());
+        assert_eq!(
+            gpuarray_type(&[Type::logical()], &ResolveContext::new(Vec::new())),
+            Type::logical()
+        );
     }
 }

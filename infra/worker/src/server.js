@@ -68,7 +68,10 @@ export function createApp() {
     const detail = normalizeDetail(payload.payload);
     const successFlag = coerceBoolean(detail.success ?? payload.success);
     const summary = summarizeEvent(event, runKind, detail, successFlag, meta);
-    const currentUrl = buildSyntheticUrl(event, runKind, detail, successFlag, meta);
+    const currentUrl =
+      extractHttpUrl(payload.current_url) ||
+      extractHttpUrl(payload.page_url) ||
+      buildSyntheticUrl(event, runKind, detail, successFlag, meta);
 
     const eventName = friendlyEventName(event);
     const friendlyLabel = friendlyEventLabel(event);
@@ -266,6 +269,30 @@ function buildSyntheticUrl(event, runKind, detail, successFlag, meta = {}) {
     status: successFlag === false ? 'fail' : 'ok',
   });
   return `runmat://run.${runKind}?${params.toString()}`;
+}
+
+function extractHttpUrl(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.length > 2048) {
+    return null;
+  }
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return null;
+    }
+    // Avoid leaking fragment identifiers (often contain state not meant for logs).
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 function friendlyEventName(event) {

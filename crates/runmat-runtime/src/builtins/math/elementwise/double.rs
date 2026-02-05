@@ -270,7 +270,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::{IntValue, Type};
+    use runmat_builtins::{IntValue, ResolveContext, Type};
 
     fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::double_builtin(value, rest))
@@ -278,9 +278,12 @@ pub(crate) mod tests {
 
     #[test]
     fn double_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(3)]),
-        }]);
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -291,9 +294,12 @@ pub(crate) mod tests {
 
     #[test]
     fn double_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(&[Type::Tensor {
-            shape: Some(vec![Some(1), Some(1)]),
-        }]);
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(1), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(out, Type::Num);
     }
 

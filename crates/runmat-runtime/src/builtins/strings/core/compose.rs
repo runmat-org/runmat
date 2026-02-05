@@ -108,7 +108,7 @@ fn format_spec_data_to_string_array(spec: FormatSpecData) -> BuiltinResult<Strin
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, Tensor, Type};
+    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
 
     fn compose_builtin(format_spec: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::compose_builtin(format_spec, rest))
@@ -243,6 +243,9 @@ pub(crate) mod tests {
 
     #[test]
     fn compose_type_is_string_array() {
-        assert_eq!(string_array_type(&[Type::String]), Type::cell_of(Type::String));
+        assert_eq!(
+            string_array_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::cell_of(Type::String)
+        );
     }
 }

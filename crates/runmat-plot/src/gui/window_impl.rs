@@ -625,8 +625,8 @@ impl<'window> PlotWindow<'window> {
             }
         }
         if reset_view {
-            // Refit main camera to data
-            self.plot_renderer.fit_camera_to_data();
+            // Refit camera to data (explicit Fit Extents)
+            self.plot_renderer.fit_extents();
         }
         if save_png || save_svg {
             // OS Save Dialog to select path

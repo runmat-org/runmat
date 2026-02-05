@@ -435,6 +435,16 @@ impl WebRenderer {
         self.render_current_scene()
     }
 
+    /// Fit the camera to the current figure extents (explicit user action).
+    pub fn fit_extents(&mut self) {
+        self.plot_renderer.fit_extents();
+    }
+
+    /// Reset camera orientation/position (explicit user action).
+    pub fn reset_camera_position(&mut self) {
+        self.plot_renderer.reset_camera_position();
+    }
+
     /// Redraw the last figure that was provided.
     pub fn render_current_scene(&mut self) -> Result<(), WebRendererError> {
         self.sync_canvas_extent()?;

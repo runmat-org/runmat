@@ -948,7 +948,7 @@ fn names_struct(names: &[String], match_data: Option<&MatchComponents>) -> Value
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn evaluate(subject: Value, pattern: Value, rest: &[Value]) -> BuiltinResult<RegexpEvaluation> {
         futures::executor::block_on(super::evaluate(subject, pattern, rest))
@@ -1500,6 +1500,9 @@ pub(crate) mod tests {
 
     #[test]
     fn regexp_type_is_unknown() {
-        assert_eq!(unknown_type(&[Type::String]), Type::Unknown);
+        assert_eq!(
+            unknown_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::Unknown
+        );
     }
 }

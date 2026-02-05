@@ -477,7 +477,7 @@ pub(crate) mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
     use crate::builtins::common::test_support;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn pad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::pad_builtin(value, rest))
@@ -702,6 +702,9 @@ pub(crate) mod tests {
 
     #[test]
     fn pad_type_preserves_text() {
-        assert_eq!(text_preserve_type(&[Type::String]), Type::String);
+        assert_eq!(
+            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
     }
 }

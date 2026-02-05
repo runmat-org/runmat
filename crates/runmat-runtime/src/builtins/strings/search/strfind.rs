@@ -285,7 +285,9 @@ fn parse_bool_like(value: &Value) -> BuiltinResult<bool> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, CharArray, StringArray, Tensor, Type};
+    use runmat_builtins::{
+        CellArray, CharArray, ResolveContext, StringArray, Tensor, Type,
+    };
 
     fn run_strfind(text: Value, pattern: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(strfind_builtin(text, pattern, rest))
@@ -669,6 +671,12 @@ pub(crate) mod tests {
 
     #[test]
     fn strfind_type_for_scalar_text_is_tensor() {
-        assert_eq!(text_search_indices_type(&[Type::String, Type::String]), Type::tensor());
+        assert_eq!(
+            text_search_indices_type(
+                &[Type::String, Type::String],
+                &ResolveContext::new(Vec::new()),
+            ),
+            Type::tensor()
+        );
     }
 }

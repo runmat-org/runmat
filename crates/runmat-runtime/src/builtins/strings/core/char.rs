@@ -288,7 +288,7 @@ fn infer_rows_cols(shape: &[usize], len: usize) -> (usize, usize) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn char_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::char_builtin(rest))
@@ -523,6 +523,9 @@ pub(crate) mod tests {
 
     #[test]
     fn char_type_is_string_array() {
-        assert_eq!(string_array_type(&[Type::Num]), Type::cell_of(Type::String));
+        assert_eq!(
+            string_array_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::cell_of(Type::String)
+        );
     }
 }

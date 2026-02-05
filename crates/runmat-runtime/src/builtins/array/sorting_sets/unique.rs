@@ -1273,7 +1273,9 @@ impl UniqueEvaluation {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor, Type, Value};
+    use runmat_builtins::{
+        CharArray, IntValue, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    };
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
@@ -1309,13 +1311,19 @@ pub(crate) mod tests {
 
     #[test]
     fn unique_type_resolver_numeric() {
-        assert_eq!(set_values_output_type(&[Type::tensor()]), Type::tensor());
+        assert_eq!(
+            set_values_output_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::tensor()
+        );
     }
 
     #[test]
     fn unique_type_resolver_string_array() {
         assert_eq!(
-            set_values_output_type(&[Type::cell_of(Type::String)]),
+            set_values_output_type(
+                &[Type::cell_of(Type::String)],
+                &ResolveContext::new(Vec::new()),
+            ),
             Type::cell_of(Type::String)
         );
     }

@@ -231,7 +231,7 @@ fn erase_cell_element(value: &Value, patterns: &PatternList) -> BuiltinResult<Va
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::erase_builtin(text, pattern))
@@ -463,6 +463,9 @@ pub(crate) mod tests {
 
     #[test]
     fn erase_type_preserves_text() {
-        assert_eq!(text_preserve_type(&[Type::String]), Type::String);
+        assert_eq!(
+            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
     }
 }

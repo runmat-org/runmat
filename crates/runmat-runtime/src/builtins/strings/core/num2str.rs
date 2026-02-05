@@ -814,7 +814,7 @@ fn apply_format_flags(mut text: String, fmt: &CustomFormat) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::num2str_builtin(value, rest))
@@ -976,6 +976,9 @@ pub(crate) mod tests {
 
     #[test]
     fn num2str_type_is_string_scalar() {
-        assert_eq!(string_scalar_type(&[Type::Num]), Type::String);
+        assert_eq!(
+            string_scalar_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
     }
 }

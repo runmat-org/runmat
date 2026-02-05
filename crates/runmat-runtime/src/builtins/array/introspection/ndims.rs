@@ -68,7 +68,8 @@ pub(crate) mod tests {
         block_on(super::ndims_builtin(value))
     }
     use runmat_builtins::{
-        CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
+        CellArray, CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor,
+        Type, Value,
     };
 
     #[test]

@@ -105,7 +105,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn call() -> crate::BuiltinResult<Value> {
         block_on(gpu_info_builtin())
@@ -202,7 +202,10 @@ pub(crate) mod tests {
 
     #[test]
     fn gpuinfo_type_is_string() {
-        assert_eq!(gpuinfo_type(&[]), Type::String);
+        assert_eq!(
+            gpuinfo_type(&[], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

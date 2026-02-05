@@ -1465,7 +1465,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor, Type, Value};
+    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
@@ -1499,7 +1499,10 @@ pub(crate) mod tests {
     #[test]
     fn union_type_resolver_numeric() {
         assert_eq!(
-            set_values_output_type(&[Type::tensor(), Type::tensor()]),
+            set_values_output_type(
+                &[Type::tensor(), Type::tensor()],
+                &ResolveContext::new(Vec::new()),
+            ),
             Type::tensor()
         );
     }
@@ -1507,7 +1510,10 @@ pub(crate) mod tests {
     #[test]
     fn union_type_resolver_string_array() {
         assert_eq!(
-            set_values_output_type(&[Type::cell_of(Type::String), Type::String]),
+            set_values_output_type(
+                &[Type::cell_of(Type::String), Type::String],
+                &ResolveContext::new(Vec::new()),
+            ),
             Type::cell_of(Type::String)
         );
     }

@@ -237,7 +237,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn call(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(gpu_device_builtin(args))
@@ -357,7 +357,10 @@ pub(crate) mod tests {
 
     #[test]
     fn gpudevice_type_is_struct() {
-        assert!(matches!(gpudevice_type(&[Type::Num]), Type::Struct { .. }));
+        assert!(matches!(
+            gpudevice_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::Struct { .. }
+        ));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

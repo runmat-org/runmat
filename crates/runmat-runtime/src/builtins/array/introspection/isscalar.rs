@@ -77,11 +77,14 @@ pub(crate) mod tests {
     }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
-    use runmat_builtins::{CellArray, CharArray, StructValue, Tensor, Type};
+    use runmat_builtins::{CellArray, CharArray, ResolveContext, StructValue, Tensor, Type};
 
     #[test]
     fn isscalar_type_returns_bool() {
-        assert_eq!(super::bool_scalar_type(&[Type::Num]), Type::Bool);
+        assert_eq!(
+            super::bool_scalar_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::Bool
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

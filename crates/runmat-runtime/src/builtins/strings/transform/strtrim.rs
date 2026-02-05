@@ -168,7 +168,7 @@ fn trim_whitespace(text: &str) -> String {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::Type;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn run_strtrim(value: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(strtrim_builtin(value))
@@ -332,6 +332,9 @@ pub(crate) mod tests {
 
     #[test]
     fn strtrim_type_preserves_text() {
-        assert_eq!(text_preserve_type(&[Type::String]), Type::String);
+        assert_eq!(
+            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
     }
 }

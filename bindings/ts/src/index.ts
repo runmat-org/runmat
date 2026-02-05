@@ -590,6 +590,8 @@ interface RunMatNativeModule {
   presentSurface?: (surfaceId: number) => void;
   presentFigureOnSurface?: (surfaceId: number, handle: number) => void;
   handlePlotSurfaceEvent?: (surfaceId: number, event: PlotSurfaceEvent) => void;
+  fitPlotSurfaceExtents?: (surfaceId: number) => void;
+  resetPlotSurfaceCamera?: (surfaceId: number) => void;
   onFigureEvent?: (callback: ((event: FigureEvent) => void) | null) => void;
   newFigureHandle?: () => number;
   selectFigure?: (handle: number) => void;
@@ -775,6 +777,18 @@ export async function handlePlotSurfaceEvent(surfaceId: number, event: PlotSurfa
   const native = await loadNativeModule();
   requireNativeFunction(native, "handlePlotSurfaceEvent");
   native.handlePlotSurfaceEvent(surfaceId, event);
+}
+
+export async function fitPlotSurfaceExtents(surfaceId: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "fitPlotSurfaceExtents");
+  native.fitPlotSurfaceExtents(surfaceId);
+}
+
+export async function resetPlotSurfaceCamera(surfaceId: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "resetPlotSurfaceCamera");
+  native.resetPlotSurfaceCamera(surfaceId);
 }
 
 export async function onFigureEvent(listener: FigureEventListener | null): Promise<void> {

@@ -191,7 +191,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{StringArray, Tensor, Type, Value};
+    use runmat_builtins::{ResolveContext, StringArray, Tensor, Type, Value};
 
     fn string_empty_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::string_empty_builtin(rest))
@@ -282,7 +282,10 @@ pub(crate) mod tests {
 
     #[test]
     fn string_empty_type_is_string_array() {
-        assert_eq!(string_array_type(&[]), Type::cell_of(Type::String));
+        assert_eq!(
+            string_array_type(&[], &ResolveContext::new(Vec::new())),
+            Type::cell_of(Type::String)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

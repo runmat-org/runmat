@@ -67,6 +67,8 @@ use runmat_runtime::builtins::plotting::{
     resize_surface as runtime_resize_surface, select_figure as runtime_select_figure,
     set_hold as runtime_set_hold, web_renderer_ready as runtime_plot_renderer_ready,
     handle_plot_surface_event as runtime_handle_plot_surface_event,
+    fit_surface_extents as runtime_fit_surface_extents,
+    reset_surface_camera as runtime_reset_surface_camera,
     FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
 #[cfg(target_arch = "wasm32")]
@@ -878,6 +880,18 @@ pub fn handle_plot_surface_event(surface_id: u32, event: JsValue) -> Result<(), 
     };
 
     runtime_handle_plot_surface_event(surface_id, event).map_err(|err| js_error(err.message()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = "fitPlotSurfaceExtents")]
+pub fn fit_plot_surface_extents(surface_id: u32) -> Result<(), JsValue> {
+    runtime_fit_surface_extents(surface_id).map_err(|err| js_error(err.message()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = "resetPlotSurfaceCamera")]
+pub fn reset_plot_surface_camera(surface_id: u32) -> Result<(), JsValue> {
+    runtime_reset_surface_camera(surface_id).map_err(|err| js_error(err.message()))
 }
 
 #[cfg(target_arch = "wasm32")]

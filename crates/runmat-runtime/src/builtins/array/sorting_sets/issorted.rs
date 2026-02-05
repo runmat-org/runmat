@@ -1050,7 +1050,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, Type, Value};
+    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type, Value};
 
     fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::issorted_builtin(value, rest))
@@ -1066,7 +1066,10 @@ pub(crate) mod tests {
 
     #[test]
     fn issorted_type_resolver_bool() {
-        assert_eq!(bool_output_type(&[Type::tensor()]), Type::Bool);
+        assert_eq!(
+            bool_output_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::Bool
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

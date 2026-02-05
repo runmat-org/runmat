@@ -260,7 +260,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use num_complex::Complex64;
-    use runmat_builtins::{CharArray, IntValue, LogicalArray, Type};
+    use runmat_builtins::{CharArray, IntValue, LogicalArray, ResolveContext, Type};
 
     fn atanh_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::atanh_builtin(value))
@@ -272,9 +272,12 @@ pub(crate) mod tests {
 
     #[test]
     fn atanh_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(3)]),
-        }]);
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -285,9 +288,12 @@ pub(crate) mod tests {
 
     #[test]
     fn atanh_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(&[Type::Tensor {
-            shape: Some(vec![Some(1), Some(1)]),
-        }]);
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(1), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(out, Type::Num);
     }
 

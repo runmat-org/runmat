@@ -684,7 +684,7 @@ pub(crate) mod tests {
     #![allow(non_snake_case)]
 
     use super::*;
-    use runmat_builtins::{CellArray, Tensor, Type};
+    use runmat_builtins::{CellArray, ResolveContext, Tensor, Type};
 
     fn extract_between_builtin(
         text: Value,
@@ -1006,6 +1006,9 @@ pub(crate) mod tests {
 
     #[test]
     fn extract_between_type_preserves_text() {
-        assert_eq!(text_preserve_type(&[Type::String]), Type::String);
+        assert_eq!(
+            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
     }
 }

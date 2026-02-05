@@ -64,7 +64,7 @@ pub(crate) mod tests {
         block_on(super::argsort_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{ComplexTensor, IntValue, Tensor, Type, Value};
+    use runmat_builtins::{ComplexTensor, IntValue, ResolveContext, Tensor, Type, Value};
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
@@ -86,7 +86,10 @@ pub(crate) mod tests {
 
     #[test]
     fn argsort_type_resolver_indices() {
-        assert_eq!(index_output_type(&[Type::tensor()]), Type::tensor());
+        assert_eq!(
+            index_output_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::tensor()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

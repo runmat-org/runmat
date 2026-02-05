@@ -550,7 +550,7 @@ fn name_key(value: &Value) -> Option<NameKey> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, LogicalArray, Tensor, Type};
+    use runmat_builtins::{CellArray, LogicalArray, ResolveContext, Tensor, Type};
 
     fn split_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::split_builtin(text, rest))
@@ -954,6 +954,9 @@ pub(crate) mod tests {
 
     #[test]
     fn split_type_is_string_array() {
-        assert_eq!(string_array_type(&[Type::String]), Type::cell_of(Type::String));
+        assert_eq!(
+            string_array_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::cell_of(Type::String)
+        );
     }
 }

@@ -541,7 +541,7 @@ pub(crate) mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
-    use runmat_builtins::{IntValue, Type};
+    use runmat_builtins::{IntValue, ResolveContext, Type};
 
     fn join_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::join_builtin(text, rest))
@@ -957,6 +957,9 @@ pub(crate) mod tests {
 
     #[test]
     fn join_type_concatenates_text() {
-        assert_eq!(text_concat_type(&[Type::String]), Type::String);
+        assert_eq!(
+            text_concat_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
     }
 }

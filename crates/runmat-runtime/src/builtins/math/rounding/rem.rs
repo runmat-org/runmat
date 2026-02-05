@@ -354,7 +354,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::RuntimeError;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor, Type};
+    use runmat_builtins::{
+        CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type,
+    };
 
     fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         block_on(super::rem_builtin(lhs, rhs))
@@ -370,14 +372,17 @@ pub(crate) mod tests {
 
     #[test]
     fn rem_type_preserves_tensor_shape() {
-        let out = numeric_binary_type(&[
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            },
-        ]);
+        let out = numeric_binary_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -388,12 +393,15 @@ pub(crate) mod tests {
 
     #[test]
     fn rem_type_scalar_and_tensor_returns_tensor() {
-        let out = numeric_binary_type(&[
-            Type::Num,
-            Type::Tensor {
-                shape: Some(vec![Some(4), Some(1)]),
-            },
-        ]);
+        let out = numeric_binary_type(
+            &[
+                Type::Num,
+                Type::Tensor {
+                    shape: Some(vec![Some(4), Some(1)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -404,7 +412,7 @@ pub(crate) mod tests {
 
     #[test]
     fn rem_type_scalar_returns_num() {
-        let out = numeric_binary_type(&[Type::Num, Type::Int]);
+        let out = numeric_binary_type(&[Type::Num, Type::Int], &ResolveContext::new(Vec::new()));
         assert_eq!(out, Type::Num);
     }
 

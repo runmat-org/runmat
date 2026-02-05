@@ -406,7 +406,9 @@ pub(crate) mod tests {
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, IntValue, LogicalArray, Tensor, Type, Value};
+    use runmat_builtins::{
+        CharArray, IntValue, LogicalArray, ResolveContext, Tensor, Type, Value,
+    };
 
     fn ceil_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::ceil_builtin(value, rest))
@@ -422,9 +424,12 @@ pub(crate) mod tests {
 
     #[test]
     fn ceil_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(&[Type::Tensor {
-            shape: Some(vec![Some(2), Some(3)]),
-        }]);
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {
@@ -435,9 +440,12 @@ pub(crate) mod tests {
 
     #[test]
     fn ceil_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(&[Type::Tensor {
-            shape: Some(vec![Some(1), Some(1)]),
-        }]);
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(1), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(out, Type::Num);
     }
 
