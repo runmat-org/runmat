@@ -10,13 +10,19 @@ variable "region" {
 }
 
 variable "telemetry_domain" {
-  description = "Delegated subdomain served by Cloud DNS (e.g. telemetry.runmat.org)"
+  description = "Primary telemetry subdomain (legacy; use telemetry_domains for multi-domain)"
   type        = string
   default     = "telemetry.runmat.org"
 }
 
+variable "telemetry_domains" {
+  description = "Telemetry subdomains to map (e.g. [telemetry.runmat.org, telemetry.runmat.com]); when empty, defaults to telemetry_domain plus telemetry.runmat.com"
+  type        = list(string)
+  default     = []
+}
+
 variable "telemetry_udp_subdomain" {
-  description = "Subdomain used for UDP intake (e.g. udp.telemetry.runmat.org)"
+  description = "Legacy UDP subdomain (derived from telemetry_domains when set)"
   type        = string
   default     = "udp.telemetry.runmat.org"
 }

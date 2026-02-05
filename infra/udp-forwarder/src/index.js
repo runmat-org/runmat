@@ -3,7 +3,7 @@ import net from 'node:net';
 import { fetch } from 'undici';
 
 const UDP_PORT = Number(process.env.UDP_PORT || 7846);
-const HTTP_ENDPOINT = process.env.TELEMETRY_HTTP_ENDPOINT || 'https://telemetry.runmat.org/ingest';
+const HTTP_ENDPOINT = process.env.TELEMETRY_HTTP_ENDPOINT || 'https://telemetry.runmat.com/ingest';
 const TELEMETRY_KEY = process.env.TELEMETRY_INGESTION_KEY || '';
 const CONCURRENCY = Number(process.env.FORWARDER_CONCURRENCY || 8);
 const HEALTH_PORT = Number(process.env.HEALTH_PORT || 9000);

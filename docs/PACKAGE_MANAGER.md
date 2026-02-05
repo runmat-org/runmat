@@ -28,7 +28,7 @@ This mirrors what works for modern ecosystems (crates.io, npm, PyPI, Julia Pkg) 
 
 - `.runmat` — project config (TOML). Declares dependencies and registries. See `/docs/configuration`.
 - `runmat.lock` — lockfile with resolved versions and sources.
-- Registries — default `https://packages.runmat.org` plus user registries.
+- Registries — default `https://packages.runmat.com` plus user registries.
 - Packages — either native (Rust) or source (MATLAB). Both carry metadata and docs.
 
 ### Package spec (declared in `.runmat`)

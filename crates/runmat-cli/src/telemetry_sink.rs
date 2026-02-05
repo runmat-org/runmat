@@ -12,7 +12,7 @@ use std::thread;
 use std::time::Duration;
 use uuid::Uuid;
 
-const DEFAULT_HTTP_ENDPOINT: &str = "https://telemetry.runmat.org/ingest";
+const DEFAULT_HTTP_ENDPOINT: &str = "https://telemetry.runmat.com/ingest";
 const MIN_QUEUE_SIZE: usize = 8;
 const DEFAULT_DRAIN_TIMEOUT_MS: u64 = 50;
 
@@ -46,7 +46,9 @@ pub fn init(config: &RuntimeTelemetryConfig) {
 
 /// Returns the configured telemetry sink for `runmat-core`, if enabled.
 pub fn sink() -> Option<Arc<dyn TelemetrySink>> {
-    CLIENT.get().map(|client| client.clone() as Arc<dyn TelemetrySink>)
+    CLIENT
+        .get()
+        .map(|client| client.clone() as Arc<dyn TelemetrySink>)
 }
 
 /// Capture the current acceleration provider snapshot, if one is registered.
@@ -352,4 +354,3 @@ enum TelemetryDrainMode {
     None,
     All,
 }
-

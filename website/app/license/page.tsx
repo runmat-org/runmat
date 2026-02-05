@@ -14,22 +14,22 @@ const jsonLd = {
   "@graph": [
     {
       "@type": "WebPage",
-      "@id": "https://runmat.org/license#webpage",
-      url: "https://runmat.org/license",
+      "@id": "https://runmat.com/license#webpage",
+      url: "https://runmat.com/license",
       name: "RunMat License",
       description:
         "RunMat is licensed under the MIT License with Attribution Requirements and Commercial Scientific Software Company Copyleft Provisions. Free for everyone with clear terms.",
       inLanguage: "en",
-      isPartOf: { "@id": "https://runmat.org/#website" },
-      author: { "@id": "https://runmat.org/#organization" },
-      publisher: { "@id": "https://runmat.org/#organization" },
-      mainEntity: { "@id": "https://runmat.org/license#faq" },
+      isPartOf: { "@id": "https://runmat.com/#website" },
+      author: { "@id": "https://runmat.com/#organization" },
+      publisher: { "@id": "https://runmat.com/#organization" },
+      mainEntity: { "@id": "https://runmat.com/license#faq" },
     },
     {
       "@type": "FAQPage",
-      "@id": "https://runmat.org/license#faq",
-      mainEntityOfPage: { "@id": "https://runmat.org/license#webpage" },
-      publisher: { "@id": "https://runmat.org/#organization" },
+      "@id": "https://runmat.com/license#faq",
+      mainEntityOfPage: { "@id": "https://runmat.com/license#webpage" },
+      publisher: { "@id": "https://runmat.com/#organization" },
       mainEntity: [
         {
           "@type": "Question",

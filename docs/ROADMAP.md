@@ -9,7 +9,7 @@ RunMat is a fast, local-first MATLAB-compatible runtime. Same syntax engineers h
 ## Current Shape
 
 - **CLI** — Install and run `runmat` in the terminal; REPL, script execution, Jupyter kernel.
-- **Browser** — No-install sandbox at [runmat.org/sandbox](https://runmat.org/sandbox); full IDE experience, local execution in the browser via WebAssembly/WebGPU.
+- **Browser** — No-install sandbox at [runmat.com/sandbox](https://runmat.com/sandbox); full IDE experience, local execution in the browser via WebAssembly/WebGPU.
 - **Desktop app** — In development; will offer a native-style experience, local project management, and optional integrations.
 
 ## Towards 1.0
