@@ -98,7 +98,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug?: st
     });
   }
 
-  const baseUrl = "https://runmat.org";
+  const baseUrl = "https://runmat.com";
   const path = `/docs${slug.length ? `/${slug.join("/")}` : ""}`;
   const pageUrl = `${baseUrl}${path}`;
   const seo = (node as DocsNode).seo;
@@ -141,7 +141,7 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
   const { body, data } = parsed;
   const jsonLdObj = isJsonLdObject(data.jsonLd);
   const jsonLdString = jsonLdObj ? JSON.stringify(jsonLdObj).replace(/<\//g, "<\\/") : undefined;
-  const baseUrl = "https://runmat.org";
+  const baseUrl = "https://runmat.com";
   const path = `/docs${slug.length ? `/${slug.join("/")}` : ""}`;
   const pageUrl = `${baseUrl}${path}`;
   const pageTitle = (node as DocsNode).title ?? "Docs";
@@ -154,9 +154,9 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
     name: pageTitle,
     ...(pageDescription ? { description: pageDescription } : {}),
     inLanguage: "en",
-    isPartOf: { "@id": "https://runmat.org/#website" },
-    author: { "@id": "https://runmat.org/#organization" },
-    publisher: { "@id": "https://runmat.org/#organization" },
+    isPartOf: { "@id": "https://runmat.com/#website" },
+    author: { "@id": "https://runmat.com/#organization" },
+    publisher: { "@id": "https://runmat.com/#organization" },
   };
   const pageJsonLdString = JSON.stringify(pageJsonLd).replace(/<\//g, "<\\/");
   const crumbs = findPathBySlug(slug) ?? [];
@@ -241,5 +241,4 @@ function findRepoRoot(start: string): string | undefined {
   }
   return undefined;
 }
-
 

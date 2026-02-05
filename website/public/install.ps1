@@ -1,5 +1,5 @@
 # RunMat Installation Script for Windows
-# Usage: iwr https://runmat.org/install.ps1 | iex
+# Usage: iwr https://runmat.com/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
@@ -7,9 +7,9 @@ $ErrorActionPreference = "Stop"
 $REPO = "runmat-org/runmat"
 $BINARY_NAME = "runmat.exe"
 $INSTALL_DIR = "$env:USERPROFILE\.runmat\bin"
-$WEBSITE_URL = "https://runmat.org"
+$WEBSITE_URL = "https://runmat.com"
 
-$TELEMETRY_ENDPOINT = "https://runmat.org/api/telemetry"
+$TELEMETRY_ENDPOINT = "https://runmat.com/api/telemetry"
 $TELEMETRY_ID_FILE = "$env:USERPROFILE\.runmat\telemetry_id"
 $InstallSession = [guid]::NewGuid().ToString()
 

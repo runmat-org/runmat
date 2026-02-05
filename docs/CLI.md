@@ -6,7 +6,7 @@ offers: first-class subcommands, rich help, environment-variable integration,
 snapshot management, a built-in benchmarker, a Jupyter kernel, and deep control
 over the JIT compiler and garbage collector.
 
-**Try RunMat without installing:** the [browser sandbox](https://runmat.org/sandbox) runs in your browser with no CLI. For installation and CLI vs browser paths, see [Getting Started](/docs/getting-started).
+**Try RunMat without installing:** the [browser sandbox](https://runmat.com/sandbox) runs in your browser with no CLI. For installation and CLI vs browser paths, see [Getting Started](/docs/getting-started).
 
 Read this end-to-end once, then use it as a reference.
 

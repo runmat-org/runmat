@@ -77,7 +77,7 @@ When calling `initRunMat`, pass a `snapshot` object to control how the initial w
 ```ts
 await initRunMat({
   snapshot: {
-    url: "https://cdn.runmat.org/snapshots/core.bin"
+    url: "https://cdn.runmat.com/snapshots/core.bin"
   }
 });
 ```

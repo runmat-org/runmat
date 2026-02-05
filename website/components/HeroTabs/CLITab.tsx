@@ -16,12 +16,12 @@ interface CLITabProps {
 function getInstallCommand(platform: Platform, psVersion: PowerShellVersion): string {
   if (platform === "windows") {
     if (psVersion === "ps7") {
-      return 'powershell -c "irm runmat.org/install.ps1|iex"';
+      return 'powershell -c "irm runmat.com/install.ps1|iex"';
     } else {
-      return 'powershell -c "irm runmat.org/install-legacy.ps1|iex"';
+      return 'powershell -c "irm runmat.com/install-legacy.ps1|iex"';
     }
   }
-  return "curl -fsSL https://runmat.org/install.sh | sh";
+  return "curl -fsSL https://runmat.com/install.sh | sh";
 }
 
 function getPlatformLabel(platform: Platform): string {

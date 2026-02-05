@@ -24,7 +24,7 @@ export function BrowserTabContent() {
           data-ph-capture-attribute-source="getting-started-browser-tab"
           data-ph-capture-attribute-cta="runmat-org-sandbox"
         >
-          runmat.org/sandbox
+          runmat.com/sandbox
         </Link>{" "}
         to start. Works in Chrome, Edge, Firefox, and Safari. For GPU acceleration, use a browser with WebGPU (Chrome 113+, Edge 113+, Safari 18+, Firefox 139+).
       </p>

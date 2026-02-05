@@ -5,11 +5,10 @@ edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
 description = "Shared telemetry schema for RunMat runtime events"
-homepage = "https://runmat.org"
+homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 runmat-accelerate-api = { workspace = true }
-

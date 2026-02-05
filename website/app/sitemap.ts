@@ -7,7 +7,7 @@ import { flatten } from '@/content/docs'
 export const dynamic = 'force-static'
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = 'https://runmat.org'
+  const baseUrl = 'https://runmat.com'
   const currentDate = new Date()
 
   const staticRoutes: MetadataRoute.Sitemap = [

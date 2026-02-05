@@ -4,7 +4,7 @@ This directory provisions the RunMat services on Google Cloud Platform.
 
 The following services are currently provisioned:
 
-- Cloud DNS zone for `telemetry.runmat.org`
+- Cloud DNS zones for `telemetry.runmat.org` and `telemetry.runmat.com`
 - Cloud Run service that hosts the HTTP telemetry worker
 - UDP forwarder running on a regional Managed Instance Group + UDP load balancer
 
@@ -71,4 +71,4 @@ Repository secrets required by the workflow:
 | `TELEMETRY_INGESTION_KEY` | Required shared secret (`x-telemetry-key`); also baked into release builds |
 | `GA_MEASUREMENT_ID` / `GA_API_SECRET` | Optional GA4 forwarding |
 
-Delegate `telemetry.runmat.org` to the Cloud DNS name servers emitted by `terraform output telemetry_name_servers`. Once delegated, Cloud Run’s domain mapping automatically issues TLS for `https://telemetry.runmat.org/ingest`, and the UDP forwarding rule is reachable at `udp.telemetry.runmat.org:7846`.
+Delegate `telemetry.runmat.org` and `telemetry.runmat.com` to the Cloud DNS name servers emitted by `terraform output telemetry_name_servers`. Once delegated, Cloud Run’s domain mapping automatically issues TLS for both HTTPS endpoints (e.g. `https://telemetry.runmat.com/ingest`), and the UDP forwarding rule is reachable at both `udp.telemetry.runmat.org:7846` and `udp.telemetry.runmat.com:7846`.

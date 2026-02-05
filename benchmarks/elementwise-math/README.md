@@ -51,7 +51,7 @@ Full sources:
 
 ## Why RunMat is fast (accelerate + fusion)
 
-RunMat fuses elementwise stages and keeps tensors resident on device between steps, while random number generation and updates execute in large, coalesced kernels—a strong fit for GPUs. For the big picture on fusion and residency, see the [Introduction to RunMat on the GPU](https://runmat.org/docs/accelerate/fusion-intro) document.
+RunMat fuses elementwise stages and keeps tensors resident on device between steps, while random number generation and updates execute in large, coalesced kernels—a strong fit for GPUs. For the big picture on fusion and residency, see the [Introduction to RunMat on the GPU](https://runmat.com/docs/accelerate/fusion-intro) document.
 
 ---
 

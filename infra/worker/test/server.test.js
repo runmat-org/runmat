@@ -95,11 +95,11 @@ describe('telemetry worker', () => {
         cid: 'abc123',
         session_id: 'session-xyz',
         run_kind: 'repl',
-        current_url: 'https://runmat.org/sandbox?it=off',
+        current_url: 'https://runmat.com/sandbox?it=off',
         payload: { jit_enabled: true, accelerate_enabled: true },
       });
     expect(res.status).toBe(200);
     const body = JSON.parse(fetch.mock.calls[0][1].body);
-    expect(body.properties.$current_url).toBe('https://runmat.org/sandbox?it=off');
+    expect(body.properties.$current_url).toBe('https://runmat.com/sandbox?it=off');
   });
 });

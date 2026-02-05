@@ -21,7 +21,7 @@ ogDescription: "RunMat, Octave, Julia, and Python compared: performance, compati
 twitterCard: "summary_large_image"
 twitterTitle: "Best Free MATLAB Alternatives in 2025"
 twitterDescription: "RunMat, Octave, Julia, and Python compared for engineers. Which is fastest, most compatible, and free?"
-canonical: "https://runmat.org/blog/free-matlab-alternatives"
+canonical: "https://runmat.com/blog/free-matlab-alternatives"
 jsonLd:
   "@context": "https://schema.org"
   "@graph":
@@ -30,18 +30,18 @@ jsonLd:
         - "@type": "ListItem"
           position: 1
           name: "RunMat"
-          item: "https://runmat.org"
+          item: "https://runmat.com"
         - "@type": "ListItem"
           position: 2
           name: "Blog"
-          item: "https://runmat.org/blog"
+          item: "https://runmat.com/blog"
         - "@type": "ListItem"
           position: 3
           name: "Free MATLAB Alternatives 2026"
-          item: "https://runmat.org/blog/free-matlab-alternatives"
+          item: "https://runmat.com/blog/free-matlab-alternatives"
 
     - "@type": "TechArticle"
-      "@id": "https://runmat.org/blog/free-matlab-alternatives#article"
+      "@id": "https://runmat.com/blog/free-matlab-alternatives#article"
       headline: "Free MATLAB Alternatives 2026: RunMat vs Octave, Julia, and Python"
       description: "A deep comparison of free MATLAB alternatives (RunMat, GNU Octave, Julia, Python) focusing on engineering performance and compatibility."
       image: "https://web.runmatstatic.com/free-matlab-alternatives-2026.png"
@@ -56,7 +56,7 @@ jsonLd:
           name: "Nabeel Allana"
           url: "https://x.com/nabeelallana"
       publisher:
-        "@id": "https://runmat.org/#organization"
+        "@id": "https://runmat.com/#organization"
       about:
         - "@type": "SoftwareApplication"
           name: "RunMat"
@@ -313,4 +313,4 @@ These tools aren't mutually exclusive; use Python for breadth, Julia for perform
 
 And with options like RunMat emerging, it's possible to get the best attributes (high performance, nearly 100% MATLAB compatibility, cross-vendor GPU acceleration, and open-source freedom) all in one package. 
 
-*Try RunMat free in your browser at <a href="/sandbox" data-ph-capture-attribute-destination="sandbox" data-ph-capture-attribute-source="blog-matlab-alternatives" data-ph-capture-attribute-cta="runmat-org-sandbox">runmat.org/sandbox</a>, or visit [runmat.org](https://runmat.org) for downloads and docs. RunMat is a free, open source community project developed by [Dystr](https://dystr.com).*
+*Try RunMat free in your browser at <a href="/sandbox" data-ph-capture-attribute-destination="sandbox" data-ph-capture-attribute-source="blog-matlab-alternatives" data-ph-capture-attribute-cta="runmat-org-sandbox">runmat.com/sandbox</a>, or visit [runmat.com](https://runmat.com) for downloads and docs. RunMat is a free, open source community project developed by [Dystr](https://dystr.com).*

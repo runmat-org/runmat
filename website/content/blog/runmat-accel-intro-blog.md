@@ -17,7 +17,7 @@ ogDescription: "RunMat Accelerate takes MATLAB-style array code and plans it acr
 twitterCard: "summary_large_image"
 twitterTitle: "Introducing RunMat Accelerate: The Fastest Runtime for Your Math"
 twitterDescription: "See how RunMat Accelerate turns a real 4K image pipeline into fused GPU work and stacks up against MATLAB, PyTorch, and Julia as the fastest runtime for your math."
-canonical: "https://runmat.org/blog/runmat-accelerate-fastest-runtime-for-your-math"
+canonical: "https://runmat.com/blog/runmat-accelerate-fastest-runtime-for-your-math"
 
 jsonLd:
   "@context": "https://schema.org"
@@ -27,18 +27,18 @@ jsonLd:
         - "@type": "ListItem"
           position: 1
           name: "RunMat"
-          item: "https://runmat.org"
+          item: "https://runmat.com"
         - "@type": "ListItem"
           position: 2
           name: "Blog"
-          item: "https://runmat.org/blog"
+          item: "https://runmat.com/blog"
         - "@type": "ListItem"
           position: 3
           name: "Introducing RunMat Accelerate"
-          item: "https://runmat.org/blog/runmat-accelerate-fastest-runtime-for-your-math"
+          item: "https://runmat.com/blog/runmat-accelerate-fastest-runtime-for-your-math"
 
     - "@type": "BlogPosting"
-      "@id": "https://runmat.org/blog/runmat-accelerate-fastest-runtime-for-your-math#article"
+      "@id": "https://runmat.com/blog/runmat-accelerate-fastest-runtime-for-your-math#article"
       headline: "Introducing RunMat Accelerate: The Fastest Runtime for Your Math"
       alternativeHeadline: "RunMat vs PyTorch vs Julia: GPU Benchmarks"
       description: "RunMat Accelerate fuses MATLAB-style array math into fast CPU and GPU kernels, eliminating the need for CUDA or manual device management."
@@ -61,7 +61,7 @@ jsonLd:
       about:
         - "@type": "SoftwareApplication"
           name: "RunMat"
-          sameAs: "https://runmat.org"
+          sameAs: "https://runmat.com"
           applicationCategory: "ScientificApplication"
           operatingSystem: ["Windows", "macOS", "Linux"]
           offers:
@@ -93,7 +93,7 @@ jsonLd:
         - "@type": "DefinedTerm"
           name: "RunMat Accelerate"
           description: "An engine feature within RunMat that automatically fuses array operations into optimized kernels and routes them to CPU or GPU based on performance heuristics."
-          url: "https://runmat.org/blog/runmat-accelerate-fastest-runtime-for-your-math#runmat-accelerate"
+          url: "https://runmat.com/blog/runmat-accelerate-fastest-runtime-for-your-math#runmat-accelerate"
 
     - "@type": "FAQPage"
       mainEntity:
@@ -387,6 +387,5 @@ Yes. The planner chooses CPU JIT/BLAS or GPU per step. Fusion keeps GPU regions 
 
 **How do I report an issue or contribute?**  
  Open an issue or PR in the repository. Include OS, GPU/CPU info, a minimal script, and steps to reproduce. [GitHub](https://github.com/runmat-org/runmat)
-
 
 

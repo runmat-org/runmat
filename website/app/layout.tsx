@@ -14,7 +14,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://runmat.org'),
+  metadataBase: new URL('https://runmat.com'),
   title: {
     default: "RunMat - Fast, Free, Modern MATLAB Runtime",
     template: "%s | RunMat"
@@ -37,7 +37,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    url: 'https://runmat.org',
+    url: 'https://runmat.com',
     siteName: 'RunMat',
     title: 'RunMat - High-Performance MATLAB/Octave Runtime',
     description: 'Pre-release MATLAB-style runtime delivering benchmarked CPU/GPU speedups; plotting currently covers simple 2D line/scatter while 3D and richer chart types are still being built.',
@@ -80,14 +80,14 @@ export default function RootLayout({
               "@graph": [
                 {
                   "@type": "Organization",
-                  "@id": "https://runmat.org/#organization",
+                   "@id": "https://runmat.com/#organization",
                   "name": "RunMat",
                   "alternateName": ["RunMat by Dystr", "Dystr"],
                   "legalName": "Dystr Inc.",
-                  "url": "https://runmat.org",
+                   "url": "https://runmat.com",
                   "logo": {
                     "@type": "ImageObject",
-                    "url": "https://runmat.org/runmat-logo.svg",
+                     "url": "https://runmat.com/runmat-logo.svg",
                     "caption": "RunMat"
                   },
                   "description":
@@ -112,25 +112,25 @@ export default function RootLayout({
                 },
                 {
                   "@type": "WebSite",
-                  "@id": "https://runmat.org/#website",
-                  "url": "https://runmat.org",
+                   "@id": "https://runmat.com/#website",
+                   "url": "https://runmat.com",
                   "name": "RunMat",
                   "description":
                     "The Fastest Runtime for Your Math. RunMat fuses back-to-back ops into fewer GPU steps and intelligently manages memory.",
-                  "publisher": { "@id": "https://runmat.org/#organization" },
+                   "publisher": { "@id": "https://runmat.com/#organization" },
                   "image": "https://web.runmatstatic.com/runmat-sandbox-dark.png",
                   "potentialAction": {
                     "@type": "SearchAction",
                     "target": {
                       "@type": "EntryPoint",
-                      "urlTemplate": "https://runmat.org/search?q={search_term_string}"
+                       "urlTemplate": "https://runmat.com/search?q={search_term_string}"
                     },
                     "query-input": "required name=search_term_string"
                   }
                 },
                 {
                   "@type": "SoftwareApplication",
-                  "@id": "https://runmat.org/#software",
+                   "@id": "https://runmat.com/#software",
                   "name": "RunMat",
                   "description":
                     "RunMat is a high-performance, open-source runtime for math that lets you run MATLAB-syntax code in the browser, on the desktop, or from the CLI, while getting GPU-speed execution.",
@@ -151,10 +151,10 @@ export default function RootLayout({
                     "priceCurrency": "USD",
                     "availability": "https://schema.org/InStock"
                   },
-                  "author": { "@id": "https://runmat.org/#organization" },
-                  "publisher": { "@id": "https://runmat.org/#organization" },
-                  "downloadUrl": "https://runmat.org/download",
-                  "mainEntityOfPage": { "@id": "https://runmat.org/#website" },
+                   "author": { "@id": "https://runmat.com/#organization" },
+                   "publisher": { "@id": "https://runmat.com/#organization" },
+                   "downloadUrl": "https://runmat.com/download",
+                   "mainEntityOfPage": { "@id": "https://runmat.com/#website" },
                   "screenshot": {
                     "@type": "ImageObject",
                     "url": "https://web.runmatstatic.com/runmat-sandbox-dark.png",

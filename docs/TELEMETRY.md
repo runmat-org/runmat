@@ -97,9 +97,9 @@ Only aggregated counts and metadata listed above are sent. For broader privacy q
 
 ## Where does telemetry go?
 
-Clients send UDP (best effort) to `udp.telemetry.runmat.org:7846` or HTTPS POSTs to `https://telemetry.runmat.org/ingest`.
+Clients send UDP (best effort) to `udp.telemetry.runmat.com:7846` (legacy `udp.telemetry.runmat.org:7846` still supported) or HTTPS POSTs to `https://telemetry.runmat.com/ingest` (legacy `https://telemetry.runmat.org/ingest`).
 
-- HTTPS traffic lands on a Cloud Run service listening at `https://telemetry.runmat.org/ingest` (the source code is available at `infra/worker/` in the GitHub repo for transparency), normalizes payloads, and forwards to an analytics service (PostHog and Google Analytics [GA4] are used by the RunMat team for analytics).
+- HTTPS traffic lands on a Cloud Run service listening at `https://telemetry.runmat.com/ingest` (the source code is available at `infra/worker/` in the GitHub repo for transparency), normalizes payloads, and forwards to an analytics service (PostHog and Google Analytics [GA4] are used by the RunMat team for analytics).
 - The UDP path flows through a lightweight Google Cloud UDP load balancer into a managed instance group running the forwarder container (code under `infra/udp-forwarder/` in the repo). Each forwarder replays datagrams to the Cloud Run endpoint asynchronously so the CLI never blocks.
 
 No payloads are stored server-side beyond transient buffers; failures are logged and the CLI continues immediately.

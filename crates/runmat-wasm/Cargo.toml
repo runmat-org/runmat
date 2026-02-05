@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
 description = "WebAssembly bindings for embedding RunMat in browsers"
-homepage = "https://runmat.org"
+homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 
 [lib]

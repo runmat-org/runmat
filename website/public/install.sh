@@ -1,6 +1,6 @@
 #!/bin/bash
 # RunMat Installation Script
-# Usage: curl -fsSL https://runmat.org/install.sh | sh
+# Usage: curl -fsSL https://runmat.com/install.sh | sh
 
 set -e
 
@@ -15,11 +15,11 @@ NC='\033[0m' # No Color
 REPO="runmat-org/runmat"
 BINARY_NAME="runmat"
 INSTALL_DIR="$HOME/.local/bin"
-WEBSITE_URL="https://runmat.org"
+WEBSITE_URL="https://runmat.com"
 
 # Optional: Telemetry relay (best-effort, anonymous)
 TELEMETRY_ID_FILE="$HOME/.runmat/telemetry_id"
-TELEMETRY_ENDPOINT="https://runmat.org/api/telemetry"
+TELEMETRY_ENDPOINT="https://runmat.com/api/telemetry"
 
 log() {
     printf "%b[INFO]%b %s\n" "$GREEN" "$NC" "$1"

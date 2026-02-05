@@ -56,49 +56,49 @@ export function builtinJsonLD(slug: string): string {
 
             {
                 "@type": "WebPage",
-                "@id": `https://runmat.org/docs/reference/builtins/${builtin?.title}`,
-                "url": `https://runmat.org/docs/reference/builtins/${builtin?.title}`,
+                "@id": `https://runmat.com/docs/reference/builtins/${builtin?.title}`,
+                "url": `https://runmat.com/docs/reference/builtins/${builtin?.title}`,
                 "name": `${builtin?.title} - RunMat Reference`,
-                "isPartOf": {"@id": "https://runmat.org/#website"},
-                "author": {"@id": "https://runmat.org/#organization"},
-                "publisher": {"@id": "https://runmat.org/#organization"},
+                "isPartOf": {"@id": "https://runmat.com/#website"},
+                "author": {"@id": "https://runmat.com/#organization"},
+                "publisher": {"@id": "https://runmat.com/#organization"},
                 "primaryImageOfPage": {
                     "@type": "ImageObject",
                     "url": "https://web.runmatstatic.com/runmat-sandbox-dark.png"
                 },
-                "breadcrumb": {"@id": `https://runmat.org/docs/reference/builtins/${builtin?.title}#breadcrumbs`},
+                "breadcrumb": {"@id": `https://runmat.com/docs/reference/builtins/${builtin?.title}#breadcrumbs`},
                 "mainEntity": {"@id": "#article"}
             },
 
 
             {
                 "@type": "BreadcrumbList",
-                "@id": `https://runmat.org/docs/reference/builtins/${builtin?.title}#breadcrumbs`,
+                "@id": `https://runmat.com/docs/reference/builtins/${builtin?.title}#breadcrumbs`,
                 "itemListElement": [
                     {
                         "@type": "ListItem",
                         "position": 1,
                         "name": "Docs",
-                        "item": "https://runmat.org/docs"
+                        "item": "https://runmat.com/docs"
                     },
                     {
                         "@type": "ListItem",
                         "position": 2,
                         "name": "Reference",
-                        "item": "https://runmat.org/docs/matlab-function-reference"
+                        "item": "https://runmat.com/docs/matlab-function-reference"
                     },
                     {
                         "@type": "ListItem",
                         "position": 3,
                         "name": builtin?.title,
-                        "item": `https://runmat.org/docs/reference/builtins/${builtin?.title}`
+                        "item": `https://runmat.com/docs/reference/builtins/${builtin?.title}`
                     }
                 ]
             },
 
             {
                 "@type": "APIReference",
-                "@id": `https://runmat.org/docs/reference/builtins/${builtin?.title}#article`,
+                "@id": `https://runmat.com/docs/reference/builtins/${builtin?.title}#article`,
                 "headline": `${builtin?.title} in MATLAB — runnable examples + source (RunMat)`,
                 "alternativeHeadline": `${builtin?.title} Function Reference`,
                 "description": `Run ${builtin?.title} in your browser. Open-source, JIT-compiled MATLAB-compatible documentation for ${builtin?.description}.`,
@@ -115,8 +115,8 @@ export function builtinJsonLD(slug: string): string {
                     "alternateName": "RunMat"
                 },
 
-                "author": {"@id": "https://runmat.org/#organization"},
-                "publisher": {"@id": "https://runmat.org/#organization"},
+                "author": {"@id": "https://runmat.com/#organization"},
+                "publisher": {"@id": "https://runmat.com/#organization"},
 
                 "about": {
                     "@type": "DefinedTerm",
@@ -125,7 +125,7 @@ export function builtinJsonLD(slug: string): string {
                     "inDefinedTermSet": {
                         "@type": "DefinedTermSet",
                         "name": "RunMat Builtin Functions",
-                        "url": "https://runmat.org/docs/matlab-function-reference"
+                        "url": "https://runmat.com/docs/matlab-function-reference"
                     }
                 },
 
@@ -166,7 +166,7 @@ export function builtinJsonLD(slug: string): string {
                     return {
                         "@type": "HowToStep",
                         "name": description,
-                        "url": `https://runmat.org/docs/reference/builtins/${builtin?.title}#${anchor}`,
+                        "url": `https://runmat.com/docs/reference/builtins/${builtin?.title}#${anchor}`,
                         "text": example.input,
                         "itemListElement": {
                             "@type": "HowToDirection",

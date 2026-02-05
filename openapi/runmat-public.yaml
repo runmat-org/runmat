@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: RunMat Public API
+  title: RunMat Server API
   description: ''
   license:
     name: ''
