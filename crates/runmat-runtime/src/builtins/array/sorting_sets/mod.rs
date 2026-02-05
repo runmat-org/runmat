@@ -7,5 +7,6 @@ pub mod issorted;
 pub mod setdiff;
 pub mod sort;
 pub mod sortrows;
+pub(crate) mod type_resolvers;
 pub mod union;
 pub mod unique;

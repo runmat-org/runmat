@@ -5,6 +5,7 @@ use runmat_macros::runtime_builtin;
 
 use super::plotting_error;
 use super::state::{set_hold, HoldMode};
+use crate::builtins::plotting::type_resolvers::string_type;
 
 use crate::BuiltinResult;
 
@@ -50,6 +51,7 @@ fn parse_mode_str(text: &str) -> BuiltinResult<HoldMode> {
     summary = "Toggle whether plots replace or append to the current axes.",
     keywords = "hold,plotting",
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::hold"
 )]
 pub fn hold_builtin(rest: Vec<Value>) -> crate::BuiltinResult<String> {

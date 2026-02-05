@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::{gpu_helpers, tensor};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::range")]
@@ -50,6 +51,17 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("range").build()
 }
 
+fn range_type(args: &[Type], _context: &ResolveContext) -> Type {
+    let Some(input) = args.first() else {
+        return Type::Unknown;
+    };
+    match input {
+        Type::Num | Type::Int | Type::Bool => Type::Num,
+        Type::Tensor { .. } | Type::Logical { .. } => Type::tensor(),
+        _ => Type::tensor(),
+    }
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::range")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "range",
@@ -67,6 +79,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Compute the difference between the maximum and minimum values.",
     keywords = "range,max,min,spread,gpu",
     accel = "reduction",
+    type_resolver(range_type),
     builtin_path = "crate::builtins::array::creation::range"
 )]
 async fn range_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -103,7 +116,32 @@ fn parse_arguments(args: &[Value]) -> crate::BuiltinResult<(DimSelection, NanMod
     let mut nan_mode = NanMode::Include;
     let mut selection_set = false;
 
-    for arg in args {
+    let tokens = tokens_from_values(args);
+    for (arg, token) in args.iter().zip(tokens.iter()) {
+        if let crate::builtins::common::arg_tokens::ArgToken::String(text) = token {
+            match text.as_str() {
+                "omitnan" => {
+                    nan_mode = NanMode::Omit;
+                    continue;
+                }
+                "includenan" => {
+                    nan_mode = NanMode::Include;
+                    continue;
+                }
+                "all" => {
+                    if selection_set && !matches!(selection, DimSelection::Auto) {
+                        return Err(builtin_error(
+                            "range: 'all' cannot be combined with an explicit dimension",
+                        ));
+                    }
+                    selection = DimSelection::All;
+                    selection_set = true;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+
         if let Some(mode) = parse_nan_flag(arg)? {
             nan_mode = mode;
             continue;
@@ -608,6 +646,23 @@ pub(crate) mod tests {
             Value::Num(n) => assert_eq!(n, 0.0),
             other => panic!("expected scalar zero, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn range_type_scalar_returns_num() {
+        assert_eq!(
+            range_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::Num
+        );
+    }
+
+    #[test]
+    fn range_type_tensor_returns_tensor() {
+        let out = range_type(
+            &[Type::Tensor { shape: None }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(out, Type::tensor());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

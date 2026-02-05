@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{linalg, tensor};
+use crate::builtins::math::linalg::type_resolvers::matmul_type;
 use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "mtimes";
@@ -71,6 +72,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Matrix multiplication with MATLAB-compatible semantics.",
     keywords = "mtimes,matrix multiplication,linear algebra,gpu",
     accel = "matmul",
+    type_resolver(matmul_type),
     builtin_path = "crate::builtins::math::linalg::ops::mtimes"
 )]
 async fn mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -364,7 +366,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, Tensor};
+    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Tensor, Type};
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -383,6 +385,27 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn mtimes_type_infers_output_shape() {
+        let out = matmul_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(3), Some(1)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(1)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

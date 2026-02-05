@@ -1,18 +1,23 @@
 //! MATLAB-compatible `cumprod` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, ProviderNanMode, ProviderScanDirection};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cumprod";
 
+fn cumprod_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    cumulative_numeric_type(args, ctx)
+}
+
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::reduction::type_resolvers::cumulative_numeric_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::cumprod")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -63,6 +68,7 @@ enum CumprodNanMode {
     summary = "Cumulative product of scalars, vectors, matrices, or N-D tensors.",
     keywords = "cumprod,cumulative product,running product,reverse,omitnan,gpu",
     accel = "reduction",
+    type_resolver(cumprod_type),
     builtin_path = "crate::builtins::math::reduction::cumprod"
 )]
 async fn cumprod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -481,6 +487,22 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, Tensor as BuiltinsTensor};
+
+    #[test]
+    fn cumprod_type_keeps_shape() {
+        let out = cumprod_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(2)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(2)])
+            }
+        );
+    }
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;

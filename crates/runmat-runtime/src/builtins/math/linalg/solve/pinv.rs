@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::linalg::type_resolvers::pinv_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "pinv";
@@ -73,6 +74,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Compute the Moore–Penrose pseudoinverse of a matrix using SVD.",
     keywords = "pinv,pseudoinverse,svd,least squares,gpu",
     accel = "pinv",
+    type_resolver(pinv_type),
     builtin_path = "crate::builtins::math::linalg::solve::pinv"
 )]
 async fn pinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -236,7 +238,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntValue};
+    use runmat_builtins::{CharArray, IntValue, ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -259,6 +261,22 @@ pub(crate) mod tests {
             Value::Num(v) => assert!((v - 0.25).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn pinv_type_swaps_dims() {
+        let out = pinv_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(2)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

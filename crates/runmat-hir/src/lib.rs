@@ -12,6 +12,7 @@ pub type Span = runmat_parser::Span;
 
 const DEFAULT_ERROR_NAMESPACE: &str = "MATLAB";
 static ERROR_NAMESPACE: OnceLock<RwLock<String>> = OnceLock::new();
+static CONST_NUM_LOOKUP: OnceLock<HashMap<String, f64>> = OnceLock::new();
 
 fn error_namespace_store() -> &'static RwLock<String> {
     ERROR_NAMESPACE.get_or_init(|| RwLock::new(DEFAULT_ERROR_NAMESPACE.to_string()))
@@ -284,6 +285,30 @@ pub struct LoweringResult {
     pub functions: HashMap<String, HirStmt>,
     pub var_types: Vec<Type>,
     pub var_names: HashMap<VarId, String>,
+    pub inferred_globals: HashMap<VarId, Type>,
+    pub inferred_function_envs: HashMap<String, HashMap<VarId, Type>>,
+    pub inferred_function_returns: HashMap<String, Vec<Type>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HirDiagnosticSeverity {
+    Warning,
+    Information,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HirDiagnostic {
+    pub message: String,
+    pub span: Span,
+    pub code: &'static str,
+    pub severity: HirDiagnosticSeverity,
+}
+
+fn merge_span(lhs: Span, rhs: Span) -> Span {
+    Span {
+        start: lhs.start.min(rhs.start),
+        end: lhs.end.max(rhs.end),
+    }
 }
 
 pub fn lower(
@@ -327,42 +352,367 @@ pub fn lower(
         }
     }
 
+    let inferred_function_returns = infer_function_output_types(&hir);
+    let inferred_function_envs = infer_function_variable_types(&hir);
+    let inferred_globals = infer_global_variable_types(&hir, &inferred_function_returns);
+
     Ok(LoweringResult {
         hir,
         variables,
         functions: ctx.functions,
         var_types: ctx.var_types,
         var_names,
+        inferred_globals,
+        inferred_function_envs,
+        inferred_function_returns,
     })
 }
 
-fn logical_builtin_return_type(name: &str, arg_types: &[Type]) -> Option<Type> {
-    let name = name.to_ascii_lowercase();
-    let is_logical = matches!(
-        name.as_str(),
-        "logical" | "not" | "and" | "or" | "xor" | "eq" | "ne" | "lt" | "le" | "gt" | "ge"
-    );
-    if !is_logical {
-        return None;
-    }
-    let has_array = arg_types
-        .iter()
-        .any(|t| matches!(t, Type::Tensor { .. } | Type::Logical));
-    let has_unknown = arg_types.iter().any(|t| matches!(t, Type::Unknown));
-    if has_array || has_unknown {
-        Some(Type::Logical)
-    } else {
-        Some(Type::Bool)
+fn logical_binary_result(lhs: &Type, rhs: &Type) -> Type {
+    match (lhs, rhs) {
+        (Type::Tensor { shape: Some(a) }, Type::Tensor { shape: Some(b) })
+        | (Type::Logical { shape: Some(a) }, Type::Logical { shape: Some(b) })
+        | (Type::Tensor { shape: Some(a) }, Type::Logical { shape: Some(b) })
+        | (Type::Logical { shape: Some(a) }, Type::Tensor { shape: Some(b) }) => Type::Logical {
+            shape: Some(runmat_builtins::shape_rules::broadcast_shapes(a, b)),
+        },
+        (Type::Tensor { shape: Some(a) }, Type::Num)
+        | (Type::Tensor { shape: Some(a) }, Type::Int)
+        | (Type::Tensor { shape: Some(a) }, Type::Bool)
+        | (Type::Logical { shape: Some(a) }, Type::Num)
+        | (Type::Logical { shape: Some(a) }, Type::Int)
+        | (Type::Logical { shape: Some(a) }, Type::Bool)
+        | (Type::Num, Type::Tensor { shape: Some(a) })
+        | (Type::Int, Type::Tensor { shape: Some(a) })
+        | (Type::Bool, Type::Tensor { shape: Some(a) })
+        | (Type::Num, Type::Logical { shape: Some(a) })
+        | (Type::Int, Type::Logical { shape: Some(a) })
+        | (Type::Bool, Type::Logical { shape: Some(a) }) => Type::Logical {
+            shape: Some(a.clone()),
+        },
+        (Type::Tensor { .. }, _)
+        | (_, Type::Tensor { .. })
+        | (Type::Logical { .. }, _)
+        | (_, Type::Logical { .. }) => Type::logical(),
+        _ => Type::Bool,
     }
 }
 
-fn logical_binary_result(lhs: &Type, rhs: &Type) -> Type {
-    if matches!(lhs, Type::Tensor { .. } | Type::Logical)
-        || matches!(rhs, Type::Tensor { .. } | Type::Logical)
-    {
-        Type::Logical
-    } else {
-        Type::Bool
+fn eval_const_num(expr: &HirExpr) -> Option<f64> {
+    fn numeric_value(value: &runmat_builtins::Value) -> Option<f64> {
+        use runmat_builtins::IntValue;
+
+        match value {
+            runmat_builtins::Value::Num(v) => Some(*v),
+            runmat_builtins::Value::Int(int_value) => match int_value {
+                IntValue::I8(v) => Some(*v as f64),
+                IntValue::I16(v) => Some(*v as f64),
+                IntValue::I32(v) => Some(*v as f64),
+                IntValue::I64(v) => Some(*v as f64),
+                IntValue::U8(v) => Some(*v as f64),
+                IntValue::U16(v) => Some(*v as f64),
+                IntValue::U32(v) => Some(*v as f64),
+                IntValue::U64(v) => Some(*v as f64),
+            },
+            runmat_builtins::Value::Bool(v) => Some(if *v { 1.0 } else { 0.0 }),
+            _ => None,
+        }
+    }
+
+    fn const_numeric_value(name: &str) -> Option<f64> {
+        let map = CONST_NUM_LOOKUP.get_or_init(|| {
+            let mut out: HashMap<String, f64> = HashMap::new();
+            for constant in runmat_builtins::constants() {
+                if let Some(value) = numeric_value(&constant.value) {
+                    out.insert(constant.name.to_ascii_lowercase(), value);
+                }
+            }
+            out
+        });
+        map.get(&name.to_ascii_lowercase()).copied()
+    }
+
+    match &expr.kind {
+        HirExprKind::Number(text) => text.parse::<f64>().ok(),
+        HirExprKind::Constant(name) => const_numeric_value(name),
+        HirExprKind::Unary(op, inner) => {
+            let value = eval_const_num(inner)?;
+            match op {
+                parser::UnOp::Plus => Some(value),
+                parser::UnOp::Minus => Some(-value),
+                _ => None,
+            }
+        }
+        HirExprKind::Binary(lhs, op, rhs) => {
+            let a = eval_const_num(lhs)?;
+            let b = eval_const_num(rhs)?;
+            match op {
+                parser::BinOp::Add => Some(a + b),
+                parser::BinOp::Sub => Some(a - b),
+                parser::BinOp::Mul | parser::BinOp::ElemMul => Some(a * b),
+                parser::BinOp::Div | parser::BinOp::ElemDiv => Some(a / b),
+                parser::BinOp::LeftDiv | parser::BinOp::ElemLeftDiv => Some(b / a),
+                parser::BinOp::Pow | parser::BinOp::ElemPow => Some(a.powf(b)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn literal_value_from_expr(expr: &HirExpr) -> runmat_builtins::LiteralValue {
+    use runmat_builtins::LiteralValue;
+
+    if let Some(value) = eval_const_num(expr) {
+        return LiteralValue::Number(value);
+    }
+
+    match &expr.kind {
+        HirExprKind::String(text) => LiteralValue::String(text.clone()),
+        HirExprKind::Constant(name) => match name.to_ascii_lowercase().as_str() {
+            "true" => LiteralValue::Bool(true),
+            "false" => LiteralValue::Bool(false),
+            _ => LiteralValue::Unknown,
+        },
+        HirExprKind::Tensor(rows) => literal_vector_from_tensor(rows),
+        _ => LiteralValue::Unknown,
+    }
+}
+
+fn literal_vector_from_tensor(rows: &[Vec<HirExpr>]) -> runmat_builtins::LiteralValue {
+    use runmat_builtins::LiteralValue;
+
+    if rows.is_empty() {
+        return LiteralValue::Vector(Vec::new());
+    }
+    let is_row = rows.len() == 1;
+    let is_column = rows.iter().all(|row| row.len() == 1);
+
+    if is_row {
+        let values = rows[0].iter().map(literal_value_from_expr).collect();
+        return LiteralValue::Vector(values);
+    }
+
+    if is_column {
+        let values = rows
+            .iter()
+            .map(|row| literal_value_from_expr(&row[0]))
+            .collect();
+        return LiteralValue::Vector(values);
+    }
+
+    let values = rows
+        .iter()
+        .map(|row| LiteralValue::Vector(row.iter().map(literal_value_from_expr).collect()))
+        .collect();
+    LiteralValue::Vector(values)
+}
+
+fn resolve_context_from_args(args: &[HirExpr]) -> runmat_builtins::ResolveContext {
+    let literal_args = args.iter().map(literal_value_from_expr).collect();
+    runmat_builtins::ResolveContext::new(literal_args)
+}
+
+fn infer_expr_type_with_env(
+    expr: &HirExpr,
+    env: &std::collections::HashMap<VarId, Type>,
+    func_returns: &std::collections::HashMap<String, Vec<Type>>,
+) -> Type {
+    fn unify_tensor(a: &Type, b: &Type) -> Type {
+        match (a, b) {
+            (Type::Tensor { shape: sa }, Type::Tensor { shape: sb }) => match (sa, sb) {
+                (Some(sa), Some(sb)) => {
+                    let maxr = sa.len().max(sb.len());
+                    let mut out: Vec<Option<usize>> = Vec::with_capacity(maxr);
+                    for i in 0..maxr {
+                        let da = sa.get(i).cloned().unwrap_or(None);
+                        let db = sb.get(i).cloned().unwrap_or(None);
+                        let d = match (da, db) {
+                            (Some(a), Some(b)) => {
+                                if a == b {
+                                    Some(a)
+                                } else if a == 1 {
+                                    Some(b)
+                                } else if b == 1 {
+                                    Some(a)
+                                } else {
+                                    None
+                                }
+                            }
+                            (Some(a), None) => Some(a),
+                            (None, Some(b)) => Some(b),
+                            (None, None) => None,
+                        };
+                        out.push(d);
+                    }
+                    Type::Tensor { shape: Some(out) }
+                }
+                _ => Type::tensor(),
+            },
+            (Type::Tensor { .. }, _) | (_, Type::Tensor { .. }) => Type::tensor(),
+            _ => Type::tensor(),
+        }
+    }
+
+    use HirExprKind as K;
+
+    match &expr.kind {
+        K::Number(_) => Type::Num,
+        K::String(_) => Type::String,
+        K::Constant(_) => Type::Num,
+        K::Var(id) => env.get(id).cloned().unwrap_or(Type::Unknown),
+        K::Unary(_, e) => infer_expr_type_with_env(e, env, func_returns),
+        K::Binary(a, op, b) => {
+            let ta = infer_expr_type_with_env(a, env, func_returns);
+            let tb = infer_expr_type_with_env(b, env, func_returns);
+            match op {
+                parser::BinOp::Mul => runmat_builtins::shape_rules::matmul_output_type(&ta, &tb),
+                parser::BinOp::LeftDiv => {
+                    runmat_builtins::shape_rules::left_divide_output_type(&ta, &tb)
+                }
+                parser::BinOp::Div => {
+                    runmat_builtins::shape_rules::right_divide_output_type(&ta, &tb)
+                }
+                parser::BinOp::Add
+                | parser::BinOp::Sub
+                | parser::BinOp::Pow
+                | parser::BinOp::ElemMul
+                | parser::BinOp::ElemDiv
+                | parser::BinOp::ElemPow
+                | parser::BinOp::ElemLeftDiv => {
+                    if matches!(ta, Type::Tensor { .. }) || matches!(tb, Type::Tensor { .. }) {
+                        unify_tensor(&ta, &tb)
+                    } else {
+                        Type::Num
+                    }
+                }
+                parser::BinOp::Equal
+                | parser::BinOp::NotEqual
+                | parser::BinOp::Less
+                | parser::BinOp::LessEqual
+                | parser::BinOp::Greater
+                | parser::BinOp::GreaterEqual => logical_binary_result(&ta, &tb),
+                parser::BinOp::AndAnd
+                | parser::BinOp::OrOr
+                | parser::BinOp::BitAnd
+                | parser::BinOp::BitOr => logical_binary_result(&ta, &tb),
+                parser::BinOp::Colon => runmat_builtins::shape_rules::infer_range_shape(
+                    eval_const_num(a),
+                    None,
+                    eval_const_num(b),
+                )
+                .map(|shape| Type::Tensor { shape: Some(shape) })
+                .unwrap_or_else(Type::tensor),
+            }
+        }
+        K::Tensor(rows) => {
+            let mut row_types: Vec<Vec<Type>> = Vec::new();
+            for row in rows {
+                let mut types = Vec::new();
+                for e in row {
+                    types.push(infer_expr_type_with_env(e, env, func_returns));
+                }
+                row_types.push(types);
+            }
+            if let Some(shape) = runmat_builtins::shape_rules::concat_shape(&row_types) {
+                return Type::Tensor { shape: Some(shape) };
+            }
+            let r = rows.len();
+            let c = rows.iter().map(|row| row.len()).max().unwrap_or(0);
+            if r > 0 && rows.iter().all(|row| row.len() == c) {
+                Type::tensor_with_shape(vec![r, c])
+            } else {
+                Type::tensor()
+            }
+        }
+        K::Cell(rows) => {
+            let mut elem_ty: Option<Type> = None;
+            let mut len: usize = 0;
+            for row in rows {
+                for e in row {
+                    let t = infer_expr_type_with_env(e, env, func_returns);
+                    elem_ty = Some(match elem_ty {
+                        Some(curr) => curr.unify(&t),
+                        None => t,
+                    });
+                    len += 1;
+                }
+            }
+            Type::Cell {
+                element_type: elem_ty.map(Box::new),
+                length: Some(len),
+            }
+        }
+        K::Index(base, idxs) => {
+            let bt = infer_expr_type_with_env(base, env, func_returns);
+            let idx_types: Vec<Type> = idxs
+                .iter()
+                .map(|e| infer_expr_type_with_env(e, env, func_returns))
+                .collect();
+            runmat_builtins::shape_rules::index_output_type(&bt, &idx_types)
+        }
+        K::IndexCell(base, idxs) => {
+            let bt = infer_expr_type_with_env(base, env, func_returns);
+            if let Type::Cell {
+                element_type: Some(t),
+                ..
+            } = bt
+            {
+                let scalar = idxs.len() == 1
+                    && matches!(
+                        infer_expr_type_with_env(&idxs[0], env, func_returns),
+                        Type::Int | Type::Num | Type::Bool | Type::Tensor { .. }
+                    );
+                if scalar {
+                    *t
+                } else {
+                    Type::Unknown
+                }
+            } else {
+                Type::Unknown
+            }
+        }
+        K::Range(start, step, end) => runmat_builtins::shape_rules::infer_range_shape(
+            eval_const_num(start),
+            step.as_ref().and_then(|s| eval_const_num(s)),
+            eval_const_num(end),
+        )
+        .map(|shape| Type::Tensor { shape: Some(shape) })
+        .unwrap_or_else(Type::tensor),
+        K::FuncCall(name, _args) => {
+            if let Some(v) = func_returns.get(name) {
+                v.first().cloned().unwrap_or(Type::Unknown)
+            } else {
+                let arg_types: Vec<Type> = _args
+                    .iter()
+                    .map(|arg| infer_expr_type_with_env(arg, env, func_returns))
+                    .collect();
+                let ctx = resolve_context_from_args(_args);
+                let builtins = runmat_builtins::builtin_functions();
+                if let Some(b) = builtins.iter().find(|b| b.name == *name) {
+                    b.infer_return_type_with_context(&arg_types, &ctx)
+                } else {
+                    Type::Unknown
+                }
+            }
+        }
+        K::MethodCall(_, _, _) => Type::Unknown,
+        K::Member(base, _) => {
+            let _bt = infer_expr_type_with_env(base, env, func_returns);
+            Type::Unknown
+        }
+        K::MemberDynamic(_, _) => Type::Unknown,
+        K::AnonFunc { .. } => Type::Function {
+            params: vec![Type::Unknown],
+            returns: Box::new(Type::Unknown),
+        },
+        K::FuncHandle(_) => Type::Function {
+            params: vec![Type::Unknown],
+            returns: Box::new(Type::Unknown),
+        },
+        K::MetaClass(_) => Type::String,
+        K::End => Type::Unknown,
+        K::Colon => Type::tensor(),
     }
 }
 
@@ -378,220 +728,7 @@ pub fn infer_function_output_types(
         env: &HashMap<VarId, Type>,
         func_returns: &HashMap<String, Vec<Type>>,
     ) -> Type {
-        fn unify_tensor(a: &Type, b: &Type) -> Type {
-            match (a, b) {
-                (Type::Tensor { shape: sa }, Type::Tensor { shape: sb }) => match (sa, sb) {
-                    (Some(sa), Some(sb)) => {
-                        let maxr = sa.len().max(sb.len());
-                        let mut out: Vec<Option<usize>> = Vec::with_capacity(maxr);
-                        for i in 0..maxr {
-                            let da = sa.get(i).cloned().unwrap_or(None);
-                            let db = sb.get(i).cloned().unwrap_or(None);
-                            let d = match (da, db) {
-                                (Some(a), Some(b)) => {
-                                    if a == b {
-                                        Some(a)
-                                    } else if a == 1 {
-                                        Some(b)
-                                    } else if b == 1 {
-                                        Some(a)
-                                    } else {
-                                        None
-                                    }
-                                }
-                                (Some(a), None) => Some(a),
-                                (None, Some(b)) => Some(b),
-                                (None, None) => None,
-                            };
-                            out.push(d);
-                        }
-                        Type::Tensor { shape: Some(out) }
-                    }
-                    _ => Type::tensor(),
-                },
-                (Type::Tensor { .. }, _) | (_, Type::Tensor { .. }) => Type::tensor(),
-                _ => Type::tensor(),
-            }
-        }
-        fn index_tensor_shape(
-            base: &Type,
-            idxs: &[HirExpr],
-            env: &HashMap<VarId, Type>,
-            func_returns: &HashMap<String, Vec<Type>>,
-        ) -> Type {
-            // Compute output tensor shape after indexing; conservative unknowns when necessary
-            let idx_types: Vec<Type> = idxs
-                .iter()
-                .map(|e| infer_expr_type(e, env, func_returns))
-                .collect();
-            match base {
-                Type::Tensor { shape: Some(dims) } => {
-                    let rank = dims.len();
-                    let mut out: Vec<Option<usize>> = Vec::new();
-                    for i in 0..rank {
-                        if i < idx_types.len() {
-                            match idx_types[i] {
-                                Type::Int | Type::Num | Type::Bool => { /* drop this dim */ }
-                                _ => {
-                                    out.push(None);
-                                }
-                            }
-                        } else {
-                            out.push(dims[i]);
-                        }
-                    }
-                    if out.is_empty() {
-                        Type::Num
-                    } else {
-                        Type::Tensor { shape: Some(out) }
-                    }
-                }
-                Type::Tensor { shape: None } => {
-                    // If all provided indices are scalar and there would be no remaining dims, return Num, else unknown tensor
-                    let scalar_count = idx_types
-                        .iter()
-                        .filter(|t| matches!(t, Type::Int | Type::Num | Type::Bool))
-                        .count();
-                    if scalar_count == idx_types.len() {
-                        Type::Num
-                    } else {
-                        Type::tensor()
-                    }
-                }
-                _ => Type::Unknown,
-            }
-        }
-        use HirExprKind as K;
-        match &expr.kind {
-            K::Number(_) => Type::Num,
-            K::String(_) => Type::String,
-            K::Constant(_) => Type::Num,
-            K::Var(id) => env.get(id).cloned().unwrap_or(Type::Unknown),
-            K::Unary(_, e) => infer_expr_type(e, env, func_returns),
-            K::Binary(a, op, b) => {
-                let ta = infer_expr_type(a, env, func_returns);
-                let tb = infer_expr_type(b, env, func_returns);
-                match op {
-                    parser::BinOp::Add
-                    | parser::BinOp::Sub
-                    | parser::BinOp::Mul
-                    | parser::BinOp::Div
-                    | parser::BinOp::Pow
-                    | parser::BinOp::LeftDiv
-                    | parser::BinOp::ElemMul
-                    | parser::BinOp::ElemDiv
-                    | parser::BinOp::ElemPow
-                    | parser::BinOp::ElemLeftDiv => {
-                        if matches!(ta, Type::Tensor { .. }) || matches!(tb, Type::Tensor { .. }) {
-                            unify_tensor(&ta, &tb)
-                        } else {
-                            Type::Num
-                        }
-                    }
-                    parser::BinOp::Equal
-                    | parser::BinOp::NotEqual
-                    | parser::BinOp::Less
-                    | parser::BinOp::LessEqual
-                    | parser::BinOp::Greater
-                    | parser::BinOp::GreaterEqual => logical_binary_result(&ta, &tb),
-                    parser::BinOp::AndAnd
-                    | parser::BinOp::OrOr
-                    | parser::BinOp::BitAnd
-                    | parser::BinOp::BitOr => logical_binary_result(&ta, &tb),
-                    parser::BinOp::Colon => Type::tensor(),
-                }
-            }
-            K::Tensor(rows) => {
-                let r = rows.len();
-                let c = rows.iter().map(|row| row.len()).max().unwrap_or(0);
-                if r > 0 && rows.iter().all(|row| row.len() == c) {
-                    Type::tensor_with_shape(vec![r, c])
-                } else {
-                    Type::tensor()
-                }
-            }
-            K::Cell(rows) => {
-                let mut elem_ty: Option<Type> = None;
-                let mut len: usize = 0;
-                for row in rows {
-                    for e in row {
-                        let t = infer_expr_type(e, env, func_returns);
-                        elem_ty = Some(match elem_ty {
-                            Some(curr) => curr.unify(&t),
-                            None => t,
-                        });
-                        len += 1;
-                    }
-                }
-                Type::Cell {
-                    element_type: elem_ty.map(Box::new),
-                    length: Some(len),
-                }
-            }
-            K::Index(base, idxs) => {
-                let bt = infer_expr_type(base, env, func_returns);
-                index_tensor_shape(&bt, idxs, env, func_returns)
-            }
-            K::IndexCell(base, idxs) => {
-                let bt = infer_expr_type(base, env, func_returns);
-                if let Type::Cell {
-                    element_type: Some(t),
-                    ..
-                } = bt
-                {
-                    let scalar = idxs.len() == 1
-                        && matches!(
-                            infer_expr_type(&idxs[0], env, func_returns),
-                            Type::Int | Type::Num | Type::Bool | Type::Tensor { .. }
-                        );
-                    if scalar {
-                        *t
-                    } else {
-                        Type::Unknown
-                    }
-                } else {
-                    Type::Unknown
-                }
-            }
-            K::Range(_, _, _) => Type::tensor(),
-            K::FuncCall(name, _args) => {
-                if let Some(v) = func_returns.get(name) {
-                    v.first().cloned().unwrap_or(Type::Unknown)
-                } else {
-                    let arg_types: Vec<Type> = _args
-                        .iter()
-                        .map(|arg| infer_expr_type(arg, env, func_returns))
-                        .collect();
-                    if let Some(ty) = logical_builtin_return_type(name, &arg_types) {
-                        return ty;
-                    }
-                    let builtins = runmat_builtins::builtin_functions();
-                    if let Some(b) = builtins.iter().find(|b| b.name == *name) {
-                        b.return_type.clone()
-                    } else {
-                        Type::Unknown
-                    }
-                }
-            }
-            K::MethodCall(_, _, _) => Type::Unknown,
-            K::Member(base, _) => {
-                // If base appears to be a struct, member read remains Unknown but confirms struct-like usage
-                let _bt = infer_expr_type(base, env, func_returns);
-                Type::Unknown
-            }
-            K::MemberDynamic(_, _) => Type::Unknown,
-            K::AnonFunc { .. } => Type::Function {
-                params: vec![Type::Unknown],
-                returns: Box::new(Type::Unknown),
-            },
-            K::FuncHandle(_) => Type::Function {
-                params: vec![Type::Unknown],
-                returns: Box::new(Type::Unknown),
-            },
-            K::MetaClass(_) => Type::String,
-            K::End => Type::Unknown,
-            K::Colon => Type::tensor(),
-        }
+        infer_expr_type_with_env(expr, env, func_returns)
     }
 
     fn join_env(a: &HashMap<VarId, Type>, b: &HashMap<VarId, Type>) -> HashMap<VarId, Type> {
@@ -1247,151 +1384,7 @@ pub fn infer_function_variable_types(
         env: &HashMap<VarId, Type>,
         returns: &HashMap<String, Vec<Type>>,
     ) -> Type {
-        use HirExprKind as K;
-        match &expr.kind {
-            K::Number(_) => Type::Num,
-            K::String(_) => Type::String,
-            K::Constant(_) => Type::Num,
-            K::Var(id) => env.get(id).cloned().unwrap_or(Type::Unknown),
-            K::Unary(_, e) => infer_expr_type(e, env, returns),
-            K::Binary(a, op, b) => {
-                let ta = infer_expr_type(a, env, returns);
-                let tb = infer_expr_type(b, env, returns);
-                match op {
-                    parser::BinOp::Add
-                    | parser::BinOp::Sub
-                    | parser::BinOp::Mul
-                    | parser::BinOp::Div
-                    | parser::BinOp::Pow
-                    | parser::BinOp::LeftDiv => {
-                        if matches!(ta, Type::Tensor { .. }) || matches!(tb, Type::Tensor { .. }) {
-                            Type::tensor()
-                        } else {
-                            Type::Num
-                        }
-                    }
-                    parser::BinOp::ElemMul
-                    | parser::BinOp::ElemDiv
-                    | parser::BinOp::ElemPow
-                    | parser::BinOp::ElemLeftDiv => {
-                        if matches!(ta, Type::Tensor { .. }) || matches!(tb, Type::Tensor { .. }) {
-                            Type::tensor()
-                        } else {
-                            Type::Num
-                        }
-                    }
-                    parser::BinOp::Equal
-                    | parser::BinOp::NotEqual
-                    | parser::BinOp::Less
-                    | parser::BinOp::LessEqual
-                    | parser::BinOp::Greater
-                    | parser::BinOp::GreaterEqual => logical_binary_result(&ta, &tb),
-                    parser::BinOp::AndAnd
-                    | parser::BinOp::OrOr
-                    | parser::BinOp::BitAnd
-                    | parser::BinOp::BitOr => logical_binary_result(&ta, &tb),
-                    parser::BinOp::Colon => Type::tensor(),
-                }
-            }
-            K::Tensor(rows) => {
-                let r = rows.len();
-                let c = rows.iter().map(|row| row.len()).max().unwrap_or(0);
-                if r > 0 && rows.iter().all(|row| row.len() == c) {
-                    Type::tensor_with_shape(vec![r, c])
-                } else {
-                    Type::tensor()
-                }
-            }
-            K::Cell(rows) => {
-                let mut elem_ty: Option<Type> = None;
-                let mut len: usize = 0;
-                for row in rows {
-                    for e in row {
-                        let t = infer_expr_type(e, env, returns);
-                        elem_ty = Some(match elem_ty {
-                            Some(curr) => curr.unify(&t),
-                            None => t,
-                        });
-                        len += 1;
-                    }
-                }
-                Type::Cell {
-                    element_type: elem_ty.map(Box::new),
-                    length: Some(len),
-                }
-            }
-            K::Index(base, idxs) => {
-                let bt = infer_expr_type(base, env, returns);
-                let scalar_indices = idxs.iter().all(|i| {
-                    matches!(
-                        infer_expr_type(i, env, returns),
-                        Type::Int | Type::Num | Type::Bool
-                    )
-                });
-                if scalar_indices {
-                    Type::Num
-                } else {
-                    bt
-                }
-            }
-            K::IndexCell(base, idxs) => {
-                let bt = infer_expr_type(base, env, returns);
-                if let Type::Cell {
-                    element_type: Some(t),
-                    ..
-                } = bt
-                {
-                    let scalar = idxs.len() == 1
-                        && matches!(
-                            infer_expr_type(&idxs[0], env, returns),
-                            Type::Int | Type::Num | Type::Bool | Type::Tensor { .. }
-                        );
-                    if scalar {
-                        *t
-                    } else {
-                        Type::Unknown
-                    }
-                } else {
-                    Type::Unknown
-                }
-            }
-            K::Range(_, _, _) => Type::tensor(),
-            K::FuncCall(name, _args) => {
-                if let Some(v) = returns.get(name) {
-                    v.first().cloned().unwrap_or(Type::Unknown)
-                } else {
-                    let arg_types: Vec<Type> = _args
-                        .iter()
-                        .map(|arg| infer_expr_type(arg, env, returns))
-                        .collect();
-                    if let Some(ty) = logical_builtin_return_type(name, &arg_types) {
-                        return ty;
-                    }
-                    if let Some(b) = runmat_builtins::builtin_functions()
-                        .into_iter()
-                        .find(|b| b.name == *name)
-                    {
-                        b.return_type.clone()
-                    } else {
-                        Type::Unknown
-                    }
-                }
-            }
-            K::MethodCall(_, _, _) => Type::Unknown,
-            K::Member(_, _) => Type::Unknown,
-            K::MemberDynamic(_, _) => Type::Unknown,
-            K::AnonFunc { .. } => Type::Function {
-                params: vec![Type::Unknown],
-                returns: Box::new(Type::Unknown),
-            },
-            K::FuncHandle(_) => Type::Function {
-                params: vec![Type::Unknown],
-                returns: Box::new(Type::Unknown),
-            },
-            K::MetaClass(_) => Type::String,
-            K::End => Type::Unknown,
-            K::Colon => Type::tensor(),
-        }
+        infer_expr_type_with_env(expr, env, returns)
     }
 
     fn join_env(a: &HashMap<VarId, Type>, b: &HashMap<VarId, Type>) -> HashMap<VarId, Type> {
@@ -1809,6 +1802,972 @@ pub fn infer_function_variable_types(
         }
     }
     out
+}
+
+/// Infer variable types for top-level (script) statements by performing a flow-sensitive analysis
+/// over the program body. Returns a mapping from VarId to inferred Type.
+pub fn infer_global_variable_types(
+    prog: &HirProgram,
+    returns: &std::collections::HashMap<String, Vec<Type>>,
+) -> std::collections::HashMap<VarId, Type> {
+    use std::collections::HashMap;
+
+    #[derive(Clone)]
+    struct Analysis {
+        exits: Vec<HashMap<VarId, Type>>,
+        fallthrough: Option<HashMap<VarId, Type>>,
+    }
+
+    fn join_env(a: &HashMap<VarId, Type>, b: &HashMap<VarId, Type>) -> HashMap<VarId, Type> {
+        let mut out = a.clone();
+        for (k, v) in b {
+            out.entry(*k)
+                .and_modify(|t| *t = t.unify(v))
+                .or_insert_with(|| v.clone());
+        }
+        out
+    }
+
+    #[allow(clippy::type_complexity, clippy::only_used_in_recursion)]
+    fn analyze_stmts(
+        stmts: &[HirStmt],
+        mut env: HashMap<VarId, Type>,
+        returns: &HashMap<String, Vec<Type>>,
+        func_defs: &HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)>,
+    ) -> Analysis {
+        let mut exits = Vec::new();
+        let mut i = 0usize;
+        while i < stmts.len() {
+            match &stmts[i] {
+                HirStmt::Assign(var, expr, _, _) => {
+                    let t = infer_expr_type_with_env(expr, &env, returns);
+                    env.insert(*var, t);
+                }
+                HirStmt::MultiAssign(vars, expr, _, _) => {
+                    if let HirExprKind::FuncCall(ref name, _) = expr.kind {
+                        let mut per_out: Vec<Type> = returns.get(name).cloned().unwrap_or_default();
+                        let needs_fallback = per_out.is_empty()
+                            || per_out.iter().any(|t| matches!(t, Type::Unknown));
+                        if needs_fallback {
+                            if let Some((params, outs, body)) = func_defs.get(name).cloned() {
+                                let mut penv: HashMap<VarId, Type> = HashMap::new();
+                                for p in params {
+                                    penv.insert(p, Type::Num);
+                                }
+                                let mut out_types: Vec<Type> = vec![Type::Unknown; outs.len()];
+                                for s in &body {
+                                    if let HirStmt::Assign(var, rhs, _, _) = s {
+                                        if let Some(pos) = outs.iter().position(|o| o == var) {
+                                            let t = infer_expr_type_with_env(rhs, &penv, returns);
+                                            out_types[pos] = out_types[pos].unify(&t);
+                                        }
+                                    }
+                                }
+                                if per_out.is_empty() {
+                                    per_out = out_types;
+                                } else {
+                                    for (i, t) in out_types.into_iter().enumerate() {
+                                        if matches!(per_out.get(i), Some(Type::Unknown)) {
+                                            if let Some(slot) = per_out.get_mut(i) {
+                                                *slot = t;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        for (i, v) in vars.iter().enumerate() {
+                            if let Some(id) = v {
+                                env.insert(*id, per_out.get(i).cloned().unwrap_or(Type::Unknown));
+                            }
+                        }
+                    } else {
+                        let t = infer_expr_type_with_env(expr, &env, returns);
+                        for v in vars.iter().flatten() {
+                            env.insert(*v, t.clone());
+                        }
+                    }
+                }
+                HirStmt::ExprStmt(_, _, _) | HirStmt::Break(_) | HirStmt::Continue(_) => {}
+                HirStmt::Return(_) => {
+                    exits.push(env.clone());
+                    return Analysis {
+                        exits,
+                        fallthrough: None,
+                    };
+                }
+                HirStmt::If {
+                    cond,
+                    then_body,
+                    elseif_blocks,
+                    else_body,
+                    span: _,
+                } => {
+                    let _ = infer_expr_type_with_env(cond, &env, returns);
+                    let then_analysis = analyze_stmts(then_body, env.clone(), returns, func_defs);
+                    let mut branch_envs = Vec::new();
+                    if let Some(f) = &then_analysis.fallthrough {
+                        branch_envs.push(f.clone());
+                    }
+                    for e in &then_analysis.exits {
+                        branch_envs.push(e.clone());
+                    }
+                    for (c, b) in elseif_blocks {
+                        let _ = infer_expr_type_with_env(c, &env, returns);
+                        let analysis = analyze_stmts(b, env.clone(), returns, func_defs);
+                        if let Some(f) = &analysis.fallthrough {
+                            branch_envs.push(f.clone());
+                        }
+                        for e in &analysis.exits {
+                            branch_envs.push(e.clone());
+                        }
+                    }
+                    if let Some(else_body) = else_body {
+                        let analysis = analyze_stmts(else_body, env.clone(), returns, func_defs);
+                        if let Some(f) = &analysis.fallthrough {
+                            branch_envs.push(f.clone());
+                        }
+                        for e in &analysis.exits {
+                            branch_envs.push(e.clone());
+                        }
+                    } else {
+                        branch_envs.push(env.clone());
+                    }
+                    if let Some(first) = branch_envs.first().cloned() {
+                        env = branch_envs
+                            .iter()
+                            .skip(1)
+                            .fold(first, |acc, e| join_env(&acc, e));
+                    }
+                }
+                HirStmt::Switch {
+                    expr,
+                    cases,
+                    otherwise,
+                    ..
+                } => {
+                    let _ = infer_expr_type_with_env(expr, &env, returns);
+                    let mut branch_envs = Vec::new();
+                    for (case_expr, case_body) in cases {
+                        let _ = infer_expr_type_with_env(case_expr, &env, returns);
+                        let analysis = analyze_stmts(case_body, env.clone(), returns, func_defs);
+                        if let Some(f) = &analysis.fallthrough {
+                            branch_envs.push(f.clone());
+                        }
+                        for e in &analysis.exits {
+                            branch_envs.push(e.clone());
+                        }
+                    }
+                    if let Some(otherwise_body) = otherwise {
+                        let analysis =
+                            analyze_stmts(otherwise_body, env.clone(), returns, func_defs);
+                        if let Some(f) = &analysis.fallthrough {
+                            branch_envs.push(f.clone());
+                        }
+                        for e in &analysis.exits {
+                            branch_envs.push(e.clone());
+                        }
+                    } else {
+                        branch_envs.push(env.clone());
+                    }
+                    if let Some(first) = branch_envs.first().cloned() {
+                        env = branch_envs
+                            .iter()
+                            .skip(1)
+                            .fold(first, |acc, e| join_env(&acc, e));
+                    }
+                }
+                HirStmt::While { cond, body, .. } => {
+                    let _ = infer_expr_type_with_env(cond, &env, returns);
+                    let body_analysis = analyze_stmts(body, env.clone(), returns, func_defs);
+                    if let Some(f) = &body_analysis.fallthrough {
+                        env = join_env(&env, f);
+                    }
+                    for e in &body_analysis.exits {
+                        env = join_env(&env, e);
+                    }
+                }
+                HirStmt::For { expr, body, .. } => {
+                    let _ = infer_expr_type_with_env(expr, &env, returns);
+                    let body_analysis = analyze_stmts(body, env.clone(), returns, func_defs);
+                    if let Some(f) = &body_analysis.fallthrough {
+                        env = join_env(&env, f);
+                    }
+                    for e in &body_analysis.exits {
+                        env = join_env(&env, e);
+                    }
+                }
+                HirStmt::Function { .. } | HirStmt::ClassDef { .. } => {}
+                HirStmt::Global(_, _)
+                | HirStmt::Persistent(_, _)
+                | HirStmt::Import { .. }
+                | HirStmt::TryCatch { .. }
+                | HirStmt::AssignLValue(_, _, _, _) => {}
+            }
+            i += 1;
+        }
+
+        Analysis {
+            exits,
+            fallthrough: Some(env),
+        }
+    }
+
+    let mut func_defs: HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)> = HashMap::new();
+    for stmt in &prog.body {
+        if let HirStmt::Function {
+            name,
+            params,
+            outputs,
+            body,
+            ..
+        } = stmt
+        {
+            func_defs.insert(
+                name.clone(),
+                (params.clone(), outputs.clone(), body.clone()),
+            );
+        } else if let HirStmt::ClassDef { members, .. } = stmt {
+            for m in members {
+                if let HirClassMember::Methods { body, .. } = m {
+                    for s in body {
+                        if let HirStmt::Function {
+                            name,
+                            params,
+                            outputs,
+                            body,
+                            ..
+                        } = s
+                        {
+                            func_defs.insert(
+                                name.clone(),
+                                (params.clone(), outputs.clone(), body.clone()),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let analysis = analyze_stmts(&prog.body, HashMap::new(), returns, &func_defs);
+    let mut out: HashMap<VarId, Type> = HashMap::new();
+    let mut accumulate = |env: &HashMap<VarId, Type>| {
+        for (k, v) in env {
+            out.entry(*k)
+                .and_modify(|t| *t = t.unify(v))
+                .or_insert_with(|| v.clone());
+        }
+    };
+    if let Some(f) = &analysis.fallthrough {
+        accumulate(f);
+    }
+    for e in &analysis.exits {
+        accumulate(e);
+    }
+
+    out
+}
+
+pub fn lint_shapes(result: &LoweringResult) -> Vec<HirDiagnostic> {
+    fn vector_literal_length(expr: &HirExpr) -> Option<usize> {
+        let shape = tensor_literal_shape(expr)?;
+        match (
+            shape.get(0).cloned().unwrap_or(None),
+            shape.get(1).cloned().unwrap_or(None),
+        ) {
+            (Some(r), Some(c)) => {
+                if r == 1 {
+                    Some(c)
+                } else if c == 1 {
+                    Some(r)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn concat_dims(ty: &Type) -> Option<(Option<usize>, Option<usize>)> {
+        match ty {
+            Type::Num | Type::Int | Type::Bool => Some((Some(1), Some(1))),
+            Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+                Some(runmat_builtins::shape_rules::matrix_dims(shape))
+            }
+            _ => None,
+        }
+    }
+    fn format_dim(dim: Option<usize>) -> String {
+        dim.map(|v| v.to_string())
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+
+    fn format_shape(shape: &[Option<usize>]) -> String {
+        if shape.len() == 2 {
+            return format!("{} x {}", format_dim(shape[0]), format_dim(shape[1]));
+        }
+        let dims: Vec<String> = shape.iter().map(|d| format_dim(*d)).collect();
+        format!("[{}]", dims.join(", "))
+    }
+
+    fn matrix_dims_from_type(ty: &Type) -> Option<(Option<usize>, Option<usize>)> {
+        match ty {
+            Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+                Some(runmat_builtins::shape_rules::matrix_dims(shape))
+            }
+            _ => None,
+        }
+    }
+
+    fn element_count(shape: &[Option<usize>]) -> Option<usize> {
+        runmat_builtins::shape_rules::element_count_if_known(shape)
+    }
+
+    fn vector_length(shape: &[Option<usize>]) -> Option<usize> {
+        let count = element_count(shape)?;
+        let is_vector = shape.len() == 1
+            || (shape.len() == 2
+                && (shape[0] == Some(1) || shape[1] == Some(1))
+                && shape.iter().all(|d| d.is_some()));
+        if is_vector {
+            Some(count)
+        } else {
+            None
+        }
+    }
+
+    fn tensor_literal_shape(expr: &HirExpr) -> Option<Vec<Option<usize>>> {
+        let HirExprKind::Tensor(rows) = &expr.kind else {
+            return None;
+        };
+        if rows.is_empty() {
+            return Some(vec![Some(0), Some(0)]);
+        }
+        let cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+        Some(vec![Some(rows.len()), Some(cols)])
+    }
+
+    enum DimSpec {
+        Known(usize),
+        Unknown,
+        Negative,
+        NonInteger,
+    }
+
+    fn parse_dim(expr: &HirExpr) -> DimSpec {
+        if let Some(value) = eval_const_num(expr) {
+            if value.is_finite() {
+                let rounded = value.round();
+                if (value - rounded).abs() <= 1e-9 {
+                    if rounded < 0.0 {
+                        return DimSpec::Negative;
+                    }
+                    return DimSpec::Known(rounded as usize);
+                }
+                return DimSpec::NonInteger;
+            }
+        }
+        DimSpec::Unknown
+    }
+    fn type_shape_for_broadcast(ty: &Type) -> Option<Vec<Option<usize>>> {
+        match ty {
+            Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+                Some(shape.clone())
+            }
+            Type::Num | Type::Int | Type::Bool => Some(vec![Some(1), Some(1)]),
+            _ => None,
+        }
+    }
+
+    fn check_binary(
+        op: &parser::BinOp,
+        lhs: &HirExpr,
+        rhs: &HirExpr,
+        env: &std::collections::HashMap<VarId, Type>,
+        returns: &std::collections::HashMap<String, Vec<Type>>,
+        diags: &mut Vec<HirDiagnostic>,
+    ) {
+        let lhs_ty = infer_expr_type_with_env(lhs, env, returns);
+        let rhs_ty = infer_expr_type_with_env(rhs, env, returns);
+        match op {
+            parser::BinOp::Mul => {
+                if let Some(false) =
+                    runmat_builtins::shape_rules::matmul_compatible(&lhs_ty, &rhs_ty)
+                {
+                    let detail = match (
+                        matrix_dims_from_type(&lhs_ty),
+                        matrix_dims_from_type(&rhs_ty),
+                    ) {
+                        (Some((lrows, lcols)), Some((rrows, rcols))) => format!(
+                            "left is {} x {}, right is {} x {} (inner dimensions {} and {})",
+                            format_dim(lrows),
+                            format_dim(lcols),
+                            format_dim(rrows),
+                            format_dim(rcols),
+                            format_dim(lcols),
+                            format_dim(rrows)
+                        ),
+                        _ => "unknown shapes".to_string(),
+                    };
+                    diags.push(HirDiagnostic {
+                        message: format!(
+                            "Matrix multiply dimension mismatch: {detail} (inner dimensions must match)"
+                        ),
+                        span: merge_span(lhs.span, rhs.span),
+                        code: "lint.shape.matmul",
+                        severity: HirDiagnosticSeverity::Warning,
+                    });
+                }
+            }
+            parser::BinOp::LeftDiv => {
+                if let Some(false) =
+                    runmat_builtins::shape_rules::left_divide_compatible(&lhs_ty, &rhs_ty)
+                {
+                    let detail = match (
+                        matrix_dims_from_type(&lhs_ty),
+                        matrix_dims_from_type(&rhs_ty),
+                    ) {
+                        (Some((lrows, _)), Some((rrows, _))) => format!(
+                            "left row dimension {}, right row dimension {}",
+                            format_dim(lrows),
+                            format_dim(rrows)
+                        ),
+                        _ => "unknown shapes".to_string(),
+                    };
+                    diags.push(HirDiagnostic {
+                        message: format!(
+                            "Left divide dimension mismatch: {detail} (row dimensions must match)"
+                        ),
+                        span: merge_span(lhs.span, rhs.span),
+                        code: "lint.shape.ldivide",
+                        severity: HirDiagnosticSeverity::Warning,
+                    });
+                }
+            }
+            parser::BinOp::Div => {
+                if let Some(false) =
+                    runmat_builtins::shape_rules::right_divide_compatible(&lhs_ty, &rhs_ty)
+                {
+                    let detail = match (
+                        matrix_dims_from_type(&lhs_ty),
+                        matrix_dims_from_type(&rhs_ty),
+                    ) {
+                        (Some((_, lcols)), Some((_, rcols))) => format!(
+                            "left column dimension {}, right column dimension {}",
+                            format_dim(lcols),
+                            format_dim(rcols)
+                        ),
+                        _ => "unknown shapes".to_string(),
+                    };
+                    diags.push(HirDiagnostic {
+                        message: format!(
+                            "Right divide dimension mismatch: {detail} (column dimensions must match)"
+                        ),
+                        span: merge_span(lhs.span, rhs.span),
+                        code: "lint.shape.rdivide",
+                        severity: HirDiagnosticSeverity::Warning,
+                    });
+                }
+            }
+            parser::BinOp::Add
+            | parser::BinOp::Sub
+            | parser::BinOp::ElemMul
+            | parser::BinOp::ElemDiv
+            | parser::BinOp::ElemPow
+            | parser::BinOp::ElemLeftDiv
+            | parser::BinOp::Equal
+            | parser::BinOp::NotEqual
+            | parser::BinOp::Less
+            | parser::BinOp::LessEqual
+            | parser::BinOp::Greater
+            | parser::BinOp::GreaterEqual => {
+                let lhs_shape = type_shape_for_broadcast(&lhs_ty);
+                let rhs_shape = type_shape_for_broadcast(&rhs_ty);
+                if let (Some(a), Some(b)) = (lhs_shape, rhs_shape) {
+                    if let Some(false) = runmat_builtins::shape_rules::broadcast_compatible(&a, &b)
+                    {
+                        let detail = format!(
+                            "left is {}, right is {}",
+                            format_shape(&a),
+                            format_shape(&b)
+                        );
+                        diags.push(HirDiagnostic {
+                            message: format!(
+                                "Elementwise/broadcast dimension mismatch: {detail} (broadcasting failed)"
+                            ),
+                            span: merge_span(lhs.span, rhs.span),
+                            code: "lint.shape.broadcast",
+                            severity: HirDiagnosticSeverity::Warning,
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn walk_expr(
+        expr: &HirExpr,
+        env: &std::collections::HashMap<VarId, Type>,
+        returns: &std::collections::HashMap<String, Vec<Type>>,
+        diags: &mut Vec<HirDiagnostic>,
+    ) {
+        match &expr.kind {
+            HirExprKind::Unary(_, inner) => walk_expr(inner, env, returns, diags),
+            HirExprKind::Binary(lhs, op, rhs) => {
+                check_binary(op, lhs, rhs, env, returns, diags);
+                walk_expr(lhs, env, returns, diags);
+                walk_expr(rhs, env, returns, diags);
+            }
+            HirExprKind::Tensor(rows) => {
+                let mut col_constraint: Option<usize> = None;
+                for row in rows {
+                    let mut row_dim: Option<usize> = None;
+                    let mut row_cols: Option<usize> = Some(0);
+                    let mut first_span: Option<Span> = None;
+                    for e in row {
+                        if first_span.is_none() {
+                            first_span = Some(e.span);
+                        }
+                        let ty = infer_expr_type_with_env(e, env, returns);
+                        if let Some((rows_dim, cols_dim)) = concat_dims(&ty) {
+                            if let (Some(prev), Some(curr)) = (row_dim, rows_dim) {
+                                if prev != curr {
+                                    diags.push(HirDiagnostic {
+                                        message: format!(
+                                            "Horizontal concatenation dimension mismatch: left row dimension {prev}, right row dimension {curr} (row dimensions must match)"
+                                        ),
+                                        span: merge_span(first_span.unwrap_or(e.span), e.span),
+                                        code: "lint.shape.horzcat",
+                                        severity: HirDiagnosticSeverity::Warning,
+                                    });
+                                }
+                            }
+                            if row_dim.is_none() {
+                                row_dim = rows_dim;
+                            }
+                            match (row_cols, cols_dim) {
+                                (Some(total), Some(value)) => row_cols = Some(total + value),
+                                _ => row_cols = None,
+                            }
+                        } else {
+                            row_dim = None;
+                            row_cols = None;
+                        }
+                    }
+
+                    if let (Some(prev_cols), Some(curr_cols)) = (col_constraint, row_cols) {
+                        if prev_cols != curr_cols {
+                            diags.push(HirDiagnostic {
+                                message: format!(
+                                    "Vertical concatenation dimension mismatch: upper column dimension {prev_cols}, lower column dimension {curr_cols} (column dimensions must match)"
+                                ),
+                                span: expr.span,
+                                code: "lint.shape.vertcat",
+                                severity: HirDiagnosticSeverity::Warning,
+                            });
+                        }
+                    }
+                    if col_constraint.is_none() {
+                        col_constraint = row_cols;
+                    }
+                }
+
+                for row in rows {
+                    for e in row {
+                        walk_expr(e, env, returns, diags);
+                    }
+                }
+            }
+            HirExprKind::Cell(rows) => {
+                for row in rows {
+                    for e in row {
+                        walk_expr(e, env, returns, diags);
+                    }
+                }
+            }
+            HirExprKind::Index(base, idxs) | HirExprKind::IndexCell(base, idxs) => {
+                walk_expr(base, env, returns, diags);
+                for idx in idxs {
+                    walk_expr(idx, env, returns, diags);
+                }
+                if matches!(expr.kind, HirExprKind::Index(_, _)) && idxs.len() == 1 {
+                    let base_ty = infer_expr_type_with_env(base, env, returns);
+                    let idx_ty = infer_expr_type_with_env(&idxs[0], env, returns);
+                    let base_shape = match base_ty {
+                        Type::Tensor { shape: Some(shape) }
+                        | Type::Logical { shape: Some(shape) } => Some(shape),
+                        _ => None,
+                    };
+                    let mask_shape = match idx_ty {
+                        Type::Logical { shape: Some(shape) }
+                        | Type::Tensor { shape: Some(shape) } => Some(shape),
+                        _ => None,
+                    };
+                    if let (Some(base_shape), Some(mask_shape)) = (base_shape, mask_shape) {
+                        if let (Some(base_count), Some(mask_count)) =
+                            (element_count(&base_shape), element_count(&mask_shape))
+                        {
+                            if base_count != mask_count {
+                                diags.push(HirDiagnostic {
+                                    message: format!(
+                                        "Logical index size mismatch: mask has {mask_count}, array has {base_count} (must match)"
+                                    ),
+                                    span: merge_span(base.span, idxs[0].span),
+                                    code: "lint.shape.logical_index",
+                                    severity: HirDiagnosticSeverity::Warning,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            HirExprKind::Range(start, step, end) => {
+                walk_expr(start, env, returns, diags);
+                if let Some(step) = step.as_ref() {
+                    walk_expr(step, env, returns, diags);
+                }
+                walk_expr(end, env, returns, diags);
+            }
+            HirExprKind::FuncCall(name, args) => {
+                if name.eq_ignore_ascii_case("dot") && args.len() >= 2 {
+                    let lhs_ty = infer_expr_type_with_env(&args[0], env, returns);
+                    let rhs_ty = infer_expr_type_with_env(&args[1], env, returns);
+                    let lhs_len = match lhs_ty {
+                        Type::Tensor { shape: Some(shape) }
+                        | Type::Logical { shape: Some(shape) } => vector_length(&shape),
+                        _ => None,
+                    };
+                    let rhs_len = match rhs_ty {
+                        Type::Tensor { shape: Some(shape) }
+                        | Type::Logical { shape: Some(shape) } => vector_length(&shape),
+                        _ => None,
+                    };
+                    if let (Some(a), Some(b)) = (lhs_len, rhs_len) {
+                        if a != b {
+                            diags.push(HirDiagnostic {
+                                message: format!(
+                                    "Dot product length mismatch: left length {a}, right length {b} (lengths must match)"
+                                ),
+                                span: merge_span(args[0].span, args[1].span),
+                                code: "lint.shape.dot",
+                                severity: HirDiagnosticSeverity::Warning,
+                            });
+                        }
+                    }
+                }
+
+                if name.eq_ignore_ascii_case("reshape") && args.len() >= 2 {
+                    let input_ty = infer_expr_type_with_env(&args[0], env, returns);
+                    let input_shape = match input_ty {
+                        Type::Tensor { shape: Some(shape) }
+                        | Type::Logical { shape: Some(shape) } => Some(shape),
+                        _ => None,
+                    };
+                    let mut dims: Vec<Option<usize>> = Vec::new();
+                    let mut negative_count = 0usize;
+                    let mut non_integer = false;
+                    for arg in args.iter().skip(1) {
+                        match parse_dim(arg) {
+                            DimSpec::Known(value) => dims.push(Some(value)),
+                            DimSpec::Negative => {
+                                negative_count += 1;
+                                dims.push(None);
+                            }
+                            DimSpec::NonInteger => {
+                                non_integer = true;
+                                dims.push(None);
+                            }
+                            DimSpec::Unknown => dims.push(None),
+                        }
+                    }
+                    if negative_count > 1 {
+                        diags.push(HirDiagnostic {
+                            message: "Reshape dimension mismatch: more than one negative dimension (only one allowed)"
+                                .to_string(),
+                            span: merge_span(args[0].span, args[1].span),
+                            code: "lint.shape.reshape",
+                            severity: HirDiagnosticSeverity::Warning,
+                        });
+                    } else if negative_count == 1 && non_integer {
+                        diags.push(HirDiagnostic {
+                            message: "Reshape dimension mismatch: negative dimensions require integer sizes"
+                                .to_string(),
+                            span: merge_span(args[0].span, args[1].span),
+                            code: "lint.shape.reshape",
+                            severity: HirDiagnosticSeverity::Warning,
+                        });
+                    }
+                    if non_integer {
+                        diags.push(HirDiagnostic {
+                            message: "Reshape dimension mismatch: non-integer dimensions"
+                                .to_string(),
+                            span: merge_span(args[0].span, args[1].span),
+                            code: "lint.shape.reshape",
+                            severity: HirDiagnosticSeverity::Warning,
+                        });
+                    }
+                    if let Some(shape) =
+                        runmat_builtins::shape_rules::constructor_shape_from_dims(&dims)
+                    {
+                        if let Some(input_shape) = input_shape {
+                            if let (Some(in_count), Some(out_count)) =
+                                (element_count(&input_shape), element_count(&shape))
+                            {
+                                if in_count != out_count {
+                                    diags.push(HirDiagnostic {
+                                        message: format!(
+                                            "Reshape element count mismatch: input has {in_count}, output has {out_count} (must match)"
+                                        ),
+                                        span: merge_span(args[0].span, args[1].span),
+                                        code: "lint.shape.reshape",
+                                        severity: HirDiagnosticSeverity::Warning,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (name.eq_ignore_ascii_case("permute") || name.eq_ignore_ascii_case("ipermute"))
+                    && args.len() >= 2
+                {
+                    let input_ty = infer_expr_type_with_env(&args[0], env, returns);
+                    let input_rank = match input_ty {
+                        Type::Tensor { shape: Some(shape) }
+                        | Type::Logical { shape: Some(shape) } => Some(shape.len()),
+                        _ => None,
+                    };
+                    let order_rank = vector_literal_length(&args[1]);
+                    if let (Some(in_rank), Some(ord_rank)) = (input_rank, order_rank) {
+                        if in_rank != ord_rank {
+                            diags.push(HirDiagnostic {
+                                message: format!(
+                                    "Permute rank mismatch: input rank {in_rank}, order length {ord_rank} (must match)"
+                                ),
+                                span: merge_span(args[0].span, args[1].span),
+                                code: "lint.shape.permute",
+                                severity: HirDiagnosticSeverity::Warning,
+                            });
+                        }
+                    }
+                    if let HirExprKind::Tensor(rows) = &args[1].kind {
+                        let mut seen: std::collections::BTreeSet<usize> =
+                            std::collections::BTreeSet::new();
+                        let mut duplicate = false;
+                        let mut max_index = 0usize;
+                        for row in rows {
+                            for entry in row {
+                                if let Some(value) = eval_const_num(entry) {
+                                    let rounded = value.round();
+                                    if (value - rounded).abs() <= 1e-9 && rounded >= 1.0 {
+                                        let idx = rounded as usize;
+                                        max_index = max_index.max(idx);
+                                        if !seen.insert(idx) {
+                                            duplicate = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if duplicate {
+                            diags.push(HirDiagnostic {
+                                message:
+                                    "Permute order mismatch: duplicate dimensions in order vector"
+                                        .to_string(),
+                                span: args[1].span,
+                                code: "lint.shape.permute",
+                                severity: HirDiagnosticSeverity::Warning,
+                            });
+                        }
+                        if let Some(in_rank) = input_rank {
+                            if max_index > in_rank {
+                                diags.push(HirDiagnostic {
+                                    message: "Permute order mismatch: order references a dimension larger than the input rank"
+                                        .to_string(),
+                                    span: args[1].span,
+                                    code: "lint.shape.permute",
+                                    severity: HirDiagnosticSeverity::Warning,
+                                });
+                            }
+                        }
+                    }
+                }
+
+                if name.eq_ignore_ascii_case("repmat") && args.len() >= 2 {
+                    let mut reps: Vec<Option<usize>> = Vec::new();
+                    let mut non_integer = false;
+                    let mut negative = false;
+                    for arg in args.iter().skip(1) {
+                        match parse_dim(arg) {
+                            DimSpec::Known(value) => reps.push(Some(value)),
+                            DimSpec::NonInteger => non_integer = true,
+                            DimSpec::Negative => negative = true,
+                            _ => reps.push(None),
+                        }
+                    }
+                    if non_integer || negative {
+                        let reason = if non_integer {
+                            "non-integer"
+                        } else {
+                            "negative"
+                        };
+                        diags.push(HirDiagnostic {
+                            message: format!(
+                                "Repmat dimension mismatch: {reason} replication factors"
+                            ),
+                            span: merge_span(args[0].span, args[1].span),
+                            code: "lint.shape.repmat",
+                            severity: HirDiagnosticSeverity::Warning,
+                        });
+                    }
+                }
+
+                if (name.eq_ignore_ascii_case("sum")
+                    || name.eq_ignore_ascii_case("mean")
+                    || name.eq_ignore_ascii_case("prod")
+                    || name.eq_ignore_ascii_case("min")
+                    || name.eq_ignore_ascii_case("max"))
+                    && args.len() >= 2
+                {
+                    let input_ty = infer_expr_type_with_env(&args[0], env, returns);
+                    let input_rank = match input_ty {
+                        Type::Tensor { shape: Some(shape) }
+                        | Type::Logical { shape: Some(shape) } => Some(shape.len()),
+                        _ => None,
+                    };
+                    if let Some(rank) = input_rank {
+                        if let DimSpec::Known(dim) = parse_dim(&args[1]) {
+                            if dim == 0 || dim > rank {
+                                diags.push(HirDiagnostic {
+                                    message: format!(
+                                        "Reduction dimension mismatch: dimension {dim} is out of range for rank {rank}"
+                                    ),
+                                    span: args[1].span,
+                                    code: "lint.shape.reduction",
+                                    severity: HirDiagnosticSeverity::Warning,
+                                });
+                            }
+                        }
+                    }
+                }
+
+                for arg in args {
+                    walk_expr(arg, env, returns, diags);
+                }
+            }
+            HirExprKind::MethodCall(_, _, args) => {
+                for arg in args {
+                    walk_expr(arg, env, returns, diags);
+                }
+            }
+            HirExprKind::Member(base, _) | HirExprKind::MemberDynamic(base, _) => {
+                walk_expr(base, env, returns, diags);
+            }
+            HirExprKind::AnonFunc { body, .. } => {
+                walk_expr(body, env, returns, diags);
+            }
+            _ => {}
+        }
+    }
+
+    fn walk_stmt(
+        stmt: &HirStmt,
+        env: &std::collections::HashMap<VarId, Type>,
+        returns: &std::collections::HashMap<String, Vec<Type>>,
+        func_envs: &std::collections::HashMap<String, std::collections::HashMap<VarId, Type>>,
+        diags: &mut Vec<HirDiagnostic>,
+    ) {
+        match stmt {
+            HirStmt::Assign(_, expr, _, _)
+            | HirStmt::ExprStmt(expr, _, _)
+            | HirStmt::MultiAssign(_, expr, _, _) => walk_expr(expr, env, returns, diags),
+            HirStmt::If {
+                cond,
+                then_body,
+                elseif_blocks,
+                else_body,
+                ..
+            } => {
+                walk_expr(cond, env, returns, diags);
+                for s in then_body {
+                    walk_stmt(s, env, returns, func_envs, diags);
+                }
+                for (cond, body) in elseif_blocks {
+                    walk_expr(cond, env, returns, diags);
+                    for s in body {
+                        walk_stmt(s, env, returns, func_envs, diags);
+                    }
+                }
+                if let Some(body) = else_body {
+                    for s in body {
+                        walk_stmt(s, env, returns, func_envs, diags);
+                    }
+                }
+            }
+            HirStmt::While { cond, body, .. } => {
+                walk_expr(cond, env, returns, diags);
+                for s in body {
+                    walk_stmt(s, env, returns, func_envs, diags);
+                }
+            }
+            HirStmt::For { expr, body, .. } => {
+                walk_expr(expr, env, returns, diags);
+                for s in body {
+                    walk_stmt(s, env, returns, func_envs, diags);
+                }
+            }
+            HirStmt::Switch {
+                expr,
+                cases,
+                otherwise,
+                ..
+            } => {
+                walk_expr(expr, env, returns, diags);
+                for (case_expr, case_body) in cases {
+                    walk_expr(case_expr, env, returns, diags);
+                    for s in case_body {
+                        walk_stmt(s, env, returns, func_envs, diags);
+                    }
+                }
+                if let Some(body) = otherwise {
+                    for s in body {
+                        walk_stmt(s, env, returns, func_envs, diags);
+                    }
+                }
+            }
+            HirStmt::Function { name, body, .. } => {
+                let func_env = func_envs.get(name).cloned().unwrap_or_default();
+                for s in body {
+                    walk_stmt(s, &func_env, returns, func_envs, diags);
+                }
+            }
+            HirStmt::ClassDef { members, .. } => {
+                for member in members {
+                    if let HirClassMember::Methods { body, .. } = member {
+                        for s in body {
+                            walk_stmt(s, env, returns, func_envs, diags);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut diags = Vec::new();
+    let global_env = result.inferred_globals.clone();
+    for stmt in &result.hir.body {
+        walk_stmt(
+            stmt,
+            &global_env,
+            &result.inferred_function_returns,
+            &result.inferred_function_envs,
+            &mut diags,
+        );
+    }
+    diags
 }
 
 /// Collect all import statements in a program for downstream name resolution
@@ -2736,6 +3695,30 @@ impl Ctx {
         self.is_user_defined_function(name) || self.is_builtin_function(name)
     }
 
+    /// Check if a name is a class-like type that should support static method syntax
+    /// (e.g., `gpuArray.zeros(...)` instead of requiring `?gpuArray.zeros(...)`).
+    fn is_static_method_class(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "gpuArray"
+                | "logical"
+                | "double"
+                | "single"
+                | "int8"
+                | "int16"
+                | "int32"
+                | "int64"
+                | "uint8"
+                | "uint16"
+                | "uint32"
+                | "uint64"
+                | "char"
+                | "string"
+                | "cell"
+                | "struct"
+        )
+    }
+
     fn lower_stmts(&mut self, stmts: &[AstStmt]) -> Result<Vec<HirStmt>, SemanticError> {
         stmts.iter().map(|s| self.lower_stmt(s)).collect()
     }
@@ -3027,6 +4010,50 @@ impl Ctx {
         }
     }
 
+    fn lower_colon_expr(
+        &mut self,
+        start: &AstExpr,
+        end: &AstExpr,
+    ) -> Result<(HirExprKind, Type), SemanticError> {
+        use parser::Expr;
+
+        let start_hir = self.lower_expr(start)?;
+
+        match end {
+            Expr::Binary(mid, parser::BinOp::Colon, final_end, _) => {
+                let mid_hir = self.lower_expr(mid)?;
+                let end_hir = self.lower_expr(final_end)?;
+                Ok((
+                    HirExprKind::Range(
+                        Box::new(start_hir),
+                        Some(Box::new(mid_hir)),
+                        Box::new(end_hir),
+                    ),
+                    Type::tensor(),
+                ))
+            }
+            Expr::Range(mid, step, final_end, _) if step.is_none() => {
+                let mid_hir = self.lower_expr(mid)?;
+                let end_hir = self.lower_expr(final_end)?;
+                Ok((
+                    HirExprKind::Range(
+                        Box::new(start_hir),
+                        Some(Box::new(mid_hir)),
+                        Box::new(end_hir),
+                    ),
+                    Type::tensor(),
+                ))
+            }
+            _ => {
+                let end_hir = self.lower_expr(end)?;
+                Ok((
+                    HirExprKind::Range(Box::new(start_hir), None, Box::new(end_hir)),
+                    Type::tensor(),
+                ))
+            }
+        }
+    }
+
     fn lower_expr(&mut self, expr: &AstExpr) -> Result<HirExpr, SemanticError> {
         use parser::Expr::*;
         let span = expr.span();
@@ -3063,6 +4090,10 @@ impl Ctx {
                 (HirExprKind::Unary(*op, Box::new(inner)), ty)
             }
             Binary(a, op, b, _) => {
+                if matches!(op, BinOp::Colon) {
+                    let (kind, ty) = self.lower_colon_expr(a, b)?;
+                    return Ok(HirExpr { kind, ty, span });
+                }
                 let left = self.lower_expr(a)?;
                 let left_ty = left.ty.clone();
                 let right = self.lower_expr(b)?;
@@ -3224,6 +4255,30 @@ impl Ctx {
             Colon(_) => (HirExprKind::Colon, Type::tensor()),
             EndKeyword(_) => (HirExprKind::End, Type::Unknown),
             Member(base, name, _) => {
+                // Check if base is an identifier that should be treated as a class reference
+                // for static property access (e.g., `gpuArray.zeros` → `?gpuArray.zeros`)
+                if let Ident(class_name, _) = &**base {
+                    let dotted_name = format!("{class_name}.{name}");
+                    if self.is_builtin_function(&dotted_name) {
+                        return Ok(HirExpr {
+                            kind: HirExprKind::FuncCall(dotted_name, Vec::new()),
+                            ty: Type::Unknown,
+                            span,
+                        });
+                    }
+                    if self.is_static_method_class(class_name) {
+                        let metaclass = HirExpr {
+                            kind: HirExprKind::MetaClass(class_name.clone()),
+                            ty: Type::String,
+                            span: base.span(),
+                        };
+                        return Ok(HirExpr {
+                            kind: HirExprKind::Member(Box::new(metaclass), name.clone()),
+                            ty: Type::Unknown,
+                            span,
+                        });
+                    }
+                }
                 let b = self.lower_expr(base)?;
                 (
                     HirExprKind::Member(Box::new(b), name.clone()),
@@ -3239,6 +4294,39 @@ impl Ctx {
                 )
             }
             MethodCall(base, name, args, _) => {
+                // Check if base is an identifier that should be treated as a class reference
+                // for static method calls (e.g., `gpuArray.zeros(1,1)` → `?gpuArray.zeros(1,1)`)
+                if let Ident(class_name, _) = &**base {
+                    let dotted_name = format!("{class_name}.{name}");
+                    if self.is_builtin_function(&dotted_name) {
+                        let lowered_args: Result<Vec<_>, _> =
+                            args.iter().map(|arg| self.lower_expr(arg)).collect();
+                        let lowered_args = lowered_args?;
+                        return Ok(HirExpr {
+                            kind: HirExprKind::FuncCall(dotted_name, lowered_args),
+                            ty: Type::Unknown,
+                            span,
+                        });
+                    }
+                    if self.is_static_method_class(class_name) {
+                        let metaclass = HirExpr {
+                            kind: HirExprKind::MetaClass(class_name.clone()),
+                            ty: Type::String,
+                            span: base.span(),
+                        };
+                        let lowered_args: Result<Vec<_>, _> =
+                            args.iter().map(|a| self.lower_expr(a)).collect();
+                        return Ok(HirExpr {
+                            kind: HirExprKind::MethodCall(
+                                Box::new(metaclass),
+                                name.clone(),
+                                lowered_args?,
+                            ),
+                            ty: Type::Unknown,
+                            span,
+                        });
+                    }
+                }
                 let b = self.lower_expr(base)?;
                 let lowered_args: Result<Vec<_>, _> =
                     args.iter().map(|a| self.lower_expr(a)).collect();
@@ -3311,16 +4399,13 @@ impl Ctx {
             return self.infer_user_function_return_type(outputs, body, args);
         }
 
-        let arg_types: Vec<Type> = args.iter().map(|arg| arg.ty.clone()).collect();
-        if let Some(ty) = logical_builtin_return_type(func_name, &arg_types) {
-            return ty;
-        }
-
         // Check builtin functions using the proper signature system
         let builtin_functions = runmat_builtins::builtin_functions();
         for builtin in builtin_functions {
             if builtin.name == func_name {
-                return builtin.return_type.clone();
+                let arg_types: Vec<Type> = args.iter().map(|arg| arg.ty.clone()).collect();
+                let ctx = resolve_context_from_args(args);
+                return builtin.infer_return_type_with_context(&arg_types, &ctx);
             }
         }
 
@@ -3546,5 +4631,103 @@ impl Ctx {
             accumulate(f);
         }
         per_output
+    }
+}
+
+#[cfg(test)]
+mod literal_context_tests {
+    use super::*;
+    use runmat_builtins::LiteralValue;
+
+    fn expr(kind: HirExprKind) -> HirExpr {
+        HirExpr {
+            kind,
+            ty: Type::Unknown,
+            span: parser::Span::default(),
+        }
+    }
+
+    #[test]
+    fn literal_from_number() {
+        let value = expr(HirExprKind::Number("3.5".to_string()));
+        assert_eq!(literal_value_from_expr(&value), LiteralValue::Number(3.5));
+    }
+
+    #[test]
+    fn literal_from_string() {
+        let value = expr(HirExprKind::String("All".to_string()));
+        assert_eq!(
+            literal_value_from_expr(&value),
+            LiteralValue::String("All".to_string())
+        );
+    }
+
+    #[test]
+    fn literal_from_bool_constant() {
+        let value = expr(HirExprKind::Constant("true".to_string()));
+        assert_eq!(literal_value_from_expr(&value), LiteralValue::Bool(true));
+    }
+
+    #[test]
+    fn literal_from_row_vector() {
+        let value = expr(HirExprKind::Tensor(vec![vec![
+            expr(HirExprKind::Number("1".to_string())),
+            expr(HirExprKind::Number("2".to_string())),
+        ]]));
+        assert_eq!(
+            literal_value_from_expr(&value),
+            LiteralValue::Vector(vec![LiteralValue::Number(1.0), LiteralValue::Number(2.0)])
+        );
+    }
+
+    #[test]
+    fn literal_from_column_vector() {
+        let value = expr(HirExprKind::Tensor(vec![
+            vec![expr(HirExprKind::Number("1".to_string()))],
+            vec![expr(HirExprKind::Number("2".to_string()))],
+        ]));
+        assert_eq!(
+            literal_value_from_expr(&value),
+            LiteralValue::Vector(vec![LiteralValue::Number(1.0), LiteralValue::Number(2.0)])
+        );
+    }
+
+    #[test]
+    fn literal_from_matrix_literal_is_nested_vector() {
+        let value = expr(HirExprKind::Tensor(vec![
+            vec![
+                expr(HirExprKind::Number("1".to_string())),
+                expr(HirExprKind::Number("2".to_string())),
+            ],
+            vec![
+                expr(HirExprKind::Number("3".to_string())),
+                expr(HirExprKind::Number("4".to_string())),
+            ],
+        ]));
+        assert_eq!(
+            literal_value_from_expr(&value),
+            LiteralValue::Vector(vec![
+                LiteralValue::Vector(vec![LiteralValue::Number(1.0), LiteralValue::Number(2.0)]),
+                LiteralValue::Vector(vec![LiteralValue::Number(3.0), LiteralValue::Number(4.0)]),
+            ])
+        );
+    }
+
+    #[test]
+    fn resolve_context_tracks_literals() {
+        let args = vec![
+            expr(HirExprKind::Number("4".to_string())),
+            expr(HirExprKind::String("omitnan".to_string())),
+            expr(HirExprKind::Constant("false".to_string())),
+        ];
+        let ctx = resolve_context_from_args(&args);
+        assert_eq!(
+            ctx.literal_args,
+            vec![
+                LiteralValue::Number(4.0),
+                LiteralValue::String("omitnan".to_string()),
+                LiteralValue::Bool(false),
+            ]
+        );
     }
 }

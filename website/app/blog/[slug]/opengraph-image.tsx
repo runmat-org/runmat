@@ -36,5 +36,5 @@ export default async function Image({ params }: { params: Promise<{ slug: string
   const imageUrl = fm?.image && (fm.image.startsWith('http://') || fm.image.startsWith('https://') || fm.image.startsWith('/'))
     ? fm.image
     : undefined;
-  return createOgResponse({ title, subtitle, imageUrl, siteTitle: 'Fast, Free, Modern MATLAB Runtime', siteUrl: 'runmat.org' });
+  return createOgResponse({ title, subtitle, imageUrl, siteTitle: 'Fast, Free, Modern MATLAB Runtime', siteUrl: 'runmat.com' });
 }

@@ -11,6 +11,7 @@ use super::contour::{
     build_contour_plot, parse_contour_args, ContourArgs, ContourLineColor,
 };
 use super::state::{render_active_plot, PlotRenderOptions};
+use crate::builtins::plotting::type_resolvers::string_type;
 
 const BUILTIN_NAME: &str = "contourf";
 
@@ -21,6 +22,7 @@ const BUILTIN_NAME: &str = "contourf";
     keywords = "contourf,plotting,filled,contour",
     sink = true,
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::contourf"
 )]
 pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -124,6 +126,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
     use runmat_builtins::Tensor;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -151,5 +154,13 @@ pub(crate) mod tests {
             ],
         );
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn contourf_type_is_string() {
+        assert_eq!(
+            string_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
     }
 }

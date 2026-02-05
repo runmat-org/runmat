@@ -327,11 +327,35 @@ impl<'a> GraphBuilder<'a> {
         let inputs = vec![lhs, rhs];
         let node_id = self.nodes.len() as NodeId;
         let span = InstrSpan { start: pc, end: pc };
-        let shape = self.infer_elementwise_shape(&inputs);
-        let out_type = if matches!(shape, ShapeInfo::Unknown) {
-            Type::Unknown
-        } else {
-            shape.to_type()
+        let out_type = match op {
+            PrimitiveOp::Mul => {
+                let lhs_type = self.values.get(lhs as usize).map(|v| &v.ty);
+                let rhs_type = self.values.get(rhs as usize).map(|v| &v.ty);
+                match (lhs_type, rhs_type) {
+                    (Some(left), Some(right)) => {
+                        runmat_builtins::shape_rules::matmul_output_type(left, right)
+                    }
+                    _ => Type::Unknown,
+                }
+            }
+            PrimitiveOp::Div => {
+                let lhs_type = self.values.get(lhs as usize).map(|v| &v.ty);
+                let rhs_type = self.values.get(rhs as usize).map(|v| &v.ty);
+                match (lhs_type, rhs_type) {
+                    (Some(left), Some(right)) => {
+                        runmat_builtins::shape_rules::right_divide_output_type(left, right)
+                    }
+                    _ => Type::Unknown,
+                }
+            }
+            _ => {
+                let shape = self.infer_elementwise_shape(&inputs);
+                if matches!(shape, ShapeInfo::Unknown) {
+                    Type::Unknown
+                } else {
+                    shape.to_type()
+                }
+            }
         };
         let mut node = AccelNode {
             id: node_id,
@@ -764,5 +788,79 @@ fn primitive_tags(op: PrimitiveOp) -> Vec<AccelGraphTag> {
             vec![AccelGraphTag::Unary, AccelGraphTag::Elementwise]
         }
         _ => vec![AccelGraphTag::Elementwise],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::instr::Instr;
+
+    #[test]
+    fn accel_graph_mul_uses_matmul_shape() {
+        let instructions = vec![
+            Instr::LoadVar(0),
+            Instr::LoadVar(1),
+            Instr::Mul,
+            Instr::StoreVar(2),
+        ];
+        let var_types = vec![
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(4)]),
+            },
+            Type::Unknown,
+        ];
+        let graph = build_accel_graph(&instructions, &var_types);
+        let mut out_type = None;
+        for node in &graph.nodes {
+            if let AccelNodeLabel::Primitive(PrimitiveOp::Mul) = node.label {
+                let out_id = node.outputs.first().copied().expect("output");
+                let value = graph.value(out_id).expect("value");
+                out_type = Some(value.ty.clone());
+            }
+        }
+        assert_eq!(
+            out_type,
+            Some(Type::Tensor {
+                shape: Some(vec![Some(2), Some(4)])
+            })
+        );
+    }
+
+    #[test]
+    fn accel_graph_div_uses_right_divide_shape() {
+        let instructions = vec![
+            Instr::LoadVar(0),
+            Instr::LoadVar(1),
+            Instr::Div,
+            Instr::StoreVar(2),
+        ];
+        let var_types = vec![
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(2)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            },
+            Type::Unknown,
+        ];
+        let graph = build_accel_graph(&instructions, &var_types);
+        let mut out_type = None;
+        for node in &graph.nodes {
+            if let AccelNodeLabel::Primitive(PrimitiveOp::Div) = node.label {
+                let out_id = node.outputs.first().copied().expect("output");
+                let value = graph.value(out_id).expect("value");
+                out_type = Some(value.ty.clone());
+            }
+        }
+        assert_eq!(
+            out_type,
+            Some(Type::Tensor {
+                shape: Some(vec![Some(2), Some(2)])
+            })
+        );
     }
 }

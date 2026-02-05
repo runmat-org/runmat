@@ -72,6 +72,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Query whether a file identifier is positioned at end-of-file.",
     keywords = "feof,end of file,io,file identifier",
     accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::feof_type),
     builtin_path = "crate::builtins::io::filetext::feof"
 )]
 async fn feof_builtin(fid: Value) -> crate::BuiltinResult<Value> {

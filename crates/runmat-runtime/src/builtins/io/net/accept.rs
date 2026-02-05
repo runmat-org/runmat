@@ -212,6 +212,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/net",
     summary = "Accept a pending client connection on a TCP server.",
     keywords = "accept,tcpserver,tcpclient",
+    type_resolver(crate::builtins::io::type_resolvers::accept_type),
     builtin_path = "crate::builtins::io::net::accept"
 )]
 pub(crate) async fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

@@ -76,6 +76,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     keywords = "dir,list files,folder contents,metadata,wildcard,struct array",
     accel = "cpu",
     suppress_auto_output = true,
+    type_resolver(crate::builtins::io::type_resolvers::dir_type),
     builtin_path = "crate::builtins::io::repl_fs::dir"
 )]
 async fn dir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

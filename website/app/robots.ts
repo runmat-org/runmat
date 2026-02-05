@@ -9,7 +9,7 @@ export default function robots(): MetadataRoute.Robots {
       allow: '/',
       disallow: ['/api/', '/admin/'],
     },
-    sitemap: 'https://runmat.org/sitemap.xml',
-    host: 'https://runmat.org',
+    sitemap: 'https://runmat.com/sitemap.xml',
+    host: 'https://runmat.com',
   }
 }

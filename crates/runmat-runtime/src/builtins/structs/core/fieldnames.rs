@@ -4,6 +4,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::structs::type_resolvers::fieldnames_type;
 use runmat_builtins::{
     CellArray, CharArray, HandleRef, Listener, ObjectInstance, StructValue, Value,
 };
@@ -50,6 +51,7 @@ fn fieldnames_flow(message: impl Into<String>) -> RuntimeError {
     category = "structs/core",
     summary = "List the field names of scalar structs or struct arrays.",
     keywords = "fieldnames,struct,introspection,fields",
+    type_resolver(fieldnames_type),
     builtin_path = "crate::builtins::structs::core::fieldnames"
 )]
 async fn fieldnames_builtin(value: Value) -> BuiltinResult<Value> {

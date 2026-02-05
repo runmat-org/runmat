@@ -6,7 +6,7 @@ offers: first-class subcommands, rich help, environment-variable integration,
 snapshot management, a built-in benchmarker, a Jupyter kernel, and deep control
 over the JIT compiler and garbage collector.
 
-**Try RunMat without installing:** the [browser sandbox](https://runmat.org/sandbox) runs in your browser with no CLI. For installation and CLI vs browser paths, see [Getting Started](/docs/getting-started).
+**Try RunMat without installing:** the [browser sandbox](https://runmat.com/sandbox) runs in your browser with no CLI. For installation and CLI vs browser paths, see [Getting Started](/docs/getting-started).
 
 Read this end-to-end once, then use it as a reference.
 
@@ -144,6 +144,67 @@ runmat pkg publish
 ```
 
 All pkg subcommands currently print: "RunMat package manager is coming soon. Track progress in the repo."
+
+### fs
+Remote filesystem commands. These require `runmat login` and a configured project.
+
+```sh
+runmat fs ls /data
+runmat fs read /data/example.mat --output example.mat
+runmat fs write /data/example.mat ./example.mat
+runmat fs mkdir /data/new --recursive
+runmat fs rm /data/example.mat
+
+# Manifest workflows
+runmat fs manifest-history /data/dataset
+runmat fs manifest-restore <version-id>
+runmat fs manifest-update /data/dataset --base-version <version-id> --manifest ./manifest.json
+
+# Version history
+runmat fs history /data/example.mat
+runmat fs restore <version-id>
+runmat fs history-delete <version-id>
+
+# Snapshots
+runmat fs snapshot-list
+runmat fs snapshot-create --message "baseline" --tag baseline
+runmat fs snapshot-restore <snapshot-id>
+runmat fs snapshot-delete <snapshot-id>
+runmat fs snapshot-tag-list
+runmat fs snapshot-tag-set <snapshot-id> <tag>
+runmat fs snapshot-tag-delete <tag>
+
+# Git sync
+runmat fs git-clone ./project-repo
+runmat fs git-pull
+runmat fs git-push
+```
+
+### remote
+Run scripts against the remote filesystem.
+
+```sh
+runmat remote run /scripts/job.m --project <project-id> --server https://api.runmat.example
+```
+
+If `--server` is omitted, the CLI defaults to `https://api.runmat.com`.
+
+### project select
+Set the default project for remote filesystem commands.
+
+```sh
+runmat project select <project-id>
+```
+
+### project retention
+Manage per-project version retention.
+
+```sh
+runmat project retention get [--project <project-id>]
+runmat project retention set <max-versions> [--project <project-id>]
+```
+
+`max-versions=0` disables pruning (unlimited history).
 
 ### version
 ```sh

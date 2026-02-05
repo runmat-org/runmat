@@ -13,6 +13,7 @@ use crate::builtins::common::{
     broadcast::BroadcastPlan, gpu_helpers, map_control_flow_with_builtin,
     random_args::complex_tensor_into_value, random_args::keyword_of, tensor,
 };
+use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::power")]
@@ -68,6 +69,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     summary = "Element-wise power with MATLAB-compatible broadcasting and complex support.",
     keywords = "power,element-wise,.^,gpu,broadcast",
     accel = "elementwise",
+    type_resolver(numeric_binary_type),
     builtin_path = "crate::builtins::math::elementwise::power"
 )]
 async fn power_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -711,10 +713,37 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
 
     fn power_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::power_builtin(lhs, rhs, rest))
+    }
+
+    #[test]
+    fn power_type_preserves_tensor_shape() {
+        let out = numeric_binary_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
+
+    #[test]
+    fn power_type_scalar_returns_num() {
+        let out = numeric_binary_type(&[Type::Num, Type::Int], &ResolveContext::new(Vec::new()));
+        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

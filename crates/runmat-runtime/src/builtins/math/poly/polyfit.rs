@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::math::poly::type_resolvers::polyfit_type;
 
 const EPS: f64 = 1.0e-12;
 const EPS_NAN: f64 = 1.0e-12;
@@ -60,6 +61,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "polyfit,polynomial,least-squares,gpu",
     accel = "sink",
     sink = true,
+    type_resolver(polyfit_type),
     builtin_path = "crate::builtins::math::poly::polyfit"
 )]
 async fn polyfit_builtin(

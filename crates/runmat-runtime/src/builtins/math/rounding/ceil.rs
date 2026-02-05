@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding::ceil")]
@@ -63,6 +64,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     summary = "Round values toward positive infinity.",
     keywords = "ceil,rounding,integers,gpu",
     accel = "unary",
+    type_resolver(numeric_unary_type),
     builtin_path = "crate::builtins::math::rounding::ceil"
 )]
 async fn ceil_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -404,7 +406,9 @@ pub(crate) mod tests {
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, IntValue, LogicalArray, Tensor, Value};
+    use runmat_builtins::{
+        CharArray, IntValue, LogicalArray, ResolveContext, Tensor, Type, Value,
+    };
 
     fn ceil_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::ceil_builtin(value, rest))
@@ -416,6 +420,33 @@ pub(crate) mod tests {
             "unexpected error: {}",
             error.message()
         );
+    }
+
+    #[test]
+    fn ceil_type_preserves_tensor_shape() {
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
+
+    #[test]
+    fn ceil_type_scalar_tensor_returns_num() {
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(1), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

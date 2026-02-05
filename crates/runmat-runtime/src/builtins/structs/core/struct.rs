@@ -4,6 +4,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::structs::type_resolvers::struct_type;
 use runmat_builtins::{CellArray, CharArray, StructValue, Value};
 use runmat_macros::runtime_builtin;
 
@@ -55,6 +56,7 @@ fn struct_flow(message: impl Into<String>) -> RuntimeError {
     category = "structs/core",
     summary = "Create scalar structs or struct arrays from name/value pairs.",
     keywords = "struct,structure,name-value,record",
+    type_resolver(struct_type),
     builtin_path = "crate::builtins::structs::core::r#struct"
 )]
 async fn struct_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {

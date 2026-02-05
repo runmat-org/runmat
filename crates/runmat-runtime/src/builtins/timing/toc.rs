@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::timing::tic::{decode_handle, take_latest_start};
+use crate::builtins::timing::type_resolvers::toc_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::timing::toc")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -57,6 +58,7 @@ fn toc_error_with_identifier(message: impl Into<String>, identifier: &str) -> cr
     category = "timing",
     summary = "Read the elapsed time since the most recent tic or an explicit handle.",
     keywords = "toc,timing,profiling,benchmark",
+    type_resolver(toc_type),
     builtin_path = "crate::builtins::timing::toc"
 )]
 pub async fn toc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {

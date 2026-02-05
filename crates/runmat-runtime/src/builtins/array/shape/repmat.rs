@@ -8,10 +8,12 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use runmat_builtins::shape_rules::element_count_if_known;
+use runmat_builtins::ResolveContext;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -46,12 +48,105 @@ fn repmat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("repmat").build()
 }
 
+fn array_shape(ty: &Type) -> Option<&[Option<usize>]> {
+    match ty {
+        Type::Tensor { shape: Some(shape) } => Some(shape.as_slice()),
+        Type::Logical { shape: Some(shape) } => Some(shape.as_slice()),
+        _ => None,
+    }
+}
+
+fn repmat_reps_len(args: &[Type]) -> Option<usize> {
+    if args.len() < 2 {
+        return None;
+    }
+    if args.len() > 2 {
+        return Some(args.len() - 1);
+    }
+    match &args[1] {
+        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+            element_count_if_known(shape)
+        }
+        Type::Num | Type::Int | Type::Bool => Some(1),
+        _ => None,
+    }
+}
+
+fn repmat_output_shape(
+    input_shape: &[Option<usize>],
+    reps_len: usize,
+) -> Option<Vec<Option<usize>>> {
+    let input_rank = input_shape.len();
+    let rank = if reps_len == 1 {
+        if input_rank == 0 {
+            return None;
+        }
+        input_rank.max(2)
+    } else {
+        input_rank.max(reps_len)
+    };
+
+    let mut output = Vec::with_capacity(rank);
+    for axis in 0..rank {
+        if axis < input_rank && input_shape[axis] == Some(0) {
+            output.push(Some(0));
+        } else {
+            output.push(None);
+        }
+    }
+    Some(output)
+}
+
+fn repmat_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    let reps = ctx.numeric_dims_from(1);
+    let input = match args.first() {
+        Some(value) => value,
+        None => return Type::Unknown,
+    };
+    if reps.is_empty() {
+        let reps_len = repmat_reps_len(args);
+        let shape = array_shape(input)
+            .and_then(|shape| reps_len.and_then(|len| repmat_output_shape(shape, len)));
+        return match input {
+            Type::Tensor { .. } => Type::Tensor { shape },
+            Type::Logical { .. } => Type::Logical { shape },
+            Type::Bool => Type::logical(),
+            Type::Num | Type::Int => Type::tensor(),
+            Type::Cell { element_type, .. } => Type::Cell {
+                element_type: element_type.clone(),
+                length: None,
+            },
+            Type::Unknown => Type::Unknown,
+            _ => Type::Unknown,
+        };
+    }
+    let shape = match input {
+        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+            runmat_builtins::shape_rules::repmat_shape(shape, &reps)
+        }
+        _ => None,
+    };
+    match input {
+        Type::Tensor { .. } => Type::Tensor { shape },
+        Type::Logical { .. } => Type::Logical { shape },
+        Type::Bool => Type::logical(),
+        Type::Num | Type::Int => Type::tensor(),
+        Type::Cell { element_type, .. } => Type::Cell {
+            element_type: element_type.clone(),
+            length: None,
+        },
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
+
 #[runtime_builtin(
     name = "repmat",
     category = "array/shape",
     summary = "Replicate arrays by tiling an input across one or more dimensions.",
     keywords = "repmat,tile,replicate,array,gpu",
     accel = "array_construct",
+    type_resolver(repmat_type),
     builtin_path = "crate::builtins::array::shape::repmat"
 )]
 async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -482,6 +577,20 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};
+
+    #[test]
+    fn repmat_type_preserves_logical_kind() {
+        let out = repmat_type(
+            &[
+            Type::Logical {
+                shape: Some(vec![Some(2), Some(2)]),
+            },
+            Type::Num,
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(out, Type::Logical { shape: Some(vec![None, None]) });
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

@@ -4,7 +4,8 @@ use std::cmp::max;
 
 use log::warn;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, MeshgridAxisView};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::shape_rules::unknown_shape;
+use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
@@ -51,12 +52,30 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Meshgrid explicitly materialises dense coordinate arrays and therefore bypasses fusion.",
 };
 
+fn meshgrid_type(args: &[Type], _context: &ResolveContext) -> Type {
+    if args.is_empty() {
+        return Type::Unknown;
+    }
+    let mut axis_count = args.len();
+    if axis_count >= 2 && matches!(args[axis_count - 2], Type::String) {
+        axis_count = axis_count.saturating_sub(2);
+    }
+    if axis_count == 0 {
+        return Type::Unknown;
+    }
+    let rank = if axis_count >= 3 { 3 } else { 2 };
+    Type::Tensor {
+        shape: Some(unknown_shape(rank)),
+    }
+}
+
 #[runtime_builtin(
     name = "meshgrid",
     category = "array/creation",
     summary = "Generate coordinate matrices for 2-D and 3-D grids.",
     keywords = "meshgrid,grid,gpu,like,3d",
     accel = "array_construct",
+    type_resolver(meshgrid_type),
     builtin_path = "crate::builtins::array::creation::meshgrid"
 )]
 async fn meshgrid_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -331,10 +350,10 @@ async fn axis_from_value(
     prefer_gpu: &mut bool,
 ) -> crate::BuiltinResult<AxisData> {
     match value {
-        Value::Tensor(tensor) => axis_from_tensor(tensor),
+        Value::Tensor(tensor) => axis_from_tensor(tensor, index),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)?;
-            axis_from_tensor(tensor)
+            axis_from_tensor(tensor, index)
         }
         Value::Num(n) => Ok(AxisData {
             values: vec![(n, 0.0)],
@@ -359,11 +378,17 @@ async fn axis_from_value(
             len: 1,
             is_complex: im != 0.0,
         }),
-        Value::ComplexTensor(tensor) => axis_from_complex_tensor(tensor),
+        Value::ComplexTensor(tensor) => axis_from_complex_tensor(tensor, index),
         Value::GpuTensor(handle) => {
-            *prefer_gpu = true;
             let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-            axis_from_tensor(tensor)
+            // Only treat GPU inputs as a signal to prefer GPU outputs when the input
+            // is actually a vector axis. When the caller passes a full coordinate
+            // matrix (already meshed), default to host output unless the user forces
+            // GPU residency via `like`.
+            if is_vector_shape(&tensor.shape) {
+                *prefer_gpu = true;
+            }
+            axis_from_tensor(tensor, index)
         }
         other => Err(builtin_error(format!(
             "meshgrid: input argument {} must be numeric, got {other:?}",
@@ -372,38 +397,202 @@ async fn axis_from_value(
     }
 }
 
-fn axis_from_tensor(tensor: Tensor) -> crate::BuiltinResult<AxisData> {
-    if !is_vector_shape(&tensor.shape) {
-        return Err(builtin_error(
-            "meshgrid: input vectors must be one-dimensional",
-        ));
+fn axis_from_tensor(tensor: Tensor, index: usize) -> crate::BuiltinResult<AxisData> {
+    if is_vector_shape(&tensor.shape) {
+        let mut values = Vec::with_capacity(tensor.data.len());
+        for &v in &tensor.data {
+            values.push((v, 0.0));
+        }
+        return Ok(AxisData {
+            len: values.len(),
+            values,
+            is_complex: false,
+        });
     }
-    let mut values = Vec::with_capacity(tensor.data.len());
-    for &v in &tensor.data {
-        values.push((v, 0.0));
+
+    // Be slightly more permissive than MATLAB: if the input is already a meshgrid-style
+    // coordinate matrix, accept it and recover the original axis vector.
+    //
+    // This is a pragmatic compatibility shim for cases where callers already have
+    // coordinate matrices (X/Y) and pass them through `meshgrid` again.
+    if let Some(axis) = axis_from_meshgrid_matrix_real(&tensor, index)? {
+        return Ok(axis);
     }
-    Ok(AxisData {
+
+    Err(builtin_error(format!(
+        "meshgrid: input argument {} must be a vector (1xN or Nx1), got shape {:?}",
+        index + 1,
+        tensor.shape
+    )))
+}
+
+fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> crate::BuiltinResult<AxisData> {
+    if is_vector_shape(&tensor.shape) {
+        let is_complex = tensor
+            .data
+            .iter()
+            .any(|&(_, imag)| !imag.is_nan() && imag != 0.0);
+        return Ok(AxisData {
+            len: tensor.data.len(),
+            values: tensor.data,
+            is_complex,
+        });
+    }
+
+    if let Some(axis) = axis_from_meshgrid_matrix_complex(&tensor, index)? {
+        return Ok(axis);
+    }
+
+    Err(builtin_error(format!(
+        "meshgrid: input argument {} must be a vector (1xN or Nx1), got shape {:?}",
+        index + 1,
+        tensor.shape
+    )))
+}
+
+fn axis_from_meshgrid_matrix_real(
+    tensor: &Tensor,
+    index: usize,
+) -> crate::BuiltinResult<Option<AxisData>> {
+    let (rows, cols) = match tensor.shape.as_slice() {
+        [r, c] => (*r, *c),
+        _ => return Ok(None),
+    };
+    if rows <= 1 || cols <= 1 {
+        return Ok(None);
+    }
+
+    // Index 0 is expected to be the X-axis: a meshgrid X matrix has identical rows.
+    // Index 1 is expected to be the Y-axis: a meshgrid Y matrix has identical columns.
+    let expect_rows_constant = index == 0;
+
+    if expect_rows_constant {
+        if !matrix_rows_are_identical_real(tensor, rows, cols) {
+            return Ok(None);
+        }
+        // Extract the first row as the axis vector (length = cols).
+        let mut values = Vec::with_capacity(cols);
+        for col in 0..cols {
+            let idx = 0 + rows * col;
+            values.push((tensor.data[idx], 0.0));
+        }
+        return Ok(Some(AxisData {
+            len: values.len(),
+            values,
+            is_complex: false,
+        }));
+    }
+
+    if !matrix_cols_are_identical_real(tensor, rows, cols) {
+        return Ok(None);
+    }
+    // Extract the first column as the axis vector (length = rows).
+    let mut values = Vec::with_capacity(rows);
+    for row in 0..rows {
+        values.push((tensor.data[row], 0.0));
+    }
+    Ok(Some(AxisData {
         len: values.len(),
         values,
         is_complex: false,
-    })
+    }))
 }
 
-fn axis_from_complex_tensor(tensor: ComplexTensor) -> crate::BuiltinResult<AxisData> {
-    if !is_vector_shape(&tensor.shape) {
-        return Err(builtin_error(
-            "meshgrid: input vectors must be one-dimensional",
-        ));
+fn axis_from_meshgrid_matrix_complex(
+    tensor: &ComplexTensor,
+    index: usize,
+) -> crate::BuiltinResult<Option<AxisData>> {
+    let (rows, cols) = match tensor.shape.as_slice() {
+        [r, c] => (*r, *c),
+        _ => return Ok(None),
+    };
+    if rows <= 1 || cols <= 1 {
+        return Ok(None);
     }
-    let is_complex = tensor
-        .data
-        .iter()
-        .any(|&(_, imag)| !imag.is_nan() && imag != 0.0);
-    Ok(AxisData {
-        len: tensor.data.len(),
-        values: tensor.data,
+
+    let expect_rows_constant = index == 0;
+    if expect_rows_constant {
+        if !matrix_rows_are_identical_complex(tensor, rows, cols) {
+            return Ok(None);
+        }
+        let mut values = Vec::with_capacity(cols);
+        for col in 0..cols {
+            let idx = 0 + rows * col;
+            values.push(tensor.data[idx]);
+        }
+        let is_complex = values.iter().any(|&(_, im)| !im.is_nan() && im != 0.0);
+        return Ok(Some(AxisData {
+            len: values.len(),
+            values,
+            is_complex,
+        }));
+    }
+
+    if !matrix_cols_are_identical_complex(tensor, rows, cols) {
+        return Ok(None);
+    }
+    let mut values = Vec::with_capacity(rows);
+    for row in 0..rows {
+        values.push(tensor.data[row]);
+    }
+    let is_complex = values.iter().any(|&(_, im)| !im.is_nan() && im != 0.0);
+    Ok(Some(AxisData {
+        len: values.len(),
+        values,
         is_complex,
-    })
+    }))
+}
+
+fn matrix_rows_are_identical_real(tensor: &Tensor, rows: usize, cols: usize) -> bool {
+    for row in 1..rows {
+        for col in 0..cols {
+            let idx0 = 0 + rows * col;
+            let idx = row + rows * col;
+            if tensor.data[idx] != tensor.data[idx0] {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn matrix_cols_are_identical_real(tensor: &Tensor, rows: usize, cols: usize) -> bool {
+    for col in 1..cols {
+        for row in 0..rows {
+            let idx0 = row + rows * 0;
+            let idx = row + rows * col;
+            if tensor.data[idx] != tensor.data[idx0] {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn matrix_rows_are_identical_complex(tensor: &ComplexTensor, rows: usize, cols: usize) -> bool {
+    for row in 1..rows {
+        for col in 0..cols {
+            let idx0 = 0 + rows * col;
+            let idx = row + rows * col;
+            if tensor.data[idx] != tensor.data[idx0] {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn matrix_cols_are_identical_complex(tensor: &ComplexTensor, rows: usize, cols: usize) -> bool {
+    for col in 1..cols {
+        for row in 0..rows {
+            let idx0 = row + rows * 0;
+            let idx = row + rows * col;
+            if tensor.data[idx] != tensor.data[idx0] {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 fn axis_real_values(axis: &AxisData) -> Vec<f64> {
@@ -689,6 +878,23 @@ pub(crate) mod tests {
         assert_eq!(
             y_out.data,
             vec![-1.0, 0.0, 1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 1.0]
+        );
+    }
+
+    #[test]
+    fn meshgrid_type_infers_rank_from_axis_count() {
+        let ctx = ResolveContext::new(Vec::new());
+        assert_eq!(
+            meshgrid_type(&[Type::Num, Type::Num], &ctx),
+            Type::Tensor {
+                shape: Some(vec![None, None])
+            }
+        );
+        assert_eq!(
+            meshgrid_type(&[Type::Num, Type::Num, Type::Num], &ctx),
+            Type::Tensor {
+                shape: Some(vec![None, None, None])
+            }
         );
     }
 

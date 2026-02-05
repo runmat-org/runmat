@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::logical::type_resolvers::logical_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::bit::or")]
@@ -67,6 +68,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Element-wise logical OR for scalars, arrays, and gpuArray values.",
     keywords = "logical,or,elementwise,boolean,gpu",
     accel = "elementwise",
+    type_resolver(logical_binary_type),
     builtin_path = "crate::builtins::logical::bit::or"
 )]
 async fn or_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {

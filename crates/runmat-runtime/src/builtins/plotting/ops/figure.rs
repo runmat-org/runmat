@@ -6,6 +6,7 @@ use runmat_macros::runtime_builtin;
 use super::plotting_error;
 use super::state::{new_figure_handle, select_figure, FigureHandle};
 use crate::build_runtime_error;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 fn parse_handle(value: &Value) -> crate::BuiltinResult<Option<FigureHandle>> {
     match value {
@@ -65,6 +66,7 @@ fn parse_string_handle(text: &str) -> crate::BuiltinResult<Option<FigureHandle>>
     summary = "Create or select a plotting figure.",
     keywords = "figure,plotting",
     suppress_auto_output = true,
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::figure"
 )]
 pub fn figure_builtin(rest: Vec<Value>) -> crate::BuiltinResult<f64> {

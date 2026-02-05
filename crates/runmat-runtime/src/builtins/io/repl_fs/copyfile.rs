@@ -85,6 +85,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     keywords = "copyfile,copy file,copy folder,filesystem,status,message,messageid,force,overwrite",
     accel = "cpu",
     suppress_auto_output = true,
+    type_resolver(crate::builtins::io::type_resolvers::copyfile_type),
     builtin_path = "crate::builtins::io::repl_fs::copyfile"
 )]
 async fn copyfile_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

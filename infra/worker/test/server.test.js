@@ -83,4 +83,23 @@ describe('telemetry worker', () => {
     expect(body.properties.summary).not.toContain('jit=');
     expect(body.properties.$current_url).toBe('runmat://install.complete?platform=macos-aarch64&method=shell&arch=arm64&status=ok');
   });
+
+  it('prefers provided current_url when present', async () => {
+    fetch.mockResolvedValue({ ok: true });
+    const app = createApp();
+    const res = await request(app)
+      .post('/ingest')
+      .set('x-telemetry-key', 'secret')
+      .send({
+        event_label: 'runtime_started',
+        cid: 'abc123',
+        session_id: 'session-xyz',
+        run_kind: 'repl',
+        current_url: 'https://runmat.com/sandbox?it=off',
+        payload: { jit_enabled: true, accelerate_enabled: true },
+      });
+    expect(res.status).toBe(200);
+    const body = JSON.parse(fetch.mock.calls[0][1].body);
+    expect(body.properties.$current_url).toBe('https://runmat.com/sandbox?it=off');
+  });
 });

@@ -3,6 +3,7 @@
 use runmat_macros::runtime_builtin;
 
 use crate::BuiltinResult;
+use crate::builtins::plotting::type_resolvers::string_type;
 
 /// Flush pending figure updates to any bound plot surfaces.
 ///
@@ -15,6 +16,7 @@ use crate::BuiltinResult;
     keywords = "drawnow,graphics,flush,plot",
     sink = true,
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::drawnow"
 )]
 pub async fn drawnow_builtin() -> BuiltinResult<String> {

@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::structs::type_resolvers::setfield_type;
 use crate::{
     build_runtime_error, call_builtin_async, gather_if_needed_async, BuiltinResult, RuntimeError,
 };
@@ -79,6 +80,7 @@ fn is_undefined_function(err: &RuntimeError) -> bool {
     category = "structs/core",
     summary = "Assign into struct fields, struct arrays, or MATLAB-style object properties.",
     keywords = "setfield,struct,assignment,object property",
+    type_resolver(setfield_type),
     builtin_path = "crate::builtins::structs::core::setfield"
 )]
 async fn setfield_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

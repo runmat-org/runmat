@@ -4,7 +4,7 @@
 //! component. Unlike `isfinite`/`isnan`, it returns a single logical scalar.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::Value;
+use runmat_builtins::{ResolveContext, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -50,6 +50,7 @@ const IDENTIFIER_INTERNAL: &str = "RunMat:isreal:InternalError";
     summary = "Return true when a value uses real storage without an imaginary component.",
     keywords = "isreal,real,complex,gpu,logical",
     accel = "metadata",
+    type_resolver(bool_scalar_type),
     builtin_path = "crate::builtins::logical::tests::isreal"
 )]
 async fn isreal_builtin(value: Value) -> BuiltinResult<Value> {
@@ -57,6 +58,10 @@ async fn isreal_builtin(value: Value) -> BuiltinResult<Value> {
         Value::GpuTensor(handle) => isreal_gpu(handle).await,
         other => isreal_host(other),
     }
+}
+
+fn bool_scalar_type(_: &[Type], _context: &ResolveContext) -> Type {
+    Type::Bool
 }
 
 async fn isreal_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
@@ -115,12 +120,20 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::{
         CellArray, CharArray, Closure, ComplexTensor, HandleRef, Listener, LogicalArray,
-        MException, ObjectInstance, StructValue, Tensor,
+        MException, ObjectInstance, ResolveContext, StructValue, Tensor, Type,
     };
     use runmat_gc_api::GcPtr;
 
     fn run_isreal(value: Value) -> BuiltinResult<Value> {
         block_on(super::isreal_builtin(value))
+    }
+
+    #[test]
+    fn isreal_type_returns_bool() {
+        assert_eq!(
+            bool_scalar_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::Bool
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

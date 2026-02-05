@@ -14,9 +14,19 @@ terraform {
 }
 
 locals {
-  zone_dns_name = "${var.telemetry_domain}."
-  worker_image  = var.worker_image != "" ? var.worker_image : "us-docker.pkg.dev/${var.project_id}/telemetry/worker:latest"
-  udp_image     = var.udp_forwarder_image != "" ? var.udp_forwarder_image : "us-docker.pkg.dev/${var.project_id}/telemetry/udp-forwarder:latest"
+  telemetry_domains = length(var.telemetry_domains) > 0 ? var.telemetry_domains : [
+    var.telemetry_domain,
+    "telemetry.runmat.com",
+  ]
+  telemetry_domain_map = {
+    for domain in toset(local.telemetry_domains) : domain => {
+      zone_name     = "telemetry-${replace(domain, ".", "-")}"
+      zone_dns_name = "${domain}."
+      udp_subdomain = "udp.${domain}"
+    }
+  }
+  worker_image = var.worker_image != "" ? var.worker_image : "us-docker.pkg.dev/${var.project_id}/telemetry/worker:latest"
+  udp_image    = var.udp_forwarder_image != "" ? var.udp_forwarder_image : "us-docker.pkg.dev/${var.project_id}/telemetry/udp-forwarder:latest"
 }
 
 provider "google" {
@@ -36,17 +46,19 @@ resource "google_project_service" "services" {
 }
 
 resource "google_dns_managed_zone" "telemetry" {
-  name        = "telemetry-${replace(var.telemetry_domain, ".", "-")}"
-  dns_name    = local.zone_dns_name
+  for_each    = local.telemetry_domain_map
+  name        = each.value.zone_name
+  dns_name    = each.value.zone_dns_name
   description = "Delegated zone for RunMat telemetry"
 }
 
 resource "google_dns_record_set" "ns_records" {
-  managed_zone = google_dns_managed_zone.telemetry.name
-  name         = local.zone_dns_name
+  for_each     = local.telemetry_domain_map
+  managed_zone = google_dns_managed_zone.telemetry[each.key].name
+  name         = each.value.zone_dns_name
   type         = "NS"
   ttl          = 300
-  rrdatas      = google_dns_managed_zone.telemetry.name_servers
+  rrdatas      = google_dns_managed_zone.telemetry[each.key].name_servers
 }
 
 resource "google_cloud_run_service" "telemetry" {
@@ -95,8 +107,9 @@ resource "google_cloud_run_service_iam_member" "public" {
 }
 
 resource "google_cloud_run_domain_mapping" "telemetry" {
+  for_each = local.telemetry_domain_map
   location = var.region
-  name     = var.telemetry_domain
+  name     = each.key
 
   metadata {
     namespace = var.project_id
@@ -116,16 +129,18 @@ data "dns_aaaa_record_set" "ghs" {
 }
 
 resource "google_dns_record_set" "domain_mapping_a" {
-  managed_zone = google_dns_managed_zone.telemetry.name
-  name         = local.zone_dns_name
+  for_each     = local.telemetry_domain_map
+  managed_zone = google_dns_managed_zone.telemetry[each.key].name
+  name         = each.value.zone_dns_name
   type         = "A"
   ttl          = 300
   rrdatas      = sort(data.dns_a_record_set.ghs.addrs)
 }
 
 resource "google_dns_record_set" "domain_mapping_aaaa" {
-  managed_zone = google_dns_managed_zone.telemetry.name
-  name         = local.zone_dns_name
+  for_each     = local.telemetry_domain_map
+  managed_zone = google_dns_managed_zone.telemetry[each.key].name
+  name         = each.value.zone_dns_name
   type         = "AAAA"
   ttl          = 300
   rrdatas      = sort(data.dns_aaaa_record_set.ghs.addrs)
@@ -238,24 +253,25 @@ resource "google_compute_forwarding_rule" "udp" {
 }
 
 resource "google_dns_record_set" "udp_dns" {
-  managed_zone = google_dns_managed_zone.telemetry.name
-  name         = "${var.telemetry_udp_subdomain}."
+  for_each     = local.telemetry_domain_map
+  managed_zone = google_dns_managed_zone.telemetry[each.key].name
+  name         = "${each.value.udp_subdomain}."
   type         = "A"
   ttl          = 120
   rrdatas      = [google_compute_address.udp.address]
 }
 
-output "telemetry_https_endpoint" {
-  description = "HTTPS endpoint the CLI can post telemetry to"
-  value       = "https://${var.telemetry_domain}/ingest"
+output "telemetry_https_endpoints" {
+  description = "HTTPS endpoints the CLI can post telemetry to"
+  value       = [for domain in local.telemetry_domains : "https://${domain}/ingest"]
 }
 
 output "telemetry_name_servers" {
-  description = "Name servers to add as NS records for the delegated subdomain"
-  value       = google_dns_managed_zone.telemetry.name_servers
+  description = "Name servers to add as NS records for delegated subdomains"
+  value       = { for domain, zone in google_dns_managed_zone.telemetry : domain => zone.name_servers }
 }
 
-output "telemetry_udp_endpoint" {
+output "telemetry_udp_endpoints" {
   description = "UDP hostname:port for CLI datagrams"
-  value       = "${var.telemetry_udp_subdomain}:7846"
+  value       = [for domain, meta in local.telemetry_domain_map : "${meta.udp_subdomain}:7846"]
 }

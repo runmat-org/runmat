@@ -71,7 +71,7 @@
     {
       "description": "Returning rich metadata in the error handler",
       "input": "cells = {1, 'two', 3};\neh = @(err, value) sprintf('%s @ %d', err.identifier, err.index);\nresults = cellfun(@(x) x + 1, cells, 'UniformOutput', false, 'ErrorHandler', eh)",
-      "output": "results =\n  1\u00d73 cell array\n    {[2]}    {'MATLAB:UndefinedFunction @ 2'}    {[4]}"
+      "output": "results =\n  1\u00d73 cell array\n    {[2]}    {[117 120 112]}    {[4]}"
     }
   ],
   "faqs": [

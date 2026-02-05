@@ -5,18 +5,23 @@ use std::cmp::Ordering;
 use runmat_accelerate_api::{
     GpuTensorHandle, ProviderCumminResult, ProviderNanMode, ProviderScanDirection,
 };
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cummin";
 
+fn cummin_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    cumulative_numeric_type(args, ctx)
+}
+
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::reduction::type_resolvers::cumulative_numeric_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::cummin")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -92,6 +97,7 @@ impl CumminEvaluation {
     summary = "Cumulative minimum and index tracking for scalars, vectors, matrices, or N-D tensors.",
     keywords = "cummin,cumulative minimum,running minimum,reverse,omitnan,indices,gpu",
     accel = "reduction",
+    type_resolver(cummin_type),
     builtin_path = "crate::builtins::math::reduction::cummin"
 )]
 async fn cummin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -693,6 +699,22 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::IntValue;
+
+    #[test]
+    fn cummin_type_keeps_shape() {
+        let out = cummin_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(3), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(1)])
+            }
+        );
+    }
 
     fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CumminEvaluation> {
         block_on(super::evaluate(value, rest))

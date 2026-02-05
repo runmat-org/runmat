@@ -10,12 +10,18 @@ use crate::builtins::common::{
     shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
+use crate::builtins::math::reduction::type_resolvers::reduce_logical_type;
+use runmat_builtins::ResolveContext;
 use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 const NAME: &str = "all";
+
+fn all_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    reduce_logical_type(args, ctx)
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::all")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -69,6 +75,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Test whether every element of an array is nonzero with MATLAB-compatible options.",
     keywords = "all,logical,reduction,omitnan,gpu",
     accel = "reduction",
+    type_resolver(all_type),
     builtin_path = "crate::builtins::math::reduction::all"
 )]
 async fn all_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -564,8 +571,9 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, Reduct
     let mut spec = ReductionSpec::Default;
     let mut nan_mode = ReductionNaN::Include;
 
-    for arg in args {
-        if is_all_token(arg) {
+    let tokens = crate::builtins::common::arg_tokens::tokens_from_values(args);
+    for (arg, token) in args.iter().zip(tokens.iter()) {
+        if is_all_token_token(token) {
             if !matches!(spec, ReductionSpec::Default) {
                 return Err(all_error(
                     "all: 'all' cannot be combined with dimension arguments",
@@ -574,7 +582,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, Reduct
             spec = ReductionSpec::All;
             continue;
         }
-        if let Some(mode) = parse_nan_mode(arg)? {
+        if let Some(mode) = parse_nan_mode_token(token)? {
             if !matches!(nan_mode, ReductionNaN::Include) {
                 return Err(all_error("all: multiple NaN handling options specified"));
             }
@@ -605,22 +613,21 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, Reduct
     Ok((spec, nan_mode))
 }
 
-fn parse_nan_mode(value: &Value) -> BuiltinResult<Option<ReductionNaN>> {
-    let Some(text) = extract_text_token(value) else {
-        return Ok(None);
-    };
-    let lowered = text.trim().to_ascii_lowercase();
-    match lowered.as_str() {
-        "omitnan" => Ok(Some(ReductionNaN::Omit)),
-        "includenan" => Ok(Some(ReductionNaN::Include)),
-        _ => Err(all_error(format!("all: unknown option '{}'", text.trim()))),
+fn parse_nan_mode_token(
+    token: &crate::builtins::common::arg_tokens::ArgToken,
+) -> BuiltinResult<Option<ReductionNaN>> {
+    match token {
+        crate::builtins::common::arg_tokens::ArgToken::String(text) => match text.as_str() {
+            "omitnan" => Ok(Some(ReductionNaN::Omit)),
+            "includenan" => Ok(Some(ReductionNaN::Include)),
+            _ => Err(all_error(format!("all: unknown option '{}'", text))),
+        },
+        _ => Ok(None),
     }
 }
 
-fn is_all_token(value: &Value) -> bool {
-    extract_text_token(value)
-        .map(|s| s.trim().eq_ignore_ascii_case("all"))
-        .unwrap_or(false)
+fn is_all_token_token(token: &crate::builtins::common::arg_tokens::ArgToken) -> bool {
+    matches!(token, crate::builtins::common::arg_tokens::ArgToken::String(text) if text == "all")
 }
 
 async fn parse_dimensions(value: &Value) -> BuiltinResult<Vec<usize>> {
@@ -665,15 +672,6 @@ fn map_dims_error(message: String) -> RuntimeError {
     all_error(message)
 }
 
-fn extract_text_token(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
-        _ => None,
-    }
-}
-
 fn product(dims: &[usize]) -> usize {
     dims.iter()
         .copied()
@@ -690,6 +688,22 @@ pub(crate) mod tests {
 
     fn all_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::all_builtin(value, rest))
+    }
+
+    #[test]
+    fn all_type_returns_logical() {
+        let out = all_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(2)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Logical {
+                shape: Some(vec![Some(1), Some(2)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

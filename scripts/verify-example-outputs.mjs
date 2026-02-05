@@ -145,6 +145,9 @@ function collectCases(dir) {
             if (!example || typeof example.output !== "string") {
                 continue;
             }
+            if (is_comment_only_output(example.output)) {
+                continue;
+            }
             const description = typeof example.description === "string" && example.description.trim().length > 0
                 ? example.description.trim()
                 : `${parsed.title ?? basename(file, ".json")} example ${i + 1}`;
@@ -161,6 +164,27 @@ function collectCases(dir) {
     }
 
     return cases;
+}
+
+/**
+ * Treat examples with only comment lines as documentation-only.
+ * @param {string} output
+ */
+function is_comment_only_output(output) {
+    const lines = output.split(/\r?\n/);
+    let saw_comment = false;
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+            continue;
+        }
+        if (trimmed.startsWith("%")) {
+            saw_comment = true;
+            continue;
+        }
+        return false;
+    }
+    return saw_comment;
 }
 
 function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
@@ -394,7 +418,7 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "      } catch (err) {}",
         "      const execResult = await Promise.resolve(session.execute(testCase.input));",
         "      if (execResult && Array.isArray(execResult.stdout)) {",
-        "        stdoutText = execResult.stdout.map((entry) => entry.text || \"\").join(\"\");",
+        "        stdoutText = execResult.stdout.map((entry) => entry.text || \"\").join(\"\\n\");",
         "      }",
         "      if (execResult && typeof execResult.valueText === \"string\") {",
         "        valueText = execResult.valueText;",
@@ -778,6 +802,7 @@ function normalizeOutput(text) {
     const lines = text.replace(/\r\n/g, "\n").split("\n");
     const stripped = lines.map((line) =>
         line.replace(/^\s*\d+(?:\s*[x×]\s*\d+)+\s+\w+(?:\s+\w+)*(?:\s+array)?\s*$/i, "")
+            .replace(/^\s*\d+(?:\s*[x×]\s*\d+)+\s*$/i, "")
             .replace(/^\s*[A-Za-z_]\w*(?:\([^)]*\))?\s*=\s*/, "")
     );
     const joined = stripped.join(" ");
@@ -786,7 +811,11 @@ function normalizeOutput(text) {
         /\b[A-Za-z_]\w*(?:\([^)]*\))?\s*=\s*/g,
         ""
     );
-    const withoutHeaders = withoutAssignments.replace(
+    const withoutInlineDims = withoutAssignments.replace(
+        /(^|\s)\d+\s*[x×]\s*\d+(?:\s*[x×]\s*\d+)*\s+(?=(?:[-+]?(?:\d|\.\d)|NaN|Inf|-Inf))/gi,
+        "$1"
+    );
+    const withoutHeaders = withoutInlineDims.replace(
         /\b\d+\s*[x×]\s*\d+(?:\s*[x×]\s*\d+)*\s+(?:gpuArray\s*)?(?:sparse\s+)?(?:complex\s+)?(?:logical\s+)?(?:logical|double|single|char|string|cell|struct|table|categorical|datetime|duration)(?:\s+array)?\b/gi,
         " "
     );
@@ -864,8 +893,20 @@ function formatWasmOutput(result) {
     if (result.stdoutText && result.valueText) {
         const normalizedStdout = normalizeOutput(result.stdoutText);
         const normalizedValue = normalizeOutput(result.valueText);
+        if (!normalizedValue) {
+            return result.stdoutText;
+        }
         if (normalizedStdout && normalizedStdout === normalizedValue) {
             return result.valueText;
+        }
+        if (normalizedStdout) {
+            const suffixIndex = normalizedStdout.lastIndexOf(normalizedValue);
+            const isSuffix = suffixIndex >= 0
+                && suffixIndex + normalizedValue.length === normalizedStdout.length
+                && (suffixIndex === 0 || normalizedStdout[suffixIndex - 1] === " ");
+            if (isSuffix) {
+                return result.stdoutText;
+            }
         }
         return `${result.stdoutText}\n${result.valueText}`;
     }

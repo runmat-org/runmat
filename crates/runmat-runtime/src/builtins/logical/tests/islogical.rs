@@ -1,7 +1,7 @@
 //! MATLAB-compatible `islogical` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::Value;
+use runmat_builtins::{ResolveContext, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -48,6 +48,7 @@ const IDENTIFIER_INTERNAL: &str = "RunMat:islogical:InternalError";
     summary = "Return true when a value uses logical storage.",
     keywords = "islogical,logical,bool,gpu",
     accel = "metadata",
+    type_resolver(bool_scalar_type),
     builtin_path = "crate::builtins::logical::tests::islogical"
 )]
 async fn islogical_builtin(value: Value) -> BuiltinResult<Value> {
@@ -55,6 +56,10 @@ async fn islogical_builtin(value: Value) -> BuiltinResult<Value> {
         Value::GpuTensor(handle) => islogical_gpu(handle).await,
         other => islogical_host(other),
     }
+}
+
+fn bool_scalar_type(_: &[Type], _context: &ResolveContext) -> Type {
+    Type::Bool
 }
 
 async fn islogical_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {

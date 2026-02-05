@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "atanh";
@@ -65,6 +66,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Inverse hyperbolic tangent with MATLAB-compatible complex promotion.",
     keywords = "atanh,inverse hyperbolic tangent,artanh,gpu",
     accel = "unary",
+    type_resolver(numeric_unary_type),
     builtin_path = "crate::builtins::math::trigonometry::atanh"
 )]
 async fn atanh_builtin(value: Value) -> BuiltinResult<Value> {
@@ -260,8 +262,13 @@ fn zero_small(value: f64) -> f64 {
 }
 
 fn atanh_real_outside_domain(x: f64) -> (f64, f64) {
-    let result = Complex64::new(x, 0.0).atanh();
-    (zero_small(result.re), zero_small(result.im))
+    // MATLAB convention: for real x with |x| > 1, atanh returns a complex result
+    // with imaginary part always +π/2, regardless of the sign of x.
+    // The formula: atanh(x) = 0.5*ln((x+1)/(x-1)) + i*π/2
+    // This differs from the standard complex atanh branch cut convention.
+    let re = 0.5 * ((x + 1.0) / (x - 1.0)).ln();
+    let im = std::f64::consts::FRAC_PI_2;
+    (zero_small(re), im)
 }
 
 #[cfg(test)]
@@ -270,7 +277,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use num_complex::Complex64;
-    use runmat_builtins::{CharArray, IntValue, LogicalArray};
+    use runmat_builtins::{CharArray, IntValue, LogicalArray, ResolveContext, Type};
 
     fn atanh_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::atanh_builtin(value))
@@ -278,6 +285,33 @@ pub(crate) mod tests {
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[test]
+    fn atanh_type_preserves_tensor_shape() {
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
+
+    #[test]
+    fn atanh_type_scalar_tensor_returns_num() {
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(1), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -504,23 +538,28 @@ pub(crate) mod tests {
             };
             let handle = provider.upload(&view).expect("upload");
             let result = atanh_builtin(Value::GpuTensor(handle)).expect("atanh");
+            // Helper to compute expected values using MATLAB convention
+            let matlab_atanh = |x: f64| -> (f64, f64) {
+                if x.abs() <= 1.0 {
+                    (x.atanh(), 0.0)
+                } else {
+                    atanh_real_outside_domain(x)
+                }
+            };
             match result {
                 Value::ComplexTensor(t) => {
                     assert_eq!(t.shape, vec![2, 1]);
-                    let expected: Vec<Complex64> = tensor
-                        .data
-                        .iter()
-                        .map(|&x| Complex64::new(x, 0.0).atanh())
-                        .collect();
-                    for ((re, im), exp) in t.data.iter().zip(expected.iter()) {
-                        assert!((re - exp.re).abs() < 1e-12);
-                        assert!((im - exp.im).abs() < 1e-12);
+                    let expected: Vec<(f64, f64)> =
+                        tensor.data.iter().map(|&x| matlab_atanh(x)).collect();
+                    for ((re, im), (exp_re, exp_im)) in t.data.iter().zip(expected.iter()) {
+                        assert!((re - exp_re).abs() < 1e-12);
+                        assert!((im - exp_im).abs() < 1e-12);
                     }
                 }
                 Value::Complex(re, im) => {
-                    let expected = Complex64::new(2.0, 0.0).atanh();
-                    assert!((re - expected.re).abs() < 1e-12);
-                    assert!((im - expected.im).abs() < 1e-12);
+                    let (exp_re, exp_im) = atanh_real_outside_domain(2.0);
+                    assert!((re - exp_re).abs() < 1e-12);
+                    assert!((im - exp_im).abs() < 1e-12);
                 }
                 other => panic!("expected complex host result, got {other:?}"),
             }

@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::strings::type_resolvers::string_scalar_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const DEFAULT_PRECISION: usize = 15;
@@ -58,6 +59,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Convert numeric scalars, vectors, and matrices into MATLAB-style character arrays using general or custom formats.",
     keywords = "num2str,number to string,format,precision",
     examples = "txt = num2str([1 2 3]);",
+    type_resolver(string_scalar_type),
     builtin_path = "crate::builtins::strings::core::num2str"
 )]
 async fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -812,6 +814,7 @@ fn apply_format_flags(mut text: String, fmt: &CustomFormat) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::num2str_builtin(value, rest))
@@ -969,5 +972,13 @@ pub(crate) mod tests {
             num2str_builtin(Value::Num(1.0), vec![Value::String("%q".into())]).unwrap_err(),
         );
         assert!(err.contains("unsupported format string"));
+    }
+
+    #[test]
+    fn num2str_type_is_string_scalar() {
+        assert_eq!(
+            string_scalar_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
     }
 }

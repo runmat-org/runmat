@@ -7,6 +7,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::introspection::type_resolvers::isstring_type;
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
@@ -43,6 +44,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return true when a value is a MATLAB string array.",
     keywords = "isstring,string array,string scalar,type checking,introspection",
     accel = "metadata",
+    type_resolver(isstring_type),
     builtin_path = "crate::builtins::introspection::isstring"
 )]
 fn isstring_builtin(value: Value) -> crate::BuiltinResult<Value> {

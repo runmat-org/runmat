@@ -15,7 +15,9 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::rot90")]
@@ -50,6 +52,38 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Rotations only reorder data; fusion planner treats rot90 as a residency-preserving boundary.",
 };
 
+fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
+    let input = match args.first() {
+        Some(value) => value,
+        None => return Type::Unknown,
+    };
+    match input {
+        Type::Tensor { shape: Some(shape) } => {
+            let rows = shape.get(0).copied().unwrap_or(None);
+            let cols = shape.get(1).copied().unwrap_or(None);
+            Type::Tensor {
+                shape: Some(vec![rows, cols]),
+            }
+        }
+        Type::Logical { shape: Some(shape) } => {
+            let rows = shape.get(0).copied().unwrap_or(None);
+            let cols = shape.get(1).copied().unwrap_or(None);
+            Type::Logical {
+                shape: Some(vec![rows, cols]),
+            }
+        }
+        Type::Tensor { shape: None } => Type::tensor(),
+        Type::Logical { shape: None } => Type::logical(),
+        Type::Num | Type::Int | Type::Bool => Type::tensor(),
+        Type::Cell { element_type, .. } => Type::Cell {
+            element_type: element_type.clone(),
+            length: None,
+        },
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
+
 fn rot90_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("rot90").build()
 }
@@ -60,6 +94,7 @@ fn rot90_error(message: impl Into<String>) -> RuntimeError {
     summary = "Rotate matrices and N-D arrays by multiples of 90 degrees.",
     keywords = "rot90,rotate,90 degrees,matrix,gpu,clockwise,counterclockwise",
     accel = "custom",
+    type_resolver(preserve_matrix_type),
     builtin_path = "crate::builtins::array::shape::rot90"
 )]
 async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -438,7 +473,23 @@ pub(crate) mod tests {
         block_on(super::rot90_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_builtins::{IntValue, Tensor, Type};
+
+    #[test]
+    fn rot90_type_preserves_matrix_shape() {
+        let out = preserve_matrix_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

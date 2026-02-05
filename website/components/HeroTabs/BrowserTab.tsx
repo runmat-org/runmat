@@ -7,7 +7,7 @@ import { trackEvent } from "@/components/GoogleAnalytics";
 export function BrowserTab() {
   const handleClick = () => {
     trackEvent("hero_cta_click", "hero_tabs", "browser");
-    window.open("https://runmat.org/sandbox", "_blank", "noopener,noreferrer");
+    window.open("https://runmat.com/sandbox", "_blank", "noopener,noreferrer");
   };
 
   return (

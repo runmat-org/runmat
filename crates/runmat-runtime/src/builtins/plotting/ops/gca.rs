@@ -6,6 +6,7 @@ use runmat_macros::runtime_builtin;
 use super::plotting_error;
 use super::state::{current_axes_state, encode_axes_handle, FigureAxesState};
 use super::style::value_as_string;
+use crate::builtins::plotting::type_resolvers::gca_type;
 
 #[runtime_builtin(
     name = "gca",
@@ -13,6 +14,7 @@ use super::style::value_as_string;
     summary = "Return the handle for the current axes.",
     keywords = "gca,axes,plotting",
     suppress_auto_output = true,
+    type_resolver(gca_type),
     builtin_path = "crate::builtins::plotting::gca"
 )]
 pub fn gca_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -55,6 +57,7 @@ fn axes_struct_response(state: FigureAxesState) -> Value {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -77,5 +80,16 @@ pub(crate) mod tests {
         setup_plot_tests();
         let value = gca_builtin(vec![Value::String("struct".to_string())]).unwrap();
         assert!(matches!(value, Value::Struct(_)));
+    }
+
+    #[test]
+    fn gca_type_no_args_returns_num() {
+        assert_eq!(gca_type(&[], &ResolveContext::new(Vec::new())), Type::Num);
+    }
+
+    #[test]
+    fn gca_type_with_args_returns_struct() {
+        let out = gca_type(&[Type::String], &ResolveContext::new(Vec::new()));
+        assert!(matches!(out, Type::Struct { .. }));
     }
 }

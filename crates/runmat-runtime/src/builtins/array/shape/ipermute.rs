@@ -14,9 +14,10 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use runmat_builtins::shape_rules::element_count_if_known;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::Value;
+use runmat_builtins::{ResolveContext, Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::ipermute")]
@@ -52,6 +53,36 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a layout barrier in fusion graphs, mirroring the behaviour of `permute`.",
 };
 
+fn permute_order_len(ty: &Type) -> Option<usize> {
+    match ty {
+        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+            element_count_if_known(shape)
+        }
+        Type::Num | Type::Int | Type::Bool => Some(1),
+        _ => None,
+    }
+}
+
+fn ipermute_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    if args.len() < 2 {
+        return Type::Unknown;
+    }
+    let input = &args[0];
+    let order_len = ctx
+        .numeric_vector_at(1)
+        .map(|values| values.len())
+        .or_else(|| permute_order_len(&args[1]));
+    let shape = order_len.map(runmat_builtins::shape_rules::unknown_shape);
+    match input {
+        Type::Tensor { .. } => Type::Tensor { shape },
+        Type::Logical { .. } => Type::Logical { shape },
+        Type::Num | Type::Int | Type::Bool => input.clone(),
+        Type::Cell { .. } => input.clone(),
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
+
 fn ipermute_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("ipermute")
@@ -64,6 +95,7 @@ fn ipermute_error(message: impl Into<String>) -> RuntimeError {
     summary = "Reorder array dimensions using the inverse of a permutation vector.",
     keywords = "ipermute,inverse permute,dimension reorder,gpu",
     accel = "custom",
+    type_resolver(ipermute_type),
     builtin_path = "crate::builtins::array::shape::ipermute"
 )]
 async fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
@@ -135,6 +167,7 @@ fn inverse_permutation(order: &[usize]) -> Vec<usize> {
 #[cfg(test)]
 pub(crate) mod tests {
     use futures::executor::block_on;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
         block_on(super::ipermute_builtin(value, order))
@@ -145,6 +178,23 @@ pub(crate) mod tests {
     };
     use crate::builtins::common::{tensor, test_support};
     use runmat_builtins::{CharArray, LogicalArray, StringArray, Tensor, Value};
+
+    #[test]
+    fn ipermute_type_uses_order_len() {
+        let order = Type::Tensor {
+            shape: Some(vec![Some(1), Some(3)]),
+        };
+        let out = super::ipermute_type(
+            &[Type::Tensor { shape: None }, order],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![None, None, None])
+            }
+        );
+    }
 
     fn make_tensor(data: &[f64], shape: &[usize]) -> Tensor {
         Tensor::new(data.to_vec(), shape.to_vec()).unwrap()

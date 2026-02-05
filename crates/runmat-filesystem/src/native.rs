@@ -97,6 +97,7 @@ impl From<fs::Metadata> for FsMetadata {
             len: meta.len(),
             modified: meta.modified().ok(),
             readonly: meta.permissions().readonly(),
+            hash: None,
         }
     }
 }

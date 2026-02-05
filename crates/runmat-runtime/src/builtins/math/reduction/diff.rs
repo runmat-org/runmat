@@ -1,7 +1,7 @@
 //! MATLAB-compatible `diff` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{CharArray, ComplexTensor, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -10,9 +10,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::reduction::type_resolvers::diff_numeric_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "diff";
+
+fn diff_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    diff_numeric_type(args, ctx)
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::diff")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -51,6 +56,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Forward finite differences of scalars, vectors, matrices, or N-D tensors.",
     keywords = "diff,difference,finite difference,nth difference,gpu",
     accel = "diff",
+    type_resolver(diff_type),
     builtin_path = "crate::builtins::math::reduction::diff"
 )]
 async fn diff_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -342,6 +348,17 @@ pub(crate) mod tests {
 
     fn diff_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::diff_builtin(value, rest))
+    }
+
+    #[test]
+    fn diff_type_defaults_tensor() {
+        let out = diff_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(out, Type::Tensor { shape: Some(vec![None, None]) });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

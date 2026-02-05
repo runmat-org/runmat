@@ -57,7 +57,9 @@ fn remote_provider_supports_repl_and_tabular_builtins() {
             auth_token: None,
             chunk_bytes: 1_024,
             parallel_requests: 2,
+            direct_read_threshold_bytes: 64 * 1024 * 1024,
             timeout: Duration::from_secs(30),
+            ..RemoteFsConfig::default()
         })
         .expect("remote provider init"),
     );

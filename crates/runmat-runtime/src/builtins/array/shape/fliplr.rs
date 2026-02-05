@@ -10,10 +10,42 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{ComplexTensor, Value};
+use runmat_builtins::{ComplexTensor, ResolveContext, Type, Value};
 use runmat_macros::runtime_builtin;
 
 const LR_DIM: [usize; 1] = [2];
+
+fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
+    let input = match args.first() {
+        Some(value) => value,
+        None => return Type::Unknown,
+    };
+    match input {
+        Type::Tensor { shape: Some(shape) } => {
+            let rows = shape.get(0).copied().unwrap_or(None);
+            let cols = shape.get(1).copied().unwrap_or(None);
+            Type::Tensor {
+                shape: Some(vec![rows, cols]),
+            }
+        }
+        Type::Logical { shape: Some(shape) } => {
+            let rows = shape.get(0).copied().unwrap_or(None);
+            let cols = shape.get(1).copied().unwrap_or(None);
+            Type::Logical {
+                shape: Some(vec![rows, cols]),
+            }
+        }
+        Type::Tensor { shape: None } => Type::tensor(),
+        Type::Logical { shape: None } => Type::logical(),
+        Type::Num | Type::Int | Type::Bool => Type::tensor(),
+        Type::Cell { element_type, .. } => Type::Cell {
+            element_type: element_type.clone(),
+            length: None,
+        },
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::fliplr")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -57,6 +89,7 @@ fn fliplr_error(message: impl Into<String>) -> RuntimeError {
     summary = "Flip an array left-to-right along the second dimension.",
     keywords = "fliplr,flip,horizontal,matrix,gpu",
     accel = "custom",
+    type_resolver(preserve_matrix_type),
     builtin_path = "crate::builtins::array::shape::fliplr"
 )]
 async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -122,7 +155,23 @@ pub(crate) mod tests {
     use crate::builtins::array::shape::flip::{flip_logical_array, flip_tensor};
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, LogicalArray, StringArray, StructValue, Tensor, Value};
+    use runmat_builtins::{CharArray, LogicalArray, StringArray, StructValue, Tensor, Type, Value};
+
+    #[test]
+    fn fliplr_type_keeps_matrix_shape() {
+        let out = preserve_matrix_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(4)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(4)])
+            }
+        );
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

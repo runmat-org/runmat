@@ -69,6 +69,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Read the next line from a file, including newline characters.",
     keywords = "fgets,file,io,line,newline",
     accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::fgets_type),
     builtin_path = "crate::builtins::io::filetext::fgets"
 )]
 async fn fgets_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

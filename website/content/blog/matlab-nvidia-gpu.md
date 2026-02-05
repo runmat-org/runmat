@@ -18,7 +18,7 @@ twitterTitle: "MATLAB on NVIDIA GPUs: gpuArray Guide + RunMat Auto GPU"
 twitterDescription: "Learn what runs fast on GPUs in MATLAB, how to use gpuArray, and what slows you down. Then try RunMat auto CPU/GPU + fusion."
 image: "https://web.runmatstatic.com/MATLAB-NVIDIA.png"
 imageAlt: "MATLAB on NVIDIA GPUs: gpuArray and RunMat"
-canonical: "https://runmat.org/blog/matlab-nvidia-gpu"
+canonical: "https://runmat.com/blog/matlab-nvidia-gpu"
 jsonLd:
   "@context": "https://schema.org"
   "@graph":
@@ -27,18 +27,18 @@ jsonLd:
         - "@type": "ListItem"
           position: 1
           name: "RunMat"
-          item: "https://runmat.org"
+          item: "https://runmat.com"
         - "@type": "ListItem"
           position: 2
           name: "Blog"
-          item: "https://runmat.org/blog"
+          item: "https://runmat.com/blog"
         - "@type": "ListItem"
           position: 3
           name: "MATLAB on NVIDIA GPUs"
-          item: "https://runmat.org/blog/matlab-nvidia-gpu"
+          item: "https://runmat.com/blog/matlab-nvidia-gpu"
 
     - "@type": "TechArticle"
-      "@id": "https://runmat.org/blog/matlab-nvidia-gpu#article"
+      "@id": "https://runmat.com/blog/matlab-nvidia-gpu#article"
       headline: "MATLAB on NVIDIA GPUs: gpuArray Guide + RunMat Auto GPU"
       alternativeHeadline: "GPU-shaped workloads, gpuArray, and RunMat's automatic GPU routing"
       description: "Learn what runs fast on GPUs in MATLAB, how to use gpuArray, and what slows you down. Then try the same code with RunMat auto CPU/GPU + fusion."
@@ -59,13 +59,13 @@ jsonLd:
         - "@type": "SoftwareApplication"
           name: "MATLAB"
         - "@type": "SoftwareApplication"
-          "@id": "https://runmat.org/#software"
+          "@id": "https://runmat.com/#software"
       speakable:
         "@type": "SpeakableSpecification"
         cssSelector: ["h1"]
 
     - "@type": "FAQPage"
-      "@id": "https://runmat.org/blog/matlab-nvidia-gpu#faq"
+      "@id": "https://runmat.com/blog/matlab-nvidia-gpu#faq"
       mainEntity:
         - "@type": "Question"
           name: "Why is my GPU slower than my CPU?"
@@ -116,7 +116,7 @@ jsonLd:
           name: "Where can I run RunMat with GPU?"
           acceptedAnswer:
             "@type": "Answer"
-            text: "In three ways: (1) Browser — open runmat.org/sandbox; GPU uses WebGPU (Chrome 113+, Edge 113+, Safari 18+, Firefox 139+). Same code, automatic fusion; browsers may limit resources. (2) Desktop app (coming soon) — packaged RunMat Desktop with full native GPU (Metal/DX12/Vulkan) and no browser caps; not yet released. (3) CLI — run scripts from the terminal with full native GPU access; same code as browser, best for max performance and CI."
+            text: "In three ways: (1) Browser — open runmat.com/sandbox; GPU uses WebGPU (Chrome 113+, Edge 113+, Safari 18+, Firefox 139+). Same code, automatic fusion; browsers may limit resources. (2) Desktop app (coming soon) — packaged RunMat Desktop with full native GPU (Metal/DX12/Vulkan) and no browser caps; not yet released. (3) CLI — run scripts from the terminal with full native GPU access; same code as browser, best for max performance and CI."
         - "@type": "Question"
           name: "What's the simplest rule to remember?"
           acceptedAnswer:
@@ -124,7 +124,7 @@ jsonLd:
             text: "Make the work big, make it contiguous, and avoid transfers."
 
     - "@type": "HowTo"
-      "@id": "https://runmat.org/blog/matlab-nvidia-gpu#howto"
+      "@id": "https://runmat.com/blog/matlab-nvidia-gpu#howto"
       name: "How to accelerate MATLAB code with gpuArray"
       description: "Step-by-step guide to using MATLAB's gpuArray for GPU acceleration: upload once, compute on GPU, gather once."
       step:
@@ -259,7 +259,7 @@ Under the hood, RunMat uses *fusion*—combining multiple array operations into 
 The same MATLAB-style code and automatic GPU routing run across three environments. How you access the GPU depends on where you run RunMat.
 
 **Browser (RunMat Desktop / sandbox)**  
-RunMat can run entirely in your browser: no install, no NVIDIA requirement. Open [runmat.org/sandbox](https://runmat.org/sandbox), write your script, and click Run. GPU acceleration uses **WebGPU** when available (Chrome 113+, Edge 113+, Safari 18+, Firefox 139+). A variables pane shows whether each array is on CPU or GPU (residency). Browsers often limit GPU and CPU usage to preserve battery, so for very large or long-running jobs you may hit resource caps.
+RunMat can run entirely in your browser: no install, no NVIDIA requirement. Open [runmat.com/sandbox](https://runmat.com/sandbox), write your script, and click Run. GPU acceleration uses **WebGPU** when available (Chrome 113+, Edge 113+, Safari 18+, Firefox 139+). A variables pane shows whether each array is on CPU or GPU (residency). Browsers often limit GPU and CPU usage to preserve battery, so for very large or long-running jobs you may hit resource caps.
 
 **Desktop (RunMat Desktop app — coming soon)**  
 A packaged RunMat Desktop app is in development. When it ships, it will give you the same editor, plots, and variable inspector in a native window. You get **full native GPU access** (Metal on Mac, DirectX 12 on Windows, Vulkan on Linux) and no browser resource limits. Same code, same fusion and auto-offload—just better performance headroom. As of publication, only the browser sandbox and CLI are available.
@@ -471,7 +471,7 @@ Same idea as the GPU-shaped decision tree: large arrays, elementwise ops, minima
 
 **Where can I run RunMat with GPU?**
 
-In three ways: (1) **Browser** — open [runmat.org/sandbox](https://runmat.org/sandbox); GPU uses WebGPU (Chrome 113+, Edge 113+, Safari 18+, Firefox 139+). Same code, automatic fusion; browsers may limit resources. (2) **Desktop app (coming soon)** — packaged RunMat Desktop with full native GPU (Metal/DX12/Vulkan) and no browser caps; not yet released. (3) **CLI** — run scripts from the terminal with full native GPU access; same code as browser, best for max performance and CI. For setup and options, see [getting started](/docs/getting-started).
+In three ways: (1) **Browser** — open [runmat.com/sandbox](https://runmat.com/sandbox); GPU uses WebGPU (Chrome 113+, Edge 113+, Safari 18+, Firefox 139+). Same code, automatic fusion; browsers may limit resources. (2) **Desktop app (coming soon)** — packaged RunMat Desktop with full native GPU (Metal/DX12/Vulkan) and no browser caps; not yet released. (3) **CLI** — run scripts from the terminal with full native GPU access; same code as browser, best for max performance and CI. For setup and options, see [getting started](/docs/getting-started).
 
 **What's the simplest rule to remember?**
 

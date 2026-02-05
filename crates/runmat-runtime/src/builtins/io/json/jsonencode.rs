@@ -101,6 +101,7 @@ enum JsonNumber {
     summary = "Serialize MATLAB values to UTF-8 JSON text.",
     keywords = "jsonencode,json,serialization,struct,gpu",
     accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::jsonencode_type),
     builtin_path = "crate::builtins::io::json::jsonencode"
 )]
 async fn jsonencode_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

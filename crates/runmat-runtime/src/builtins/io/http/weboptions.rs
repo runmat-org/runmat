@@ -47,6 +47,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Create an options struct that configures webread and webwrite HTTP behaviour.",
     keywords = "weboptions,http options,timeout,headers,rest client",
     accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::weboptions_type),
     builtin_path = "crate::builtins::io::http::weboptions"
 )]
 async fn weboptions_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {

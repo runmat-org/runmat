@@ -9,7 +9,7 @@ Capture math in MATLAB syntax. Run on CPU or GPU. Works across Windows, macOS, L
 [![Crates.io](https://img.shields.io/crates/v/runmat.svg)](https://crates.io/crates/runmat)
 [![Downloads](https://img.shields.io/crates/d/runmat.svg)](https://crates.io/crates/runmat)
 
-**[🌐 Website](https://runmat.org) • [📖 Documentation](https://runmat.org/docs)**
+**[🌐 Website](https://runmat.com) • [📖 Documentation](https://runmat.com/docs)**
 
 ---
 
@@ -146,10 +146,10 @@ On smaller arrays Fusion keeps work on CPU so you still get low overhead and a f
 
 ```bash
 # Quick install (Linux/macOS)
-curl -fsSL https://runmat.org/install.sh | sh
+curl -fsSL https://runmat.com/install.sh | sh
 
 # Quick install (Windows PowerShell)
-iwr https://runmat.org/install.ps1 | iex
+iwr https://runmat.com/install.ps1 | iex
 
 # Homebrew (macOS/Linux)
 brew install runmat-org/tap/runmat
@@ -310,7 +310,7 @@ fprintf('m=%.6f\n', double(m));  % Single download at sink
 
 RunMat detects the elementwise chain (`sin`, `.*`, `+`), fuses them into one GPU dispatch, keeps `y` resident on GPU, and only downloads `m` when needed for output.
 
-For more details, see [Introduction to RunMat GPU](https://runmat.org/docs/accelerate/fusion-intro).
+For more details, see [Introduction to RunMat GPU](https://runmat.com/docs/accelerate/fusion-intro).
 
 ## 🎨 Modern Developer Experience
 
@@ -372,7 +372,7 @@ runmat gc major
 runmat info
 ```
 
-See [CLI Documentation](https://runmat.org/docs/cli) for the complete command reference.
+See [CLI Documentation](https://runmat.com/docs/cli) for the complete command reference.
 
 ## 📦 Package System
 
@@ -413,7 +413,7 @@ Both package types appear identically to users—functions show up in the namesp
 
 ### Package Management
 
-The RunMat package manager is still in active design—no CLI commands ship in the current toolchain yet. The [Package Manager Documentation](https://runmat.org/docs/package-manager) captures the proposed workflow (dependency manifests, registry + git sources, publishing flow) and will be updated once the implementation begins.
+The RunMat package manager is still in active design—no CLI commands ship in the current toolchain yet. The [Package Manager Documentation](https://runmat.com/docs/package-manager) captures the proposed workflow (dependency manifests, registry + git sources, publishing flow) and will be updated once the implementation begins.
 
 ## 💡 Design Philosophy
 
@@ -447,7 +447,7 @@ RunMat keeps the core small and uncompromisingly high-quality; everything else i
 - A smaller trusted compute base, easier auditing
 - Community-driven package ecosystem
 
-See [Design Philosophy](https://runmat.org/docs/design-philosophy) for the complete design rationale.
+See [Design Philosophy](https://runmat.com/docs/design-philosophy) for the complete design rationale.
 
 ## 🌍 Who Uses RunMat?
 
@@ -538,7 +538,7 @@ RunMat is licensed under the **MIT License with Attribution Requirements**. This
 ⚠️ **Attribution required** - credit "RunMat by Dystr" in public distributions  
 ⚠️ **Special provisions** - large scientific software companies must keep modifications open source  
 
-See [LICENSE.md](LICENSE.md) for complete terms or visit [runmat.org/license](https://runmat.org/license) for FAQs.
+See [LICENSE.md](LICENSE.md) for complete terms or visit [runmat.com/license](https://runmat.com/license) for FAQs.
 
 ---
 
@@ -546,7 +546,7 @@ See [LICENSE.md](LICENSE.md) for complete terms or visit [runmat.org/license](ht
 
 ⭐ **Star us on GitHub** if RunMat is useful to you.
 
-[**🚀 Get Started**](https://runmat.org/docs/getting-started) • [**🐦 Follow @dystr**](https://x.com/dystrEng)
+[**🚀 Get Started**](https://runmat.com/docs/getting-started) • [**🐦 Follow @dystr**](https://x.com/dystrEng)
 
 ---
 

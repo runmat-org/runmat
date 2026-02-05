@@ -9,12 +9,18 @@ use env_logger::Env;
 use log::{debug, error, info, warn};
 use miette::{SourceOffset, SourceSpan};
 use std::env;
+use uuid::Uuid;
 
-mod telemetry;
+mod telemetry_sink;
+mod public_api;
+mod remote;
 use runmat_accelerate::AccelerateInitOptions;
 use runmat_builtins::Value;
 use runmat_config::{self as config, ConfigLoader, PlotBackend, PlotMode, RunMatConfig};
-use runmat_core::{ExecutionStreamEntry, ExecutionStreamKind, RunError, RunMatSession};
+use runmat_core::{
+    ExecutionStreamEntry, ExecutionStreamKind, RunError, RunMatSession, TelemetryRunConfig,
+    TelemetryRunFinish,
+};
 use runmat_gc::{
     gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats, GcConfig,
 };
@@ -32,9 +38,9 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::time::Duration;
-use telemetry::{
-    capture_provider_snapshot, emit_runtime_value, emit_session_start, telemetry_client_id,
-    RuntimeExecutionCounters, RuntimeTelemetryRecord, TelemetryRunKind, TelemetrySessionEvent,
+use telemetry_sink::{
+    capture_provider_snapshot, sink as telemetry_sink, telemetry_client_id, RuntimeExecutionCounters,
+    TelemetryRunKind,
 };
 
 fn parser_compat(mode: config::LanguageCompatMode) -> runmat_parser::CompatMode {
@@ -438,6 +444,44 @@ enum Commands {
         #[command(subcommand)]
         config_command: ConfigCommand,
     },
+    /// Run against remote filesystem
+    Remote {
+        #[command(subcommand)]
+        remote_command: RemoteCommand,
+    },
+    /// Authenticate with RunMat server
+    Login {
+        /// Server URL
+        #[arg(long)]
+        server: Option<String>,
+        /// API key or access token
+        #[arg(long)]
+        api_key: Option<String>,
+        /// Email for interactive login
+        #[arg(long)]
+        email: Option<String>,
+        /// Default organization id
+        #[arg(long)]
+        org: Option<Uuid>,
+        /// Default project id
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Organization management
+    Org {
+        #[command(subcommand)]
+        org_command: OrgCommand,
+    },
+    /// Project management
+    Project {
+        #[command(subcommand)]
+        project_command: ProjectCommand,
+    },
+    /// Remote filesystem commands
+    Fs {
+        #[command(subcommand)]
+        fs_command: FsCommand,
+    },
     /// Package manager (coming soon)
     Pkg {
         #[command(subcommand)]
@@ -508,6 +552,316 @@ enum ConfigCommand {
     },
     /// Show configuration file locations
     Paths,
+}
+
+#[derive(Subcommand, Clone)]
+enum OrgCommand {
+    /// List organizations
+    List {
+        /// Page size
+        #[arg(long)]
+        limit: Option<u32>,
+        /// Pagination cursor
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Clone)]
+enum ProjectCommand {
+    /// List projects for an organization
+    List {
+        /// Organization id
+        #[arg(long)]
+        org: Option<Uuid>,
+        /// Page size
+        #[arg(long)]
+        limit: Option<u32>,
+        /// Pagination cursor
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+    /// Create a project
+    Create {
+        /// Organization id
+        #[arg(long)]
+        org: Option<Uuid>,
+        /// Project name
+        name: String,
+    },
+    /// Project membership commands
+    Members {
+        #[command(subcommand)]
+        members_command: ProjectMembersCommand,
+    },
+    /// Project retention policy
+    Retention {
+        #[command(subcommand)]
+        retention_command: ProjectRetentionCommand,
+    },
+    /// Set default project
+    Select {
+        /// Project id
+        project: Uuid,
+    },
+}
+
+#[derive(Subcommand, Clone)]
+enum ProjectMembersCommand {
+    /// List project members
+    List {
+        /// Project id
+        #[arg(long)]
+        project: Option<Uuid>,
+        /// Page size
+        #[arg(long)]
+        limit: Option<u32>,
+        /// Pagination cursor
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Clone)]
+enum ProjectRetentionCommand {
+    /// Show retention settings
+    Get {
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Set retention max versions
+    Set {
+        /// Max versions to keep (0 = unlimited)
+        max_versions: usize,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+}
+
+#[derive(Subcommand, Clone)]
+enum FsCommand {
+    /// Read a remote file
+    Read {
+        /// Remote path
+        path: String,
+        /// Output file (stdout when omitted)
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Write a remote file from local input
+    Write {
+        /// Remote path
+        path: String,
+        /// Input file
+        input: PathBuf,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// List directory contents
+    Ls {
+        /// Remote path
+        #[arg(default_value = "/")]
+        path: String,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Create directory
+    Mkdir {
+        /// Remote path
+        path: String,
+        /// Create parent directories
+        #[arg(short, long)]
+        recursive: bool,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Remove file or directory
+    Rm {
+        /// Remote path
+        path: String,
+        /// Remove directory
+        #[arg(long)]
+        dir: bool,
+        /// Remove directory recursively
+        #[arg(short, long)]
+        recursive: bool,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// List file history
+    History {
+        /// Remote path
+        path: String,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Restore file version
+    Restore {
+        /// Version id to restore
+        version: Uuid,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Delete file version
+    HistoryDelete {
+        /// Version id to delete
+        version: Uuid,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// List filesystem snapshots
+    SnapshotList {
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Create filesystem snapshot
+    SnapshotCreate {
+        /// Optional message
+        #[arg(long)]
+        message: Option<String>,
+        /// Parent snapshot override
+        #[arg(long)]
+        parent: Option<Uuid>,
+        /// Optional tag
+        #[arg(long)]
+        tag: Option<String>,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Restore filesystem snapshot
+    SnapshotRestore {
+        /// Snapshot id to restore
+        snapshot: Uuid,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Delete filesystem snapshot
+    SnapshotDelete {
+        /// Snapshot id to delete
+        snapshot: Uuid,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// List snapshot tags
+    SnapshotTagList {
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Set snapshot tag
+    SnapshotTagSet {
+        /// Snapshot id to tag
+        snapshot: Uuid,
+        /// Tag name
+        tag: String,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Delete snapshot tag
+    SnapshotTagDelete {
+        /// Tag name
+        tag: String,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Clone project snapshots into a git repo
+    GitClone {
+        /// Destination directory
+        directory: PathBuf,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+        /// Server override
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Pull latest snapshots into git repo
+    GitPull {
+        /// Repo directory
+        #[arg(default_value = ".")]
+        directory: PathBuf,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+        /// Server override
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Push git repo history into project snapshots
+    GitPush {
+        /// Repo directory
+        #[arg(default_value = ".")]
+        directory: PathBuf,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+        /// Server override
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// List shard manifest history
+    ManifestHistory {
+        /// Remote path
+        path: String,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Restore shard manifest version
+    ManifestRestore {
+        /// Version id to restore
+        version: Uuid,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+    /// Update shard manifest with partial edits
+    ManifestUpdate {
+        /// Remote path
+        path: String,
+        /// Base manifest version id
+        #[arg(long)]
+        base_version: Uuid,
+        /// Manifest JSON file
+        #[arg(long)]
+        manifest: PathBuf,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+    },
+}
+
+#[derive(Subcommand, Clone)]
+enum RemoteCommand {
+    /// Run a script with remote filesystem
+    Run {
+        /// Script path
+        script: PathBuf,
+        /// Project id override
+        #[arg(long)]
+        project: Option<Uuid>,
+        /// Server URL override
+        #[arg(long)]
+        server: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Clone)]
@@ -651,7 +1005,7 @@ async fn main() -> Result<()> {
     };
     apply_cli_overrides(&mut config, &cli);
 
-    telemetry::init(&config.telemetry);
+    telemetry_sink::init(&config.telemetry);
 
     // Initialize logging based on final config
     let log_level = if config.logging.debug || cli.debug {
@@ -1042,6 +1396,19 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) ->
             height,
         } => execute_plot_command(mode, width, height, config).await,
         Commands::Config { config_command } => execute_config_command(config_command, config).await,
+        Commands::Login {
+            server,
+            api_key,
+            email,
+            org,
+            project,
+        } => remote::execute_login(server, api_key, email, org, project).await,
+        Commands::Org { org_command } => remote::execute_org_command(org_command).await,
+        Commands::Project { project_command } => {
+            remote::execute_project_command(project_command).await
+        }
+        Commands::Fs { fs_command } => remote::execute_fs_command(fs_command).await,
+        Commands::Remote { remote_command } => remote::execute_remote_command(remote_command).await,
         Commands::Pkg { pkg_command } => execute_pkg_command(pkg_command).await,
     }
 }
@@ -1051,12 +1418,6 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     if config.runtime.verbose {
         info!("Verbose mode enabled");
     }
-
-    emit_session_start(TelemetrySessionEvent {
-        kind: TelemetryRunKind::Repl,
-        jit_enabled: config.jit.enabled,
-        accelerate_enabled: config.accelerate.enabled,
-    });
     let session_start = Instant::now();
 
     let enable_jit = config.jit.enabled;
@@ -1073,12 +1434,18 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     )
     .context("Failed to create REPL engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
+    engine.set_telemetry_sink(telemetry_sink());
     engine.set_compat_mode(parser_compat(config.language.compat));
     engine.set_callstack_limit(config.runtime.callstack_limit);
     engine.set_error_namespace(config.runtime.error_namespace.clone());
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
+    let repl_run = engine.telemetry_run(TelemetryRunConfig {
+        kind: TelemetryRunKind::Repl,
+        jit_enabled: config.jit.enabled,
+        accelerate_enabled: config.accelerate.enabled,
+    });
 
     info!("RunMat REPL ready");
 
@@ -1099,7 +1466,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
                 break;
             }
         }
-        finalize_repl_session(&engine, config, session_start);
+        finalize_repl_session(&engine, config, session_start, repl_run);
         return Ok(());
     }
 
@@ -1160,7 +1527,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
         }
     }
 
-    finalize_repl_session(&engine, config, session_start);
+    finalize_repl_session(&engine, config, session_start, repl_run);
     Ok(())
 }
 
@@ -1261,24 +1628,28 @@ fn emit_execution_streams(streams: &[ExecutionStreamEntry]) {
     }
 }
 
-fn finalize_repl_session(engine: &RunMatSession, config: &RunMatConfig, session_start: Instant) {
+fn finalize_repl_session(
+    engine: &RunMatSession,
+    config: &RunMatConfig,
+    session_start: Instant,
+    repl_run: Option<runmat_core::TelemetryRunGuard>,
+) {
     let stats = engine.stats();
     let counters = RuntimeExecutionCounters {
         total_executions: stats.total_executions as u64,
         jit_compiled: stats.jit_compiled as u64,
         interpreter_fallback: stats.interpreter_fallback as u64,
     };
-    emit_runtime_value(RuntimeTelemetryRecord {
-        kind: TelemetryRunKind::Repl,
-        duration: Some(session_start.elapsed()),
-        success: true,
-        error: None,
-        jit_enabled: config.jit.enabled,
-        jit_used: stats.jit_compiled > 0,
-        accelerate_enabled: config.accelerate.enabled,
-        counters: Some(counters),
-        provider: capture_provider_snapshot(),
-    });
+    if let Some(run) = repl_run {
+        run.finish(TelemetryRunFinish {
+            duration: Some(session_start.elapsed()),
+            success: true,
+            jit_used: stats.jit_compiled > 0,
+            error: None,
+            counters: Some(counters),
+            provider: capture_provider_snapshot(),
+        });
+    }
 
     info!("RunMat REPL exiting");
 }
@@ -1398,6 +1769,14 @@ async fn execute_script(
     execute_script_with_args(script, vec![], emit_bytecode_path, cli, config).await
 }
 
+pub(crate) async fn execute_script_with_remote_provider(
+    script: PathBuf,
+    config: &RunMatConfig,
+) -> Result<()> {
+    let cli = Cli::parse();
+    execute_script_with_args(script, vec![], None, &cli, config).await
+}
+
 async fn execute_script_with_args(
     script: PathBuf,
     _args: Vec<String>,
@@ -1406,12 +1785,6 @@ async fn execute_script_with_args(
     config: &RunMatConfig,
 ) -> Result<()> {
     info!("Executing script: {script:?}");
-
-    emit_session_start(TelemetrySessionEvent {
-        kind: TelemetryRunKind::Script,
-        jit_enabled: config.jit.enabled,
-        accelerate_enabled: config.accelerate.enabled,
-    });
 
     let content = fs::read_to_string(&script)
         .with_context(|| format!("Failed to read script file: {script:?}"))?;
@@ -1431,6 +1804,7 @@ async fn execute_script_with_args(
     )
     .context("Failed to create execution engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
+    engine.set_telemetry_sink(telemetry_sink());
     engine.set_compat_mode(parser_compat(config.language.compat));
     engine.set_callstack_limit(config.runtime.callstack_limit);
     engine.set_error_namespace(config.runtime.error_namespace.clone());
@@ -1438,10 +1812,25 @@ async fn execute_script_with_args(
         engine.set_telemetry_client_id(Some(cid));
     }
     engine.set_source_name_override(Some(script.to_string_lossy().to_string()));
+    let mut script_run = engine.telemetry_run(TelemetryRunConfig {
+        kind: TelemetryRunKind::Script,
+        jit_enabled: config.jit.enabled,
+        accelerate_enabled: config.accelerate.enabled,
+    });
     let start_time = Instant::now();
     let result = match engine.execute(&content).await {
         Ok(result) => result,
         Err(err) => {
+            if let Some(run) = script_run.take() {
+                run.finish(TelemetryRunFinish {
+                    duration: Some(start_time.elapsed()),
+                    success: false,
+                    jit_used: false,
+                    error: Some("runtime_error".to_string()),
+                    counters: None,
+                    provider: capture_provider_snapshot(),
+                });
+            }
             if let Some(diag) =
                 format_frontend_error(&err, script.to_string_lossy().as_ref(), &content)
             {
@@ -1457,21 +1846,22 @@ async fn execute_script_with_args(
     emit_execution_streams(&result.streams);
 
     let provider_snapshot = capture_provider_snapshot();
-    let error_payload = result.error.as_ref().map(|err| {
-        err.format_diagnostic_with_source(Some(script.to_string_lossy().as_ref()), Some(&content))
-    });
+    let error_payload = result
+        .error
+        .as_ref()
+        .and_then(|err| err.identifier().map(|value| value.to_string()))
+        .or_else(|| result.error.as_ref().map(|_| "runtime_error".to_string()));
     let success = error_payload.is_none();
-    emit_runtime_value(RuntimeTelemetryRecord {
-        kind: TelemetryRunKind::Script,
-        duration: Some(execution_time),
-        success,
-        error: error_payload.clone(),
-        jit_enabled: config.jit.enabled,
-        jit_used: result.used_jit,
-        accelerate_enabled: config.accelerate.enabled,
-        counters: None,
-        provider: provider_snapshot,
-    });
+    if let Some(run) = script_run.take() {
+        run.finish(TelemetryRunFinish {
+            duration: Some(execution_time),
+            success,
+            jit_used: result.used_jit,
+            error: error_payload.clone(),
+            counters: None,
+            provider: provider_snapshot,
+        });
+    }
 
     if let Some(error) = error_payload {
         eprintln!("{error}");
@@ -1784,18 +2174,13 @@ async fn execute_benchmark(
 ) -> Result<()> {
     info!("Benchmarking script: {file:?} ({iterations} iterations, JIT: {jit})");
 
-    emit_session_start(TelemetrySessionEvent {
-        kind: TelemetryRunKind::Benchmark,
-        jit_enabled: jit,
-        accelerate_enabled: config.accelerate.enabled,
-    });
-
     let content = fs::read_to_string(&file)
         .with_context(|| format!("Failed to read script file: {file:?}"))?;
 
     let mut engine = RunMatSession::with_snapshot(jit, false, _cli.snapshot.as_ref())
         .context("Failed to create execution engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
+    engine.set_telemetry_sink(telemetry_sink());
     engine.set_compat_mode(parser_compat(config.language.compat));
     engine.set_callstack_limit(config.runtime.callstack_limit);
     engine.set_error_namespace(config.runtime.error_namespace.clone());
@@ -1803,6 +2188,11 @@ async fn execute_benchmark(
         engine.set_telemetry_client_id(Some(cid));
     }
     engine.set_source_name_override(Some(file.to_string_lossy().to_string()));
+    let mut bench_run = engine.telemetry_run(TelemetryRunConfig {
+        kind: TelemetryRunKind::Benchmark,
+        jit_enabled: jit,
+        accelerate_enabled: config.accelerate.enabled,
+    });
 
     let mut total_time = Duration::ZERO;
     let mut jit_executions: u64 = 0;
@@ -1819,26 +2209,28 @@ async fn execute_benchmark(
         let result = engine.execute(&content).await.map_err(anyhow::Error::new)?;
 
         let iter_duration = Duration::from_millis(result.execution_time_ms);
-        if let Some(error) = result.error.as_ref().map(|err| {
-            err.format_diagnostic_with_source(Some(file.to_string_lossy().as_ref()), Some(&content))
-        }) {
+        if let Some(error) = result
+            .error
+            .as_ref()
+            .and_then(|err| err.identifier().map(|value| value.to_string()))
+            .or_else(|| result.error.as_ref().map(|_| "runtime_error".to_string()))
+        {
             total_time += iter_duration;
             let counters = RuntimeExecutionCounters {
                 total_executions: i as u64,
                 jit_compiled: jit_executions + if result.used_jit { 1 } else { 0 },
                 interpreter_fallback: interpreter_executions + if result.used_jit { 0 } else { 1 },
             };
-            emit_runtime_value(RuntimeTelemetryRecord {
-                kind: TelemetryRunKind::Benchmark,
-                duration: Some(total_time),
-                success: false,
-                error: Some(error.clone()),
-                jit_enabled: jit,
-                jit_used: result.used_jit,
-                accelerate_enabled: config.accelerate.enabled,
-                counters: Some(counters),
-                provider: capture_provider_snapshot(),
-            });
+            if let Some(run) = bench_run.take() {
+                run.finish(TelemetryRunFinish {
+                    duration: Some(total_time),
+                    success: false,
+                    jit_used: result.used_jit,
+                    error: Some(error.clone()),
+                    counters: Some(counters),
+                    provider: capture_provider_snapshot(),
+                });
+            }
             error!("Benchmark iteration {i} failed: {error}");
             std::process::exit(1);
         }
@@ -1872,17 +2264,16 @@ async fn execute_benchmark(
         jit_compiled: jit_executions,
         interpreter_fallback: interpreter_executions,
     };
-    emit_runtime_value(RuntimeTelemetryRecord {
-        kind: TelemetryRunKind::Benchmark,
-        duration: Some(total_time),
-        success: true,
-        error: None,
-        jit_enabled: jit,
-        jit_used: jit_executions > 0,
-        accelerate_enabled: config.accelerate.enabled,
-        counters: Some(counters),
-        provider: capture_provider_snapshot(),
-    });
+    if let Some(run) = bench_run.take() {
+        run.finish(TelemetryRunFinish {
+            duration: Some(total_time),
+            success: true,
+            jit_used: jit_executions > 0,
+            error: None,
+            counters: Some(counters),
+            provider: capture_provider_snapshot(),
+        });
+    }
 
     engine.set_source_name_override(None);
 

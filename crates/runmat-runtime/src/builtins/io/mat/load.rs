@@ -55,6 +55,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "load,mat,workspace",
     accel = "cpu",
     sink = true,
+    type_resolver(crate::builtins::io::type_resolvers::load_type),
     builtin_path = "crate::builtins::io::mat::load"
 )]
 async fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

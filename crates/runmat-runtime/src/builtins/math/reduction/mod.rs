@@ -15,6 +15,7 @@ pub(crate) mod prod;
 pub(crate) mod std;
 pub(crate) mod sum;
 pub(crate) mod var;
+pub(crate) mod type_resolvers;
 
 pub use self::diff::diff_tensor_host;
 pub use self::median::compute_median_inplace;

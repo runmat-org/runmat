@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::logical::type_resolvers::logical_binary_type;
 use crate::{build_runtime_error, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::rel::eq")]
@@ -73,6 +74,7 @@ fn eq_error(message: impl Into<String>, identifier: &'static str) -> RuntimeErro
     summary = "Element-wise equality comparison for scalars, arrays, and gpuArray inputs.",
     keywords = "eq,equality,comparison,logical,gpu",
     accel = "elementwise",
+    type_resolver(logical_binary_type),
     builtin_path = "crate::builtins::logical::rel::eq"
 )]
 async fn eq_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {

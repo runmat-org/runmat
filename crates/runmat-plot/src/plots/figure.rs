@@ -25,6 +25,7 @@ pub struct Figure {
     pub y_label: Option<String>,
     pub legend_enabled: bool,
     pub grid_enabled: bool,
+    pub box_enabled: bool,
     pub background_color: Vec4,
 
     /// Axis limits (None = auto-scale)
@@ -112,6 +113,7 @@ impl Figure {
             y_label: None,
             legend_enabled: true,
             grid_enabled: true,
+            box_enabled: true,
             background_color: Vec4::new(1.0, 1.0, 1.0, 1.0), // White background
             x_limits: None,
             y_limits: None,
@@ -750,7 +752,7 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.bounds(),
             PlotElement::Pie(plot) => plot.bounds(),
             PlotElement::Image(plot) => plot.bounds(),
-            PlotElement::Surface(_plot) => BoundingBox::default(),
+            PlotElement::Surface(plot) => plot.bounds(),
             PlotElement::Scatter3(plot) => plot.bounds(),
             PlotElement::Contour(plot) => plot.bounds(),
             PlotElement::ContourFill(plot) => plot.bounds(),

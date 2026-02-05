@@ -1,10 +1,12 @@
 //! MATLAB-compatible `logspace` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
+use crate::builtins::array::type_resolvers::row_vector_type;
+use runmat_builtins::ResolveContext;
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -53,6 +55,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Sequence generation is treated as a sink and is not fused with other operations.",
 };
 
+fn logspace_type(_args: &[Type], ctx: &ResolveContext) -> Type {
+    row_vector_type(ctx)
+}
+
 #[runtime_builtin(
     name = "logspace",
     category = "array/creation",
@@ -60,6 +66,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "logspace,logarithmic,vector,gpu",
     examples = "x = logspace(1, 3, 3)  % [10 100 1000]",
     accel = "array_construct",
+    type_resolver(logspace_type),
     builtin_path = "crate::builtins::array::creation::logspace"
 )]
 async fn logspace_builtin(
@@ -380,6 +387,16 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn logspace_type_is_row_vector() {
+        assert_eq!(
+            logspace_type(&[Type::Num, Type::Num], &ResolveContext::new(Vec::new())),
+            Type::Tensor {
+                shape: Some(vec![Some(1), None])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

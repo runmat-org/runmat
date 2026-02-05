@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::math::linalg::type_resolvers::dot_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const DOT_NAME: &str = "dot";
@@ -91,6 +92,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Dot product (inner product) of matching tensors along a specified dimension.",
     keywords = "dot,inner product,gpu,linear algebra",
     accel = "reduction",
+    type_resolver(dot_type),
     builtin_path = "crate::builtins::math::linalg::ops::dot"
 )]
 async fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -400,7 +402,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray};
+    use runmat_builtins::{IntValue, LiteralValue, LogicalArray, ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -415,6 +417,49 @@ pub(crate) mod tests {
             Value::Num(result) => assert_eq!(result, 32.0),
             other => panic!("expected scalar result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn dot_type_reduces_first_dimension() {
+        let out = dot_type(
+            &[
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(2)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(2)]),
+            },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(2)])
+            }
+        );
+    }
+
+    #[test]
+    fn dot_type_vector_with_dim_returns_scalar() {
+        let ctx = ResolveContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Number(1.0),
+        ]);
+        let out = dot_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(4)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(4)]),
+                },
+                Type::Int,
+            ],
+            &ctx,
+        );
+        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

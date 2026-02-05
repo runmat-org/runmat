@@ -20,6 +20,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::introspection::type_resolvers::which_type;
 use crate::{
     build_runtime_error, dispatcher::gather_if_needed_async, make_cell, BuiltinResult, RuntimeError,
 };
@@ -82,6 +83,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Identify which variable, builtin, script, class, or folder RunMat will execute for a given name.",
     keywords = "which,search path,builtin lookup,script path,variable shadowing",
     accel = "cpu",
+    type_resolver(which_type),
     builtin_path = "crate::builtins::introspection::which"
 )]
 async fn which_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

@@ -78,6 +78,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     summary = "Return a unique temporary file path.",
     keywords = "tempname,temporary file,unique name,temp directory",
     accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::tempname_type),
     builtin_path = "crate::builtins::io::repl_fs::tempname"
 )]
 async fn tempname_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -170,9 +171,20 @@ fn unique_token() -> String {
         .unwrap_or_default();
     let secs = now.as_secs();
     let nanos = now.subsec_nanos();
-    let pid = std::process::id() as u64;
+    let pid = process_id();
     let counter = UNIQUE_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("tp{:016x}{:08x}{:08x}{:016x}", secs, nanos, pid, counter)
+}
+
+fn process_id() -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        0
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::process::id() as u64
+    }
 }
 
 fn path_to_value(path: &Path) -> Value {

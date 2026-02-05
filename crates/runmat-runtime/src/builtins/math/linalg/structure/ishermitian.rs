@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::linalg::type_resolvers::logical_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(
@@ -54,6 +55,7 @@ fn runtime_error(name: &str, message: impl Into<String>) -> RuntimeError {
     summary = "Determine whether a matrix is Hermitian or skew-Hermitian.",
     keywords = "ishermitian,hermitian,skew-hermitian,matrix structure,gpu",
     accel = "metadata",
+    type_resolver(logical_scalar_type),
     builtin_path = "crate::builtins::math::linalg::structure::ishermitian"
 )]
 async fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -475,7 +477,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray};
+    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -487,6 +489,17 @@ pub(crate) mod tests {
         .unwrap();
         let result = ishermitian_builtin(Value::Tensor(tensor), Vec::new()).expect("ishermitian");
         assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn ishermitian_type_returns_bool() {
+        let out = logical_scalar_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(2)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(out, Type::Bool);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

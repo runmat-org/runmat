@@ -1,5 +1,6 @@
 use runmat_builtins::Value;
 
+use crate::builtins::common::arg_tokens::ArgToken;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -114,6 +115,42 @@ pub(crate) fn coerce_positive_int(value: f64, builtin: &str) -> BuiltinResult<us
     Ok(rounded as usize)
 }
 
+pub(crate) fn dims_from_tokens(tokens: &[ArgToken]) -> Option<Vec<usize>> {
+    let value = tokens.first()?;
+    match value {
+        ArgToken::Number(num) => coerce_positive_literal(*num).map(|dim| vec![dim]),
+        ArgToken::Vector(values) => {
+            if values.is_empty() {
+                return None;
+            }
+            let mut dims = Vec::with_capacity(values.len());
+            for value in values {
+                let dim = match value {
+                    ArgToken::Number(num) => coerce_positive_literal(*num)?,
+                    _ => return None,
+                };
+                dims.push(dim);
+            }
+            Some(dims)
+        }
+        _ => None,
+    }
+}
+
+fn coerce_positive_literal(value: f64) -> Option<usize> {
+    if !value.is_finite() {
+        return None;
+    }
+    let rounded = value.round();
+    if (rounded - value).abs() > f64::EPSILON {
+        return None;
+    }
+    if rounded < 1.0 {
+        return None;
+    }
+    Some(rounded as usize)
+}
+
 /// Build column-major strides for the supplied dimensions, checking overflow.
 pub(crate) fn build_strides(dims: &[usize], builtin: &str) -> BuiltinResult<Vec<usize>> {
     let mut strides = Vec::with_capacity(dims.len());
@@ -144,4 +181,32 @@ pub(crate) fn total_elements(dims: &[usize], builtin: &str) -> BuiltinResult<usi
 
 fn indexing_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dims_from_tokens_accepts_scalar() {
+        let dims = dims_from_tokens(&[ArgToken::Number(3.0)]);
+        assert_eq!(dims, Some(vec![3]));
+    }
+
+    #[test]
+    fn dims_from_tokens_accepts_vector() {
+        let dims = dims_from_tokens(&[ArgToken::Vector(vec![
+            ArgToken::Number(2.0),
+            ArgToken::Number(4.0),
+        ])]);
+        assert_eq!(dims, Some(vec![2, 4]));
+    }
+
+    #[test]
+    fn dims_from_tokens_rejects_non_numeric() {
+        let dims = dims_from_tokens(&[ArgToken::Vector(vec![ArgToken::String(
+            "bad".to_string(),
+        )])]);
+        assert_eq!(dims, None);
+    }
 }

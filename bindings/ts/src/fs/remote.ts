@@ -17,8 +17,15 @@ export interface RemoteProviderOptions {
 interface MetadataPayload {
   fileType: RunMatFsFileType;
   len: number;
-  modified?: number;
+  modifiedAt?: string;
   readonly?: boolean;
+  hash?: string;
+  etag?: string;
+}
+
+interface DownloadUrlPayload {
+  downloadUrl: string;
+  expiresAt: string;
 }
 
 interface DirEntryPayload {
@@ -70,12 +77,13 @@ export function createRemoteFsProvider(options: RemoteProviderOptions): RunMatFi
       while (offset < bytes.length) {
         const end = Math.min(offset + chunkBytes, bytes.length);
         const chunk = bytes.subarray(offset, end);
-        client.writeChunk(normalized, offset, chunk, chunkIndex === 0);
+        const finalChunk = end === bytes.length;
+        client.writeChunk(normalized, offset, chunk, chunkIndex === 0, finalChunk);
         offset = end;
         chunkIndex += 1;
       }
       if (bytes.length === 0) {
-        client.writeChunk(normalized, 0, new Uint8Array(), true);
+        client.writeChunk(normalized, 0, new Uint8Array(), true, true);
       }
     },
 
@@ -145,30 +153,52 @@ class RemoteHttpClient {
 
   fetchMetadata(path: string): RunMatFilesystemMetadata {
     const payload = this.getJson<MetadataPayload>("/fs/metadata", { path });
+    const modifiedAt = payload.modifiedAt ? Date.parse(payload.modifiedAt) : undefined;
+    const modified =
+      modifiedAt !== undefined && !Number.isNaN(modifiedAt)
+        ? Math.floor(modifiedAt / 1000)
+        : undefined;
     return {
       fileType: payload.fileType,
       len: payload.len,
-      modified: payload.modified,
+      modified,
       readonly: payload.readonly
     };
   }
 
   readChunk(path: string, offset: number, length: number): Uint8Array {
-    const response = this.send("GET", "/fs/read", {
+    const xhr = this.sendRaw("GET", "/fs/read", {
       path,
       offset: String(offset),
       length: String(length)
     }, "arraybuffer");
-    return new Uint8Array(response ?? []);
+    const contentType =
+      typeof (xhr as any).getResponseHeader === "function"
+        ? (xhr as any).getResponseHeader("Content-Type") ?? ""
+        : "";
+    if (contentType.includes("application/json")) {
+      const payload = JSON.parse(arrayBufferToString(xhr.response as ArrayBuffer)) as DownloadUrlPayload;
+      return this.downloadRange(payload.downloadUrl, offset, length);
+    }
+    return new Uint8Array((xhr.response as ArrayBuffer) ?? []);
   }
 
-  writeChunk(path: string, offset: number, data: Uint8Array, truncate: boolean): void {
+  writeChunk(
+    path: string,
+    offset: number,
+    data: Uint8Array,
+    truncate: boolean,
+    finalChunk: boolean
+  ): void {
     const query: Record<string, string> = {
       path,
       offset: String(offset)
     };
     if (truncate) {
       query.truncate = "true";
+    }
+    if (finalChunk) {
+      query.final = "true";
     }
     this.send("PUT", "/fs/write", query, "arraybuffer", data);
   }
@@ -185,6 +215,25 @@ class RemoteHttpClient {
     return this.send("GET", route, query, "json") as T;
   }
 
+  private downloadRange(url: string, offset: number, length: number): Uint8Array {
+    if (length === 0) {
+      return new Uint8Array();
+    }
+    const end = offset + length - 1;
+    const xhr = this.sendRaw(
+      "GET",
+      url,
+      {},
+      "arraybuffer",
+      undefined,
+      undefined,
+      { Range: `bytes=${offset}-${end}` },
+      false,
+      false
+    );
+    return new Uint8Array((xhr.response as ArrayBuffer) ?? []);
+  }
+
   private send(
     method: string,
     route: string,
@@ -193,15 +242,30 @@ class RemoteHttpClient {
     body?: ArrayBufferView | ArrayBuffer | string,
     contentType?: string
   ): any {
+    return this.sendRaw(method, route, query, responseType, body, contentType).response;
+  }
+
+  private sendRaw(
+    method: string,
+    route: string,
+    query: Record<string, string>,
+    responseType: XMLHttpRequestResponseType,
+    body?: ArrayBufferView | ArrayBuffer | string,
+    contentType?: string,
+    extraHeaders: Record<string, string> = {},
+    includeAuth = true,
+    includeClientHeaders = true
+  ): XMLHttpRequest {
     const xhr = new XMLHttpRequest();
-    xhr.open(method, buildUrl(this.baseUrl, route, query), false);
+    const url = route.startsWith("http") ? route : buildUrl(this.baseUrl, route, query);
+    xhr.open(method, url, false);
     xhr.timeout = this.timeoutMs;
     xhr.responseType = responseType;
     const headers: Record<string, string> = {
-      "X-RunMat-Client": "remote-fs",
-      ...this.extraHeaders
+      ...(includeClientHeaders ? { "X-RunMat-Client": "remote-fs", ...this.extraHeaders } : {}),
+      ...extraHeaders
     };
-    if (this.authToken) {
+    if (this.authToken && includeAuth) {
       headers.Authorization = `Bearer ${this.authToken}`;
     }
     if (contentType) {
@@ -225,7 +289,7 @@ class RemoteHttpClient {
         `remote fs request failed (${xhr.status}): ${xhr.responseText || xhr.statusText}`
       );
     }
-    return xhr.response;
+    return xhr;
   }
 }
 
@@ -261,4 +325,9 @@ function toUint8Array(data: Uint8Array | ArrayBuffer | ArrayBufferView): Uint8Ar
     data.byteOffset,
     data.byteLength
   );
+}
+
+function arrayBufferToString(buffer: ArrayBuffer): string {
+  const decoder = new TextDecoder("utf-8");
+  return decoder.decode(new Uint8Array(buffer));
 }

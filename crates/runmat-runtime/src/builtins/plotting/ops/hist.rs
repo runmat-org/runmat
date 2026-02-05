@@ -24,6 +24,7 @@ use super::common::{numeric_vector, value_as_f64};
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarStyle, BarStyleDefaults};
+use crate::builtins::plotting::type_resolvers::hist_type;
 use crate::builtins::plotting::gpu_helpers::{axis_bounds_async, gather_tensor_from_gpu_async};
 use crate::{BuiltinResult, RuntimeError};
 
@@ -298,6 +299,7 @@ impl HistWeightsInput {
     keywords = "hist,histogram,frequency",
     sink = true,
     suppress_auto_output = true,
+    type_resolver(hist_type),
     builtin_path = "crate::builtins::plotting::hist"
 )]
 pub async fn hist_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -1309,6 +1311,8 @@ pub(crate) mod tests {
     use crate::builtins::plotting::tests::ensure_plot_test_env;
     use crate::RuntimeError;
     use futures::executor::block_on;
+    use runmat_builtins::{ResolveContext, Type};
+    use crate::builtins::array::type_resolvers::row_vector_type;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -1502,5 +1506,31 @@ pub(crate) mod tests {
         apply_normalization(&mut counts, &widths, HistNormalization::Pdf, 10.0);
         // PDF height = weight / (total_weight * bin_width) = 5 / (10 * 0.5) = 1
         assert!((counts[0] - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn hist_type_defaults_to_row_vector() {
+        let ctx = ResolveContext::new(Vec::new());
+        assert_eq!(hist_type(&[Type::tensor()], &ctx), row_vector_type(&ctx));
+    }
+
+    #[test]
+    fn hist_type_uses_bin_centers_length() {
+        let ctx = ResolveContext::new(Vec::new());
+        let out = hist_type(
+            &[
+                Type::tensor(),
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(5)]),
+                },
+            ],
+            &ctx,
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(5)])
+            }
+        );
     }
 }

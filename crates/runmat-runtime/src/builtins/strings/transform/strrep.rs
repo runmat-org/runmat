@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
@@ -70,6 +71,7 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     summary = "Replace substring occurrences with MATLAB-compatible semantics.",
     keywords = "strrep,replace,strings,character array,text",
     accel = "sink",
+    type_resolver(text_preserve_type),
     builtin_path = "crate::builtins::strings::transform::strrep"
 )]
 async fn strrep_builtin(
@@ -194,6 +196,7 @@ fn strrep_cell_element(value: &Value, old: &str, new: &str) -> BuiltinResult<Val
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn run_strrep(str_value: Value, old_value: Value, new_value: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(strrep_builtin(str_value, old_value, new_value))
@@ -515,5 +518,13 @@ pub(crate) mod tests {
         )
         .expect("strrep");
         assert_eq!(result, Value::String("Turbine JIT".into()));
+    }
+
+    #[test]
+    fn strrep_type_preserves_text() {
+        assert_eq!(
+            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
     }
 }

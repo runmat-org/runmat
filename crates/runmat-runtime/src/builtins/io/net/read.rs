@@ -65,6 +65,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/net",
     summary = "Read numeric or text data from a TCP/IP client.",
     keywords = "read,tcpclient,networking",
+    type_resolver(crate::builtins::io::type_resolvers::read_type),
     builtin_path = "crate::builtins::io::net::read"
 )]
 async fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

@@ -8,6 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, uppercase_preserving_missing};
+use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::upper")]
@@ -60,6 +61,7 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     summary = "Convert strings, character arrays, and cell arrays of character vectors to uppercase.",
     keywords = "upper,uppercase,strings,character array,text",
     accel = "sink",
+    type_resolver(text_preserve_type),
     builtin_path = "crate::builtins::strings::transform::upper"
 )]
 async fn upper_builtin(value: Value) -> BuiltinResult<Value> {
@@ -144,6 +146,7 @@ fn upper_cell_element(value: &Value) -> BuiltinResult<Value> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn run_upper(value: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(upper_builtin(value))
@@ -316,5 +319,13 @@ pub(crate) mod tests {
         let err = run_upper(Value::GpuTensor(handle.clone())).unwrap_err();
         assert_eq!(err.to_string(), ARG_TYPE_ERROR);
         provider.free(&handle).ok();
+    }
+
+    #[test]
+    fn upper_type_preserves_text() {
+        assert_eq!(
+            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
     }
 }

@@ -5,7 +5,7 @@
 //! high-quality output across all use cases.
 
 use crate::core::renderer::Vertex;
-use crate::core::{Camera, Scene, WgpuRenderer};
+use crate::core::{Camera, ClipPolicy, DepthMode, Scene, WgpuRenderer};
 use crate::plots::figure::LegendEntry;
 use crate::plots::surface::ColorMap;
 use crate::plots::Figure;
@@ -21,9 +21,6 @@ pub struct PlotRenderer {
     /// Current scene being rendered
     pub scene: Scene,
 
-    /// Camera for view transformations
-    pub camera: Camera,
-
     /// Current theme configuration  
     pub theme: crate::styling::PlotThemeConfig,
 
@@ -37,6 +34,7 @@ pub struct PlotRenderer {
     figure_y_label: Option<String>,
     figure_show_grid: bool,
     figure_show_legend: bool,
+    figure_show_box: bool,
     figure_x_limits: Option<(f64, f64)>,
     figure_y_limits: Option<(f64, f64)>,
     legend_entries: Vec<LegendEntry>,
@@ -48,7 +46,7 @@ pub struct PlotRenderer {
     // Categorical axis cache
     figure_categorical_is_x: Option<bool>,
     figure_categorical_labels: Option<Vec<String>>,
-    /// Per-axes cameras (for subplots). If empty, use `camera` for single axes.
+    /// Per-axes cameras (for subplots and single-axes figures).
     axes_cameras: Vec<Camera>,
     /// Keep a clone of the last figure set for export/UX operations
     pub(crate) last_figure: Option<crate::plots::Figure>,
@@ -56,6 +54,11 @@ pub struct PlotRenderer {
     /// Last surface extent (in pixels) that was used to build viewport-dependent geometry.
     /// Used so we can rebuild the scene after the canvas is resized (common on wasm).
     last_scene_viewport_px: Option<(u32, u32)>,
+
+    /// If false, do not auto-fit camera when the figure updates (user has interacted).
+    camera_auto_fit: bool,
+    /// Cached flag: whether the current figure contains 3D plots (surf/scatter3).
+    figure_has_3d: bool,
 }
 
 /// Configuration for plot rendering
@@ -80,6 +83,12 @@ pub struct PlotRenderConfig {
     /// Anti-aliasing samples
     pub msaa_samples: u32,
 
+    /// Depth mode for 3D rendering (standard vs reversed-Z).
+    pub depth_mode: DepthMode,
+
+    /// Clip plane policy for 3D rendering.
+    pub clip_policy: ClipPolicy,
+
     /// Theme to use
     pub theme: crate::styling::PlotThemeConfig,
 }
@@ -94,6 +103,8 @@ impl Default for PlotRenderConfig {
             show_axes: true,
             show_title: true,
             msaa_samples: 4,
+            depth_mode: DepthMode::default(),
+            clip_policy: ClipPolicy::default(),
             theme: crate::styling::PlotThemeConfig::default(),
         }
     }
@@ -171,13 +182,11 @@ impl PlotRenderer {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let wgpu_renderer = WgpuRenderer::new(device, queue, surface_config).await;
         let scene = Scene::new();
-        let camera = Self::create_default_camera();
         let theme = crate::styling::PlotThemeConfig::default();
 
         Ok(Self {
             wgpu_renderer,
             scene,
-            camera,
             theme,
             data_bounds: None,
             needs_update: true,
@@ -186,6 +195,7 @@ impl PlotRenderer {
             figure_y_label: None,
             figure_show_grid: true,
             figure_show_legend: true,
+            figure_show_box: true,
             figure_x_limits: None,
             figure_y_limits: None,
             legend_entries: Vec::new(),
@@ -196,10 +206,20 @@ impl PlotRenderer {
             figure_colorbar_enabled: false,
             figure_categorical_is_x: None,
             figure_categorical_labels: None,
-            axes_cameras: Vec::new(),
+            axes_cameras: vec![Self::create_default_camera()],
             last_figure: None,
             last_scene_viewport_px: None,
+            camera_auto_fit: true,
+            figure_has_3d: false,
         })
+    }
+
+    /// Mark that the user has interacted with the camera (disable auto-fit-on-update).
+    pub fn note_camera_interaction(&mut self) {
+        if self.camera_auto_fit {
+            log::debug!(target: "runmat_plot", "camera_auto_fit disabled (user interaction)");
+        }
+        self.camera_auto_fit = false;
     }
 
     /// Set the figure to render
@@ -208,15 +228,47 @@ impl PlotRenderer {
         self.scene.clear();
 
         // Convert figure to scene nodes
+        let prev_has_3d = self.figure_has_3d;
+        let stats = figure.statistics();
+        let next_has_3d =
+            stats.plot_type_counts.contains_key(&crate::plots::figure::PlotType::Surface)
+                || stats
+                    .plot_type_counts
+                    .contains_key(&crate::plots::figure::PlotType::Scatter3);
+        self.figure_has_3d = next_has_3d;
+
+        // If the plot "mode" changed (2D <-> 3D), reset auto-fit so the new mode gets a sensible
+        // initial camera. Otherwise, switching from a previously-interacted 2D plot could leave us
+        // stuck in an orthographic camera for a 3D surface.
+        if prev_has_3d != next_has_3d {
+            self.camera_auto_fit = true;
+        }
+        // Also, if we are about to render a 3D plot but the current camera is still orthographic,
+        // force a one-time auto-fit to bootstrap the perspective camera.
+        if next_has_3d
+            && matches!(
+                self.camera().projection,
+                crate::core::camera::ProjectionType::Orthographic { .. }
+            )
+        {
+            self.camera_auto_fit = true;
+        }
+
         self.cache_figure_meta(&figure);
         self.last_figure = Some(figure.clone());
         // Initialize axes cameras for subplot grid
         let (rows, cols) = figure.axes_grid();
         let num_axes = rows.max(1) * cols.max(1);
-        if self.axes_cameras.len() != num_axes {
-            self.axes_cameras = (0..num_axes)
-                .map(|_| Self::create_default_camera())
-                .collect();
+        // Ensure per-axes cameras exist and match the plot mode (2D vs 3D).
+        // Subplot rendering prefers `axes_cameras`, so these must be initialized correctly.
+        if self.axes_cameras.len() != num_axes || prev_has_3d != next_has_3d {
+            if next_has_3d {
+                self.axes_cameras = (0..num_axes).map(|_| Camera::new()).collect();
+            } else {
+                self.axes_cameras = (0..num_axes)
+                    .map(|_| Self::create_default_camera())
+                    .collect();
+            }
         }
 
         self.add_figure_to_scene(figure);
@@ -224,8 +276,14 @@ impl PlotRenderer {
         // Mark for update
         self.needs_update = true;
 
-        // Recompute bounds and fit camera immediately
-        self.fit_camera_to_data();
+        // Recompute bounds and fit camera immediately (only once per initial dataset).
+        if self.camera_auto_fit {
+            if self.fit_camera_to_data() {
+                // Freeze the initial fit (CAD-like): don't re-fit as data updates (e.g. animations)
+                // unless the user explicitly asks (Fit Extents / Reset View) or we change plot mode.
+                self.camera_auto_fit = false;
+            }
+        }
     }
 
     /// Add a figure to the current scene
@@ -277,10 +335,6 @@ impl PlotRenderer {
             let _ = rows;
             let _ = cols;
         }
-
-        // Update camera to fit data
-        // println!("Scene now has {} visible nodes", self.scene.get_visible_nodes().len());
-        self.fit_camera_to_data();
     }
 
     /// Cache figure metadata for overlay consumption
@@ -290,6 +344,7 @@ impl PlotRenderer {
         self.figure_y_label = figure.y_label.clone();
         self.figure_show_grid = figure.grid_enabled;
         self.figure_show_legend = figure.legend_enabled;
+        self.figure_show_box = figure.box_enabled;
         self.figure_x_limits = figure.x_limits;
         self.figure_y_limits = figure.y_limits;
         self.legend_entries = figure.legend_entries();
@@ -358,52 +413,112 @@ impl PlotRenderer {
         }
     }
 
-    /// Fit camera to show all data
-    pub fn fit_camera_to_data(&mut self) {
+    /// Fit camera to show all data.
+    ///
+    /// Returns `true` if a fit was applied (i.e. bounds existed).
+    pub fn fit_camera_to_data(&mut self) -> bool {
+        if self.figure_has_3d {
+            let Some(fig) = self.last_figure.as_mut() else {
+                return false;
+            };
+            let bounds = fig.bounds();
+            let min = bounds.min;
+            let max = bounds.max;
+            // Seed a non-axis-aligned view direction (MATLAB-like az/el) before fitting.
+            let center = (min + max) * 0.5;
+            let mut cam = Camera::new();
+            cam.target = center;
+            // Z-up default (CAD-like). This must match `Camera::new()`; otherwise auto-fit
+            // will override the user's expected default orientation.
+            cam.up = Vec3::Z;
+            // Direction roughly (az=-37.5°, el=30°): angled in X/Y with positive Z.
+            cam.position = center + Vec3::new(1.0, -1.0, 1.0);
+            cam.fit_bounds(min, max);
+
+            for c in self.axes_cameras.iter_mut() {
+                *c = cam.clone();
+            }
+            return true;
+        }
+
         if let Some((x_min, x_max, y_min, y_max)) = self.calculate_data_bounds() {
             // Match the camera bounds exactly to data bounds to align with overlay grid
-            if let crate::core::camera::ProjectionType::Orthographic { .. } = self.camera.projection
-            {
-                let mut l = x_min as f32;
-                let mut r = x_max as f32;
-                let mut b = y_min as f32;
-                let mut t = y_max as f32;
-                if self.figure_axis_equal {
-                    let cx = (l + r) * 0.5;
-                    let cy = (b + t) * 0.5;
-                    let width = (r - l).abs();
-                    let height = (t - b).abs();
-                    let size = width.max(height);
-                    l = cx - size * 0.5;
-                    r = cx + size * 0.5;
-                    b = cy - size * 0.5;
-                    t = cy + size * 0.5;
-                }
-                if let crate::core::camera::ProjectionType::Orthographic {
-                    ref mut left,
-                    ref mut right,
-                    ref mut bottom,
-                    ref mut top,
-                    ..
-                } = self.camera.projection
-                {
-                    *left = l;
-                    *right = r;
-                    *bottom = b;
-                    *top = t;
-                }
-                // Important: for 2D plotting we treat the orthographic projection bounds as
-                // world/data coordinates. That means the view transform must not translate in X/Y,
-                // otherwise we'd effectively offset the view twice (once via view_matrix and once
-                // via projection bounds), causing the plot to appear shifted / partially clipped.
-                //
-                // Keep the camera looking down at the z=0 plane; only adjust Z so the view matrix
-                // stays stable across resizes.
-                self.camera.position.z = 1.0;
-                self.camera.target.z = 0.0;
-                self.camera.mark_dirty();
+            let mut cam = Self::create_default_camera();
+            let mut l = x_min as f32;
+            let mut r = x_max as f32;
+            let mut b = y_min as f32;
+            let mut t = y_max as f32;
+            if self.figure_axis_equal {
+                let cx = (l + r) * 0.5;
+                let cy = (b + t) * 0.5;
+                let width = (r - l).abs();
+                let height = (t - b).abs();
+                let size = width.max(height);
+                l = cx - size * 0.5;
+                r = cx + size * 0.5;
+                b = cy - size * 0.5;
+                t = cy + size * 0.5;
             }
+            if let crate::core::camera::ProjectionType::Orthographic {
+                ref mut left,
+                ref mut right,
+                ref mut bottom,
+                ref mut top,
+                ..
+            } = cam.projection
+            {
+                *left = l;
+                *right = r;
+                *bottom = b;
+                *top = t;
+            }
+            cam.position.z = 1.0;
+            cam.target.z = 0.0;
+            cam.mark_dirty();
+
+            for c in self.axes_cameras.iter_mut() {
+                *c = cam.clone();
+            }
+            return true;
         }
+        false
+    }
+
+    /// Explicit "Fit Extents" action (CAD-like). Fits the camera to current data once.
+    pub fn fit_extents(&mut self) {
+        let _ = self.fit_camera_to_data();
+        self.camera_auto_fit = false;
+        self.needs_update = true;
+    }
+
+    /// Explicit "Reset Camera" action. Restores the default orientation without re-framing.
+    ///
+    /// For 3D, this resets the view direction around the current data center (or current target)
+    /// while preserving the current zoom distance.
+    /// For 2D, this is equivalent to Fit Extents (since "home" without data bounds is rarely useful).
+    pub fn reset_camera_position(&mut self) {
+        if self.figure_has_3d {
+            let data_center = self
+                .last_figure
+                .as_mut()
+                .map(|f| {
+                    let b = f.bounds();
+                    (b.min + b.max) * 0.5
+                })
+                .unwrap_or_else(|| Vec3::ZERO);
+            let dir = Vec3::new(1.0, -1.0, 1.0).normalize_or_zero();
+            for c in self.axes_cameras.iter_mut() {
+                let dist = (c.position - c.target).length().max(0.1);
+                c.target = data_center;
+                c.up = Vec3::Z;
+                c.position = data_center + dir * dist;
+                c.mark_dirty();
+            }
+        } else {
+            self.fit_extents();
+        }
+        self.camera_auto_fit = false;
+        self.needs_update = true;
     }
 
     /// Render the current scene to a specific viewport within a texture/surface
@@ -449,7 +564,8 @@ impl PlotRenderer {
         }
 
         // Update uniforms
-        let view_proj_matrix = self.camera.view_proj_matrix();
+        let mut cam = self.camera().clone();
+        let view_proj_matrix = cam.view_proj_matrix();
 
         self.wgpu_renderer
             .update_uniforms(view_proj_matrix, Mat4::IDENTITY);
@@ -557,7 +673,8 @@ impl PlotRenderer {
         self.wgpu_renderer.ensure_direct_triangle_pipeline();
 
         // Update camera uniforms for standard rendering path
-        let view_proj_matrix = self.camera.view_proj_matrix();
+        let mut cam = self.camera().clone();
+        let view_proj_matrix = cam.view_proj_matrix();
         self.wgpu_renderer
             .update_uniforms(view_proj_matrix, Mat4::IDENTITY);
 
@@ -857,12 +974,11 @@ impl PlotRenderer {
 
         self.wgpu_renderer.ensure_msaa(config.msaa_samples);
 
-        // Update camera aspect ratio
+        // Update WGPU uniforms from primary axes camera
         let aspect_ratio = config.width as f32 / config.height as f32;
-        self.camera.update_aspect_ratio(aspect_ratio);
-
-        // Update WGPU uniforms
-        let view_proj_matrix = self.camera.view_proj_matrix();
+        let mut cam = self.camera().clone();
+        cam.update_aspect_ratio(aspect_ratio);
+        let view_proj_matrix = cam.view_proj_matrix();
         let model_matrix = Mat4::IDENTITY;
         self.wgpu_renderer
             .update_uniforms(view_proj_matrix, model_matrix);
@@ -1075,23 +1191,54 @@ impl PlotRenderer {
         target_view: &wgpu::TextureView,
         viewport_scissor: (u32, u32, u32, u32),
         config: &PlotRenderConfig,
+        camera: &Camera,
     ) -> Result<RenderResult, Box<dyn std::error::Error>> {
         let start_time = Instant::now();
 
         // Apply MSAA preference into pipelines
         self.wgpu_renderer.ensure_msaa(config.msaa_samples);
+        self.wgpu_renderer.set_depth_mode(config.depth_mode);
 
-        // Update aspect ratio based on provided config (caller should pass plot area aspect)
+        // Ensure a depth attachment exists for camera-based 3D rendering.
+        // This is a no-op for pure 2D direct-mapped pipelines, but is required for correct
+        // occlusion in 3D plots (surf/mesh/scatter3).
+        let depth_view = self.wgpu_renderer.ensure_depth_view();
+
+        // Update standard uniforms from the provided camera
         let aspect_ratio = (config.width.max(1)) as f32 / (config.height.max(1)) as f32;
-        self.camera.update_aspect_ratio(aspect_ratio);
+        let mut cam = camera.clone();
+        cam.update_aspect_ratio(aspect_ratio);
+        cam.depth_mode = config.depth_mode;
 
-        // Update standard uniforms
-        let view_proj_matrix = self.camera.view_proj_matrix();
+        // Dynamic clip planes (CAD-like): keep near/far tight to visible bounds to avoid
+        // clipping surprises and depth precision collapse on huge datasets.
+        if config.clip_policy.dynamic {
+            let mut bounds: Option<crate::core::scene::BoundingBox> = None;
+            for node in self.scene.get_visible_nodes() {
+                if let Some(rd) = &node.render_data {
+                    if let Some(b) = rd.bounds {
+                        bounds = Some(bounds.map_or(b, |acc| acc.union(&b)));
+                    }
+                }
+            }
+            if let Some(b) = bounds {
+                cam.update_clip_planes_from_world_aabb(b.min, b.max, &config.clip_policy);
+            }
+        }
+        let view_proj_matrix = cam.view_proj_matrix();
         self.wgpu_renderer
             .update_uniforms(view_proj_matrix, Mat4::IDENTITY);
 
+        let (sx, sy, sw, sh) = viewport_scissor;
+        let is_2d = matches!(
+            cam.projection,
+            crate::core::camera::ProjectionType::Orthographic { .. }
+        );
+
         // Prepare render items outside the pass
+        let mut owned_render_data: Vec<Box<crate::core::RenderData>> = Vec::new();
         let mut render_items = Vec::new();
+        let mut grid_plane_buffers: Option<(wgpu::Buffer, wgpu::Buffer)> = None;
         let mut total_vertices = 0usize;
         let mut total_triangles = 0usize;
         for node in self.scene.get_visible_nodes() {
@@ -1105,6 +1252,240 @@ impl PlotRenderer {
                     }
                     render_items.push((render_data, vb, ib));
                 }
+            }
+        }
+
+        // 3D helpers: CAD-style XY grid at Z=0 (grid on/off) + origin triad (always).
+        // These are generated per-frame so they can adapt to zoom level.
+        if !is_2d {
+            let view_proj = view_proj_matrix;
+            let inv_view_proj = view_proj.inverse();
+
+            let unproject = |ndc_x: f32, ndc_y: f32, ndc_z: f32| -> Option<Vec3> {
+                let clip = Vec4::new(ndc_x, ndc_y, ndc_z, 1.0);
+                let world = inv_view_proj * clip;
+                if !world.w.is_finite() || world.w.abs() < 1e-6 {
+                    return None;
+                }
+                let p = world.truncate() / world.w;
+                if p.x.is_finite() && p.y.is_finite() && p.z.is_finite() {
+                    Some(p)
+                } else {
+                    None
+                }
+            };
+
+            let ray_intersect_z0 = |ndc_x: f32, ndc_y: f32| -> Option<Vec3> {
+                // Use a near/far pair in clip space to form a ray.
+                let p0 = unproject(ndc_x, ndc_y, -1.0)?;
+                let p1 = unproject(ndc_x, ndc_y, 1.0)?;
+                let dir = p1 - p0;
+                if !dir.z.is_finite() || dir.z.abs() < 1e-8 {
+                    return None;
+                }
+                let t = (-p0.z) / dir.z;
+                if !t.is_finite() || t <= 0.0 {
+                    return None;
+                }
+                Some(p0 + dir * t)
+            };
+
+            let mut plane_pts: Vec<Vec3> = Vec::new();
+            for (nx, ny) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+                if let Some(p) = ray_intersect_z0(nx, ny) {
+                    plane_pts.push(p);
+                }
+            }
+
+            // Fallback region if we couldn't intersect enough rays (camera nearly parallel to plane).
+            let mut min_x = 0.0_f32;
+            let mut max_x = 1.0_f32;
+            let mut min_y = 0.0_f32;
+            let mut max_y = 1.0_f32;
+
+            if plane_pts.len() >= 2 {
+                min_x = plane_pts.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
+                max_x = plane_pts.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max);
+                min_y = plane_pts.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
+                max_y = plane_pts.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
+            } else if let crate::core::camera::ProjectionType::Perspective { fov, .. } = cam.projection
+            {
+                let dist = (cam.position - cam.target).length().max(1e-3);
+                let extent = (dist * (0.5 * fov).tan() * 1.25).max(0.5);
+                let center = Vec3::new(cam.target.x, cam.target.y, 0.0);
+                min_x = center.x - extent;
+                max_x = center.x + extent;
+                min_y = center.y - extent;
+                max_y = center.y + extent;
+            }
+
+            // Expand a bit so grid lines don't pop at edges.
+            let dx = (max_x - min_x).abs().max(1e-3);
+            let dy = (max_y - min_y).abs().max(1e-3);
+            let margin_x = dx * 0.10;
+            let margin_y = dy * 0.10;
+            min_x -= margin_x;
+            max_x += margin_x;
+            min_y -= margin_y;
+            max_y += margin_y;
+
+            let project_to_px = |p: Vec3| -> Option<(f32, f32)> {
+                let clip = view_proj * Vec4::new(p.x, p.y, p.z, 1.0);
+                if !clip.w.is_finite() || clip.w.abs() < 1e-6 {
+                    return None;
+                }
+                let ndc = clip.truncate() / clip.w;
+                if !(ndc.x.is_finite() && ndc.y.is_finite()) {
+                    return None;
+                }
+                let px = ((ndc.x + 1.0) * 0.5) * (sw.max(1) as f32);
+                let py = ((1.0 - ndc.y) * 0.5) * (sh.max(1) as f32);
+                Some((px, py))
+            };
+
+            let nice_step = |raw: f64| -> f64 {
+                if !raw.is_finite() || raw <= 0.0 {
+                    return 1.0;
+                }
+                let pow10 = 10.0_f64.powf(raw.log10().floor());
+                let norm = raw / pow10;
+                let mult = if norm <= 1.0 {
+                    1.0
+                } else if norm <= 2.0 {
+                    2.0
+                } else if norm <= 5.0 {
+                    5.0
+                } else {
+                    10.0
+                };
+                mult * pow10
+            };
+
+            // Determine grid scale from projection at the plane center.
+            let cx = (min_x + max_x) * 0.5;
+            let cy = (min_y + max_y) * 0.5;
+            let center = Vec3::new(cx, cy, 0.0);
+            let px_per_world = {
+                let a = project_to_px(center);
+                let b = project_to_px(center + Vec3::new(1.0, 0.0, 0.0));
+                match (a, b) {
+                    (Some((ax, ay)), Some((bx, by))) => ((bx - ax).hypot(by - ay)).max(1e-3),
+                    _ => 1.0,
+                }
+            };
+            let desired_major_px = 120.0_f64;
+            let major_step = nice_step((desired_major_px / (px_per_world as f64)).max(1e-6));
+            let mut minor_step = major_step / 10.0;
+            if !minor_step.is_finite() || minor_step <= 0.0 {
+                minor_step = major_step.max(1.0);
+            }
+
+            // Cap minor line density to avoid noisy/perf-heavy grids.
+            let max_minor_lines = 180.0;
+            let minor_count_x = (dx as f64 / minor_step).abs();
+            let minor_count_y = (dy as f64 / minor_step).abs();
+            if minor_count_x > max_minor_lines || minor_count_y > max_minor_lines {
+                minor_step = (major_step / 5.0).max(major_step); // effectively disable minors
+            }
+
+            let mut helper_vertices: Vec<Vertex> = Vec::new();
+            let mut push_line = |a: Vec3, b: Vec3, color: Vec4| {
+                helper_vertices.push(Vertex::new(a, color));
+                helper_vertices.push(Vertex::new(b, color));
+            };
+
+            // Slightly offset the grid plane to reduce z-fighting with geometry on z=0.
+            let z_grid = -1e-4_f32;
+
+            // Procedural XY grid plane (depth-tested, no depth writes). This avoids far-plane
+            // popping and keeps line density stable via shader derivatives.
+            if self.figure_show_grid {
+                self.wgpu_renderer.ensure_grid_plane_pipeline();
+                self.wgpu_renderer.update_grid_uniforms(crate::core::renderer::GridUniforms {
+                    major_step: major_step as f32,
+                    minor_step: minor_step as f32,
+                    fade_start: (0.60 * dx.max(dy)).max(major_step as f32),
+                    fade_end: (0.95 * dx.max(dy)).max((major_step as f32) * 2.0),
+                    camera_pos: cam.position.to_array(),
+                    _pad0: 0.0,
+                    target_pos: Vec3::new(cam.target.x, cam.target.y, 0.0).to_array(),
+                    _pad1: 0.0,
+                    major_color: [0.90, 0.92, 0.96, 0.30],
+                    minor_color: [0.82, 0.84, 0.88, 0.18],
+                });
+
+                let quad_vertices = [
+                    Vertex::new(Vec3::new(min_x, min_y, z_grid), Vec4::ONE),
+                    Vertex::new(Vec3::new(max_x, min_y, z_grid), Vec4::ONE),
+                    Vertex::new(Vec3::new(max_x, max_y, z_grid), Vec4::ONE),
+                    Vertex::new(Vec3::new(min_x, max_y, z_grid), Vec4::ONE),
+                ];
+                let quad_indices: [u32; 6] = [0, 1, 2, 0, 2, 3];
+                let vb = self.wgpu_renderer.create_vertex_buffer(&quad_vertices);
+                let ib = self.wgpu_renderer.create_index_buffer(&quad_indices);
+                grid_plane_buffers = Some((vb, ib));
+            }
+
+            // Origin triad (always, for spatial awareness).
+            let axis_len = (major_step as f32 * 5.0).clamp(0.5, (dx.max(dy) * 0.6).max(0.5));
+            let origin = Vec3::new(0.0, 0.0, 0.0);
+            let col_x = Vec4::new(0.92, 0.25, 0.25, 0.85);
+            let col_y = Vec4::new(0.35, 0.90, 0.45, 0.85);
+            let col_z = Vec4::new(0.35, 0.62, 0.98, 0.85);
+            push_line(origin, origin + Vec3::new(axis_len, 0.0, 0.0), col_x);
+            push_line(origin, origin + Vec3::new(0.0, axis_len, 0.0), col_y);
+            push_line(origin, origin + Vec3::new(0.0, 0.0, axis_len), col_z);
+
+            // Dynamic tick marks on the origin triad (major step only). Labels are drawn in the
+            // overlay so they stay crisp; these marks provide a depth-correct anchor in the scene.
+            let tick_len = (axis_len * 0.04).clamp(0.01, major_step as f32 * 0.25);
+            let max_ticks = 6usize;
+            let mut add_ticks = |axis: Vec3, perp: Vec3, col: Vec4| {
+                if major_step <= 0.0 {
+                    return;
+                }
+                for i in 1..=max_ticks {
+                    let t = (i as f32) * (major_step as f32);
+                    if t >= axis_len * 0.999 {
+                        break;
+                    }
+                    let p = origin + axis * t;
+                    push_line(p - perp * tick_len, p + perp * tick_len, Vec4::new(col.x, col.y, col.z, col.w * 0.85));
+                }
+            };
+            add_ticks(Vec3::X, Vec3::Y, col_x);
+            add_ticks(Vec3::Y, Vec3::X, col_y);
+            add_ticks(Vec3::Z, Vec3::X, col_z);
+
+            if !helper_vertices.is_empty() {
+                let rd = Box::new(crate::core::RenderData {
+                    pipeline_type: crate::core::PipelineType::Lines,
+                    vertices: helper_vertices,
+                    indices: None,
+                    gpu_vertices: None,
+                    bounds: None,
+                    material: crate::core::Material::default(),
+                    draw_calls: vec![crate::core::DrawCall {
+                        vertex_offset: 0,
+                        vertex_count: 0, // filled below
+                        index_offset: None,
+                        index_count: None,
+                        instance_count: 1,
+                    }],
+                    image: None,
+                });
+                owned_render_data.push(rd);
+                let idx = owned_render_data.len() - 1;
+                // Fill vertex_count now that vertices are owned.
+                let vcount = owned_render_data[idx].vertices.len();
+                if let Some(dc) = owned_render_data[idx].draw_calls.get_mut(0) {
+                    dc.vertex_count = vcount;
+                }
+                let vb = Arc::new(self.wgpu_renderer.create_vertex_buffer(&owned_render_data[idx].vertices));
+                // Draw helpers first (under data, depth-tested).
+                let rd_ref: &crate::core::RenderData = &owned_render_data[idx];
+                render_items.insert(0, (rd_ref, vb, None));
+                total_vertices += vcount;
             }
         }
 
@@ -1167,10 +1548,9 @@ impl PlotRenderer {
         }
 
         // Precompute optional grid geometry and uniforms so we can draw it under data
-        let (sx, sy, sw, sh) = viewport_scissor;
         // Grid is drawn only when enabled and in 2D orthographic
         let mut grid_vb_opt: Option<wgpu::Buffer> = None;
-        if self.figure_show_grid {
+        if is_2d && self.figure_show_grid {
             if let Some((l, r, b, t)) = self.view_bounds() {
                 // Update direct uniforms mapping for viewport
                 self.wgpu_renderer.update_direct_uniforms(
@@ -1216,27 +1596,37 @@ impl PlotRenderer {
         }
 
         // Before the pass: configure direct uniforms and ensure pipelines
-        let bounds_opt = self.data_bounds;
-        if let Some((l, r, b, t)) = self.view_bounds() {
-            self.wgpu_renderer.update_direct_uniforms(
-                [l as f32, b as f32],
-                [r as f32, t as f32],
-                [-1.0, -1.0],
-                [1.0, 1.0],
-                [sw.max(1) as f32, sh.max(1) as f32],
-            );
-        } else if let Some((x_min, x_max, y_min, y_max)) = bounds_opt {
-            self.wgpu_renderer.update_direct_uniforms(
-                [x_min as f32, y_min as f32],
-                [x_max as f32, y_max as f32],
-                [-1.0, -1.0],
-                [1.0, 1.0],
-                [sw.max(1) as f32, sh.max(1) as f32],
-            );
+        let bounds_opt = if is_2d { self.data_bounds } else { None };
+        if is_2d {
+            if let Some((l, r, b, t)) = self.view_bounds() {
+                self.wgpu_renderer.update_direct_uniforms(
+                    [l as f32, b as f32],
+                    [r as f32, t as f32],
+                    [-1.0, -1.0],
+                    [1.0, 1.0],
+                    [sw.max(1) as f32, sh.max(1) as f32],
+                );
+            } else if let Some((x_min, x_max, y_min, y_max)) = bounds_opt {
+                self.wgpu_renderer.update_direct_uniforms(
+                    [x_min as f32, y_min as f32],
+                    [x_max as f32, y_max as f32],
+                    [-1.0, -1.0],
+                    [1.0, 1.0],
+                    [sw.max(1) as f32, sh.max(1) as f32],
+                );
+            }
+            self.wgpu_renderer.ensure_direct_triangle_pipeline();
+            self.wgpu_renderer.ensure_direct_line_pipeline();
+            self.wgpu_renderer.ensure_direct_point_pipeline();
+        } else {
+            // 3D: ensure camera-based pipelines exist so surfaces rotate with the camera.
+            self.wgpu_renderer
+                .ensure_pipeline(crate::core::PipelineType::Triangles);
+            self.wgpu_renderer
+                .ensure_pipeline(crate::core::PipelineType::Lines);
+            self.wgpu_renderer
+                .ensure_pipeline(crate::core::PipelineType::Points);
         }
-        self.wgpu_renderer.ensure_direct_triangle_pipeline();
-        self.wgpu_renderer.ensure_direct_line_pipeline();
-        self.wgpu_renderer.ensure_direct_point_pipeline();
 
         // Begin pass with Load (preserve egui)
         {
@@ -1275,7 +1665,17 @@ impl PlotRenderer {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth_view.as_ref(),
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(match config.depth_mode {
+                            DepthMode::Standard => 1.0,
+                            DepthMode::ReversedZ => 0.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
@@ -1311,8 +1711,8 @@ impl PlotRenderer {
             }
 
             // Use direct pipelines for precise 2D mapping inside the viewport
-            let use_direct_for_triangles = true;
-            let use_direct_for_lines = true;
+            let use_direct_for_triangles = is_2d;
+            let use_direct_for_lines = is_2d;
             let direct_tri_pipeline = if use_direct_for_triangles && bounds_opt.is_some() {
                 self.wgpu_renderer
                     .direct_triangle_pipeline
@@ -1329,7 +1729,7 @@ impl PlotRenderer {
             } else {
                 None
             };
-            let direct_point_pipeline = if bounds_opt.is_some() {
+            let direct_point_pipeline = if is_2d && bounds_opt.is_some() {
                 self.wgpu_renderer
                     .direct_point_pipeline
                     .as_ref()
@@ -1355,9 +1755,10 @@ impl PlotRenderer {
                     crate::core::PipelineType::Textured
                 );
                 // Use direct mapping for lines/triangles/points for correct pixel-sized markers in GUI
-                let use_direct = ((use_direct_for_triangles && is_triangles)
-                    || (use_direct_for_lines && is_lines)
-                    || is_points)
+                let use_direct = is_2d
+                    && ((use_direct_for_triangles && is_triangles)
+                        || (use_direct_for_lines && is_lines)
+                        || is_points)
                     && bounds_opt.is_some();
 
                 if use_direct {
@@ -1417,6 +1818,18 @@ impl PlotRenderer {
                             0..dc.instance_count as u32,
                         );
                     }
+                }
+            }
+
+            // Draw procedural 3D grid plane after data, depth-tested (no depth writes).
+            if let Some((ref vb, ref ib)) = grid_plane_buffers {
+                if let Some(pipeline) = self.wgpu_renderer.grid_plane_pipeline() {
+                    render_pass.set_pipeline(pipeline);
+                    render_pass.set_bind_group(0, self.wgpu_renderer.get_uniform_bind_group(), &[]);
+                    render_pass.set_bind_group(1, &self.wgpu_renderer.grid_uniform_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, vb.slice(..));
+                    render_pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.draw_indexed(0..6, 0, 0..1);
                 }
             }
         }
@@ -1480,9 +1893,11 @@ impl PlotRenderer {
                 }
             }
             // Update camera and bounds
-            if let Some(cam) = self.axes_cameras.get(ax_idx).cloned() {
-                self.camera = cam;
-            }
+            let cam = self
+                .axes_cameras
+                .get(ax_idx)
+                .cloned()
+                .unwrap_or_else(Self::create_default_camera);
             let _ = self.calculate_data_bounds();
 
             // Render this axes into its viewport
@@ -1492,7 +1907,7 @@ impl PlotRenderer {
                 msaa_samples,
                 ..Default::default()
             };
-            let _ = self.render_camera_to_viewport(encoder, target_view, *viewport, &cfg)?;
+            let _ = self.render_camera_to_viewport(encoder, target_view, *viewport, &cfg, &cam)?;
 
             // Restore hidden nodes visibility
             for id in hidden_ids {
@@ -1516,6 +1931,7 @@ impl PlotRenderer {
             near: -10.0,
             far: 10.0,
         };
+        camera.depth_mode = DepthMode::default();
         // For 2D plotting we keep the camera close to the z=0 plane.
         camera.position = Vec3::new(0.0, 0.0, 1.0);
         camera.target = Vec3::new(0.0, 0.0, 0.0);
@@ -1525,14 +1941,22 @@ impl PlotRenderer {
 
     // Removed simple data_bounds getter in favor of overlay-aware bounds below
 
-    /// Get camera reference
+    /// Get the primary (axes 0) camera.
     pub fn camera(&self) -> &Camera {
-        &self.camera
+        self.axes_cameras
+            .first()
+            .expect("axes_cameras must contain at least one camera")
     }
 
-    /// Get mutable camera reference
+    /// Get mutable reference to the primary (axes 0) camera.
     pub fn camera_mut(&mut self) -> &mut Camera {
-        &mut self.camera
+        self.axes_cameras
+            .first_mut()
+            .expect("axes_cameras must contain at least one camera")
+    }
+
+    pub fn axes_camera(&self, axes_index: usize) -> Option<&Camera> {
+        self.axes_cameras.get(axes_index)
     }
 
     /// Get scene reference
@@ -1547,7 +1971,7 @@ impl PlotRenderer {
 
     /// Get current view bounds (camera frustum) in world/data space for 2D
     pub fn view_bounds(&self) -> Option<(f64, f64, f64, f64)> {
-        match self.camera.projection {
+        match self.camera().projection {
             crate::core::camera::ProjectionType::Orthographic {
                 left,
                 right,
@@ -1562,6 +1986,9 @@ impl PlotRenderer {
     /// Overlay configuration getters
     pub fn overlay_show_grid(&self) -> bool {
         self.figure_show_grid
+    }
+    pub fn overlay_show_box(&self) -> bool {
+        self.figure_show_box
     }
     pub fn overlay_title(&self) -> Option<&String> {
         self.figure_title.as_ref()
@@ -1592,18 +2019,10 @@ impl PlotRenderer {
     }
     /// Subplot grid
     pub fn figure_axes_grid(&self) -> (usize, usize) {
-        self.scene_axes_grid_fallback()
-    }
-
-    fn scene_axes_grid_fallback(&self) -> (usize, usize) {
-        // We don't retain Figure here; infer grid from number of axes cameras if present, else 1x1
-        if !self.axes_cameras.is_empty() {
-            // Try best effort: assume rows*cols == axes_cameras.len() with rows contiguous
-            // Default to 1 x N for now
-            (1, self.axes_cameras.len())
-        } else {
-            (1, 1)
-        }
+        self.last_figure
+            .as_ref()
+            .map(|f| f.axes_grid())
+            .unwrap_or((1, 1))
     }
     /// Return categorical labels if any (is_x_axis, &labels)
     pub fn overlay_categorical_labels(&self) -> Option<(bool, &Vec<String>)> {
@@ -1657,6 +2076,38 @@ impl PlotRenderer {
         None
     }
 
+    pub fn axes_bounds(&self, axes_index: usize) -> Option<crate::core::BoundingBox> {
+        let mut min = Vec3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY);
+        let mut max = Vec3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+        let mut saw_any = false;
+
+        for node in self.scene.get_visible_nodes() {
+            if node.axes_index != axes_index {
+                continue;
+            }
+            let Some(render_data) = &node.render_data else {
+                continue;
+            };
+            if let Some(bounds) = render_data.bounds.as_ref() {
+                min = min.min(bounds.min);
+                max = max.max(bounds.max);
+                saw_any = true;
+                continue;
+            }
+            for v in &render_data.vertices {
+                let p = Vec3::new(v.position[0], v.position[1], v.position[2]);
+                min = min.min(p);
+                max = max.max(p);
+                saw_any = true;
+            }
+        }
+
+        if !saw_any {
+            return None;
+        }
+        Some(crate::core::BoundingBox { min, max })
+    }
+
     /// Prefer exporting the original figure if available
     pub fn export_figure_clone(&self) -> crate::plots::Figure {
         if let Some(f) = &self.last_figure {
@@ -1669,6 +2120,7 @@ impl PlotRenderer {
         fig.y_label = self.figure_y_label.clone();
         fig.legend_enabled = self.figure_show_legend;
         fig.grid_enabled = self.figure_show_grid;
+        fig.box_enabled = self.figure_show_box;
         fig.x_limits = self.figure_x_limits;
         fig.y_limits = self.figure_y_limits;
         fig.x_log = self.figure_x_log;

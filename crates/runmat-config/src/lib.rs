@@ -185,7 +185,7 @@ impl Default for TelemetryConfig {
             enabled: true,
             show_payloads: false,
             http_endpoint: None,
-            udp_endpoint: Some("udp.telemetry.runmat.org:7846".to_string()),
+            udp_endpoint: Some("udp.telemetry.runmat.com:7846".to_string()),
             queue_size: default_telemetry_queue(),
             require_ingestion_key: true,
         }
@@ -433,7 +433,7 @@ pub struct PackagesConfig {
 pub struct Registry {
     /// Registry logical name
     pub name: String,
-    /// Base URL for index/API (e.g., https://packages.runmat.org)
+    /// Base URL for index/API (e.g., https://packages.runmat.com)
     pub url: String,
 }
 
@@ -637,7 +637,7 @@ fn default_lod_threshold() -> u32 {
 fn default_registries() -> Vec<Registry> {
     vec![Registry {
         name: "runmat".to_string(),
-        url: "https://packages.runmat.org".to_string(),
+        url: "https://packages.runmat.com".to_string(),
     }]
 }
 

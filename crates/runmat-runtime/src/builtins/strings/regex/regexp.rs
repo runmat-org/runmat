@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::strings::type_resolvers::unknown_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::regex::regexp")]
@@ -85,6 +86,7 @@ pub async fn evaluate_with(
     summary = "Regular expression matching with MATLAB-compatible outputs.",
     keywords = "regexp,regex,pattern,match,tokens,split",
     accel = "sink",
+    type_resolver(unknown_type),
     builtin_path = "crate::builtins::strings::regex::regexp"
 )]
 async fn regexp_builtin(
@@ -946,6 +948,7 @@ fn names_struct(names: &[String], match_data: Option<&MatchComponents>) -> Value
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn evaluate(subject: Value, pattern: Value, rest: &[Value]) -> BuiltinResult<RegexpEvaluation> {
         futures::executor::block_on(super::evaluate(subject, pattern, rest))
@@ -1493,5 +1496,13 @@ pub(crate) mod tests {
             }
             other => panic!("unexpected output {other:?}"),
         }
+    }
+
+    #[test]
+    fn regexp_type_is_unknown() {
+        assert_eq!(
+            unknown_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::Unknown
+        );
     }
 }

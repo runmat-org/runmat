@@ -8,6 +8,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::fft::type_resolvers::fftshift_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
@@ -54,6 +55,7 @@ fn fftshift_error(message: impl Into<String>) -> RuntimeError {
     summary = "Shift zero-frequency components to the center of a spectrum.",
     keywords = "fftshift,fourier transform,frequency centering,spectrum,gpu",
     accel = "custom",
+    type_resolver(fftshift_type),
     builtin_path = "crate::builtins::math::fft::fftshift"
 )]
 async fn fftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -197,10 +199,28 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, Tensor};
+    use runmat_builtins::{
+        ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type,
+    };
 
     fn error_message(error: crate::RuntimeError) -> String {
         error.message().to_string()
+    }
+
+    #[test]
+    fn fftshift_type_preserves_tensor_shape() {
+        let out = fftshift_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(5)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(5)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

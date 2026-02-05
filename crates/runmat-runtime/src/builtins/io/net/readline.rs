@@ -62,6 +62,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/net",
     summary = "Read ASCII text until the terminator from a TCP/IP client.",
     keywords = "readline,tcpclient,networking",
+    type_resolver(crate::builtins::io::type_resolvers::readline_type),
     builtin_path = "crate::builtins::io::net::readline"
 )]
 async fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

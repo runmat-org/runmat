@@ -252,8 +252,9 @@ impl ImageExporter {
                 .map_err(|e| format!("render subplot failed: {e}"))?;
         } else {
             let viewport = (0u32, 0u32, self.settings.width, self.settings.height);
+            let cam = plot_renderer.camera().clone();
             plot_renderer
-                .render_camera_to_viewport(&mut encoder, &color_view, viewport, &cfg)
+                .render_camera_to_viewport(&mut encoder, &color_view, viewport, &cfg, &cam)
                 .map_err(|e| format!("render failed: {e}"))?;
         }
 

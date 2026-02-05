@@ -19,14 +19,17 @@ pub(crate) mod style;
 #[path = "core/web.rs"]
 pub mod web;
 
+#[path = "type_resolvers.rs"]
+pub(crate) mod type_resolvers;
+
 #[path = "ops/bar.rs"]
 pub(crate) mod bar;
 #[path = "ops/clf.rs"]
 pub(crate) mod clf;
 #[path = "ops/close.rs"]
 pub(crate) mod close;
-#[path = "ops/compat_cmds.rs"]
-pub(crate) mod compat_cmds;
+#[path = "ops/cmds.rs"]
+pub(crate) mod cmds;
 #[path = "ops/contour.rs"]
 pub(crate) mod contour;
 #[path = "ops/contourf.rs"]
@@ -74,7 +77,11 @@ pub use state::{
 pub use web::{
     bind_surface_to_figure, detach_surface, install_surface, present_figure_on_surface,
     present_surface, render_current_scene, resize_surface, web_renderer_ready,
+    fit_surface_extents, reset_surface_camera,
 };
+
+#[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+pub use web::handle_plot_surface_event;
 
 pub(crate) fn plotting_error(builtin: &str, message: impl Into<String>) -> crate::RuntimeError {
     crate::build_runtime_error(message)

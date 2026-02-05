@@ -6,6 +6,7 @@
 use crate::core::{plot_utils, PlotRenderer};
 use crate::styling::{ModernDarkTheme, PlotThemeConfig};
 use egui::{Align2, Color32, Context, FontId, Pos2, Rect, Stroke};
+use glam::{Vec3, Vec4};
 
 /// GUI overlay manager for plot annotations and controls
 pub struct PlotOverlay {
@@ -338,9 +339,10 @@ impl PlotOverlay {
 
                 // Plot controls
                 ui.collapsing("🔧 Controls", |ui| {
-                    ui.label("🖱️ Left drag: Rotate");
-                    ui.label("🖱️ Right drag: Pan");
-                    ui.label("🖱️ Scroll: Zoom");
+                    ui.label("🖱️ Orbit: MMB drag (or RMB drag)");
+                    ui.label("🖱️ Pan: Shift + MMB drag (or Shift + RMB drag)");
+                    ui.label("🖱️ Zoom: Scroll wheel (zooms to cursor)");
+                    ui.label("🖱️ Alt + LMB/MMB/RMB: Orbit/Pan/Zoom");
                     ui.label("📱 Touch: Pinch to zoom");
                 });
             });
@@ -359,46 +361,96 @@ impl PlotOverlay {
     ) -> Rect {
         let available_rect = ui.available_rect_before_wrap();
 
-        // Calculate plot area with margins
-        let plot_rect = Rect::from_min_size(
-            available_rect.min + egui::Vec2::new(config.plot_margins.left, config.plot_margins.top),
-            available_rect.size()
-                - egui::Vec2::new(
-                    config.plot_margins.left + config.plot_margins.right,
-                    config.plot_margins.top + config.plot_margins.bottom,
-                ),
-        );
+        // Detect whether we're rendering any 3D (perspective) axes. In 3D we don't need 2D-style
+        // margins for ticks/labels, and inset margins read like an "outer frame".
+        let (rows, cols) = plot_renderer.figure_axes_grid();
+        let has_3d_axes = (0..(rows.max(1) * cols.max(1))).any(|axes_index| {
+            let cam = plot_renderer
+                .axes_camera(axes_index)
+                .unwrap_or_else(|| plot_renderer.camera());
+            matches!(
+                cam.projection,
+                crate::core::camera::ProjectionType::Perspective { .. }
+            )
+        });
+
+        // Calculate plot area. Use full available rect for 3D; keep margins for 2D.
+        let plot_rect = if has_3d_axes {
+            available_rect
+        } else {
+            Rect::from_min_size(
+                available_rect.min
+                    + egui::Vec2::new(config.plot_margins.left, config.plot_margins.top),
+                available_rect.size()
+                    - egui::Vec2::new(
+                        config.plot_margins.left + config.plot_margins.right,
+                        config.plot_margins.top + config.plot_margins.bottom,
+                    ),
+            )
+        };
 
         // Use full available rectangular plot area (do not force square);
         // camera fitting and axis_equal settings will control aspect.
         let centered_plot_rect = plot_rect;
 
-        let (rows, cols) = plot_renderer.figure_axes_grid();
         if rows * cols > 1 {
             let rects = self.compute_subplot_rects(centered_plot_rect, rows, cols, 8.0, 8.0);
             for (i, r) in rects.iter().enumerate() {
-                // Frame
-                ui.painter()
-                    .rect_stroke(*r, 0.0, Stroke::new(1.5, Color32::from_gray(180)));
-                // Grid
+                let cam = plot_renderer.axes_camera(i).unwrap_or_else(|| plot_renderer.camera());
+                if matches!(
+                    cam.projection,
+                    crate::core::camera::ProjectionType::Perspective { .. }
+                ) {
+                    self.draw_3d_orientation_gizmo(ui, *r, plot_renderer, i, config.font_scale);
+                    self.draw_3d_origin_axis_ticks(ui, *r, plot_renderer, i, config.font_scale);
+                    continue;
+                }
+                // Frame (2D only; 3D uses the axes cube instead)
+                if plot_renderer.overlay_show_box() {
+                    ui.painter()
+                        .rect_stroke(*r, 0.0, Stroke::new(1.5, Color32::from_gray(180)));
+                }
+
+                // Grid (2D)
                 if config.show_grid {
                     let b = plot_renderer.view_bounds_for_axes(i);
                     self.draw_grid(ui, *r, plot_renderer, b);
                 }
-                // Axes
+                // Axes (2D)
                 if config.show_axes {
                     let b = plot_renderer.view_bounds_for_axes(i);
                     self.draw_axes(ui, *r, plot_renderer, config, b);
                 }
             }
         } else {
-            // Draw plot frame
-            ui.painter().rect_stroke(
-                centered_plot_rect,
-                0.0,
-                Stroke::new(1.5, Color32::from_gray(180)),
-            );
-
+            let cam = plot_renderer.camera();
+            if matches!(
+                cam.projection,
+                crate::core::camera::ProjectionType::Perspective { .. }
+            ) {
+                self.draw_3d_orientation_gizmo(
+                    ui,
+                    centered_plot_rect,
+                    plot_renderer,
+                    0,
+                    config.font_scale,
+                );
+                self.draw_3d_origin_axis_ticks(
+                    ui,
+                    centered_plot_rect,
+                    plot_renderer,
+                    0,
+                    config.font_scale,
+                );
+            } else {
+            // Draw plot frame (2D only; 3D uses the axes cube instead)
+            if plot_renderer.overlay_show_box() {
+                ui.painter().rect_stroke(
+                    centered_plot_rect,
+                    0.0,
+                    Stroke::new(1.5, Color32::from_gray(180)),
+                );
+            }
             // Draw grid if enabled
             if config.show_grid {
                 self.draw_grid(ui, centered_plot_rect, plot_renderer, None);
@@ -408,7 +460,10 @@ impl PlotOverlay {
             if config.show_axes {
                 self.draw_axes(ui, centered_plot_rect, plot_renderer, config, None);
                 // Emphasize zero baseline if within data range
-                if let Some((x_min, x_max, y_min, y_max)) = plot_renderer.data_bounds() {
+                if let Some((x_min, x_max, y_min, y_max)) = plot_renderer
+                    .view_bounds()
+                    .or_else(|| plot_renderer.data_bounds())
+                {
                     let zero_stroke = Stroke::new(1.5, Color32::from_gray(200));
                     if y_min < 0.0 && y_max > 0.0 {
                         let y_screen = centered_plot_rect.max.y
@@ -435,6 +490,7 @@ impl PlotOverlay {
                     }
                 }
             }
+            }
         }
 
         // Draw title if enabled (single global title)
@@ -444,12 +500,15 @@ impl PlotOverlay {
             }
         }
 
-        // Draw axis labels
-        if let Some(x_label) = &config.x_label {
-            self.draw_x_label(ui, centered_plot_rect, x_label, config.font_scale);
-        }
-        if let Some(y_label) = &config.y_label {
-            self.draw_y_label(ui, centered_plot_rect, y_label, config.font_scale);
+        // Draw axis labels only for 2D plots. In 3D (perspective) the axes cube already
+        // communicates orientation and drawing large "X/Y" labels looks like a 2D frame.
+        if !has_3d_axes {
+            if let Some(x_label) = &config.x_label {
+                self.draw_x_label(ui, centered_plot_rect, x_label, config.font_scale);
+            }
+            if let Some(y_label) = &config.y_label {
+                self.draw_y_label(ui, centered_plot_rect, y_label, config.font_scale);
+            }
         }
 
         // Draw legend if enabled and entries available
@@ -636,7 +695,10 @@ impl PlotOverlay {
         plot_renderer: &PlotRenderer,
         view_bounds_override: Option<(f64, f64, f64, f64)>,
     ) {
-        if let Some(data_bounds) = view_bounds_override.or_else(|| plot_renderer.data_bounds()) {
+        if let Some(data_bounds) = view_bounds_override
+            .or_else(|| plot_renderer.view_bounds())
+            .or_else(|| plot_renderer.data_bounds())
+        {
             let grid_color_major = Color32::from_gray(80);
             let _grid_color_minor = Color32::from_gray(60);
 
@@ -748,7 +810,10 @@ impl PlotOverlay {
         config: &OverlayConfig,
         view_bounds_override: Option<(f64, f64, f64, f64)>,
     ) {
-        if let Some(data_bounds) = view_bounds_override.or_else(|| plot_renderer.data_bounds()) {
+        if let Some(data_bounds) = view_bounds_override
+            .or_else(|| plot_renderer.view_bounds())
+            .or_else(|| plot_renderer.data_bounds())
+        {
             let (x_min, x_max, y_min, y_max) = data_bounds;
             let x_range = x_max - x_min;
             let y_range = y_max - y_min;
@@ -925,6 +990,219 @@ impl PlotOverlay {
                 }
             }
         }
+    }
+
+    /// Draw a CAD-style XYZ orientation gizmo in the bottom-left corner of the plot rect.
+    /// This is drawn in screen-space (overlay) but rotates with the current 3D camera.
+    fn draw_3d_orientation_gizmo(
+        &self,
+        ui: &mut egui::Ui,
+        plot_rect: Rect,
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+        font_scale: f32,
+    ) {
+        let cam_ref = plot_renderer
+            .axes_camera(axes_index)
+            .unwrap_or_else(|| plot_renderer.camera());
+        let cam = cam_ref.clone();
+
+        let forward = (cam.target - cam.position).normalize_or_zero();
+        if forward.length_squared() < 1e-9 {
+            return;
+        }
+        let world_up = cam.up.normalize_or_zero();
+        let right = forward.cross(world_up).normalize_or_zero();
+        if right.length_squared() < 1e-9 {
+            return;
+        }
+        let up = right.cross(forward).normalize_or_zero();
+        if up.length_squared() < 1e-9 {
+            return;
+        }
+
+        let scale = font_scale.max(0.75);
+        let base = plot_rect.width().min(plot_rect.height()).max(1.0);
+        let gizmo_size = (base * 0.16).clamp(44.0, 110.0) * scale;
+        let pad = (10.0 * scale).round();
+        let origin = Pos2::new(plot_rect.min.x + pad, plot_rect.max.y - pad);
+
+        struct AxisItem {
+            label: &'static str,
+            dir_world: Vec3,
+            color: Color32,
+            z_sort: f32,
+        }
+
+        let mut axes = [
+            AxisItem {
+                label: "X",
+                dir_world: Vec3::X,
+                color: Color32::from_rgb(235, 80, 80),
+                z_sort: 0.0,
+            },
+            AxisItem {
+                label: "Y",
+                dir_world: Vec3::Y,
+                color: Color32::from_rgb(90, 220, 120),
+                z_sort: 0.0,
+            },
+            AxisItem {
+                label: "Z",
+                dir_world: Vec3::Z,
+                color: Color32::from_rgb(90, 160, 255),
+                z_sort: 0.0,
+            },
+        ];
+
+        // Transform world axis directions into camera space and use the camera-space z as a
+        // painter's-order hint (draw farther axes first so nearer ones sit on top).
+        for a in axes.iter_mut() {
+            let x = a.dir_world.dot(right);
+            let y = a.dir_world.dot(up);
+            let z = a.dir_world.dot(-forward);
+            a.z_sort = z;
+            a.dir_world = Vec3::new(x, y, z);
+        }
+        axes.sort_by(|a, b| a.z_sort.partial_cmp(&b.z_sort).unwrap_or(std::cmp::Ordering::Equal));
+
+        let painter = ui.painter();
+        // Subtle background to keep gizmo readable over bright surfaces.
+        let bg_rect = Rect::from_min_size(
+            Pos2::new(origin.x - 4.0 * scale, origin.y - gizmo_size - 8.0 * scale),
+            egui::Vec2::new(gizmo_size + 12.0 * scale, gizmo_size + 12.0 * scale),
+        );
+        painter.rect_filled(
+            bg_rect,
+            6.0 * scale,
+            Color32::from_rgba_premultiplied(0, 0, 0, 70),
+        );
+
+        painter.circle_filled(origin, 2.0 * scale, Color32::from_gray(210));
+
+        let axis_len = gizmo_size * 0.65;
+        let head_len = (8.0 * scale).min(axis_len * 0.35);
+        let head_w = 5.0 * scale;
+        let font = FontId::proportional(11.0 * scale);
+
+        for a in axes.iter() {
+            let dir2 = egui::Vec2::new(a.dir_world.x, -a.dir_world.y);
+            let mag = dir2.length();
+            if !mag.is_finite() || mag < 1e-4 {
+                continue;
+            }
+            let d = dir2 / mag;
+
+            let end = origin + d * axis_len;
+            let stroke = Stroke::new(2.0 * scale, a.color);
+            painter.line_segment([origin, end], stroke);
+
+            // Arrow head
+            let base = end - d * head_len;
+            let perp = egui::Vec2::new(-d.y, d.x);
+            painter.line_segment([end, base + perp * head_w], stroke);
+            painter.line_segment([end, base - perp * head_w], stroke);
+
+            // Label near arrow tip
+            let label_pos = end + d * (10.0 * scale);
+            painter.text(label_pos, Align2::CENTER_CENTER, a.label, font.clone(), a.color);
+        }
+    }
+
+    /// Draw dynamic tick labels for the 3D origin triad axes (X/Y/Z).
+    /// These labels are screen-space (egui) but are positioned by projecting 3D points.
+    fn draw_3d_origin_axis_ticks(
+        &self,
+        ui: &mut egui::Ui,
+        plot_rect: Rect,
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+        font_scale: f32,
+    ) {
+        let cam_ref = plot_renderer
+            .axes_camera(axes_index)
+            .unwrap_or_else(|| plot_renderer.camera());
+        let mut cam = cam_ref.clone();
+        let w = plot_rect.width().max(1.0);
+        let h = plot_rect.height().max(1.0);
+        cam.update_aspect_ratio(w / h);
+        let view_proj = cam.view_proj_matrix();
+
+        let project = |p: Vec3| -> Option<Pos2> {
+            let clip: Vec4 = view_proj * Vec4::new(p.x, p.y, p.z, 1.0);
+            if !clip.w.is_finite() || clip.w.abs() < 1e-6 {
+                return None;
+            }
+            let ndc = clip.truncate() / clip.w;
+            if !(ndc.x.is_finite() && ndc.y.is_finite()) {
+                return None;
+            }
+            let sx = plot_rect.min.x + ((ndc.x + 1.0) * 0.5) * plot_rect.width();
+            let sy = plot_rect.min.y + ((1.0 - ndc.y) * 0.5) * plot_rect.height();
+            Some(Pos2::new(sx, sy))
+        };
+
+        let nice_step = |raw: f64| -> f64 {
+            if !raw.is_finite() || raw <= 0.0 {
+                return 1.0;
+            }
+            let pow10 = 10.0_f64.powf(raw.log10().floor());
+            let norm = raw / pow10;
+            let mult = if norm <= 1.0 {
+                1.0
+            } else if norm <= 2.0 {
+                2.0
+            } else if norm <= 5.0 {
+                5.0
+            } else {
+                10.0
+            };
+            mult * pow10
+        };
+
+        // Use the same basic heuristic as the renderer: choose a major tick spacing based on
+        // projected pixels per world unit near the origin.
+        let origin = Vec3::ZERO;
+        let px_per_world = match (project(origin), project(origin + Vec3::X)) {
+            (Some(a), Some(b)) => ((b.x - a.x).hypot(b.y - a.y) as f64).max(1e-3),
+            _ => 1.0,
+        };
+        let desired_major_px = 120.0_f64;
+        let major_step = nice_step((desired_major_px / px_per_world).max(1e-6));
+        if !(major_step.is_finite() && major_step > 0.0) {
+            return;
+        }
+        let axis_len = (major_step as f32 * 5.0).max(0.5);
+
+        let scale = font_scale.max(0.75);
+        let font = FontId::proportional(11.0 * scale);
+        let painter = ui.painter();
+        let col_x = Color32::from_rgb(235, 80, 80);
+        let col_y = Color32::from_rgb(90, 220, 120);
+        let col_z = Color32::from_rgb(90, 160, 255);
+
+        let draw_axis = |axis: Vec3, color: Color32| {
+            for i in 1..=6 {
+                let t = (i as f32) * (major_step as f32);
+                if t >= axis_len * 0.999 {
+                    break;
+                }
+                let p = origin + axis * t;
+                let Some(pos) = project(p) else { continue };
+                // Offset labels slightly away from the axis in screen-space based on camera right/up.
+                let offset = egui::Vec2::new(6.0 * scale, -6.0 * scale);
+                painter.text(
+                    pos + offset,
+                    Align2::LEFT_CENTER,
+                    plot_utils::format_tick_label((i as f64) * major_step),
+                    font.clone(),
+                    color,
+                );
+            }
+        };
+        draw_axis(Vec3::X, col_x);
+        draw_axis(Vec3::Y, col_y);
+        draw_axis(Vec3::Z, col_z);
     }
 
     /// Draw plot title

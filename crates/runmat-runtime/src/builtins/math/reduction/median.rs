@@ -3,19 +3,27 @@
 use std::cmp::Ordering;
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "median";
 
+use runmat_builtins::ResolveContext;
+
+fn median_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    reduce_numeric_type(args, ctx)
+}
+
+use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::median")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -76,6 +84,7 @@ struct ParsedArguments {
     summary = "Median of scalars, vectors, matrices, or N-D tensors.",
     keywords = "median,reduction,omitnan,includenan,statistics,gpu",
     accel = "reduction",
+    type_resolver(median_type),
     builtin_path = "crate::builtins::math::reduction::median"
 )]
 async fn median_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -90,10 +99,40 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut axes = MedianAxes::Default;
     let mut axes_set = false;
     let mut nan_mode = ReductionNaN::Include;
+    let tokens = tokens_from_values(args);
 
     let mut idx = 0;
     while idx < args.len() {
         let arg = &args[idx];
+
+        if let Some(token) = tokens.get(idx) {
+            if let crate::builtins::common::arg_tokens::ArgToken::String(text) = token {
+                match text.as_str() {
+                    "omitnan" => {
+                        nan_mode = ReductionNaN::Omit;
+                        idx += 1;
+                        continue;
+                    }
+                    "includenan" => {
+                        nan_mode = ReductionNaN::Include;
+                        idx += 1;
+                        continue;
+                    }
+                    "all" => {
+                        if axes_set && !matches!(axes, MedianAxes::Default) {
+                            return Err(median_error(
+                                "median: 'all' cannot be combined with an explicit dimension",
+                            ));
+                        }
+                        axes = MedianAxes::All;
+                        axes_set = true;
+                        idx += 1;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+        }
 
         if let Some(keyword) = keyword_of(arg) {
             match keyword.as_str() {
@@ -531,6 +570,22 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::IntValue;
+
+    #[test]
+    fn median_type_reduces_first_dim() {
+        let out = median_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(5)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(5)])
+            }
+        );
+    }
 
     fn median_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::median_builtin(value, rest))

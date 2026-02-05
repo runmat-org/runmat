@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::linalg::type_resolvers::logical_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(
@@ -54,6 +55,7 @@ fn runtime_error(name: &str, message: impl Into<String>) -> RuntimeError {
     summary = "Test whether a matrix is symmetric or skew-symmetric.",
     keywords = "issymmetric,symmetric,skew-symmetric,matrix structure,gpu",
     accel = "metadata",
+    type_resolver(logical_scalar_type),
     builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
 )]
 async fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -482,7 +484,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
-    use runmat_builtins::{IntValue, LogicalArray};
+    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -494,6 +496,17 @@ pub(crate) mod tests {
         .unwrap();
         let result = issymmetric_builtin(Value::Tensor(tensor), Vec::new()).expect("issymmetric");
         assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn issymmetric_type_returns_bool() {
+        let out = logical_scalar_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(2)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(out, Type::Bool);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

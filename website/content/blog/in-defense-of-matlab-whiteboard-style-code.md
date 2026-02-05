@@ -20,7 +20,7 @@ ogDescription: "MATLAB still shines for math-heavy work. Its whiteboard-style sy
 twitterCard: "summary_large_image"
 twitterTitle: "In Defense of MATLAB: Why Engineers Still Need Whiteboard-Style Code"
 twitterDescription: "Whiteboard-style MATLAB code is still a superpower for engineers. Here’s why readable math matters for safety, code review, and AI-assisted workflows."
-canonical: "https://runmat.org/blog/in-defense-of-matlab-whiteboard-style-code"
+canonical: "https://runmat.com/blog/in-defense-of-matlab-whiteboard-style-code"
 jsonLd:
   "@context": "https://schema.org"
   "@graph":
@@ -29,18 +29,18 @@ jsonLd:
         - "@type": "ListItem"
           position: 1
           name: "RunMat"
-          item: "https://runmat.org"
+          item: "https://runmat.com"
         - "@type": "ListItem"
           position: 2
           name: "Blog"
-          item: "https://runmat.org/blog"
+          item: "https://runmat.com/blog"
         - "@type": "ListItem"
           position: 3
           name: "In Defense of MATLAB"
-          item: "https://runmat.org/blog/in-defense-of-matlab-whiteboard-style-code"
+          item: "https://runmat.com/blog/in-defense-of-matlab-whiteboard-style-code"
 
     - "@type": "BlogPosting"
-      "@id": "https://runmat.org/blog/in-defense-of-matlab-whiteboard-style-code#article"
+      "@id": "https://runmat.com/blog/in-defense-of-matlab-whiteboard-style-code#article"
       headline: "In Defense of MATLAB: Why Engineers Still Need Whiteboard-Style Code"
       alternativeHeadline: "Why readable math matters in an AI coding world"
       description: "MATLAB still shines for math-heavy work. Its whiteboard-style syntax makes code easy to read, review, and run on modern tools like RunMat and fast GPUs."
@@ -68,7 +68,7 @@ jsonLd:
           operatingSystem: ["Windows", "macOS", "Linux"]
         - "@type": "SoftwareApplication"
           name: "RunMat"
-          sameAs: "https://runmat.org"
+          sameAs: "https://runmat.com"
           applicationCategory: "ScientificApplication"
           operatingSystem: ["Windows", "macOS", "Linux"]
           offers:
@@ -83,7 +83,7 @@ jsonLd:
         - "@type": "DefinedTerm"
           name: "Whiteboard-Style Code"
           description: "A coding style where one line of code corresponds to one line of mathematical derivation, characterized by high density and visual similarity to matrix equations."
-          url: "https://runmat.org/blog/in-defense-of-matlab-whiteboard-style-code#whiteboard-style-code"
+          url: "https://runmat.com/blog/in-defense-of-matlab-whiteboard-style-code#whiteboard-style-code"
 
       speakable:
         "@type": "SpeakableSpecification"
@@ -232,4 +232,3 @@ Engineers working on the next generation of renewable energy grids, autonomous v
 The future doesn't need to copy the business models of the past. But it should absolutely keep the best part of the legacy: code that looks like the math on the board.
 
 Want to see how close RunMat stays to MATLAB semantics? Check the [Language Coverage guide](/docs/language-coverage).
-

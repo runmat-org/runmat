@@ -11,9 +11,9 @@ export const metadata: Metadata = {
     title: "RunMat Benchmarks - Performance Comparisons",
     description: "Reproducible, cross-language benchmarks comparing RunMat against common alternatives.",
     type: "website",
-    url: "https://runmat.org/benchmarks",
+    url: "https://runmat.com/benchmarks",
   },
-  alternates: { canonical: "https://runmat.org/benchmarks" },
+  alternates: { canonical: "https://runmat.com/benchmarks" },
 };
 
 export default function BenchmarksPage() {

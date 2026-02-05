@@ -11,10 +11,13 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
 
@@ -52,6 +55,24 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Circshift reorders data; fusion planners treat it as a residency boundary between kernels.",
 };
 
+fn preserve_array_type(args: &[Type], _context: &ResolveContext) -> Type {
+    let input = match args.first() {
+        Some(value) => value,
+        None => return Type::Unknown,
+    };
+    match input {
+        Type::Tensor { shape } => Type::Tensor { shape: shape.clone() },
+        Type::Logical { shape } => Type::Logical { shape: shape.clone() },
+        Type::Num | Type::Int | Type::Bool => Type::tensor(),
+        Type::Cell { element_type, .. } => Type::Cell {
+            element_type: element_type.clone(),
+            length: None,
+        },
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
+
 fn circshift_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("circshift")
@@ -64,6 +85,7 @@ fn circshift_error(message: impl Into<String>) -> RuntimeError {
     summary = "Rotate arrays circularly along one or more dimensions.",
     keywords = "circshift,circular shift,rotate array,gpu,cyclic shift",
     accel = "custom",
+    type_resolver(preserve_array_type),
     builtin_path = "crate::builtins::array::shape::circshift"
 )]
 async fn circshift_builtin(
@@ -135,13 +157,33 @@ fn parse_circshift_spec(shift: &Value, rest: &[Value]) -> crate::BuiltinResult<C
     let dims: Vec<usize> = if rest.is_empty() {
         (0..shifts.len()).collect()
     } else {
-        let dims_vec = value_to_dims_vector(&rest[0])?;
-        if dims_vec.len() != shifts.len() {
-            return Err(circshift_error(
-                "circshift: shift and dimension vectors must have the same length",
-            ));
+        let tokens = tokens_from_values(rest);
+        if let Some(token) = tokens.first() {
+            if let Some(dims_vec) = dims_from_token(token) {
+                if dims_vec.len() != shifts.len() {
+                    return Err(circshift_error(
+                        "circshift: shift and dimension vectors must have the same length",
+                    ));
+                }
+                dims_vec.into_iter().map(|dim| dim - 1).collect()
+            } else {
+                let dims_vec = value_to_dims_vector(&rest[0])?;
+                if dims_vec.len() != shifts.len() {
+                    return Err(circshift_error(
+                        "circshift: shift and dimension vectors must have the same length",
+                    ));
+                }
+                dims_vec.into_iter().map(|dim| dim - 1).collect()
+            }
+        } else {
+            let dims_vec = value_to_dims_vector(&rest[0])?;
+            if dims_vec.len() != shifts.len() {
+                return Err(circshift_error(
+                    "circshift: shift and dimension vectors must have the same length",
+                ));
+            }
+            dims_vec.into_iter().map(|dim| dim - 1).collect()
         }
-        dims_vec.into_iter().map(|dim| dim - 1).collect()
     };
 
     if dims.len() != shifts.len() {
@@ -160,6 +202,41 @@ fn parse_circshift_spec(shift: &Value, rest: &[Value]) -> crate::BuiltinResult<C
     }
 
     Ok(CircshiftSpec { dims, shifts })
+}
+
+fn dims_from_token(token: &ArgToken) -> Option<Vec<usize>> {
+    match token {
+        ArgToken::Number(value) => coerce_dim_value(*value).map(|dim| vec![dim]),
+        ArgToken::Vector(values) => {
+            if values.is_empty() {
+                return None;
+            }
+            let mut dims = Vec::with_capacity(values.len());
+            for value in values {
+                let dim = match value {
+                    ArgToken::Number(num) => coerce_dim_value(*num)?,
+                    _ => return None,
+                };
+                dims.push(dim);
+            }
+            Some(dims)
+        }
+        _ => None,
+    }
+}
+
+fn coerce_dim_value(value: f64) -> Option<usize> {
+    if !value.is_finite() {
+        return None;
+    }
+    let rounded = value.round();
+    if (rounded - value).abs() > f64::EPSILON {
+        return None;
+    }
+    if rounded < 1.0 {
+        return None;
+    }
+    Some(rounded as usize)
 }
 
 fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
@@ -680,6 +757,22 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor};
+
+    #[test]
+    fn circshift_type_preserves_tensor_shape() {
+        let out = preserve_array_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(3), Some(2)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(2)])
+            }
+        );
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

@@ -15,6 +15,7 @@ use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::build_surface_gpu_plot;
+use crate::builtins::plotting::type_resolvers::string_type;
 use crate::BuiltinResult;
 use std::sync::Arc;
 
@@ -54,6 +55,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "mesh,wireframe,surface,plotting",
     sink = true,
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::mesh"
 )]
 pub fn mesh_builtin(
@@ -148,6 +150,7 @@ pub(crate) fn build_mesh_surface(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -180,5 +183,16 @@ pub(crate) mod tests {
             Vec::new(),
         );
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn mesh_type_is_string() {
+        assert_eq!(
+            string_type(
+                &[Type::tensor(), Type::tensor(), Type::tensor()],
+                &ResolveContext::new(Vec::new())
+            ),
+            Type::String
+        );
     }
 }

@@ -84,6 +84,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Read numeric data from a delimiter-separated text file.",
     keywords = "dlmread,delimiter,ascii import,range",
     accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::tensor_type),
     builtin_path = "crate::builtins::io::tabular::dlmread"
 )]
 async fn dlmread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

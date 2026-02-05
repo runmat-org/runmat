@@ -31,9 +31,12 @@ use runmat_thread_local::runmat_thread_local;
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 use std::backtrace::Backtrace;
 use tracing::{info, info_span};
+use runmat_core::{TelemetryPlatformInfo, TelemetryRunConfig, TelemetryRunFinish, TelemetrySink};
+use runmat_telemetry::TelemetryRunKind;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
+use glam::Vec2;
 
 #[cfg(target_arch = "wasm32")]
 mod fs;
@@ -63,6 +66,9 @@ use runmat_runtime::builtins::plotting::{
     reset_hold_state_for_run as runtime_reset_hold_state_for_run,
     resize_surface as runtime_resize_surface, select_figure as runtime_select_figure,
     set_hold as runtime_set_hold, web_renderer_ready as runtime_plot_renderer_ready,
+    handle_plot_surface_event as runtime_handle_plot_surface_event,
+    fit_surface_extents as runtime_fit_surface_extents,
+    reset_surface_camera as runtime_reset_surface_camera,
     FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
 #[cfg(target_arch = "wasm32")]
@@ -129,6 +135,8 @@ struct InitOptions {
     surface_vertex_budget: Option<u64>,
     #[serde(default)]
     telemetry_id: Option<String>,
+    #[serde(default, rename = "telemetryRunKind")]
+    telemetry_run_kind: Option<String>,
     #[serde(default)]
     emit_fusion_plan: Option<bool>,
     #[serde(default)]
@@ -141,6 +149,9 @@ struct InitOptions {
     callstack_limit: Option<usize>,
     #[serde(default)]
     error_namespace: Option<String>,
+    #[cfg(target_arch = "wasm32")]
+    #[serde(skip)]
+    telemetry_emitter: Option<JsValue>,
 }
 
 runmat_thread_local! {
@@ -191,6 +202,7 @@ struct SessionConfig {
     verbose: bool,
     telemetry_consent: bool,
     telemetry_client_id: Option<String>,
+    telemetry_run_kind: TelemetryRunKind,
     enable_gpu: bool,
     wgpu_power_preference: AccelPowerPreference,
     wgpu_force_fallback_adapter: bool,
@@ -209,6 +221,7 @@ impl SessionConfig {
             verbose: opts.verbose.unwrap_or(false),
             telemetry_consent: opts.telemetry_consent.unwrap_or(true),
             telemetry_client_id: opts.telemetry_id.clone(),
+            telemetry_run_kind: parse_telemetry_run_kind(opts.telemetry_run_kind.as_deref()),
             enable_gpu: opts.enable_gpu.unwrap_or(true),
             wgpu_power_preference: parse_power_preference(opts.wgpu_power_preference.as_deref()),
             wgpu_force_fallback_adapter: opts.wgpu_force_fallback_adapter.unwrap_or(false),
@@ -257,6 +270,7 @@ pub struct RunMatWasm {
     gpu_status: GpuStatus,
     disposed: Cell<bool>,
     active_interrupt: RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>,
+    telemetry_sink: Option<Arc<dyn TelemetrySink>>,
 }
 
 #[wasm_bindgen]
@@ -278,6 +292,23 @@ impl RunMatWasm {
             .collect();
         // Reset hold state so a previous `hold on` doesn't cause subsequent runs to keep appending.
         runtime_reset_hold_state_for_run();
+
+        let telemetry_run = {
+            if self.disposed.get() {
+                None
+            } else {
+                let cfg = self.config.borrow();
+                if !cfg.telemetry_consent {
+                    None
+                } else {
+                    self.session.borrow().telemetry_run(TelemetryRunConfig {
+                        kind: cfg.telemetry_run_kind.clone(),
+                        jit_enabled: cfg.enable_jit,
+                        accelerate_enabled: self.gpu_status.active,
+                    })
+                }
+            }
+        };
 
         // Ensure `cancelExecution()` can interrupt the *active* session even while we temporarily
         // move it out of `self.session` to avoid holding a RefCell borrow across `.await`.
@@ -355,6 +386,27 @@ impl RunMatWasm {
                 .unwrap_or(""),
             "Execution finished"
         );
+        if let Some(run) = telemetry_run {
+            let duration = std::time::Duration::from_millis(payload.execution_time_ms);
+            let (success, error) = match payload.error.as_ref() {
+                None => (true, None),
+                Some(err) => (
+                    false,
+                    err.identifier
+                        .as_deref()
+                        .map(|s| s.to_string())
+                        .or_else(|| Some("runtime_error".to_string())),
+                ),
+            };
+            run.finish(TelemetryRunFinish {
+                duration: Some(duration),
+                success,
+                jit_used: payload.used_jit,
+                error,
+                counters: None,
+                provider: None,
+            });
+        }
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize execution result: {err}")))
     }
@@ -387,6 +439,13 @@ impl RunMatWasm {
         session.set_callstack_limit(config.callstack_limit);
         session.set_error_namespace(config.error_namespace.clone());
         session.set_source_name_override(Some("<wasm>".to_string()));
+        if self.telemetry_sink.is_some() {
+            session.set_telemetry_platform_info(TelemetryPlatformInfo {
+                os: Some("web".to_string()),
+                arch: Some("wasm32".to_string()),
+            });
+            session.set_telemetry_sink(self.telemetry_sink.clone());
+        }
         let mut slot = self.session.borrow_mut();
         *slot = session;
         Ok(())
@@ -713,6 +772,126 @@ pub fn present_surface(surface_id: u32) -> Result<(), JsValue> {
 #[wasm_bindgen(js_name = presentFigureOnSurface)]
 pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> Result<(), JsValue> {
     runtime_present_figure_on_surface(surface_id, handle).map_err(|err| js_error(err.message()))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlotSurfaceEventPayload {
+    kind: String,
+    x: f32,
+    y: f32,
+    #[serde(default)]
+    dx: f32,
+    #[serde(default)]
+    dy: f32,
+    #[serde(default)]
+    button: i32,
+    #[serde(default)]
+    wheel_delta_x: f32,
+    #[serde(default)]
+    wheel_delta_y: f32,
+    #[serde(default)]
+    wheel_delta_mode: u32,
+    #[serde(default)]
+    shift_key: bool,
+    #[serde(default)]
+    ctrl_key: bool,
+    #[serde(default)]
+    alt_key: bool,
+    #[serde(default)]
+    meta_key: bool,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = handlePlotSurfaceEvent)]
+pub fn handle_plot_surface_event(surface_id: u32, event: JsValue) -> Result<(), JsValue> {
+    use runmat_plot::core::interaction::MouseButton as PlotMouseButton;
+    use runmat_plot::core::interaction::Modifiers as PlotModifiers;
+    use runmat_plot::core::PlotEvent;
+
+    let payload: PlotSurfaceEventPayload =
+        serde_wasm_bindgen::from_value(event).map_err(|err| js_error(&err.to_string()))?;
+    let position = Vec2::new(payload.x, payload.y);
+    let delta = Vec2::new(payload.dx, payload.dy);
+    let button = match payload.button {
+        2 => PlotMouseButton::Right,
+        1 => PlotMouseButton::Middle,
+        _ => PlotMouseButton::Left,
+    };
+    let modifiers = PlotModifiers {
+        shift: payload.shift_key,
+        ctrl: payload.ctrl_key,
+        alt: payload.alt_key,
+        meta: payload.meta_key,
+    };
+
+    let event = match payload.kind.as_str() {
+        "mouseDown" => PlotEvent::MousePress {
+            position,
+            button,
+            modifiers,
+        },
+        "mouseUp" => PlotEvent::MouseRelease {
+            position,
+            button,
+            modifiers,
+        },
+        "mouseMove" => PlotEvent::MouseMove {
+            position,
+            delta,
+            modifiers,
+        },
+        "wheel" => {
+            // Normalize DOM wheel delta (pixel/line/page) into a roughly "lines" scale.
+            // - Pixel deltas (trackpads) tend to be large; scale them down.
+            // - Page deltas are rare; scale them up.
+            let mut wheel_delta_x = payload.wheel_delta_x;
+            let mut wheel_delta_y = payload.wheel_delta_y;
+            match payload.wheel_delta_mode {
+                0 => {
+                    // pixels
+                    wheel_delta_x /= 100.0;
+                    wheel_delta_y /= 100.0;
+                }
+                1 => {
+                    // lines
+                }
+                2 => {
+                    // pages
+                    wheel_delta_x *= 10.0;
+                    wheel_delta_y *= 10.0;
+                }
+                _ => {}
+            }
+            // Align with the native path + common CAD conventions:
+            // positive delta = zoom in (wheel up / away from user).
+            wheel_delta_x = -wheel_delta_x;
+            wheel_delta_y = -wheel_delta_y;
+            PlotEvent::MouseWheel {
+                position,
+                delta: Vec2::new(wheel_delta_x, wheel_delta_y),
+                modifiers,
+            }
+        }
+        other => {
+            let message = format!("Unknown plot event kind '{other}'");
+            return Err(js_error(&message));
+        }
+    };
+
+    runtime_handle_plot_surface_event(surface_id, event).map_err(|err| js_error(err.message()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = "fitPlotSurfaceExtents")]
+pub fn fit_plot_surface_extents(surface_id: u32) -> Result<(), JsValue> {
+    runtime_fit_surface_extents(surface_id).map_err(|err| js_error(err.message()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = "resetPlotSurfaceCamera")]
+pub fn reset_plot_surface_camera(surface_id: u32) -> Result<(), JsValue> {
+    runtime_reset_surface_camera(surface_id).map_err(|err| js_error(err.message()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1161,6 +1340,11 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
                     parsed_opts.snapshot_stream = Some(stream_value);
                 }
             }
+            if let Ok(emitter_value) = Reflect::get(&options, &JsValue::from_str("telemetryEmitter")) {
+                if !emitter_value.is_null() && !emitter_value.is_undefined() {
+                    parsed_opts.telemetry_emitter = Some(emitter_value);
+                }
+            }
         }
     }
 
@@ -1233,14 +1417,47 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         install_cpu_provider(&config);
     }
 
-    Ok(RunMatWasm {
+    let telemetry_sink: Option<Arc<dyn TelemetrySink>> = {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if config.telemetry_consent {
+                if let Some(callback) = parsed_opts
+                    .telemetry_emitter
+                    .as_ref()
+                    .and_then(|value| value.clone().dyn_into::<js_sys::Function>().ok())
+                {
+                    Some(Arc::new(WasmTelemetrySink { callback }) as Arc<dyn TelemetrySink>)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            None
+        }
+    };
+
+    if telemetry_sink.is_some() {
+        session.set_telemetry_platform_info(TelemetryPlatformInfo {
+            os: Some("web".to_string()),
+            arch: Some("wasm32".to_string()),
+        });
+        session.set_telemetry_sink(telemetry_sink.clone());
+    }
+
+    let instance = RunMatWasm {
         session: RefCell::new(session),
         snapshot_seed,
         config: RefCell::new(config),
         gpu_status,
         disposed: Cell::new(false),
         active_interrupt: RefCell::new(None),
-    })
+        telemetry_sink,
+    };
+    Ok(instance)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1248,6 +1465,25 @@ fn ensure_getrandom_js() {
     let mut buf = [0u8; 1];
     if let Err(err) = getrandom::getrandom(&mut buf) {
         warn!("RunMat wasm: failed to initialize JS randomness source: {err}");
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct WasmTelemetrySink {
+    callback: js_sys::Function,
+}
+
+#[cfg(target_arch = "wasm32")]
+unsafe impl Send for WasmTelemetrySink {}
+
+#[cfg(target_arch = "wasm32")]
+unsafe impl Sync for WasmTelemetrySink {}
+
+#[cfg(target_arch = "wasm32")]
+impl TelemetrySink for WasmTelemetrySink {
+    fn emit(&self, payload_json: String) {
+        let value = js_sys::JSON::parse(&payload_json).unwrap_or_else(|_| payload_json.into());
+        let _ = self.callback.call1(&JsValue::NULL, &value);
     }
 }
 
@@ -1264,6 +1500,15 @@ fn parse_language_compat(input: Option<&str>) -> CompatMode {
     input
         .and_then(parse_language_compat_from_str)
         .unwrap_or(CompatMode::Matlab)
+}
+
+fn parse_telemetry_run_kind(value: Option<&str>) -> TelemetryRunKind {
+    match value.unwrap_or("repl").trim().to_ascii_lowercase().as_str() {
+        "script" => TelemetryRunKind::Script,
+        "benchmark" => TelemetryRunKind::Benchmark,
+        "install" => TelemetryRunKind::Install,
+        _ => TelemetryRunKind::Repl,
+    }
 }
 
 fn parse_language_compat_from_str(value: &str) -> Option<CompatMode> {

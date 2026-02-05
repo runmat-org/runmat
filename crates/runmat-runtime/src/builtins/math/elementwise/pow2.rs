@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{
     broadcast::BroadcastPlan, gpu_helpers, map_control_flow_with_builtin, tensor,
 };
+use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const LN_2: f64 = std::f64::consts::LN_2;
@@ -72,6 +73,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     summary = "Compute 2.^X or scale mantissas by binary exponents.",
     keywords = "pow2,ldexp,binary scaling,gpu",
     accel = "unary",
+    type_resolver(numeric_binary_type),
     builtin_path = "crate::builtins::math::elementwise::pow2"
 )]
 async fn pow2_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -358,10 +360,37 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
 
     fn pow2_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::pow2_builtin(first, rest))
+    }
+
+    #[test]
+    fn pow2_type_preserves_tensor_shape() {
+        let out = numeric_binary_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
+
+    #[test]
+    fn pow2_type_scalar_returns_num() {
+        let out = numeric_binary_type(&[Type::Num, Type::Int], &ResolveContext::new(Vec::new()));
+        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

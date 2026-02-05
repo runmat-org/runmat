@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::fft::type_resolvers::ifftshift_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
@@ -56,6 +57,7 @@ fn ifftshift_error(message: impl Into<String>) -> RuntimeError {
     summary = "Undo fftshift by moving the zero-frequency component back to the origin.",
     keywords = "ifftshift,inverse fft shift,frequency alignment,gpu",
     accel = "custom",
+    type_resolver(ifftshift_type),
     builtin_path = "crate::builtins::math::fft::ifftshift"
 )]
 async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -200,10 +202,28 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, Tensor};
+    use runmat_builtins::{
+        ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type,
+    };
 
     fn error_message(error: crate::RuntimeError) -> String {
         error.message().to_string()
+    }
+
+    #[test]
+    fn ifftshift_type_preserves_tensor_shape() {
+        let out = ifftshift_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(5)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(5)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

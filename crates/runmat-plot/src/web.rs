@@ -8,6 +8,7 @@
 #![cfg(all(target_arch = "wasm32", feature = "web"))]
 
 use crate::context::SharedWgpuContext;
+use crate::core::{camera::MouseButton as CameraMouseButton, CameraController, PlotEvent};
 use crate::core::plot_renderer::{PlotRenderConfig, PlotRenderer, RenderTarget};
 use crate::plots::Figure;
 use log::{debug, warn};
@@ -112,11 +113,14 @@ pub struct WebRenderer {
     queue: Arc<wgpu::Queue>,
     surface_config: wgpu::SurfaceConfiguration,
     plot_renderer: PlotRenderer,
+    camera_controller: CameraController,
     render_config: PlotRenderConfig,
     options: WebRendererOptions,
     msaa_texture: Option<wgpu::Texture>,
     msaa_extent: (u32, u32),
     pixels_per_point: f32,
+    last_axes_viewports_px: Vec<(u32, u32, u32, u32)>,
+    last_pointer_position: glam::Vec2,
     #[cfg(feature = "egui-overlay")]
     overlay: Option<WebOverlayState>,
 }
@@ -242,6 +246,7 @@ impl WebRenderer {
             queue,
             surface_config,
             plot_renderer,
+            camera_controller: CameraController::new(),
             render_config: PlotRenderConfig {
                 width,
                 height,
@@ -252,11 +257,147 @@ impl WebRenderer {
             msaa_texture: None,
             msaa_extent: (0, 0),
             pixels_per_point: 1.0,
+            last_axes_viewports_px: vec![(0, 0, width.max(1), height.max(1))],
+            last_pointer_position: glam::Vec2::ZERO,
             #[cfg(feature = "egui-overlay")]
             overlay,
         };
         renderer.sync_renderer_config();
         Ok(renderer)
+    }
+
+    fn pick_axes_index(&self, position: glam::Vec2) -> usize {
+        for (i, (x, y, w, h)) in self.last_axes_viewports_px.iter().enumerate() {
+            let x0 = *x as f32;
+            let y0 = *y as f32;
+            let x1 = (*x + *w) as f32;
+            let y1 = (*y + *h) as f32;
+            if position.x >= x0 && position.x <= x1 && position.y >= y0 && position.y <= y1 {
+                return i;
+            }
+        }
+        0
+    }
+
+    /// Apply a user interaction event (mouse/keyboard) to the renderer state.
+    /// Returns `true` when a re-render is recommended.
+    pub fn handle_event(&mut self, event: PlotEvent) -> bool {
+        match event {
+            PlotEvent::MousePress {
+                position,
+                button,
+                modifiers,
+            } => {
+                #[cfg(target_arch = "wasm32")]
+                log::debug!(
+                    target: "runmat_plot",
+                    "web.handle_event MousePress pos=({:.1},{:.1}) button={:?}",
+                    position.x,
+                    position.y,
+                    button
+                );
+                self.camera_controller
+                    .mouse_press(position, map_mouse_button(button), modifiers);
+                self.last_pointer_position = position;
+                self.plot_renderer.note_camera_interaction();
+                true
+            }
+            PlotEvent::MouseRelease {
+                position,
+                button,
+                modifiers,
+            } => {
+                #[cfg(target_arch = "wasm32")]
+                log::debug!(target: "runmat_plot", "web.handle_event MouseRelease button={:?}", button);
+                self.camera_controller
+                    .mouse_release(position, map_mouse_button(button), modifiers);
+                true
+            }
+            PlotEvent::MouseMove {
+                position,
+                delta,
+                modifiers,
+            } => {
+                #[cfg(target_arch = "wasm32")]
+                log::debug!(
+                    target: "runmat_plot",
+                    "web.handle_event MouseMove pos=({:.1},{:.1}) delta=({:.2},{:.2})",
+                    position.x,
+                    position.y,
+                    delta.x,
+                    delta.y
+                );
+                let axes_index = self.pick_axes_index(position);
+                let (vx, vy, vw, vh) = self
+                    .last_axes_viewports_px
+                    .get(axes_index)
+                    .copied()
+                    .unwrap_or((0, 0, self.render_config.width.max(1), self.render_config.height.max(1)));
+                let viewport = (vw.max(1), vh.max(1));
+                if let Some(cam) = self.plot_renderer.axes_camera_mut(axes_index) {
+                    self.camera_controller
+                        .mouse_move(
+                            glam::Vec2::new(position.x - (vx as f32), position.y - (vy as f32)),
+                            delta,
+                            viewport,
+                            modifiers,
+                            cam,
+                        );
+                }
+                self.last_pointer_position = position;
+                self.plot_renderer.note_camera_interaction();
+                true
+            }
+            PlotEvent::MouseWheel {
+                position,
+                delta,
+                modifiers,
+            } => {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let (proj, pos, target) = match self.plot_renderer.camera().projection {
+                        crate::core::camera::ProjectionType::Perspective { .. } => (
+                            "Perspective",
+                            self.plot_renderer.camera().position,
+                            self.plot_renderer.camera().target,
+                        ),
+                        crate::core::camera::ProjectionType::Orthographic { .. } => (
+                            "Orthographic",
+                            self.plot_renderer.camera().position,
+                            self.plot_renderer.camera().target,
+                        ),
+                    };
+                    log::debug!(
+                        target: "runmat_plot",
+                        "web.handle_event MouseWheel delta={:.3} proj={} cam.pos=({:.2},{:.2},{:.2}) cam.target=({:.2},{:.2},{:.2})",
+                        delta,
+                        proj,
+                        pos.x,
+                        pos.y,
+                        pos.z,
+                        target.x,
+                        target.y,
+                        target.z
+                    );
+                }
+                let axes_index = self.pick_axes_index(position);
+                if let Some(cam) = self.plot_renderer.axes_camera_mut(axes_index) {
+                    let (vx, vy, vw, vh) = self
+                        .last_axes_viewports_px
+                        .get(axes_index)
+                        .copied()
+                        .unwrap_or((0, 0, self.render_config.width.max(1), self.render_config.height.max(1)));
+                    let local = glam::Vec2::new(position.x - (vx as f32), position.y - (vy as f32));
+                    self.camera_controller
+                        .mouse_wheel(delta, local, (vw.max(1), vh.max(1)), modifiers, cam);
+                }
+                self.last_pointer_position = position;
+                self.plot_renderer.note_camera_interaction();
+                true
+            }
+            PlotEvent::Resize { .. } => true,
+            PlotEvent::KeyPress { .. } | PlotEvent::KeyRelease { .. } => false,
+        }
     }
 
     /// Explicitly resize the underlying surface to the provided dimensions (in
@@ -292,6 +433,16 @@ impl WebRenderer {
     pub fn render_figure(&mut self, figure: Figure) -> Result<(), WebRendererError> {
         self.plot_renderer.set_figure(figure);
         self.render_current_scene()
+    }
+
+    /// Fit the camera to the current figure extents (explicit user action).
+    pub fn fit_extents(&mut self) {
+        self.plot_renderer.fit_extents();
+    }
+
+    /// Reset camera orientation/position (explicit user action).
+    pub fn reset_camera_position(&mut self) {
+        self.plot_renderer.reset_camera_position();
     }
 
     /// Redraw the last figure that was provided.
@@ -507,7 +658,7 @@ impl WebRenderer {
                 // Align plot camera to the plot area aspect ratio (matching native behavior).
                 if vw > 0 && vh > 0 {
                     self.plot_renderer
-                        .camera
+                        .camera_mut()
                         .update_aspect_ratio((vw as f32) / (vh as f32));
                 }
 
@@ -546,6 +697,7 @@ impl WebRenderer {
                         }
                         viewports.push((rx as u32, ry as u32, rw as u32, rh as u32));
                     }
+                    self.last_axes_viewports_px = viewports.clone();
                     self.plot_renderer
                         .render_axes_to_viewports(
                             &mut encoder,
@@ -555,12 +707,14 @@ impl WebRenderer {
                         )
                         .map_err(|err| WebRendererError::Render(err.to_string()))?;
                 } else {
+                    self.last_axes_viewports_px = vec![(vx, vy, vw.max(1), vh.max(1))];
                     let cfg = PlotRenderConfig {
                         width: vw.max(1),
                         height: vh.max(1),
                         msaa_samples: requested_samples,
                         ..Default::default()
                     };
+                    let cam = self.plot_renderer.camera().clone();
                     let _ = self
                         .plot_renderer
                         .render_camera_to_viewport(
@@ -568,6 +722,7 @@ impl WebRenderer {
                             &frame_view,
                             (vx, vy, vw, vh),
                             &cfg,
+                            &cam,
                         )
                         .map_err(|err| WebRendererError::Render(err.to_string()))?;
                 }
@@ -666,6 +821,14 @@ impl WebRenderer {
         self.msaa_texture = Some(texture);
         self.msaa_extent = (width, height);
         Ok(())
+    }
+}
+
+fn map_mouse_button(button: crate::core::interaction::MouseButton) -> CameraMouseButton {
+    match button {
+        crate::core::interaction::MouseButton::Left => CameraMouseButton::Left,
+        crate::core::interaction::MouseButton::Right => CameraMouseButton::Right,
+        crate::core::interaction::MouseButton::Middle => CameraMouseButton::Middle,
     }
 }
 

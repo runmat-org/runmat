@@ -24,7 +24,7 @@ const colors = {
   brandGradient: theme.dark.brandGradient,
 };
 
-export function renderOg({ title, subtitle, imageUrl, siteTitle = 'Fast, Free, Modern MATLAB Runtime', siteUrl = 'runmat.org' }: OgOptions) {
+export function renderOg({ title, subtitle, imageUrl, siteTitle = 'Fast, Free, Modern MATLAB Runtime', siteUrl = 'runmat.com' }: OgOptions) {
   return (
     <div
       style={{

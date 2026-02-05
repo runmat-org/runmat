@@ -7,7 +7,7 @@ import { trackEvent } from "@/components/GoogleAnalytics";
 export function OtherTab() {
   const handleClick = () => {
     trackEvent("hero_cta_click", "hero_tabs", "other");
-    window.open("https://runmat.org/download", "_blank", "noopener,noreferrer");
+    window.open("https://runmat.com/download", "_blank", "noopener,noreferrer");
   };
 
   return (

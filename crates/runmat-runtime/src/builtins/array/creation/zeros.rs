@@ -13,6 +13,10 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{shape::normalize_scalar_shape, tensor};
 use runmat_builtins::NumericDType;
+use runmat_builtins::Type;
+
+use crate::builtins::array::type_resolvers::tensor_type_from_rank;
+use runmat_builtins::ResolveContext;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::zeros")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -35,6 +39,16 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("zeros").build()
+}
+
+fn zeros_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    if args.is_empty() {
+        return Type::Num;
+    }
+    if args.iter().any(|arg| matches!(arg, Type::String)) {
+        return Type::Unknown;
+    }
+    tensor_type_from_rank(args, ctx)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::zeros")]
@@ -65,6 +79,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Create arrays filled with zeros.",
     keywords = "zeros,array,logical,gpu,like",
     accel = "array_construct",
+    type_resolver(zeros_type),
     builtin_path = "crate::builtins::array::creation::zeros"
 )]
 async fn zeros_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -85,6 +100,8 @@ enum OutputTemplate {
     /// single precision when allocating on GPU via 'like' or provider hooks.
     Single,
     Logical,
+    /// GPU-resident zeros array request via 'gpuArray' keyword or gpuArray.zeros() static method
+    GpuArray,
     Like(Value),
 }
 
@@ -150,6 +167,16 @@ impl ParsedZeros {
                             ));
                         }
                         class_override = Some(OutputTemplate::Single);
+                        idx += 1;
+                        continue;
+                    }
+                    "gpuArray" | "gpuarray" => {
+                        if like_proto.is_some() {
+                            return Err(builtin_error(
+                                "zeros: cannot combine 'like' with 'gpuArray'",
+                            ));
+                        }
+                        class_override = Some(OutputTemplate::GpuArray);
                         idx += 1;
                         continue;
                     }
@@ -230,6 +257,7 @@ async fn build_output(parsed: ParsedZeros) -> crate::BuiltinResult<Value> {
         OutputTemplate::Double => zeros_double(&parsed.shape),
         OutputTemplate::Single => zeros_single(&parsed.shape),
         OutputTemplate::Logical => zeros_logical(&parsed.shape),
+        OutputTemplate::GpuArray => zeros_gpu(&parsed.shape).await,
         OutputTemplate::Like(proto) => zeros_like(&proto, &parsed.shape).await,
     }
 }
@@ -285,6 +313,36 @@ fn force_host_allocation(shape: &[usize]) -> bool {
 
 fn zeros_logical(shape: &[usize]) -> crate::BuiltinResult<Value> {
     Ok(Value::LogicalArray(LogicalArray::zeros(shape.to_vec())))
+}
+
+/// Create a GPU-resident zeros array. Falls back to host tensor if no GPU provider.
+async fn zeros_gpu(shape: &[usize]) -> crate::BuiltinResult<Value> {
+    // Try to allocate on GPU with default precision (usually F32)
+    if let Some(provider) = runmat_accelerate_api::provider() {
+        let precision = provider.precision();
+        let dtype = dtype_from_precision(precision);
+        match provider.zeros(shape) {
+            Ok(handle) => {
+                runmat_accelerate_api::set_handle_precision(&handle, precision);
+                return Ok(Value::GpuTensor(handle));
+            }
+            Err(err) => {
+                log::debug!("zeros_gpu: provider.zeros failed ({err}); falling back to host upload");
+            }
+        }
+        // Fallback: build a host tensor and upload
+        let host = tensor::zeros_with_dtype(shape, dtype)?;
+        let view = HostTensorView {
+            data: &host.data,
+            shape: &host.shape,
+        };
+        if let Ok(gpu) = provider.upload(&view) {
+            runmat_accelerate_api::set_handle_precision(&gpu, precision);
+            return Ok(Value::GpuTensor(gpu));
+        }
+    }
+    // No GPU provider: fall back to host double tensor
+    zeros_double(shape)
 }
 
 #[async_recursion::async_recursion(?Send)]
@@ -465,6 +523,34 @@ pub(crate) mod tests {
     fn zeros_default_scalar() {
         let result = block_on(zeros_builtin(Vec::new())).expect("zeros");
         assert_eq!(result, Value::Num(0.0));
+    }
+
+    #[test]
+    fn zeros_type_defaults_to_num() {
+        assert_eq!(zeros_type(&[], &ResolveContext::new(Vec::new())), Type::Num);
+    }
+
+    #[test]
+    fn zeros_type_infers_rank_from_scalar_dim() {
+        assert_eq!(
+            zeros_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::Tensor {
+                shape: Some(vec![None, None])
+            }
+        );
+    }
+
+    #[test]
+    fn zeros_type_infers_rank_from_size_vector() {
+        let size_vec = Type::Tensor {
+            shape: Some(vec![Some(1), Some(3)]),
+        };
+        assert_eq!(
+            zeros_type(&[size_vec], &ResolveContext::new(Vec::new())),
+            Type::Tensor {
+                shape: Some(vec![None, None, None])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

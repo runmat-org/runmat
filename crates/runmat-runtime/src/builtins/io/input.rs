@@ -41,7 +41,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Side-effecting builtin; excluded from fusion plans.",
 };
 
-#[runtime_builtin(name = "input", builtin_path = "crate::builtins::io::input")]
+#[runtime_builtin(
+    name = "input",
+    type_resolver(crate::builtins::io::type_resolvers::input_type),
+    builtin_path = "crate::builtins::io::input"
+)]
 async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.len() > 2 {
         return Err(build_runtime_error("MATLAB:input:TooManyInputs").build());

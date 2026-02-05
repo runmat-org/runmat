@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::triu")]
@@ -43,6 +43,38 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Triangular masking is currently treated as a fusion boundary.",
 };
 
+fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
+    let input = match args.first() {
+        Some(value) => value,
+        None => return Type::Unknown,
+    };
+    match input {
+        Type::Tensor { shape: Some(shape) } => {
+            let rows = shape.get(0).copied().unwrap_or(None);
+            let cols = shape.get(1).copied().unwrap_or(None);
+            Type::Tensor {
+                shape: Some(vec![rows, cols]),
+            }
+        }
+        Type::Logical { shape: Some(shape) } => {
+            let rows = shape.get(0).copied().unwrap_or(None);
+            let cols = shape.get(1).copied().unwrap_or(None);
+            Type::Logical {
+                shape: Some(vec![rows, cols]),
+            }
+        }
+        Type::Tensor { shape: None } => Type::tensor(),
+        Type::Logical { shape: None } => Type::logical(),
+        Type::Num | Type::Int | Type::Bool => Type::tensor(),
+        Type::Cell { element_type, .. } => Type::Cell {
+            element_type: element_type.clone(),
+            length: None,
+        },
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
+
 fn triu_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("triu").build()
 }
@@ -53,6 +85,7 @@ fn triu_error(message: impl Into<String>) -> RuntimeError {
     summary = "Upper triangular portion of a matrix or paged tensor.",
     keywords = "triu,upper triangular,matrix,diagonal,gpu",
     accel = "custom",
+    type_resolver(preserve_matrix_type),
     builtin_path = "crate::builtins::array::shape::triu"
 )]
 async fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -257,7 +290,23 @@ pub(crate) mod tests {
         block_on(super::triu_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, LogicalArray};
+    use runmat_builtins::{IntValue, LogicalArray, Type};
+
+    #[test]
+    fn triu_type_preserves_matrix_shape() {
+        let out = preserve_matrix_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(4), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(4), Some(1)])
+            }
+        );
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

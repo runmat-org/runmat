@@ -5,6 +5,7 @@ use runmat_macros::runtime_builtin;
 
 use super::plotting_error;
 use super::state::configure_subplot_with_builtin;
+use crate::builtins::plotting::type_resolvers::string_type;
 
 use crate::BuiltinResult;
 
@@ -51,6 +52,7 @@ fn to_positive_index(value: f64, name: &str) -> BuiltinResult<usize> {
     summary = "Select a subplot grid location.",
     keywords = "subplot,axes,plotting",
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::subplot"
 )]
 pub fn subplot_builtin(rows: Value, cols: Value, position: Value) -> crate::BuiltinResult<String> {

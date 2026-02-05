@@ -5,9 +5,16 @@ use std::collections::HashSet;
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, HostTensorView, ProviderPrecision, ReductionFlavor,
 };
-use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
+use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Type, Value};
 const NAME: &str = "sum";
 
+use runmat_builtins::ResolveContext;
+
+fn sum_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    reduce_numeric_type(args, ctx)
+}
+
+use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -19,6 +26,7 @@ use crate::builtins::common::{
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
+use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_macros::runtime_builtin;
 
@@ -71,6 +79,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Sum elements of scalars, vectors, matrices, or N-D tensors.",
     keywords = "sum,reduction,gpu,omitnan,all,like",
     accel = "reduction",
+    type_resolver(sum_type),
     builtin_path = "crate::builtins::math::reduction::sum"
 )]
 async fn sum_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -230,10 +239,39 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut nan_mode = ReductionNaN::Include;
     let mut output = OutputTemplate::Double;
     let mut output_set = false;
+    let tokens = tokens_from_values(args);
 
     let mut idx = 0;
     while idx < args.len() {
         let arg = &args[idx];
+        if let Some(token) = tokens.get(idx) {
+            if let crate::builtins::common::arg_tokens::ArgToken::String(text) = token {
+                match text.as_str() {
+                    "omitnan" => {
+                        nan_mode = ReductionNaN::Omit;
+                        idx += 1;
+                        continue;
+                    }
+                    "includenan" => {
+                        nan_mode = ReductionNaN::Include;
+                        idx += 1;
+                        continue;
+                    }
+                    "all" => {
+                        if selection_set && !matches!(selection, DimSelection::Auto) {
+                            return Err(sum_error(
+                                "sum: 'all' cannot be combined with an explicit dimension",
+                            ));
+                        }
+                        selection = DimSelection::All;
+                        selection_set = true;
+                        idx += 1;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+        }
         if let Some(keyword) = keyword_of(arg) {
             match keyword.as_str() {
                 "omitnan" => {
@@ -1063,6 +1101,22 @@ pub(crate) mod tests {
 
     fn sum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::sum_builtin(value, rest))
+    }
+
+    #[test]
+    fn sum_type_reduces_first_dim() {
+        let out = sum_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(3)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

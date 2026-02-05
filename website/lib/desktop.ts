@@ -120,7 +120,7 @@ export function buildWorkspaceUrl({
   baseUrl?: string;
 }): string {
   const normalizedPath = normalizeTargetPath(targetPath);
-  const base = baseUrl ?? (typeof window !== "undefined" ? window.location.origin : "https://runmat.org");
+  const base = baseUrl ?? (typeof window !== "undefined" ? window.location.origin : "https://runmat.com");
   const url = new URL(normalizedPath, base);
 
   if (useHash) {
@@ -215,4 +215,3 @@ function buildStorageKey(workspaceId: string): string {
 }
 
 export { WORKSPACE_PARAM, STORAGE_PREFIX as WORKSPACE_STORAGE_PREFIX, DEFAULT_TTL_MS as WORKSPACE_DEFAULT_TTL_MS };
-

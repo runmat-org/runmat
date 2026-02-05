@@ -42,54 +42,96 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut examples_lit: Option<Lit> = None;
     let mut accel_values: Vec<String> = Vec::new();
     let mut builtin_path_lit: Option<LitStr> = None;
+    let mut type_resolver_path: Option<syn::Path> = None;
+    let mut type_resolver_ctx_path: Option<syn::Path> = None;
     let mut sink_flag = false;
     let mut suppress_auto_output_flag = false;
     for arg in args {
-        if let NestedMeta::Meta(Meta::NameValue(MetaNameValue { path, lit, .. })) = arg {
-            if path.is_ident("name") {
-                name_lit = Some(lit);
-            } else if path.is_ident("category") {
-                category_lit = Some(lit);
-            } else if path.is_ident("summary") {
-                summary_lit = Some(lit);
-            } else if path.is_ident("keywords") {
-                keywords_lit = Some(lit);
-            } else if path.is_ident("errors") {
-                errors_lit = Some(lit);
-            } else if path.is_ident("related") {
-                related_lit = Some(lit);
-            } else if path.is_ident("introduced") {
-                introduced_lit = Some(lit);
-            } else if path.is_ident("status") {
-                status_lit = Some(lit);
-            } else if path.is_ident("examples") {
-                examples_lit = Some(lit);
-            } else if path.is_ident("accel") {
-                if let Lit::Str(ls) = lit {
-                    accel_values.extend(
-                        ls.value()
-                            .split(|c: char| c == ',' || c == '|' || c.is_ascii_whitespace())
-                            .filter(|s| !s.is_empty())
-                            .map(|s| s.to_ascii_lowercase()),
-                    );
-                }
-            } else if path.is_ident("sink") {
-                if let Lit::Bool(lb) = lit {
-                    sink_flag = lb.value;
-                }
-            } else if path.is_ident("suppress_auto_output") {
-                if let Lit::Bool(lb) = lit {
-                    suppress_auto_output_flag = lb.value;
-                }
-            } else if path.is_ident("builtin_path") {
-                if let Lit::Str(ls) = lit {
-                    builtin_path_lit = Some(ls);
+        match arg {
+            NestedMeta::Meta(Meta::NameValue(MetaNameValue { path, lit, .. })) => {
+                if path.is_ident("name") {
+                    name_lit = Some(lit);
+                } else if path.is_ident("category") {
+                    category_lit = Some(lit);
+                } else if path.is_ident("summary") {
+                    summary_lit = Some(lit);
+                } else if path.is_ident("keywords") {
+                    keywords_lit = Some(lit);
+                } else if path.is_ident("errors") {
+                    errors_lit = Some(lit);
+                } else if path.is_ident("related") {
+                    related_lit = Some(lit);
+                } else if path.is_ident("introduced") {
+                    introduced_lit = Some(lit);
+                } else if path.is_ident("status") {
+                    status_lit = Some(lit);
+                } else if path.is_ident("examples") {
+                    examples_lit = Some(lit);
+                } else if path.is_ident("accel") {
+                    if let Lit::Str(ls) = lit {
+                        accel_values.extend(
+                            ls.value()
+                                .split(|c: char| c == ',' || c == '|' || c.is_ascii_whitespace())
+                                .filter(|s| !s.is_empty())
+                                .map(|s| s.to_ascii_lowercase()),
+                        );
+                    }
+                } else if path.is_ident("sink") {
+                    if let Lit::Bool(lb) = lit {
+                        sink_flag = lb.value;
+                    }
+                } else if path.is_ident("suppress_auto_output") {
+                    if let Lit::Bool(lb) = lit {
+                        suppress_auto_output_flag = lb.value;
+                    }
+                } else if path.is_ident("builtin_path") {
+                    if let Lit::Str(ls) = lit {
+                        builtin_path_lit = Some(ls);
+                    } else {
+                        panic!("builtin_path must be a string literal");
+                    }
+                } else if path.is_ident("type_resolver") {
+                    if let Lit::Str(ls) = lit {
+                        let parsed: syn::Path = ls.parse().expect("type_resolver must be a path");
+                        type_resolver_path = Some(parsed);
+                    } else {
+                        panic!("type_resolver must be a string literal path");
+                    }
+                } else if path.is_ident("type_resolver_ctx") {
+                    if let Lit::Str(ls) = lit {
+                        let parsed: syn::Path =
+                            ls.parse().expect("type_resolver_ctx must be a path");
+                        type_resolver_ctx_path = Some(parsed);
+                    } else {
+                        panic!("type_resolver_ctx must be a string literal path");
+                    }
                 } else {
-                    panic!("builtin_path must be a string literal");
+                    // Gracefully ignore unknown parameters for better IDE experience
                 }
-            } else {
-                // Gracefully ignore unknown parameters for better IDE experience
             }
+            NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("type_resolver") => {
+                if list.nested.len() != 1 {
+                    panic!("type_resolver expects exactly one path argument");
+                }
+                let nested = list.nested.first().unwrap();
+                if let NestedMeta::Meta(Meta::Path(path)) = nested {
+                    type_resolver_path = Some(path.clone());
+                } else {
+                    panic!("type_resolver expects a path argument");
+                }
+            }
+            NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("type_resolver_ctx") => {
+                if list.nested.len() != 1 {
+                    panic!("type_resolver_ctx expects exactly one path argument");
+                }
+                let nested = list.nested.first().unwrap();
+                if let NestedMeta::Meta(Meta::Path(path)) = nested {
+                    type_resolver_ctx_path = Some(path.clone());
+                } else {
+                    panic!("type_resolver_ctx expects a path argument");
+                }
+            }
+            _ => {}
         }
     }
     let name_lit = name_lit.expect("expected `name = \"...\"` argument");
@@ -284,6 +326,13 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     } else {
         quote! { &[#(#accel_tokens),*] }
     };
+    let type_resolver_expr = if let Some(path) = type_resolver_ctx_path.as_ref() {
+        quote! { Some(runmat_builtins::type_resolver_kind_ctx(#path)) }
+    } else if let Some(path) = type_resolver_path.as_ref() {
+        quote! { Some(runmat_builtins::type_resolver_kind_ctx(#path)) }
+    } else {
+        quote! { None }
+    };
     let sink_bool = sink_flag;
     let suppress_auto_output_bool = suppress_auto_output_flag;
 
@@ -296,6 +345,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             "",
             vec![#(#inferred_param_types),*],
             #inferred_return_type,
+            #type_resolver_expr,
             #wrapper_ident,
             #accel_slice,
             #sink_bool,

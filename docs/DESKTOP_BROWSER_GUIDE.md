@@ -19,7 +19,7 @@ All computation happens locally in your browser. There's no server-side executio
 
 ## Accessing RunMat Desktop
 
-Visit **[runmat.org/sandbox](https://runmat.org/sandbox)** to launch the desktop environment.
+Visit **[runmat.com/sandbox](https://runmat.com/sandbox)** to launch the desktop environment.
 
 No installation required. Works in Chrome, Edge, Firefox, and Safari.
 
@@ -219,7 +219,7 @@ Browsers limit how much GPU and CPU a website can use to preserve battery life. 
 1. **Download RunMat CLI** — Run scripts from your terminal with full native GPU access
 2. **Use RunMat Desktop App** — Coming soon, provides native performance in a desktop window
 
-Visit [runmat.org/download](https://runmat.org/download) for installation options.
+Visit [runmat.com/download](https://runmat.com/download) for installation options.
 
 ---
 
@@ -236,7 +236,6 @@ Now that you've run your first script:
 
 ## Getting Help
 
-- **Documentation**: [runmat.org/docs](https://runmat.org/docs)
+- **Documentation**: [runmat.com/docs](https://runmat.com/docs)
 - **GitHub Issues**: [Report bugs or request features](https://github.com/runmat-org/runmat/issues)
 - **Discussions**: [Ask questions and share ideas](https://github.com/runmat-org/runmat/discussions)
-

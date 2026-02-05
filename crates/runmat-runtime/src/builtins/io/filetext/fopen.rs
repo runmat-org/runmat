@@ -71,6 +71,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     summary = "Open a file and obtain a MATLAB-compatible file identifier.",
     keywords = "fopen,file,io,permission,encoding",
     accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::fopen_type),
     builtin_path = "crate::builtins::io::filetext::fopen"
 )]
 async fn fopen_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

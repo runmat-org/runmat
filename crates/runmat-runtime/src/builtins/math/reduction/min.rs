@@ -4,14 +4,19 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use runmat_accelerate_api::{GpuTensorHandle, ReduceDimResult};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "min";
 
+fn min_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    min_max_type(args, ctx)
+}
+
 use crate::builtins::common::broadcast::BroadcastPlan;
+use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -23,6 +28,7 @@ use crate::builtins::common::{
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
+use crate::builtins::math::reduction::type_resolvers::min_max_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::min")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -104,6 +110,7 @@ impl MinEvaluation {
     summary = "Return the minimum elements of scalars, vectors, matrices, or N-D tensors.",
     keywords = "min,minimum,reduction,gpu,comparisonmethod,omitnan",
     accel = "reduction",
+    type_resolver(min_type),
     builtin_path = "crate::builtins::math::reduction::min"
 )]
 async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -199,7 +206,36 @@ async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Bu
     let mut idx = 0usize;
     let mut selection_set = !matches!(args.selection, DimSelection::Auto);
     let mut comparison_set = matches!(args.comparison, ComparisonMethod::Auto);
+    let tokens = tokens_from_values(rest);
     while idx < rest.len() {
+        if let Some(token) = tokens.get(idx) {
+            if let crate::builtins::common::arg_tokens::ArgToken::String(text) = token {
+                match text.as_str() {
+                    "omitnan" => {
+                        args.nan_mode = ReductionNaN::Omit;
+                        idx += 1;
+                        continue;
+                    }
+                    "includenan" => {
+                        args.nan_mode = ReductionNaN::Include;
+                        idx += 1;
+                        continue;
+                    }
+                    "all" => {
+                        if selection_set {
+                            return Err(min_error(
+                                "min: 'all' cannot be combined with an explicit dimension",
+                            ));
+                        }
+                        args.selection = DimSelection::All;
+                        selection_set = true;
+                        idx += 1;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+        }
         if let Some(keyword) = keyword_of(&rest[idx]) {
             match keyword.as_str() {
                 "omitnan" => {
@@ -1607,6 +1643,15 @@ pub(crate) mod tests {
 
     fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::min_builtin(value, rest))
+    }
+
+    #[test]
+    fn min_type_with_two_args_returns_tensor() {
+        let out = min_type(
+            &[Type::Tensor { shape: None }, Type::Tensor { shape: None }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(out, Type::tensor());
     }
 
     fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluation> {

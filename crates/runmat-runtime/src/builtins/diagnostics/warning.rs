@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::diagnostics::type_resolvers::warning_type;
 use crate::console::{record_console_output, ConsoleStream};
 use crate::warning_store;
 use crate::{build_runtime_error, RuntimeError};
@@ -90,6 +91,7 @@ where
     accel = "metadata",
     sink = true,
     suppress_auto_output = true,
+    type_resolver(warning_type),
     builtin_path = "crate::builtins::diagnostics::warning"
 )]
 fn warning_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -878,6 +880,7 @@ fn structs_to_cell(structs: Vec<StructValue>) -> crate::BuiltinResult<Value> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_builtins::{ResolveContext, Type};
 
     static TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
@@ -1203,6 +1206,14 @@ pub(crate) mod tests {
             .insert("state".to_string(), Value::from("default"));
         warning_builtin(vec![Value::Struct(verbose)]).expect("apply verbose");
         assert!(!with_manager(|mgr| mgr.verbose_enabled));
+    }
+
+    #[test]
+    fn warning_type_is_unknown() {
+        assert_eq!(
+            warning_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::Unknown
+        );
     }
 
     trait ExpectStruct {

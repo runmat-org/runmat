@@ -3,15 +3,18 @@
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
-use super::common::{build_strides, materialize_value, parse_dims};
+use super::common::{build_strides, dims_from_tokens, materialize_value, parse_dims};
+use crate::builtins::common::arg_tokens::tokens_from_context;
+use crate::builtins::array::type_resolvers::is_scalar_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use runmat_builtins::shape_rules::element_count_if_known;
 use crate::{build_runtime_error, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::indexing::sub2ind")]
@@ -41,12 +44,38 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Index conversion executes eagerly on the host; fusion does not apply.",
 };
 
+fn sub2ind_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    if args.len() < 2 {
+        return Type::Unknown;
+    }
+    if let Some(dims) = dims_from_tokens(&tokens_from_context(ctx)) {
+        if args.len() - 1 != dims.len() {
+            return Type::Unknown;
+        }
+    }
+    let subscripts = &args[1..];
+    if subscripts.iter().all(|ty| is_scalar_type(ty)) {
+        return Type::Num;
+    }
+    for ty in subscripts {
+        if let Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } = ty {
+            if element_count_if_known(shape).unwrap_or(0) > 1 {
+                return Type::Tensor {
+                    shape: Some(shape.clone()),
+                };
+            }
+        }
+    }
+    Type::tensor()
+}
+
 #[runtime_builtin(
     name = "sub2ind",
     category = "array/indexing",
     summary = "Convert N-D subscripts into MATLAB-style column-major linear indices.",
     keywords = "sub2ind,linear index,column major,gpu indexing",
     accel = "custom",
+    type_resolver(sub2ind_type),
     builtin_path = "crate::builtins::array::indexing::sub2ind"
 )]
 async fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -316,7 +345,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor, Value};
+    use runmat_builtins::{IntValue, Tensor, Type, Value};
 
     fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::sub2ind_builtin(dims_val, rest))
@@ -329,6 +358,33 @@ pub(crate) mod tests {
         let result =
             sub2ind_builtin(Value::Tensor(dims), vec![Value::Num(2.0), Value::Num(3.0)]).unwrap();
         assert_eq!(result, Value::Num(8.0));
+    }
+
+    #[test]
+    fn sub2ind_type_scalar_outputs_num() {
+        assert_eq!(
+            sub2ind_type(
+                &[Type::Tensor { shape: None }, Type::Num, Type::Int],
+                &ResolveContext::new(Vec::new()),
+            ),
+            Type::Num
+        );
+    }
+
+    #[test]
+    fn sub2ind_type_vector_outputs_tensor() {
+        let subs = Type::Tensor {
+            shape: Some(vec![Some(3), Some(1)]),
+        };
+        assert_eq!(
+            sub2ind_type(
+                &[Type::Tensor { shape: None }, subs.clone(), Type::Num],
+                &ResolveContext::new(Vec::new()),
+            ),
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(1)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

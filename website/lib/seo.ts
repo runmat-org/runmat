@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-const SITE_ORIGIN = "https://runmat.org";
+const SITE_ORIGIN = "https://runmat.com";
 
 function toAbsoluteUrl(pathOrUrl: string): string {
   if (!pathOrUrl) return SITE_ORIGIN;
@@ -42,4 +42,3 @@ export function buildPageMetadata(opts: PageSeoOptions): Metadata {
     },
   };
 }
-

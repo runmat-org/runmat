@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::introspection::type_resolvers::who_type;
 use crate::builtins::io::mat::load::read_mat_file_for_builtin;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
@@ -46,6 +47,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "List the names of variables in the workspace or MAT-files (MATLAB-compatible).",
     keywords = "who,workspace,variables,introspection",
     accel = "cpu",
+    type_resolver(who_type),
     builtin_path = "crate::builtins::introspection::who"
 )]
 async fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
