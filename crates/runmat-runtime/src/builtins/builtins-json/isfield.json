@@ -40,18 +40,18 @@
   "examples": [
     {
       "description": "Checking whether a struct defines a single field",
-      "input": "s = struct(\"name\", \"Ada\", \"score\", 42);\nhasScore = isfield(s, \"score\");",
+      "input": "s = struct(\"name\", \"Ada\", \"score\", 42);\nhasScore = isfield(s, \"score\")",
       "output": "hasScore =\n  logical\n   1"
     },
     {
       "description": "Testing multiple field names at once",
-      "input": "s = struct(\"name\", \"Ada\", \"score\", 42);\nnames = {\"name\", \"department\"; \"score\", \"email\"};\nmask = isfield(s, names);",
-      "output": "mask =\n  2×2 logical array\n     1     0\n     1     0"
+      "input": "s = struct(\"name\", \"Ada\", \"score\", 42);\nnames = {\"name\", \"department\"; \"score\", \"email\"};\nmask = isfield(s, names)",
+      "output": "mask =\n  2\u00d72 logical array\n     1     0\n     1     0"
     },
     {
       "description": "Inspecting a struct array that shares a common schema",
-      "input": "people = struct(\"name\", {\"Ada\", \"Grace\"}, \"id\", {101, 102});\nidxMask = isfield(people, [\"id\", \"department\"]);",
-      "output": "idxMask =\n  1×2 logical array\n     1     0"
+      "input": "people = struct(\"name\", {\"Ada\", \"Grace\"}, \"id\", {101, 102});\nidxMask = isfield(people, [\"id\", \"department\"])",
+      "output": "idxMask =\n  1\u00d72 logical array\n     1     0"
     },
     {
       "description": "Using `isfield` before accessing optional configuration fields",
@@ -59,11 +59,11 @@
     },
     {
       "description": "Mixing string scalars and character vectors in a cell array",
-      "input": "opts = struct(\"Solver\", \"cg\", \"MaxIter\", 200);\nqueries = {\"Solver\", \"Tolerances\"; \"MaxIter\", \"History\"};\npresent = isfield(opts, queries);"
+      "input": "opts = struct(\"Solver\", \"cg\", \"MaxIter\", 200);\nqueries = {\"Solver\", \"Tolerances\"; \"MaxIter\", \"History\"};\npresent = isfield(opts, queries)"
     },
     {
       "description": "Behaviour when the input is not a struct",
-      "input": "value = 42;\ntf = isfield(value, \"anything\");",
+      "input": "value = 42;\ntf = isfield(value, \"anything\")",
       "output": "tf =\n  logical\n   0"
     }
   ],

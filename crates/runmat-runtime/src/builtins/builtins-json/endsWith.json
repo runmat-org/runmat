@@ -44,37 +44,37 @@
   "examples": [
     {
       "description": "Check if a filename ends with an extension",
-      "input": "tf = endsWith(\"report.pdf\", \".pdf\");",
+      "input": "tf = endsWith(\"report.pdf\", \".pdf\")",
       "output": "tf = logical\n   1"
     },
     {
       "description": "Perform a case-insensitive suffix test",
-      "input": "tf = endsWith(\"RunMat\", \"MAT\", 'IgnoreCase', true);",
+      "input": "tf = endsWith(\"RunMat\", \"MAT\", 'IgnoreCase', true)",
       "output": "tf = logical\n   1"
     },
     {
       "description": "Apply a scalar suffix to every element of a string array",
-      "input": "labels = [\"alpha\" \"beta\" \"gamma\"];\ntf = endsWith(labels, \"ma\");",
+      "input": "labels = [\"alpha\" \"beta\" \"gamma\"];\ntf = endsWith(labels, \"ma\")",
       "output": "tf = 1\u00d73 logical array\n   0   0   1"
     },
     {
       "description": "Use element-wise suffixes with implicit expansion",
-      "input": "names = [\"hydrogen\"; \"helium\"; \"lithium\"];\nsuffixes = [\"gen\"; \"ium\"; \"ium\"];\ntf = endsWith(names, suffixes);",
+      "input": "names = [\"hydrogen\"; \"helium\"; \"lithium\"];\nsuffixes = [\"gen\"; \"ium\"; \"ium\"];\ntf = endsWith(names, suffixes)",
       "output": "tf = 3\u00d71 logical array\n   1\n   1\n   1"
     },
     {
       "description": "Test suffixes for a cell array of character vectors",
-      "input": "C = {'Mercury', 'Venus', 'Mars'};\ntf = endsWith(C, 's');",
+      "input": "C = {'Mercury', 'Venus', 'Mars'};\ntf = endsWith(C, 's')",
       "output": "tf = 1\u00d73 logical array\n   0   1   1"
     },
     {
       "description": "Provide multiple suffixes as a column vector",
-      "input": "tf = endsWith(\"saturn\", ['n'; 'x'; 'r']);",
+      "input": "tf = endsWith(\"saturn\", ['n'; 'x'; 'r'])",
       "output": "tf = 3\u00d71 logical array\n   1\n   0\n   0"
     },
     {
       "description": "Handle empty patterns and missing values",
-      "input": "texts = [\"\", missing];\ntf = endsWith(texts, \"\");",
+      "input": "texts = [\"\", missing];\ntf = endsWith(texts, \"\")",
       "output": "tf = 1\u00d72 logical array\n   1   0"
     }
   ],

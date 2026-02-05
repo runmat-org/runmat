@@ -51,23 +51,23 @@
   "examples": [
     {
       "description": "Setting custom timeouts for webread calls",
-      "input": "opts = weboptions(\"Timeout\", 10);\nhtml = webread(\"https://example.com\", opts);"
+      "input": "opts = weboptions(\"Timeout\", 10);\nhtml = webread(\"https://example.com\", opts)"
     },
     {
       "description": "Providing HTTP basic authentication credentials",
-      "input": "opts = weboptions(\"Username\", \"ada\", \"Password\", \"lovelace\");\nprofile = webread(\"https://api.example.com/me\", opts);"
+      "input": "opts = weboptions(\"Username\", \"ada\", \"Password\", \"lovelace\");\nprofile = webread(\"https://api.example.com/me\", opts)"
     },
     {
       "description": "Sending JSON payloads with webwrite",
-      "input": "opts = weboptions(\"ContentType\", \"json\", \"MediaType\", \"application/json\");\npayload = struct(\"title\", \"RunMat\", \"stars\", 5);\nreply = webwrite(\"https://api.example.com/projects\", payload, opts);"
+      "input": "opts = weboptions(\"ContentType\", \"json\", \"MediaType\", \"application/json\");\npayload = struct(\"title\", \"RunMat\", \"stars\", 5);\nreply = webwrite(\"https://api.example.com/projects\", payload, opts)"
     },
     {
       "description": "Applying custom headers with struct syntax",
-      "input": "headers = struct(\"Accept\", \"application/json\", \"X-Client\", \"RunMat\");\nopts = weboptions(\"HeaderFields\", headers);\ndata = webread(\"https://api.example.com/resources\", opts);"
+      "input": "headers = struct(\"Accept\", \"application/json\", \"X-Client\", \"RunMat\");\nopts = weboptions(\"HeaderFields\", headers);\ndata = webread(\"https://api.example.com/resources\", opts)"
     },
     {
       "description": "Combining existing options with overrides",
-      "input": "base = weboptions(\"ContentType\", \"json\");\nopts = weboptions(base, \"Timeout\", 15, \"QueryParameters\", struct(\"verbose\", true));\nresult = webread(\"https://api.example.com/items\", opts);"
+      "input": "base = weboptions(\"ContentType\", \"json\");\nopts = weboptions(base, \"Timeout\", 15, \"QueryParameters\", struct(\"verbose\", true));\nresult = webread(\"https://api.example.com/items\", opts)"
     }
   ],
   "faqs": [

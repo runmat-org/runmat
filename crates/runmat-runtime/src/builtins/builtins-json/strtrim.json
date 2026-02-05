@@ -42,32 +42,32 @@
   "examples": [
     {
       "description": "Trim Leading And Trailing Spaces From A String Scalar",
-      "input": "name = \"   RunMat   \";\nclean = strtrim(name);",
+      "input": "name = \"   RunMat   \";\nclean = strtrim(name)",
       "output": "clean = \"RunMat\""
     },
     {
       "description": "Remove Extra Whitespace From Each Element Of A String Array",
-      "input": "labels = [\"  Alpha  \"; \"Beta   \"; \"   Gamma\"];\ntrimmed = strtrim(labels);",
+      "input": "labels = [\"  Alpha  \"; \"Beta   \"; \"   Gamma\"];\ntrimmed = strtrim(labels)",
       "output": "trimmed = 3\u00d71 string\n    \"Alpha\"\n    \"Beta\"\n    \"Gamma\""
     },
     {
       "description": "Trim Character Array Rows While Preserving Shape",
-      "input": "animals = char('  cat   ', 'dog', ' cow ');\nresult = strtrim(animals);",
+      "input": "animals = char('  cat   ', 'dog', ' cow ');\nresult = strtrim(animals)",
       "output": "result =\n\n  3\u00d73 char array\n\n    'cat'\n    'dog'\n    'cow'"
     },
     {
       "description": "Trim Tabs And Newlines Alongside Spaces",
-      "input": "text = \"\\tMetrics \" + newline;\nclean = strtrim(text);",
+      "input": "text = \"\\tMetrics \" + newline;\nclean = strtrim(text)",
       "output": "clean = \"Metrics\""
     },
     {
       "description": "Trim Each Element Of A Cell Array Of Character Vectors",
-      "input": "pieces = {'  GPU  ', \" Accelerate\", 'RunMat   '};\nout = strtrim(pieces);",
+      "input": "pieces = {'  GPU  ', \" Accelerate\", 'RunMat   '};\nout = strtrim(pieces)",
       "output": "out = 1\u00d73 cell array\n    {'GPU'}    {\"Accelerate\"}    {'RunMat'}"
     },
     {
       "description": "Preserve Missing String Scalars",
-      "input": "vals = [\" ok \"; \"<missing>\"; \" trimmed \"];\ntrimmed = strtrim(vals);",
+      "input": "vals = [\" ok \"; \"<missing>\"; \" trimmed \"];\ntrimmed = strtrim(vals)",
       "output": "trimmed = 1\u00d73 string\n    \"ok\"\n    <missing>\n    \"trimmed\""
     }
   ],

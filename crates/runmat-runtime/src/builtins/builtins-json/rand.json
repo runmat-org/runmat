@@ -48,12 +48,12 @@
     },
     {
       "description": "Creating a 2x4x3 matrix of random numbers",
-      "input": "sz = [2 4 3];\nT = rand(sz);",
+      "input": "sz = [2 4 3];\nT = rand(sz)",
       "output": "T = [0.8147 0.9134 0.1270 0.9058 0.6324 0.0975 0.1270 0.0975 0.2785; 0.9134 0.6324 0.0975 0.2785 0.0975 0.1270 0.9058 0.6324 0.0975];"
     },
     {
       "description": "Creating a 128x128 matrix of random numbers on a GPU",
-      "input": "G = rand(128, 128);",
+      "input": "G = rand(128, 128)",
       "output": "H = [0.8147 0.9134 0.1270 0.9058 0.6324 0.0975 0.1270 0.0975 0.2785; 0.9134 0.6324 0.0975 0.2785 0.0975 0.1270 0.9058 0.6324 0.0975];"
     }
   ],

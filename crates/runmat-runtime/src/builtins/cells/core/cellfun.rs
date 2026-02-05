@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
 };
 use crate::{
     build_runtime_error, call_builtin_async, gather_if_needed_async, make_cell_with_shape,
-    BuiltinResult, RuntimeError,
+    user_functions, BuiltinResult, RuntimeError,
 };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::cells::core::cellfun")]
@@ -444,7 +444,7 @@ impl Callable {
                     ))
                 }
             }
-            Value::FunctionHandle(name) => Self::from_text(&name, false),
+            Value::FunctionHandle(name) => Self::from_text(&name, true),
             Value::Closure(c) => Ok(Callable::Closure(c)),
             other => Err(cellfun_error_with_identifier(
                 format!("cellfun: expected function handle or builtin name, got {other:?}"),
@@ -492,10 +492,20 @@ impl Callable {
 
     async fn call(&self, args: &[Value]) -> BuiltinResult<Value> {
         match self {
-            Callable::Builtin { name } => call_builtin_async(name, args).await,
+            Callable::Builtin { name } => {
+                if let Some(result) = user_functions::try_call_user_function(name, args).await {
+                    return result;
+                }
+                call_builtin_async(name, args).await
+            }
             Callable::Closure(c) => {
                 let mut captures = c.captures.clone();
                 captures.extend_from_slice(args);
+                if let Some(result) =
+                    user_functions::try_call_user_function(&c.function_name, &captures).await
+                {
+                    return result;
+                }
                 call_builtin_async(&c.function_name, &captures).await
             }
             Callable::Special(special) => special.call(args).await,

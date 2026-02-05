@@ -9,6 +9,7 @@ use runmat_builtins::{CharArray, Value};
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::env as runtime_env;
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -96,7 +97,7 @@ async fn tempname_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 }
 
 fn default_temp_directory() -> BuiltinResult<PathBuf> {
-    let path = std::env::temp_dir();
+    let path = runtime_env::temp_dir();
     if path.as_os_str().is_empty() {
         Err(tempname_error(ERR_TEMP_DIR_UNAVAILABLE))
     } else {
@@ -170,9 +171,20 @@ fn unique_token() -> String {
         .unwrap_or_default();
     let secs = now.as_secs();
     let nanos = now.subsec_nanos();
-    let pid = std::process::id() as u64;
+    let pid = process_id();
     let counter = UNIQUE_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("tp{:016x}{:08x}{:08x}{:016x}", secs, nanos, pid, counter)
+}
+
+fn process_id() -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        0
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::process::id() as u64
+    }
 }
 
 fn path_to_value(path: &Path) -> Value {
@@ -237,7 +249,7 @@ pub(crate) mod tests {
         let parent = path
             .parent()
             .expect("tempname should include a parent folder");
-        assert_eq!(parent, std::env::temp_dir().as_path());
+        assert_eq!(parent, runtime_env::temp_dir().as_path());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

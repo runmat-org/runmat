@@ -3,6 +3,7 @@ mod test_helpers;
 use runmat_parser::parse;
 use std::collections::HashMap;
 use std::thread;
+use std::convert::TryFrom;
 use test_helpers::lower;
 use test_helpers::{execute, interpret};
 
@@ -170,10 +171,40 @@ fn function_handle_anon_round_trip() {
     let vars = execute(&hir).unwrap();
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s.starts_with("@"))));
+        .any(|v| matches!(v, runmat_builtins::Value::FunctionHandle(_))));
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::String(s) if s.starts_with("@anon"))));
+}
+
+#[test]
+fn cellfun_upper_function_handle_round_trip() {
+    let input =
+        "names = {'Ada', 'Linus', 'Katherine'}; upper = cellfun(@upper, names, 'UniformOutput', false);";
+    let ast = parse(input).unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+
+    let mut found = false;
+    for value in vars {
+        if let runmat_builtins::Value::Cell(ca) = value {
+            if ca.data.len() != 3 {
+                continue;
+            }
+            let texts: Vec<String> = ca
+                .data
+                .iter()
+                .map(|ptr| String::try_from(&**ptr))
+                .collect::<Result<_, _>>()
+                .unwrap_or_default();
+            if texts == vec!["ADA", "LINUS", "KATHERINE"] {
+                found = true;
+                break;
+            }
+        }
+    }
+
+    assert!(found);
 }
 
 #[test]
@@ -1442,4 +1473,41 @@ fn import_specific_vs_wildcard_same_name_prefers_specific_under_nesting() {
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-10.0).abs()<1e-9)));
+}
+
+#[test]
+fn type_class_static_method_zeros() {
+    // Test that double.zeros(2, 3) is lowered to zeros(2, 3, 'double')
+    let program = r#"
+        A = double.zeros(2, 3);
+        s = size(A);
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    // The result should be a 2x3 matrix of zeros
+    assert!(vars.iter().any(|v| {
+        if let runmat_builtins::Value::Tensor(t) = v {
+            t.shape == vec![2, 3] && t.data.iter().all(|&x| x == 0.0)
+        } else {
+            false
+        }
+    }));
+}
+
+#[test]
+fn type_class_static_method_logical_zeros() {
+    // Test that logical.zeros(2, 2) is lowered to zeros(2, 2, 'logical')
+    let program = r#"
+        A = logical.zeros(2, 2);
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    // The result should be a 2x2 logical array of zeros
+    assert!(vars.iter().any(|v| {
+        if let runmat_builtins::Value::LogicalArray(l) = v {
+            l.shape == vec![2, 2] && l.data.iter().all(|&x| x == 0)
+        } else {
+            false
+        }
+    }));
 }

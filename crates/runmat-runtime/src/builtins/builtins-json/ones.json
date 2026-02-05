@@ -44,17 +44,17 @@
   "examples": [
     {
       "description": "Creating a 3x3 matrix of ones",
-      "input": "B = ones(3);",
+      "input": "B = ones(3)",
       "output": "B = [1 1 1; 1 1 1; 1 1 1];"
     },
     {
       "description": "Creating a 4x1 logical matrix of ones",
-      "input": "mask = ones(4, 1, 'logical');",
+      "input": "mask = ones(4, 1, 'logical')",
       "output": "mask = [1 1 1 1];"
     },
     {
       "description": "Creating a 64x64 matrix of ones on a GPU",
-      "input": "H = ones(64, 64);",
+      "input": "H = ones(64, 64)",
       "output": "H = [1 1 1 ... 1; 1 1 1 ... 1; ...; 1 1 1 ... 1];"
     }
   ],

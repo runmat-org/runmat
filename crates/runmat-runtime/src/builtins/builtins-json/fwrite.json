@@ -50,32 +50,32 @@
   "examples": [
     {
       "description": "Write unsigned bytes with the default precision",
-      "input": "fid = fopen('bytes.bin', 'w+b');\ncount = fwrite(fid, [1 2 3 255]);\nfclose(fid);",
+      "input": "fid = fopen('bytes.bin', 'w+b');\ncount = fwrite(fid, [1 2 3 255]);\nfclose(fid);\ncount",
       "output": "count = 4"
     },
     {
       "description": "Write double-precision values",
-      "input": "fid = fopen('values.bin', 'w+b');\ndata = [1.5 -2.25 42.0];\ncount = fwrite(fid, data, 'double');\nfclose(fid);",
+      "input": "fid = fopen('values.bin', 'w+b');\ndata = [1.5 -2.25 42.0];\ncount = fwrite(fid, data, 'double');\nfclose(fid);\ncount",
       "output": "count = 3"
     },
     {
       "description": "Write 16-bit integers using big-endian byte ordering",
-      "input": "fid = fopen('sensor.be', 'w+b', 'ieee-be');\nfwrite(fid, [258 772], 'uint16');\nfclose(fid);",
+      "input": "fid = fopen('sensor.be', 'w+b', 'ieee-be');\ncount = fwrite(fid, [258 772], 'uint16');\nfclose(fid);\ncount",
       "output": "count = 2"
     },
     {
       "description": "Insert padding bytes between samples",
-      "input": "fid = fopen('spaced.bin', 'w+b');\nfwrite(fid, [10 20 30], 'uint8', 1);   % skip one byte between elements\nfclose(fid);",
+      "input": "fid = fopen('spaced.bin', 'w+b');\ncount = fwrite(fid, [10 20 30], 'uint8', 1);   % skip one byte between elements\nfclose(fid);\ncount",
       "output": "count = 3"
     },
     {
       "description": "Write character data without manual conversions",
-      "input": "fid = fopen('greeting.txt', 'w+b');\nfwrite(fid, 'RunMat!', 'char');\nfclose(fid);",
+      "input": "fid = fopen('greeting.txt', 'w+b');\ncount = fwrite(fid, 'RunMat!', 'char');\nfclose(fid);\ncount",
       "output": "count = 7"
     },
     {
       "description": "Gather GPU data before writing",
-      "input": "fid = fopen('gpu.bin', 'w+b');\nG = gpuArray([1 2 3 4]);\ncount = fwrite(fid, G, 'uint16');\nfclose(fid);",
+      "input": "fid = fopen('gpu.bin', 'w+b');\nG = gpuArray([1 2 3 4]);\ncount = fwrite(fid, G, 'uint16');\nfclose(fid);\ncount",
       "output": "count = 4"
     }
   ],

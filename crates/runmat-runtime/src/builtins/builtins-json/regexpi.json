@@ -44,32 +44,32 @@
   "examples": [
     {
       "description": "Finding indices regardless of case",
-      "input": "idx = regexpi('Abracadabra', 'a');",
+      "input": "idx = regexpi('Abracadabra', 'a')",
       "output": "idx =\n     1     4     6     8    11"
     },
     {
       "description": "Returning matched substrings ignoring case",
-      "input": "matches = regexpi('abcXYZ123', '[a-z]{3}', 'match');",
+      "input": "matches = regexpi('abcXYZ123', '[a-z]{3}', 'match')",
       "output": "matches =\n  1\u00d72 cell array\n    {'abc'}    {'XYZ'}"
     },
     {
       "description": "Extracting capture tokens case-insensitively",
-      "input": "tokens = regexpi('ID:AB12', '(?<prefix>[a-z]+)(?<digits>\\d+)', 'tokens');\nfirst = tokens{1}{1};\nsecond = tokens{1}{2};",
+      "input": "tokens = regexpi('ID:AB12', '(?<prefix>[a-z]+)(?<digits>\\d+)', 'tokens');\nfirst = tokens{1}{1};\nsecond = tokens{1}{2}",
       "output": "first =\n    'AB'\nsecond =\n    '12'"
     },
     {
       "description": "Limiting `regexpi` to the first match",
-      "input": "firstMatch = regexpi('aXaXaX', 'ax', 'match', 'once');",
+      "input": "firstMatch = regexpi('aXaXaX', 'ax', 'match', 'once')",
       "output": "firstMatch =\n    'aX'"
     },
     {
       "description": "Splitting a string array without worrying about letter case",
-      "input": "parts = regexpi([\"Color:Red\"; \"COLOR:Blue\"], 'color:', 'split');",
+      "input": "parts = regexpi([\"Color:Red\"; \"COLOR:Blue\"], 'color:', 'split')",
       "output": "parts =\n  2\u00d71 cell array\n    {1\u00d72 cell}\n    {1\u00d72 cell}\n\nparts{2}{2}\nans =\n    'Blue'"
     },
     {
       "description": "Enforcing case-sensitive matches with `'matchcase'`",
-      "input": "idx = regexpi('CaseTest', 'case', 'matchcase');",
+      "input": "idx = regexpi('CaseTest', 'case', 'matchcase')",
       "output": "idx =\n     []"
     }
   ],

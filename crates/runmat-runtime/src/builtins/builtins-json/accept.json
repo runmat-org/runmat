@@ -42,27 +42,27 @@
   "examples": [
     {
       "description": "Accepting a localhost client connection",
-      "input": "srv = tcpserver(\"127.0.0.1\", 0);\nport = srv.ServerPort;\n% In another MATLAB/RunMat session (or any TCP client script), connect to the port above.\nclient = accept(srv);\ndisp(client.Address)\ndisp(client.Port)",
+      "input": "srv = tcpserver(\"127.0.0.1\", 0);\nport = srv.ServerPort;\ntcpclient(\"127.0.0.1\", port);\nclient = accept(srv);\ndisp(client.Address)\ndisp(client.Port)",
       "output": "127.0.0.1\n55000    % varies per run"
     },
     {
       "description": "Overriding the timeout for a single accept call",
-      "input": "srv = tcpserver(\"0.0.0.0\", 40000, \"Timeout\", 10);\ntry\n    client = accept(srv, \"Timeout\", 0.25);\ncatch err\n    disp(err.identifier)\nend",
+      "input": "srv = tcpserver(\"0.0.0.0\", 0, \"Timeout\", 10);\ntry\n    client = accept(srv, \"Timeout\", 0.25);\ncatch err\n    disp(err.identifier)\nend",
       "output": "MATLAB:accept:Timeout"
     },
     {
       "description": "Inspecting connection metadata after accepting a client",
-      "input": "srv = tcpserver(\"::1\", 45000);\nclient = accept(srv);\nfprintf(\"Remote peer %s:%d\\\\n\", client.Address, client.Port);\nfprintf(\"Byte order: %s\\\\n\", client.ByteOrder);",
+      "input": "srv = tcpserver(\"::1\", 45000);\ntcpclient(\"::1\", 45000);\nclient = accept(srv);\nfprintf(\"Remote peer %s:%d\\\\n\", client.Address, client.Port);\nfprintf(\"Byte order: %s\\\\n\", client.ByteOrder)",
       "output": "Remote peer ::1:51432\nByte order: little-endian"
     },
     {
       "description": "Handling multiple queued clients sequentially",
-      "input": "srv = tcpserver(\"127.0.0.1\", 47000);\n% Connect two clients (for example, two tcpclient calls) before running accept twice.\nclient1 = accept(srv);\nclient2 = accept(srv);\nfprintf(\"First connection from %s\\\\n\", client1.Address);\nfprintf(\"Second connection from %s\\\\n\", client2.Address);",
+      "input": "srv = tcpserver(\"127.0.0.1\", 47000);\ntcpclient(\"127.0.0.1\", 47000);\ntcpclient(\"127.0.0.1\", 47000);\nclient1 = accept(srv);\nclient2 = accept(srv);\nfprintf(\"First connection from %s\\\\n\", client1.Address);\nfprintf(\"Second connection from %s\\\\n\", client2.Address)",
       "output": "First connection from 127.0.0.1\nSecond connection from 127.0.0.1"
     },
     {
       "description": "Using the returned identifier with other networking builtins",
-      "input": "srv = tcpserver(\"127.0.0.1\", 52000);\n% Connect a client from another process, then accept it.\nclient = accept(srv);\nclientId = client.__tcpclient_id;\nfprintf(\"Opaque client identifier: %d\\\\n\", clientId);",
+      "input": "srv = tcpserver(\"127.0.0.1\", 52000);\ntcpclient(\"127.0.0.1\", 52000);\nclient = accept(srv);\nclientId = client.__tcpclient_id;\nfprintf(\"Opaque client identifier: %d\\\\n\", clientId)",
       "output": "Opaque client identifier: 42   % identifier value varies per run"
     }
   ],

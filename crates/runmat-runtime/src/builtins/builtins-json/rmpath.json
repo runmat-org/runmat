@@ -42,32 +42,32 @@
   "examples": [
     {
       "description": "Removing a single folder from the MATLAB search path",
-      "input": "old = rmpath(\"util/toolbox\");\ndisp(old);\npath();",
+      "input": "old = rmpath(\"util/toolbox\");\ndisp(old);\npath()",
       "output": "old =\n    '/Users/you/runmat/toolbox:util/toolbox'\n% The folder util/toolbox no longer appears in the active search path."
     },
     {
       "description": "Removing multiple folders at once",
-      "input": "rmpath(\"shared/filters\", \"shared/signal\");\npath();",
+      "input": "rmpath(\"shared/filters\", \"shared/signal\");\npath()",
       "output": "% shared/filters and shared/signal are both removed from the MATLAB path."
     },
     {
       "description": "Removing folders produced by `genpath`",
-      "input": "tree = genpath(\"third_party/toolchain\");\nrmpath(tree);",
+      "input": "tree = genpath(\"third_party/toolchain\");\nrmpath(tree)",
       "output": "% Every directory returned by genpath is pruned from the search path."
     },
     {
       "description": "Removing folders specified in a cell array",
-      "input": "folders = {'src/algorithms', 'src/visualization'};\nrmpath(folders{:});\npath();",
+      "input": "folders = {'src/algorithms', 'src/visualization'};\nrmpath(folders{:});\npath()",
       "output": "% Both folders are removed from the MATLAB search path."
     },
     {
       "description": "Capturing and restoring the previous path after removal",
-      "input": "old = rmpath(\"analysis/utilities\");\n% ... run experiments ...\npath(old);   % Restore the previous path\npath();",
+      "input": "old = rmpath(\"analysis/utilities\");\n% ... run experiments ...\npath(old);   % Restore the previous path\npath()",
       "output": "% The original search path is restored when you call path(old)."
     },
     {
       "description": "Handling attempts to remove folders that are not on the path",
-      "input": "rmpath(\"nonexistent/toolbox\");"
+      "input": "rmpath(\"nonexistent/toolbox\")"
     }
   ],
   "faqs": [

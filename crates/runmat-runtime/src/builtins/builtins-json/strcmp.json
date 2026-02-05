@@ -43,32 +43,32 @@
   "examples": [
     {
       "description": "Compare Two Equal Strings",
-      "input": "tf = strcmp(\"RunMat\", \"RunMat\");",
+      "input": "tf = strcmp(\"RunMat\", \"RunMat\")",
       "output": "tf = logical\n   1"
     },
     {
       "description": "Compare String Array With Scalar Text",
-      "input": "names = [\"red\" \"green\" \"blue\"];\ntf = strcmp(names, \"green\");",
+      "input": "names = [\"red\" \"green\" \"blue\"];\ntf = strcmp(names, \"green\")",
       "output": "tf = 1\u00d73 logical array\n   0   1   0"
     },
     {
       "description": "Compare Character Array Rows",
-      "input": "labels = char(\"cat\", \"dog\", \"cat\");\ntf = strcmp(labels, \"cat\");",
+      "input": "labels = char(\"cat\", \"dog\", \"cat\");\ntf = strcmp(labels, \"cat\")",
       "output": "tf = 3\u00d71 logical array\n   1\n   0\n   1"
     },
     {
       "description": "Compare Two Cell Arrays Of Character Vectors",
-      "input": "C1 = {'apple', 'pear', 'grape'};\nC2 = {'apple', 'peach', 'grape'};\ntf = strcmp(C1, C2);",
+      "input": "C1 = {'apple', 'pear', 'grape'};\nC2 = {'apple', 'peach', 'grape'};\ntf = strcmp(C1, C2)",
       "output": "tf = 1\u00d73 logical array\n   1   0   1"
     },
     {
       "description": "Handle Missing Strings",
-      "input": "vals = [\"alpha\" missing];\ntf = strcmp(vals, \"alpha\");",
+      "input": "vals = [\"alpha\" missing];\ntf = strcmp(vals, \"alpha\")",
       "output": "tf = 1\u00d72 logical array\n   1   0"
     },
     {
       "description": "Implicit Expansion With Column Vector Text",
-      "input": "patterns = char(\"north\", \"south\");\ntf = strcmp(patterns, [\"north\" \"east\"]);",
+      "input": "patterns = char(\"north\", \"south\");\ntf = strcmp(patterns, [\"north\" \"east\"])",
       "output": "tf = 2\u00d72 logical array\n   1   0\n   0   0"
     }
   ],

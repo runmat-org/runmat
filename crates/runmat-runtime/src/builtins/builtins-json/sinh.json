@@ -41,27 +41,27 @@
   "examples": [
     {
       "description": "Compute the hyperbolic sine of a scalar value",
-      "input": "y = sinh(1);",
+      "input": "y = sinh(1)",
       "output": "y = 1.1752;"
     },
     {
       "description": "Apply `sinh` to each element of a vector",
-      "input": "x = linspace(-1, 1, 5);\ny = sinh(x);",
+      "input": "x = linspace(-1, 1, 5);\ny = sinh(x)",
       "output": "y = [-1.1752 -0.5211 0 0.5211 1.1752];"
     },
     {
       "description": "Evaluate `sinh` on a matrix",
-      "input": "A = [0 1; 2 3];\nB = sinh(A);",
+      "input": "A = [0 1; 2 3];\nB = sinh(A)",
       "output": "B = [0 1.1752; 3.6269 10.0179];"
     },
     {
       "description": "Compute the hyperbolic sine on the GPU",
-      "input": "G = gpuArray([0.25 0.5; 0.75 1.0]);\nresult_gpu = sinh(G);\nresult = gather(result_gpu);",
+      "input": "G = gpuArray([0.25 0.5; 0.75 1.0]);\nresult_gpu = sinh(G);\nresult = gather(result_gpu)",
       "output": "result = [0.2526 0.5211; 0.8223 1.1752];"
     },
     {
       "description": "Work with complex inputs",
-      "input": "z = 1 + 2i;\nw = sinh(z);",
+      "input": "z = 1 + 2i;\nw = sinh(z)",
       "output": "w = -0.4891 + 1.4031i;"
     }
   ],

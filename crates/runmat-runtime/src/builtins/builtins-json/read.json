@@ -41,22 +41,22 @@
   "examples": [
     {
       "description": "Reading a fixed number of bytes from a TCP echo service",
-      "input": "client = tcpclient(\"127.0.0.1\", 50000);\nwrite(client, uint8(1:6));\npayload = read(client, 6);",
+      "input": "client = tcpclient(\"127.0.0.1\", 50000);\nwrite(client, uint8(1:6));\npayload = read(client, 6)",
       "output": "payload =\n     1     2     3     4     5     6"
     },
     {
       "description": "Reading ASCII text as characters",
-      "input": "client = tcpclient(\"127.0.0.1\", 50001);\nwrite(client, \"RunMat TCP\");\nchars = read(client, 10, \"char\");",
+      "input": "client = tcpclient(\"127.0.0.1\", 50001);\nwrite(client, \"RunMat TCP\");\nchars = read(client, 10, \"char\")",
       "output": "chars =\n    'RunMat TCP'"
     },
     {
       "description": "Reading doubles written in big-endian byte order",
-      "input": "client = tcpclient(\"localhost\", 50002, \"ByteOrder\", \"big-endian\");\nwrite(client, swapbytes([1 2 3], \"double\"));\nvalues = read(client, 3, \"double\");",
+      "input": "client = tcpclient(\"localhost\", 50002, \"ByteOrder\", \"big-endian\");\nwrite(client, swapbytes([1 2 3], \"double\"));\nvalues = read(client, 3, \"double\")",
       "output": "values =\n     1     2     3"
     },
     {
       "description": "Reading all available data without specifying a count",
-      "input": "client = tcpclient(\"127.0.0.1\", 50003);\nwrite(client, uint8([10 20 30]));\nburst = read(client);",
+      "input": "client = tcpclient(\"127.0.0.1\", 50003);\nwrite(client, uint8([10 20 30]));\nburst = read(client)",
       "output": "burst =\n    10    20    30"
     },
     {

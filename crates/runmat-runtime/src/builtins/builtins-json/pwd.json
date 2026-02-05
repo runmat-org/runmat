@@ -40,28 +40,28 @@
   "examples": [
     {
       "description": "Show The Current Working Folder",
-      "input": "current = pwd;\ndisp(current);",
-      "output": "C:\\Users\\alex\\runmat-project"
+      "input": "current = pwd;\ndisp(current)",
+      "output": "/"
     },
     {
       "description": "Capture The Folder Before Changing Directories",
-      "input": "startDir = pwd;\nif ~exist(\"results\", \"dir\")\n    mkdir(\"results\");\nend\ncd(\"results\");\n% ... produce artifacts in results/ ...\ncd(startDir);",
+      "input": "startDir = pwd;\nif ~exist(\"results\", \"dir\")\n    mkdir(\"results\");\nend\ncd(\"results\");\n% ... produce artifacts in results/ ...\ncd(startDir)",
       "output": "% Restores the original folder after work completes"
     },
     {
       "description": "Combine `pwd` With `cd` To Print Relative Paths",
-      "input": "old = cd(\"..\");\nfprintf(\"Now working in: %s\\n\", pwd);\ncd(old);",
-      "output": "% Prints the absolute path to the parent directory, then returns to the old folder\n% For example:\n%   Now working in: /Users/alex"
+      "input": "old = cd(\"..\");\nfprintf(\"Now working in: %s\\n\", pwd);\ncd(old)",
+      "output": "% Prints the absolute path to the parent directory, then returns to the old folder\n% For example:\n%   Now working in: /home"
     },
     {
       "description": "Confirm The Folder Inside Scripts",
-      "input": "fprintf(\"Script started in %s\\n\", pwd);",
-      "output": "% Example output:\n%   Script started in /Users/alex/runmat-project"
+      "input": "fprintf(\"Script started in %s\\n\", pwd)",
+      "output": "% Example output:\n%   Script started in /"
     },
     {
       "description": "Log The Working Folder Together With Results",
-      "input": "logFile = \"run.log\";\nfid = fopen(logFile, \"w\");\nfprintf(fid, \"Working folder: %s\\n\", pwd);\nfclose(fid);",
-      "output": "% The log file contains a line such as:\n%   Working folder: /Users/alex/runmat-project"
+      "input": "logFile = \"run.log\";\nfid = fopen(logFile, \"w\");\nfprintf(fid, \"Working folder: %s\\n\", pwd);\nfclose(fid)",
+      "output": "% The log file contains a line such as:\n%   Working folder: /"
     },
     {
       "description": "Handle Errors When The Working Folder Is Unavailable",

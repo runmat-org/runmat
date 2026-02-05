@@ -43,37 +43,37 @@
   "examples": [
     {
       "description": "Removing text between substrings",
-      "input": "txt = \"The quick brown fox\";\nresult = eraseBetween(txt, \"quick\", \" fox\");",
+      "input": "txt = \"The quick brown fox\";\nresult = eraseBetween(txt, \"quick\", \" fox\")",
       "output": "result = \"The quick fox\""
     },
     {
       "description": "Deleting substrings across a string array",
-      "input": "str = [\"The quick brown fox jumps\"; \"over the lazy dog\"];\nstarts = [\"quick\"; \"the\"];\nends = [\" fox\"; \" dog\"];\ntrimmed = eraseBetween(str, starts, ends);",
+      "input": "str = [\"The quick brown fox jumps\"; \"over the lazy dog\"];\nstarts = [\"quick\"; \"the\"];\nends = [\" fox\"; \" dog\"];\ntrimmed = eraseBetween(str, starts, ends)",
       "output": "trimmed = 2\u00d71 string\n    \"The quick fox jumps\"\n    \"over the dog\""
     },
     {
       "description": "Removing characters between numeric positions",
-      "input": "name = \"Edgar Allen Poe\";\nshort = eraseBetween(name, 6, 11);",
+      "input": "name = \"Edgar Allen Poe\";\nshort = eraseBetween(name, 6, 11)",
       "output": "short = \"Edgar Poe\""
     },
     {
       "description": "Using inclusive boundaries to drop the markers",
-      "input": "sentence = \"The quick brown fox jumps over the lazy dog\";\ncollapsed = eraseBetween(sentence, \" brown\", \"lazy\", \"Boundaries\", \"inclusive\");",
+      "input": "sentence = \"The quick brown fox jumps over the lazy dog\";\ncollapsed = eraseBetween(sentence, \" brown\", \"lazy\", \"Boundaries\", \"inclusive\")",
       "output": "collapsed = \"The quick dog\""
     },
     {
       "description": "Operating on character arrays while preserving padding",
-      "input": "chars = char(\"Server<GPU>\", \"Engine<CPU>\");\ntrimmed = eraseBetween(chars, \"<\", \">\", \"Boundaries\", \"inclusive\");",
+      "input": "chars = char(\"Server<GPU>\", \"Engine<CPU>\");\ntrimmed = eraseBetween(chars, \"<\", \">\", \"Boundaries\", \"inclusive\")",
       "output": "trimmed =\n\n  2\u00d76 char array\n\n    \"Server\"\n    \"Engine\""
     },
     {
       "description": "Preserving element types in cell arrays",
-      "input": "C = {'alpha<1>', \"beta<2>\";\n     'gamma<3>', \"delta<4>\"};\nclean = eraseBetween(C, \"<\", \">\", \"Boundaries\", \"inclusive\");",
+      "input": "C = {'alpha<1>', \"beta<2>\";\n     'gamma<3>', \"delta<4>\"};\nclean = eraseBetween(C, \"<\", \">\", \"Boundaries\", \"inclusive\")",
       "output": "clean =\n  2\u00d72 cell array\n    {'alpha'}    {\"beta\"}\n    {'gamma'}    {\"delta\"}"
     },
     {
       "description": "Handling missing strings safely",
-      "input": "texts = [missing, \"Planner<GPU>\"];\nresult = eraseBetween(texts, \"<\", \">\");",
+      "input": "texts = [missing, \"Planner<GPU>\"];\nresult = eraseBetween(texts, \"<\", \">\")",
       "output": "result = 1\u00d72 string\n    \"<missing>\"    \"Planner\""
     }
   ],

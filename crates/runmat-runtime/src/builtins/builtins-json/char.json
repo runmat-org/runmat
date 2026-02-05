@@ -43,32 +43,32 @@
   "examples": [
     {
       "description": "Converting a string scalar to a character row",
-      "input": "name = char(\"RunMat\");",
+      "input": "name = char(\"RunMat\")",
       "output": "name =\n    'RunMat'"
     },
     {
       "description": "Building a character matrix from multiple rows",
-      "input": "rows = char(\"alpha\", \"beta\");",
+      "input": "rows = char(\"alpha\", \"beta\")",
       "output": "rows =\n    'alpha'\n    'beta '"
     },
     {
       "description": "Transforming numeric codes to characters",
-      "input": "codes = [77 65 84 76 65 66];\nletters = char(codes);",
+      "input": "codes = [77 65 84 76 65 66];\nletters = char(codes)",
       "output": "letters =\n    'MATLAB'"
     },
     {
       "description": "Padding a string array into a character matrix",
-      "input": "animals = [\"cat\"; \"giraffe\"];\nC = char(animals);",
+      "input": "animals = [\"cat\"; \"giraffe\"];\nC = char(animals)",
       "output": "C =\n    'cat   '\n    'giraffe'"
     },
     {
       "description": "Creating rows from a cell array of character vectors",
-      "input": "dirs = {'north', 'east', 'west'};\nchart = char(dirs);",
+      "input": "dirs = {'north', 'east', 'west'};\nchart = char(dirs)",
       "output": "chart =\n    'north'\n    'east '\n    'west '"
     },
     {
       "description": "Converting GPU-resident codes back to text",
-      "input": "G = gpuArray([82 85 78 77 65 84]);\nlabel = char(G);",
+      "input": "G = gpuArray([82 85 78 77 65 84]);\nlabel = char(G)",
       "output": "label =\n    'RUNMAT'"
     }
   ],

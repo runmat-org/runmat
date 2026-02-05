@@ -53,22 +53,22 @@
   "examples": [
     {
       "description": "Converting a MATLAB struct to JSON",
-      "input": "person = struct('name', 'Ada', 'age', 37);\nencoded = jsonencode(person);",
+      "input": "person = struct('name', 'Ada', 'age', 37);\nencoded = jsonencode(person)",
       "output": "encoded = '{\"age\":37,\"name\":\"Ada\"}'"
     },
     {
       "description": "Serialising a matrix with pretty printing",
-      "input": "A = magic(3);\nencoded = jsonencode(A, 'PrettyPrint', true);",
+      "input": "A = magic(3);\nencoded = jsonencode(A, 'PrettyPrint', true)",
       "output": "encoded =\n'[\n    [8,1,6],\n    [3,5,7],\n    [4,9,2]\n]'"
     },
     {
       "description": "Encoding nested cell arrays",
-      "input": "C = {struct('task','encode','ok',true), {'nested', 42}};\nencoded = jsonencode(C);",
+      "input": "C = {struct('task','encode','ok',true), {'nested', 42}};\nencoded = jsonencode(C)",
       "output": "encoded = '[{\"ok\":true,\"task\":\"encode\"},[\"nested\",42]]'"
     },
     {
       "description": "Handling NaN and Inf values",
-      "input": "data = [1 NaN Inf];\nencoded = jsonencode(data);",
+      "input": "data = [1 NaN Inf];\nencoded = jsonencode(data)",
       "output": "encoded = '[1,null,null]'"
     },
     {
@@ -78,7 +78,7 @@
     },
     {
       "description": "Serialising GPU-resident tensors",
-      "input": "G = gpuArray(eye(2));\nencoded = jsonencode(G);",
+      "input": "G = gpuArray(eye(2));\nencoded = jsonencode(G)",
       "output": "encoded = '[[1,0],[0,1]]'"
     }
   ],

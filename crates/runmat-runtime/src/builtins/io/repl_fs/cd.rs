@@ -1,5 +1,7 @@
 //! MATLAB-compatible `cd` builtin for RunMat.
 
+use runmat_filesystem as vfs;
+#[cfg(test)]
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -10,7 +12,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::console::{record_console_output, ConsoleStream};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::cd")]
@@ -80,28 +81,25 @@ async fn cd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 }
 
 fn current_directory_value() -> BuiltinResult<Value> {
-    let current = env::current_dir()
+    let current = vfs::current_dir()
         .map_err(|err| cd_error(format!("cd: unable to determine current directory ({err})")))?;
-    emit_path_stdout(&current);
     Ok(path_to_value(&current))
 }
 
 fn change_directory(value: &Value) -> BuiltinResult<Value> {
     let target_raw = extract_path(value)?;
     let target = expand_path(&target_raw)?;
-    let previous = env::current_dir()
+    let previous = vfs::current_dir()
         .map_err(|err| cd_error(format!("cd: unable to determine current directory ({err})")))?;
 
-    env::set_current_dir(&target).map_err(|err| {
+    vfs::set_current_dir(&target).map_err(|err| {
         cd_error(format!(
             "cd: unable to change directory to '{target_raw}' ({err})"
         ))
     })?;
 
-    let new_path = env::current_dir()
+    let _new_path = vfs::current_dir()
         .map_err(|err| cd_error(format!("cd: unable to determine current directory ({err})")))?;
-    emit_path_stdout(&new_path);
-
     Ok(path_to_value(&previous))
 }
 
@@ -147,39 +145,9 @@ fn extract_path(value: &Value) -> BuiltinResult<String> {
 }
 
 fn expand_path(raw: &str) -> BuiltinResult<PathBuf> {
-    if raw == "~" {
-        return home_directory().ok_or_else(|| cd_error("cd: unable to resolve home directory"));
-    }
-
-    if let Some(stripped) = raw.strip_prefix("~/").or_else(|| raw.strip_prefix("~\\")) {
-        let home =
-            home_directory().ok_or_else(|| cd_error("cd: unable to resolve home directory"))?;
-        if stripped.is_empty() {
-            return Ok(home);
-        }
-        let mut buf = home;
-        buf.push(stripped);
-        return Ok(buf);
-    }
-
-    Ok(PathBuf::from(raw))
-}
-
-fn home_directory() -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        if let Ok(user_profile) = env::var("USERPROFILE") {
-            return Some(PathBuf::from(user_profile));
-        }
-        if let (Ok(drive), Ok(path)) = (env::var("HOMEDRIVE"), env::var("HOMEPATH")) {
-            return Some(PathBuf::from(format!("{drive}{path}")));
-        }
-        None
-    }
-    #[cfg(not(windows))]
-    {
-        env::var("HOME").map(PathBuf::from).ok()
-    }
+    let expanded =
+        crate::builtins::common::fs::expand_user_path(raw, BUILTIN_NAME).map_err(cd_error)?;
+    Ok(PathBuf::from(expanded))
 }
 
 async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
@@ -205,10 +173,6 @@ fn path_to_string(path: &Path) -> String {
 
 fn char_array_value(text: &str) -> Value {
     Value::CharArray(CharArray::new_row(text))
-}
-
-fn emit_path_stdout(path: &Path) {
-    record_console_output(ConsoleStream::Stdout, path_to_string(path));
 }
 
 #[cfg(test)]
@@ -326,7 +290,9 @@ pub(crate) mod tests {
         let guard = DirGuard::new();
         let original = guard.original.clone();
 
-        let home = home_directory().expect("home directory");
+        let home_text =
+            crate::builtins::common::fs::expand_user_path("~", BUILTIN_NAME).expect("home");
+        let home = PathBuf::from(home_text);
         let previous = cd_builtin(vec![Value::from("~")]).expect("cd ~");
         let previous_str = String::try_from(&previous).expect("string conversion");
         let previous_path = PathBuf::from(previous_str);

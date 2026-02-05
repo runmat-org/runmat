@@ -2535,6 +2535,10 @@ impl Compiler {
                                 | runmat_hir::Type::Bool
                                 | runmat_hir::Type::Logical { .. }
                         )
+                        || !matches!(
+                            e.kind,
+                            HirExprKind::Number(_) | HirExprKind::Colon | HirExprKind::End
+                        )
                 });
                 // General case: any-dimension ranges with end arithmetic (e.g., A(:,2:2:end-1,...))
                 // We lower into IndexRangeEnd: push base, then per-range start[, step] in increasing dimension order,

@@ -40,38 +40,38 @@
   "examples": [
     {
       "description": "Computing string lengths across a cell array",
-      "input": "C = {'apple', 'banana', 'cherry'};\nlengths = cellfun(@length, C);",
+      "input": "C = {'apple', 'banana', 'cherry'};\nlengths = cellfun(@length, C)",
       "output": "lengths =\n     5     6     6"
     },
     {
       "description": "Mapping across two cell arrays in lockstep",
-      "input": "A = {1, 2, 3};\nB = {4, 5, 6};\ntotals = cellfun(@plus, A, B);",
+      "input": "A = {1, 2, 3};\nB = {4, 5, 6};\ntotals = cellfun(@plus, A, B)",
       "output": "totals =\n     5     7     9"
     },
     {
       "description": "Keeping non-scalar outputs as cells",
-      "input": "names = {'Ada', 'Linus', 'Katherine'};\nupper = cellfun(@upper, names, 'UniformOutput', false);",
+      "input": "names = {'Ada', 'Linus', 'Katherine'};\nupper = cellfun(@upper, names, 'UniformOutput', false)",
       "output": "upper =\n  1\u00d73 cell array\n    {'ADA'}    {'LINUS'}    {'KATHERINE'}"
     },
     {
       "description": "Supplying additional arguments alongside each cell",
-      "input": "C = {magic(3), eye(3)};\ndiag3 = cellfun('size', C, 2);",
+      "input": "C = {magic(3), eye(3)};\ndiag3 = cellfun('size', C, 2)",
       "output": "diag3 =\n     3     3"
     },
     {
       "description": "Handling callback failures with `'ErrorHandler'`",
-      "input": "C = {'42', 'NaN', '3.14'};\nhandler = @(err, value) NaN;\nnumbers = cellfun(@str2double, C, 'ErrorHandler', handler);",
+      "input": "C = {'42', 'NaN', '3.14'};\nhandler = @(err, value) NaN;\nnumbers = cellfun(@str2double, C, 'ErrorHandler', handler)",
       "output": "numbers =\n   42     NaN    3.1400"
     },
     {
       "description": "Using builtin short names instead of function handles",
-      "input": "cells = {[], 1:5, zeros(0, 3)};\nempty_flags = cellfun('isempty', cells);",
+      "input": "cells = {[], 1:5, zeros(0, 3)};\nempty_flags = cellfun('isempty', cells)",
       "output": "empty_flags =\n     1     0     1"
     },
     {
       "description": "Returning rich metadata in the error handler",
-      "input": "cells = {1, 'two', 3};\neh = @(err, value) sprintf('%s @ %d', err.identifier, err.index);\nresults = cellfun(@(x) x + 1, cells, 'UniformOutput', false, 'ErrorHandler', eh);",
-      "output": "results =\n  1\u00d73 cell array\n    {[2]}    {'MATLAB:UndefinedFunction @ 2'}    {[4]}"
+      "input": "cells = {1, 'two', 3};\neh = @(err, value) sprintf('%s @ %d', err.identifier, err.index);\nresults = cellfun(@(x) x + 1, cells, 'UniformOutput', false, 'ErrorHandler', eh)",
+      "output": "results =\n  1\u00d73 cell array\n    {[2]}    {[117 120 112]}    {[4]}"
     }
   ],
   "faqs": [

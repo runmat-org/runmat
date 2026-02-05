@@ -36,8 +36,8 @@
   },
   "description": "`rc = rcond(A)` returns an estimate of the reciprocal of the condition number of a square matrix `A` in the 1-norm. Well-conditioned matrices yield values close to `1`, whereas singular or numerically singular matrices yield values near zero. The estimate mirrors MATLAB: it is based on the ratio of the smallest to largest singular values.",
   "behaviors": [
-    "Inputs must be square matrices (scalars count as `1 × 1`). Non-square inputs trigger the MATLAB error `\"rcond: input must be a square matrix.\"`",
-    "For the empty matrix (`0 × 0`) the reciprocal condition number is `Inf`.",
+    "Inputs must be square matrices (scalars count as `1 \u00d7 1`). Non-square inputs trigger the MATLAB error `\"rcond: input must be a square matrix.\"`",
+    "For the empty matrix (`0 \u00d7 0`) the reciprocal condition number is `Inf`.",
     "`rcond(0)` returns `0`. Non-zero scalars return `1`.",
     "Logical and integer arrays are promoted to double precision before analysis.",
     "Complex matrices are supported; the singular values are computed in complex arithmetic.",
@@ -46,32 +46,32 @@
   "examples": [
     {
       "description": "Reciprocal condition of the identity matrix",
-      "input": "A = eye(3);\nrc = rcond(A);",
+      "input": "A = eye(3);\nrc = rcond(A)",
       "output": "rc = 1"
     },
     {
       "description": "Detecting a nearly singular matrix",
-      "input": "A = diag([1, 1e-8]);\nrc = rcond(A);",
+      "input": "A = diag([1, 1e-8]);\nrc = rcond(A)",
       "output": "rc = 1e-8"
     },
     {
       "description": "Reciprocal condition of a singular matrix",
-      "input": "A = [1 2; 2 4];\nrc = rcond(A);",
+      "input": "A = [1 2; 2 4];\nrc = rcond(A)",
       "output": "rc = 0"
     },
     {
       "description": "Reciprocal condition for a complex matrix",
-      "input": "A = [1+2i 0; 3i 2-1i];\nrc = rcond(A);",
+      "input": "A = [1+2i 0; 3i 2-1i];\nrc = rcond(A)",
       "output": "rc = 0.1887"
     },
     {
       "description": "Handling the empty matrix",
-      "input": "rc = rcond([]);",
+      "input": "rc = rcond([])",
       "output": "rc = Inf"
     },
     {
       "description": "Estimating conditioning on GPU data",
-      "input": "G = gpuArray([2 0; 0 0.5]);\nrc_gpu = rcond(G);\nrc = gather(rc_gpu);",
+      "input": "G = gpuArray([2 0; 0 0.5]);\nrc_gpu = rcond(G);\nrc = gather(rc_gpu)",
       "output": "rc = 0.25"
     }
   ],

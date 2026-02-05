@@ -44,32 +44,32 @@
   "examples": [
     {
       "description": "Cosine of zero",
-      "input": "y = cos(0);",
+      "input": "y = cos(0)",
       "output": "y = 1"
     },
     {
       "description": "Cosine of evenly spaced angles",
-      "input": "theta = linspace(0, 2*pi, 5);\nvalues = cos(theta);",
-      "output": "values = [1 0.3090 -0.8090 -0.8090 0.3090]"
+      "input": "theta = linspace(0, 2*pi, 5);\nvalues = cos(theta)",
+      "output": "values = [1 0 -1 0 1]"
     },
     {
       "description": "Cosine of complex data",
-      "input": "z = cos(1 + 2i);",
+      "input": "z = cos(1 + 2i)",
       "output": "z = 2.0327 - 3.0519i"
     },
     {
       "description": "Cosine on a GPU tensor without manual residency",
       "input": "A = reshape(0:5, [3 2]);\nresult = cos(A);        % planner keeps the tensor on device when beneficial",
-      "output": "result =\n    1.0000   -0.9899\n    0.5403   -0.6536\n   -0.4161    0.2837"
+      "output": "result =\n    1.0000   -0.9900\n    0.5403   -0.6536\n   -0.4161    0.2837"
     },
     {
       "description": "Keeping results on the GPU with a `'like'` prototype",
-      "input": "proto = gpuArray.zeros(1, 1, 'single');\nangles = [0 pi/2 pi];\ndeviceResult = cos(angles, 'like', proto);",
-      "output": "deviceResult = single([1 0 -1])"
+      "input": "proto = gpuArray.zeros(1, 1, 'single');\nangles = [0 pi/2 pi];\ndeviceResult = cos(angles, 'like', proto);\nresult = gather(deviceResult)",
+      "output": "result = [1 0 -1]"
     },
     {
       "description": "Matching a host prototype while inputs live on the GPU",
-      "input": "G = gpuArray([0 1 2]);\nhostLike = cos(G, 'like', zeros(1, 'double'));",
+      "input": "G = gpuArray([0 1 2]);\nhostLike = cos(G, 'like', zeros(1, 'double'))",
       "output": "hostLike = [1 0.5403 -0.4161]"
     }
   ],

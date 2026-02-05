@@ -12,6 +12,7 @@
 
 use crate::builtins::common::format::format_variadic;
 use runmat_builtins::Value;
+#[cfg(not(target_arch = "wasm32"))]
 use runmat_gc_api::GcPtr;
 
 pub mod dispatcher;
@@ -31,6 +32,7 @@ pub mod indexing;
 pub mod matrix;
 pub mod plotting_hooks;
 pub mod runtime_error;
+pub mod user_functions;
 pub mod warning_store;
 pub mod workspace;
 
@@ -78,14 +80,24 @@ pub use blas::*;
 #[cfg(feature = "blas-lapack")]
 pub use lapack::*;
 
-pub(crate) fn make_cell_with_shape(values: Vec<Value>, shape: Vec<usize>) -> Result<Value, String> {
-    let handles: Vec<GcPtr<Value>> = values
-        .into_iter()
-        .map(|v| runmat_gc::gc_allocate(v).expect("gc alloc"))
-        .collect();
-    let ca = runmat_builtins::CellArray::new_handles_with_shape(handles, shape)
-        .map_err(|e| format!("Cell creation error: {e}"))?;
-    Ok(Value::Cell(ca))
+pub fn make_cell_with_shape(values: Vec<Value>, shape: Vec<usize>) -> Result<Value, String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let ca = runmat_builtins::CellArray::new_with_shape(values, shape)
+            .map_err(|e| format!("Cell creation error: {e}"))?;
+        return Ok(Value::Cell(ca));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let handles: Vec<GcPtr<Value>> = values
+            .into_iter()
+            .map(|v| runmat_gc::gc_allocate(v).map_err(|e| format!("Cell creation error: {e}")))
+            .collect::<Result<_, _>>()?;
+        let ca = runmat_builtins::CellArray::new_handles_with_shape(handles, shape)
+            .map_err(|e| format!("Cell creation error: {e}"))?;
+        Ok(Value::Cell(ca))
+    }
 }
 
 pub(crate) fn make_cell(values: Vec<Value>, rows: usize, cols: usize) -> Result<Value, String> {
@@ -433,7 +445,7 @@ async fn set_p_builtin(obj: Value, val: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(name = "make_handle", builtin_path = "crate")]
 async fn make_handle_builtin(name: String) -> crate::BuiltinResult<Value> {
-    Ok(Value::String(format!("@{name}")))
+    Ok(Value::FunctionHandle(name))
 }
 
 #[runmat_macros::runtime_builtin(name = "make_anon", builtin_path = "crate")]
@@ -999,11 +1011,18 @@ async fn overidx_xor(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(name = "feval", builtin_path = "crate")]
 async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    async fn call_by_name(name: &str, args: &[Value]) -> crate::BuiltinResult<Value> {
+        if let Some(result) = crate::user_functions::try_call_user_function(name, args).await {
+            return result;
+        }
+        Ok(crate::call_builtin_async(name, args).await?)
+    }
+
     match f {
-        // Current handles are strings like "@sin"
+        // Function handle strings like "@sin"
         Value::String(s) => {
             if let Some(name) = s.strip_prefix('@') {
-                Ok(crate::call_builtin_async(name, &rest).await?)
+                call_by_name(name, &rest).await
             } else {
                 Err(
                     (format!("feval: expected function handle string starting with '@', got {s}"))
@@ -1016,7 +1035,7 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             if ca.rows == 1 {
                 let s: String = ca.data.iter().collect();
                 if let Some(name) = s.strip_prefix('@') {
-                    Ok(crate::call_builtin_async(name, &rest).await?)
+                    call_by_name(name, &rest).await
                 } else {
                     Err((format!(
                         "feval: expected function handle string starting with '@', got {s}"
@@ -1027,12 +1046,12 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
                 Err(("feval: function handle char array must be a row vector".to_string()).into())
             }
         }
+        Value::FunctionHandle(name) => call_by_name(&name, &rest).await,
         Value::Closure(c) => {
             let mut args = c.captures.clone();
             args.extend(rest);
-            Ok(crate::call_builtin_async(&c.function_name, &args).await?)
+            call_by_name(&c.function_name, &args).await
         }
-        // Future: support Value::Function variants
         other => Err((format!("feval: unsupported function value {other:?}")).into()),
     }
 }

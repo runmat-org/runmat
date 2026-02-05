@@ -4,7 +4,9 @@
 //! and platform-aware sorting so builtins such as `ls` and `dir`
 //! can focus on their user-facing semantics.
 
+use crate::builtins::common::env as runtime_env;
 use std::cmp::Ordering;
+#[cfg(windows)]
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -45,7 +47,7 @@ pub fn home_directory() -> Option<PathBuf> {
     }
     #[cfg(not(windows))]
     {
-        env::var("HOME").map(PathBuf::from).ok()
+        runtime_env::var("HOME").map(PathBuf::from).ok()
     }
 }
 

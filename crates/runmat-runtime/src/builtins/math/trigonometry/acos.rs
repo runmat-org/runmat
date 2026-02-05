@@ -170,9 +170,9 @@ fn acos_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
     let mut complex_data = Vec::with_capacity(len);
 
     for &v in &tensor.data {
-        let result = Complex64::new(v, 0.0).acos();
-        let re = zero_small(result.re);
-        let im = zero_small(result.im);
+        let (re, im) = acos_real_matlab(v);
+        let re = zero_small(re);
+        let im = zero_small(im);
         if im.abs() > ZERO_EPS {
             requires_complex = true;
         }
@@ -193,6 +193,30 @@ fn acos_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
         let tensor = Tensor::new(real_data, tensor.shape.clone())
             .map_err(|e| runtime_error_for(format!("acos: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
+    }
+}
+
+/// MATLAB-compatible acos for real values.
+///
+/// For values within `[-1, 1]`, returns the standard real acos.
+/// For values outside this range, MATLAB's principal branch is:
+/// - `x > 1`:  `acos(x) = -i * acosh(x)`  → `(0, -acosh(x))`
+/// - `x < -1`: `acos(x) = π - i * acosh(-x)` → `(π, -acosh(-x))`
+///
+/// This differs from `num_complex::Complex64::acos()` which uses a different branch cut.
+fn acos_real_matlab(x: f64) -> (f64, f64) {
+    if x.is_nan() {
+        return (f64::NAN, 0.0);
+    }
+    if (-1.0..=1.0).contains(&x) {
+        // Within domain: real result
+        (x.acos(), 0.0)
+    } else if x > 1.0 {
+        // x > 1: acos(x) = -i * acosh(x)
+        (0.0, -x.acosh())
+    } else {
+        // x < -1: acos(x) = π - i * acosh(-x)
+        (std::f64::consts::PI, -(-x).acosh())
     }
 }
 
@@ -295,14 +319,69 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_scalar_outside_domain_returns_complex() {
+        // For x > 1, MATLAB returns acos(x) = -i * acosh(x)
         let result = acos_builtin(Value::Num(1.2)).expect("acos");
         match result {
             Value::Complex(re, im) => {
-                let expected = Complex64::new(1.2, 0.0).acos();
-                assert!((re - expected.re).abs() < 1e-10);
-                assert!((im - expected.im).abs() < 1e-10);
+                // MATLAB: acos(1.2) = 0 - 0.6224i
+                assert!(re.abs() < 1e-10, "real part should be ~0, got {}", re);
+                let expected_im = -1.2f64.acosh(); // negative imaginary
+                assert!(
+                    (im - expected_im).abs() < 1e-10,
+                    "expected im={}, got im={}",
+                    expected_im,
+                    im
+                );
             }
             other => panic!("unexpected result {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn acos_of_two_matches_matlab() {
+        // MATLAB: acos(2) = 0 - 1.3170i
+        // This is the principal branch: acos(x) = -i * acosh(x) for x > 1
+        let result = acos_builtin(Value::Num(2.0)).expect("acos(2)");
+        match result {
+            Value::Complex(re, im) => {
+                assert!(re.abs() < 1e-10, "expected re=0, got {}", re);
+                // acosh(2) ≈ 1.3169578969248166
+                let expected_im = -2.0f64.acosh();
+                assert!(
+                    (im - expected_im).abs() < 1e-10,
+                    "expected im≈{:.4}, got im≈{:.4}",
+                    expected_im,
+                    im
+                );
+                // Verify the sign is negative (MATLAB convention)
+                assert!(im < 0.0, "imaginary part should be negative, got {}", im);
+            }
+            other => panic!("expected complex result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn acos_negative_outside_domain() {
+        // MATLAB: acos(-2) = π - i * acosh(2) ≈ 3.1416 - 1.3170i
+        let result = acos_builtin(Value::Num(-2.0)).expect("acos(-2)");
+        match result {
+            Value::Complex(re, im) => {
+                assert!(
+                    (re - std::f64::consts::PI).abs() < 1e-10,
+                    "expected re=π, got {}",
+                    re
+                );
+                let expected_im = -2.0f64.acosh();
+                assert!(
+                    (im - expected_im).abs() < 1e-10,
+                    "expected im≈{:.4}, got im≈{:.4}",
+                    expected_im,
+                    im
+                );
+            }
+            other => panic!("expected complex result, got {other:?}"),
         }
     }
 
@@ -346,16 +425,34 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_char_array_complex_promotion() {
+        // 'B' has ASCII code 66, which is > 1, so complex promotion is required.
+        // MATLAB: acos(66) = 0 - i * acosh(66)
         let chars = CharArray::new("B".chars().collect(), 1, 1).expect("char");
         let result = acos_builtin(Value::CharArray(chars)).expect("acos char");
         match result {
             Value::Complex(re, im) => {
-                let expected = Complex64::new('B' as u32 as f64, 0.0).acos();
-                assert!((re - expected.re).abs() < 1e-10);
-                assert!((im - expected.im).abs() < 1e-10);
+                let x = 'B' as u32 as f64; // 66.0
+                assert!(re.abs() < 1e-10, "expected re=0, got {}", re);
+                let expected_im = -x.acosh();
+                assert!(
+                    (im - expected_im).abs() < 1e-10,
+                    "expected im={}, got {}",
+                    expected_im,
+                    im
+                );
             }
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.data.len(), 1);
+                let (re, im) = ct.data[0];
+                let x = 'B' as u32 as f64;
+                assert!(re.abs() < 1e-10, "expected re=0, got {}", re);
+                let expected_im = -x.acosh();
+                assert!(
+                    (im - expected_im).abs() < 1e-10,
+                    "expected im={}, got {}",
+                    expected_im,
+                    im
+                );
             }
             other => panic!("unexpected result {other:?}"),
         }

@@ -58,17 +58,17 @@
     },
     {
       "description": "Applying gamma element-wise to arrays",
-      "input": "A = [1 2; 3 4];\nB = gamma(A);",
+      "input": "A = [1 2; 3 4];\nB = gamma(A)",
       "output": "B =\n     1     1\n     2     6"
     },
     {
       "description": "Working with complex numbers",
-      "input": "z = 0.5 + 1i;\ng = gamma(z);",
+      "input": "z = 0.5 + 1i;\ng = gamma(z)",
       "output": "g = 0.8182 - 0.7633i"
     },
     {
       "description": "Using `gamma` with GPU tensors",
-      "input": "G = gpuArray([0.5 1.5 2.5]);\nout = gamma(G);\nresult = gather(out);",
+      "input": "G = gpuArray([0.5 1.5 2.5]);\nout = gamma(G);\nresult = gather(out)",
       "output": "result = [1.7725 0.8862 1.3293]"
     }
   ],
