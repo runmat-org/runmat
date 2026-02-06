@@ -40,7 +40,7 @@
     "`circshift(A, K, dims)` lets you target specific dimensions. `K` and `dims` must have the same length; each entry in `dims` is 1-based.",
     "Works for numeric tensors, logical masks, complex arrays, string arrays, and character matrices. Character arrays only support dimensions one and two, mirroring MATLAB limitations.",
     "Empty dimensions remain empty; shifting them is a no-op. Scalars are returned unchanged.",
-    "Shifts that are integer multiples of a dimension\u2019s extent leave that axis unchanged. RunMat reduces each shift modulo the axis length, matching MATLAB."
+    "Shifts that are integer multiples of a dimension’s extent leave that axis unchanged. RunMat reduces each shift modulo the axis length, matching MATLAB."
   ],
   "examples": [
     {
@@ -113,7 +113,7 @@
     },
     {
       "question": "Does the builtin allocate new GPU buffers?",
-      "answer": "Providers may reuse buffers internally, but from the user\u2019s perspective the result is a fresh gpuArray handle that preserves residency information."
+      "answer": "Providers may reuse buffers internally, but from the user’s perspective the result is a fresh gpuArray handle that preserves residency information."
     }
   ],
   "links": [
@@ -142,7 +142,7 @@
     "label": "`crates/runmat-runtime/src/builtins/array/shape/circshift.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/circshift.rs"
   },
-  "gpu_residency": "No additional steps are required. RunMat\u2019s auto-offload planner keeps tensors on the GPU whenever the provider exposes native support. If a provider falls back to the host implementation, the runtime gathers and re-uploads the data transparently so subsequent operations can continue on the GPU. Explicit calls to `gpuArray` remain available for MATLAB compatibility but are not mandatory.",
+  "gpu_residency": "No additional steps are required. RunMat’s auto-offload planner keeps tensors on the GPU whenever the provider exposes native support. If a provider falls back to the host implementation, the runtime gathers and re-uploads the data transparently so subsequent operations can continue on the GPU. Explicit calls to `gpuArray` remain available for MATLAB compatibility but are not mandatory.",
   "gpu_behavior": [
     "When RunMat Accelerate is active, the runtime first asks the selected provider for a native `circshift` implementation. Providers that implement the hook perform the rotation entirely on the device, preserving residency metadata and enabling fusion with subsequent GPU kernels. If the hook is missing, RunMat downloads the tensor once, rotates it on the host using the same semantics, and uploads the result back to the GPU so downstream work continues without manual intervention."
   ]

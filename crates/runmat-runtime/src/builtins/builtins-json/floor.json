@@ -37,9 +37,9 @@
     "Works on scalars, vectors, matrices, and higher-dimensional tensors with MATLAB broadcasting semantics.",
     "`floor(X, N)` rounds toward negative infinity with `N` decimal digits (positive `N`) or powers of ten (negative `N`).",
     "`floor(X, N, 'significant')` rounds to `N` significant digits; `N` must be a positive integer.",
-    "Logical inputs are promoted to doubles (`false \u2192 0`, `true \u2192 1`) before flooring.",
+    "Logical inputs are promoted to doubles (`false → 0`, `true → 1`) before flooring.",
     "Character arrays are interpreted numerically (their Unicode code points) and return dense double tensors.",
-    "Complex inputs are floored component-wise: `floor(a + bi) = floor(a) + i\u00b7floor(b)`.",
+    "Complex inputs are floored component-wise: `floor(a + bi) = floor(a) + i·floor(b)`.",
     "Non-finite values (`NaN`, `Inf`, `-Inf`) propagate unchanged.",
     "Empty arrays return empty arrays of the appropriate shape.",
     "Appending `'like', prototype` forces the result to match the residency of `prototype` (CPU or GPU). Currently prototypes must be numeric."
@@ -48,12 +48,12 @@
     {
       "description": "Flooring positive and negative scalars",
       "input": "x = [-2.7, -0.3, 0, 0.8, 3.9];\ny = floor(x)",
-      "output": "y = [-3, -1, 0, 0, 3];"
+      "output": "y = [-3, -1, 0, 0, 3]"
     },
     {
       "description": "Flooring every element of a matrix",
       "input": "A = [1.2 4.7; -3.4 5.0];\nB = floor(A)",
-      "output": "B = [1 4; -4 5];"
+      "output": "B = [1 4; -4 5]"
     },
     {
       "description": "Flooring fractions stored in a tensor",
@@ -63,17 +63,17 @@
     {
       "description": "Flooring values to a fixed number of decimal places",
       "input": "temps = [21.456 19.995 22.501];\nfloored = floor(temps, 2)",
-      "output": "floored = [21.45 19.99 22.50];"
+      "output": "floored = [21.45 19.99 22.50]"
     },
     {
       "description": "Flooring to significant digits",
       "input": "measurements = [0.001234 12.3456 98765];\nsig2 = floor(measurements, 2, 'significant')",
-      "output": "sig2 = [0.0012 12.0 98000];"
+      "output": "sig2 = [0.0012 12.0 98000]"
     },
     {
       "description": "Flooring complex numbers component-wise",
       "input": "z = [1.7 + 2.1i, -0.2 - 3.9i];\nresult = floor(z)",
-      "output": "result = [1 + 2i, -1 - 4i];"
+      "output": "result = [1 + 2i, -1 - 4i]"
     },
     {
       "description": "Keeping GPU data on device when the provider supports `unary_floor`",
@@ -89,7 +89,7 @@
   "faqs": [
     {
       "question": "Does `floor` always round toward negative infinity?",
-      "answer": "Yes\u2014positive values round down toward zero, while negative values round to the more negative integer (e.g., `floor(-0.1) = -1`)."
+      "answer": "Yes—positive values round down toward zero, while negative values round to the more negative integer (e.g., `floor(-0.1) = -1`)."
     },
     {
       "question": "How are complex numbers handled?",
@@ -152,6 +152,6 @@
   },
   "gpu_residency": "```matlab:runnable\nA = [1.8 -0.2; 2.7 3.4];\nproto = gpuArray(0);\nG = floor(A, 'like', proto);   % Result remains on the GPU\nresult = gather(G);\n```\n\nExpected output:\n\n```matlab\nresult =\n    [ 1 -1;\n      2  3]\n```",
   "gpu_behavior": [
-    "When tensors already reside on the GPU, RunMat consults the active acceleration provider. If the provider implements the `unary_floor` hook, `floor(X)` executes entirely on the device and keeps tensors resident. When decimal or significant-digit rounding is requested\u2014or when the provider lacks `unary_floor`\u2014RunMat gathers the tensor to host memory, applies the CPU implementation, and honours any `'like'` GPU prototype by uploading the result back to the device. This keeps semantics consistent even when specialised kernels are unavailable."
+    "When tensors already reside on the GPU, RunMat consults the active acceleration provider. If the provider implements the `unary_floor` hook, `floor(X)` executes entirely on the device and keeps tensors resident. When decimal or significant-digit rounding is requested—or when the provider lacks `unary_floor`—RunMat gathers the tensor to host memory, applies the CPU implementation, and honours any `'like'` GPU prototype by uploading the result back to the device. This keeps semantics consistent even when specialised kernels are unavailable."
   ]
 }

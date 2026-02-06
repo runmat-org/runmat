@@ -34,10 +34,10 @@
   "behaviors": [
     "Accepts character vectors (`'PATH'`) or string scalars (`\"PATH\"`). Character vector inputs return character vectors; string inputs return string scalars.",
     "Vectorised calls are supported: pass a string array to receive a string array of values, or a cell array of character vectors to receive a cell array of character vectors.",
-    "When the requested variable is not defined, `getenv` returns an empty character vector or an empty string scalar (depending on the input type). This matches MATLAB\u2019s \u201cvariable not found\u201d semantics.",
-    "Calling `getenv` with no arguments returns a scalar struct. Field names are the environment variable names; field values are character vectors containing each variable\u2019s value.",
+    "When the requested variable is not defined, `getenv` returns an empty character vector or an empty string scalar (depending on the input type). This matches MATLAB’s “variable not found” semantics.",
+    "Calling `getenv` with no arguments returns a scalar struct. Field names are the environment variable names; field values are character vectors containing each variable’s value.",
     "On Windows, environment variable lookups are case-insensitive, mirroring the operating system. On Unix-like systems, lookups are case-sensitive.",
-    "Trailing spaces in character matrix inputs are ignored so that padded rows created with MATLAB\u2019s string manipulation functions remain compatible.",
+    "Trailing spaces in character matrix inputs are ignored so that padded rows created with MATLAB’s string manipulation functions remain compatible.",
     "The builtin rejects non-text inputs (numeric arrays, logicals, GPU tensors, etc.) with a clear MATLAB-style diagnostic."
   ],
   "examples": [
@@ -134,6 +134,6 @@
   },
   "gpu_residency": "No. `getenv` has no GPU implementation and simply queries the host environment. Passing GPU-resident values is supported (RunMat gathers them automatically), but there is no benefit to calling `gpuArray` yourself.",
   "gpu_behavior": [
-    "`getenv` always runs on the CPU. If the argument originates from the GPU\u2014for example, a string scalar produced by an accelerated builtin\u2014RunMat gathers it to host memory before reading the environment. No GPU kernels are launched, and acceleration providers do not need to implement hooks for this builtin."
+    "`getenv` always runs on the CPU. If the argument originates from the GPU—for example, a string scalar produced by an accelerated builtin—RunMat gathers it to host memory before reading the environment. No GPU kernels are launched, and acceleration providers do not need to implement hooks for this builtin."
   ]
 }

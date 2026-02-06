@@ -118,7 +118,7 @@
     },
     {
       "question": "How are empty inputs handled?",
-      "answer": "If all argument arrays are empty, `sprintf` returns an empty character array (`1\u00d70`). If the format string itself is empty, the result is also empty."
+      "answer": "If all argument arrays are empty, `sprintf` returns an empty character array (`1×0`). If the format string itself is empty, the result is also empty."
     },
     {
       "question": "What happens with multi-row character arrays?",

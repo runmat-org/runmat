@@ -64,8 +64,8 @@
     },
     {
       "description": "Read Latin-1 encoded text",
-      "input": "fname = tempname;\nfid = fopen(fname, 'w', 'n', 'latin1');\nfprintf(fid, 'Espa\u00f1ol\\n');\nfclose(fid);\n\nfid = fopen(fname, 'r', 'n', 'latin1');\nline = fgets(fid);\nfclose(fid);\ndelete(fname);\n\ntext = line(1:end-1);\ncodes = double(text);\n\ntext\ncodes",
-      "output": "text =\n    'Espa\u00f1ol'\ncodes =\n    69   115   112    97   241   111   108"
+      "input": "fname = tempname;\nfid = fopen(fname, 'w', 'n', 'latin1');\nfprintf(fid, 'Español\\n');\nfclose(fid);\n\nfid = fopen(fname, 'r', 'n', 'latin1');\nline = fgets(fid);\nfclose(fid);\ndelete(fname);\n\ntext = line(1:end-1);\ncodes = double(text);\n\ntext\ncodes",
+      "output": "text =\n    'Español'\ncodes =\n    69   115   112    97   241   111   108"
     }
   ],
   "faqs": [

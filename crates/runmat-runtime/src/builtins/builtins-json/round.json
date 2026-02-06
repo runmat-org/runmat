@@ -33,11 +33,11 @@
   },
   "description": "`round(X)` rounds numeric values to the nearest integers using MATLAB-compatible half-away-from-zero semantics. Additional arguments allow rounding to a specified number of decimal digits or significant digits.",
   "behaviors": [
-    "`round(X)` rounds each element of `X` to the nearest integer; ties (e.g., `\u00b10.5`) round away from zero.",
+    "`round(X)` rounds each element of `X` to the nearest integer; ties (e.g., `±0.5`) round away from zero.",
     "`round(X, N)` rounds to `N` decimal digits when `N` is positive and to powers of ten when `N` is negative.",
     "`round(X, N, 'significant')` rounds to `N` significant digits. `N` must be a positive integer.",
     "Logical inputs are promoted to double before rounding; `round(true)` returns `1`.",
-    "Complex inputs are rounded component-wise (`round(a + bi) = round(a) + i\u00b7round(b)`), matching MATLAB.",
+    "Complex inputs are rounded component-wise (`round(a + bi) = round(a) + i·round(b)`), matching MATLAB.",
     "Non-finite values (`NaN`, `Inf`, `-Inf`) propagate unchanged regardless of precision arguments.",
     "Character arrays are treated as their numeric code points and return double tensors of the same size."
   ],
@@ -45,27 +45,27 @@
     {
       "description": "Rounding values to the nearest integers",
       "input": "X = [-3.5 -2.2 -0.5 0 0.5 1.7];\nY = round(X)",
-      "output": "Y = [-4 -2 -1 0 1 2];"
+      "output": "Y = [-4 -2 -1 0 1 2]"
     },
     {
       "description": "Rounding to a fixed number of decimal places",
       "input": "temps = [21.456 19.995 22.501];\nrounded = round(temps, 2)",
-      "output": "rounded = [21.46 20.00 22.50];"
+      "output": "rounded = [21.46 20.00 22.50]"
     },
     {
       "description": "Rounding to negative powers of ten",
       "input": "counts = [1234 5678 91011];\nrounded = round(counts, -2)",
-      "output": "rounded = [1200 5700 91000];"
+      "output": "rounded = [1200 5700 91000]"
     },
     {
       "description": "Rounding to significant digits",
       "input": "measurements = [0.001234 12.3456 98765];\nsig3 = round(measurements, 3, 'significant')",
-      "output": "sig3 = [0.00123 12.3 98800];"
+      "output": "sig3 = [0.00123 12.3 98800]"
     },
     {
       "description": "Rounding GPU tensors and gathering the results",
       "input": "G = gpuArray(linspace(-2.5, 2.5, 6));\nrounded = round(G);\nhostValues = gather(rounded)",
-      "output": "hostValues = [-3 -2 -1 1 2 3];"
+      "output": "hostValues = [-3 -2 -1 1 2 3]"
     }
   ],
   "faqs": [

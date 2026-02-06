@@ -41,7 +41,7 @@
     {
       "description": "Creating a 2x3 logical array of false values",
       "input": "mask = false(2, 3)",
-      "output": "mask = [0 0 0; 0 0 0];"
+      "output": "mask = [0 0 0; 0 0 0]"
     },
     {
       "description": "Creating a logical array from a size vector",

@@ -34,41 +34,41 @@
   "description": "`Y = exp(X)` raises *e* to the power of every element in `X`. Results follow MATLAB semantics for scalars, vectors, matrices, logical arrays, character arrays, and complex inputs.",
   "behaviors": [
     "`exp(X)` applies the exponential element-by-element with MATLAB broadcasting rules.",
-    "Logical inputs convert to double (`true \u2192 1.0`, `false \u2192 0.0`) before exponentiation.",
+    "Logical inputs convert to double (`true → 1.0`, `false → 0.0`) before exponentiation.",
     "Character arrays are treated as their numeric code points and return dense double tensors.",
-    "Complex values follow MATLAB's definition: `exp(a + bi) = exp(a) * (cos(b) + i\u00b7sin(b))`.",
+    "Complex values follow MATLAB's definition: `exp(a + bi) = exp(a) * (cos(b) + i·sin(b))`.",
     "Inputs already living on the GPU stay there when the provider implements `unary_exp`; otherwise RunMat gathers the data, computes on the host, and returns the correct residency."
   ],
   "examples": [
     {
       "description": "Calculate the exponential of a scalar value",
       "input": "y = exp(1)",
-      "output": "y = 2.7183;"
+      "output": "y = 2.7183"
     },
     {
       "description": "Apply the exponential function to a vector of growth rates",
       "input": "rates = [-1 -0.5 0 0.5 1];\nfactor = exp(rates)",
-      "output": "factor = [0.3679 0.6065 1 1.6487 2.7183];"
+      "output": "factor = [0.3679 0.6065 1 1.6487 2.7183]"
     },
     {
       "description": "Exponentiate every element of a matrix",
       "input": "A = [0 1 2; 3 4 5];\nB = exp(A)",
-      "output": "B = [1.0000 2.7183 7.3891; 20.0855 54.5982 148.4132];"
+      "output": "B = [1.0000 2.7183 7.3891; 20.0855 54.5982 148.4132]"
     },
     {
       "description": "Compute the exponential of complex numbers",
       "input": "z = [1+2i, -1+pi*i];\nw = exp(z)",
-      "output": "w = [-1.1312 + 2.4717i, -0.3679 + 0.0000i];"
+      "output": "w = [-1.1312 + 2.4717i, -0.3679 + 0.0000i]"
     },
     {
       "description": "Run element-wise exponential on GPU data",
       "input": "G = gpuArray([0 1; 2 3]);\nout = exp(G);\nresult = gather(out)",
-      "output": "result = [1.0000 2.7183; 7.3891 20.0855];"
+      "output": "result = [1.0000 2.7183; 7.3891 20.0855]"
     },
     {
       "description": "Convert character codes to exponentials",
       "input": "C = 'ABC';\nY = exp(C)",
-      "output": "Y = [5.9874e+41 1.2946e+42 2.7992e+42];"
+      "output": "Y = [5.9874e+41 1.2946e+42 2.7992e+42]"
     }
   ],
   "faqs": [

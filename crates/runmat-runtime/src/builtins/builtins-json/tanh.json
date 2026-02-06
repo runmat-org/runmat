@@ -81,7 +81,7 @@
   "faqs": [
     {
       "question": "When should I reach for `tanh`?",
-      "answer": "Use `tanh` for hyperbolic tangent evaluations\u2014common in signal processing, numerical solvers, and neural-network activations thanks to its bounded output."
+      "answer": "Use `tanh` for hyperbolic tangent evaluations—common in signal processing, numerical solvers, and neural-network activations thanks to its bounded output."
     },
     {
       "question": "Does `tanh` support complex numbers?",
@@ -105,7 +105,7 @@
     },
     {
       "question": "Do I need to worry about numerical overflow?",
-      "answer": "`tanh` saturates towards \u00b11 for large-magnitude real inputs, providing stable results. Complex poles can still yield infinities, mirroring MATLAB."
+      "answer": "`tanh` saturates towards ±1 for large-magnitude real inputs, providing stable results. Complex poles can still yield infinities, mirroring MATLAB."
     },
     {
       "question": "Can I differentiate `tanh` in RunMat?",
@@ -141,7 +141,7 @@
   "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. The fusion planner keeps tensors on the GPU whenever the active provider exposes the necessary kernels (such as `unary_tanh`). Manual `gpuArray` / `gather` calls remain supported for MATLAB compatibility or when you need to pin residency before interacting with external code.",
   "gpu_behavior": [
     "With RunMat Accelerate active, tensors remain on the device and execute through the provider's `unary_tanh` hook (or a fused elementwise kernel) without leaving GPU memory.",
-    "If the provider declines the operation\u2014for example, when it lacks the hook for the active precision\u2014RunMat transparently gathers to the host, computes the result, and reapplies the requested residency rules.",
-    "Fusion planning keeps neighbouring elementwise operators grouped, reducing host\u2194device transfers even when an intermediate fallback occurs."
+    "If the provider declines the operation—for example, when it lacks the hook for the active precision—RunMat transparently gathers to the host, computes the result, and reapplies the requested residency rules.",
+    "Fusion planning keeps neighbouring elementwise operators grouped, reducing host↔device transfers even when an intermediate fallback occurs."
   ]
 }

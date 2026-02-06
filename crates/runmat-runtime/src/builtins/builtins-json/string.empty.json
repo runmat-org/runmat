@@ -30,11 +30,11 @@
   "tested": {
     "unit": "builtins::strings::core::string_empty::tests"
   },
-  "description": "`string.empty` constructs an empty string array. By default it returns a `0\u00d70` array, and when you specify additional dimensions they define the trailing extents while the leading dimension remains zero, ensuring the total element count is zero. This mirrors MATLAB's static `string.empty` method.",
+  "description": "`string.empty` constructs an empty string array. By default it returns a `0×0` array, and when you specify additional dimensions they define the trailing extents while the leading dimension remains zero, ensuring the total element count is zero. This mirrors MATLAB's static `string.empty` method.",
   "behaviors": [
-    "`string.empty` with no arguments yields a `0\u00d70` string array.",
-    "`string.empty(n)` produces a `0\u00d7n` array. The leading dimension is fixed at `0`, so the result is still empty even if `n > 0`.",
-    "`string.empty(m, n, p, ...)` returns a `0\u00d7n\u00d7p\u00d7\u2026` array. All trailing dimensions are honoured while the leading dimension remains zero.",
+    "`string.empty` with no arguments yields a `0×0` string array.",
+    "`string.empty(n)` produces a `0×n` array. The leading dimension is fixed at `0`, so the result is still empty even if `n > 0`.",
+    "`string.empty(m, n, p, ...)` returns a `0×n×p×…` array. All trailing dimensions are honoured while the leading dimension remains zero.",
     "You can provide a single size vector such as `string.empty([0 5 3])`; the first entry is ignored beyond confirming it is non-negative, and the remaining entries set the trailing dimensions.",
     "`string.empty(___, 'like', prototype)` copies the trailing dimensions from `prototype` when you do not supply explicit sizes. Any dimensions you pass explicitly take precedence. GPU-resident prototypes are automatically gathered so their shape can be inspected.",
     "Size inputs must be finite, real, non-negative integers. Fractional or negative values produce a MATLAB-compatible error.",
@@ -88,7 +88,7 @@
     },
     {
       "question": "Does `string.empty(n)` create space for `n` elements?",
-      "answer": "No. It returns a `0\u00d7n` array, which still has zero elements. Use `strings(n)` if you want an array of string scalars that you can fill later."
+      "answer": "No. It returns a `0×n` array, which still has zero elements. Use `strings(n)` if you want an array of string scalars that you can fill later."
     },
     {
       "question": "Can I combine scalars and size vectors?",
@@ -116,7 +116,7 @@
     },
     {
       "question": "What happens if I pass an empty array as the size vector?",
-      "answer": "`string.empty([])` returns the canonical `0\u00d70` string array, just like calling `string.empty` with no arguments."
+      "answer": "`string.empty([])` returns the canonical `0×0` string array, just like calling `string.empty` with no arguments."
     },
     {
       "question": "Does `string.empty` ever throw away extra arguments?",

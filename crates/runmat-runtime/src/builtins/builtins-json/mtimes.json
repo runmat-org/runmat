@@ -37,22 +37,22 @@
   "description": "`mtimes(A, B)` implements MATLAB's matrix multiplication operator (`A * B`). It supports scalars, vectors, matrices, and complex tensors while preserving MATLAB's column-major layout and dimension rules.",
   "behaviors": [
     "The inner dimensions must match: `size(A, 2) == size(B, 1)` for 2-D arrays. N-D tensors flatten the leading two dimensions into a matrix slice so MATLAB-style broadcasting semantics stay intact.",
-    "Row vectors (`1\u00d7N`) times column vectors (`N\u00d71`) evaluate to a scalar; column-by-row produces the familiar outer product (`N\u00d71` \u00b7 `1\u00d7M` \u2192 `N\u00d7M`).",
-    "Scalars multiply every element of the other operand without changing shape; logical inputs are first converted to double precision (`true \u2192 1`, `false \u2192 0`).",
+    "Row vectors (`1×N`) times column vectors (`N×1`) evaluate to a scalar; column-by-row produces the familiar outer product (`N×1` · `1×M` → `N×M`).",
+    "Scalars multiply every element of the other operand without changing shape; logical inputs are first converted to double precision (`true → 1`, `false → 0`).",
     "Complex scalars, matrices, and tensors use full complex arithmetic, including real/complex mixes that promote the result to a complex tensor when necessary.",
-    "Empty matrices follow MATLAB semantics: multiplying an `m\u00d70` by `0\u00d7n` yields an `m\u00d7n` zero matrix and any mismatch in inner dimensions raises `Inner matrix dimensions must agree`.",
+    "Empty matrices follow MATLAB semantics: multiplying an `m×0` by `0×n` yields an `m×n` zero matrix and any mismatch in inner dimensions raises `Inner matrix dimensions must agree`.",
     "When either input is GPU-resident, RunMat consults the active acceleration provider; if its `matmul` hook supports the operands the computation stays on device, otherwise the runtime gathers inputs and executes the CPU fallback transparently."
   ],
   "examples": [
     {
       "description": "Multiply two 2-D matrices",
       "input": "A = [1 2 3; 4 5 6];\nB = [7 8; 9 10; 11 12];\nC = A * B",
-      "output": "C = [58 64; 139 154];"
+      "output": "C = [58 64; 139 154]"
     },
     {
       "description": "Compute a dot product with row and column vectors",
       "input": "u = [1 2 3];\nv = [4; 5; 6];\ndotVal = u * v",
-      "output": "dotVal = 32;"
+      "output": "dotVal = 32"
     },
     {
       "description": "Scale a matrix by a scalar using `mtimes`",
@@ -98,7 +98,7 @@
     },
     {
       "question": "Do vectors need to be explicitly shaped?",
-      "answer": "Like MATLAB, row vectors must be `1\u00d7N` and column vectors `N\u00d71`. Use `.'` or `(:)` to reshape when needed."
+      "answer": "Like MATLAB, row vectors must be `1×N` and column vectors `N×1`. Use `.'` or `(:)` to reshape when needed."
     },
     {
       "question": "Does RunMat use BLAS?",
@@ -139,7 +139,7 @@
     "label": "`crates/runmat-runtime/src/builtins/math/linalg/ops/mtimes.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/mtimes.rs"
   },
-  "gpu_residency": "When both operands already live on the GPU, the provider keeps intermediate buffers and the final result on the device. If RunMat needs to fall back to the CPU it gathers any gpuArray inputs, performs the multiplication, and returns a host tensor\u2014apply `gpuArray` to the result if subsequent steps must stay on the device. Auto-offload heuristics will continue to expand, so explicit residency control is rarely required.",
+  "gpu_residency": "When both operands already live on the GPU, the provider keeps intermediate buffers and the final result on the device. If RunMat needs to fall back to the CPU it gathers any gpuArray inputs, performs the multiplication, and returns a host tensor—apply `gpuArray` to the result if subsequent steps must stay on the device. Auto-offload heuristics will continue to expand, so explicit residency control is rarely required.",
   "gpu_behavior": [
     "1. The native auto-offload planner checks the active acceleration provider. When a backend with a `matmul` hook (for example, the WGPU provider) is registered, RunMat dispatches the operation there, keeping gpuArray inputs and the result resident on the device. 2. Mixed-residency calls automatically upload host tensors to the provider before invoking `matmul`, while pure scalar operands use the provider's `scalar_mul` hook to avoid unnecessary transfers. 3. If no GPU provider is registered or the backend declines the request (unsupported precision, shape, or size), RunMat gathers any gpuArray inputs, executes the CPU fallback in this module, and returns a host tensor. Reapply `gpuArray` if you need the result back on the device."
   ]

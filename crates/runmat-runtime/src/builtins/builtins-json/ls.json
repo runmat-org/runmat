@@ -37,7 +37,7 @@
     "Paths beginning with `~` or `~/` expand to the current user's home directory, matching MATLAB desktop behaviour on every supported platform.",
     "Wildcards follow MATLAB rules: `*` matches any sequence of characters and `?` matches exactly one character. The pattern is evaluated relative to the current folder unless it contains a leading path.",
     "Directory results include the platform-specific file separator (`/` on Unix, `\\` on Windows) so you can quickly distinguish folders from files, and duplicate matches are removed automatically.",
-    "Empty matches return a `0\u00d70` character array rather than raising an error, enabling idioms such as `isempty(ls(\"*.tmp\"))`.",
+    "Empty matches return a `0×0` character array rather than raising an error, enabling idioms such as `isempty(ls(\"*.tmp\"))`.",
     "Only scalar inputs are supported. Multi-row character arrays, multi-element string arrays, numeric values, or logical arguments raise `ls: name must be a character vector or string scalar`, mirroring MATLAB's diagnostics."
   ],
   "examples": [
@@ -80,7 +80,7 @@
   "faqs": [
     {
       "question": "What types can I pass to `ls`?",
-      "answer": "Use character vectors or string scalars. Other types \u2013 including numeric values, logical arrays, or string arrays with multiple elements \u2013 produce an error."
+      "answer": "Use character vectors or string scalars. Other types – including numeric values, logical arrays, or string arrays with multiple elements – produce an error."
     },
     {
       "question": "Does `ls` support wildcard patterns?",
@@ -92,7 +92,7 @@
     },
     {
       "question": "What happens if there are no matches?",
-      "answer": "The function returns a `0\u00d70` character array. You can test for this with `isempty` or by checking `size`."
+      "answer": "The function returns a `0×0` character array. You can test for this with `isempty` or by checking `size`."
     },
     {
       "question": "Can I list the contents of another drive or mounted volume?",

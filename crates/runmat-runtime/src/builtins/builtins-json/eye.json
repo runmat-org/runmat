@@ -35,8 +35,8 @@
   "description": "`eye` creates identity matrices (and higher-dimensional identity tensors) containing ones along the leading diagonal and zeros everywhere else. RunMat mirrors MATLAB semantics across scalar, vector, matrix, and N-D inputs, including `'logical'` and `'like'` options.",
   "behaviors": [
     "`eye()` returns the scalar `1`.",
-    "`eye(n)` returns an `n \u00d7 n` double-precision identity matrix.",
-    "`eye(m, n, ...)` returns an `m \u00d7 n \u00d7 ...` tensor whose first two dimensions form an identity slice that is replicated across all trailing dimensions.",
+    "`eye(n)` returns an `n × n` double-precision identity matrix.",
+    "`eye(m, n, ...)` returns an `m × n × ...` tensor whose first two dimensions form an identity slice that is replicated across all trailing dimensions.",
     "`eye(sz)` accepts a size vector (row or column) and returns an array with `size(I) == sz`.",
     "`eye(A)` matches the size of `A`. Logical, complex, and GPU prototypes preserve their logical/complex/device traits; other inputs default to double precision for MATLAB parity.",
     "`eye(___, 'logical')` returns a logical identity tensor instead of double precision.",
@@ -71,7 +71,7 @@
   "faqs": [
     {
       "question": "When should I use the `eye` function?",
-      "answer": "Use `eye` whenever you need an identity matrix\u2014for example, when solving linear systems, creating initial values for iterative methods, or building block-diagonal structures."
+      "answer": "Use `eye` whenever you need an identity matrix—for example, when solving linear systems, creating initial values for iterative methods, or building block-diagonal structures."
     },
     {
       "question": "Does `eye` produce double arrays by default?",
@@ -83,7 +83,7 @@
     },
     {
       "question": "Can `eye` generate higher-dimensional identity tensors?",
-      "answer": "Yes. Extra dimensions replicate the identity slice. For example, `eye(2, 3, 4)` creates four `2 \u00d7 3` identity matrices stacked along the third dimension."
+      "answer": "Yes. Extra dimensions replicate the identity slice. For example, `eye(2, 3, 4)` creates four `2 × 3` identity matrices stacked along the third dimension."
     },
     {
       "question": "What happens if I request zero-sized dimensions?",
@@ -95,7 +95,7 @@
     },
     {
       "question": "Does `eye(A)` match the class of `A`?",
-      "answer": "For logical, complex, and GPU prototypes, yes\u2014`eye(A)` behaves like `eye(size(A), 'like', A)`. Other numeric inputs produce double precision to mirror MATLAB's default."
+      "answer": "For logical, complex, and GPU prototypes, yes—`eye(A)` behaves like `eye(size(A), 'like', A)`. Other numeric inputs produce double precision to mirror MATLAB's default."
     },
     {
       "question": "How efficient is the GPU path?",

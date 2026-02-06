@@ -38,7 +38,7 @@
     "`csvread(filename, row, col, range)` reads only the rectangle described by `range`. Numeric ranges must contain four elements `[r1 c1 r2 c2]` (zero-based, inclusive). Excel-style ranges use the familiar `\"B2:D6\"` A1 notation, which RunMat converts to zero-based indices internally.",
     "Empty fields (two consecutive commas or a trailing comma) are interpreted as `0`. Tokens such as `NaN`, `Inf`, and `-Inf` are accepted (case-insensitive).",
     "Any other nonnumeric token raises an error that identifies the offending row and column.",
-    "Results are dense double-precision tensors using column-major layout. An empty file produces a `0\u00d70` tensor.",
+    "Results are dense double-precision tensors using column-major layout. An empty file produces a `0×0` tensor.",
     "Paths can contain `~` to reference the home directory; RunMat expands the token before opening the file."
   ],
   "examples": [
@@ -109,7 +109,7 @@
     },
     {
       "question": "What if the file is empty?",
-      "answer": "An empty file results in a `0\u00d70` double tensor. MATLAB behaves the same way."
+      "answer": "An empty file results in a `0×0` double tensor. MATLAB behaves the same way."
     },
     {
       "question": "Does `csvread` change the working directory?",

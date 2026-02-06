@@ -45,12 +45,12 @@
     {
       "description": "Checking if every column is nonzero",
       "input": "A = [1 2 3; 4 5 6];\ncolAllNonZero = all(A)",
-      "output": "colAllNonZero = [1 1 1];"
+      "output": "colAllNonZero = [1 1 1]"
     },
     {
       "description": "Verifying that each row contains only nonzero values",
       "input": "B = [1 0 3; 4 5 6; 0 7 8];\nrowAllNonZero = all(B, 2)",
-      "output": "rowAllNonZero = [0; 1; 0];"
+      "output": "rowAllNonZero = [0; 1; 0]"
     },
     {
       "description": "Collapsing multiple dimensions with `vecdim`",
@@ -60,7 +60,7 @@
     {
       "description": "Reducing all elements to a single logical scalar",
       "input": "D = [2 4; 6 8];\neverythingNonZero = all(D, 'all')",
-      "output": "everythingNonZero = true;"
+      "output": "everythingNonZero = true"
     },
     {
       "description": "Ignoring `NaN` values while testing slices",

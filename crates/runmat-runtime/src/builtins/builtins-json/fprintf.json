@@ -65,7 +65,7 @@
     },
     {
       "description": "Respect File Encoding Constraints",
-      "input": "[fid, msg] = fopen('ascii.txt', 'w', 'native', 'ascii');\nif fid == -1, error(msg); end\ntry\n    fprintf(fid, 'caf\u00e9\\n');\ncatch err\n    disp(err.message);\nend\nfclose(fid)"
+      "input": "[fid, msg] = fopen('ascii.txt', 'w', 'native', 'ascii');\nif fid == -1, error(msg); end\ntry\n    fprintf(fid, 'café\\n');\ncatch err\n    disp(err.message);\nend\nfclose(fid)"
     },
     {
       "description": "Format GPU-Resident Data Transparently",
@@ -144,7 +144,7 @@
     "label": "crates/runmat-runtime/src/builtins/io/filetext/fprintf.rs",
     "url": "crates/runmat-runtime/src/builtins/io/filetext/fprintf.rs"
   },
-  "gpu_residency": "You can pass `gpuArray` inputs directly\u2014`fprintf` gathers them back to host memory before formatting. No provider-specific hooks are required and outputs always reside on the CPU. This mirrors MATLAB, where explicit `gather` calls are unnecessary when writing to files or console streams.",
+  "gpu_residency": "You can pass `gpuArray` inputs directly—`fprintf` gathers them back to host memory before formatting. No provider-specific hooks are required and outputs always reside on the CPU. This mirrors MATLAB, where explicit `gather` calls are unnecessary when writing to files or console streams.",
   "gpu_behavior": [
     "`fprintf` is a residency sink. Any argument containing `gpuArray` data is gathered via the active acceleration provider before formatting. No GPU kernels are launched. When no provider is registered, the builtin raises the same descriptive error used by other sinks (`gather: no acceleration provider registered`)."
   ]

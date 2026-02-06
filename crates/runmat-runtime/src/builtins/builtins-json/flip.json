@@ -50,7 +50,7 @@
     {
       "description": "Reversing a Row Vector",
       "input": "row = 1:5;\nrev = flip(row)",
-      "output": "rev = [5 4 3 2 1];"
+      "output": "rev = [5 4 3 2 1]"
     },
     {
       "description": "Reversing Matrix Rows (Vertical Flip)",
@@ -134,7 +134,7 @@
     "label": "`crates/runmat-runtime/src/builtins/array/shape/flip.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/flip.rs"
   },
-  "gpu_residency": "No additional steps are required. RunMat keeps tensors on the GPU across fused expressions. You can opt-in explicitly with `gpuArray` for MATLAB compatibility, but the auto-offload planner already tracks residency and minimises host/device copies even when a provider falls back to the gather \u2192 flip \u2192 upload pathway.",
+  "gpu_residency": "No additional steps are required. RunMat keeps tensors on the GPU across fused expressions. You can opt-in explicitly with `gpuArray` for MATLAB compatibility, but the auto-offload planner already tracks residency and minimises host/device copies even when a provider falls back to the gather → flip → upload pathway.",
   "gpu_behavior": [
     "When RunMat Accelerate is active, the runtime first checks whether the selected provider implements the `flip` hook (`ProviderHook::Custom(\"flip\")`). Providers may specialise the operation using device-side kernels. If the hook is missing (common for the simple provider or builds without GPU support), RunMat gathers the tensor once, performs the flip on the host, and uploads the result back to the device. The returned value is still a gpuArray, ensuring residency is preserved for downstream fused expressions."
   ]

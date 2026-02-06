@@ -35,10 +35,10 @@
   "description": "`meshgrid` turns one-, two-, or three-dimensional vectors into coordinate arrays that span a rectangular grid, mirroring MathWorks MATLAB behaviour exactly. The first output replicates the `x` vector across rows, the second replicates the `y` vector across columns, and the optional third output expands a `z` vector across pages for volumetric grids.",
   "behaviors": [
     "`meshgrid(x)` is shorthand for `[X, Y] = meshgrid(x, x)`. It produces square 2-D grids.",
-    "`meshgrid(x, y)` yields `X` of size `length(y) \u00d7 length(x)` with rows copied from `x`, and `Y` of the same size with columns copied from `y`.",
-    "`meshgrid(x, y, z)` returns three outputs sized `length(y) \u00d7 length(x) \u00d7 length(z)`, enabling 3-D volume visualisation.",
+    "`meshgrid(x, y)` yields `X` of size `length(y) × length(x)` with rows copied from `x`, and `Y` of the same size with columns copied from `y`.",
+    "`meshgrid(x, y, z)` returns three outputs sized `length(y) × length(x) × length(z)`, enabling 3-D volume visualisation.",
     "Input vectors may be row or column vectors (or even scalars). Empty vectors propagate to empty grids of matching shape.",
-    "Complex inputs produce complex grids where each output shares the input\u2019s complex values.",
+    "Complex inputs produce complex grids where each output shares the input’s complex values.",
     "Supplying GPU vectors (or a `'like', gpuArray(...)` prototype) keeps the outputs on the GPU when an acceleration provider is active. Without provider support, RunMat gathers inputs, materialises the grid on the host, and uploads the result transparently.",
     "`'like', prototype` matches both the residency (host or GPU) and numeric class (real or complex) of the prototype. Integer prototypes are promoted to double precision, consistent with MATLAB."
   ],
@@ -86,7 +86,7 @@
     },
     {
       "question": "What happens with empty vectors?",
-      "answer": "Empty inputs propagate to empty outputs. For example, `meshgrid([], 1:3)` returns `0\u00d73` grids for both outputs."
+      "answer": "Empty inputs propagate to empty outputs. For example, `meshgrid([], 1:3)` returns `0×3` grids for both outputs."
     },
     {
       "question": "Can I use integer vectors?",

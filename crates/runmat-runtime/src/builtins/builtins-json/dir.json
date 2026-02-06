@@ -44,7 +44,7 @@
     "`isdir`: logical flag indicating whether the entry is a directory.",
     "`datenum`: serial date number compatible with MATLAB's `datenum`.",
     "Results are sorted using MATLAB-style ordering (case-insensitive on Windows, case-sensitive on Unix-like systems).",
-    "Empty matches return a `0\u00d71` struct array so idioms like `isempty(dir(\"*.tmp\"))` continue working.",
+    "Empty matches return a `0×1` struct array so idioms like `isempty(dir(\"*.tmp\"))` continue working.",
     "Invalid arguments (numeric, logical, non-scalar string arrays) raise MATLAB-compatible diagnostics."
   ],
   "examples": [

@@ -32,13 +32,13 @@
     "unit": "builtins::math::trigonometry::sin::tests",
     "integration": "builtins::math::trigonometry::sin::tests::sin_gpu_provider_roundtrip"
   },
-  "description": "`y = sin(x)` evaluates the sine of each element in `x`, using radians and preserving MATLAB\u2019s column-major layout and broadcasting rules.",
+  "description": "`y = sin(x)` evaluates the sine of each element in `x`, using radians and preserving MATLAB’s column-major layout and broadcasting rules.",
   "behaviors": [
     "Operates on scalars, vectors, matrices, and N-D tensors with MATLAB-compatible implicit expansion.",
-    "Logical and integer inputs are promoted to double precision before evaluation so that downstream arithmetic matches MATLAB\u2019s numeric tower.",
-    "Complex values use the analytic extension `sin(a + bi) = sin(a)cosh(b) + i\u00b7cos(a)sinh(b)` while propagating `NaN`/`Inf` components independently.",
-    "Character arrays are interpreted through their Unicode code points and return dense double arrays that mirror MATLAB\u2019s behaviour.",
-    "Appending `'like', prototype` mirrors the prototype\u2019s class and residency (host or GPU), re-uploading the result when a device prototype is supplied.",
+    "Logical and integer inputs are promoted to double precision before evaluation so that downstream arithmetic matches MATLAB’s numeric tower.",
+    "Complex values use the analytic extension `sin(a + bi) = sin(a)cosh(b) + i·cos(a)sinh(b)` while propagating `NaN`/`Inf` components independently.",
+    "Character arrays are interpreted through their Unicode code points and return dense double arrays that mirror MATLAB’s behaviour.",
+    "Appending `'like', prototype` mirrors the prototype’s class and residency (host or GPU), re-uploading the result when a device prototype is supplied.",
     "Empty inputs and singleton dimensions are preserved without introducing extraneous allocations."
   ],
   "examples": [
@@ -79,11 +79,11 @@
     },
     {
       "question": "How are logical, integer, or character inputs handled?",
-      "answer": "Logical and integer inputs are promoted to double precision before evaluation, and character arrays are converted to their Unicode code points. The result is always floating-point, matching MATLAB\u2019s behaviour."
+      "answer": "Logical and integer inputs are promoted to double precision before evaluation, and character arrays are converted to their Unicode code points. The result is always floating-point, matching MATLAB’s behaviour."
     },
     {
       "question": "Can the result stay on the GPU automatically?",
-      "answer": "Yes. If your inputs are already on the GPU\u2014or you pass `'like', gpuArray(\u2026)`\u2014RunMat keeps the output on the device. When a fallback is required, the runtime re-uploads the result so downstream consumers still see a GPU tensor."
+      "answer": "Yes. If your inputs are already on the GPU—or you pass `'like', gpuArray(…)`—RunMat keeps the output on the device. When a fallback is required, the runtime re-uploads the result so downstream consumers still see a GPU tensor."
     },
     {
       "question": "What happens if the provider does not implement `unary_sin`?",
@@ -122,8 +122,8 @@
   },
   "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. The fusion planner keeps tensors on the GPU whenever the active provider exposes the necessary kernels (such as `unary_sin`). Manual `gpuArray` / `gather` calls remain supported for MATLAB compatibility or when you need to pin residency before interacting with external code.",
   "gpu_behavior": [
-    "With RunMat Accelerate active, tensors remain on the device and execute through the provider\u2019s `unary_sin` hook (or fused elementwise kernels) without leaving GPU memory.",
-    "If the provider declines the operation\u2014for example, when only CPU precision is available or the operand type is unsupported\u2014RunMat transparently gathers to the host, computes the result, and reapplies the requested residency rules (including `'like'` prototypes).",
-    "Fusion planning keeps neighbouring elementwise operators grouped, reducing host\u2194device transfers even when an intermediate fallback occurs."
+    "With RunMat Accelerate active, tensors remain on the device and execute through the provider’s `unary_sin` hook (or fused elementwise kernels) without leaving GPU memory.",
+    "If the provider declines the operation—for example, when only CPU precision is available or the operand type is unsupported—RunMat transparently gathers to the host, computes the result, and reapplies the requested residency rules (including `'like'` prototypes).",
+    "Fusion planning keeps neighbouring elementwise operators grouped, reducing host↔device transfers even when an intermediate fallback occurs."
   ]
 }

@@ -35,48 +35,48 @@
   "description": "`colon(start, stop)` and `colon(start, step, stop)` build row vectors that mirror the MATLAB colon operator. The function returns an arithmetic progression that begins at `start`, advances by `step` (default `+1` or `-1` depending on the bounds), and stops before exceeding `stop`.",
   "behaviors": [
     "Inputs must be real scalars (numeric, logical, scalar tensors, or single-character arrays). Imaginary parts must be zero.",
-    "`colon(start, stop)` picks an increment of `+1` when `stop \u2265 start`, otherwise `-1`.",
+    "`colon(start, stop)` picks an increment of `+1` when `stop ≥ start`, otherwise `-1`.",
     "`colon(start, step, stop)` uses the supplied increment. A zero increment raises an error.",
-    "When the endpoints are character scalars, the result is a row vector of characters; otherwise a double-precision row vector. Empty progressions are `1\u00d70`.",
+    "When the endpoints are character scalars, the result is a row vector of characters; otherwise a double-precision row vector. Empty progressions are `1×0`.",
     "`stop` is included only when it lies on the arithmetic progression; otherwise the sequence stops at the last admissible value before overshooting.",
     "Arguments may be `gpuArray` scalars; the result stays on the GPU when a provider is active.",
-    "Floating-point tolerance follows MATLAB\u2019s rules, so values that should land on `stop` are preserved even when rounding noise accumulates."
+    "Floating-point tolerance follows MATLAB’s rules, so values that should land on `stop` are preserved even when rounding noise accumulates."
   ],
   "examples": [
     {
       "description": "Generating consecutive integers",
       "input": "x = colon(1, 5)",
-      "output": "x = [1 2 3 4 5];"
+      "output": "x = [1 2 3 4 5]"
     },
     {
       "description": "Counting down without specifying a step",
       "input": "y = colon(5, 1)",
-      "output": "y = [5 4 3 2 1];"
+      "output": "y = [5 4 3 2 1]"
     },
     {
       "description": "Using a custom increment",
       "input": "z = colon(0, 0.5, 2)",
-      "output": "z = [0 0.5 1.0 1.5 2.0];"
+      "output": "z = [0 0.5 1.0 1.5 2.0]"
     },
     {
       "description": "Stopping before overshooting the end point",
       "input": "vals = colon(0, 2, 5)",
-      "output": "vals = [0 2 4];"
+      "output": "vals = [0 2 4]"
     },
     {
       "description": "Working with fractional radians",
       "input": "theta = colon(-pi, pi/4, pi/2)",
-      "output": "theta = [-3.1416 -2.3562 -1.5708 -0.7854 0.0000 0.7854 1.5708];"
+      "output": "theta = [-3.1416 -2.3562 -1.5708 -0.7854 0.0000 0.7854 1.5708]"
     },
     {
       "description": "Keeping sequences on the GPU",
       "input": "g = gpuArray(0);\nh = colon(g, 0.25, 1);\nresult = gather(h)",
-      "output": "result = [0 0.25 0.5 0.75 1.0];"
+      "output": "result = [0 0.25 0.5 0.75 1.0]"
     },
     {
       "description": "Building character ranges",
       "input": "letters = colon('a', 'f');\nodds    = colon('a', 2, 'g')",
-      "output": "letters = 'abcdef';\nodds    = 'aceg';"
+      "output": "letters = 'abcdef';\nodds    = 'aceg'"
     }
   ],
   "faqs": [
@@ -98,7 +98,7 @@
     },
     {
       "question": "Does the function accept logical inputs?",
-      "answer": "Yes. Logical scalars are promoted to doubles (`true \u2192 1`, `false \u2192 0`) before building the sequence."
+      "answer": "Yes. Logical scalars are promoted to doubles (`true → 1`, `false → 0`) before building the sequence."
     },
     {
       "question": "How does this differ from `linspace`?",

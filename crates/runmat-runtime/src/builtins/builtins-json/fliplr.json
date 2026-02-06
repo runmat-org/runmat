@@ -20,7 +20,7 @@
       "bool"
     ],
     "broadcasting": "none",
-    "notes": "Uses the generic flip provider hook with axis=1; falls back to gather\u2192flip\u2192upload when unavailable."
+    "notes": "Uses the generic flip provider hook with axis=1; falls back to gather→flip→upload when unavailable."
   },
   "fusion": {
     "elementwise": false,
@@ -55,7 +55,7 @@
     {
       "description": "Flip the Order of Polynomial Coefficients",
       "input": "c = [1 0 -2 5];\nrev = fliplr(c)",
-      "output": "rev = [5  -2  0  1];"
+      "output": "rev = [5  -2  0  1]"
     },
     {
       "description": "Reverse Each Slice in a 3-D Array Along Columns",
@@ -137,8 +137,8 @@
     "label": "`crates/runmat-runtime/src/builtins/array/shape/fliplr.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/fliplr.rs"
   },
-  "gpu_residency": "You typically do not need to call `gpuArray` directly. RunMat\u2019s auto-offload planner keeps tensors on the GPU when profitable and only gathers when a provider lacks the flip hook. Even in that fallback, `fliplr` uploads the flipped result back to the device so subsequent operations can stay gpu-resident.",
+  "gpu_residency": "You typically do not need to call `gpuArray` directly. RunMat’s auto-offload planner keeps tensors on the GPU when profitable and only gathers when a provider lacks the flip hook. Even in that fallback, `fliplr` uploads the flipped result back to the device so subsequent operations can stay gpu-resident.",
   "gpu_behavior": [
-    "RunMat first tries to execute `fliplr` on the GPU by delegating to the provider\u2019s generic `flip` implementation with axis `1` (zero-based). If the provider does not implement this hook, RunMat transparently gathers the tensor, performs the horizontal flip on the host, and uploads the result back to the device so residency is preserved."
+    "RunMat first tries to execute `fliplr` on the GPU by delegating to the provider’s generic `flip` implementation with axis `1` (zero-based). If the provider does not implement this hook, RunMat transparently gathers the tensor, performs the horizontal flip on the host, and uploads the result back to the device so residency is preserved."
   ]
 }

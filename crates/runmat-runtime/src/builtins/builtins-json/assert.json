@@ -28,7 +28,7 @@
     "unit": "builtins::diagnostics::assert::tests",
     "integration": "builtins::diagnostics::assert::tests::assert_gpu_tensor_passes"
   },
-  "description": "`assert(cond, ...)` aborts execution with a MATLAB-compatible error when `cond` is false or contains any zero/NaN elements. When the condition is true (or an empty array), execution continues with no output. RunMat mirrors MATLAB\u2019s identifier normalisation, message formatting, and argument validation rules.",
+  "description": "`assert(cond, ...)` aborts execution with a MATLAB-compatible error when `cond` is false or contains any zero/NaN elements. When the condition is true (or an empty array), execution continues with no output. RunMat mirrors MATLAB’s identifier normalisation, message formatting, and argument validation rules.",
   "behaviors": [
     "The first argument must be logical or numeric (real or complex). Scalars must evaluate to true; arrays must contain only nonzero, non-NaN elements (complex values fail when both real and imaginary parts are zero or contain NaNs). Empty inputs pass automatically.",
     "`assert(cond)` raises `MATLAB:assertion:failed` with message `Assertion failed.` when `cond` is false.",
@@ -78,7 +78,7 @@
     },
     {
       "question": "How are NaN values treated?",
-      "answer": "Any `NaN` element causes the assertion to fail, matching MATLAB\u2019s requirement that all elements are non-NaN and nonzero."
+      "answer": "Any `NaN` element causes the assertion to fail, matching MATLAB’s requirement that all elements are non-NaN and nonzero."
     },
     {
       "question": "Do empty arrays pass the assertion?",

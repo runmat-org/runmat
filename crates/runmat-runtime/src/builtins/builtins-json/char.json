@@ -32,7 +32,7 @@
   },
   "description": "`char` converts its inputs into a character array. Numeric inputs are interpreted as Unicode code points, text inputs become rows of characters, and cell elements or string scalars are padded with spaces when necessary so every row in the result has the same width.",
   "behaviors": [
-    "`char(x)` with no arguments returns a `0\u00d70` character array.",
+    "`char(x)` with no arguments returns a `0×0` character array.",
     "Numeric arrays must be real integers. The output character array has the same shape (up to two dimensions) as the numeric input.",
     "String scalars and character vectors become individual rows. Rows are padded on the right with spaces to match the longest row.",
     "String arrays with one or two dimensions contribute one row per element using MATLAB's column-major ordering.",

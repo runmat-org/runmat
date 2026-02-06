@@ -33,10 +33,10 @@
     "gpu": "builtins::math::elementwise::double::tests::double_gpu_roundtrip",
     "wgpu": "builtins::math::elementwise::double::tests::double_wgpu_matches_cpu"
   },
-  "description": "`double(X)` promotes scalars, arrays, complex values, logical masks, character data, and gpuArray handles to MATLAB\u2019s default double-precision (`float64`) representation while preserving shapes and column-major layout.",
+  "description": "`double(X)` promotes scalars, arrays, complex values, logical masks, character data, and gpuArray handles to MATLAB’s default double-precision (`float64`) representation while preserving shapes and column-major layout.",
   "behaviors": [
     "Numeric inputs that are already double precision are returned unchanged; single-precision and integer values are promoted without altering shapes.",
-    "Logical inputs become dense double arrays containing `0` and `1`, matching MATLAB\u2019s promotion rules used by arithmetic on logical masks.",
+    "Logical inputs become dense double arrays containing `0` and `1`, matching MATLAB’s promotion rules used by arithmetic on logical masks.",
     "Character arrays are converted to their Unicode code points and returned as doubles (`'A'` becomes `65`).",
     "Complex scalars and arrays remain complex, but both components are stored as double precision.",
     "Empty arrays stay empty, orientation is preserved, and singleton dimensions are untouched.",
@@ -46,37 +46,37 @@
     {
       "description": "Convert integers to double precision",
       "input": "ints = int32([1 2 3]);\ndoubles = double(ints)",
-      "output": "doubles = [1 2 3];"
+      "output": "doubles = [1 2 3]"
     },
     {
       "description": "Promote logical masks for arithmetic",
       "input": "mask = logical([0 1 0 1]);\nweights = double(mask)",
-      "output": "weights = [0 1 0 1];"
+      "output": "weights = [0 1 0 1]"
     },
     {
       "description": "Convert character arrays to Unicode code points",
       "input": "codes = double('RunMat')",
-      "output": "codes = [82 117 110 77 97 116];"
+      "output": "codes = [82 117 110 77 97 116]"
     },
     {
       "description": "Preserve complex numbers while promoting precision",
       "input": "z = [1+2i, 3-4i];\nresult = double(z)",
-      "output": "result = [1+2i  3-4i];"
+      "output": "result = [1+2i  3-4i]"
     },
     {
       "description": "Convert single-precision gpuArray data to double",
       "input": "G = single(gpuArray(1:4));\nH = double(G);\ngather(H)",
-      "output": "ans = [1 2 3 4];"
+      "output": "ans = [1 2 3 4]"
     },
     {
       "description": "Handle double precision with `'like'` prototypes",
       "input": "proto = gpuArray.zeros(1, 1, 'double');\nout = double([pi 0], 'like', proto)",
-      "output": "out =\n  1\u00d72 gpuArray  double\n    3.1416         0"
+      "output": "out =\n  1×2 gpuArray  double\n    3.1416         0"
     },
     {
       "description": "Promote matrices without changing shape",
       "input": "A = single([1.5 2.25; 3.75 4.5]);\nB = double(A)",
-      "output": "B = [1.5 2.25; 3.75 4.5];"
+      "output": "B = [1.5 2.25; 3.75 4.5]"
     }
   ],
   "faqs": [
@@ -90,7 +90,7 @@
     },
     {
       "question": "What happens to NaN or Inf values?",
-      "answer": "IEEE special values survive promotion exactly. NaNs stay NaN, and \u00b1Inf remain \u00b1Inf."
+      "answer": "IEEE special values survive promotion exactly. NaNs stay NaN, and ±Inf remain ±Inf."
     },
     {
       "question": "Can I convert strings with `double`?",
@@ -106,7 +106,7 @@
     },
     {
       "question": "Can I request GPU residency with `'like'`?",
-      "answer": "Yes. Pass `'like', prototype` to mirror the prototype\u2019s residency. Provide a gpuArray prototype to keep the result on the device when the backend supports float64."
+      "answer": "Yes. Pass `'like', prototype` to mirror the prototype’s residency. Provide a gpuArray prototype to keep the result on the device when the backend supports float64."
     },
     {
       "question": "How does `double` interact with complex inputs?",
@@ -137,6 +137,6 @@
   },
   "gpu_residency": "RunMat keeps tensors on the GPU whenever the active provider supports double precision. You only need explicit `gpuArray` / `gather` calls when interfacing with legacy code or when you must force residency. On float32-only providers, `double` returns host data, matching MATLAB systems where the GPU lacks native double support.",
   "gpu_behavior": [
-    "RunMat first inspects the active acceleration provider:\n\n1. **Provider exposes float64 (double) precision:** gpuArray inputs are kept on device. The runtime downloads once only when the provider lacks a native cast primitive, performs the conversion on the host, and uploads the double-precision result back to the device, freeing the original handle. Providers may later add a `unary_double` hook to avoid the temporary host hop. 2. **Provider is float32-only:** gpuArray inputs are gathered to host memory because the backend cannot store double precision. The result is returned as a host tensor; subsequent operations can choose to re-upload if profitable. 3. **No provider registered:** gpuArray values behave like gathered host arrays, mirroring MATLAB\u2019s behaviour when Parallel Computing Toolbox is absent.\n\nAll GPU fallbacks are documented so you know exactly when data leaves the device."
+    "RunMat first inspects the active acceleration provider:\n\n1. **Provider exposes float64 (double) precision:** gpuArray inputs are kept on device. The runtime downloads once only when the provider lacks a native cast primitive, performs the conversion on the host, and uploads the double-precision result back to the device, freeing the original handle. Providers may later add a `unary_double` hook to avoid the temporary host hop. 2. **Provider is float32-only:** gpuArray inputs are gathered to host memory because the backend cannot store double precision. The result is returned as a host tensor; subsequent operations can choose to re-upload if profitable. 3. **No provider registered:** gpuArray values behave like gathered host arrays, mirroring MATLAB’s behaviour when Parallel Computing Toolbox is absent.\n\nAll GPU fallbacks are documented so you know exactly when data leaves the device."
   ]
 }

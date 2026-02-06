@@ -38,7 +38,7 @@
     "Lower form (`chol(A, 'lower')`): Returns a lower-triangular factor `L` such that `L * L' = A`. The two-output variant `[L, p] = chol(A, 'lower')` follows the same failure semantics.",
     "The option `'upper'` is accepted for completeness and matches the default behaviour.",
     "Real logical inputs are promoted to double precision. Complex inputs must be Hermitian positive definite (HPD); the factor preserves complex values.",
-    "Scalar and `0\u00d70` inputs are supported. `chol([])` returns an empty matrix with `p = 0`."
+    "Scalar and `0×0` inputs are supported. `chol([])` returns an empty matrix with `p = 0`."
   ],
   "examples": [
     {
@@ -98,7 +98,7 @@
     },
     {
       "question": "How should I interpret the result when `p > 0`?",
-      "answer": "Only the leading `(p-1)` columns/rows of the factor are valid. The remaining portions are zeros, mirroring MATLAB\u2019s contract."
+      "answer": "Only the leading `(p-1)` columns/rows of the factor are valid. The remaining portions are zeros, mirroring MATLAB’s contract."
     },
     {
       "question": "Does the GPU path return the same flag `p`?",
@@ -110,7 +110,7 @@
     },
     {
       "question": "How should I choose between `chol` and `lu`/`qr`?",
-      "answer": "Use `chol` when the matrix is Hermitian positive definite\u2014its triangular factors are cheaper to compute and exploit symmetry. Use `lu` or `qr` for more general matrices."
+      "answer": "Use `chol` when the matrix is Hermitian positive definite—its triangular factors are cheaper to compute and exploit symmetry. Use `lu` or `qr` for more general matrices."
     }
   ],
   "links": [

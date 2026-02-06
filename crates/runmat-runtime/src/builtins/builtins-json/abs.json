@@ -35,7 +35,7 @@
   "behaviors": [
     "Real scalars, vectors, matrices, and N-D tensors are mapped to their element-wise absolute values.",
     "Complex inputs return the magnitude `sqrt(real(x).^2 + imag(x).^2)`, matching MATLAB semantics.",
-    "Logical inputs are promoted to doubles (`true \u2192 1.0`, `false \u2192 0.0`) before taking the absolute value.",
+    "Logical inputs are promoted to doubles (`true → 1.0`, `false → 0.0`) before taking the absolute value.",
     "Character arrays are converted to double arrays of code point magnitudes, just like MATLAB.",
     "String arrays are not supported and raise an error (`abs` only accepts numeric, logical, or char inputs).",
     "NaN values remain NaN; the function does not change IEEE NaN propagation rules."
@@ -44,17 +44,17 @@
     {
       "description": "Getting the absolute value of a scalar",
       "input": "y = abs(-42)",
-      "output": "y = 42;"
+      "output": "y = 42"
     },
     {
       "description": "Taking the absolute value of a vector",
       "input": "v = [-2 -1 0 1 2];\nresult = abs(v)",
-      "output": "result = [2 1 0 1 2];"
+      "output": "result = [2 1 0 1 2]"
     },
     {
       "description": "Measuring complex magnitudes",
       "input": "z = [3+4i, 1-1i];\nmagnitudes = abs(z)",
-      "output": "magnitudes = [5 1.4142];"
+      "output": "magnitudes = [5 1.4142]"
     },
     {
       "description": "Working with matrices on the GPU",
@@ -63,12 +63,12 @@
     {
       "description": "Using `abs` with logical arrays",
       "input": "mask = logical([0 1 0; 1 0 1]);\nnumeric = abs(mask)",
-      "output": "numeric = [0 1 0; 1 0 1];"
+      "output": "numeric = [0 1 0; 1 0 1]"
     },
     {
       "description": "Converting characters to numeric codes",
       "input": "c = 'ABC';\ncodes = abs(c)",
-      "output": "codes = [65 66 67];"
+      "output": "codes = [65 66 67]"
     },
     {
       "description": "Chaining `abs` inside fused expressions",
