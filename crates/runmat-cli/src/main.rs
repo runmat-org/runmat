@@ -1630,7 +1630,7 @@ fn emit_execution_streams(streams: &[ExecutionStreamEntry]) {
 
 fn finalize_repl_session(
     engine: &RunMatSession,
-    config: &RunMatConfig,
+    _config: &RunMatConfig,
     session_start: Instant,
     repl_run: Option<runmat_core::TelemetryRunGuard>,
 ) {

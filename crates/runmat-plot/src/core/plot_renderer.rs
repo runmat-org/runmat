@@ -1438,7 +1438,12 @@ impl PlotRenderer {
 
             // Dynamic tick marks on the origin triad (major step only). Labels are drawn in the
             // overlay so they stay crisp; these marks provide a depth-correct anchor in the scene.
-            let tick_len = (axis_len * 0.04).clamp(0.01, major_step as f32 * 0.25);
+            // NOTE: `f32::clamp` panics if min > max. When zoomed very far in, `major_step` can
+            // be tiny, making `major_step * 0.25` smaller than a fixed minimum like 0.01.
+            // Keep the min <= max by adapting the minimum to the current step size.
+            let tick_max = (major_step as f32 * 0.25).max(1.0e-6);
+            let tick_min = 0.01_f32.min(tick_max);
+            let tick_len = (axis_len * 0.04).clamp(tick_min, tick_max);
             let max_ticks = 6usize;
             let mut add_ticks = |axis: Vec3, perp: Vec3, col: Vec4| {
                 if major_step <= 0.0 {

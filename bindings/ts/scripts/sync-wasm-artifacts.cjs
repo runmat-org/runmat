@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const fs = require("node:fs/promises");
+const fsSync = require("node:fs");
 const path = require("node:path");
 
 async function copyTree(src, dest) {
@@ -34,6 +35,11 @@ async function copyTree(src, dest) {
 
 async function main() {
   const repoRoot = path.join(__dirname, "..");
+  const snapshotSrcCandidates = [
+    path.join(repoRoot, "artifacts", "stdlib.snapshot"),
+    path.join(repoRoot, "stdlib.snapshot")
+  ];
+  const snapshotSrc = snapshotSrcCandidates.find((candidate) => fsSync.existsSync(candidate));
   const copies = [
     {
       src: path.join(repoRoot, "pkg"),
@@ -48,7 +54,7 @@ async function main() {
       dest: path.join(repoRoot, "dist", "lsp"),
     },
     {
-      src: path.join(repoRoot, "stdlib.snapshot"),
+      src: snapshotSrc ?? snapshotSrcCandidates[0],
       dest: path.join(repoRoot, "dist", "runtime", "stdlib.snapshot"),
       required: true,
     },
