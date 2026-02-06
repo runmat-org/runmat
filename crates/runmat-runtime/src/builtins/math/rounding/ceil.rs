@@ -406,9 +406,7 @@ pub(crate) mod tests {
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
-        CharArray, IntValue, LogicalArray, ResolveContext, Tensor, Type, Value,
-    };
+    use runmat_builtins::{CharArray, IntValue, LogicalArray, ResolveContext, Tensor, Type, Value};
 
     fn ceil_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::ceil_builtin(value, rest))

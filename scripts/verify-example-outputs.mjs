@@ -77,6 +77,19 @@ const results = await runHeadlessChrome({
 });
 
 const resultsById = new Map(results.map((result) => [result.id, result]));
+const debugCase = cases.find(
+    (testCase) => testCase.builtin === "cellfun" && testCase.exampleIndex === 0
+);
+if (debugCase) {
+    const result = resultsById.get(debugCase.id);
+    const info = result && typeof result.debugInfo === "string" ? result.debugInfo : "";
+    const err = result && typeof result.debugError === "string" ? result.debugError : "";
+    const debugLine = `[debug] exist('make_handle','builtin') => "${info}" error="${err}"\n`;
+    console.log(debugLine.trimEnd());
+    try {
+        writeFileSync("/tmp/runmat-debug.txt", debugLine, "utf8");
+    } catch (e) {}
+}
 
 mkdirSync(outputDir, { recursive: true });
 
@@ -356,6 +369,8 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "  let stdoutText = \"\";",
         "  let valueText = \"\";",
         "  let errorText = \"\";",
+        "  let debugInfo = \"\";",
+        "  let debugError = \"\";",
         "  try {",
         "    if (typeof self.process !== \"object\" || !self.process) {",
         "      self.process = { env: {} };",
@@ -416,6 +431,17 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "      try {",
         "        await Promise.resolve(session.execute(\"cd('/')\"));",
         "      } catch (err) {}",
+        "      try {",
+        "        const check = await Promise.resolve(session.execute(\"exist('make_handle','builtin')\"));",
+        "        if (check && typeof check.valueText === \"string\") {",
+        "          debugInfo = check.valueText;",
+        "        }",
+        "        if (check && typeof check.error === \"string\") {",
+        "          debugError = check.error;",
+        "        }",
+        "      } catch (err) {",
+        "        debugError = err instanceof Error ? err.message : String(err);",
+        "      }",
         "      const execResult = await Promise.resolve(session.execute(testCase.input));",
         "      if (execResult && Array.isArray(execResult.stdout)) {",
         "        stdoutText = execResult.stdout.map((entry) => entry.text || \"\").join(\"\\n\");",
@@ -434,7 +460,7 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "  } catch (err) {",
         "    errorText = err instanceof Error ? err.message : String(err);",
         "  }",
-        "  self.postMessage({ id: testCase.id, stdoutText, valueText, errorText });",
+        "  self.postMessage({ id: testCase.id, stdoutText, valueText, errorText, debugInfo, debugError });",
         "};"
     ].join("\n");
     return `<!doctype html>

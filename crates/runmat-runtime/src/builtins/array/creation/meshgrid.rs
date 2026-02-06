@@ -473,7 +473,7 @@ fn axis_from_meshgrid_matrix_real(
         // Extract the first row as the axis vector (length = cols).
         let mut values = Vec::with_capacity(cols);
         for col in 0..cols {
-            let idx = 0 + rows * col;
+            let idx = rows * col;
             values.push((tensor.data[idx], 0.0));
         }
         return Ok(Some(AxisData {
@@ -517,7 +517,7 @@ fn axis_from_meshgrid_matrix_complex(
         }
         let mut values = Vec::with_capacity(cols);
         for col in 0..cols {
-            let idx = 0 + rows * col;
+            let idx = rows * col;
             values.push(tensor.data[idx]);
         }
         let is_complex = values.iter().any(|&(_, im)| !im.is_nan() && im != 0.0);
@@ -546,7 +546,7 @@ fn axis_from_meshgrid_matrix_complex(
 fn matrix_rows_are_identical_real(tensor: &Tensor, rows: usize, cols: usize) -> bool {
     for row in 1..rows {
         for col in 0..cols {
-            let idx0 = 0 + rows * col;
+            let idx0 = rows * col;
             let idx = row + rows * col;
             if tensor.data[idx] != tensor.data[idx0] {
                 return false;
@@ -559,7 +559,7 @@ fn matrix_rows_are_identical_real(tensor: &Tensor, rows: usize, cols: usize) -> 
 fn matrix_cols_are_identical_real(tensor: &Tensor, rows: usize, cols: usize) -> bool {
     for col in 1..cols {
         for row in 0..rows {
-            let idx0 = row + rows * 0;
+            let idx0 = row;
             let idx = row + rows * col;
             if tensor.data[idx] != tensor.data[idx0] {
                 return false;
@@ -572,7 +572,7 @@ fn matrix_cols_are_identical_real(tensor: &Tensor, rows: usize, cols: usize) -> 
 fn matrix_rows_are_identical_complex(tensor: &ComplexTensor, rows: usize, cols: usize) -> bool {
     for row in 1..rows {
         for col in 0..cols {
-            let idx0 = 0 + rows * col;
+            let idx0 = rows * col;
             let idx = row + rows * col;
             if tensor.data[idx] != tensor.data[idx0] {
                 return false;
@@ -585,7 +585,7 @@ fn matrix_rows_are_identical_complex(tensor: &ComplexTensor, rows: usize, cols: 
 fn matrix_cols_are_identical_complex(tensor: &ComplexTensor, rows: usize, cols: usize) -> bool {
     for col in 1..cols {
         for row in 0..rows {
-            let idx0 = row + rows * 0;
+            let idx0 = row;
             let idx = row + rows * col;
             if tensor.data[idx] != tensor.data[idx0] {
                 return false;

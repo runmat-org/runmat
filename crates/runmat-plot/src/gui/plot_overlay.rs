@@ -396,7 +396,9 @@ impl PlotOverlay {
         if rows * cols > 1 {
             let rects = self.compute_subplot_rects(centered_plot_rect, rows, cols, 8.0, 8.0);
             for (i, r) in rects.iter().enumerate() {
-                let cam = plot_renderer.axes_camera(i).unwrap_or_else(|| plot_renderer.camera());
+                let cam = plot_renderer
+                    .axes_camera(i)
+                    .unwrap_or_else(|| plot_renderer.camera());
                 if matches!(
                     cam.projection,
                     crate::core::camera::ProjectionType::Perspective { .. }
@@ -443,53 +445,54 @@ impl PlotOverlay {
                     config.font_scale,
                 );
             } else {
-            // Draw plot frame (2D only; 3D uses the axes cube instead)
-            if plot_renderer.overlay_show_box() {
-                ui.painter().rect_stroke(
-                    centered_plot_rect,
-                    0.0,
-                    Stroke::new(1.5, Color32::from_gray(180)),
-                );
-            }
-            // Draw grid if enabled
-            if config.show_grid {
-                self.draw_grid(ui, centered_plot_rect, plot_renderer, None);
-            }
+                // Draw plot frame (2D only; 3D uses the axes cube instead)
+                if plot_renderer.overlay_show_box() {
+                    ui.painter().rect_stroke(
+                        centered_plot_rect,
+                        0.0,
+                        Stroke::new(1.5, Color32::from_gray(180)),
+                    );
+                }
+                // Draw grid if enabled
+                if config.show_grid {
+                    self.draw_grid(ui, centered_plot_rect, plot_renderer, None);
+                }
 
-            // Draw axes if enabled
-            if config.show_axes {
-                self.draw_axes(ui, centered_plot_rect, plot_renderer, config, None);
-                // Emphasize zero baseline if within data range
-                if let Some((x_min, x_max, y_min, y_max)) = plot_renderer
-                    .view_bounds()
-                    .or_else(|| plot_renderer.data_bounds())
-                {
-                    let zero_stroke = Stroke::new(1.5, Color32::from_gray(200));
-                    if y_min < 0.0 && y_max > 0.0 {
-                        let y_screen = centered_plot_rect.max.y
-                            - ((0.0 - y_min) / (y_max - y_min)) as f32
-                                * centered_plot_rect.height();
-                        ui.painter().line_segment(
-                            [
-                                Pos2::new(centered_plot_rect.min.x, y_screen),
-                                Pos2::new(centered_plot_rect.max.x, y_screen),
-                            ],
-                            zero_stroke,
-                        );
-                    }
-                    if x_min < 0.0 && x_max > 0.0 {
-                        let x_screen = centered_plot_rect.min.x
-                            + ((0.0 - x_min) / (x_max - x_min)) as f32 * centered_plot_rect.width();
-                        ui.painter().line_segment(
-                            [
-                                Pos2::new(x_screen, centered_plot_rect.min.y),
-                                Pos2::new(x_screen, centered_plot_rect.max.y),
-                            ],
-                            zero_stroke,
-                        );
+                // Draw axes if enabled
+                if config.show_axes {
+                    self.draw_axes(ui, centered_plot_rect, plot_renderer, config, None);
+                    // Emphasize zero baseline if within data range
+                    if let Some((x_min, x_max, y_min, y_max)) = plot_renderer
+                        .view_bounds()
+                        .or_else(|| plot_renderer.data_bounds())
+                    {
+                        let zero_stroke = Stroke::new(1.5, Color32::from_gray(200));
+                        if y_min < 0.0 && y_max > 0.0 {
+                            let y_screen = centered_plot_rect.max.y
+                                - ((0.0 - y_min) / (y_max - y_min)) as f32
+                                    * centered_plot_rect.height();
+                            ui.painter().line_segment(
+                                [
+                                    Pos2::new(centered_plot_rect.min.x, y_screen),
+                                    Pos2::new(centered_plot_rect.max.x, y_screen),
+                                ],
+                                zero_stroke,
+                            );
+                        }
+                        if x_min < 0.0 && x_max > 0.0 {
+                            let x_screen = centered_plot_rect.min.x
+                                + ((0.0 - x_min) / (x_max - x_min)) as f32
+                                    * centered_plot_rect.width();
+                            ui.painter().line_segment(
+                                [
+                                    Pos2::new(x_screen, centered_plot_rect.min.y),
+                                    Pos2::new(x_screen, centered_plot_rect.max.y),
+                                ],
+                                zero_stroke,
+                            );
+                        }
                     }
                 }
-            }
             }
         }
 
@@ -1064,7 +1067,11 @@ impl PlotOverlay {
             a.z_sort = z;
             a.dir_world = Vec3::new(x, y, z);
         }
-        axes.sort_by(|a, b| a.z_sort.partial_cmp(&b.z_sort).unwrap_or(std::cmp::Ordering::Equal));
+        axes.sort_by(|a, b| {
+            a.z_sort
+                .partial_cmp(&b.z_sort)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         let painter = ui.painter();
         // Subtle background to keep gizmo readable over bright surfaces.
@@ -1105,7 +1112,13 @@ impl PlotOverlay {
 
             // Label near arrow tip
             let label_pos = end + d * (10.0 * scale);
-            painter.text(label_pos, Align2::CENTER_CENTER, a.label, font.clone(), a.color);
+            painter.text(
+                label_pos,
+                Align2::CENTER_CENTER,
+                a.label,
+                font.clone(),
+                a.color,
+            );
         }
     }
 

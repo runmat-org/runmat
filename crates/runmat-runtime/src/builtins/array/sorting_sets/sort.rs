@@ -434,56 +434,54 @@ impl SortArgs {
                     }
                 }
             }
-            if let Some(token) = tokens.get(i) {
-                if let ArgToken::String(text) = token {
-                    match text.as_str() {
-                        "ascend" | "ascending" => {
-                            args.direction = SortDirection::Ascend;
-                            i += 1;
-                            continue;
-                        }
-                        "descend" | "descending" => {
-                            args.direction = SortDirection::Descend;
-                            i += 1;
-                            continue;
-                        }
-                        "comparisonmethod" => {
-                            i += 1;
-                            if i >= rest.len() {
-                                return Err(sort_error(
-                                    "sort: expected a value for 'ComparisonMethod'",
-                                ));
-                            }
-                            let value = match tokens.get(i) {
-                                Some(ArgToken::String(value)) => value.as_str(),
-                                _ => {
-                                    return Err(sort_error(
-                                        "sort: 'ComparisonMethod' requires a string value",
-                                    ))
-                                }
-                            };
-                            args.comparison = match value {
-                                "auto" => ComparisonMethod::Auto,
-                                "real" => ComparisonMethod::Real,
-                                "abs" | "magnitude" => ComparisonMethod::Abs,
-                                other => {
-                                    return Err(sort_error(format!(
-                                        "sort: unsupported ComparisonMethod '{other}'"
-                                    ))
-                                    .into())
-                                }
-                            };
-                            i += 1;
-                            continue;
-                        }
-                        "missingplacement" => {
-                            return Err(sort_error(
-                                "sort: the 'MissingPlacement' option is not supported yet",
-                            )
-                            .into());
-                        }
-                        _ => {}
+            if let Some(ArgToken::String(text)) = tokens.get(i) {
+                match text.as_str() {
+                    "ascend" | "ascending" => {
+                        args.direction = SortDirection::Ascend;
+                        i += 1;
+                        continue;
                     }
+                    "descend" | "descending" => {
+                        args.direction = SortDirection::Descend;
+                        i += 1;
+                        continue;
+                    }
+                    "comparisonmethod" => {
+                        i += 1;
+                        if i >= rest.len() {
+                            return Err(sort_error(
+                                "sort: expected a value for 'ComparisonMethod'",
+                            ));
+                        }
+                        let value = match tokens.get(i) {
+                            Some(ArgToken::String(value)) => value.as_str(),
+                            _ => {
+                                return Err(sort_error(
+                                    "sort: 'ComparisonMethod' requires a string value",
+                                ))
+                            }
+                        };
+                        args.comparison = match value {
+                            "auto" => ComparisonMethod::Auto,
+                            "real" => ComparisonMethod::Real,
+                            "abs" | "magnitude" => ComparisonMethod::Abs,
+                            other => {
+                                return Err(sort_error(format!(
+                                    "sort: unsupported ComparisonMethod '{other}'"
+                                ))
+                                .into())
+                            }
+                        };
+                        i += 1;
+                        continue;
+                    }
+                    "missingplacement" => {
+                        return Err(sort_error(
+                            "sort: the 'MissingPlacement' option is not supported yet",
+                        )
+                        .into());
+                    }
+                    _ => {}
                 }
             }
             if let Some(keyword) = tensor::value_to_string(&rest[i]) {

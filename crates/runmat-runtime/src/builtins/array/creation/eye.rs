@@ -4,12 +4,12 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use runmat_builtins::ResolveContext;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::eye")]

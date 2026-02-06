@@ -8,8 +8,8 @@
 #![cfg(all(target_arch = "wasm32", feature = "web"))]
 
 use crate::context::SharedWgpuContext;
-use crate::core::{camera::MouseButton as CameraMouseButton, CameraController, PlotEvent};
 use crate::core::plot_renderer::{PlotRenderConfig, PlotRenderer, RenderTarget};
+use crate::core::{camera::MouseButton as CameraMouseButton, CameraController, PlotEvent};
 use crate::plots::Figure;
 use log::{debug, warn};
 use std::sync::Arc;
@@ -332,17 +332,21 @@ impl WebRenderer {
                     .last_axes_viewports_px
                     .get(axes_index)
                     .copied()
-                    .unwrap_or((0, 0, self.render_config.width.max(1), self.render_config.height.max(1)));
+                    .unwrap_or((
+                        0,
+                        0,
+                        self.render_config.width.max(1),
+                        self.render_config.height.max(1),
+                    ));
                 let viewport = (vw.max(1), vh.max(1));
                 if let Some(cam) = self.plot_renderer.axes_camera_mut(axes_index) {
-                    self.camera_controller
-                        .mouse_move(
-                            glam::Vec2::new(position.x - (vx as f32), position.y - (vy as f32)),
-                            delta,
-                            viewport,
-                            modifiers,
-                            cam,
-                        );
+                    self.camera_controller.mouse_move(
+                        glam::Vec2::new(position.x - (vx as f32), position.y - (vy as f32)),
+                        delta,
+                        viewport,
+                        modifiers,
+                        cam,
+                    );
                 }
                 self.last_pointer_position = position;
                 self.plot_renderer.note_camera_interaction();
@@ -386,10 +390,20 @@ impl WebRenderer {
                         .last_axes_viewports_px
                         .get(axes_index)
                         .copied()
-                        .unwrap_or((0, 0, self.render_config.width.max(1), self.render_config.height.max(1)));
+                        .unwrap_or((
+                            0,
+                            0,
+                            self.render_config.width.max(1),
+                            self.render_config.height.max(1),
+                        ));
                     let local = glam::Vec2::new(position.x - (vx as f32), position.y - (vy as f32));
-                    self.camera_controller
-                        .mouse_wheel(delta, local, (vw.max(1), vh.max(1)), modifiers, cam);
+                    self.camera_controller.mouse_wheel(
+                        delta,
+                        local,
+                        (vw.max(1), vh.max(1)),
+                        modifiers,
+                        cam,
+                    );
                 }
                 self.last_pointer_position = position;
                 self.plot_renderer.note_camera_interaction();

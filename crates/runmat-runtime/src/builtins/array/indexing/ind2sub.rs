@@ -4,9 +4,11 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
-use super::common::{build_strides, dims_from_tokens, materialize_value, parse_dims, total_elements};
-use crate::builtins::common::arg_tokens::tokens_from_context;
+use super::common::{
+    build_strides, dims_from_tokens, materialize_value, parse_dims, total_elements,
+};
 use crate::builtins::array::type_resolvers::size_vector_len;
+use crate::builtins::common::arg_tokens::tokens_from_context;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,

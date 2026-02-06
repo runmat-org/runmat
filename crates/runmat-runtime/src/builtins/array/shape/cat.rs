@@ -1,6 +1,6 @@
 //! MATLAB-compatible `cat` builtin with GPU-aware semantics for RunMat.
 
-use crate::builtins::common::arg_tokens::{ArgToken, tokens_from_context, tokens_from_values};
+use crate::builtins::common::arg_tokens::{tokens_from_context, tokens_from_values, ArgToken};
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -1002,15 +1002,15 @@ pub(crate) mod tests {
     fn cat_type_prefers_cell() {
         let out = cat_type(
             &[
-            Type::Int,
-            Type::Cell {
-                element_type: Some(Box::new(Type::Num)),
-                length: None,
-            },
-            Type::Cell {
-                element_type: Some(Box::new(Type::Num)),
-                length: None,
-            },
+                Type::Int,
+                Type::Cell {
+                    element_type: Some(Box::new(Type::Num)),
+                    length: None,
+                },
+                Type::Cell {
+                    element_type: Some(Box::new(Type::Num)),
+                    length: None,
+                },
             ],
             &ResolveContext::new(Vec::new()),
         );

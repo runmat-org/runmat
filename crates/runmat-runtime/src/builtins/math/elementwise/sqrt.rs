@@ -259,9 +259,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        CharArray, IntValue, LogicalArray, ResolveContext, Tensor, Type,
-    };
+    use runmat_builtins::{CharArray, IntValue, LogicalArray, ResolveContext, Tensor, Type};
 
     fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::sqrt_builtin(value))

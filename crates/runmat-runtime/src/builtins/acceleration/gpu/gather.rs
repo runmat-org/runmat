@@ -1,10 +1,10 @@
 //! MATLAB-compatible `gather` builtin with provider-aware semantics.
 
+use crate::builtins::acceleration::gpu::type_resolvers::gather_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::acceleration::gpu::type_resolvers::gather_type;
 use crate::{build_runtime_error, make_cell, RuntimeError};
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;

@@ -113,33 +113,33 @@ fn parse_union_option(
     seen_order: &mut Option<UnionOrder>,
     lowered: &str,
 ) -> crate::BuiltinResult<()> {
-        match lowered {
-            "rows" => opts.rows = true,
-            "sorted" => {
-                if let Some(prev) = seen_order {
-                    if *prev != UnionOrder::Sorted {
-                        return Err(union_error("union: cannot combine 'sorted' with 'stable'"));
-                    }
+    match lowered {
+        "rows" => opts.rows = true,
+        "sorted" => {
+            if let Some(prev) = seen_order {
+                if *prev != UnionOrder::Sorted {
+                    return Err(union_error("union: cannot combine 'sorted' with 'stable'"));
                 }
-                *seen_order = Some(UnionOrder::Sorted);
-                opts.order = UnionOrder::Sorted;
             }
-            "stable" => {
-                if let Some(prev) = seen_order {
-                    if *prev != UnionOrder::Stable {
-                        return Err(union_error("union: cannot combine 'sorted' with 'stable'"));
-                    }
-                }
-                *seen_order = Some(UnionOrder::Stable);
-                opts.order = UnionOrder::Stable;
-            }
-            "legacy" | "r2012a" => {
-                return Err(union_error(
-                    "union: the 'legacy' behaviour is not supported",
-                ));
-            }
-            other => return Err(union_error(format!("union: unrecognised option '{other}'"))),
+            *seen_order = Some(UnionOrder::Sorted);
+            opts.order = UnionOrder::Sorted;
         }
+        "stable" => {
+            if let Some(prev) = seen_order {
+                if *prev != UnionOrder::Stable {
+                    return Err(union_error("union: cannot combine 'sorted' with 'stable'"));
+                }
+            }
+            *seen_order = Some(UnionOrder::Stable);
+            opts.order = UnionOrder::Stable;
+        }
+        "legacy" | "r2012a" => {
+            return Err(union_error(
+                "union: the 'legacy' behaviour is not supported",
+            ));
+        }
+        other => return Err(union_error(format!("union: unrecognised option '{other}'"))),
+    }
     Ok(())
 }
 

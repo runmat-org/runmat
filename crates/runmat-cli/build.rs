@@ -22,7 +22,8 @@ fn normalize_responses_for_progenitor(responses: &mut openapiv3::Responses) {
     if success_keys.len() <= 1 {
         // Still normalize the single response content types if possible.
         if let Some(code) = success_keys.pop() {
-            if let Some(openapiv3::ReferenceOr::Item(response)) = responses.responses.get_mut(&code) {
+            if let Some(openapiv3::ReferenceOr::Item(response)) = responses.responses.get_mut(&code)
+            {
                 if response.content.len() > 1 {
                     if let Some(mt) = response.content.shift_remove("application/json") {
                         response.content.clear();
@@ -41,8 +42,12 @@ fn normalize_responses_for_progenitor(responses: &mut openapiv3::Responses) {
 
     success_keys.sort_by(|a, b| match (a, b) {
         (openapiv3::StatusCode::Code(x), openapiv3::StatusCode::Code(y)) => x.cmp(y),
-        (openapiv3::StatusCode::Code(_), openapiv3::StatusCode::Range(_)) => std::cmp::Ordering::Less,
-        (openapiv3::StatusCode::Range(_), openapiv3::StatusCode::Code(_)) => std::cmp::Ordering::Greater,
+        (openapiv3::StatusCode::Code(_), openapiv3::StatusCode::Range(_)) => {
+            std::cmp::Ordering::Less
+        }
+        (openapiv3::StatusCode::Range(_), openapiv3::StatusCode::Code(_)) => {
+            std::cmp::Ordering::Greater
+        }
         (openapiv3::StatusCode::Range(x), openapiv3::StatusCode::Range(y)) => x.cmp(y),
     });
 
@@ -108,7 +113,8 @@ fn main() {
     println!("cargo:rerun-if-changed={}", spec_path.display());
 
     let spec_text = fs::read_to_string(&spec_path).expect("read openapi spec");
-    let mut spec: openapiv3::OpenAPI = serde_yaml::from_str(&spec_text).expect("parse openapi spec");
+    let mut spec: openapiv3::OpenAPI =
+        serde_yaml::from_str(&spec_text).expect("parse openapi spec");
     normalize_openapi_for_progenitor(&mut spec);
 
     let settings = progenitor::GenerationSettings::default();

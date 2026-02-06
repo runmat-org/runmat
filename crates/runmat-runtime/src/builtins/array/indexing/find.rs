@@ -4,13 +4,13 @@ use runmat_accelerate_api::{HostTensorView, ProviderFindResult};
 use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::array::type_resolvers::column_vector_type;
+use crate::builtins::common::arg_tokens::ArgToken;
+use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::arg_tokens::ArgToken;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 
@@ -68,7 +68,10 @@ fn parse_find_tokens(tokens: &[ArgToken]) -> crate::BuiltinResult<FindOptions> {
             let limit = token_to_limit(&tokens[0])?;
             let direction = token_to_direction(&tokens[1])?
                 .ok_or_else(|| find_error("find: third argument must be 'first' or 'last'"))?;
-            Ok(FindOptions { limit: Some(limit), direction })
+            Ok(FindOptions {
+                limit: Some(limit),
+                direction,
+            })
         }
         _ => Err(find_error("find: too many input arguments")),
     }
@@ -275,10 +278,10 @@ impl FindEval {
 }
 
 async fn parse_options(args: &[Value]) -> crate::BuiltinResult<FindOptions> {
-    parse_find_tokens(&crate::builtins::common::arg_tokens::tokens_from_values(args))
+    parse_find_tokens(&crate::builtins::common::arg_tokens::tokens_from_values(
+        args,
+    ))
 }
-
-
 
 fn parse_limit_scalar(value: f64) -> crate::BuiltinResult<usize> {
     if !value.is_finite() {

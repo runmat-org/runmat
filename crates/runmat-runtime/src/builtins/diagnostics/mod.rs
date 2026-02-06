@@ -2,5 +2,5 @@
 
 pub mod assert;
 pub mod error;
-pub mod warning;
 pub(crate) mod type_resolvers;
+pub mod warning;

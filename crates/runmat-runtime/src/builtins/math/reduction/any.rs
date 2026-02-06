@@ -11,8 +11,8 @@ use crate::builtins::common::{
     tensor,
 };
 use crate::builtins::math::reduction::type_resolvers::reduce_logical_type;
-use runmat_builtins::ResolveContext;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
+use runmat_builtins::ResolveContext;
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 

@@ -8,8 +8,8 @@ use glam::{Mat4, Vec3, Vec4};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
-use crate::{core::scene::GpuVertexBuffer, gpu::shaders};
 use crate::core::DepthMode;
+use crate::{core::scene::GpuVertexBuffer, gpu::shaders};
 
 /// Uniforms for the procedural 3D grid plane.
 #[repr(C)]

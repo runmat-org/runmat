@@ -123,41 +123,41 @@ fn parse_setdiff_option(
     seen_order: &mut Option<SetdiffOrder>,
     lowered: &str,
 ) -> crate::BuiltinResult<()> {
-        match lowered {
-            "rows" => opts.rows = true,
-            "sorted" => {
-                if let Some(prev) = seen_order {
-                    if *prev != SetdiffOrder::Sorted {
-                        return Err(setdiff_error(
-                            "setdiff: cannot combine 'sorted' with 'stable'",
-                        ));
-                    }
+    match lowered {
+        "rows" => opts.rows = true,
+        "sorted" => {
+            if let Some(prev) = seen_order {
+                if *prev != SetdiffOrder::Sorted {
+                    return Err(setdiff_error(
+                        "setdiff: cannot combine 'sorted' with 'stable'",
+                    ));
                 }
-                *seen_order = Some(SetdiffOrder::Sorted);
-                opts.order = SetdiffOrder::Sorted;
             }
-            "stable" => {
-                if let Some(prev) = seen_order {
-                    if *prev != SetdiffOrder::Stable {
-                        return Err(setdiff_error(
-                            "setdiff: cannot combine 'sorted' with 'stable'",
-                        ));
-                    }
-                }
-                *seen_order = Some(SetdiffOrder::Stable);
-                opts.order = SetdiffOrder::Stable;
-            }
-            "legacy" | "r2012a" => {
-                return Err(setdiff_error(
-                    "setdiff: the 'legacy' behaviour is not supported",
-                ));
-            }
-            other => {
-                return Err(setdiff_error(format!(
-                    "setdiff: unrecognised option '{other}'"
-                )))
-            }
+            *seen_order = Some(SetdiffOrder::Sorted);
+            opts.order = SetdiffOrder::Sorted;
         }
+        "stable" => {
+            if let Some(prev) = seen_order {
+                if *prev != SetdiffOrder::Stable {
+                    return Err(setdiff_error(
+                        "setdiff: cannot combine 'sorted' with 'stable'",
+                    ));
+                }
+            }
+            *seen_order = Some(SetdiffOrder::Stable);
+            opts.order = SetdiffOrder::Stable;
+        }
+        "legacy" | "r2012a" => {
+            return Err(setdiff_error(
+                "setdiff: the 'legacy' behaviour is not supported",
+            ));
+        }
+        other => {
+            return Err(setdiff_error(format!(
+                "setdiff: unrecognised option '{other}'"
+            )))
+        }
+    }
     Ok(())
 }
 

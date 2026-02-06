@@ -199,9 +199,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type,
-    };
+    use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type};
 
     fn error_message(error: crate::RuntimeError) -> String {
         error.message().to_string()

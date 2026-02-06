@@ -217,7 +217,10 @@ struct PlotRegistryGuard<'a> {
 
 impl<'a> PlotRegistryGuard<'a> {
     #[cfg(test)]
-    fn new(inner: RegistryBackendGuard<'a>, _test_lock: std::sync::MutexGuard<'static, ()>) -> Self {
+    fn new(
+        inner: RegistryBackendGuard<'a>,
+        _test_lock: std::sync::MutexGuard<'static, ()>,
+    ) -> Self {
         Self { inner, _test_lock }
     }
 
@@ -419,10 +422,8 @@ pub fn set_colormap(colormap: ColorMap) {
         // Propagate to existing surface plots (matches expected MATLAB semantics).
         let plot_count = state.figure.len();
         for idx in 0..plot_count {
-            if let Some(plot) = state.figure.get_plot_mut(idx) {
-                if let PlotElement::Surface(surface) = plot {
-                    *surface = surface.clone().with_colormap(colormap);
-                }
+            if let Some(PlotElement::Surface(surface)) = state.figure.get_plot_mut(idx) {
+                *surface = surface.clone().with_colormap(colormap);
             }
         }
         state.revision = state.revision.wrapping_add(1);
@@ -438,10 +439,8 @@ pub fn set_surface_shading(mode: ShadingMode) {
         let state = get_state_mut(&mut reg, handle);
         let plot_count = state.figure.len();
         for idx in 0..plot_count {
-            if let Some(plot) = state.figure.get_plot_mut(idx) {
-                if let PlotElement::Surface(surface) = plot {
-                    *surface = surface.clone().with_shading(mode);
-                }
+            if let Some(PlotElement::Surface(surface)) = state.figure.get_plot_mut(idx) {
+                *surface = surface.clone().with_shading(mode);
             }
         }
         state.revision = state.revision.wrapping_add(1);

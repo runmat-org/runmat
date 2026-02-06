@@ -43,7 +43,7 @@ fn matrix_rows_are_identical(tensor: &Tensor) -> bool {
     }
     for row in 1..rows {
         for col in 0..cols {
-            let idx0 = 0 + rows * col;
+            let idx0 = rows * col;
             let idx = row + rows * col;
             if tensor.data[idx] != tensor.data[idx0] {
                 return false;
@@ -61,7 +61,7 @@ fn matrix_cols_are_identical(tensor: &Tensor) -> bool {
     }
     for col in 1..cols {
         for row in 0..rows {
-            let idx0 = row + rows * 0;
+            let idx0 = row;
             let idx = row + rows * col;
             if tensor.data[idx] != tensor.data[idx0] {
                 return false;
@@ -95,7 +95,7 @@ fn extract_meshgrid_axes_from_xy_matrices(
     // Extract x vector (length = cols) from the first row of X.
     let mut x_vec = Vec::with_capacity(cols);
     for col in 0..cols {
-        let idx = 0 + rows * col;
+        let idx = rows * col;
         x_vec.push(x.data[idx]);
     }
     // Extract y vector (length = rows) from the first column of Y.

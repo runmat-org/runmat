@@ -1015,7 +1015,7 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
         if let Some(result) = crate::user_functions::try_call_user_function(name, args).await {
             return result;
         }
-        Ok(crate::call_builtin_async(name, args).await?)
+        crate::call_builtin_async(name, args).await
     }
 
     match f {

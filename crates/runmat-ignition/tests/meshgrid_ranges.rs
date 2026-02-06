@@ -49,17 +49,15 @@ fn meshgrid_accepts_precomputed_ranges() {
     let hir = lower(&ast).unwrap();
     // Sanity-check the lowering: we should be calling the meshgrid builtin with args [Var(a), Var(b)].
     match hir.body.last().expect("expected statements") {
-        runmat_hir::HirStmt::MultiAssign(_vars, expr, _suppressed, _) => {
-            match &expr.kind {
-                runmat_hir::HirExprKind::FuncCall(name, args) => {
-                    assert_eq!(name, "meshgrid");
-                    assert_eq!(args.len(), 2);
-                    assert!(matches!(args[0].kind, runmat_hir::HirExprKind::Var(_)));
-                    assert!(matches!(args[1].kind, runmat_hir::HirExprKind::Var(_)));
-                }
-                other => panic!("expected FuncCall(meshgrid, ...), got {other:?}"),
+        runmat_hir::HirStmt::MultiAssign(_vars, expr, _suppressed, _) => match &expr.kind {
+            runmat_hir::HirExprKind::FuncCall(name, args) => {
+                assert_eq!(name, "meshgrid");
+                assert_eq!(args.len(), 2);
+                assert!(matches!(args[0].kind, runmat_hir::HirExprKind::Var(_)));
+                assert!(matches!(args[1].kind, runmat_hir::HirExprKind::Var(_)));
             }
-        }
+            other => panic!("expected FuncCall(meshgrid, ...), got {other:?}"),
+        },
         other => panic!("expected final stmt to be MultiAssign, got {other:?}"),
     }
     let vars = execute(&hir).unwrap();
@@ -97,10 +95,9 @@ fn two_colon_ranges_remain_vectors() {
 #[test]
 fn meshgrid_failure_does_not_mutate_inputs() {
     // Even if meshgrid errors, the input vectors should remain vectors.
-    let ast = parse(
-        "a = -2:0.08:2; b = -2:0.08:2; try; [X, Y] = meshgrid(a, b); catch e; end; A = a;",
-    )
-    .unwrap();
+    let ast =
+        parse("a = -2:0.08:2; b = -2:0.08:2; try; [X, Y] = meshgrid(a, b); catch e; end; A = a;")
+            .unwrap();
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     // A is assigned last; it should be a row vector.
@@ -110,4 +107,3 @@ fn meshgrid_failure_does_not_mutate_inputs() {
         other => panic!("expected A to be a tensor, got {other:?}"),
     }
 }
-

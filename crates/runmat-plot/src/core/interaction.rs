@@ -40,9 +40,16 @@ pub enum PlotEvent {
         delta: Vec2,
         modifiers: Modifiers,
     },
-    KeyPress { key: KeyCode },
-    KeyRelease { key: KeyCode },
-    Resize { width: u32, height: u32 },
+    KeyPress {
+        key: KeyCode,
+    },
+    KeyRelease {
+        key: KeyCode,
+    },
+    Resize {
+        width: u32,
+        height: u32,
+    },
 }
 
 /// Mouse button enumeration

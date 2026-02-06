@@ -41,5 +41,19 @@ pub async fn try_call_user_function(
 ) -> Option<Result<Value, RuntimeError>> {
     let invoker = USER_FUNCTION_INVOKER.with(|slot| slot.borrow().clone());
     let invoker = invoker?;
-    Some(invoker(name, args).await)
+    let result = invoker(name, args).await;
+    match result {
+        Err(err)
+            if err
+                .identifier()
+                .map(|id| id.ends_with("UndefinedFunction"))
+                .unwrap_or(false)
+                && err
+                    .message()
+                    .contains(&format!("Undefined function: {name}")) =>
+        {
+            None
+        }
+        other => Some(other),
+    }
 }
