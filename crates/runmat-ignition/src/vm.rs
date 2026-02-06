@@ -553,6 +553,52 @@ async fn index_scalar_from_value(value: &Value) -> VmResult<Option<i64>> {
     Ok(index_scalar_from_host_value(value))
 }
 
+async fn scalar_index_from_numeric(value: &Value) -> VmResult<Option<usize>> {
+    if matches!(value, Value::Bool(_)) {
+        return Ok(None);
+    }
+    if let Some(idx_val) = index_scalar_from_value(value).await? {
+        if idx_val < 1 {
+            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+        }
+        return Ok(Some(idx_val as usize));
+    }
+    Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+    use runmat_builtins::IntValue;
+
+    #[test]
+    fn scalar_index_from_numeric_accepts_positive_ints() {
+        let value = Value::Int(IntValue::I32(2));
+        let result = block_on(scalar_index_from_numeric(&value))
+            .expect("expected Ok result")
+            .expect("expected Some index");
+        assert_eq!(result, 2);
+    }
+
+    #[test]
+    fn scalar_index_from_numeric_rejects_zero() {
+        let value = Value::Int(IntValue::I32(0));
+        let err = block_on(scalar_index_from_numeric(&value)).expect_err("should error");
+        assert_eq!(err.identifier(), Some("MATLAB:IndexOutOfBounds"));
+    }
+
+    #[test]
+    fn selector_from_value_dim_accepts_ints() {
+        let value = Value::Int(IntValue::I32(3));
+        let selector = block_on(selector_from_value_dim(&value, 5)).expect("selector");
+        match selector {
+            SliceSelector::Scalar(idx) => assert_eq!(idx, 3),
+            _ => panic!("expected scalar selector variant"),
+        }
+    }
+}
+
 async fn indices_from_value_linear(value: &Value, total_len: usize) -> VmResult<Vec<usize>> {
     if let Some(idx_val) = index_scalar_from_value(value).await? {
         if idx_val < 1 || (idx_val as usize) > total_len {
@@ -6103,51 +6149,45 @@ async fn run_interpreter_inner(
                             } else if is_end {
                                 idxs = vec![total];
                             } else if let Some(v) = numeric.first() {
-                                match v {
-                                    Value::Num(n) => {
-                                        let i = *n as isize;
-                                        if i < 1 {
-                                            vm_bail!(mex(
-                                                "IndexOutOfBounds",
-                                                "Index out of bounds"
-                                            ));
+                                if let Some(idx) = scalar_index_from_numeric(v).await? {
+                                    idxs = vec![idx];
+                                } else {
+                                    match v {
+                                        Value::Tensor(idx_t) => {
+                                            for &val in &idx_t.data {
+                                                let i = val as isize;
+                                                if i < 1 || (i as usize) > total {
+                                                    vm_bail!(mex(
+                                                        "IndexOutOfBounds",
+                                                        "Index out of bounds"
+                                                    ));
+                                                }
+                                                idxs.push(i as usize);
+                                            }
                                         }
-                                        idxs = vec![i as usize];
-                                    }
-                                    Value::Tensor(idx_t) => {
-                                        for &val in &idx_t.data {
-                                            let i = val as isize;
-                                            if i < 1 || (i as usize) > total {
+                                        Value::Bool(b) => {
+                                            if *b {
+                                                idxs = vec![1];
+                                            }
+                                        }
+                                        Value::LogicalArray(la) => {
+                                            if la.data.len() != total {
                                                 vm_bail!(mex(
-                                                    "IndexOutOfBounds",
-                                                    "Index out of bounds"
+                                                    "IndexShape",
+                                                    "Logical mask length mismatch for linear indexing"
                                                 ));
                                             }
-                                            idxs.push(i as usize);
-                                        }
-                                    }
-                                    Value::Bool(b) => {
-                                        if *b {
-                                            idxs = vec![1];
-                                        }
-                                    }
-                                    Value::LogicalArray(la) => {
-                                        if la.data.len() != total {
-                                            vm_bail!(mex(
-                                                "IndexShape",
-                                                "Logical mask length mismatch for linear indexing"
-                                            ));
-                                        }
-                                        for (i, &val) in la.data.iter().enumerate() {
-                                            if val != 0 {
-                                                idxs.push(i + 1);
+                                            for (i, &val) in la.data.iter().enumerate() {
+                                                if val != 0 {
+                                                    idxs.push(i + 1);
+                                                }
                                             }
                                         }
+                                        _ => vm_bail!(mex(
+                                            "UnsupportedIndexType",
+                                            "Unsupported index type"
+                                        )),
                                     }
-                                    _ => vm_bail!(mex(
-                                        "UnsupportedIndexType",
-                                        "Unsupported index type"
-                                    )),
                                 }
                             } else {
                                 vm_bail!(mex("MissingNumericIndex", "missing numeric index"));
@@ -6182,62 +6222,56 @@ async fn run_interpreter_inner(
                                         "missing numeric index",
                                     ))?;
                                     num_iter += 1;
-                                    match v {
-                                        Value::Num(n) => {
-                                            let idx = *n as isize;
-                                            if idx < 1 {
-                                                return Err(mex(
-                                                    "IndexOutOfBounds",
-                                                    "Index out of bounds",
-                                                ));
-                                            }
-                                            selectors.push(Sel::Scalar(idx as usize));
-                                        }
-                                        Value::Tensor(idx_t) => {
-                                            let dim_len = *t.shape.get(d).unwrap_or(&1);
-                                            let len = idx_t.shape.iter().product::<usize>();
-                                            let mut indices = Vec::with_capacity(len);
-                                            for &val in &idx_t.data {
-                                                let idx = val as isize;
-                                                if idx < 1 || (idx as usize) > dim_len {
-                                                    return Err(mex(
-                                                        "IndexOutOfBounds",
-                                                        "Index out of bounds",
-                                                    ));
-                                                }
-                                                indices.push(idx as usize);
-                                            }
-                                            selectors.push(Sel::Indices(indices));
-                                        }
-                                        Value::Bool(b) => {
-                                            if *b {
-                                                selectors.push(Sel::Indices(vec![1]));
-                                            } else {
-                                                selectors.push(Sel::Indices(Vec::new()));
-                                            }
-                                        }
-                                        Value::LogicalArray(la) => {
-                                            let dim_len = *t.shape.get(d).unwrap_or(&1);
-                                            if la.data.len() == dim_len {
-                                                let mut indices = Vec::new();
-                                                for (i, &b) in la.data.iter().enumerate() {
-                                                    if b != 0 {
-                                                        indices.push(i + 1);
+                                    if let Some(idx) = scalar_index_from_numeric(v).await? {
+                                        selectors.push(Sel::Scalar(idx));
+                                    } else {
+                                        match v {
+                                            Value::Tensor(idx_t) => {
+                                                let dim_len = *t.shape.get(d).unwrap_or(&1);
+                                                let len = idx_t.shape.iter().product::<usize>();
+                                                let mut indices = Vec::with_capacity(len);
+                                                for &val in &idx_t.data {
+                                                    let idx = val as isize;
+                                                    if idx < 1 || (idx as usize) > dim_len {
+                                                        return Err(mex(
+                                                            "IndexOutOfBounds",
+                                                            "Index out of bounds",
+                                                        ));
                                                     }
+                                                    indices.push(idx as usize);
                                                 }
                                                 selectors.push(Sel::Indices(indices));
-                                            } else {
-                                                return Err(mex(
-                                                    "IndexShape",
-                                                    "Logical mask shape mismatch",
-                                                ));
                                             }
-                                        }
-                                        _ => {
-                                            return Err(mex(
-                                                "UnsupportedIndexType",
-                                                "Unsupported index type",
-                                            ))
+                                            Value::Bool(b) => {
+                                                if *b {
+                                                    selectors.push(Sel::Indices(vec![1]));
+                                                } else {
+                                                    selectors.push(Sel::Indices(Vec::new()));
+                                                }
+                                            }
+                                            Value::LogicalArray(la) => {
+                                                let dim_len = *t.shape.get(d).unwrap_or(&1);
+                                                if la.data.len() == dim_len {
+                                                    let mut indices = Vec::new();
+                                                    for (i, &b) in la.data.iter().enumerate() {
+                                                        if b != 0 {
+                                                            indices.push(i + 1);
+                                                        }
+                                                    }
+                                                    selectors.push(Sel::Indices(indices));
+                                                } else {
+                                                    return Err(mex(
+                                                        "IndexShape",
+                                                        "Logical mask shape mismatch",
+                                                    ));
+                                                }
+                                            }
+                                            _ => {
+                                                return Err(mex(
+                                                    "UnsupportedIndexType",
+                                                    "Unsupported index type",
+                                                ))
+                                            }
                                         }
                                     }
                                 }
@@ -6532,42 +6566,36 @@ async fn run_interpreter_inner(
                             } else if is_end {
                                 idxs = vec![total];
                             } else if let Some(v) = numeric.first() {
-                                match v {
-                                    Value::Num(n) => {
-                                        let i = *n as isize;
-                                        if i < 1 {
-                                            vm_bail!(mex(
-                                                "IndexOutOfBounds",
-                                                "Index out of bounds"
-                                            ));
-                                        }
-                                        idxs = vec![i as usize];
-                                    }
-                                    Value::Tensor(idx_t) => {
-                                        let len = idx_t.shape.iter().product::<usize>();
-                                        if len == total {
-                                            for (i, &val) in idx_t.data.iter().enumerate() {
-                                                if val != 0.0 {
-                                                    idxs.push(i + 1);
+                                if let Some(idx) = scalar_index_from_numeric(v).await? {
+                                    idxs = vec![idx];
+                                } else {
+                                    match v {
+                                        Value::Tensor(idx_t) => {
+                                            let len = idx_t.shape.iter().product::<usize>();
+                                            if len == total {
+                                                for (i, &val) in idx_t.data.iter().enumerate() {
+                                                    if val != 0.0 {
+                                                        idxs.push(i + 1);
+                                                    }
+                                                }
+                                            } else {
+                                                for &val in &idx_t.data {
+                                                    let i = val as isize;
+                                                    if i < 1 {
+                                                        vm_bail!(mex(
+                                                            "IndexOutOfBounds",
+                                                            "Index out of bounds"
+                                                        ));
+                                                    }
+                                                    idxs.push(i as usize);
                                                 }
                                             }
-                                        } else {
-                                            for &val in &idx_t.data {
-                                                let i = val as isize;
-                                                if i < 1 {
-                                                    vm_bail!(mex(
-                                                        "IndexOutOfBounds",
-                                                        "Index out of bounds"
-                                                    ));
-                                                }
-                                                idxs.push(i as usize);
-                                            }
                                         }
+                                        _ => vm_bail!(mex(
+                                            "UnsupportedIndexType",
+                                            "Unsupported index type"
+                                        )),
                                     }
-                                    _ => vm_bail!(mex(
-                                        "UnsupportedIndexType",
-                                        "Unsupported index type"
-                                    )),
                                 }
                             } else {
                                 vm_bail!(mex("MissingNumericIndex", "missing numeric index"));
@@ -6603,49 +6631,46 @@ async fn run_interpreter_inner(
                                         "missing numeric index",
                                     ))?;
                                     num_iter += 1;
-                                    match v {
-                                        Value::Num(n) => {
-                                            let idx = *n as isize;
-                                            if idx < 1 {
-                                                return Err(mex(
-                                                    "IndexOutOfBounds",
-                                                    "Index out of bounds",
-                                                ));
-                                            }
-                                            selectors.push(Sel::Scalar(idx as usize));
-                                        }
-                                        Value::Tensor(idx_t) => {
-                                            let dim_len = *sa.shape.get(d).unwrap_or(&1);
-                                            let len = idx_t.shape.iter().product::<usize>();
-                                            let is_binary_mask = len == dim_len
-                                                && idx_t.data.iter().all(|&x| x == 0.0 || x == 1.0);
-                                            if is_binary_mask {
-                                                let mut v = Vec::new();
-                                                for (i, &val) in idx_t.data.iter().enumerate() {
-                                                    if val != 0.0 {
-                                                        v.push(i + 1);
+                                    if let Some(idx) = scalar_index_from_numeric(v).await? {
+                                        selectors.push(Sel::Scalar(idx));
+                                    } else {
+                                        match v {
+                                            Value::Tensor(idx_t) => {
+                                                let dim_len = *sa.shape.get(d).unwrap_or(&1);
+                                                let len = idx_t.shape.iter().product::<usize>();
+                                                let is_binary_mask = len == dim_len
+                                                    && idx_t
+                                                        .data
+                                                        .iter()
+                                                        .all(|&x| x == 0.0 || x == 1.0);
+                                                if is_binary_mask {
+                                                    let mut v = Vec::new();
+                                                    for (i, &val) in idx_t.data.iter().enumerate() {
+                                                        if val != 0.0 {
+                                                            v.push(i + 1);
+                                                        }
                                                     }
-                                                }
-                                                selectors.push(Sel::Indices(v));
-                                            } else {
-                                                let mut v = Vec::with_capacity(len);
-                                                for &val in &idx_t.data {
-                                                    let idx = val as isize;
-                                                    if idx < 1 {
-                                                        vm_bail!(mex(
-                                                            "IndexOutOfBounds",
-                                                            "Index out of bounds"
-                                                        ));
+                                                    selectors.push(Sel::Indices(v));
+                                                } else {
+                                                    let mut v = Vec::with_capacity(len);
+                                                    for &val in &idx_t.data {
+                                                        let idx = val as isize;
+                                                        if idx < 1 {
+                                                            vm_bail!(mex(
+                                                                "IndexOutOfBounds",
+                                                                "Index out of bounds"
+                                                            ));
+                                                        }
+                                                        v.push(idx as usize);
                                                     }
-                                                    v.push(idx as usize);
+                                                    selectors.push(Sel::Indices(v));
                                                 }
-                                                selectors.push(Sel::Indices(v));
                                             }
+                                            _ => vm_bail!(mex(
+                                                "UnsupportedIndexType",
+                                                "Unsupported index type"
+                                            )),
                                         }
-                                        _ => vm_bail!(mex(
-                                            "UnsupportedIndexType",
-                                            "Unsupported index type"
-                                        )),
                                     }
                                 }
                             }
@@ -9138,32 +9163,32 @@ async fn run_interpreter_inner(
                                 .get(num_iter)
                                 .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
                             num_iter += 1;
-                            match v {
-                                Value::Num(n) => {
-                                    let idx = *n as isize;
-                                    if idx < 1 {
-                                        vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
-                                    }
-                                    selectors.push(Sel::Scalar(idx as usize));
-                                }
-                                Value::Tensor(idx_t) => {
-                                    let dim_len = *t.shape.get(d).unwrap_or(&1);
-                                    let len = idx_t.shape.iter().product::<usize>();
-                                    let mut vi = Vec::with_capacity(len);
-                                    for &val in &idx_t.data {
-                                        let idx = val as isize;
-                                        if idx < 1 || (idx as usize) > dim_len {
-                                            vm_bail!(mex(
-                                                "IndexOutOfBounds",
-                                                "Index out of bounds"
-                                            ));
+                            if let Some(idx) = scalar_index_from_numeric(v).await? {
+                                selectors.push(Sel::Scalar(idx));
+                            } else {
+                                match v {
+                                    Value::Tensor(idx_t) => {
+                                        let dim_len = *t.shape.get(d).unwrap_or(&1);
+                                        let len = idx_t.shape.iter().product::<usize>();
+                                        let mut vi = Vec::with_capacity(len);
+                                        for &val in &idx_t.data {
+                                            let idx = val as isize;
+                                            if idx < 1 || (idx as usize) > dim_len {
+                                                vm_bail!(mex(
+                                                    "IndexOutOfBounds",
+                                                    "Index out of bounds"
+                                                ));
+                                            }
+                                            vi.push(idx as usize);
                                         }
-                                        vi.push(idx as usize);
+                                        selectors.push(Sel::Indices(vi));
                                     }
-                                    selectors.push(Sel::Indices(vi));
-                                }
-                                _ => {
-                                    vm_bail!(mex("UnsupportedIndexType", "Unsupported index type"))
+                                    _ => {
+                                        vm_bail!(mex(
+                                            "UnsupportedIndexType",
+                                            "Unsupported index type"
+                                        ))
+                                    }
                                 }
                             }
                         }
