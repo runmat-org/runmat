@@ -140,7 +140,8 @@ async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(flipud_error("flipud: unsupported input type")),
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(flipud_error("flipud: unsupported input type")),
     }
 }
 

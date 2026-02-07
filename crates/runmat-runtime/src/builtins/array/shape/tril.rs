@@ -141,7 +141,8 @@ async fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(tril_error("tril: unsupported input type")),
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(tril_error("tril: unsupported input type")),
     }
 }
 

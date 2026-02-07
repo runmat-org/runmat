@@ -261,7 +261,8 @@ fn parse_ifft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usi
         | Value::Listener(_)
         | Value::Object(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(ifft2_error("ifft2: transform lengths must be numeric")),
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(ifft2_error("ifft2: transform lengths must be numeric")),
     }
 }
 

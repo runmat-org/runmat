@@ -103,6 +103,28 @@ fn token_to_limit(token: &ArgToken) -> crate::BuiltinResult<usize> {
 )]
 async fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(value, &rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        if out_count <= 1 {
+            let linear = eval.linear_value()?;
+            return Ok(crate::output_count::output_list_with_padding(
+                out_count,
+                vec![linear],
+            ));
+        }
+        let rows = eval.row_value()?;
+        let cols = eval.column_value()?;
+        let mut outputs = vec![rows, cols];
+        if out_count >= 3 {
+            outputs.push(eval.values_value()?);
+        }
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count,
+            outputs,
+        ));
+    }
     eval.linear_value()
 }
 

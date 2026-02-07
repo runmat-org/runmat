@@ -90,6 +90,8 @@ pub enum Value {
     HandleObject(HandleRef),
     /// Event listener handle for events
     Listener(Listener),
+    /// Multiple outputs captured as a list (internal destructuring helper)
+    OutputList(Vec<Value>),
     // Function handle pointing to a named function (builtin or user)
     FunctionHandle(String),
     Closure(Closure),
@@ -849,6 +851,8 @@ pub enum Type {
         /// Optional set of known field names observed via control-flow (None = unknown fields)
         known_fields: Option<Vec<String>>, // kept sorted unique for deterministic Eq
     },
+    /// Multiple return values captured as a list (internal destructuring helper)
+    OutputList(Vec<Type>),
 }
 
 impl Type {
@@ -898,6 +902,7 @@ impl Type {
             (Type::Unknown, _) | (_, Type::Unknown) => true,
             (Type::Int, Type::Num) | (Type::Num, Type::Int) => true, // Number compatibility
             (Type::Tensor { .. }, Type::Tensor { .. }) => true, // Tensor compatibility regardless of dims for now
+            (Type::OutputList(a), Type::OutputList(b)) => a.len() == b.len(),
             (a, b) => a == b,
         }
     }
@@ -907,10 +912,64 @@ impl Type {
         match (self, other) {
             (Type::Unknown, t) | (t, Type::Unknown) => t.clone(),
             (Type::Int, Type::Num) | (Type::Num, Type::Int) => Type::Num,
-            (Type::Tensor { .. }, Type::Tensor { .. }) => Type::tensor(), // Lose shape info for now
+            (Type::Tensor { shape: a }, Type::Tensor { shape: b }) => {
+                let a_norm = match a {
+                    Some(dims) if dims.is_empty() => None,
+                    _ => a.clone(),
+                };
+                let b_norm = match b {
+                    Some(dims) if dims.is_empty() => None,
+                    _ => b.clone(),
+                };
+                let a_unknown = a_norm
+                    .as_ref()
+                    .map(|dims| dims.iter().all(|d| d.is_none()))
+                    .unwrap_or(true);
+                let b_unknown = b_norm
+                    .as_ref()
+                    .map(|dims| dims.iter().all(|d| d.is_none()))
+                    .unwrap_or(true);
+                if a_norm == b_norm {
+                    Type::Tensor { shape: a_norm }
+                } else if !a_unknown && b_unknown {
+                    Type::Tensor { shape: a_norm }
+                } else if a_unknown && !b_unknown {
+                    Type::Tensor { shape: b_norm }
+                } else if a_norm.is_some() && b_norm.is_none() {
+                    Type::Tensor { shape: a_norm }
+                } else if a_norm.is_none() && b_norm.is_some() {
+                    Type::Tensor { shape: b_norm }
+                } else {
+                    Type::tensor()
+                }
+            }
             (Type::Logical { shape: a }, Type::Logical { shape: b }) => {
-                if a == b {
-                    Type::Logical { shape: a.clone() }
+                let a_norm = match a {
+                    Some(dims) if dims.is_empty() => None,
+                    _ => a.clone(),
+                };
+                let b_norm = match b {
+                    Some(dims) if dims.is_empty() => None,
+                    _ => b.clone(),
+                };
+                let a_unknown = a_norm
+                    .as_ref()
+                    .map(|dims| dims.iter().all(|d| d.is_none()))
+                    .unwrap_or(true);
+                let b_unknown = b_norm
+                    .as_ref()
+                    .map(|dims| dims.iter().all(|d| d.is_none()))
+                    .unwrap_or(true);
+                if a_norm == b_norm {
+                    Type::Logical { shape: a_norm }
+                } else if !a_unknown && b_unknown {
+                    Type::Logical { shape: a_norm }
+                } else if a_unknown && !b_unknown {
+                    Type::Logical { shape: b_norm }
+                } else if a_norm.is_some() && b_norm.is_none() {
+                    Type::Logical { shape: a_norm }
+                } else if a_norm.is_none() && b_norm.is_some() {
+                    Type::Logical { shape: b_norm }
                 } else {
                     Type::logical()
                 }
@@ -928,6 +987,18 @@ impl Type {
                     }
                 }
             },
+            (Type::OutputList(a), Type::OutputList(b)) => {
+                if a.len() == b.len() {
+                    let items = a
+                        .iter()
+                        .zip(b.iter())
+                        .map(|(lhs, rhs)| lhs.unify(rhs))
+                        .collect();
+                    Type::OutputList(items)
+                } else {
+                    Type::OutputList(vec![Type::Unknown; a.len().max(b.len())])
+                }
+            }
             (a, b) if a == b => a.clone(),
             _ => Type::Union(vec![self.clone(), other.clone()]),
         }
@@ -989,6 +1060,9 @@ impl Type {
                     element_type: Some(Box::new(Type::String)),
                     length: Some(ca.rows * ca.cols),
                 }
+            }
+            Value::OutputList(values) => {
+                Type::OutputList(values.iter().map(Type::from_value).collect())
             }
         }
     }
@@ -1569,6 +1643,16 @@ impl fmt::Display for Value {
                     write!(f, "{}: {}", key, val)?;
                 }
                 write!(f, "}}")
+            }
+            Value::OutputList(values) => {
+                write!(f, "[")?;
+                for (i, value) in values.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", value)?;
+                }
+                write!(f, "]")
             }
             Value::FunctionHandle(name) => write!(f, "@{name}"),
             Value::Closure(c) => write!(

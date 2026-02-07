@@ -64,7 +64,7 @@ fn arrayfun_output_type(returns: &Type) -> Type {
         Type::Bool | Type::Logical { .. } => Type::logical(),
         Type::Num | Type::Int | Type::Tensor { .. } => Type::tensor(),
         Type::Unknown | Type::Cell { .. } | Type::String | Type::Struct { .. } => Type::Unknown,
-        Type::Function { .. } | Type::Void | Type::Union(_) => Type::Unknown,
+        Type::Function { .. } | Type::Void | Type::Union(_) | Type::OutputList(_) => Type::Unknown,
     }
 }
 

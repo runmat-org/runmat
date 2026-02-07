@@ -313,7 +313,8 @@ fn empty_value_like(proto: Option<&Value>) -> BuiltinResult<Value> {
             | Value::FunctionHandle(_)
             | Value::Closure(_)
             | Value::ClassRef(_)
-            | Value::MException(_) => default_empty_double(),
+            | Value::MException(_)
+            | Value::OutputList(_) => default_empty_double(),
         },
         None => default_empty_double(),
     }

@@ -21,6 +21,7 @@ pub mod callsite;
 pub mod console;
 pub mod interaction;
 pub mod interrupt;
+pub mod output_count;
 pub mod source_context;
 
 pub mod arrays;
@@ -58,8 +59,8 @@ extern "C" {}
 extern crate openblas_src;
 
 pub use dispatcher::{
-    call_builtin, call_builtin_async, gather_if_needed, gather_if_needed_async, is_gpu_value,
-    value_contains_gpu,
+    call_builtin, call_builtin_async, call_builtin_async_with_outputs, gather_if_needed,
+    gather_if_needed_async, is_gpu_value, value_contains_gpu,
 };
 
 pub use runmat_macros::{register_fusion_spec, register_gpu_spec};
@@ -1013,7 +1014,18 @@ async fn overidx_xor(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     async fn call_by_name(name: &str, args: &[Value]) -> crate::BuiltinResult<Value> {
         if let Some(result) = crate::user_functions::try_call_user_function(name, args).await {
-            return result;
+            match result {
+                Ok(value) => return Ok(value),
+                Err(err) => {
+                    let identifier = err.identifier().unwrap_or("").to_ascii_lowercase();
+                    let message = err.message().to_ascii_lowercase();
+                    let is_undefined = identifier.contains("undefinedfunction")
+                        || message.contains("undefined function");
+                    if !is_undefined {
+                        return Err(err);
+                    }
+                }
+            }
         }
         Ok(crate::call_builtin_async(name, args).await?)
     }

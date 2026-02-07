@@ -112,7 +112,8 @@ async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(ifftshift_error("ifftshift: unsupported input type")),
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(ifftshift_error("ifftshift: unsupported input type")),
     }
 }
 

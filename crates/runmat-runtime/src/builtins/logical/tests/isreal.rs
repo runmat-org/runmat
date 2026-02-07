@@ -97,6 +97,7 @@ fn isreal_host(value: Value) -> BuiltinResult<Value> {
         Value::Closure(_) => false,
         Value::ClassRef(_) => false,
         Value::MException(_) => false,
+        Value::OutputList(_) => false,
         Value::GpuTensor(_) => {
             return Err(internal_error(
                 "isreal: internal error, GPU value reached host path",

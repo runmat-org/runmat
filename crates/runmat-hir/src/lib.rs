@@ -1849,6 +1849,21 @@ pub fn infer_global_variable_types(
                         let needs_fallback = per_out.is_empty()
                             || per_out.iter().any(|t| matches!(t, Type::Unknown));
                         if needs_fallback {
+                            if let HirExprKind::FuncCall(_, args) = &expr.kind {
+                                if let Some(builtin) = runmat_builtins::builtin_functions()
+                                    .iter()
+                                    .find(|b| b.name.eq_ignore_ascii_case(name))
+                                {
+                                    let arg_types: Vec<Type> = args
+                                        .iter()
+                                        .map(|arg| infer_expr_type_with_env(arg, &env, returns))
+                                        .collect();
+                                    let ctx = resolve_context_from_args(args);
+                                    let out_type =
+                                        builtin.infer_return_type_with_context(&arg_types, &ctx);
+                                    per_out = vec![out_type; vars.len()];
+                                }
+                            }
                             if let Some((params, outs, body)) = func_defs.get(name).cloned() {
                                 let mut penv: HashMap<VarId, Type> = HashMap::new();
                                 for p in params {
@@ -1988,7 +2003,15 @@ pub fn infer_global_variable_types(
                     }
                 }
                 HirStmt::For { expr, body, .. } => {
-                    let _ = infer_expr_type_with_env(expr, &env, returns);
+                    let range_ty = infer_expr_type_with_env(expr, &env, returns);
+                    if let HirStmt::For { var, .. } = &stmts[i] {
+                        let iter_ty = match &range_ty {
+                            Type::Tensor { .. } => Type::Num,
+                            Type::Logical { .. } => Type::Bool,
+                            other => other.clone(),
+                        };
+                        env.insert(*var, iter_ty);
+                    }
                     let body_analysis = analyze_stmts(body, env.clone(), returns, func_defs);
                     if let Some(f) = &body_analysis.fallthrough {
                         env = join_env(&env, f);

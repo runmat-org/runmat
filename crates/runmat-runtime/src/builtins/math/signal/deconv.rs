@@ -61,6 +61,19 @@ fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
 )]
 async fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinResult<Value> {
     let eval = evaluate(numerator, denominator).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        let mut outputs = vec![eval.quotient()];
+        if out_count >= 2 {
+            outputs.push(eval.remainder());
+        }
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count,
+            outputs,
+        ));
+    }
     Ok(eval.quotient())
 }
 

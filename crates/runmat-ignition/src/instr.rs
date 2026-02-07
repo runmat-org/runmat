@@ -41,6 +41,8 @@ pub enum Instr {
     JumpIfFalse(usize),
     Jump(usize),
     Pop,
+    // Unpack a value into N outputs (uses OutputList when present, pads with 0.0)
+    Unpack(usize),
     CallBuiltin(String, usize),
     StochasticEvolution,
     // User function call

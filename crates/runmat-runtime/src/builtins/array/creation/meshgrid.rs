@@ -4,8 +4,9 @@ use std::cmp::max;
 
 use log::warn;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, MeshgridAxisView};
-use runmat_builtins::shape_rules::unknown_shape;
 use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
+
+use crate::builtins::array::type_resolvers::size_vector_len;
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
@@ -63,10 +64,16 @@ fn meshgrid_type(args: &[Type], _context: &ResolveContext) -> Type {
     if axis_count == 0 {
         return Type::Unknown;
     }
-    let rank = if axis_count >= 3 { 3 } else { 2 };
-    Type::Tensor {
-        shape: Some(unknown_shape(rank)),
-    }
+    let axis_args = &args[..axis_count];
+    let len_x = axis_args.get(0).and_then(size_vector_len);
+    let len_y = axis_args.get(1).and_then(size_vector_len).or(len_x);
+    let len_z = axis_args.get(2).and_then(size_vector_len);
+    let shape = if axis_count >= 3 {
+        vec![len_y, len_x, len_z]
+    } else {
+        vec![len_y, len_x]
+    };
+    Type::Tensor { shape: Some(shape) }
 }
 
 #[runtime_builtin(
@@ -80,6 +87,30 @@ fn meshgrid_type(args: &[Type], _context: &ResolveContext) -> Type {
 )]
 async fn meshgrid_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        let available = eval.output_count();
+        if out_count > available {
+            let msg = if available == 2 {
+                "meshgrid with two inputs supports at most two outputs"
+            } else {
+                "meshgrid supports at most three outputs"
+            };
+            return Err(builtin_error(msg));
+        }
+        let mut outputs = Vec::with_capacity(out_count);
+        let first = eval.first().await?;
+        outputs.push(first);
+        if out_count >= 2 {
+            outputs.push(eval.second().await?);
+        }
+        if out_count >= 3 {
+            outputs.push(eval.third().await?);
+        }
+        return Ok(Value::OutputList(outputs));
+    }
     eval.first().await
 }
 
@@ -333,7 +364,8 @@ fn analyse_like_prototype(proto: &Value) -> crate::BuiltinResult<PrototypeSpec> 
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(builtin_error("meshgrid: prototypes must be numeric arrays")),
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(builtin_error("meshgrid: prototypes must be numeric arrays")),
     }
 }
 
@@ -887,13 +919,34 @@ pub(crate) mod tests {
         assert_eq!(
             meshgrid_type(&[Type::Num, Type::Num], &ctx),
             Type::Tensor {
-                shape: Some(vec![None, None])
+                shape: Some(vec![Some(1), Some(1)])
             }
         );
         assert_eq!(
             meshgrid_type(&[Type::Num, Type::Num, Type::Num], &ctx),
             Type::Tensor {
-                shape: Some(vec![None, None, None])
+                shape: Some(vec![Some(1), Some(1), Some(1)])
+            }
+        );
+    }
+
+    #[test]
+    fn meshgrid_type_uses_vector_lengths() {
+        let ctx = ResolveContext::new(Vec::new());
+        assert_eq!(
+            meshgrid_type(
+                &[
+                    Type::Tensor {
+                        shape: Some(vec![Some(1), Some(201)]),
+                    },
+                    Type::Tensor {
+                        shape: Some(vec![Some(1), Some(101)]),
+                    },
+                ],
+                &ctx,
+            ),
+            Type::Tensor {
+                shape: Some(vec![Some(101), Some(201)])
             }
         );
     }

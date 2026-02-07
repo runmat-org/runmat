@@ -252,7 +252,8 @@ mod tests {
             vec![Some(4), Some(3)]
         );
         assert_eq!(
-            runmat_builtins::shape_rules::broadcast_shapes(&[Some(4)], &[Some(1), Some(3)]),
+            // Treat vectors as 2D shapes (column-major): 4x1 broadcast with 1x3 -> 4x3.
+            runmat_builtins::shape_rules::broadcast_shapes(&[Some(4), Some(1)], &[Some(1), Some(3)]),
             vec![Some(4), Some(3)]
         );
         assert_eq!(
@@ -260,7 +261,8 @@ mod tests {
             vec![Some(5)]
         );
         assert_eq!(
-            runmat_builtins::shape_rules::broadcast_shapes(&[Some(2), Some(3)], &[Some(2)]),
+            // Treat vectors as 2D shapes (column-major): 2x3 broadcast with 2x1 -> 2x3.
+            runmat_builtins::shape_rules::broadcast_shapes(&[Some(2), Some(3)], &[Some(2), Some(1)]),
             vec![Some(2), Some(3)]
         );
     }

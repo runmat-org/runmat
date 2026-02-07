@@ -61,9 +61,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::stats::hist::histcounts2"
 )]
 async fn histcounts2_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    evaluate(x, y, &rest)
-        .await
-        .map(|eval| eval.into_counts_value())
+    let eval = evaluate(x, y, &rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        if out_count == 1 {
+            return Ok(Value::OutputList(vec![eval.into_counts_value()]));
+        }
+        if out_count == 2 {
+            let (counts, x_edges) = eval.into_pair();
+            return Ok(Value::OutputList(vec![counts, x_edges]));
+        }
+        let (counts, x_edges, y_edges) = eval.into_triple();
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count,
+            vec![counts, x_edges, y_edges],
+        ));
+    }
+    Ok(eval.into_counts_value())
 }
 
 /// Evaluate `histcounts2` once and surface all outputs.

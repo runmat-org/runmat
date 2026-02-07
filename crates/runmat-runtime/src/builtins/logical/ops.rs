@@ -98,6 +98,7 @@ async fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
         Value::FunctionHandle(_) | Value::Closure(_) => Err(conversion_error("function_handle")),
         Value::ClassRef(_) => Err(conversion_error("meta.class")),
         Value::MException(_) => Err(conversion_error("MException")),
+        Value::OutputList(_) => Err(conversion_error("OutputList")),
     }
 }
 

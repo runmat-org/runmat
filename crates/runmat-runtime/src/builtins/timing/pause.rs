@@ -286,7 +286,8 @@ async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(pause_error_with_identifier(
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(pause_error_with_identifier(
             MSG_INVALID_ARG,
             ERR_INVALID_ARG,
         )),

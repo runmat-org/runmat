@@ -80,6 +80,28 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::linalg::factor::eig"
 )]
 async fn eig_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        let require_left = out_count >= 3;
+        let eval = evaluate(value, &rest, require_left).await?;
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        if out_count == 1 {
+            return Ok(Value::OutputList(vec![eval.eigenvalues()]));
+        }
+        if out_count == 2 {
+            return Ok(Value::OutputList(vec![eval.right(), eval.diagonal()]));
+        }
+        if out_count == 3 {
+            let left = eval.left()?;
+            return Ok(Value::OutputList(vec![
+                eval.right(),
+                eval.diagonal(),
+                left,
+            ]));
+        }
+        return Err(eig_error("eig currently supports at most three outputs"));
+    }
     let eval = evaluate(value, &rest, false).await?;
     Ok(eval.eigenvalues())
 }

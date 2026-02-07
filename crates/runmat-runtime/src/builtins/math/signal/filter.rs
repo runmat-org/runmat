@@ -86,6 +86,19 @@ async fn filter_builtin(
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     let eval = evaluate(b, a, x, &rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        if out_count == 1 {
+            return Ok(Value::OutputList(vec![eval.into_value()]));
+        }
+        let (output, final_state) = eval.into_pair();
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count,
+            vec![output, final_state],
+        ));
+    }
     Ok(eval.into_value())
 }
 
