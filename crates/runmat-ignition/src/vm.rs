@@ -3247,6 +3247,10 @@ async fn run_interpreter_inner(
                     pc += 1;
                     continue;
                 }
+                let requested_outputs = match bytecode.instructions.get(pc + 1) {
+                    Some(Instr::Unpack(count)) => Some(*count),
+                    _ => None,
+                };
                 let mut args = Vec::new();
 
                 for _ in 0..arg_count {
@@ -3264,7 +3268,18 @@ async fn run_interpreter_inner(
                 );
 
                 let prepared_primary = accel_prepare_args(&name, &args).await?;
-                match call_builtin_vm!(&name, &prepared_primary) {
+                let result = match requested_outputs {
+                    Some(count) => {
+                        runmat_runtime::call_builtin_async_with_outputs(
+                            &name,
+                            &prepared_primary,
+                            count,
+                        )
+                        .await
+                    }
+                    None => runmat_runtime::call_builtin_async(&name, &prepared_primary).await,
+                };
+                match result {
                     Ok(result) => stack.push(result),
                     Err(e) => {
                         let e = e;
@@ -3278,7 +3293,19 @@ async fn run_interpreter_inner(
                                 let qual = path.join(".");
                                 let qual_args =
                                     accel_prepare_args(&qual, &prepared_primary).await?;
-                                match call_builtin_vm!(&qual, &qual_args) {
+                                let result = match requested_outputs {
+                                    Some(count) => {
+                                        runmat_runtime::call_builtin_async_with_outputs(
+                                            &qual, &qual_args, count,
+                                        )
+                                        .await
+                                    }
+                                    None => {
+                                        runmat_runtime::call_builtin_async(&qual, &qual_args)
+                                            .await
+                                    }
+                                };
+                                match result {
                                     Ok(value) => specific_matches.push((qual, qual_args, value)),
                                     Err(_err) => {}
                                 }
@@ -3316,7 +3343,19 @@ async fn run_interpreter_inner(
                                 qual.push_str(&name);
                                 let qual_args =
                                     accel_prepare_args(&qual, &prepared_primary).await?;
-                                match call_builtin_vm!(&qual, &qual_args) {
+                                let result = match requested_outputs {
+                                    Some(count) => {
+                                        runmat_runtime::call_builtin_async_with_outputs(
+                                            &qual, &qual_args, count,
+                                        )
+                                        .await
+                                    }
+                                    None => {
+                                        runmat_runtime::call_builtin_async(&qual, &qual_args)
+                                            .await
+                                    }
+                                };
+                                match result {
                                     Ok(value) => wildcard_matches.push((qual, qual_args, value)),
                                     Err(_err) => {}
                                 }
@@ -4636,82 +4675,6 @@ async fn run_interpreter_inner(
                     }
                 }
                 stack.push(Value::OutputList(outputs));
-            }
-            Instr::CallBuiltinMulti(name, arg_count, out_count) => {
-                let mut args = Vec::new();
-                for _ in 0..arg_count {
-                    args.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                args.reverse();
-
-                let _callsite_guard = runmat_runtime::callsite::push_callsite(
-                    bytecode.source_id,
-                    bytecode.call_arg_spans.get(pc).cloned().flatten(),
-                );
-
-                let result = match runmat_runtime::call_builtin_async_with_outputs(
-                    &name,
-                    &args,
-                    out_count,
-                )
-                .await
-                {
-                    Ok(v) => v,
-                    Err(e) => {
-                        // Try wildcard imports resolution similar to CallBuiltin
-                        let mut resolved = None;
-                        for (path, wildcard) in &imports {
-                            if !*wildcard {
-                                continue;
-                            }
-                            let mut qual = String::new();
-                            for (i, part) in path.iter().enumerate() {
-                                if i > 0 {
-                                    qual.push('.');
-                                }
-                                qual.push_str(part);
-                            }
-                            qual.push('.');
-                            qual.push_str(&name);
-                            if let Ok(v) =
-                                runmat_runtime::call_builtin_async_with_outputs(&qual, &args, out_count)
-                                    .await
-                            {
-                                resolved = Some(v);
-                                break;
-                            }
-                        }
-                        if let Some(v) = resolved {
-                            v
-                        } else {
-                            vm_bail!(e.to_string());
-                        }
-                    }
-                };
-
-                let outputs = match result {
-                    Value::OutputList(values) => Value::OutputList(values),
-                    Value::Tensor(t) => {
-                        let mut values = Vec::with_capacity(out_count);
-                        for &val in t.data.iter().take(out_count) {
-                            values.push(Value::Num(val));
-                        }
-                        Value::OutputList(values)
-                    }
-                    Value::Cell(ca) => {
-                        let mut values = Vec::with_capacity(out_count);
-                        for v in ca.data.iter().take(out_count) {
-                            values.push((**v).clone());
-                        }
-                        Value::OutputList(values)
-                    }
-                    other => Value::OutputList(vec![other]),
-                };
-                stack.push(outputs);
             }
             Instr::EnterTry(catch_pc, catch_var) => {
                 try_stack.push((catch_pc, catch_var));

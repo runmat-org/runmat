@@ -110,7 +110,7 @@ The compiler is responsible for stack shaping and choosing appropriate instructi
 `[a,b,c] = rhs` lowers as follows:
 
 - If `rhs` is a user function: emit `CallFunctionMulti(name, argc, outc)` where `outc == len([a,b,c])`, then `StoreVar`/`Pop` right-to-left
-- If `rhs` is builtin/unknown: `CallBuiltinMulti(name, argc, outc)` and distribute results similarly
+- If `rhs` is builtin/unknown: `CallBuiltin(name, argc)` then `Unpack(outc)` and distribute results similarly
 - If `rhs` is `C{...}` (cell indexing): `IndexCellExpand(num_indices, outc)`
 - Otherwise: first real variable gets `expr`, others receive `0` (matlab-compatible defaulting in many test paths)
 

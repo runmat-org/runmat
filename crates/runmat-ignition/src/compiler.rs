@@ -1760,7 +1760,7 @@ impl Compiler {
                                 self.compile_expr(arg)?;
                             }
                             self.emit_call_with_arg_spans(
-                                Instr::CallBuiltinMulti(name.clone(), args.len(), vars.len()),
+                                Instr::CallBuiltin(name.clone(), args.len()),
                                 &call_arg_spans,
                             );
                             self.emit(Instr::Unpack(vars.len()));

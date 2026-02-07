@@ -22,7 +22,7 @@ fn arithmetic_and_assignment() {
 }
 
 #[test]
-fn call_builtin_multi_advances_pc_for_zero_outputs() {
+fn call_builtin_multi_output_advances_pc_for_zero_outputs() {
     let input = "disp('hi'); x = 42;";
     let ast = parse(input).expect("parse disp script");
     let hir = lower(&ast).expect("lower disp script");

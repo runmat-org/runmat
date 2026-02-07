@@ -136,7 +136,6 @@ pub enum Instr {
     CallFunction(String, usize), // Function name and argument count
     // Call a user function and push `out_count` return values (left-to-right), if fewer available push 0
     CallFunctionMulti(String, usize, usize),
-    CallBuiltinMulti(String, usize, usize),
     // Call a user function with one argument (at position) expanded from a cell indexing expression
     // (name, before_count, num_indices, after_count)
     CallFunctionExpandAt(String, usize, usize, usize),

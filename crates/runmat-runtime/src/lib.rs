@@ -177,6 +177,12 @@ async fn strjoin_rowwise(a: Value, delim: Value) -> crate::BuiltinResult<Value> 
 // deal: distribute inputs to multiple outputs (via cell for expansion)
 #[runmat_macros::runtime_builtin(name = "deal", builtin_path = "crate")]
 async fn deal_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count,
+            rest,
+        ));
+    }
     // Return cell row vector of inputs for expansion
     let cols = rest.len();
     make_cell(rest, 1, cols).map_err(Into::into)
