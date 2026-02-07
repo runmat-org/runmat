@@ -12,7 +12,7 @@ slug: "rust-llm-training-distribution"
 tags: ["Rust", "LLM", "MATLAB", "RunMat", "Programming Languages"]
 keywords: "Rust LLM code generation, training distribution, programming languages, RunMat, scientific computing"
 excerpt: "Training data quality shapes LLM outputs. Rust’s tight distribution and strong compiler feedback make it uniquely suited for reliable model-assisted coding."
-image: "https://runmat.org/rust-blog-image.png"
+image: "https://runmat.com/rust-blog-image.png"
 imageAlt: "Why Rust for LLM code gen"
 ogType: "article"
 ogTitle: "Why Rust Improves LLM-Written Code"
@@ -20,7 +20,7 @@ ogDescription: "Rust offers tighter training distribution, stronger compiler che
 twitterCard: "summary_large_image"
 twitterTitle: "Rust + LLMs: Why Distribution Matters"
 twitterDescription: "Rust narrows the training distribution and provides strong compiler feedback, enabling more reliable model-written code."
-canonical: "https://runmat.org/blog/rust-llm-training-distribution"
+canonical: "https://runmat.com/blog/rust-llm-training-distribution"
 
 jsonLd:
   "@context": "https://schema.org"
@@ -30,22 +30,22 @@ jsonLd:
         - "@type": "ListItem"
           position: 1
           name: "RunMat"
-          item: "https://runmat.org"
+          item: "https://runmat.com"
         - "@type": "ListItem"
           position: 2
           name: "Blog"
-          item: "https://runmat.org/blog"
+          item: "https://runmat.com/blog"
         - "@type": "ListItem"
           position: 3
           name: "Choosing Rust for LLM-Generated Code"
-          item: "https://runmat.org/blog/rust-llm-training-distribution"
+          item: "https://runmat.com/blog/rust-llm-training-distribution"
 
     - "@type": "BlogPosting"
-      "@id": "https://runmat.org/blog/rust-llm-training-distribution#article"
+      "@id": "https://runmat.com/blog/rust-llm-training-distribution#article"
       headline: "Choosing Rust for LLM-Generated Code"
       alternativeHeadline: "Why Rust Improves LLM-Written Code"
       description: "Why the training distribution of programming languages matters for LLMs, and how Rust improves reliability in model-written code."
-      image: "https://runmat.org/rust-blog-image.png"
+      image: "https://runmat.com/rust-blog-image.png"
       datePublished: "2025-09-12T00:00:00Z"
       dateModified: "2025-09-12T00:00:00Z"
       author:
@@ -70,7 +70,7 @@ jsonLd:
           sameAs: "https://en.wikipedia.org/wiki/TypeScript"
         - "@type": "SoftwareApplication"
           name: "RunMat"
-          sameAs: "https://runmat.org"
+          sameAs: "https://runmat.com"
           applicationCategory: "ScientificApplication"
           operatingSystem: ["Windows", "macOS", "Linux"]
           offers:
@@ -178,5 +178,4 @@ Language choice is no longer solely about runtime speed or the availability of d
 We have a few more updates coming for RunMat over the next few months, including a world-class plotting system, a clean core standard library, and a modern package system and builder. Each is an opportunity to continue experimenting with the edge of what model-driven development can achieve. 
 
 **Subscribe to our newsletter to receive updates on RunMat's progress**
-
 

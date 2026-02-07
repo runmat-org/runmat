@@ -22,6 +22,7 @@ use super::gpu_helpers::axis_bounds;
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::surf::build_color_lut;
+use crate::builtins::plotting::type_resolvers::string_type;
 
 use crate::BuiltinResult;
 
@@ -279,6 +280,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "contour,plotting,isolines",
     sink = true,
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::contour"
 )]
 pub fn contour_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -1130,6 +1132,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
     use runmat_builtins::NumericDType;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -1290,5 +1293,13 @@ pub(crate) mod tests {
             ],
         );
         assert!(ok.is_ok());
+    }
+
+    #[test]
+    fn contour_type_is_string() {
+        assert_eq!(
+            string_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
     }
 }

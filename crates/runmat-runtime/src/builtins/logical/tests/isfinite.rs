@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::logical::type_resolvers::logical_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::tests::isfinite")]
@@ -62,6 +63,7 @@ const IDENTIFIER_INTERNAL: &str = "RunMat:isfinite:InternalError";
     summary = "Return a logical mask indicating which elements of the input are finite.",
     keywords = "isfinite,finite,logical,gpu",
     accel = "elementwise",
+    type_resolver(logical_unary_type),
     builtin_path = "crate::builtins::logical::tests::isfinite"
 )]
 async fn isfinite_builtin(value: Value) -> BuiltinResult<Value> {
@@ -174,6 +176,13 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::{ResolveContext, Type};
+
+    #[test]
+    fn isfinite_type_returns_logical() {
+        let out = logical_unary_type(&[Type::Tensor { shape: None }], &ResolveContext::new(Vec::new()));
+        assert_eq!(out, Type::logical());
+    }
     use runmat_builtins::{CharArray, IntValue, StringArray};
 
     fn run_isfinite(value: Value) -> BuiltinResult<Value> {

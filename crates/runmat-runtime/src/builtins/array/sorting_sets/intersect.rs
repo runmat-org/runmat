@@ -12,7 +12,9 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use super::type_resolvers::set_values_output_type;
 use crate::build_runtime_error;
+use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -66,6 +68,7 @@ fn intersect_error(message: impl Into<String>) -> crate::RuntimeError {
     keywords = "intersect,set,stable,rows,indices,gpu",
     accel = "array_construct",
     sink = true,
+    type_resolver(set_values_output_type),
     builtin_path = "crate::builtins::array::sorting_sets::intersect"
 )]
 async fn intersect_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -112,32 +115,51 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<IntersectOptions> {
     };
     let mut seen_order: Option<IntersectOrder> = None;
 
-    for arg in rest {
-        let text = tensor::value_to_string(arg)
-            .ok_or_else(|| intersect_error("intersect: expected string option arguments"))?;
-        let lowered = text.trim().to_ascii_lowercase();
-        match lowered.as_str() {
+    let tokens = tokens_from_values(rest);
+    for (arg, token) in rest.iter().zip(tokens.iter()) {
+        let text = match token {
+            crate::builtins::common::arg_tokens::ArgToken::String(text) => text.as_str(),
+            _ => {
+                let text = tensor::value_to_string(arg)
+                    .ok_or_else(|| intersect_error("intersect: expected string option arguments"))?;
+                let lowered = text.trim().to_ascii_lowercase();
+                parse_intersect_option(&mut opts, &mut seen_order, &lowered)?;
+                continue;
+            }
+        };
+        parse_intersect_option(&mut opts, &mut seen_order, text)?;
+    }
+
+    Ok(opts)
+}
+
+fn parse_intersect_option(
+    opts: &mut IntersectOptions,
+    seen_order: &mut Option<IntersectOrder>,
+    lowered: &str,
+) -> crate::BuiltinResult<()> {
+        match lowered {
             "rows" => opts.rows = true,
             "sorted" => {
                 if let Some(prev) = seen_order {
-                    if prev != IntersectOrder::Sorted {
+                    if *prev != IntersectOrder::Sorted {
                         return Err(intersect_error(
                             "intersect: cannot combine 'sorted' with 'stable'",
                         ));
                     }
                 }
-                seen_order = Some(IntersectOrder::Sorted);
+                *seen_order = Some(IntersectOrder::Sorted);
                 opts.order = IntersectOrder::Sorted;
             }
             "stable" => {
                 if let Some(prev) = seen_order {
-                    if prev != IntersectOrder::Stable {
+                    if *prev != IntersectOrder::Stable {
                         return Err(intersect_error(
                             "intersect: cannot combine 'sorted' with 'stable'",
                         ));
                     }
                 }
-                seen_order = Some(IntersectOrder::Stable);
+                *seen_order = Some(IntersectOrder::Stable);
                 opts.order = IntersectOrder::Stable;
             }
             "legacy" | "r2012a" => {
@@ -151,9 +173,7 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<IntersectOptions> {
                 )))
             }
         }
-    }
-
-    Ok(opts)
+    Ok(())
 }
 
 async fn intersect_gpu_pair(
@@ -1284,6 +1304,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
@@ -1317,6 +1338,25 @@ pub(crate) mod tests {
         let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
         assert_eq!(ia.data, vec![4.0, 2.0]);
         assert_eq!(ib.data, vec![2.0, 1.0]);
+    }
+
+    #[test]
+    fn intersect_type_resolver_numeric() {
+        assert_eq!(
+            set_values_output_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::tensor()
+        );
+    }
+
+    #[test]
+    fn intersect_type_resolver_string_array() {
+        assert_eq!(
+            set_values_output_type(
+                &[Type::cell_of(Type::String)],
+                &ResolveContext::new(Vec::new()),
+            ),
+            Type::cell_of(Type::String)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

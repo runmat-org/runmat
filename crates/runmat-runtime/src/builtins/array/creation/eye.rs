@@ -1,7 +1,7 @@
 //! MATLAB-compatible `eye` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -9,6 +9,8 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::array::type_resolvers::tensor_type_from_rank;
+use runmat_builtins::ResolveContext;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::eye")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -40,12 +42,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Identity tensors are materialised directly; fusion planner treats eye() as a standalone allocation.",
 };
 
+fn eye_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    if args.is_empty() {
+        return Type::Num;
+    }
+    if args.iter().any(|arg| matches!(arg, Type::String)) {
+        return Type::Unknown;
+    }
+    tensor_type_from_rank(args, ctx)
+}
+
 #[runtime_builtin(
     name = "eye",
     category = "array/creation",
     summary = "Identity matrix or N-D identity tensor.",
     keywords = "eye,identity,matrix,gpu,like,logical",
     accel = "array_construct",
+    type_resolver(eye_type),
     builtin_path = "crate::builtins::array::creation::eye"
 )]
 async fn eye_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -374,12 +387,28 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_accelerate_api::HostTensorView;
+    use runmat_builtins::Type;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_default_scalar() {
         let result = block_on(eye_builtin(Vec::new())).expect("eye");
         assert_eq!(result, Value::Num(1.0));
+    }
+
+    #[test]
+    fn eye_type_defaults_to_num() {
+        assert_eq!(eye_type(&[], &ResolveContext::new(Vec::new())), Type::Num);
+    }
+
+    #[test]
+    fn eye_type_infers_rank_from_scalar_dim() {
+        assert_eq!(
+            eye_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::Tensor {
+                shape: Some(vec![None, None])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -77,6 +77,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Send data to web services using HTTP POST/PUT requests and return the response.",
     keywords = "webwrite,http post,rest client,json upload,form post",
     accel = "sink",
+    type_resolver(crate::builtins::io::type_resolvers::webwrite_type),
     builtin_path = "crate::builtins::io::http::webwrite"
 )]
 async fn webwrite_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

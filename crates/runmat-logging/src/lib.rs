@@ -6,6 +6,8 @@ use std::sync::Arc;
 use tracing::subscriber::DefaultGuard;
 use tracing::Subscriber;
 use tracing_log::LogTracer;
+#[cfg(feature = "otlp")]
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
@@ -15,6 +17,11 @@ use tracing_subscriber::reload;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::SystemTime;
+
+#[cfg(feature = "otlp")]
+use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
+#[cfg(feature = "otlp")]
+use opentelemetry::Context as OtelContext;
 
 const DEFAULT_LOG_FILTER: &str = "info";
 
@@ -162,6 +169,62 @@ pub fn update_log_filter(spec: &str) -> Result<(), String> {
 #[cfg(target_arch = "wasm32")]
 pub fn update_log_filter(_spec: &str) -> Result<(), String> {
     Err("runtime log filtering is not yet supported in wasm builds".to_string())
+}
+
+pub fn with_signal_trace<T>(trace_id: Option<&str>, name: &str, f: impl FnOnce() -> T) -> T {
+    let Some(trace_id) = trace_id else {
+        return f();
+    };
+    if let Some(span) = build_signal_span(trace_id, name) {
+        let _guard = span.enter();
+        return f();
+    }
+    f()
+}
+
+fn build_signal_span(trace_id: &str, name: &str) -> Option<tracing::Span> {
+    let span = tracing::span!(
+        tracing::Level::INFO,
+        "signal",
+        signal = name,
+        trace_id = trace_id
+    );
+    #[cfg(feature = "otlp")]
+    {
+        if let Some((trace_id, span_id)) = parse_trace_parent(trace_id) {
+            let context = SpanContext::new(
+                trace_id,
+                span_id,
+                TraceFlags::SAMPLED,
+                true,
+                TraceState::default(),
+            );
+            span.set_parent(OtelContext::new().with_remote_span_context(context));
+        }
+    }
+    Some(span)
+}
+
+#[cfg(feature = "otlp")]
+fn parse_trace_parent(trace_id: &str) -> Option<(TraceId, SpanId)> {
+    if trace_id.len() != 32 {
+        return None;
+    }
+    let trace_id = TraceId::from_hex(trace_id).ok()?;
+    let span_id = SpanId::from_hex(&trace_id_hex_tail(trace_id)).ok()?;
+    Some((trace_id, span_id))
+}
+
+#[cfg(feature = "otlp")]
+fn trace_id_hex_tail(trace_id: TraceId) -> String {
+    let hex = trace_id.to_string();
+    hex.chars()
+        .rev()
+        .take(16)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
 }
 
 struct LogBridgeLayer;

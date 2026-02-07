@@ -8,6 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::regex::regexp::{self, RegexpEvaluation};
+use crate::builtins::strings::type_resolvers::unknown_type;
 use crate::{build_runtime_error, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::regex::regexpi")]
@@ -61,6 +62,7 @@ pub async fn evaluate(
     summary = "Case-insensitive regular expression matching with MATLAB-compatible outputs.",
     keywords = "regexpi,regex,pattern,ignorecase,match",
     accel = "sink",
+    type_resolver(unknown_type),
     builtin_path = "crate::builtins::strings::regex::regexpi"
 )]
 async fn regexpi_builtin(
@@ -113,7 +115,7 @@ fn option_name(value: &Value) -> Option<String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, StringArray};
+    use runmat_builtins::{CellArray, ResolveContext, StringArray, Type};
 
     fn evaluate(subject: Value, pattern: Value, rest: &[Value]) -> BuiltinResult<RegexpEvaluation> {
         futures::executor::block_on(super::evaluate(subject, pattern, rest))
@@ -389,6 +391,14 @@ pub(crate) mod tests {
         assert!(
             message.contains("cell array elements"),
             "unexpected error message: {message}"
+        );
+    }
+
+    #[test]
+    fn regexpi_type_is_unknown() {
+        assert_eq!(
+            unknown_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::Unknown
         );
     }
 }

@@ -10,7 +10,7 @@ readTime: "10 min read"
 slug: "what-is-matlab"
 tags: ["MATLAB", "RunMat", "language", "runtime"]
 visibility: unlisted
-canonical: "https://runmat.org/blog/what-is-matlab"
+canonical: "https://runmat.com/blog/what-is-matlab"
 jsonLd:
   "@context": "https://schema.org"
   "@graph":
@@ -19,17 +19,17 @@ jsonLd:
         - "@type": "ListItem"
           position: 1
           name: "Docs"
-          item: "https://runmat.org/docs"
+          item: "https://runmat.com/docs"
         - "@type": "ListItem"
           position: 2
           name: "Concepts"
-          item: "https://runmat.org/docs/concepts"
+          item: "https://runmat.com/docs/concepts"
         - "@type": "ListItem"
           position: 3
           name: "What is MATLAB?"
-          item: "https://runmat.org/blog/what-is-matlab"
+          item: "https://runmat.com/blog/what-is-matlab"
     - "@type": "TechArticle"
-      "@id": "https://runmat.org/blog/what-is-matlab#article"
+      "@id": "https://runmat.com/blog/what-is-matlab#article"
       headline: "What is MATLAB? The Language, The Runtime, and RunMat"
       alternativeHeadline: "MATLAB vs RunMat: A Technical Overview"
       description: "An engineer's guide to the MATLAB language, its mental model (arrays, matrices, indexing), and how RunMat provides a modern, high-performance open-source runtime for it."
@@ -55,7 +55,7 @@ jsonLd:
           operatingSystem: ["Windows", "macOS", "Linux"]
         - "@type": "SoftwareApplication"
           name: "RunMat"
-          url: "https://runmat.org"
+          url: "https://runmat.com"
           applicationCategory: "Runtime Environment"
           operatingSystem: ["Windows", "macOS", "Linux"]
           offers:

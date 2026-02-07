@@ -5,6 +5,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::linalg::type_resolvers::matrix_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use num_complex::Complex64;
@@ -66,6 +67,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "lu,factorization,decomposition,permutation",
     accel = "sink",
     sink = true,
+    type_resolver(matrix_unary_type),
     builtin_path = "crate::builtins::math::linalg::factor::lu"
 )]
 async fn lu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -483,7 +485,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor as CMatrix, Tensor as Matrix};
+    use runmat_builtins::{ComplexTensor as CMatrix, ResolveContext, Tensor as Matrix, Type};
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
@@ -504,6 +506,22 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor value, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn lu_type_preserves_matrix_shape() {
+        let out = matrix_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
     }
 
     fn row_major_matmul(a: &RowMajorMatrix, b: &RowMajorMatrix) -> RowMajorMatrix {

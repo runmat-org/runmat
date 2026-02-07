@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::diagnostics::type_resolvers::assert_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const DEFAULT_IDENTIFIER: &str = "MATLAB:assertion:failed";
@@ -69,6 +70,7 @@ where
     summary = "Throw a MATLAB-style error when a logical or numeric condition evaluates to false.",
     keywords = "assert,diagnostics,validation,error",
     accel = "metadata",
+    type_resolver(assert_type),
     builtin_path = "crate::builtins::diagnostics::assert"
 )]
 async fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -327,7 +329,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, Tensor};
+    use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type};
 
     fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::assert_builtin(args))
@@ -584,5 +586,13 @@ pub(crate) mod tests {
             assert_builtin(vec![Value::GpuTensor(handle)]).expect_err("assert should fail"),
         );
         assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+    }
+
+    #[test]
+    fn assert_type_is_numeric() {
+        assert_eq!(
+            assert_type(&[Type::Bool], &ResolveContext::new(Vec::new())),
+            Type::Num
+        );
     }
 }

@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 use crate::core::builtins_json;
 
 /// Helpers for documentation linking/formatting.
-const RUNMAT_DOC_BASE_URL: &str = "https://runmat.org/docs/reference/builtins/";
+const RUNMAT_DOC_BASE_URL: &str = "https://runmat.com/docs/reference/builtins/";
 
 /// Build a documentation URL for a builtin slug (website uses lowercase).
 pub fn builtin_doc_url(name: &str) -> String {

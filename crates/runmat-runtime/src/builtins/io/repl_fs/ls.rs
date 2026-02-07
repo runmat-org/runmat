@@ -75,6 +75,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     keywords = "ls,list files,folder contents,wildcard listing,dir",
     accel = "cpu",
     suppress_auto_output = true,
+    type_resolver(crate::builtins::io::type_resolvers::ls_type),
     builtin_path = "crate::builtins::io::repl_fs::ls"
 )]
 async fn ls_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

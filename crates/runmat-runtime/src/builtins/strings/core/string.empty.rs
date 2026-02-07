@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::strings::type_resolvers::string_array_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const LABEL: &str = "string.empty";
@@ -56,6 +57,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Construct an empty string array with MATLAB-compatible dimensions.",
     keywords = "string.empty,empty,string array,preallocate",
     accel = "none",
+    type_resolver(string_array_type),
     builtin_path = "crate::builtins::strings::core::string_empty"
 )]
 async fn string_empty_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -189,7 +191,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{StringArray, Tensor, Value};
+    use runmat_builtins::{ResolveContext, StringArray, Tensor, Type, Value};
 
     fn string_empty_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::string_empty_builtin(rest))
@@ -276,6 +278,14 @@ pub(crate) mod tests {
             Value::StringArray(sa) => assert_eq!(sa.shape, vec![0, 4, 0]),
             other => panic!("expected string array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn string_empty_type_is_string_array() {
+        assert_eq!(
+            string_array_type(&[], &ResolveContext::new(Vec::new())),
+            Type::cell_of(Type::String)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

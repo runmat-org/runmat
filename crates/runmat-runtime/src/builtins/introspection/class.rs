@@ -4,6 +4,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::introspection::type_resolvers::class_type;
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
@@ -39,6 +40,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "introspection",
     summary = "Return the MATLAB class name for scalars, arrays, and objects.",
     keywords = "class,type inspection,type name,gpuArray class",
+    type_resolver(class_type),
     builtin_path = "crate::builtins::introspection::class"
 )]
 fn class_builtin(value: Value) -> crate::BuiltinResult<String> {

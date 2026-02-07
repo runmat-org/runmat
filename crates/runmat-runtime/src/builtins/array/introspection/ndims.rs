@@ -5,7 +5,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use runmat_builtins::Value;
+use runmat_builtins::{ResolveContext, Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::ndims")]
@@ -37,12 +37,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata query; fusion planner bypasses this builtin and emits a host scalar.",
 };
 
+fn ndims_type(args: &[Type], _context: &ResolveContext) -> Type {
+    if args.is_empty() {
+        Type::Unknown
+    } else {
+        Type::Int
+    }
+}
+
 #[runtime_builtin(
     name = "ndims",
     category = "array/introspection",
     summary = "Return the number of dimensions of scalars, vectors, matrices, and N-D arrays.",
     keywords = "ndims,number of dimensions,array rank,gpu metadata,MATLAB compatibility",
     accel = "metadata",
+    type_resolver(ndims_type),
     builtin_path = "crate::builtins::array::introspection::ndims"
 )]
 async fn ndims_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -59,8 +68,17 @@ pub(crate) mod tests {
         block_on(super::ndims_builtin(value))
     }
     use runmat_builtins::{
-        CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+        CellArray, CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor,
+        Type, Value,
     };
+
+    #[test]
+    fn ndims_type_returns_int() {
+        assert_eq!(
+            super::ndims_type(&[Type::Tensor { shape: None }], &ResolveContext::new(Vec::new())),
+            Type::Int
+        );
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::image::filters::type_resolvers::filter2_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::filter2")]
@@ -60,6 +61,7 @@ fn filter2_error(message: impl Into<String>) -> RuntimeError {
     summary = "Apply a 2-D correlation or convolution with MATLAB-compatible sizing.",
     keywords = "filter2,correlation,convolution,image filtering,gpu",
     accel = "custom-imfilter",
+    type_resolver(filter2_type),
     builtin_path = "crate::builtins::image::filters::filter2"
 )]
 async fn filter2_builtin(

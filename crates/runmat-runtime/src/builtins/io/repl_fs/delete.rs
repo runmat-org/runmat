@@ -83,6 +83,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "cpu",
     sink = true,
     suppress_auto_output = true,
+    type_resolver(crate::builtins::io::type_resolvers::delete_type),
     builtin_path = "crate::builtins::io::repl_fs::delete"
 )]
 async fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

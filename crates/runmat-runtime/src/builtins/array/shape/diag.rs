@@ -5,11 +5,57 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 const MESSAGE_ID_INVALID_INPUT: &str = "MATLAB:diag:InvalidInput";
 const MESSAGE_ID_INVALID_OFFSET: &str = "MATLAB:diag:InvalidOffset";
+
+fn diag_type(args: &[Type], _context: &ResolveContext) -> Type {
+    let input = match args.first() {
+        Some(value) => value,
+        None => return Type::Unknown,
+    };
+    match input {
+        Type::Tensor { shape: Some(shape) } => {
+            if shape.len() == 1
+                || (shape.len() >= 2 && (shape[0] == Some(1) || shape[1] == Some(1)))
+            {
+                let len = shape
+                    .get(0)
+                    .copied()
+                    .flatten()
+                    .or_else(|| shape.get(1).copied().flatten());
+                if let Some(n) = len {
+                    return Type::Tensor {
+                        shape: Some(vec![Some(n), Some(n)]),
+                    };
+                }
+            }
+            Type::tensor()
+        }
+        Type::Logical { shape: Some(shape) } => {
+            if shape.len() == 1
+                || (shape.len() >= 2 && (shape[0] == Some(1) || shape[1] == Some(1)))
+            {
+                let len = shape
+                    .get(0)
+                    .copied()
+                    .flatten()
+                    .or_else(|| shape.get(1).copied().flatten());
+                if let Some(n) = len {
+                    return Type::Logical {
+                        shape: Some(vec![Some(n), Some(n)]),
+                    };
+                }
+            }
+            Type::logical()
+        }
+        Type::Num | Type::Int | Type::Bool => Type::tensor(),
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::diag")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -50,6 +96,7 @@ fn diag_error(message_id: &'static str, message: impl Into<String>) -> RuntimeEr
     category = "array/shape",
     summary = "Extract or create a diagonal from a vector or matrix.",
     keywords = "diag,diagonal,matrix",
+    type_resolver(diag_type),
     builtin_path = "crate::builtins::array::shape::diag"
 )]
 async fn diag_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -71,6 +118,38 @@ async fn diag_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             MESSAGE_ID_INVALID_INPUT,
             format!("diag: unsupported input {other:?}"),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diag_type_vector_to_square() {
+        let out = diag_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(4), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(4), Some(4)])
+            }
+        );
+    }
+
+    #[test]
+    fn diag_type_matrix_falls_back_tensor() {
+        let out = diag_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(out, Type::tensor());
     }
 }
 

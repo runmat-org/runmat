@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor::{self, value_to_string};
+use crate::builtins::stats::type_resolvers::corrcoef_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "corrcoef";
@@ -53,6 +54,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Compute Pearson correlation coefficients for the columns of matrices or paired data sets.",
     keywords = "corrcoef,correlation,statistics,rows,normalization,gpu",
     accel = "reduction",
+    type_resolver(corrcoef_type),
     builtin_path = "crate::builtins::stats::summary::corrcoef"
 )]
 async fn corrcoef_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -617,7 +619,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor, Value};
+    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
 
     fn assert_tensor_close(actual: &Tensor, expected: &[f64], tol: f64) {
         let dim = (expected.len() as f64).sqrt() as usize;
@@ -635,6 +637,33 @@ pub(crate) mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn corrcoef_type_preserves_column_count() {
+        let out = corrcoef_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(6), Some(2)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(2)])
+            }
+        );
+    }
+
+    #[test]
+    fn corrcoef_type_vector_returns_scalar() {
+        let out = corrcoef_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(4), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(out, Type::Num);
     }
 
     fn assert_flow_message(err: RuntimeError, needle: &str) {

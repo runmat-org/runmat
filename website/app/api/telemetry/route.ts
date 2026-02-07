@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 const ALLOWED_EVENTS = new Set(['install_start', 'install_complete', 'install_failed']);
-const UPSTREAM_URL = 'https://telemetry.runmat.org/ingest';
+const UPSTREAM_URL = 'https://telemetry.runmat.com/ingest';
 
 export async function POST(request: Request) {
   const ingestionKey = process.env.TELEMETRY_INGESTION_KEY;
@@ -45,4 +45,3 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ ok: true });
 }
-

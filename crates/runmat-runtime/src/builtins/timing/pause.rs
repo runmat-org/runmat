@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::timing::type_resolvers::pause_type;
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
 use crate::builtins::plotting;
 #[cfg(not(test))]
@@ -102,6 +103,7 @@ enum PauseWait {
     keywords = "pause,sleep,wait,delay",
     accel = "metadata",
     sink = true,
+    type_resolver(pause_type),
     builtin_path = "crate::builtins::timing::pause"
 )]
 async fn pause_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

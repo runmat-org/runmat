@@ -812,8 +812,11 @@ pub enum Type {
     Num,
     /// Boolean type
     Bool,
-    /// Logical array type (N-D boolean array)
-    Logical,
+    /// Logical array type (N-D boolean array) with optional shape information
+    Logical {
+        /// Optional full shape; None means unknown/dynamic; individual dims can be omitted by using None
+        shape: Option<Vec<Option<usize>>>,
+    },
     /// String type
     String,
     /// Tensor type with optional shape information (column-major semantics in runtime)
@@ -852,6 +855,18 @@ impl Type {
     /// Create a tensor type with unknown shape
     pub fn tensor() -> Self {
         Type::Tensor { shape: None }
+    }
+
+    /// Create a logical type with unknown shape
+    pub fn logical() -> Self {
+        Type::Logical { shape: None }
+    }
+
+    /// Create a logical type with known shape
+    pub fn logical_with_shape(shape: Vec<usize>) -> Self {
+        Type::Logical {
+            shape: Some(shape.into_iter().map(Some).collect()),
+        }
     }
 
     /// Create a tensor type with known shape
@@ -893,6 +908,13 @@ impl Type {
             (Type::Unknown, t) | (t, Type::Unknown) => t.clone(),
             (Type::Int, Type::Num) | (Type::Num, Type::Int) => Type::Num,
             (Type::Tensor { .. }, Type::Tensor { .. }) => Type::tensor(), // Lose shape info for now
+            (Type::Logical { shape: a }, Type::Logical { shape: b }) => {
+                if a == b {
+                    Type::Logical { shape: a.clone() }
+                } else {
+                    Type::logical()
+                }
+            }
             (Type::Struct { known_fields: a }, Type::Struct { known_fields: b }) => match (a, b) {
                 (None, None) => Type::Struct { known_fields: None },
                 (Some(ka), None) | (None, Some(ka)) => Type::Struct {
@@ -918,7 +940,9 @@ impl Type {
             Value::Num(_) => Type::Num,
             Value::Complex(_, _) => Type::Num, // treat as numeric double (complex) in type system for now
             Value::Bool(_) => Type::Bool,
-            Value::LogicalArray(_) => Type::Logical,
+            Value::LogicalArray(arr) => Type::Logical {
+                shape: Some(arr.shape.iter().map(|&d| Some(d)).collect()),
+            },
             Value::String(_) => Type::String,
             Value::StringArray(_sa) => {
                 // Model as Cell of String for type system for now
@@ -993,6 +1017,181 @@ pub type BuiltinControlFlow = runmat_async::RuntimeError;
 /// Async result type for builtins.
 pub type BuiltinFuture = Pin<Box<dyn Future<Output = Result<Value, BuiltinControlFlow>> + 'static>>;
 
+#[derive(Clone, Debug, Default)]
+pub struct ResolveContext {
+    pub literal_args: Vec<LiteralValue>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum LiteralValue {
+    Number(f64),
+    Bool(bool),
+    String(String),
+    Vector(Vec<LiteralValue>),
+    Unknown,
+}
+
+impl ResolveContext {
+    pub fn new(literal_args: Vec<LiteralValue>) -> Self {
+        Self { literal_args }
+    }
+
+    pub fn numeric_dims(&self) -> Vec<Option<usize>> {
+        self.numeric_dims_from(0)
+    }
+
+    pub fn numeric_dims_from(&self, start: usize) -> Vec<Option<usize>> {
+        let slice = self.literal_args.get(start..).unwrap_or(&[]);
+        if let Some(LiteralValue::Vector(values)) = slice.first() {
+            return values
+                .iter()
+                .map(Self::numeric_dimension_from_literal)
+                .collect();
+        }
+        slice
+            .iter()
+            .map(Self::numeric_dimension_from_literal)
+            .collect()
+    }
+
+    pub fn literal_string_at(&self, index: usize) -> Option<String> {
+        match self.literal_args.get(index) {
+            Some(LiteralValue::String(value)) => Some(value.to_ascii_lowercase()),
+            _ => None,
+        }
+    }
+
+    pub fn literal_bool_at(&self, index: usize) -> Option<bool> {
+        match self.literal_args.get(index) {
+            Some(LiteralValue::Bool(value)) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub fn literal_vector_at(&self, index: usize) -> Option<Vec<LiteralValue>> {
+        match self.literal_args.get(index) {
+            Some(LiteralValue::Vector(values)) => Some(values.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn numeric_vector_at(&self, index: usize) -> Option<Vec<Option<usize>>> {
+        let values = match self.literal_args.get(index) {
+            Some(LiteralValue::Vector(values)) => values,
+            _ => return None,
+        };
+        if values
+            .iter()
+            .any(|value| matches!(value, LiteralValue::Vector(_)))
+        {
+            return None;
+        }
+        Some(
+            values
+                .iter()
+                .map(Self::numeric_dimension_from_literal)
+                .collect(),
+        )
+    }
+
+    fn numeric_dimension_from_literal(value: &LiteralValue) -> Option<usize> {
+        match value {
+            LiteralValue::Number(num) => {
+                if num.is_finite() {
+                    let rounded = num.round();
+                    if (num - rounded).abs() <= 1e-9 && rounded >= 0.0 {
+                        return Some(rounded as usize);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod resolve_context_tests {
+    use super::{LiteralValue, ResolveContext};
+
+    #[test]
+    fn numeric_dims_reads_vector_literal() {
+        let ctx = ResolveContext::new(vec![LiteralValue::Vector(vec![
+            LiteralValue::Number(2.0),
+            LiteralValue::Number(3.0),
+        ])]);
+        assert_eq!(ctx.numeric_dims(), vec![Some(2), Some(3)]);
+    }
+
+    #[test]
+    fn numeric_dims_skips_non_numeric_entries() {
+        let ctx = ResolveContext::new(vec![
+            LiteralValue::Number(4.0),
+            LiteralValue::String("like".to_string()),
+            LiteralValue::Unknown,
+        ]);
+        assert_eq!(ctx.numeric_dims(), vec![Some(4), None, None]);
+    }
+
+    #[test]
+    fn numeric_dims_prefers_vector_even_with_trailing_args() {
+        let ctx = ResolveContext::new(vec![
+            LiteralValue::Vector(vec![LiteralValue::Number(1.0), LiteralValue::Number(5.0)]),
+            LiteralValue::String("like".to_string()),
+        ]);
+        assert_eq!(ctx.numeric_dims(), vec![Some(1), Some(5)]);
+    }
+
+    #[test]
+    fn literal_string_is_lowercased() {
+        let ctx = ResolveContext::new(vec![LiteralValue::String("OmItNaN".to_string())]);
+        assert_eq!(ctx.literal_string_at(0), Some("omitnan".to_string()));
+    }
+
+    #[test]
+    fn literal_bool_is_available() {
+        let ctx = ResolveContext::new(vec![LiteralValue::Bool(true)]);
+        assert_eq!(ctx.literal_bool_at(0), Some(true));
+    }
+
+    #[test]
+    fn literal_vector_at_returns_clone() {
+        let ctx = ResolveContext::new(vec![LiteralValue::Vector(vec![
+            LiteralValue::Number(7.0),
+            LiteralValue::Unknown,
+        ])]);
+        assert_eq!(
+            ctx.literal_vector_at(0),
+            Some(vec![LiteralValue::Number(7.0), LiteralValue::Unknown])
+        );
+    }
+
+    #[test]
+    fn numeric_vector_at_rejects_nested_vectors() {
+        let ctx = ResolveContext::new(vec![LiteralValue::Vector(vec![LiteralValue::Vector(
+            vec![LiteralValue::Number(1.0)],
+        )])]);
+        assert_eq!(ctx.numeric_vector_at(0), None);
+    }
+}
+
+pub type TypeResolver = fn(args: &[Type]) -> Type;
+pub type TypeResolverWithContext = fn(args: &[Type], ctx: &ResolveContext) -> Type;
+
+#[derive(Clone, Copy, Debug)]
+pub enum TypeResolverKind {
+    Legacy(TypeResolver),
+    WithContext(TypeResolverWithContext),
+}
+
+pub fn type_resolver_kind(resolver: TypeResolver) -> TypeResolverKind {
+    TypeResolverKind::Legacy(resolver)
+}
+
+pub fn type_resolver_kind_ctx(resolver: TypeResolverWithContext) -> TypeResolverKind {
+    TypeResolverKind::WithContext(resolver)
+}
+
 /// Simple builtin function definition using the unified type system
 #[derive(Debug, Clone)]
 pub struct BuiltinFunction {
@@ -1003,6 +1202,7 @@ pub struct BuiltinFunction {
     pub examples: &'static str,
     pub param_types: Vec<Type>,
     pub return_type: Type,
+    pub type_resolver: Option<TypeResolverKind>,
     pub implementation: fn(&[Value]) -> BuiltinFuture,
     pub accel_tags: &'static [AccelTag],
     pub is_sink: bool,
@@ -1019,6 +1219,7 @@ impl BuiltinFunction {
         examples: &'static str,
         param_types: Vec<Type>,
         return_type: Type,
+        type_resolver: Option<TypeResolverKind>,
         implementation: fn(&[Value]) -> BuiltinFuture,
         accel_tags: &'static [AccelTag],
         is_sink: bool,
@@ -1032,11 +1233,26 @@ impl BuiltinFunction {
             examples,
             param_types,
             return_type,
+            type_resolver,
             implementation,
             accel_tags,
             is_sink,
             suppress_auto_output,
         }
+    }
+
+    pub fn infer_return_type(&self, args: &[Type]) -> Type {
+        self.infer_return_type_with_context(args, &ResolveContext::default())
+    }
+
+    pub fn infer_return_type_with_context(&self, args: &[Type], ctx: &ResolveContext) -> Type {
+        if let Some(resolver) = self.type_resolver {
+            return match resolver {
+                TypeResolverKind::Legacy(resolver) => resolver(args),
+                TypeResolverKind::WithContext(resolver) => resolver(args, ctx),
+            };
+        }
+        self.return_type.clone()
     }
 }
 
@@ -1046,6 +1262,8 @@ pub struct Constant {
     pub name: &'static str,
     pub value: Value,
 }
+
+pub mod shape_rules;
 
 impl std::fmt::Debug for Constant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -18,7 +18,7 @@ ogDescription: "Run MATLAB code with performance and Rust safety, completely fre
 twitterCard: "summary_large_image"
 twitterTitle: "RunMat: A modern, fast MATLAB code runtime built in Rust"
 twitterDescription: "Slim core, tiered execution, generational GC. Open-source, designed for performance and extensibility."
-canonical: "https://runmat.org/blog/introducing-runmat"
+canonical: "https://runmat.com/blog/introducing-runmat"
 jsonLd:
   "@context": "https://schema.org"
   "@graph":
@@ -27,22 +27,22 @@ jsonLd:
         - "@type": "ListItem"
           position: 1
           name: "RunMat"
-          item: "https://runmat.org"
+          item: "https://runmat.com"
         - "@type": "ListItem"
           position: 2
           name: "Blog"
-          item: "https://runmat.org/blog"
+          item: "https://runmat.com/blog"
         - "@type": "ListItem"
           position: 3
           name: "Introducing RunMat"
-          item: "https://runmat.org/blog/introducing-runmat"
+          item: "https://runmat.com/blog/introducing-runmat"
 
     - "@type": "BlogPosting"
-      "@id": "https://runmat.org/blog/introducing-runmat#article"
+      "@id": "https://runmat.com/blog/introducing-runmat#article"
       headline: "Introducing RunMat: A Fast, Free, Modern MATLAB Code Runtime"
       alternativeHeadline: "RunMat vs GNU Octave: Performance Benchmarks"
       description: "RunMat is a modern, open-source runtime that executes MATLAB code quickly using a Rust-based engine, tiered JIT execution, and automatic GPU acceleration."
-      image: "https://runmat.org/plot-example.jpg"
+      image: "https://runmat.com/plot-example.jpg"
       datePublished: "2025-08-07T00:00:00Z"
       dateModified: "2025-08-07T00:00:00Z"
       author:
@@ -60,7 +60,7 @@ jsonLd:
       about:
         - "@type": "SoftwareApplication"
           name: "RunMat"
-          sameAs: "https://runmat.org"
+          sameAs: "https://runmat.com"
           applicationCategory: "ScientificApplication"
           operatingSystem: ["Windows", "macOS", "Linux"]
           offers:

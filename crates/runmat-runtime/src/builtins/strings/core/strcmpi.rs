@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
+use crate::builtins::strings::type_resolvers::logical_text_match_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strcmpi")]
@@ -55,6 +56,7 @@ fn remap_strcmpi_flow(err: RuntimeError) -> RuntimeError {
     summary = "Compare text inputs for equality without considering case.",
     keywords = "strcmpi,string compare,text equality",
     accel = "sink",
+    type_resolver(logical_text_match_type),
     builtin_path = "crate::builtins::strings::core::strcmpi"
 )]
 async fn strcmpi_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
@@ -102,7 +104,9 @@ fn evaluate_strcmpi(left: &TextCollection, right: &TextCollection) -> BuiltinRes
 pub(crate) mod tests {
     use super::*;
     use crate::RuntimeError;
-    use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray};
+    use runmat_builtins::{
+        CellArray, CharArray, LogicalArray, ResolveContext, StringArray, Type,
+    };
 
     fn strcmpi_builtin(a: Value, b: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strcmpi_builtin(a, b))
@@ -289,5 +293,16 @@ pub(crate) mod tests {
             .expect("strcmpi");
         let expected = LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
         assert_eq!(result, Value::LogicalArray(expected));
+    }
+
+    #[test]
+    fn strcmpi_type_is_logical_match() {
+        assert_eq!(
+            logical_text_match_type(
+                &[Type::String, Type::String],
+                &ResolveContext::new(Vec::new()),
+            ),
+            Type::Bool
+        );
     }
 }

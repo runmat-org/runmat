@@ -18,14 +18,14 @@ const jsonLd = {
   "@graph": [
     {
       "@type": "Organization",
-      "@id": "https://runmat.org/#organization",
+      "@id": "https://runmat.com/#organization",
       "name": "RunMat",
       "alternateName": ["RunMat by Dystr", "Dystr"],
       "legalName": "Dystr Inc.",
-      "url": "https://runmat.org",
+      "url": "https://runmat.com",
       "logo": {
         "@type": "ImageObject",
-        "url": "https://runmat.org/runmat-logo.svg",
+        "url": "https://runmat.com/runmat-logo.svg",
         "caption": "RunMat"
       },
       "description": "RunMat is a high-performance, open-source runtime for math that lets you run MATLAB-syntax code in the browser, on the desktop, or from the CLI, while getting GPU-speed execution.",
@@ -49,24 +49,24 @@ const jsonLd = {
     },
     {
       "@type": "WebSite",
-      "@id": "https://runmat.org/#website",
-      "url": "https://runmat.org",
+      "@id": "https://runmat.com/#website",
+      "url": "https://runmat.com",
       "name": "RunMat",
       "description": "The Fastest Runtime for Your Math. RunMat fuses back-to-back ops into fewer GPU steps and intelligently manages memory.",
-      "publisher": { "@id": "https://runmat.org/#organization" },
+      "publisher": { "@id": "https://runmat.com/#organization" },
       "image": "https://web.runmatstatic.com/runmat-sandbox-dark.png",
       "potentialAction": {
         "@type": "SearchAction",
         "target": {
           "@type": "EntryPoint",
-          "urlTemplate": "https://runmat.org/search?q={search_term_string}"
+          "urlTemplate": "https://runmat.com/search?q={search_term_string}"
         },
         "query-input": "required name=search_term_string"
       }
     },
     {
       "@type": "SoftwareApplication",
-      "@id": "https://runmat.org/#software",
+      "@id": "https://runmat.com/#software",
       "name": "RunMat",
       "description": "RunMat is a high-performance, open-source runtime for math that lets you run MATLAB-syntax code in the browser, on the desktop, or from the CLI, while getting GPU-speed execution.",
       "license": "https://opensource.org/licenses/MIT",
@@ -89,10 +89,10 @@ const jsonLd = {
         "priceCurrency": "USD",
         "availability": "https://schema.org/InStock"
       },
-      "author": { "@id": "https://runmat.org/#organization" },
-      "publisher": { "@id": "https://runmat.org/#organization" },
-      "downloadUrl": "https://runmat.org/download",
-      "mainEntityOfPage": { "@id": "https://runmat.org/#website" },
+      "author": { "@id": "https://runmat.com/#organization" },
+      "publisher": { "@id": "https://runmat.com/#organization" },
+      "downloadUrl": "https://runmat.com/download",
+      "mainEntityOfPage": { "@id": "https://runmat.com/#website" },
       "screenshot": {
         "@type": "ImageObject",
         "url": "https://web.runmatstatic.com/runmat-sandbox-dark.png",
@@ -397,7 +397,18 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-center">
-                  The RunMat runtime is MIT-licensed and open source. No per-seat fees, no license servers, no vendor audits. Collaboration, cloud storage, and team features are coming soon.
+                  <Link
+                    href="https://runmat.com/sandbox"
+                    className="underline"
+                    target="_blank"
+                    rel="noreferrer"
+                    data-ph-capture-attribute-destination="sandbox"
+                    data-ph-capture-attribute-source="home-portable-card"
+                    data-ph-capture-attribute-cta="try-in-browser"
+                  >
+                    Try instantly in the browser with no install,
+                  </Link>{" "}
+                  or download the CLI for local scripts. Same code runs on macOS, Windows, Linux, and headless servers. GPU portability via Metal, DirectX 12, and Vulkan—no CUDA lock-in.
                 </CardDescription>
               </CardContent>
             </Card>

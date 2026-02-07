@@ -74,6 +74,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Download web content (JSON, text, or binary) over HTTP/HTTPS.",
     keywords = "webread,http get,rest client,json,api",
     accel = "sink",
+    type_resolver(crate::builtins::io::type_resolvers::webread_type),
     builtin_path = "crate::builtins::io::http::webread"
 )]
 async fn webread_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

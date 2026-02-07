@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::strings::core::string::{
     extract_format_spec, format_from_spec, FormatSpecData,
 };
+use crate::builtins::strings::type_resolvers::string_array_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::compose")]
@@ -61,6 +62,7 @@ fn remap_compose_flow(mut err: RuntimeError) -> RuntimeError {
     summary = "Format values into MATLAB string arrays using printf-style placeholders.",
     keywords = "compose,format,string array,gpu",
     accel = "sink",
+    type_resolver(string_array_type),
     builtin_path = "crate::builtins::strings::core::compose"
 )]
 async fn compose_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -106,7 +108,7 @@ fn format_spec_data_to_string_array(spec: FormatSpecData) -> BuiltinResult<Strin
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
 
     fn compose_builtin(format_spec: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::compose_builtin(format_spec, rest))
@@ -237,5 +239,13 @@ pub(crate) mod tests {
             }
             other => panic!("unexpected results {other:?}"),
         }
+    }
+
+    #[test]
+    fn compose_type_is_string_array() {
+        assert_eq!(
+            string_array_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::cell_of(Type::String)
+        );
     }
 }

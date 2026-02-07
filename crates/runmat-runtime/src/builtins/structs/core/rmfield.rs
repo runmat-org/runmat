@@ -4,6 +4,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::structs::type_resolvers::rmfield_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{CellArray, StringArray, StructValue, Value};
 use runmat_macros::runtime_builtin;
@@ -45,6 +46,7 @@ fn rmfield_flow(message: impl Into<String>) -> RuntimeError {
     category = "structs/core",
     summary = "Remove one or more fields from scalar structs or struct arrays.",
     keywords = "rmfield,struct,remove field,struct array",
+    type_resolver(rmfield_type),
     builtin_path = "crate::builtins::structs::core::rmfield"
 )]
 async fn rmfield_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

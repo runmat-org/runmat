@@ -224,7 +224,9 @@ impl<'window> PlotWindow<'window> {
         // Fit camera to show the plot
         let bounds_min = Vec3::new(-1.0, -1.5, -1.0);
         let bounds_max = Vec3::new(10.0, 1.5, 1.0);
-        self.plot_renderer.camera.fit_bounds(bounds_min, bounds_max);
+        self.plot_renderer
+            .camera_mut()
+            .fit_bounds(bounds_min, bounds_max);
     }
 
     /// Set the figure to display in this window (clears existing content)
@@ -520,7 +522,7 @@ impl<'window> PlotWindow<'window> {
 
         // Update camera aspect ratio
         self.plot_renderer
-            .camera
+            .camera_mut()
             .update_aspect_ratio(width as f32 / height as f32);
     }
 
@@ -548,7 +550,7 @@ impl<'window> PlotWindow<'window> {
 
         // Get UI data before borrowing
         let scene_stats = self.plot_renderer.scene.statistics();
-        let _camera_pos = self.plot_renderer.camera.position;
+        let _camera_pos = self.plot_renderer.camera().position;
 
         // Track the plot area for WGPU rendering
         let mut plot_area: Option<egui::Rect> = None;
@@ -623,8 +625,8 @@ impl<'window> PlotWindow<'window> {
             }
         }
         if reset_view {
-            // Refit main camera to data
-            self.plot_renderer.fit_camera_to_data();
+            // Refit camera to data (explicit Fit Extents)
+            self.plot_renderer.fit_extents();
         }
         if save_png || save_svg {
             // OS Save Dialog to select path
@@ -702,7 +704,7 @@ impl<'window> PlotWindow<'window> {
             let plot_height = plot_rect.height();
             if plot_width > 0.0 && plot_height > 0.0 {
                 self.plot_renderer
-                    .camera
+                    .camera_mut()
                     .update_aspect_ratio(plot_width / plot_height);
             }
         }
@@ -812,11 +814,13 @@ impl<'window> PlotWindow<'window> {
                     msaa_samples: 4,
                     ..Default::default()
                 };
+                let cam = self.plot_renderer.camera().clone();
                 let _ = self.plot_renderer.render_camera_to_viewport(
                     &mut encoder,
                     &view,
                     scissor,
                     &cfg,
+                    &cam,
                 );
             }
         }
@@ -971,25 +975,28 @@ impl<'window> PlotWindow<'window> {
                             break;
                         }
                     }
-                } else if let crate::core::camera::ProjectionType::Orthographic {
-                    ref mut left,
-                    ref mut right,
-                    ref mut bottom,
-                    ref mut top,
-                    ..
-                } = self.plot_renderer.camera.projection
-                {
-                    let pw = (plot_rect.width() * self.pixels_per_point).max(1.0);
-                    let ph = (plot_rect.height() * self.pixels_per_point).max(1.0);
-                    let world_w = *right - *left;
-                    let world_h = *top - *bottom;
-                    let dx_world = (delta.x / pw) * world_w;
-                    let dy_world = (delta.y / ph) * world_h;
-                    *left -= dx_world;
-                    *right -= dx_world;
-                    *bottom += dy_world;
-                    *top += dy_world;
-                    self.plot_renderer.camera.mark_dirty();
+                } else {
+                    let cam = self.plot_renderer.camera_mut();
+                    if let crate::core::camera::ProjectionType::Orthographic {
+                        left,
+                        right,
+                        bottom,
+                        top,
+                        ..
+                    } = &mut cam.projection
+                    {
+                        let pw = (plot_rect.width() * self.pixels_per_point).max(1.0);
+                        let ph = (plot_rect.height() * self.pixels_per_point).max(1.0);
+                        let world_w = *right - *left;
+                        let world_h = *top - *bottom;
+                        let dx_world = (delta.x / pw) * world_w;
+                        let dy_world = (delta.y / ph) * world_h;
+                        *left -= dx_world;
+                        *right -= dx_world;
+                        *bottom += dy_world;
+                        *top += dy_world;
+                        cam.mark_dirty();
+                    }
                 }
             }
         }
@@ -1052,44 +1059,47 @@ impl<'window> PlotWindow<'window> {
                         break;
                     }
                 }
-            } else if let crate::core::camera::ProjectionType::Orthographic {
-                ref mut left,
-                ref mut right,
-                ref mut bottom,
-                ref mut top,
-                ..
-            } = self.plot_renderer.camera.projection
-            {
-                let factor = (1.0 - scroll_delta * 0.1).clamp(0.2, 5.0);
-                let px_min_x = plot_rect.min.x * self.pixels_per_point;
-                let px_min_y = plot_rect.min.y * self.pixels_per_point;
-                let px_w = plot_rect.width() * self.pixels_per_point;
-                let px_h = plot_rect.height() * self.pixels_per_point;
-                let mx = self.mouse_position.x;
-                let my = self.mouse_position.y;
-                let mut pivot_x = (*left + *right) * 0.5;
-                let mut pivot_y = (*bottom + *top) * 0.5;
-                if mx >= px_min_x
-                    && mx <= px_min_x + px_w
-                    && my >= px_min_y
-                    && my <= px_min_y + px_h
+            } else {
+                let cam = self.plot_renderer.camera_mut();
+                if let crate::core::camera::ProjectionType::Orthographic {
+                    left,
+                    right,
+                    bottom,
+                    top,
+                    ..
+                } = &mut cam.projection
                 {
-                    let tx = (mx - px_min_x) / px_w;
-                    let ty = (my - px_min_y) / px_h;
-                    let w = *right - *left;
-                    let h = *top - *bottom;
-                    pivot_x = *left + tx * w;
-                    pivot_y = *top - ty * h;
+                    let factor = (1.0 - scroll_delta * 0.1).clamp(0.2, 5.0);
+                    let px_min_x = plot_rect.min.x * self.pixels_per_point;
+                    let px_min_y = plot_rect.min.y * self.pixels_per_point;
+                    let px_w = plot_rect.width() * self.pixels_per_point;
+                    let px_h = plot_rect.height() * self.pixels_per_point;
+                    let mx = self.mouse_position.x;
+                    let my = self.mouse_position.y;
+                    let mut pivot_x = (*left + *right) * 0.5;
+                    let mut pivot_y = (*bottom + *top) * 0.5;
+                    if mx >= px_min_x
+                        && mx <= px_min_x + px_w
+                        && my >= px_min_y
+                        && my <= px_min_y + px_h
+                    {
+                        let tx = (mx - px_min_x) / px_w;
+                        let ty = (my - px_min_y) / px_h;
+                        let w = *right - *left;
+                        let h = *top - *bottom;
+                        pivot_x = *left + tx * w;
+                        pivot_y = *top - ty * h;
+                    }
+                    let new_left = pivot_x - (pivot_x - *left) * factor;
+                    let new_right = pivot_x + (*right - pivot_x) * factor;
+                    let new_bottom = pivot_y - (pivot_y - *bottom) * factor;
+                    let new_top = pivot_y + (*top - pivot_y) * factor;
+                    *left = new_left;
+                    *right = new_right;
+                    *bottom = new_bottom;
+                    *top = new_top;
+                    cam.mark_dirty();
                 }
-                let new_left = pivot_x - (pivot_x - *left) * factor;
-                let new_right = pivot_x + (*right - pivot_x) * factor;
-                let new_bottom = pivot_y - (pivot_y - *bottom) * factor;
-                let new_top = pivot_y + (*top - pivot_y) * factor;
-                *left = new_left;
-                *right = new_right;
-                *bottom = new_bottom;
-                *top = new_top;
-                self.plot_renderer.camera.mark_dirty();
             }
         }
     }

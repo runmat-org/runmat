@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::image::filters::type_resolvers::imfilter_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::imfilter")]
@@ -53,6 +54,7 @@ fn filter_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
     summary = "Apply linear filters with MATLAB-compatible padding semantics.",
     keywords = "imfilter,image,filter,convolution,correlation,padding",
     accel = "custom-imfilter",
+    type_resolver(imfilter_type),
     builtin_path = "crate::builtins::image::filters::imfilter"
 )]
 async fn imfilter_builtin(

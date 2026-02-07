@@ -9,6 +9,40 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 use crate::{core::scene::GpuVertexBuffer, gpu::shaders};
+use crate::core::DepthMode;
+
+/// Uniforms for the procedural 3D grid plane.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct GridUniforms {
+    pub major_step: f32,
+    pub minor_step: f32,
+    pub fade_start: f32,
+    pub fade_end: f32,
+    pub camera_pos: [f32; 3],
+    pub _pad0: f32,
+    pub target_pos: [f32; 3],
+    pub _pad1: f32,
+    pub major_color: [f32; 4],
+    pub minor_color: [f32; 4],
+}
+
+impl Default for GridUniforms {
+    fn default() -> Self {
+        Self {
+            major_step: 1.0,
+            minor_step: 0.1,
+            fade_start: 10.0,
+            fade_end: 15.0,
+            camera_pos: [0.0, 0.0, 0.0],
+            _pad0: 0.0,
+            target_pos: [0.0, 0.0, 0.0],
+            _pad1: 0.0,
+            major_color: [0.90, 0.92, 0.96, 0.30],
+            minor_color: [0.82, 0.84, 0.88, 0.18],
+        }
+    }
+}
 
 /// Vertex data for rendering points, lines, and triangles
 #[repr(C)]
@@ -204,6 +238,12 @@ pub struct WgpuRenderer {
     image_sampler: wgpu::Sampler,
     point_style_bind_group_layout: wgpu::BindGroupLayout,
 
+    // Grid helper uniforms/pipeline (3D only)
+    grid_uniform_buffer: wgpu::Buffer,
+    pub grid_uniform_bind_group: wgpu::BindGroup,
+    grid_uniform_bind_group_layout: wgpu::BindGroupLayout,
+    grid_plane_pipeline: Option<wgpu::RenderPipeline>,
+
     // Uniform resources (traditional)
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
@@ -217,6 +257,14 @@ pub struct WgpuRenderer {
     // Current uniforms
     uniforms: Uniforms,
     direct_uniforms: DirectUniforms,
+
+    // Depth resources (used by camera-based 3D rendering paths)
+    depth_texture: Option<wgpu::Texture>,
+    depth_view: Option<Arc<wgpu::TextureView>>,
+    depth_extent: (u32, u32, u32), // (w, h, sample_count)
+
+    /// Depth mapping mode for camera-based 3D pipelines.
+    pub depth_mode: DepthMode,
 }
 
 impl WgpuRenderer {
@@ -352,6 +400,36 @@ impl WgpuRenderer {
                 }],
             });
 
+        // Grid uniforms (3D helper plane)
+        let grid_uniforms = GridUniforms::default();
+        let grid_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Grid Uniform Buffer"),
+            contents: bytemuck::cast_slice(&[grid_uniforms]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let grid_uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: Some("grid_uniform_bind_group_layout"),
+            });
+        let grid_uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("grid_uniform_bind_group"),
+            layout: &grid_uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: grid_uniform_buffer.as_entire_binding(),
+            }],
+        });
+
         Self {
             device,
             queue,
@@ -367,6 +445,10 @@ impl WgpuRenderer {
             image_bind_group_layout,
             image_sampler,
             point_style_bind_group_layout,
+            grid_uniform_buffer,
+            grid_uniform_bind_group,
+            grid_uniform_bind_group_layout,
+            grid_plane_pipeline: None,
             uniform_buffer,
             uniform_bind_group,
             uniform_bind_group_layout,
@@ -375,6 +457,33 @@ impl WgpuRenderer {
             direct_uniform_bind_group_layout,
             uniforms,
             direct_uniforms,
+            depth_texture: None,
+            depth_view: None,
+            depth_extent: (0, 0, 0),
+            depth_mode: DepthMode::default(),
+        }
+    }
+
+    pub fn update_grid_uniforms(&mut self, uniforms: GridUniforms) {
+        self.queue.write_buffer(
+            &self.grid_uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[uniforms]),
+        );
+    }
+
+    pub fn set_depth_mode(&mut self, mode: DepthMode) {
+        if self.depth_mode != mode {
+            self.depth_mode = mode;
+            // Pipelines depend on depth compare; rebuild.
+            self.point_pipeline = None;
+            self.line_pipeline = None;
+            self.triangle_pipeline = None;
+            self.direct_line_pipeline = None;
+            self.direct_triangle_pipeline = None;
+            self.direct_point_pipeline = None;
+            self.image_pipeline = None;
+            self.grid_plane_pipeline = None;
         }
     }
 
@@ -399,7 +508,61 @@ impl WgpuRenderer {
             self.direct_triangle_pipeline = None;
             self.direct_point_pipeline = None;
             self.image_pipeline = None;
+            self.grid_plane_pipeline = None;
+            // Depth attachment must match sample count.
+            self.depth_texture = None;
+            self.depth_view = None;
+            self.depth_extent = (0, 0, 0);
         }
+    }
+
+    fn depth_format() -> wgpu::TextureFormat {
+        // Prefer a higher-precision depth buffer on native; keep a web-friendly format on wasm.
+        #[cfg(target_arch = "wasm32")]
+        {
+            wgpu::TextureFormat::Depth24Plus
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            wgpu::TextureFormat::Depth32Float
+        }
+    }
+
+    fn depth_compare(&self) -> wgpu::CompareFunction {
+        match self.depth_mode {
+            DepthMode::Standard => wgpu::CompareFunction::LessEqual,
+            DepthMode::ReversedZ => wgpu::CompareFunction::GreaterEqual,
+        }
+    }
+
+    pub fn ensure_depth_view(&mut self) -> Arc<wgpu::TextureView> {
+        let width = self.surface_config.width.max(1);
+        let height = self.surface_config.height.max(1);
+        let samples = self.msaa_sample_count.max(1);
+        if self.depth_view.is_none() || self.depth_extent != (width, height, samples) {
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("runmat_depth_texture"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: samples,
+                dimension: wgpu::TextureDimension::D2,
+                format: Self::depth_format(),
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            self.depth_texture = Some(texture);
+            self.depth_view = Some(Arc::new(view));
+            self.depth_extent = (width, height, samples);
+        }
+        self.depth_view
+            .as_ref()
+            .cloned()
+            .expect("depth view missing")
     }
 
     /// Create a GPU texture and bind group for an RGBA8 image
@@ -578,6 +741,16 @@ impl WgpuRenderer {
         }
     }
 
+    pub fn ensure_grid_plane_pipeline(&mut self) {
+        if self.grid_plane_pipeline.is_none() {
+            self.grid_plane_pipeline = Some(self.create_grid_plane_pipeline());
+        }
+    }
+
+    pub fn grid_plane_pipeline(&self) -> Option<&wgpu::RenderPipeline> {
+        self.grid_plane_pipeline.as_ref()
+    }
+
     /// Create point rendering pipeline
     fn create_point_pipeline(&self) -> wgpu::RenderPipeline {
         let shader = self
@@ -622,7 +795,13 @@ impl WgpuRenderer {
                     unclipped_depth: false,
                     conservative: false,
                 },
-                depth_stencil: None, // Disable depth testing for 2D point plots
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: Self::depth_format(),
+                    depth_write_enabled: true,
+                    depth_compare: self.depth_compare(),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState {
                     count: self.msaa_sample_count,
                     mask: !0,
@@ -676,7 +855,13 @@ impl WgpuRenderer {
                     unclipped_depth: false,
                     conservative: false,
                 },
-                depth_stencil: None, // Disable depth testing for 2D line plots
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: Self::depth_format(),
+                    depth_write_enabled: true,
+                    depth_compare: self.depth_compare(),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState {
                     count: self.msaa_sample_count,
                     mask: !0,
@@ -730,7 +915,16 @@ impl WgpuRenderer {
                     unclipped_depth: false,
                     conservative: false,
                 },
-                depth_stencil: None, // Disable depth testing for 2D line plots
+                // This pipeline is used inside a render pass that has a depth attachment.
+                // To be compatible with that pass, we must specify a matching depth format.
+                // Use CompareFunction::Always + no writes to effectively disable depth testing.
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: Self::depth_format(),
+                    depth_write_enabled: false,
+                    depth_compare: wgpu::CompareFunction::Always,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState {
                     count: self.msaa_sample_count,
                     mask: !0,
@@ -784,7 +978,13 @@ impl WgpuRenderer {
                     unclipped_depth: false,
                     conservative: false,
                 },
-                depth_stencil: None,
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: Self::depth_format(),
+                    depth_write_enabled: false,
+                    depth_compare: wgpu::CompareFunction::Always,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState {
                     count: self.msaa_sample_count,
                     mask: !0,
@@ -841,7 +1041,13 @@ impl WgpuRenderer {
                     unclipped_depth: false,
                     conservative: false,
                 },
-                depth_stencil: None,
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: Self::depth_format(),
+                    depth_write_enabled: false,
+                    depth_compare: wgpu::CompareFunction::Always,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState {
                     count: self.msaa_sample_count,
                     mask: !0,
@@ -921,7 +1127,13 @@ impl WgpuRenderer {
                     unclipped_depth: false,
                     conservative: false,
                 },
-                depth_stencil: None,
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: Self::depth_format(),
+                    depth_write_enabled: false,
+                    depth_compare: wgpu::CompareFunction::Always,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState {
                     count: self.msaa_sample_count,
                     mask: !0,
@@ -975,7 +1187,75 @@ impl WgpuRenderer {
                     unclipped_depth: false,
                     conservative: false,
                 },
-                depth_stencil: None, // Disable depth testing for 2D plotting
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: Self::depth_format(),
+                    depth_write_enabled: true,
+                    depth_compare: self.depth_compare(),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: self.msaa_sample_count,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+            })
+    }
+
+    fn create_grid_plane_pipeline(&self) -> wgpu::RenderPipeline {
+        let shader = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Grid Plane Shader"),
+                source: wgpu::ShaderSource::Wgsl(shaders::vertex::GRID_PLANE.into()),
+            });
+
+        let pipeline_layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Grid Plane Pipeline Layout"),
+                bind_group_layouts: &[
+                    &self.uniform_bind_group_layout,
+                    &self.grid_uniform_bind_group_layout,
+                ],
+                push_constant_ranges: &[],
+            });
+
+        self.device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Grid Plane Pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[Vertex::desc()],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: self.surface_config.format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: Self::depth_format(),
+                    depth_write_enabled: false,
+                    depth_compare: self.depth_compare(),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState {
                     count: self.msaa_sample_count,
                     mask: !0,

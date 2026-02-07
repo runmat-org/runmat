@@ -1,7 +1,7 @@
 //! MATLAB-compatible `isnumeric` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::Value;
+use runmat_builtins::{ResolveContext, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -48,6 +48,7 @@ const IDENTIFIER_INTERNAL: &str = "RunMat:isnumeric:InternalError";
     summary = "Return true when a value is stored as numeric data.",
     keywords = "isnumeric,numeric,type,gpu",
     accel = "metadata",
+    type_resolver(bool_scalar_type),
     builtin_path = "crate::builtins::logical::tests::isnumeric"
 )]
 async fn isnumeric_builtin(value: Value) -> BuiltinResult<Value> {
@@ -55,6 +56,10 @@ async fn isnumeric_builtin(value: Value) -> BuiltinResult<Value> {
         Value::GpuTensor(handle) => isnumeric_gpu(handle).await,
         other => Ok(Value::Bool(isnumeric_value(&other))),
     }
+}
+
+fn bool_scalar_type(_: &[Type], _context: &ResolveContext) -> Type {
+    Type::Bool
 }
 
 async fn isnumeric_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
@@ -111,12 +116,20 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
         CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntValue, Listener, LogicalArray,
-        MException, ObjectInstance, StringArray, StructValue, Tensor,
+        MException, ObjectInstance, ResolveContext, StringArray, StructValue, Tensor, Type,
     };
     use runmat_gc_api::GcPtr;
 
     fn run_isnumeric(value: Value) -> BuiltinResult<Value> {
         block_on(super::isnumeric_builtin(value))
+    }
+
+    #[test]
+    fn isnumeric_type_returns_bool() {
+        assert_eq!(
+            bool_scalar_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::Bool
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

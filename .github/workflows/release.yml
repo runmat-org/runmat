@@ -282,10 +282,10 @@ jobs:
             #### Quick Install (Recommended)
             ```bash
             # Linux/macOS
-            curl -fsSL https://runmat.org/install.sh | sh
+            curl -fsSL https://runmat.com/install.sh | sh
             
             # Windows (PowerShell)
-            iwr https://runmat.org/install.ps1 | iex
+            iwr https://runmat.com/install.ps1 | iex
             ```
             
             #### Manual Installation
@@ -294,7 +294,7 @@ jobs:
             3. Add the binary to your PATH
             
             ### Documentation
-            - [Getting Started](https://runmat.org/docs/getting-started)
+            - [Getting Started](https://runmat.com/docs/getting-started)
           files: |
             artifacts/**/*
           draft: false

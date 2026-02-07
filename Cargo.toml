@@ -5,6 +5,7 @@ members = [
     "crates/runmat-parser",
     "crates/runmat-hir",
     "crates/runmat-ignition",
+    "crates/runmat-telemetry",
     "crates/runmat-accelerate-api",
     "crates/runmat-accelerate",
     "crates/runmat-plot",
@@ -66,6 +67,7 @@ runmat-parser = { version = "=0.2.8", path = "crates/runmat-parser" }
 runmat-hir = { version = "=0.2.8", path = "crates/runmat-hir" }
 runmat-ignition = { version = "=0.2.8", path = "crates/runmat-ignition" }
 runmat-async = { version = "=0.2.8", path = "crates/runmat-async" }
+runmat-telemetry = { version = "=0.2.8", path = "crates/runmat-telemetry" }
 runmat-core = { version = "=0.2.8", path = "crates/runmat-core", default-features = false }
 runmat-plot = { version = "=0.2.8", path = "crates/runmat-plot", default-features = false }
 runmat-macros = { version = "=0.2.8", path = "crates/runmat-macros" }

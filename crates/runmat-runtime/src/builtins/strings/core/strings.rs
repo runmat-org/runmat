@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::strings::type_resolvers::string_array_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const FN_NAME: &str = "strings";
@@ -70,6 +71,7 @@ enum FillKind {
     summary = "Preallocate string arrays filled with empty string scalars.",
     keywords = "strings,string array,empty,preallocate",
     accel = "array_construct",
+    type_resolver(string_array_type),
     builtin_path = "crate::builtins::strings::core::strings"
 )]
 async fn strings_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -318,6 +320,7 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn strings_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strings_builtin(rest))
@@ -626,6 +629,14 @@ pub(crate) mod tests {
                 other => panic!("expected string array, got {other:?}"),
             }
         });
+    }
+
+    #[test]
+    fn strings_type_is_string_array() {
+        assert_eq!(
+            string_array_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::cell_of(Type::String)
+        );
     }
 
     #[cfg(feature = "wgpu")]

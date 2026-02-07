@@ -93,6 +93,7 @@ impl FileEncoding {
     summary = "Read the entire contents of a text file into a 1-by-N character vector.",
     keywords = "fileread,io,read file,text file,character vector",
     accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::fileread_type),
     builtin_path = "crate::builtins::io::filetext::fileread"
 )]
 async fn fileread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

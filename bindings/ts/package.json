@@ -1,10 +1,10 @@
 {
   "name": "runmat",
-  "version": "0.2.14",
+  "version": "0.2.17",
   "description": "Blazing fast runtime for math. Run MATLAB code on CPU or GPU.",
   "type": "module",
   "license": "SEE LICENSE IN ../../LICENSE.md",
-  "homepage": "https://runmat.org",
+  "homepage": "https://runmat.com",
   "repository": {
     "type": "git",
     "url": "https://github.com/runmat-org/runmat"
@@ -38,7 +38,8 @@
     "build:wasm:web": "wasm-pack build ../../crates/runmat-wasm --target web --out-dir ../../bindings/ts/pkg-web --out-name runmat_wasm_web --release",
     "build:lsp": "wasm-pack build ../../crates/runmat-lsp --target web --out-dir ../../bindings/ts/lsp-web --out-name runmat_lsp --release -- --no-default-features --features wasm",
     "build:types": "tsc -p tsconfig.json",
-    "build": "npm run clean && npm run build:registry && npm run build:wasm && npm run build:wasm:web && npm run build:lsp && npm run build:types && npm run sync:wasm",
+    "build:snapshot": "mkdir -p artifacts && cargo run -p runmat -- snapshot create -o artifacts/stdlib.snapshot",
+    "build": "npm run clean && npm run build:registry && npm run build:wasm && npm run build:wasm:web && npm run build:lsp && npm run build:types && npm run build:snapshot && npm run sync:wasm",
     "ci": "npm run build && npm run lint && npm test && cargo check -p runmat-wasm --target wasm32-unknown-unknown",
     "lint": "tsc --noEmit",
     "test": "vitest run",

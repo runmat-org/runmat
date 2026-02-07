@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::strings::type_resolvers::numeric_text_scalar_or_tensor_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::str2double")]
@@ -61,6 +62,7 @@ fn remap_str2double_flow(err: RuntimeError) -> RuntimeError {
     summary = "Convert strings, character arrays, or cell arrays of text into doubles.",
     keywords = "str2double,string to double,text conversion,gpu",
     accel = "sink",
+    type_resolver(numeric_text_scalar_or_tensor_type),
     builtin_path = "crate::builtins::strings::core::str2double"
 )]
 async fn str2double_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -160,6 +162,7 @@ fn parse_numeric_scalar(text: &str) -> f64 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn str2double_builtin(value: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::str2double_builtin(value))
@@ -301,5 +304,13 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn str2double_type_is_numeric_text_scalar_or_tensor() {
+        assert_eq!(
+            numeric_text_scalar_or_tensor_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::Num
+        );
     }
 }

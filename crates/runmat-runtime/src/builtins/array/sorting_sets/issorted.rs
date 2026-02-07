@@ -5,6 +5,7 @@ use std::cmp::Ordering;
 use runmat_builtins::{CharArray, ComplexTensor, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use super::type_resolvers::bool_output_type;
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -55,6 +56,7 @@ fn issorted_error(message: impl Into<String>) -> crate::RuntimeError {
     keywords = "issorted,sorted,monotonic,rows",
     accel = "sink",
     sink = true,
+    type_resolver(bool_output_type),
     builtin_path = "crate::builtins::array::sorting_sets::issorted"
 )]
 async fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -1048,7 +1050,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, Value};
+    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type, Value};
 
     fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::issorted_builtin(value, rest))
@@ -1060,6 +1062,14 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let result = issorted_builtin(Value::Tensor(tensor), vec![]).expect("issorted");
         assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn issorted_type_resolver_bool() {
+        assert_eq!(
+            bool_output_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::Bool
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

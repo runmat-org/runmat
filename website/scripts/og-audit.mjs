@@ -111,7 +111,7 @@ function missingFields(meta) {
 }
 
 async function main() {
-  const base = process.argv[2] ?? "https://runmat.org";
+  const base = process.argv[2] ?? "https://runmat.com";
   const baseUrl = new URL(base);
   const baseOrigin = baseUrl.origin;
 
@@ -160,8 +160,8 @@ async function main() {
       const imgUrl = (() => {
         // When auditing a local server, rewrite absolute production URLs to local origin
         // so we validate the images we just built.
-        if (baseOrigin !== "https://runmat.org" && meta["og:image"].startsWith("https://runmat.org/")) {
-          return meta["og:image"].replace("https://runmat.org", baseOrigin);
+        if (baseOrigin !== "https://runmat.com" && meta["og:image"].startsWith("https://runmat.com/")) {
+          return meta["og:image"].replace("https://runmat.com", baseOrigin);
         }
         return meta["og:image"];
       })();
@@ -191,4 +191,3 @@ main().catch((err) => {
   console.error(err);
   process.exit(1);
 });
-

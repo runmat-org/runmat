@@ -1,13 +1,20 @@
 //! MATLAB-compatible `mean` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ProviderPrecision};
-use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
+use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Type, Value};
 const NAME: &str = "mean";
+
+use runmat_builtins::ResolveContext;
+
+fn mean_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    reduce_numeric_type(args, ctx)
+}
 
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -18,6 +25,7 @@ use crate::builtins::common::{
     shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
+use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::dispatcher;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::mean")]
@@ -203,6 +211,7 @@ enum MeanAxes {
     summary = "Average elements of scalars, vectors, matrices, or N-D tensors.",
     keywords = "mean,average,reduction,gpu,omitnan",
     accel = "reduction",
+    type_resolver(mean_type),
     builtin_path = "crate::builtins::math::reduction::mean"
 )]
 async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -260,10 +269,39 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut nan_mode = ReductionNaN::Include;
     let mut output = OutputTemplate::Double;
     let mut output_set = false;
+    let tokens = tokens_from_values(args);
 
     let mut idx = 0;
     while idx < args.len() {
         let arg = &args[idx];
+        if let Some(token) = tokens.get(idx) {
+            if let crate::builtins::common::arg_tokens::ArgToken::String(text) = token {
+                match text.as_str() {
+                    "omitnan" => {
+                        nan_mode = ReductionNaN::Omit;
+                        idx += 1;
+                        continue;
+                    }
+                    "includenan" => {
+                        nan_mode = ReductionNaN::Include;
+                        idx += 1;
+                        continue;
+                    }
+                    "all" => {
+                        if axes_set && !matches!(axes, MeanAxes::Default) {
+                            return Err(mean_error(
+                                "mean: 'all' cannot be combined with an explicit dimension",
+                            ));
+                        }
+                        axes = MeanAxes::All;
+                        axes_set = true;
+                        idx += 1;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+        }
         if let Some(keyword) = keyword_of(arg) {
             match keyword.as_str() {
                 "omitnan" => {
@@ -1294,6 +1332,22 @@ pub(crate) mod tests {
 
     fn mean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::mean_builtin(value, rest))
+    }
+
+    #[test]
+    fn mean_type_reduces_first_dim() {
+        let out = mean_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(4)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(4)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

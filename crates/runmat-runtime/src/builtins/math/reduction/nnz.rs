@@ -10,13 +10,20 @@ use crate::builtins::common::{
     shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
+use crate::builtins::math::reduction::type_resolvers::count_nonzero_type;
 use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{
+    CharArray, ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 const NAME: &str = "nnz";
+
+fn nnz_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    count_nonzero_type(args, ctx)
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::nnz")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -78,6 +85,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Count the number of nonzero elements in an array with MATLAB-compatible semantics.",
     keywords = "nnz,nonzero,count,sparsity,gpu",
     accel = "reduction",
+    type_resolver(nnz_type),
     builtin_path = "crate::builtins::math::reduction::nnz"
 )]
 async fn nnz_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -393,6 +401,17 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
+
+    #[test]
+    fn nnz_type_returns_num() {
+        assert_eq!(
+            nnz_type(
+                &[Type::Tensor { shape: None }],
+                &ResolveContext::new(Vec::new()),
+            ),
+            Type::Num
+        );
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

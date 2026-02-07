@@ -239,6 +239,7 @@ fn coerce_to_format_string(value: &Value) -> Result<Option<Value>, String> {
     accel = "cpu",
     sink = true,
     suppress_auto_output = true,
+    type_resolver(crate::builtins::io::type_resolvers::fprintf_type),
     builtin_path = "crate::builtins::io::filetext::fprintf"
 )]
 async fn fprintf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

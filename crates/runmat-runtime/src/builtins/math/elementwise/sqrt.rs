@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -71,6 +72,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     summary = "Element-wise square root of scalars, vectors, matrices, or N-D tensors.",
     keywords = "sqrt,square root,elementwise,gpu,complex",
     accel = "unary",
+    type_resolver(numeric_unary_type),
     builtin_path = "crate::builtins::math::elementwise::sqrt"
 )]
 async fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
@@ -257,10 +259,39 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntValue, LogicalArray, Tensor};
+    use runmat_builtins::{
+        CharArray, IntValue, LogicalArray, ResolveContext, Tensor, Type,
+    };
 
     fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::sqrt_builtin(value))
+    }
+
+    #[test]
+    fn sqrt_type_preserves_tensor_shape() {
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
+
+    #[test]
+    fn sqrt_type_scalar_tensor_returns_num() {
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(1), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

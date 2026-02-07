@@ -68,6 +68,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     keywords = "cd,change directory,current folder,working directory,pwd",
     accel = "cpu",
     suppress_auto_output = true,
+    type_resolver(crate::builtins::io::type_resolvers::cd_type),
     builtin_path = "crate::builtins::io::repl_fs::cd"
 )]
 async fn cd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

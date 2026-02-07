@@ -1094,7 +1094,7 @@ impl Compiler {
                                     e.ty,
                                     runmat_hir::Type::Tensor { .. }
                                         | runmat_hir::Type::Bool
-                                        | runmat_hir::Type::Logical
+                                        | runmat_hir::Type::Logical { .. }
                                 )
                             });
                             if has_colon || has_end || has_vector || indices.len() > 2 {
@@ -2533,7 +2533,11 @@ impl Compiler {
                             e.ty,
                             runmat_hir::Type::Tensor { .. }
                                 | runmat_hir::Type::Bool
-                                | runmat_hir::Type::Logical
+                                | runmat_hir::Type::Logical { .. }
+                        )
+                        || !matches!(
+                            e.kind,
+                            HirExprKind::Number(_) | HirExprKind::Colon | HirExprKind::End
                         )
                         || !matches!(
                             e.kind,

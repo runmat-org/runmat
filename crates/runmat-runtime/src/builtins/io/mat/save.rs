@@ -55,6 +55,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Persist workspace variables to a MAT-file.",
     keywords = "save,mat,workspace",
     sink = true,
+    type_resolver(crate::builtins::io::type_resolvers::save_type),
     builtin_path = "crate::builtins::io::mat::save"
 )]
 async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

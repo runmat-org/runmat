@@ -7,7 +7,9 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ComplexTensor, LogicalArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::squeeze")]
@@ -47,12 +49,51 @@ fn squeeze_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("squeeze").build()
 }
 
+fn squeeze_shape_options(shape: &[Option<usize>]) -> Vec<Option<usize>> {
+    if shape.len() <= 2 {
+        return shape.to_vec();
+    }
+    let mut squeezed: Vec<Option<usize>> = shape
+        .iter()
+        .copied()
+        .filter(|dim| *dim != Some(1))
+        .collect();
+    if squeezed.is_empty() {
+        squeezed = vec![Some(1), Some(1)];
+    } else if squeezed.len() == 1 {
+        squeezed.push(Some(1));
+    }
+    squeezed
+}
+
+fn squeeze_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let input = match args.first() {
+        Some(value) => value,
+        None => return Type::Unknown,
+    };
+    match input {
+        Type::Tensor { shape: Some(shape) } => Type::Tensor {
+            shape: Some(squeeze_shape_options(shape)),
+        },
+        Type::Logical { shape: Some(shape) } => Type::Logical {
+            shape: Some(squeeze_shape_options(shape)),
+        },
+        Type::Tensor { shape: None } => Type::tensor(),
+        Type::Logical { shape: None } => Type::logical(),
+        Type::Num | Type::Int | Type::Bool => input.clone(),
+        Type::Cell { .. } => input.clone(),
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
+
 #[runtime_builtin(
     name = "squeeze",
     category = "array/shape",
     summary = "Remove singleton dimensions while preserving MATLAB row/column semantics.",
     keywords = "squeeze,singleton dimensions,array reshape,gpu",
     accel = "shape",
+    type_resolver(squeeze_type),
     builtin_path = "crate::builtins::array::shape::squeeze"
 )]
 async fn squeeze_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -182,6 +223,22 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
+
+    #[test]
+    fn squeeze_type_preserves_logical_shape() {
+        let out = squeeze_type(
+            &[Type::Logical {
+                shape: Some(vec![Some(1), Some(3), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Logical {
+                shape: Some(vec![Some(3), Some(1)])
+            }
+        );
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

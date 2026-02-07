@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
+use crate::builtins::strings::type_resolvers::logical_text_match_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const FN_NAME: &str = "strncmp";
@@ -56,6 +57,7 @@ fn remap_strncmp_flow(err: RuntimeError) -> RuntimeError {
     summary = "Compare text inputs for equality up to N leading characters (case-sensitive).",
     keywords = "strncmp,string compare,prefix,text equality",
     accel = "sink",
+    type_resolver(logical_text_match_type),
     builtin_path = "crate::builtins::strings::core::strncmp"
 )]
 async fn strncmp_builtin(a: Value, b: Value, n: Value) -> crate::BuiltinResult<Value> {
@@ -202,7 +204,9 @@ pub(crate) mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::{CellArray, CharArray, IntValue, LogicalArray, StringArray, Tensor};
+    use runmat_builtins::{
+        CellArray, CharArray, IntValue, LogicalArray, ResolveContext, StringArray, Tensor, Type,
+    };
 
     fn strncmp_builtin(a: Value, b: Value, n: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strncmp_builtin(a, b, n))
@@ -481,5 +485,16 @@ pub(crate) mod tests {
         .expect("strncmp");
         assert_eq!(result, Value::Bool(true));
         let _ = provider.free(&handle);
+    }
+
+    #[test]
+    fn strncmp_type_is_logical_match() {
+        assert_eq!(
+            logical_text_match_type(
+                &[Type::String, Type::String],
+                &ResolveContext::new(Vec::new()),
+            ),
+            Type::Bool
+        );
     }
 }

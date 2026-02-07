@@ -9,9 +9,12 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use runmat_builtins::shape_rules::element_count_if_known;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::permute")]
@@ -47,6 +50,36 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Permute only changes metadata/data layout; fusion plans treat it as a boundary between kernels.",
 };
 
+fn permute_order_len(ty: &Type) -> Option<usize> {
+    match ty {
+        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+            element_count_if_known(shape)
+        }
+        Type::Num | Type::Int | Type::Bool => Some(1),
+        _ => None,
+    }
+}
+
+fn permute_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    if args.len() < 2 {
+        return Type::Unknown;
+    }
+    let input = &args[0];
+    let order_len = ctx
+        .numeric_vector_at(1)
+        .map(|values| values.len())
+        .or_else(|| permute_order_len(&args[1]));
+    let shape = order_len.map(runmat_builtins::shape_rules::unknown_shape);
+    match input {
+        Type::Tensor { .. } => Type::Tensor { shape },
+        Type::Logical { .. } => Type::Logical { shape },
+        Type::Num | Type::Int | Type::Bool => input.clone(),
+        Type::Cell { .. } => input.clone(),
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
+
 fn permute_error(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
 }
@@ -57,6 +90,7 @@ fn permute_error(builtin: &'static str, message: impl Into<String>) -> RuntimeEr
     summary = "Reorder the dimensions of arrays, tensors, logical masks, and gpuArray values.",
     keywords = "permute,dimension reorder,swap axes,gpu",
     accel = "custom",
+    type_resolver(permute_type),
     builtin_path = "crate::builtins::array::shape::permute"
 )]
 async fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
@@ -453,6 +487,21 @@ pub(crate) mod tests {
         block_on(super::permute_builtin(value, order))
     }
     use crate::builtins::common::test_support;
+
+    #[test]
+    fn permute_type_uses_order_len() {
+        let order = Type::Tensor {
+            shape: Some(vec![Some(1), Some(2)]),
+        };
+        let out =
+            permute_type(&[Type::Tensor { shape: None }, order], &ResolveContext::new(Vec::new()));
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![None, None])
+            }
+        );
+    }
 
     fn tensor(data: &[f64], shape: &[usize]) -> Tensor {
         Tensor::new(data.to_vec(), shape.to_vec()).unwrap()

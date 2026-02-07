@@ -74,6 +74,8 @@ export interface RunMatInitOptions {
   gpuBufferPoolMaxPerKey?: number;
   telemetryConsent?: boolean;
   telemetryId?: string;
+  telemetryRunKind?: "script" | "repl" | "benchmark" | "install";
+  telemetryEmitter?: (envelope: unknown) => void;
   wgpuPowerPreference?: "auto" | "high-performance" | "low-power";
   wgpuForceFallbackAdapter?: boolean;
   wasmModule?: WasmInitInput;
@@ -156,6 +158,51 @@ export type FigurePlotKind =
 export type FigureEventListener = (event: FigureEvent) => void;
 export type HoldMode = "on" | "off" | "toggle" | boolean;
 
+export type PlotSurfaceEvent =
+  | {
+      kind: "mouseDown";
+      x: number;
+      y: number;
+      button: number;
+      shiftKey?: boolean;
+      ctrlKey?: boolean;
+      altKey?: boolean;
+      metaKey?: boolean;
+    }
+  | {
+      kind: "mouseUp";
+      x: number;
+      y: number;
+      button: number;
+      shiftKey?: boolean;
+      ctrlKey?: boolean;
+      altKey?: boolean;
+      metaKey?: boolean;
+    }
+  | {
+      kind: "mouseMove";
+      x: number;
+      y: number;
+      dx: number;
+      dy: number;
+      shiftKey?: boolean;
+      ctrlKey?: boolean;
+      altKey?: boolean;
+      metaKey?: boolean;
+    }
+  | {
+      kind: "wheel";
+      x: number;
+      y: number;
+    wheelDeltaX: number;
+    wheelDeltaY: number;
+      wheelDeltaMode?: number;
+      shiftKey?: boolean;
+      ctrlKey?: boolean;
+      altKey?: boolean;
+      metaKey?: boolean;
+    };
+
 export type StdoutStreamKind = "stdout" | "stderr";
 
 export interface StdoutEntry {
@@ -193,6 +240,21 @@ export interface TraceEvent {
 }
 
 export type TraceEventListener = (entries: TraceEvent[]) => void;
+
+export type SignalTraceHandler = <T>(traceId: string, name: string, fn: () => T) => T;
+
+let signalTraceHandler: SignalTraceHandler | null = null;
+
+export function setSignalTraceHandler(handler: SignalTraceHandler | null): void {
+  signalTraceHandler = handler;
+}
+
+export function withSignalTrace<T>(traceId: string | undefined, name: string, fn: () => T): T {
+  if (traceId && signalTraceHandler) {
+    return signalTraceHandler(traceId, name, fn);
+  }
+  return fn();
+}
 
 export type InputRequest =
   | { kind: "line"; prompt: string; echo: boolean }
@@ -460,6 +522,8 @@ interface NativeInitOptions {
   gpuBufferPoolMaxPerKey?: number;
   telemetryConsent?: boolean;
   telemetryId?: string;
+  telemetryRunKind?: string;
+  telemetryEmitter?: (envelope: unknown) => void;
   wgpuPowerPreference?: string;
   wgpuForceFallbackAdapter?: boolean;
   scatterTargetPoints?: number;
@@ -512,6 +576,11 @@ interface RunMatNativeModule {
   default: (module?: WasmInitInput | Promise<WasmInitInput>) => Promise<unknown>;
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
   registerFsProvider?: (provider: RunMatFilesystemProvider) => void;
+  // Legacy plot canvas bindings (handle-based).
+  registerPlotCanvas?: (canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<void>;
+  deregisterPlotCanvas?: () => void;
+  registerFigureCanvas?: (handle: number, canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<void>;
+  deregisterFigureCanvas?: (handle: number) => void;
   plotRendererReady?: () => boolean;
   renderCurrentFigureScene?: (handle: number) => void;
   createPlotSurface?: (canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<number>;
@@ -520,6 +589,9 @@ interface RunMatNativeModule {
   bindSurfaceToFigure?: (surfaceId: number, handle: number) => void;
   presentSurface?: (surfaceId: number) => void;
   presentFigureOnSurface?: (surfaceId: number, handle: number) => void;
+  handlePlotSurfaceEvent?: (surfaceId: number, event: PlotSurfaceEvent) => void;
+  fitPlotSurfaceExtents?: (surfaceId: number) => void;
+  resetPlotSurfaceCamera?: (surfaceId: number) => void;
   onFigureEvent?: (callback: ((event: FigureEvent) => void) | null) => void;
   newFigureHandle?: () => number;
   selectFigure?: (handle: number) => void;
@@ -577,11 +649,19 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     native.registerFsProvider(fsProvider);
   }
   if (options.plotCanvas) {
-    if (typeof native.createPlotSurface !== "function") {
-      throw new Error("The loaded runmat-wasm module does not support WebGPU plotting surfaces yet.");
+    if (typeof native.registerPlotCanvas === "function") {
+      // Legacy binding: register the default plot canvas before initializing the session.
+      await native.registerPlotCanvas(options.plotCanvas);
+    } else if (typeof native.createPlotSurface === "function") {
+      // New binding: create a surface for the provided canvas. The caller is responsible for binding/presenting.
+      await native.createPlotSurface(options.plotCanvas);
+    } else {
+      const err = new Error(
+        "The loaded runmat-wasm module does not support WebGPU plotting surfaces yet."
+      ) as Error & { code?: string };
+      err.code = "PlotCanvas";
+      throw err;
     }
-    // Create a surface for the provided canvas. The caller is responsible for binding/presenting.
-    await native.createPlotSurface(options.plotCanvas);
   }
   const supportsWebGpu = typeof navigator !== "undefined" && typeof (navigator as any).gpu !== "undefined";
   const hasExplicitEnableFlag = Object.prototype.hasOwnProperty.call(options, "enableGpu");
@@ -613,6 +693,8 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     gpuBufferPoolMaxPerKey: options.gpuBufferPoolMaxPerKey,
     telemetryConsent: options.telemetryConsent ?? true,
     telemetryId: options.telemetryId,
+    telemetryRunKind: options.telemetryRunKind,
+    telemetryEmitter: options.telemetryEmitter,
     wgpuPowerPreference: options.wgpuPowerPreference ?? "auto",
     wgpuForceFallbackAdapter: options.wgpuForceFallbackAdapter ?? false,
     scatterTargetPoints: options.scatterTargetPoints,
@@ -631,6 +713,22 @@ export async function plotRendererReady(): Promise<boolean> {
     return false;
   }
   return native.plotRendererReady();
+}
+
+export async function deregisterPlotCanvas(): Promise<void> {
+  const native = await loadNativeModule();
+  if (typeof native.deregisterPlotCanvas !== "function") {
+    throw new Error("The loaded runmat-wasm module does not expose deregisterPlotCanvas.");
+  }
+  native.deregisterPlotCanvas();
+}
+
+export async function deregisterFigureCanvas(handle: number): Promise<void> {
+  const native = await loadNativeModule();
+  if (typeof native.deregisterFigureCanvas !== "function") {
+    throw new Error("The loaded runmat-wasm module does not expose deregisterFigureCanvas.");
+  }
+  native.deregisterFigureCanvas(handle);
 }
 
 export async function createPlotSurface(canvas: HTMLCanvasElement | OffscreenCanvas): Promise<number> {
@@ -673,6 +771,24 @@ export async function renderCurrentFigureScene(handle: number): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "renderCurrentFigureScene");
   native.renderCurrentFigureScene(handle);
+}
+
+export async function handlePlotSurfaceEvent(surfaceId: number, event: PlotSurfaceEvent): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "handlePlotSurfaceEvent");
+  native.handlePlotSurfaceEvent(surfaceId, event);
+}
+
+export async function fitPlotSurfaceExtents(surfaceId: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "fitPlotSurfaceExtents");
+  native.fitPlotSurfaceExtents(surfaceId);
+}
+
+export async function resetPlotSurfaceCamera(surfaceId: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "resetPlotSurfaceCamera");
+  native.resetPlotSurfaceCamera(surfaceId);
 }
 
 export async function onFigureEvent(listener: FigureEventListener | null): Promise<void> {
@@ -1296,10 +1412,32 @@ function normalizeSliceVector(values?: number[], requirePositive = false): numbe
   return normalized;
 }
 
+function normalizeResumeInputValue(value: ResumeInputValue): ResumeInputPayload {
+  if (value && typeof value === "object") {
+    const payload = value as ResumeInputPayload;
+    if (payload.error) {
+      return { error: String(payload.error) };
+    }
+    if (payload.kind === "keyPress") {
+      return { kind: "keyPress" };
+    }
+    if (payload.kind === "line") {
+      const raw = payload.value ?? payload.line ?? "";
+      return { kind: "line", value: String(raw ?? "") };
+    }
+  }
+  // Scalars and nulls are treated as line inputs.
+  if (value === null || value === undefined) {
+    return { kind: "line", value: "" };
+  }
+  return { kind: "line", value: String(value) };
+}
+
 export const __internals = {
   resolveSnapshotSource,
   fetchSnapshotFromUrl,
   coerceFigureError,
+  normalizeResumeInputValue,
   workspaceHover: workspaceHoverInternals as unknown as Record<string, unknown>,
   setNativeModuleOverride(module: RunMatNativeModule | RunMatNativeSession | null): void {
     nativeModuleOverride = module;

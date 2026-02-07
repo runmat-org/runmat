@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding::rem")]
@@ -79,6 +80,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     summary = "MATLAB-compatible remainder a - b .* fix(a./b) with support for complex values and broadcasting.",
     keywords = "rem,remainder,truncate,gpu",
     accel = "binary",
+    type_resolver(numeric_binary_type),
     builtin_path = "crate::builtins::math::rounding::rem"
 )]
 async fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -352,7 +354,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::RuntimeError;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor};
+    use runmat_builtins::{
+        CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type,
+    };
 
     fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         block_on(super::rem_builtin(lhs, rhs))
@@ -364,6 +368,52 @@ pub(crate) mod tests {
             "unexpected error: {}",
             error.message()
         );
+    }
+
+    #[test]
+    fn rem_type_preserves_tensor_shape() {
+        let out = numeric_binary_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
+
+    #[test]
+    fn rem_type_scalar_and_tensor_returns_tensor() {
+        let out = numeric_binary_type(
+            &[
+                Type::Num,
+                Type::Tensor {
+                    shape: Some(vec![Some(4), Some(1)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(4), Some(1)])
+            }
+        );
+    }
+
+    #[test]
+    fn rem_type_scalar_returns_num() {
+        let out = numeric_binary_type(&[Type::Num, Type::Int], &ResolveContext::new(Vec::new()));
+        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

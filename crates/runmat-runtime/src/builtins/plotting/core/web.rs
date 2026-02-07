@@ -20,6 +20,7 @@ pub(crate) mod wasm {
     use super::*;
     use crate::builtins::plotting::state::{clone_figure, current_figure_revision, FigureHandle};
     use log::debug;
+    use runmat_plot::core::PlotEvent;
     use runmat_plot::web::WebRenderer;
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
@@ -162,6 +163,69 @@ pub(crate) mod wasm {
         })
     }
 
+    pub(super) fn handle_surface_event_impl(surface_id: u32, event: PlotEvent) -> BuiltinResult<()> {
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            let entry = map.get_mut(&surface_id).ok_or_else(|| {
+                web_error(format!(
+                    "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
+                ))
+            })?;
+            match &event {
+                PlotEvent::MousePress { .. }
+                | PlotEvent::MouseRelease { .. }
+                | PlotEvent::MouseWheel { .. } => {
+                    debug!("plot-web: surface_event(surface_id={surface_id}, event={event:?})");
+                }
+                PlotEvent::MouseMove { .. } | PlotEvent::Resize { .. } => {}
+                PlotEvent::KeyPress { .. } | PlotEvent::KeyRelease { .. } => {}
+            }
+            // If no figure was ever rendered, there's nothing to manipulate.
+            // Still accept the event (no-op) so the host doesn't have to special-case.
+            let _ = entry.renderer.handle_event(event);
+            // Camera interactions should re-render immediately, without requiring a figure revision bump.
+            entry
+                .renderer
+                .render_current_scene()
+                .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+            Ok(())
+        })
+    }
+
+    pub(super) fn fit_surface_extents_impl(surface_id: u32) -> BuiltinResult<()> {
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            let entry = map.get_mut(&surface_id).ok_or_else(|| {
+                web_error(format!(
+                    "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
+                ))
+            })?;
+            entry.renderer.fit_extents();
+            entry
+                .renderer
+                .render_current_scene()
+                .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+            Ok(())
+        })
+    }
+
+    pub(super) fn reset_surface_camera_impl(surface_id: u32) -> BuiltinResult<()> {
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            let entry = map.get_mut(&surface_id).ok_or_else(|| {
+                web_error(format!(
+                    "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
+                ))
+            })?;
+            entry.renderer.reset_camera_position();
+            entry
+                .renderer
+                .render_current_scene()
+                .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+            Ok(())
+        })
+    }
+
     pub fn render_current_scene(handle: u32) -> BuiltinResult<()> {
         debug!("plot-web: render_current_scene(handle={handle})");
         // If nothing is currently bound to this handle, try to claim the lowest-id unbound
@@ -266,6 +330,14 @@ pub(crate) mod wasm {
     ) -> BuiltinResult<()> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
+
+    pub(super) fn fit_surface_extents_impl(_surface_id: u32) -> BuiltinResult<()> {
+        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
+    }
+
+    pub(super) fn reset_surface_camera_impl(_surface_id: u32) -> BuiltinResult<()> {
+        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
+    }
 }
 
 pub use wasm::render_current_scene;
@@ -296,8 +368,24 @@ pub fn present_surface(surface_id: u32) -> BuiltinResult<()> {
     wasm::present_surface_impl(surface_id)
 }
 
+#[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+pub fn handle_plot_surface_event(
+    surface_id: u32,
+    event: runmat_plot::core::PlotEvent,
+) -> BuiltinResult<()> {
+    wasm::handle_surface_event_impl(surface_id, event)
+}
+
 pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> BuiltinResult<()> {
     wasm::present_figure_on_surface_impl(surface_id, handle)
+}
+
+pub fn fit_surface_extents(surface_id: u32) -> BuiltinResult<()> {
+    wasm::fit_surface_extents_impl(surface_id)
+}
+
+pub fn reset_surface_camera(surface_id: u32) -> BuiltinResult<()> {
+    wasm::reset_surface_camera_impl(surface_id)
 }
 
 // No render_web_canvas wrapper; web presentation is surface-driven.

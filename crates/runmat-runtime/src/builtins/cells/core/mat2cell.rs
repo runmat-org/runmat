@@ -3,6 +3,7 @@
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::cells::type_resolvers::mat2cell_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -62,6 +63,7 @@ fn mat2cell_error_with_identifier(message: impl Into<String>, identifier: &str) 
     category = "cells/core",
     summary = "Split arrays into cell-array blocks.",
     keywords = "mat2cell,cell array,partition,block",
+    type_resolver(mat2cell_type),
     builtin_path = "crate::builtins::cells::core::mat2cell"
 )]
 async fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

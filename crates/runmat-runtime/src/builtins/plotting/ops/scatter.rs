@@ -35,6 +35,7 @@ use super::point::{
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{LineStyleParseOptions, MarkerColor};
+use crate::builtins::plotting::type_resolvers::string_type;
 use crate::{BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::scatter")]
@@ -73,6 +74,7 @@ const BUILTIN_NAME: &str = "scatter";
     keywords = "scatter,plotting,2d,markers",
     sink = true,
     suppress_auto_output = true,
+    type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::scatter"
 )]
 pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -601,6 +603,7 @@ pub(crate) mod tests {
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_builtins::Value;
+    use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -766,5 +769,13 @@ pub(crate) mod tests {
         assert!(style.marker_edge_flat);
         let plot = build_scatter_plot(vec![0.0, 1.0], vec![0.0, 1.0], &mut style).expect("plot");
         assert!(plot.edge_color_from_vertex_colors);
+    }
+
+    #[test]
+    fn scatter_type_is_string() {
+        assert_eq!(
+            string_type(&[Type::tensor(), Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
     }
 }

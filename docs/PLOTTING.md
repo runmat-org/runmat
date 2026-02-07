@@ -10,6 +10,11 @@ The core design principle is:
 
 This keeps semantics clean for modelling/physics code while unlocking smooth GPU-resident animation.
 
+## 3D depth + clipping
+
+For details on depth modes (standard vs reversed‑Z), clip plane policies, and the 3D grid helper,
+see `docs/PLOTTING_DEPTH.md`.
+
 ## Semantics: state vs presentation
 
 ### `plot`, `scatter`, `hist`, …
@@ -74,3 +79,24 @@ Plotting is designed to avoid host round-trips when data is already on a GPU pro
 - Plot surface attachment (desktop/web host): `runmat-private/desktop/src/runtime/graphics/figure-canvas-adapter.ts`
 - Host scheduling of presents: `runmat-private/desktop/src/runtime/runtime-provider.tsx`
 - GPU compute backend notes: `docs/GPU_BEHAVIOR_NOTES.md`
+
+## Interaction + camera (Web/WASM)
+
+Interactive camera control is supported on Web/WASM by forwarding pointer/wheel events
+from the main thread into the worker/WASM renderer. This is intentionally **separate**
+from figure mutation:
+
+- **Figure updates** (data changes) still follow the figure-event coalescing model.
+- **Camera updates** (pan/zoom/rotate) trigger a **camera-only re-render** on the bound surface,
+  even if the figure revision did not change.
+
+### Current controls
+
+- **Rotate (3D)**: left-drag
+- **Pan**: right-drag
+- **Zoom**: mouse wheel
+
+### 3D correctness
+
+3D camera-based rendering uses a depth attachment so surfaces/meshes/3D scatter occlude
+correctly during interaction.

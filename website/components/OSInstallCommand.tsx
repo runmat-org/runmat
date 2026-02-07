@@ -99,7 +99,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
           </CardHeader>
           <CardContent>
             <CopyableCommand 
-              command="curl -fsSL https://runmat.org/install.sh | sh"
+              command="curl -fsSL https://runmat.com/install.sh | sh"
               bgColor="bg-gray-900"
             />
           </CardContent>
@@ -112,7 +112,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
           </CardHeader>
           <CardContent>
             <CopyableCommand 
-              command="iwr https://runmat.org/install.ps1 | iex"
+              command="iwr https://runmat.com/install.ps1 | iex"
               bgColor="bg-blue-900"
             />
           </CardContent>
@@ -129,8 +129,8 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
           title: 'Windows',
           icon: Monitor,
           command: winFlavor === 'ps7'
-            ? 'iwr https://runmat.org/install.ps1 | iex'
-            : 'iwr https://runmat.org/install.ps1 -UseBasicParsing | iex',
+            ? 'iwr https://runmat.com/install.ps1 | iex'
+            : 'iwr https://runmat.com/install.ps1 -UseBasicParsing | iex',
           bgColor: 'bg-blue-900',
           iconColor: 'text-blue-600',
           description: null,
@@ -139,7 +139,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
         return {
           title: 'macOS',
           icon: Terminal,
-          command: 'curl -fsSL https://runmat.org/install.sh | sh',
+          command: 'curl -fsSL https://runmat.com/install.sh | sh',
           bgColor: 'bg-gray-900',
           iconColor: 'text-green-600',
           description: null
@@ -148,7 +148,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
         return {
           title: 'Linux',
           icon: Terminal,
-          command: 'curl -fsSL https://runmat.org/install.sh | sh',
+          command: 'curl -fsSL https://runmat.com/install.sh | sh',
           bgColor: 'bg-gray-900',
           iconColor: 'text-green-600',
           description: null
@@ -157,7 +157,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
         return {
           title: 'Your System',
           icon: Terminal,
-          command: 'curl -fsSL https://runmat.org/install.sh | sh',
+          command: 'curl -fsSL https://runmat.com/install.sh | sh',
           bgColor: 'bg-gray-900',
           iconColor: 'text-green-600',
           description: null

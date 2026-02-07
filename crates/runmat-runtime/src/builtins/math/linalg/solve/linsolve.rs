@@ -17,6 +17,7 @@ use crate::builtins::common::{
     linalg::{diagonal_rcond, singular_value_rcond},
     tensor,
 };
+use crate::builtins::math::linalg::type_resolvers::left_divide_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "linsolve";
@@ -77,6 +78,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Solve A * X = B with structural hints such as LT, UT, POSDEF, or TRANSA.",
     keywords = "linsolve,linear system,triangular,gpu",
     accel = "linsolve",
+    type_resolver(left_divide_type),
     builtin_path = "crate::builtins::math::linalg::solve::linsolve"
 )]
 async fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -929,7 +931,7 @@ pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, StructValue};
+    use runmat_builtins::{CharArray, ResolveContext, StructValue, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -940,6 +942,27 @@ pub(crate) mod tests {
 
     fn evaluate_args(a: Value, b: Value, rest: &[Value]) -> Result<LinsolveEval, RuntimeError> {
         block_on(super::evaluate_args(a, b, rest))
+    }
+
+    #[test]
+    fn linsolve_type_uses_rhs_columns() {
+        let out = left_divide_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(2)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
     }
 
     use crate::builtins::common::test_support;

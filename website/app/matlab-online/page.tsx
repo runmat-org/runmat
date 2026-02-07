@@ -21,7 +21,7 @@ export const metadata: Metadata = {
   title: "Free Online MATLAB Alternative with GPU Acceleration",
   description:
     "Run MATLAB-style code online with RunMat. Interactive 3D plotting, real-time type tracking, GPU acceleration, and no license required. Try the sandbox in seconds.",
-  alternates: { canonical: "https://runmat.org/matlab-online" },
+  alternates: { canonical: "https://runmat.com/matlab-online" },
 };
 
 const heroVideoSrc = "https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4";
@@ -90,14 +90,14 @@ const jsonLd = {
   "@graph": [
     {
       "@type": "Organization",
-      "@id": "https://runmat.org/#organization",
+      "@id": "https://runmat.com/#organization",
       name: "RunMat",
       alternateName: ["RunMat by Dystr", "Dystr"],
       legalName: "Dystr Inc.",
-      url: "https://runmat.org",
+      url: "https://runmat.com",
       logo: {
         "@type": "ImageObject",
-        url: "https://runmat.org/runmat-logo.svg",
+        url: "https://runmat.com/runmat-logo.svg",
         caption: "RunMat",
       },
       description:
@@ -122,26 +122,26 @@ const jsonLd = {
     },
     {
       "@type": "WebPage",
-      "@id": "https://runmat.org/matlab-online#webpage",
-      url: "https://runmat.org/matlab-online",
+      "@id": "https://runmat.com/matlab-online#webpage",
+      url: "https://runmat.com/matlab-online",
       name: "Free Online MATLAB Alternative with GPU Acceleration",
       description:
         "Run MATLAB-style code online with RunMat. Interactive 3D plotting, real-time type tracking, GPU acceleration, and no license required. Try the sandbox in seconds.",
       inLanguage: "en",
-      isPartOf: { "@id": "https://runmat.org/#website" },
-      breadcrumb: { "@id": "https://runmat.org/matlab-online#breadcrumb" },
-      author: { "@id": "https://runmat.org/#organization" },
-      publisher: { "@id": "https://runmat.org/#organization" },
-      video: { "@id": "https://runmat.org/matlab-online#hero-video" },
+      isPartOf: { "@id": "https://runmat.com/#website" },
+      breadcrumb: { "@id": "https://runmat.com/matlab-online#breadcrumb" },
+      author: { "@id": "https://runmat.com/#organization" },
+      publisher: { "@id": "https://runmat.com/#organization" },
+      video: { "@id": "https://runmat.com/matlab-online#hero-video" },
       mainEntity: [
-        { "@id": "https://runmat.org/matlab-online#faq" },
-        { "@id": "https://runmat.org/matlab-online#howto" },
-        { "@id": "https://runmat.org/matlab-online#software" },
+        { "@id": "https://runmat.com/matlab-online#faq" },
+        { "@id": "https://runmat.com/matlab-online#howto" },
+        { "@id": "https://runmat.com/matlab-online#software" },
       ],
     },
     {
       "@type": "VideoObject",
-      "@id": "https://runmat.org/matlab-online#hero-video",
+      "@id": "https://runmat.com/matlab-online#hero-video",
       name: "RunMat MATLAB-style code in the browser",
       description:
         "Short demo of RunMat running MATLAB-syntax code in the browser with GPU acceleration.",
@@ -152,20 +152,20 @@ const jsonLd = {
     },
     {
       "@type": "BreadcrumbList",
-      "@id": "https://runmat.org/matlab-online#breadcrumb",
+      "@id": "https://runmat.com/matlab-online#breadcrumb",
       itemListElement: [
-        { "@type": "ListItem", position: 1, name: "Home", item: "https://runmat.org" },
+        { "@type": "ListItem", position: 1, name: "Home", item: "https://runmat.com" },
         {
           "@type": "ListItem",
           position: 2,
           name: "MATLAB Online",
-          item: "https://runmat.org/matlab-online",
+          item: "https://runmat.com/matlab-online",
         },
       ],
     },
     {
       "@type": "SoftwareApplication",
-      "@id": "https://runmat.org/matlab-online#software",
+      "@id": "https://runmat.com/matlab-online#software",
       name: "RunMat",
       description:
         "RunMat is a high-performance, open-source runtime for math that runs MATLAB-syntax code in the browser with GPU acceleration and no license required.",
@@ -182,15 +182,15 @@ const jsonLd = {
         "No account or license required",
       ],
       offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-      url: "https://runmat.org/sandbox",
-      author: { "@id": "https://runmat.org/#organization" },
-      publisher: { "@id": "https://runmat.org/#organization" },
-      mainEntityOfPage: { "@id": "https://runmat.org/matlab-online#webpage" },
+      url: "https://runmat.com/sandbox",
+      author: { "@id": "https://runmat.com/#organization" },
+      publisher: { "@id": "https://runmat.com/#organization" },
+      mainEntityOfPage: { "@id": "https://runmat.com/matlab-online#webpage" },
     },
     {
       "@type": "FAQPage",
-      "@id": "https://runmat.org/matlab-online#faq",
-      mainEntityOfPage: { "@id": "https://runmat.org/matlab-online#webpage" },
+      "@id": "https://runmat.com/matlab-online#faq",
+      mainEntityOfPage: { "@id": "https://runmat.com/matlab-online#webpage" },
       mainEntity: faqItems.map(item => ({
         "@type": "Question",
         name: item.question,
@@ -202,9 +202,9 @@ const jsonLd = {
     },
     {
       "@type": "HowTo",
-      "@id": "https://runmat.org/matlab-online#howto",
+      "@id": "https://runmat.com/matlab-online#howto",
       name: "Run MATLAB-style code in your browser",
-      mainEntityOfPage: { "@id": "https://runmat.org/matlab-online#webpage" },
+      mainEntityOfPage: { "@id": "https://runmat.com/matlab-online#webpage" },
       step: [
         {
           "@type": "HowToStep",
@@ -580,7 +580,7 @@ export default function MatlabOnlinePage() {
             <Card className="border border-border/60 bg-[#0E1421] shadow-lg overflow-hidden flex flex-col h-full">
               <div className="bg-gradient-to-r from-purple-500/20 to-transparent p-6 flex items-start justify-start h-[200px]">
                 <Link
-                  href="https://runmat.org/sandbox"
+                  href="https://runmat.com/sandbox"
                   target="_blank"
                   rel="noreferrer"
                   className="rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-100 px-3 py-2 text-base flex items-center gap-2 transition hover:border-purple-400/60 hover:text-purple-50"
@@ -591,7 +591,7 @@ export default function MatlabOnlinePage() {
                   <span className="h-2 w-2 rounded-full bg-red-400"></span>
                   <span className="h-2 w-2 rounded-full bg-yellow-400"></span>
                   <span className="h-2 w-2 rounded-full bg-green-400"></span>
-                  <span className="ml-2">runmat.org/sandbox</span>
+                  <span className="ml-2">runmat.com/sandbox</span>
                 </Link>
               </div>
               <CardContent className="pt-6 space-y-2 flex-1">
@@ -979,4 +979,3 @@ export default function MatlabOnlinePage() {
     </div>
   );
 }
-

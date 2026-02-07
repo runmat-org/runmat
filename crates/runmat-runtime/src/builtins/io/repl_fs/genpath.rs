@@ -73,6 +73,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     keywords = "genpath,recursive path,search path,addpath",
     accel = "cpu",
     suppress_auto_output = true,
+    type_resolver(crate::builtins::io::type_resolvers::genpath_type),
     builtin_path = "crate::builtins::io::repl_fs::genpath"
 )]
 async fn genpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

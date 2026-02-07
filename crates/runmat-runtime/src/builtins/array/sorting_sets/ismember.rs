@@ -9,6 +9,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use super::type_resolvers::logical_output_type;
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -59,6 +60,7 @@ fn ismember_error(message: impl Into<String>) -> crate::RuntimeError {
     keywords = "ismember,membership,set,rows,indices,gpu",
     accel = "array_construct",
     sink = true,
+    type_resolver(logical_output_type),
     builtin_path = "crate::builtins::array::sorting_sets::ismember"
 )]
 async fn ismember_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -722,7 +724,7 @@ fn logical_array_into_value(logical: LogicalArray) -> Value {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{ResolveContext, Tensor, Type};
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
@@ -747,6 +749,17 @@ pub(crate) mod tests {
         let eval = ismember_numeric_elements(a, b).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 1, 0, 1]);
         assert_eq!(eval.loc.data, vec![3.0, 1.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn ismember_type_resolver_logical() {
+        assert_eq!(
+            logical_output_type(
+                &[Type::tensor(), Type::tensor()],
+                &ResolveContext::new(Vec::new()),
+            ),
+            Type::logical()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

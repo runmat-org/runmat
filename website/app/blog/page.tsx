@@ -14,9 +14,9 @@ export const metadata: Metadata = {
     title: "RunMat Blog - Stories and Insights",
     description: "Stories, insights, and updates from the RunMat development team.",
     type: "website",
-    url: "https://runmat.org/blog",
+    url: "https://runmat.com/blog",
   },
-  alternates: { canonical: "https://runmat.org/blog" },
+  alternates: { canonical: "https://runmat.com/blog" },
 };
 
 export default function BlogPage() {

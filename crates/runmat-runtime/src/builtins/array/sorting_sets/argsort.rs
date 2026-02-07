@@ -4,6 +4,7 @@ use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
 use super::sort;
+use super::type_resolvers::index_output_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -45,6 +46,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "argsort,sort,indices,permutation,gpu",
     accel = "sink",
     sink = true,
+    type_resolver(index_output_type),
     builtin_path = "crate::builtins::array::sorting_sets::argsort"
 )]
 async fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -55,13 +57,14 @@ async fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
 #[cfg(test)]
 pub(crate) mod tests {
     use super::sort;
+    use super::index_output_type;
     use futures::executor::block_on;
 
     fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::argsort_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{ComplexTensor, IntValue, Tensor, Value};
+    use runmat_builtins::{ComplexTensor, IntValue, ResolveContext, Tensor, Type, Value};
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
@@ -79,6 +82,14 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn argsort_type_resolver_indices() {
+        assert_eq!(
+            index_output_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::tensor()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

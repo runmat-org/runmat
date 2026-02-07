@@ -5,6 +5,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::cells::type_resolvers::cell_type;
 use crate::builtins::common::random_args::{keyword_of, shape_from_value};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -62,6 +63,7 @@ fn cell_error_with_identifier(message: impl Into<String>, identifier: &str) -> R
     keywords = "cell,cell array,container,empty",
     accel = "array_construct",
     sink = true,
+    type_resolver(cell_type),
     builtin_path = "crate::builtins::cells::core::cell"
 )]
 async fn cell_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

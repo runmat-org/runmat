@@ -6,6 +6,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::introspection::type_resolvers::ischar_type;
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
@@ -42,6 +43,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return true when a value is a MATLAB character array.",
     keywords = "ischar,char array,type checking,introspection",
     accel = "metadata",
+    type_resolver(ischar_type),
     builtin_path = "crate::builtins::introspection::ischar"
 )]
 fn ischar_builtin(value: Value) -> crate::BuiltinResult<Value> {

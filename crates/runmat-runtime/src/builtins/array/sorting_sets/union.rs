@@ -14,7 +14,9 @@ use runmat_accelerate_api::{
 use runmat_builtins::{CharArray, ComplexTensor, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use super::type_resolvers::set_values_output_type;
 use crate::build_runtime_error;
+use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -61,6 +63,7 @@ fn union_error(message: impl Into<String>) -> crate::RuntimeError {
     keywords = "union,set,stable,rows,indices,gpu",
     accel = "array_construct",
     sink = true,
+    type_resolver(set_values_output_type),
     builtin_path = "crate::builtins::array::sorting_sets::union"
 )]
 async fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -87,28 +90,47 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<UnionOptions> {
     };
     let mut seen_order: Option<UnionOrder> = None;
 
-    for arg in rest {
-        let text = tensor::value_to_string(arg)
-            .ok_or_else(|| union_error("union: expected string option arguments"))?;
-        let lowered = text.trim().to_ascii_lowercase();
-        match lowered.as_str() {
+    let tokens = tokens_from_values(rest);
+    for (arg, token) in rest.iter().zip(tokens.iter()) {
+        let text = match token {
+            crate::builtins::common::arg_tokens::ArgToken::String(text) => text.as_str(),
+            _ => {
+                let text = tensor::value_to_string(arg)
+                    .ok_or_else(|| union_error("union: expected string option arguments"))?;
+                let lowered = text.trim().to_ascii_lowercase();
+                parse_union_option(&mut opts, &mut seen_order, &lowered)?;
+                continue;
+            }
+        };
+        parse_union_option(&mut opts, &mut seen_order, text)?;
+    }
+
+    Ok(opts)
+}
+
+fn parse_union_option(
+    opts: &mut UnionOptions,
+    seen_order: &mut Option<UnionOrder>,
+    lowered: &str,
+) -> crate::BuiltinResult<()> {
+        match lowered {
             "rows" => opts.rows = true,
             "sorted" => {
                 if let Some(prev) = seen_order {
-                    if prev != UnionOrder::Sorted {
+                    if *prev != UnionOrder::Sorted {
                         return Err(union_error("union: cannot combine 'sorted' with 'stable'"));
                     }
                 }
-                seen_order = Some(UnionOrder::Sorted);
+                *seen_order = Some(UnionOrder::Sorted);
                 opts.order = UnionOrder::Sorted;
             }
             "stable" => {
                 if let Some(prev) = seen_order {
-                    if prev != UnionOrder::Stable {
+                    if *prev != UnionOrder::Stable {
                         return Err(union_error("union: cannot combine 'sorted' with 'stable'"));
                     }
                 }
-                seen_order = Some(UnionOrder::Stable);
+                *seen_order = Some(UnionOrder::Stable);
                 opts.order = UnionOrder::Stable;
             }
             "legacy" | "r2012a" => {
@@ -118,9 +140,7 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<UnionOptions> {
             }
             other => return Err(union_error(format!("union: unrecognised option '{other}'"))),
         }
-    }
-
-    Ok(opts)
+    Ok(())
 }
 
 async fn union_gpu_pair(
@@ -1445,7 +1465,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor, Value};
+    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
@@ -1474,6 +1494,28 @@ pub(crate) mod tests {
         let ib = tensor::value_into_tensor_for("union", eval.ib_value()).expect("ib tensor");
         assert_eq!(ib.data, vec![1.0]);
         assert_eq!(ib.shape, vec![1, 1]);
+    }
+
+    #[test]
+    fn union_type_resolver_numeric() {
+        assert_eq!(
+            set_values_output_type(
+                &[Type::tensor(), Type::tensor()],
+                &ResolveContext::new(Vec::new()),
+            ),
+            Type::tensor()
+        );
+    }
+
+    #[test]
+    fn union_type_resolver_string_array() {
+        assert_eq!(
+            set_values_output_type(
+                &[Type::cell_of(Type::String), Type::String],
+                &ResolveContext::new(Vec::new()),
+            ),
+            Type::cell_of(Type::String)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -5,6 +5,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::cells::type_resolvers::cellfun_type;
 use crate::builtins::common::shape::{dims_to_row_tensor, value_numel};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -12,7 +13,7 @@ use crate::builtins::common::spec::{
 };
 use crate::{
     build_runtime_error, call_builtin_async, gather_if_needed_async, make_cell_with_shape,
-    BuiltinResult, RuntimeError,
+    user_functions, BuiltinResult, RuntimeError,
 };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::cells::core::cellfun")]
@@ -63,6 +64,7 @@ fn cellfun_error_with_identifier(message: impl Into<String>, identifier: &str) -
     summary = "Apply a function to the contents of each cell array element.",
     keywords = "cellfun,cell,array,functional",
     accel = "host",
+    type_resolver(cellfun_type),
     builtin_path = "crate::builtins::cells::core::cellfun"
 )]
 async fn cellfun_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -442,7 +444,7 @@ impl Callable {
                     ))
                 }
             }
-            Value::FunctionHandle(name) => Self::from_text(&name, false),
+            Value::FunctionHandle(name) => Self::from_text(&name, true),
             Value::Closure(c) => Ok(Callable::Closure(c)),
             other => Err(cellfun_error_with_identifier(
                 format!("cellfun: expected function handle or builtin name, got {other:?}"),
@@ -490,10 +492,20 @@ impl Callable {
 
     async fn call(&self, args: &[Value]) -> BuiltinResult<Value> {
         match self {
-            Callable::Builtin { name } => call_builtin_async(name, args).await,
+            Callable::Builtin { name } => {
+                if let Some(result) = user_functions::try_call_user_function(name, args).await {
+                    return result;
+                }
+                call_builtin_async(name, args).await
+            }
             Callable::Closure(c) => {
                 let mut captures = c.captures.clone();
                 captures.extend_from_slice(args);
+                if let Some(result) =
+                    user_functions::try_call_user_function(&c.function_name, &captures).await
+                {
+                    return result;
+                }
                 call_builtin_async(&c.function_name, &captures).await
             }
             Callable::Special(special) => special.call(args).await,
@@ -1066,6 +1078,7 @@ pub(crate) mod tests {
 
     #[runmat_macros::runtime_builtin(
         name = "__cellfun_test_handler",
+        type_resolver(cellfun_type),
         builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]
     fn cellfun_test_handler(
@@ -1080,6 +1093,7 @@ pub(crate) mod tests {
 
     #[runmat_macros::runtime_builtin(
         name = "__cellfun_add",
+        type_resolver(cellfun_type),
         builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]
     fn cellfun_add(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
@@ -1090,6 +1104,7 @@ pub(crate) mod tests {
 
     #[runmat_macros::runtime_builtin(
         name = "__cellfun_identity",
+        type_resolver(cellfun_type),
         builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]
     fn cellfun_identity(value: Value) -> crate::BuiltinResult<Value> {

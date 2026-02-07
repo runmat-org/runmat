@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "norm";
@@ -75,6 +76,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Vector and matrix norms with MATLAB semantics.",
     keywords = "norm,vector norm,matrix norm,frobenius,nuclear,gpu",
     accel = "reduction",
+    type_resolver(numeric_scalar_type),
     builtin_path = "crate::builtins::math::linalg::solve::norm"
 )]
 async fn norm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -635,7 +637,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::CharArray;
+    use runmat_builtins::{CharArray, ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -649,6 +651,17 @@ pub(crate) mod tests {
             diff < 1e-10,
             "expected {expected}, got {actual} (diff {diff})"
         );
+    }
+
+    #[test]
+    fn norm_type_returns_scalar() {
+        let out = numeric_scalar_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(4), Some(1)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

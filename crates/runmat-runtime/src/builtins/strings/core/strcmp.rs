@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
+use crate::builtins::strings::type_resolvers::logical_text_match_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strcmp")]
@@ -55,6 +56,7 @@ fn remap_strcmp_flow(err: RuntimeError) -> RuntimeError {
     summary = "Compare text inputs for exact matches (case-sensitive).",
     keywords = "strcmp,string compare,text equality",
     accel = "sink",
+    type_resolver(logical_text_match_type),
     builtin_path = "crate::builtins::strings::core::strcmp"
 )]
 async fn strcmp_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
@@ -95,7 +97,9 @@ fn evaluate_strcmp(left: &TextCollection, right: &TextCollection) -> BuiltinResu
 pub(crate) mod tests {
     use super::*;
     use crate::RuntimeError;
-    use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray};
+    use runmat_builtins::{
+        CellArray, CharArray, LogicalArray, ResolveContext, StringArray, Type,
+    };
 
     fn strcmp_builtin(a: Value, b: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strcmp_builtin(a, b))
@@ -271,5 +275,16 @@ pub(crate) mod tests {
             strcmp_builtin(Value::Num(1.0), Value::String("a".into())).expect_err("invalid type"),
         );
         assert!(err.contains("first argument must be text"));
+    }
+
+    #[test]
+    fn strcmp_type_is_logical_match() {
+        assert_eq!(
+            logical_text_match_type(
+                &[Type::String, Type::String],
+                &ResolveContext::new(Vec::new()),
+            ),
+            Type::Bool
+        );
     }
 }

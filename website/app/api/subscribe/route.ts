@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
     const payload = {
       fields: [{ name: "email", value: email }],
       context: {
-        pageUri: pageUri || req.headers.get("referer") || "https://runmat.org",
+        pageUri: pageUri || req.headers.get("referer") || "https://runmat.com",
         pageName: pageName || "RunMat Subscribe",
       },
     };
@@ -61,5 +61,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "invalid_request" }, { status: 400 });
   }
 }
-
 

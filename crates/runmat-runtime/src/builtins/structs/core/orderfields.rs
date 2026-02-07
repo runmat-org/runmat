@@ -5,6 +5,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::structs::type_resolvers::orderfields_type;
 
 use runmat_builtins::{CellArray, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -73,6 +74,7 @@ fn orderfields_flow(message_id: &str, message: impl Into<String>) -> RuntimeErro
     category = "structs/core",
     summary = "Reorder structure field definitions alphabetically or using a supplied order.",
     keywords = "orderfields,struct,reorder fields,alphabetical,struct array",
+    type_resolver(orderfields_type),
     builtin_path = "crate::builtins::structs::core::orderfields"
 )]
 async fn orderfields_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

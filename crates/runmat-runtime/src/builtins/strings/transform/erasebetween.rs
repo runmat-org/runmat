@@ -5,6 +5,7 @@ use std::cmp::min;
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
@@ -81,6 +82,7 @@ enum BoundariesMode {
     summary = "Delete text between boundary markers with MATLAB-compatible semantics.",
     keywords = "eraseBetween,delete,boundaries,strings",
     accel = "sink",
+    type_resolver(text_preserve_type),
     builtin_path = "crate::builtins::strings::transform::erasebetween"
 )]
 async fn erase_between_builtin(
@@ -698,7 +700,9 @@ pub(crate) mod tests {
     #![allow(non_snake_case)]
 
     use super::*;
-    use runmat_builtins::{CellArray, CharArray, StringArray, Tensor};
+    use runmat_builtins::{
+        CellArray, CharArray, ResolveContext, StringArray, Tensor, Type,
+    };
 
     fn erase_between_builtin(
         text: Value,
@@ -1055,5 +1059,13 @@ pub(crate) mod tests {
         )
         .unwrap_err();
         assert_eq!(err.to_string(), BOUNDARY_TYPE_ERROR);
+    }
+
+    #[test]
+    fn erase_between_type_preserves_text() {
+        assert_eq!(
+            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
     }
 }

@@ -78,6 +78,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     keywords = "rmdir,remove directory,delete folder,filesystem,status,message,messageid,recursive",
     accel = "cpu",
     suppress_auto_output = true,
+    type_resolver(crate::builtins::io::type_resolvers::rmdir_type),
     builtin_path = "crate::builtins::io::repl_fs::rmdir"
 )]
 async fn rmdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

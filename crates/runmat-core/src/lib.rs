@@ -39,6 +39,11 @@ mod fusion_snapshot;
 mod value_metadata;
 use fusion_snapshot::build_fusion_snapshot;
 
+mod telemetry;
+pub use telemetry::{
+    TelemetryPlatformInfo, TelemetryRunConfig, TelemetryRunFinish, TelemetryRunGuard, TelemetrySink,
+};
+
 pub use value_metadata::{
     approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,
     value_shape,
@@ -86,6 +91,8 @@ pub struct RunMatSession {
     source_name_override: Option<String>,
     telemetry_consent: bool,
     telemetry_client_id: Option<String>,
+    telemetry_platform: TelemetryPlatformInfo,
+    telemetry_sink: Option<Arc<dyn TelemetrySink>>,
     workspace_preview_tokens: HashMap<Uuid, WorkspaceMaterializeTicket>,
     workspace_version: u64,
     emit_fusion_plan: bool,
@@ -828,6 +835,8 @@ impl RunMatSession {
             source_name_override: None,
             telemetry_consent: true,
             telemetry_client_id: None,
+            telemetry_platform: TelemetryPlatformInfo::default(),
+            telemetry_sink: None,
             workspace_preview_tokens: HashMap::new(),
             workspace_version: 0,
             emit_fusion_plan: false,
@@ -1687,7 +1696,9 @@ impl RunMatSession {
             self.populate_callstack(runtime_error);
         }
 
-        let public_value = if is_semicolon_suppressed {
+        let suppress_public_value =
+            is_expression_stmt && matches!(final_stmt_emit, FinalStmtEmitDisposition::Suppressed);
+        let public_value = if is_semicolon_suppressed || suppress_public_value {
             None
         } else {
             result_value

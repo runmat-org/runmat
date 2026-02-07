@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
 description = "WebAssembly bindings for embedding RunMat in browsers"
-homepage = "https://runmat.org"
+homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 
 [lib]
@@ -24,6 +24,7 @@ runmat-accelerate-api = { workspace = true }
 runmat-ignition = { workspace = true }
 runmat-filesystem = { workspace = true }
 runmat-thread-local = { workspace = true }
+glam = "0.24"
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde-wasm-bindgen = "0.6"
@@ -41,6 +42,7 @@ uuid = { version = "1", features = ["v4", "js"], default-features = false }
 runmat-logging = { path = "../runmat-logging", version = "0.1.0" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "registry"] }
+runmat-telemetry = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 runmat-runtime = { workspace = true, features = ["plot-web"] }

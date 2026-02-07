@@ -77,6 +77,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     keywords = "savepath,pathdef,search path,runmat path,persist path",
     accel = "cpu",
     suppress_auto_output = true,
+    type_resolver(crate::builtins::io::type_resolvers::savepath_type),
     builtin_path = "crate::builtins::io::repl_fs::savepath"
 )]
 async fn savepath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

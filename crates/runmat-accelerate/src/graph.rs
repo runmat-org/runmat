@@ -192,7 +192,11 @@ pub enum ShapeInfo {
 impl ShapeInfo {
     pub fn from_type(ty: &Type) -> Self {
         match ty {
-            Type::Int | Type::Num | Type::Bool | Type::Logical => ShapeInfo::Scalar,
+            Type::Int | Type::Num | Type::Bool => ShapeInfo::Scalar,
+            Type::Logical { shape } => match shape {
+                Some(dims) => ShapeInfo::Tensor(dims.clone()),
+                None => ShapeInfo::Tensor(Vec::new()),
+            },
             Type::Tensor { shape } => match shape {
                 Some(dims) => ShapeInfo::Tensor(dims.clone()),
                 None => ShapeInfo::Tensor(Vec::new()),
@@ -207,7 +211,9 @@ impl ShapeInfo {
             (ShapeInfo::Scalar, ShapeInfo::Scalar) => ShapeInfo::Scalar,
             (ShapeInfo::Scalar, ShapeInfo::Tensor(dims))
             | (ShapeInfo::Tensor(dims), ShapeInfo::Scalar) => ShapeInfo::Tensor(dims.clone()),
-            (ShapeInfo::Tensor(a), ShapeInfo::Tensor(b)) => ShapeInfo::Tensor(unify_dims(a, b)),
+            (ShapeInfo::Tensor(a), ShapeInfo::Tensor(b)) => {
+                ShapeInfo::Tensor(runmat_builtins::shape_rules::broadcast_shapes(a, b))
+            }
         }
     }
 
@@ -232,44 +238,29 @@ impl ShapeInfo {
     }
 }
 
-fn unify_dims(a: &[Option<usize>], b: &[Option<usize>]) -> Vec<Option<usize>> {
-    let len = a.len().max(b.len());
-    let mut result = Vec::with_capacity(len);
-    for i in 0..len {
-        let da = a.get(i).cloned().unwrap_or(None);
-        let db = b.get(i).cloned().unwrap_or(None);
-        let dim = match (da, db) {
-            (Some(x), Some(y)) if x == y => Some(x),
-            (Some(1), Some(y)) => Some(y),
-            (Some(x), Some(1)) => Some(x),
-            (Some(x), Some(y)) if x != y => None,
-            (Some(x), None) => Some(x),
-            (None, Some(y)) => Some(y),
-            (None, None) => None,
-            _ => None,
-        };
-        result.push(dim);
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{unify_dims, ShapeInfo};
+    use super::ShapeInfo;
 
     #[test]
     fn test_unify_dims_basic() {
         assert_eq!(
-            unify_dims(&[Some(4), Some(3)], &[Some(4), Some(3)]),
+            runmat_builtins::shape_rules::broadcast_shapes(
+                &[Some(4), Some(3)],
+                &[Some(4), Some(3)]
+            ),
             vec![Some(4), Some(3)]
         );
         assert_eq!(
-            unify_dims(&[Some(4)], &[Some(1), Some(3)]),
+            runmat_builtins::shape_rules::broadcast_shapes(&[Some(4)], &[Some(1), Some(3)]),
             vec![Some(4), Some(3)]
         );
-        assert_eq!(unify_dims(&[None], &[Some(5)]), vec![Some(5)]);
         assert_eq!(
-            unify_dims(&[Some(2), Some(3)], &[Some(2)]),
+            runmat_builtins::shape_rules::broadcast_shapes(&[None], &[Some(5)]),
+            vec![Some(5)]
+        );
+        assert_eq!(
+            runmat_builtins::shape_rules::broadcast_shapes(&[Some(2), Some(3)], &[Some(2)]),
             vec![Some(2), Some(3)]
         );
     }
@@ -279,5 +270,12 @@ mod tests {
         let a = ShapeInfo::Tensor(vec![Some(4), Some(3)]);
         let b = ShapeInfo::Scalar;
         assert!(matches!(a.unify(&b), ShapeInfo::Tensor(_)));
+    }
+
+    #[test]
+    fn test_shape_unify_broadcasts() {
+        let a = ShapeInfo::Tensor(vec![Some(1), Some(3)]);
+        let b = ShapeInfo::Tensor(vec![Some(2), Some(1)]);
+        assert_eq!(a.unify(&b), ShapeInfo::Tensor(vec![Some(2), Some(3)]));
     }
 }

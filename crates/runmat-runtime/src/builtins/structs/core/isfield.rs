@@ -4,6 +4,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::structs::type_resolvers::isfield_type;
 use runmat_builtins::{CellArray, LogicalArray, StructValue, Value};
 use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
@@ -46,6 +47,7 @@ fn isfield_flow(message: impl Into<String>) -> RuntimeError {
     category = "structs/core",
     summary = "Test whether a struct or struct array defines specific field names.",
     keywords = "isfield,struct,field existence",
+    type_resolver(isfield_type),
     builtin_path = "crate::builtins::structs::core::isfield"
 )]
 async fn isfield_builtin(target: Value, names: Value) -> BuiltinResult<Value> {

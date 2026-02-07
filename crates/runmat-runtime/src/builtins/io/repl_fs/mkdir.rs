@@ -76,6 +76,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     keywords = "mkdir,create directory,folder,filesystem,status,message,messageid",
     accel = "cpu",
     suppress_auto_output = true,
+    type_resolver(crate::builtins::io::type_resolvers::mkdir_type),
     builtin_path = "crate::builtins::io::repl_fs::mkdir"
 )]
 async fn mkdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

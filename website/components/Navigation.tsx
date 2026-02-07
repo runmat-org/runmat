@@ -197,7 +197,7 @@ export default function Navigation() {
               </Link>
             </Button>
             <Link
-              href="https://runmat.org/sandbox"
+              href="https://runmat.com/sandbox"
               className="inline-flex items-center justify-center h-10 px-6 text-sm font-semibold flex-shrink-0 whitespace-nowrap rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow hover:from-blue-600 hover:to-purple-700 transition-colors"
               onClick={handleTryInBrowserClick}
               target="_blank"

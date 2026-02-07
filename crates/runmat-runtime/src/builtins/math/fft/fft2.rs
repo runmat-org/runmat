@@ -8,6 +8,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::fft::type_resolvers::fft2_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{ComplexTensor, Value};
@@ -54,6 +55,7 @@ fn fft2_error(message: impl Into<String>) -> RuntimeError {
     category = "math/fft",
     summary = "Compute the two-dimensional discrete Fourier transform (DFT) of numeric or complex data.",
     keywords = "fft2,2d fft,two-dimensional fourier transform,gpu",
+    type_resolver(fft2_type),
     builtin_path = "crate::builtins::math::fft::fft2"
 )]
 async fn fft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -209,7 +211,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
 
     fn approx_eq(a: (f64, f64), b: (f64, f64), tol: f64) -> bool {
         (a.0 - b.0).abs() <= tol && (a.1 - b.1).abs() <= tol
@@ -217,6 +219,22 @@ pub(crate) mod tests {
 
     fn error_message(error: crate::RuntimeError) -> String {
         error.message().to_string()
+    }
+
+    #[test]
+    fn fft2_type_pads_rank() {
+        let out = fft2_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(4)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(4), Some(1)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

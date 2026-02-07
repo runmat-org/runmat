@@ -77,6 +77,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     summary = "Determine whether a variable, file, folder, built-in, or class exists.",
     keywords = "exist,file,dir,var,builtin,class",
     accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::exist_type),
     builtin_path = "crate::builtins::io::repl_fs::exist"
 )]
 async fn exist_builtin(name: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

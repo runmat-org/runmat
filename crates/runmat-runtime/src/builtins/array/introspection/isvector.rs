@@ -5,7 +5,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use runmat_builtins::Value;
+use runmat_builtins::{ResolveContext, Type, Value};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(
@@ -45,10 +45,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return true when an array is 1-by-N or N-by-1 (including scalars).",
     keywords = "isvector,vector detection,metadata query,gpu,logical",
     accel = "metadata",
+    type_resolver(bool_scalar_type),
     builtin_path = "crate::builtins::array::introspection::isvector"
 )]
 async fn isvector_builtin(value: Value) -> crate::BuiltinResult<Value> {
     Ok(Value::Bool(value_is_vector(&value).await?))
+}
+
+fn bool_scalar_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Bool
 }
 
 async fn value_is_vector(value: &Value) -> crate::BuiltinResult<bool> {
@@ -80,7 +85,15 @@ pub(crate) mod tests {
     }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
-    use runmat_builtins::{CellArray, CharArray, Tensor};
+    use runmat_builtins::{CellArray, CharArray, ResolveContext, Tensor, Type};
+
+    #[test]
+    fn isvector_type_returns_bool() {
+        assert_eq!(
+            super::bool_scalar_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::Bool
+        );
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

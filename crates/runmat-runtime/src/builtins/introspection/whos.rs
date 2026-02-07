@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::introspection::class::class_name_for_value;
+use crate::builtins::introspection::type_resolvers::whos_type;
 use crate::builtins::io::mat::load::read_mat_file_for_builtin;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
@@ -51,6 +52,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "List variables in the workspace or MAT-files with MATLAB-compatible metadata.",
     keywords = "whos,workspace variables,memory usage,struct array",
     accel = "cpu",
+    type_resolver(whos_type),
     builtin_path = "crate::builtins::introspection::whos"
 )]
 async fn whos_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

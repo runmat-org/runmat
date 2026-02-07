@@ -6,3 +6,4 @@ pub mod reduction;
 pub mod rounding;
 pub mod signal;
 pub mod trigonometry;
+pub mod type_resolvers;

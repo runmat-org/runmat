@@ -1,6 +1,7 @@
 //! MATLAB-compatible `horzcat` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::{IntValue, Tensor, Value};
+use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::shape_rules::scalar_tensor_shape;
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, RuntimeError};
@@ -41,12 +42,145 @@ fn horzcat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("horzcat").build()
 }
 
+fn concat_input_shape(ty: &Type) -> Option<Vec<Option<usize>>> {
+    match ty {
+        Type::Tensor { shape: Some(shape) } => Some(shape.clone()),
+        Type::Logical { shape: Some(shape) } => Some(shape.clone()),
+        Type::Num | Type::Int | Type::Bool => Some(scalar_tensor_shape()),
+        _ => None,
+    }
+}
+
+fn concat_shape(shapes: &[Vec<Option<usize>>], dim_1based: usize) -> Option<Vec<Option<usize>>> {
+    if shapes.is_empty() || dim_1based == 0 {
+        return None;
+    }
+    let rank = shapes
+        .iter()
+        .map(|shape| shape.len())
+        .max()?
+        .max(dim_1based);
+    let mut padded = Vec::with_capacity(shapes.len());
+    for shape in shapes {
+        let mut current = shape.clone();
+        while current.len() < rank {
+            current.push(Some(1));
+        }
+        padded.push(current);
+    }
+
+    let mut output = vec![None; rank];
+    let dim_zero = dim_1based - 1;
+    for axis in 0..rank {
+        if axis == dim_zero {
+            let mut total: Option<usize> = Some(0);
+            for shape in &padded {
+                match (total, shape[axis]) {
+                    (Some(acc), Some(value)) => total = acc.checked_add(value),
+                    _ => {
+                        total = None;
+                        break;
+                    }
+                }
+            }
+            output[axis] = total;
+        } else {
+            let mut shared: Option<usize> = None;
+            let mut mismatch = false;
+            for shape in &padded {
+                match (shared, shape[axis]) {
+                    (None, value) => shared = value,
+                    (Some(current), Some(value)) if current == value => {}
+                    (Some(_), Some(_)) => {
+                        mismatch = true;
+                        break;
+                    }
+                    _ => {
+                        shared = None;
+                        break;
+                    }
+                }
+            }
+            output[axis] = if mismatch { None } else { shared };
+        }
+    }
+
+    let min_len = dim_1based.max(2).min(output.len());
+    while output.len() > min_len && matches!(output.last(), Some(Some(1))) {
+        output.pop();
+    }
+    Some(output)
+}
+
+fn cell_element_type(inputs: &[Type]) -> Option<Box<Type>> {
+    let mut element: Option<Type> = None;
+    for ty in inputs {
+        let Type::Cell { element_type, .. } = ty else {
+            return None;
+        };
+        match (&element, element_type.as_deref()) {
+            (None, Some(current)) => element = Some(current.clone()),
+            (Some(existing), Some(current)) if existing == current => {}
+            (Some(_), Some(_)) => return None,
+            _ => {}
+        }
+    }
+    element.map(Box::new)
+}
+
+fn concat_type_with_dim(args: &[Type], dim_1based: usize) -> Type {
+    if args.is_empty() {
+        return Type::tensor();
+    }
+    if args.len() == 1 {
+        return args[0].clone();
+    }
+
+    let all_cells = args.iter().all(|arg| matches!(arg, Type::Cell { .. }));
+    if all_cells {
+        return Type::Cell {
+            element_type: cell_element_type(args),
+            length: None,
+        };
+    }
+
+    let all_strings = args.iter().all(|arg| matches!(arg, Type::String));
+    if all_strings {
+        return Type::cell_of(Type::String);
+    }
+
+    let has_numeric =
+        args.iter().any(|arg| matches!(arg, Type::Tensor { .. } | Type::Num | Type::Int));
+    let has_logical = args
+        .iter()
+        .any(|arg| matches!(arg, Type::Logical { .. } | Type::Bool));
+
+    if has_numeric {
+        let shapes: Option<Vec<Vec<Option<usize>>>> = args.iter().map(concat_input_shape).collect();
+        let shape = shapes.as_ref().and_then(|s| concat_shape(s, dim_1based));
+        return Type::Tensor { shape };
+    }
+
+    if has_logical {
+        let shapes: Option<Vec<Vec<Option<usize>>>> = args.iter().map(concat_input_shape).collect();
+        let shape = shapes.as_ref().and_then(|s| concat_shape(s, dim_1based));
+        return Type::Logical { shape };
+    }
+
+    Type::Unknown
+}
+
+fn horzcat_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    concat_type_with_dim(args, 2)
+}
+
 #[runtime_builtin(
     name = "horzcat",
     category = "array/shape",
     summary = "Concatenate inputs horizontally (dimension 2) just like MATLAB square brackets.",
     keywords = "horzcat,horizontal concatenation,array,gpu",
     accel = "array_construct",
+    type_resolver(horzcat_type),
     builtin_path = "crate::builtins::array::shape::horzcat"
 )]
 async fn horzcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -99,6 +233,27 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor};
+
+    #[test]
+    fn horzcat_type_combines_shapes() {
+        let out = horzcat_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(1)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(3)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(4)])
+            }
+        );
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

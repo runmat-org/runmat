@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::linalg::type_resolvers::bandwidth_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(
@@ -63,6 +64,7 @@ enum BandSelector {
     summary = "Compute the lower and upper bandwidth of a matrix.",
     keywords = "bandwidth,lower bandwidth,upper bandwidth,structure,gpu",
     accel = "structure",
+    type_resolver(bandwidth_type),
     builtin_path = "crate::builtins::math::linalg::structure::bandwidth"
 )]
 async fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -288,7 +290,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::LogicalArray;
+    use runmat_builtins::{LogicalArray, ResolveContext, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -303,6 +305,22 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn bandwidth_type_defaults_to_two_element_tensor() {
+        let out = bandwidth_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(3), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(2)])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

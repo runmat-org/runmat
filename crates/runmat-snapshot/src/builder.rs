@@ -1228,6 +1228,7 @@ mod tests {
             "",
             vec![],
             runmat_builtins::Type::Num,
+            None,
             test_builtin,
             &[],
             false,
