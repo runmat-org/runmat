@@ -20,7 +20,7 @@ import {
 export const metadata: Metadata = {
   title: "Free Online MATLAB Alternative with GPU Acceleration",
   description:
-    "Run MATLAB-style code online with RunMat. Browser-native execution, GPU acceleration, and no license required. Try the sandbox in seconds.",
+    "Run MATLAB-style code online with RunMat. Interactive 3D plotting, real-time type tracking, GPU acceleration, and no license required. Try the sandbox in seconds.",
   alternates: { canonical: "https://runmat.org/matlab-online" },
 };
 
@@ -56,7 +56,7 @@ const faqItems = [
   {
     question: "How does RunMat run code in the browser?",
     answer:
-      "RunMat compiles to WebAssembly, which runs natively in your browser at near-native speed. For GPU-accelerated operations, it uses WebGPU (available in Chrome and Edge).",
+      "RunMat compiles to WebAssembly, which runs natively in your browser at near-native speed. For GPU-accelerated operations, it uses WebGPU (available in Chrome, Edge, Safari 18+, and Firefox 139+).",
   },
   {
     question: "Is my code private?",
@@ -66,7 +66,7 @@ const faqItems = [
   {
     question: "Can RunMat use my GPU?",
     answer:
-      "Yes, in browsers that support WebGPU (currently Chrome and Edge on most systems). RunMat automatically offloads eligible operations to the GPU for faster execution.",
+      "Yes, in browsers that support WebGPU (Chrome, Edge, Safari 18+, and Firefox 139+). RunMat automatically offloads eligible operations to the GPU for faster execution.",
   },
   {
     question: "What’s the difference between RunMat and GNU Octave?",
@@ -77,6 +77,11 @@ const faqItems = [
     question: "Is there a desktop version?",
     answer:
       "Yes. The RunMat desktop app provides the same interface as the browser sandbox with full local file system access. See the download page.",
+  },
+  {
+    question: "Does RunMat support plotting?",
+    answer:
+      "Yes. RunMat supports interactive 2D and 3D plotting. 3D surface plots can be rotated, zoomed, and panned directly in the browser. Additional chart types are being added.",
   },
 ];
 
@@ -121,17 +126,29 @@ const jsonLd = {
       url: "https://runmat.org/matlab-online",
       name: "Free Online MATLAB Alternative with GPU Acceleration",
       description:
-        "Run MATLAB-style code online with RunMat. Browser-native execution, GPU acceleration, and no license required. Try the sandbox in seconds.",
+        "Run MATLAB-style code online with RunMat. Interactive 3D plotting, real-time type tracking, GPU acceleration, and no license required. Try the sandbox in seconds.",
       inLanguage: "en",
       isPartOf: { "@id": "https://runmat.org/#website" },
       breadcrumb: { "@id": "https://runmat.org/matlab-online#breadcrumb" },
       author: { "@id": "https://runmat.org/#organization" },
       publisher: { "@id": "https://runmat.org/#organization" },
+      video: { "@id": "https://runmat.org/matlab-online#hero-video" },
       mainEntity: [
         { "@id": "https://runmat.org/matlab-online#faq" },
         { "@id": "https://runmat.org/matlab-online#howto" },
         { "@id": "https://runmat.org/matlab-online#software" },
       ],
+    },
+    {
+      "@type": "VideoObject",
+      "@id": "https://runmat.org/matlab-online#hero-video",
+      name: "RunMat MATLAB-style code in the browser",
+      description:
+        "Short demo of RunMat running MATLAB-syntax code in the browser with GPU acceleration.",
+      thumbnailUrl: heroPosterSrc,
+      contentUrl: heroVideoSrc,
+      uploadDate: "2026-02-03",
+      duration: "PT15S",
     },
     {
       "@type": "BreadcrumbList",
@@ -155,6 +172,15 @@ const jsonLd = {
       applicationCategory: "ScientificApplication",
       applicationSubCategory: "EngineeringApplication",
       operatingSystem: ["Browser", "Windows", "macOS", "Linux"],
+      featureList: [
+        "Interactive 2D and 3D plotting with GPU acceleration",
+        "Real-time type and shape tracking with dimension error detection",
+        "Execution tracing and diagnostic logging",
+        "JIT-accelerated MATLAB-style syntax",
+        "Automatic GPU fusion and memory management",
+        "Browser, desktop, and CLI execution",
+        "No account or license required",
+      ],
       offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
       url: "https://runmat.org/sandbox",
       author: { "@id": "https://runmat.org/#organization" },
@@ -413,11 +439,20 @@ export default function MatlabOnlinePage() {
                 </div>
                 <div className="flex items-start gap-4">
                   <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-200">
+                    <BarChart3 className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <p className="text-xl font-medium text-gray-100">Interactive 2D &amp; 3D plotting</p>
+                    <p className="text-lg text-gray-300">Crisp, interactive surfaces you can rotate, zoom, and inspect from any angle.</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-4">
+                  <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-200">
                     <AlertTriangle className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-gray-100">Live syntax validation</p>
-                    <p className="text-lg text-gray-300">Red underlines highlight errors before you run.</p>
+                    <p className="text-xl font-medium text-gray-100">Type &amp; shape tracking</p>
+                    <p className="text-lg text-gray-300">Hover to see matrix dimensions. Red underlines warn about mismatches before you run.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4">
@@ -425,8 +460,8 @@ export default function MatlabOnlinePage() {
                     <FileText className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-gray-100">Tracing &amp; logging</p>
-                    <p className="text-lg text-gray-300">Detailed execution trace and console output.</p>
+                    <p className="text-xl font-medium text-gray-100">Execution tracing &amp; diagnostics</p>
+                    <p className="text-lg text-gray-300">Step through what each line does with clear error messages and diagnostic logging.</p>
                   </div>
                 </div>
               </div>
@@ -665,13 +700,19 @@ export default function MatlabOnlinePage() {
                     <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-300">
                       ✓
                     </span>
-                    Live syntax validation
+                    Interactive 2D &amp; 3D plotting
                   </li>
                   <li className="flex items-start gap-3 text-green-300">
                     <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-300">
                       ✓
                     </span>
-                    Execution tracing &amp; logging
+                    Real-time type &amp; shape tracking
+                  </li>
+                  <li className="flex items-start gap-3 text-green-300">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-300">
+                      ✓
+                    </span>
+                    Execution tracing &amp; diagnostics
                   </li>
                   <li className="flex items-start gap-3 text-gray-400">
                     <span className="mt-0.5 inline-flex items-center justify-center text-base text-gray-400">
@@ -753,13 +794,14 @@ export default function MatlabOnlinePage() {
         <section className="py-16 md:py-24 lg:py-32">
           <div className="mx-auto max-w-5xl text-center mb-10 space-y-3">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground">What works today</h2>
+            <p className="text-muted-foreground text-lg">Current coverage and what&apos;s coming next.</p>
            
           </div>
           <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-2">
             <Card className="border border-green-500/30 bg-[#0E1421] shadow-lg">
               <CardHeader className="flex flex-row items-center gap-3 border-b border-border/60">
                 <CheckCircle className="h-4 w-4 text-green-300" />
-                <CardTitle className="text-xl text-gray-100">Works Well</CardTitle>
+                <CardTitle className="text-xl text-gray-100">Works well</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-gray-300 text-lg">
                 <div className="flex items-start gap-2">
@@ -788,15 +830,19 @@ export default function MatlabOnlinePage() {
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-green-300">•</span>
-                  <p>Simple 2D plotting (line, scatter)</p>
+                  <p>Interactive 2D and 3D plotting (rotate, zoom, pan)</p>
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-green-300">•</span>
-                  <p>Live syntax validation (red underlines for errors)</p>
+                  <p>Real-time type and shape tracking (hover to see matrix dimensions)</p>
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-green-300">•</span>
-                  <p>Execution tracing and console logging</p>
+                  <p>Live syntax validation (red underlines for dimension mismatches and errors)</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="mt-1 text-green-300">•</span>
+                  <p>Execution tracing and diagnostic logging</p>
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-green-300">•</span>
@@ -807,15 +853,15 @@ export default function MatlabOnlinePage() {
             <Card className="border border-amber-500/30 bg-[#0E1421] shadow-lg">
               <CardHeader className="flex flex-row items-center gap-3 border-b border-border/60">
                 <Clock className="h-4 w-4 text-amber-300" />
-                <CardTitle className="text-xl text-gray-100">Limitations &amp; Future Work</CardTitle>
+                <CardTitle className="text-xl text-gray-100">Limitations &amp; future work</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4 text-gray-300 text-lg">
                 <div>
-                  <h4 className="text-lg font-semibold text-gray-100 mb-2">In Progress</h4>
+                  <h4 className="text-lg font-semibold text-gray-100 mb-2">In progress</h4>
                   <div className="space-y-2">
                     <div className="flex items-start gap-2">
                       <span className="mt-1 text-amber-300">•</span>
-                      <p>Advanced plotting (3D, surfaces, subplots, figure handles)</p>
+                      <p>Advanced plotting (subplots, additional chart types, figure handles)</p>
                     </div>
                     <div className="flex items-start gap-2">
                       <span className="mt-1 text-amber-300">•</span>
@@ -828,7 +874,7 @@ export default function MatlabOnlinePage() {
                   </div>
                 </div>
                 <div className="border-t border-border/60 pt-4">
-                  <h4 className="text-lg font-semibold text-gray-100 mb-2">Not Supported</h4>
+                  <h4 className="text-lg font-semibold text-gray-100 mb-2">Not supported</h4>
                   <div className="space-y-2">
                     <div className="flex items-start gap-2">
                       <span className="mt-1 text-slate-300">•</span>

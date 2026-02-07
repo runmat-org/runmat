@@ -4,8 +4,8 @@ import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SiGithub } from "react-icons/si";
 
-import { OSInstallCommand } from "@/components/OSInstallCommand";
 import MatlabCodeCard from "@/components/MatlabCodeCard";
 
 import HeroBenchmarkShowcase from "@/components/benchmarks/HeroBenchmarkShowcase";
@@ -78,7 +78,10 @@ const jsonLd = {
         "JIT-accelerated MATLAB-style syntax",
         "RunMat Desktop: Full IDE experience with code editor, file explorer, and live plotting in-browser",
         "Automatic GPU Fusion & Memory Management",
-        "Cross-platform binary (Metal, Vulkan, DX12) and CLI support"
+        "Cross-platform binary (Metal, Vulkan, DX12) and CLI support",
+        "Interactive 2D and 3D plotting with GPU acceleration",
+        "Real-time type and shape tracking with dimension error detection",
+        "Execution tracing and diagnostic logging"
       ],
       "offers": {
         "@type": "Offer",
@@ -117,6 +120,11 @@ export const metadata: Metadata = {
     "matlab jupyter kernel",
     "jupyter matlab integration",
     "matlab plotting",
+    "matlab 3d plot",
+    "matlab plotting online",
+    "interactive matlab plots",
+    "matlab debugging",
+    "matlab dimension error",
     "matlab vs octave",
     "matlab vs python",
     "matlab vs julia",
@@ -193,12 +201,74 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* Developer Experience Section */}
+      <section className="w-full py-16 md:py-24 lg:py-32">
+        <div className="container mx-auto px-4 md:px-6">
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
+            <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
+              See your results. Catch your mistakes.
+            </h2>
+            <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-lg">
+              Rich plotting and live diagnostics, built into the same environment as your code. No separate tools. No waiting until runtime to find errors.
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-8 max-w-5xl mx-auto">
+            <div className="rounded-xl border border-border overflow-hidden bg-muted/40">
+              <video
+                className="w-full h-auto"
+                autoPlay
+                muted
+                loop
+                playsInline
+                aria-label="RunMat 3D interactive plotting demo"
+              >
+                <source
+                  src="https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4"
+                  type="video/mp4"
+                />
+              </video>
+              <div className="p-4">
+                <h3 className="font-semibold text-lg">Interactive 3D Plotting</h3>
+                <p className="text-muted-foreground text-sm mt-1">
+                  Explore your results as crisp, interactive 3D surfaces. Rotate, zoom in, and inspect your data from any angle.
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border overflow-hidden bg-muted/40">
+              <video
+                className="w-full h-auto"
+                autoPlay
+                muted
+                loop
+                playsInline
+                aria-label="RunMat shape tracking and type system demo"
+              >
+                <source
+                  src="https://web.runmatstatic.com/video/runmat-shape-tracking.mp4"
+                  type="video/mp4"
+                />
+              </video>
+              <div className="p-4">
+                <h3 className="font-semibold text-lg">Catch Errors Before You Run</h3>
+                <p className="text-muted-foreground text-sm mt-1">
+                  Hover to see matrix dimensions. Red underlines warn you about dimension
+                  mismatches before execution.
+                </p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
       {/* GPU Fusion Architecture Section */}
       <section className="w-full py-16 md:py-24 lg:py-32 bg-muted/50">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
-              Why it&apos;s Fast: GPU Fusion & Residency
+              Why it&apos;s fast: GPU fusion &amp; residency
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-lg sm:leading-7">
               RunMat fuses sequential operations into fewer computational steps and keeps arrays on device between steps (&quot;residency&quot;). That means less memory traffic and fewer GPU program launches, so your scripts finish sooner.
@@ -240,7 +310,7 @@ export default function HomePage() {
           <div className="mt-12">
             <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-6 text-center mb-8">
               <h3 className="font-heading text-2xl leading-[1.1] sm:text-3xl md:text-4xl">
-                Real Workloads, Reproducible Results
+                Real workloads, reproducible results
               </h3>
               <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-base">
                 Benchmarked on an <span className="font-semibold">Apple M2 Max, 32GB</span>.
@@ -278,16 +348,15 @@ export default function HomePage() {
         </div>
       </section>
 
-
       {/* Features Section */}
       <section className="w-full py-16 md:py-24 lg:py-18 bg-muted/50">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl lg:text-6xl">
-              Why Use RunMat?
+              One runtime. Every platform.
             </h2>
             <p className="max-w-[46rem] text-muted-foreground">
-              Comparing options? Read our{" "}
+              The same math engine runs in your browser, on your desktop, and from the command line — with no dependencies and no license. Comparing options? Read our{" "}
               <Link href="/blog/free-matlab-alternatives" className="underline">
                 MATLAB alternatives guide
               </Link>{" "}
@@ -302,44 +371,33 @@ export default function HomePage() {
             <Card>
               <CardHeader className="items-center text-center">
                 <div className="mb-3 text-3xl">⚡</div>
-                <CardTitle>Faster For Math by Design</CardTitle>
+                <CardTitle>Browser, Desktop, or CLI</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-center">
-                  From Fusion to Residency and VM OpCodes designed for executing math fast, RunMat is optimized for math, not general purpose programming.
+                  Start in RunMat instantly with zero install. Move to the desktop app for local file access. Run headless from the CLI on servers and CI pipelines. Same runtime, same results, everywhere.
                 </CardDescription>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="items-center text-center">
                 <div className="mb-3 text-3xl">📦</div>
-                <CardTitle>Cross-Platform</CardTitle>
+                <CardTitle>Any GPU. No Lock-In.</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-center">
-                  Single binary with consistent performance on macOS/Windows/Linux and headless servers. Use Mac Metal GPUs, NVDIA/AMD GPUs, or ARM Vulkan GPUs.
+                  Metal on Mac, Vulkan on Linux and ARM, DirectX 12 on Windows. No CUDA dependency, no vendor lock-in. Your code runs on whatever hardware your team already has.
                 </CardDescription>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="items-center text-center">
                 <div className="mb-3 text-3xl">🧱</div>
-                <CardTitle>Portable + Lightweight</CardTitle>
+                <CardTitle>Open Source and Free</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-center">
-                  <Link
-                    href="https://runmat.org/sandbox"
-                    className="underline"
-                    target="_blank"
-                    rel="noreferrer"
-                    data-ph-capture-attribute-destination="sandbox"
-                    data-ph-capture-attribute-source="home-portable-card"
-                    data-ph-capture-attribute-cta="try-in-browser"
-                  >
-                    Try instantly in the browser with no install,
-                  </Link>{" "}
-                  or download the CLI for local scripts. Same code runs on macOS, Windows, Linux, and headless servers. GPU portability via Metal, DirectX 12, and Vulkan—no CUDA lock-in.
+                  The RunMat runtime is MIT-licensed and open source. No per-seat fees, no license servers, no vendor audits. Collaboration, cloud storage, and team features are coming soon.
                 </CardDescription>
               </CardContent>
             </Card>
@@ -347,28 +405,63 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Quick Install Section */}
+      {/* Open Source Section */}
       <section className="w-full py-16 md:py-24 lg:py-32 bg-muted/30">
         <div className="container mx-auto px-4 md:px-6">
-          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center">
-          <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
-              Free and Open Source
-          </h2>
-          <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-              Copy and paste the command below to get started with RunMat.
-          </p>
-          
-          <OSInstallCommand className="w-full max-w-4xl" />
-          
-            <div className="flex flex-col sm:flex-row gap-4">
-              <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200">
-                <Link href="/download">More Install Options</Link>
-            </Button>
-              <Button variant="outline" size="lg" asChild className="h-12 px-8 text-lg">
-                <Link href="/docs/getting-started">Get Started</Link>
-            </Button>
+          <div className="mx-auto max-w-3xl text-center">
+            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl mb-8">
+              Free and open source
+            </h2>
+            <Card className="border border-border/60 bg-[#0E1421] shadow-lg">
+              <CardContent className="py-8 space-y-4">
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-border/60 bg-background/30 text-sm text-gray-400">
+                  <SiGithub className="h-7 w-7" />
+                </div>
+                <p className="text-gray-300 text-lg">
+                  The RunMat runtime is MIT licensed and on{" "}
+                  <Link href="https://github.com/runmat-org/runmat" className="underline text-blue-300 hover:text-blue-200" target="_blank" rel="noreferrer">
+                    GitHub
+                  </Link>
+                  . The JIT, the fusion engine, the GPU planner — all open source and actively maintained.
+                </p>
+              </CardContent>
+            </Card>
           </div>
         </div>
+      </section>
+
+      {/* Final CTA */}
+      <section className="w-full py-16 md:py-24 lg:py-32">
+        <div className="container mx-auto px-4 md:px-6">
+          <Card className="mx-auto max-w-3xl border border-purple-500/30 bg-gradient-to-r from-purple-500/10 to-blue-500/10 shadow-lg">
+            <CardContent className="py-8 space-y-4 text-center">
+              <h2 className="text-3xl md:text-4xl font-bold text-foreground">
+                Run MATLAB code online — no install, no license
+              </h2>
+              <p className="text-muted-foreground text-lg">
+                Start running math immediately in your browser.
+              </p>
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                <Button
+                  size="lg"
+                  asChild
+                  className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200"
+                >
+                  <Link
+                    href="/sandbox"
+                    data-ph-capture-attribute-destination="sandbox"
+                    data-ph-capture-attribute-source="home-bottom-cta"
+                    data-ph-capture-attribute-cta="launch-sandbox"
+                  >
+                    Launch the Sandbox
+                  </Link>
+                </Button>
+                <Button variant="outline" size="lg" asChild className="h-12 px-8 text-base">
+                  <Link href="/download">Other download options</Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </section>
 

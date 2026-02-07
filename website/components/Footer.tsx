@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Heart } from "lucide-react";
+import { Heart, MapPin } from "lucide-react";
+import { SiGithub, SiLinkedin, SiX } from "react-icons/si";
 import Image from "next/image";
 import NewsletterCta from "@/components/NewsletterCta";
 
@@ -29,7 +30,7 @@ export default function Footer() {
   return (
     <footer className="bg-background">
       <div className="container mx-auto flex flex-col md:flex-row items-start justify-between gap-8 py-8 px-4 md:px-6 border-t">
-        <div className="hidden md:flex flex-col gap-3">
+        <div className="flex flex-col gap-3">
           <div className="flex items-center gap-3">
             <Link href="/" className="focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded">
               <Image
@@ -45,8 +46,26 @@ export default function Footer() {
           <p className="text-sm text-muted-foreground leading-relaxed">
             The Fastest Runtime for Math
           </p>
+          <div className="flex items-center gap-3 mt-1">
+            <Link href="https://github.com/runmat-org/runmat" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">
+              <SiGithub className="h-5 w-5" />
+              <span className="sr-only">GitHub</span>
+            </Link>
+            <Link href="https://x.com/runmat_com" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">
+              <SiX className="h-5 w-5" />
+              <span className="sr-only">X (Twitter)</span>
+            </Link>
+            <Link href="https://www.linkedin.com/company/runmat" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">
+              <SiLinkedin className="h-5 w-5" />
+              <span className="sr-only">LinkedIn</span>
+            </Link>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <MapPin className="h-3.5 w-3.5" />
+            <span>San Francisco, CA · Seattle, WA · New York, NY</span>
+          </div>
         </div>
-        <div className="grid w-full md:flex-1 gap-6 md:grid-cols-2 text-sm text-muted-foreground">
+        <div className="grid w-full md:flex-1 gap-y-6 md:gap-x-8 md:grid-cols-2 text-sm text-muted-foreground">
           <div>
             <h3 className="text-foreground font-semibold mb-2">Resources</h3>
             <ul className="space-y-1">
