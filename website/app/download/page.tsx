@@ -25,7 +25,7 @@ export default function DownloadPage() {
         
         {/* Header */}
         <div className="text-center mb-12">
-          <Badge className="mb-4">Free Download</Badge>
+          <Badge className="mb-4">Free download</Badge>
           <h1 className="text-4xl lg:text-5xl font-bold mb-6 text-foreground">
             Download RunMat
           </h1>
@@ -127,7 +127,7 @@ export default function DownloadPage() {
                   <Code className="h-5 w-5 mr-2 text-gray-400" />
                   VS Code Extension
                   <span className="ml-auto bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-full text-xs font-medium">
-                    Coming Soon
+                    Coming soon
                   </span>
                 </CardTitle>
               </CardHeader>
@@ -137,7 +137,7 @@ export default function DownloadPage() {
                 </p>
                 <Button className="w-full opacity-50 cursor-not-allowed" disabled>
                   <ExternalLink className="mr-2 h-4 w-4" />
-                  Install Extension
+                  Install extension
                 </Button>
               </CardContent>
             </Card>
@@ -149,7 +149,7 @@ export default function DownloadPage() {
                   <Code className="h-5 w-5 mr-2 text-gray-400" />
                   IntelliJ IDEA Plugin
                   <span className="ml-auto bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-full text-xs font-medium">
-                    Coming Soon
+                    Coming soon
                   </span>
                 </CardTitle>
               </CardHeader>
@@ -159,7 +159,7 @@ export default function DownloadPage() {
                 </p>
                 <Button className="w-full opacity-50 cursor-not-allowed" disabled>
                   <ExternalLink className="mr-2 h-4 w-4" />
-                  Install Extension
+                  Install extension
                 </Button>
               </CardContent>
             </Card>
@@ -189,7 +189,7 @@ export default function DownloadPage() {
                 </div>
                 <Button variant="outline" size="sm" asChild className="w-full">
                   <Link href="/docs/getting-started">
-                    Getting Started Guide
+                    Getting started guide
                   </Link>
                 </Button>
               </CardContent>
@@ -199,7 +199,7 @@ export default function DownloadPage() {
                 <div className="flex items-center mb-4">
                   <Zap className="h-6 w-6 mr-3 text-purple-600" />
                   <h3 className="text-xl font-bold text-foreground">
-                    Set up Jupyter Kernel
+                    Set up Jupyter kernel
                   </h3>
                 </div>
                 <p className="text-muted-foreground mb-4">
@@ -210,7 +210,7 @@ export default function DownloadPage() {
                 </div>
                 <Button variant="outline" size="sm" asChild className="w-full">
                   <Link href="/docs/getting-started#jupyter-notebook-integration">
-                    Jupyter Setup Guide
+                    Jupyter setup guide
                   </Link>
                 </Button>
               </CardContent>
@@ -224,7 +224,7 @@ export default function DownloadPage() {
             <CardHeader className="text-center">
               <CardTitle className="flex items-center justify-center text-foreground">
                 <SiGithub className="h-6 w-6 mr-2" />
-                Open Source
+                Open source
               </CardTitle>
             </CardHeader>
             <CardContent className="text-center">

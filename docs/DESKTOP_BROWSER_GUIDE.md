@@ -10,8 +10,10 @@ RunMat Desktop lets you:
 
 - **Write MATLAB-style code** in a full-featured editor with syntax highlighting
 - **Run scripts instantly** with automatic CPU/GPU acceleration
-- **See live plots** rendered directly in the browser
+- **See live plots** — interactive 2D and 3D surfaces rendered directly in the browser
+- **Catch errors before you run** — hover to see matrix dimensions, with red underlines for dimension mismatches
 - **Inspect variables** and console output in real time
+- **Trace execution** with detailed diagnostic logging
 
 All computation happens locally in your browser. There's no server-side execution—your code and data never leave your machine.
 
@@ -46,7 +48,9 @@ When you open RunMat Desktop, you'll see three main areas:
 
 ### Editor (Center)
 
-- Full code editor with syntax highlighting and language services (e.g., red underlines for errors)
+- Full code editor with syntax highlighting and language services
+- **Shape tracking**: hover over any variable to see its type and matrix dimensions as they flow through your code
+- **Live diagnostics**: red underlines for syntax errors and dimension mismatches (e.g., multiplying incompatible matrices) — caught before you run
 - Multiple file tabs (click a file to open, double-click to pin)
 - Unsaved changes shown with a dot indicator
 - **Cmd/Ctrl+S** to save
@@ -54,9 +58,10 @@ When you open RunMat Desktop, you'll see three main areas:
 ### Runtime Panel (Right)
 
 - **Run button** to execute the current file
-- **Figure tabs** for viewing plots
+- **Figure tabs** for viewing plots (2D and interactive 3D — rotate, zoom, and pan)
 - **Console** for standard output and input prompts
 - **Variables pane** showing workspace variables, their types, shapes, and whether they're on CPU or GPU
+- **Trace / Logs** for execution tracing and diagnostic output — step through what each line does
 
 All three panels are resizable—drag the borders to adjust.
 
@@ -161,13 +166,35 @@ The Variables pane shows **Residency** for each variable:
 
 ### Plotting
 
-> **Note:** Plotting support is still in development. Some plot types may not be fully functional yet.
+Plots render directly in the browser using GPU-accelerated graphics. Supported plot types include:
+- `plot` — 2D line plots
+- `scatter`, `scatter3` — scatter plots
+- `surf`, `mesh` — interactive 3D surface plots (rotate, zoom, and pan with the mouse)
+- `plot3` — 3D line plots
 
-Plots render directly in the browser using GPU-accelerated graphics. Currently supported plot types include:
-- `plot` — line plots
-- `scatter` — scatter plots
+3D plots are fully interactive: click and drag to rotate, scroll to zoom, and right-click to pan. Plots render as crisp, high-fidelity surfaces regardless of data size.
 
-More plot types (bar charts, histograms, 3D plots, etc.) are being added.
+> **Note:** Additional plot types (bar charts, histograms, subplots, figure handles) are still in development.
+
+### Type & Shape Tracking
+
+RunMat tracks the type and dimensions of every variable as it flows through your code:
+
+- **Hover to see dimensions**: place your cursor over any variable to see its current type and shape (e.g., `double [3×4]`)
+- **Dimension mismatch warnings**: if you try to multiply matrices with incompatible sizes, a red underline appears in the editor *before* you run the script
+- **LSP-powered hovers**: built-in function documentation appears on hover, showing expected inputs and outputs
+
+This works in both the browser sandbox and the desktop app.
+
+### Execution Tracing
+
+When you run a script, the Trace panel shows a step-by-step log of what each line did:
+
+- Which functions were called and what they returned
+- Diagnostic messages and warnings
+- Clear, readable error messages with line numbers
+
+Use the Trace panel (in the Runtime Panel on the right) to debug unexpected behavior without adding `disp()` statements everywhere.
 
 ---
 
@@ -229,6 +256,7 @@ Now that you've run your first script:
 
 - **Explore the built-in functions** — See the [Library Reference](/docs/library)
 - **Learn about GPU acceleration** — Read [Introduction to RunMat GPU](/docs/accelerate/fusion-intro)
+- **Try interactive plotting** — Add `surf(peaks)` to a script and rotate the 3D surface
 - **Install the CLI** — For local file access and scripting: [CLI Guide](/docs/cli)
 - **Try the benchmarks** — Compare RunMat performance against NumPy and PyTorch
 

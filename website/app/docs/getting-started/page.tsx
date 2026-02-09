@@ -7,6 +7,7 @@ import {
   ArrowRight,
   Zap,
   ExternalLink,
+  BarChart3,
 } from "lucide-react";
 import Link from "next/link";
 import { OSInstallCommand } from "@/components/OSInstallCommand";
@@ -16,7 +17,7 @@ import { GettingStartedTabs } from "@/components/GettingStartedTabs";
 export const metadata = buildPageMetadata({
   title: "Getting Started | Docs",
   description:
-    "Learn how to install and use RunMat, the modern MATLAB/Octave runtime. Complete guide for researchers, engineers, and students.",
+    "Get started with RunMat: interactive plotting, real-time diagnostics, and GPU acceleration for MATLAB-style code. Browser, desktop, or CLI.",
   canonicalPath: "/docs/getting-started",
   ogType: "article",
   ogImagePath: "/docs/getting-started/opengraph-image",
@@ -97,17 +98,37 @@ export default function GettingStartedPage() {
             <Card className="hover:shadow-lg transition-shadow">
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <FileText className="h-5 w-5 mr-2 text-blue-600" />
-                  Learn the Fundamentals
+                  <BarChart3 className="h-5 w-5 mr-2 text-blue-600" />
+                  Plotting &amp; diagnostics
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground mb-4">
-                  Dive deeper into RunMat&apos;s features and capabilities.
+                  Interactive 2D and 3D plots, real-time shape tracking, and dimension mismatch warnings — all built into the editor.
+                </p>
+                <Button variant="outline" className="w-full" asChild>
+                  <Link href="/docs/desktop-browser-guide" className="flex items-center justify-center">
+                    Desktop &amp; browser guide
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="hover:shadow-lg transition-shadow">
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <FileText className="h-5 w-5 mr-2 text-blue-600" />
+                  Learn the fundamentals
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground mb-4">
+                  Dive deeper into how RunMat compiles and accelerates your code.
                 </p>
                 <Button variant="outline" className="w-full" asChild>
                   <Link href="/docs/how-it-works" className="flex items-center justify-center">
-                    How RunMat Works
+                    How RunMat works
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Link>
                 </Button>
@@ -118,7 +139,7 @@ export default function GettingStartedPage() {
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <Terminal className="h-5 w-5 mr-2 text-green-600 dark:text-green-400" />
-                  Explore Examples
+                  Explore examples
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -158,7 +179,7 @@ export default function GettingStartedPage() {
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <Zap className="h-5 w-5 mr-2 text-purple-600" />
-                  Understand the Design
+                  Understand the design
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -167,7 +188,7 @@ export default function GettingStartedPage() {
                 </p>
                 <Button variant="outline" className="w-full" asChild>
                   <Link href="/docs/design-philosophy" className="flex items-center justify-center">
-                    Design Philosophy
+                    Design philosophy
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Link>
                 </Button>
@@ -181,7 +202,7 @@ export default function GettingStartedPage() {
           <Card className="bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
             <CardContent className="p-6">
               <h3 className="text-lg font-semibold mb-3 text-foreground">
-                Need Help?
+                Need help?
               </h3>
               <p className="text-muted-foreground mb-4">
                 Join our community and get support from other RunMat users and developers.
