@@ -4742,6 +4742,7 @@ async fn run_interpreter_inner(
                     bytecode.call_arg_spans.get(pc).cloned().flatten(),
                 );
                 let _output_guard = push_output_count(out_count);
+                pc += 1;
                 if std::env::var("RUNMAT_DEBUG_MESHGRID_ARGS").as_deref() == Ok("1")
                     && name == "meshgrid"
                 {
@@ -4765,7 +4766,6 @@ async fn run_interpreter_inner(
                         };
                     let len = eval.len();
                     if out_count == 0 {
-                        pc += 1;
                         continue;
                     }
                     if len == 1 {
@@ -4773,7 +4773,6 @@ async fn run_interpreter_inner(
                             vm_bail!(mex("TooManyOutputs", "gather: too many output arguments"));
                         }
                         stack.push(eval.into_first());
-                        pc += 1;
                         continue;
                     }
                     if out_count != len {
@@ -4785,7 +4784,6 @@ async fn run_interpreter_inner(
                     for value in eval.into_outputs() {
                         stack.push(value);
                     }
-                    pc += 1;
                     continue;
                 }
                 if name == "meshgrid" {
@@ -4797,7 +4795,6 @@ async fn run_interpreter_inner(
                             Err(err) => vm_bail!(err),
                         };
                     if out_count == 0 {
-                        pc += 1;
                         continue;
                     }
                     let available = eval.output_count();
@@ -4828,7 +4825,6 @@ async fn run_interpreter_inner(
                         };
                         stack.push(third);
                     }
-                    pc += 1;
                     continue;
                 }
                 if name == "load" {
@@ -5105,7 +5101,6 @@ async fn run_interpreter_inner(
                             "chol currently supports at most two outputs"
                         )),
                     }
-                    pc += 1;
                     continue;
                 }
                 if name == "lu" {
@@ -5194,25 +5189,21 @@ async fn run_interpreter_inner(
                     };
                     match out_count {
                         0 => {
-                            pc += 1;
                             continue;
                         }
                         1 => {
                             stack.push(eval.r());
-                            pc += 1;
                             continue;
                         }
                         2 => {
                             stack.push(eval.q());
                             stack.push(eval.r());
-                            pc += 1;
                             continue;
                         }
                         3 => {
                             stack.push(eval.q());
                             stack.push(eval.r());
                             stack.push(eval.permutation());
-                            pc += 1;
                             continue;
                         }
                         _ => vm_bail!(mex(
@@ -6055,6 +6046,7 @@ async fn run_interpreter_inner(
                         }
                     }
                 }
+                continue;
             }
             Instr::EnterTry(catch_pc, catch_var) => {
                 try_stack.push((catch_pc, catch_var));

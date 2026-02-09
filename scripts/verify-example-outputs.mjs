@@ -65,6 +65,7 @@ const timeoutMs = resolveTimeoutMs();
 const concurrency = resolveConcurrency();
 const overallTimeoutMs = resolveOverallTimeoutMs(timeoutMs, concurrency, cases.length);
 const logIntervalMs = resolveLogIntervalMs();
+const reportMode = resolveReportMode();
 const runnerHtml = createRunnerHtml(timeoutMs, concurrency, logIntervalMs);
 const casesJson = JSON.stringify(cases);
 
@@ -106,10 +107,11 @@ const rows = cases.map((testCase) => {
     };
 });
 
-const reportHtml = buildReportHtml(rows);
+const reportRows = filterReportRows(rows, reportMode);
+const reportHtml = buildReportHtml(rows, reportRows, reportMode);
 writeFileSync(reportPath, reportHtml, "utf8");
 
-const reportMarkdown = buildReportMarkdown(rows);
+const reportMarkdown = buildReportMarkdown(rows, reportRows, reportMode);
 writeFileSync(markdownReportPath, reportMarkdown, "utf8");
 
 console.log(`Wrote consolidated reports to:
@@ -818,6 +820,36 @@ function resolveLogIntervalMs() {
     return Math.floor(parsed);
 }
 
+function resolveReportMode() {
+    const args = new Set(process.argv.slice(2));
+    if (args.has("--errors-only")) {
+        return "errors-only";
+    }
+    if (args.has("--all")) {
+        return "all";
+    }
+    const raw = process.env.RUNMAT_EXAMPLE_REPORT_MODE;
+    if (!raw) {
+        return "all";
+    }
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === "errors-only" || normalized === "errors" || normalized === "mismatches") {
+        return "errors-only";
+    }
+    return "all";
+}
+
+/**
+ * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, matches: boolean }[]} rows
+ * @param {"all" | "errors-only"} reportMode
+ */
+function filterReportRows(rows, reportMode) {
+    if (reportMode === "errors-only") {
+        return rows.filter((row) => !row.matches);
+    }
+    return rows;
+}
+
 /**
  * @param {string} text
  */
@@ -860,10 +892,7 @@ function normalizeOutput(text) {
         .replace(/\b(?:gpuArray|logical|double|single|string|char|cell)\b/gi, " ");
     const normalizedComplex = strippedMetadata
         .replace(/(\d+\.\d+)(\d+\.\d+[ij])/g, "$1+$2")
-        .replace(/(\d)\s*\+\s*(?=\d)/g, "$1+")
-        .replace(/(\d)\s*\+\s*(?=[ij])/g, "$1+")
-        .replace(/(\d)\s*-\s*(?=\d)/g, "$1-")
-        .replace(/(\d)\s*-\s*(?=[ij])/g, "$1-")
+        .replace(/(\d)\s*([+-])\s*(?=[^\s]*[ij])/g, "$1$2")
         .replace(/\+\s*-/g, "-")
         .replace(/-\s*\+/g, "-")
         .replace(/\+\s*\+/g, "+");
@@ -890,12 +919,11 @@ function normalizeOutput(text) {
         }
     );
     const withoutZeroPlus = normalizedNumbers.replace(/\b0\s*\+\s*/g, "");
-    const withoutZeroMinus = withoutZeroPlus.replace(/\b0-/g, "-");
+    const withoutZeroMinus = withoutZeroPlus.replace(/\b0-(?=\d+(?:\.\d+)?[ij]\b)/g, "-");
     const withoutImaginaryZero = withoutZeroMinus
         .replace(/\s*[+-]\s*0[ij]\b/g, "")
         .replace(/\b0[ij]\b/g, "0");
-    const tightenedMinus = withoutImaginaryZero.replace(/([0-9])\s*-\s*([0-9])/g, "$1-$2");
-    const compact = tightenedMinus.trim().replace(/\s+/g, " ");
+    const compact = withoutImaginaryZero.trim().replace(/\s+/g, " ");
     const fixedZeroConcat = compact
         .replace(/(?<![0-9.])0(?=\d+(?:\.\d+)?[ij]\b)/g, "")
         .replace(/(?<![0-9.])0(?=0[ij]\b)/g, "")
@@ -945,12 +973,13 @@ function formatWasmOutput(result) {
 /**
  * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, matches: boolean }[]} rows
  */
-function buildReportHtml(rows) {
+function buildReportHtml(allRows, reportRows, reportMode) {
     const title = "RunMat Builtins Example Output Report";
-    const totalCount = rows.length;
-    const successCount = rows.filter((row) => row.matches).length;
+    const totalCount = allRows.length;
+    const errorCount = allRows.filter((row) => !row.matches).length;
+    const successCount = totalCount - errorCount;
     const successPercent = totalCount === 0 ? "0.0" : ((successCount / totalCount) * 100).toFixed(1);
-    const renderedRows = rows.map((row) => {
+    const renderedRows = reportRows.map((row) => {
         const statusClass = row.matches ? "status-ok" : "status-bad";
         const statusSymbol = row.matches ? "&#10003;" : "X";
         const statusLabel = row.matches ? "Match" : "Mismatch";
@@ -1035,8 +1064,15 @@ function buildReportHtml(rows) {
   <body>
     <h1>${escapeHtml(title)}</h1>
     <p class="meta">Results: ${successCount}/${totalCount} succeeded (${successPercent}%).</p>
-    <p class="meta">Generated from ${rows.length} example(s).</p>
-    <table>
+    <p class="meta">${
+        reportMode === "errors-only"
+            ? `Showing ${reportRows.length} mismatch(es) out of ${totalCount} example(s).`
+            : `Showing all ${reportRows.length} example(s).`
+    }</p>
+    ${
+        reportRows.length === 0
+            ? "<p class=\"meta\">No mismatches detected.</p>"
+            : `<table>
       <thead>
         <tr>
           <th>Input</th>
@@ -1047,17 +1083,27 @@ function buildReportHtml(rows) {
       <tbody>
         ${renderedRows}
       </tbody>
-    </table>
+    </table>`
+    }
   </body>
 </html>`;
 }
 
 /**
- * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, matches: boolean }[]} rows
+ * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, matches: boolean }[]} allRows
+ * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, matches: boolean }[]} reportRows
+ * @param {"all" | "errors-only"} reportMode
  */
-function buildReportMarkdown(rows) {
+function buildReportMarkdown(allRows, reportRows, reportMode) {
+    const totalCount = allRows.length;
+    const errorCount = allRows.filter((row) => !row.matches).length;
+    const successCount = totalCount - errorCount;
+    const successPercent = totalCount === 0 ? "0.0" : ((successCount / totalCount) * 100).toFixed(1);
+    const summary = reportMode === "errors-only"
+        ? `Showing ${reportRows.length} mismatch(es) out of ${totalCount} example(s).`
+        : `Showing all ${reportRows.length} example(s).`;
     const tableHeader = "| Status | Description / Input | Expected | Actual |\n| :--- | :--- | :--- | :--- |\n";
-    const tableRows = rows.map((row) => {
+    const tableRows = reportRows.map((row) => {
         const status = row.matches ? "✅" : "❌";
         const description = row.testCase.description;
         const sourceInfo = `${row.testCase.file} (example ${row.testCase.exampleIndex + 1})`;
@@ -1069,7 +1115,11 @@ function buildReportMarkdown(rows) {
         return `| ${status} | **${description}**<br>${sourceInfo}<br>\`${input}\` | \`${expected}\` | \`${actual}\` |`;
     }).join("\n");
 
-    return tableHeader + tableRows;
+    const header = `Results: ${successCount}/${totalCount} succeeded (${successPercent}%).\n${summary}\n\n`;
+    if (!tableRows) {
+        return `${header}No mismatches detected.\n`;
+    }
+    return header + tableHeader + tableRows;
 }
 
 /**

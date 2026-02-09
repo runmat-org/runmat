@@ -53,7 +53,7 @@
     {
       "description": "Erase characters from a character array while preserving padding",
       "input": "chars = char(\"workspace\", \"snapshots\");\ntrimmed = erase(chars, \"s\")",
-      "output": "trimmed =\n\n  2×8 char array\n\n    'workpace'\n    'napshot '"
+      "output": "trimmed =\n\n  2×8 char array\n\n    'workpace'\n    'naphot '"
     },
     {
       "description": "Remove substrings from a cell array of text",
