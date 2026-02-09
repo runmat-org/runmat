@@ -65,7 +65,7 @@ export default function Footer() {
             <span>San Francisco, CA · Seattle, WA · New York, NY</span>
           </div>
         </div>
-        <div className="grid w-full md:flex-1 gap-y-6 md:gap-x-8 md:grid-cols-2 text-sm text-muted-foreground">
+        <div className="grid w-full md:flex-1 gap-y-6 md:gap-x-8 md:grid-cols-[minmax(6rem,1fr)_minmax(6rem,1fr)] text-sm text-muted-foreground">
           <div>
             <h3 className="text-foreground font-semibold mb-2">Resources</h3>
             <ul className="space-y-1">

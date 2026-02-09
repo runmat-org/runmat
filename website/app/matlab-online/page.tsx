@@ -104,7 +104,7 @@ const jsonLd = {
         "RunMat is a high-performance, open-source runtime for math that lets you run MATLAB-syntax code in the browser, on the desktop, or from the CLI, while getting GPU-speed execution.",
       sameAs: [
         "https://github.com/runmat-org/runmat",
-        "https://x.com/runmat_org",
+        "https://x.com/runmat_com",
         "https://dystr.com",
       ],
       knowsAbout: [
@@ -245,10 +245,10 @@ export default function MatlabOnlinePage() {
           <div className="grid grid-cols-1 gap-10 lg:grid-cols-2 lg:items-center">
             <div className="flex flex-col space-y-6 text-left items-start">
               <div className="mb-2 p-0 text-lg font-semibold uppercase tracking-wide text-primary">
-                MATLAB Online Alternative
+                MATLAB online alternative
               </div>
               <h1 className="font-heading text-left leading-tight tracking-tight text-[clamp(2.6rem,4.8vw,4.25rem)] sm:text-[clamp(3rem,4vw,5rem)] lg:text-[clamp(3.25rem,3.6vw,5.25rem)]">
-                Run Your MATLAB Code in the Browser Blazing Fast
+                Run your MATLAB code in the browser blazing fast
               </h1>
               <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-lg">
                 RunMat executes MATLAB-syntax code in your browser with auto GPU acceleration. No account or licence
@@ -266,7 +266,7 @@ export default function MatlabOnlinePage() {
                     data-ph-capture-attribute-source="matlab-online-hero"
                     data-ph-capture-attribute-cta="try-runmat-browser"
                   >
-                    Try RunMat in Your Browser →
+                    Try RunMat in your browser →
                   </Link>
                 </Button>
                 <Button
@@ -275,7 +275,7 @@ export default function MatlabOnlinePage() {
                   asChild
                   className="h-12 px-8 text-base bg-[#0E1B1E] dark:bg-[#0E1B1E] border-gray-200 dark:border-gray-700 text-gray-100 dark:text-gray-100"
                 >
-                  <Link href="/docs/desktop-browser-guide">View Getting Started</Link>
+                  <Link href="/docs/desktop-browser-guide">View getting started</Link>
                 </Button>
               </div>
             </div>
@@ -477,7 +477,7 @@ export default function MatlabOnlinePage() {
                     data-ph-capture-attribute-source="matlab-online-features"
                     data-ph-capture-attribute-cta="try-runmat-browser"
                   >
-                    Try RunMat in Your Browser →
+                    Try RunMat in your browser →
                   </Link>
                 </Button>
               </div>
@@ -960,7 +960,7 @@ export default function MatlabOnlinePage() {
                     data-ph-capture-attribute-source="matlab-online-bottom-cta"
                     data-ph-capture-attribute-cta="launch-sandbox"
                   >
-                    Launch the Sandbox
+                    Launch the sandbox
                   </Link>
                 </Button>
                 <Button

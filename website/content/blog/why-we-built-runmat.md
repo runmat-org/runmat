@@ -20,7 +20,7 @@ ogDescription: "We started with Dystr, an AI-powered engineering workbook. Here'
 twitterCard: "summary_large_image"
 twitterTitle: "Why We Built RunMat"
 twitterDescription: "We started with Dystr. Here's why we pivoted to RunMat, a fast, open-source MATLAB runtime that meets engineers where they are."
-canonical: "https://runmat.org/blog/why-we-built-runmat"
+canonical: "https://runmat.com/blog/why-we-built-runmat"
 jsonLd:
   "@context": "https://schema.org"
   "@graph":
@@ -29,18 +29,18 @@ jsonLd:
         - "@type": "ListItem"
           position: 1
           name: "RunMat"
-          item: "https://runmat.org"
+          item: "https://runmat.com"
         - "@type": "ListItem"
           position: 2
           name: "Blog"
-          item: "https://runmat.org/blog"
+          item: "https://runmat.com/blog"
         - "@type": "ListItem"
           position: 3
           name: "Why We Built RunMat"
-          item: "https://runmat.org/blog/why-we-built-runmat"
+          item: "https://runmat.com/blog/why-we-built-runmat"
 
     - "@type": "BlogPosting"
-      "@id": "https://runmat.org/blog/why-we-built-runmat#article"
+      "@id": "https://runmat.com/blog/why-we-built-runmat#article"
       headline: "Why We Built RunMat"
       description: "We started with Dystr, an AI-powered engineering workbook. Here's why we pivoted to RunMat, a fast, open-source MATLAB runtime that meets engineers where they are."
       image: "https://web.runmatstatic.com/julie-nabeel-group-about-page.png"
@@ -58,11 +58,11 @@ jsonLd:
         name: "RunMat by Dystr"
         logo:
           "@type": "ImageObject"
-          url: "https://runmat.org/runmat-logo.svg"
+          url: "https://runmat.com/runmat-logo.svg"
       about:
         - "@type": "SoftwareApplication"
           name: "RunMat"
-          sameAs: "https://runmat.org"
+          sameAs: "https://runmat.com"
           applicationCategory: "ScientificApplication"
           operatingSystem: ["Windows", "macOS", "Linux", "Browser"]
           offers:
@@ -186,6 +186,6 @@ We're still working on the same problem we started with. We just know a lot more
 
 ---
 
-**Ready to try it?** [Open the RunMat sandbox](https://runmat.org/sandbox) and run your first script in seconds. No install, no signup.
+**Ready to try it?** [Open the RunMat sandbox](https://runmat.com/sandbox) and run your first script in seconds. No install, no signup.
 
-Have questions or want to share feedback? Reach us at [team@runmat.org](mailto:team@runmat.org).
+Have questions or want to share feedback? Reach us at [team@runmat.com](mailto:team@runmat.com).

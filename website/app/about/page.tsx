@@ -10,10 +10,10 @@ export const metadata: Metadata = {
   title: "About RunMat | Team, Mission, and Vision",
   description:
     "Meet the RunMat team. We're building a fast, open-source runtime for math with GPU acceleration so engineers can run MATLAB-style code in the browser, desktop, or CLI.",
-  alternates: { canonical: "https://runmat.org/about" },
+  alternates: { canonical: "https://runmat.com/about" },
   openGraph: {
     type: "website",
-    url: "https://runmat.org/about",
+    url: "https://runmat.com/about",
     title: "About RunMat | Team, Mission, and Vision",
     description:
       "Meet the RunMat team. We're building a fast, open-source runtime for math with GPU acceleration so engineers can run MATLAB-style code in the browser, desktop, or CLI.",
@@ -39,35 +39,35 @@ const jsonLd = {
   "@graph": [
     {
       "@type": "AboutPage",
-      "@id": "https://runmat.org/about#webpage",
-      url: "https://runmat.org/about",
+      "@id": "https://runmat.com/about#webpage",
+      url: "https://runmat.com/about",
       name: "About RunMat | Team, Mission, and Vision",
       description:
         "Meet the RunMat team. We're building a fast, open-source runtime for math with GPU acceleration so engineers can run MATLAB-style code in the browser, desktop, or CLI.",
       inLanguage: "en",
-      isPartOf: { "@id": "https://runmat.org/#website" },
-      breadcrumb: { "@id": "https://runmat.org/about#breadcrumb" },
-      mainEntity: { "@id": "https://runmat.org/#organization" },
-      author: { "@id": "https://runmat.org/#organization" },
-      publisher: { "@id": "https://runmat.org/#organization" },
+      isPartOf: { "@id": "https://runmat.com/#website" },
+      breadcrumb: { "@id": "https://runmat.com/about#breadcrumb" },
+      mainEntity: { "@id": "https://runmat.com/#organization" },
+      author: { "@id": "https://runmat.com/#organization" },
+      publisher: { "@id": "https://runmat.com/#organization" },
     },
     {
       "@type": "Organization",
-      "@id": "https://runmat.org/#organization",
+      "@id": "https://runmat.com/#organization",
       name: "RunMat",
       alternateName: ["RunMat by Dystr", "Dystr"],
       legalName: "Dystr Inc.",
-      url: "https://runmat.org",
+      url: "https://runmat.com",
       logo: {
         "@type": "ImageObject",
-        url: "https://runmat.org/runmat-logo.svg",
+        url: "https://runmat.com/runmat-logo.svg",
         caption: "RunMat",
       },
       description:
         "RunMat is a high-performance, open-source runtime for math that lets you run MATLAB-syntax code in the browser, on the desktop, or from the CLI, while getting GPU-speed execution.",
       sameAs: [
         "https://github.com/runmat-org/runmat",
-        "https://x.com/runmat_org",
+        "https://x.com/runmat_com",
         "https://dystr.com",
       ],
       knowsAbout: [
@@ -86,11 +86,11 @@ const jsonLd = {
         "@type": "Place",
         name: "Seattle, WA and San Francisco, CA",
       },
-      founder: [{ "@id": "https://runmat.org/about#nabeel" }, { "@id": "https://runmat.org/about#julie" }],
+      founder: [{ "@id": "https://runmat.com/about#nabeel" }, { "@id": "https://runmat.com/about#julie" }],
     },
     {
       "@type": "Person",
-      "@id": "https://runmat.org/about#nabeel",
+      "@id": "https://runmat.com/about#nabeel",
       name: "Nabeel Allana",
       jobTitle: "CEO and Co-founder",
       image: "https://web.runmatstatic.com/julie-nabeel-group-about-page.png",
@@ -100,7 +100,7 @@ const jsonLd = {
         "https://x.com/nabeelallana",
         "https://github.com/nallana",
       ],
-      worksFor: { "@id": "https://runmat.org/#organization" },
+      worksFor: { "@id": "https://runmat.com/#organization" },
       alumniOf: [
         { "@type": "Organization", name: "Apple" },
         { "@type": "Organization", name: "Toyota" },
@@ -109,20 +109,20 @@ const jsonLd = {
     },
     {
       "@type": "Person",
-      "@id": "https://runmat.org/about#julie",
+      "@id": "https://runmat.com/about#julie",
       name: "Julie Ruiz",
       jobTitle: "Co-founder",
       image: "https://web.runmatstatic.com/julie-nabeel-group-about-page.png",
       url: "https://www.linkedin.com/in/julie-ruiz-64b24328/",
       sameAs: ["https://www.linkedin.com/in/julie-ruiz-64b24328/"],
-      worksFor: { "@id": "https://runmat.org/#organization" },
+      worksFor: { "@id": "https://runmat.com/#organization" },
     },
     {
       "@type": "BreadcrumbList",
-      "@id": "https://runmat.org/about#breadcrumb",
+      "@id": "https://runmat.com/about#breadcrumb",
       itemListElement: [
-        { "@type": "ListItem", position: 1, name: "Home", item: "https://runmat.org" },
-        { "@type": "ListItem", position: 2, name: "About", item: "https://runmat.org/about" },
+        { "@type": "ListItem", position: 1, name: "Home", item: "https://runmat.com" },
+        { "@type": "ListItem", position: 2, name: "About", item: "https://runmat.com/about" },
       ],
     },
   ],
@@ -509,7 +509,7 @@ export default function AboutPage() {
                     data-ph-capture-attribute-source="about-bottom-cta"
                     data-ph-capture-attribute-cta="launch-sandbox"
                   >
-                    Launch the Sandbox
+                    Launch the sandbox
                   </Link>
                 </Button>
                 <Button

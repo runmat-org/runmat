@@ -31,7 +31,7 @@ const jsonLd = {
       "description": "RunMat is a high-performance, open-source runtime for math that lets you run MATLAB-syntax code in the browser, on the desktop, or from the CLI, while getting GPU-speed execution.",
       "sameAs": [
         "https://github.com/runmat-org/runmat",
-        "https://x.com/runmat_org",
+        "https://x.com/runmat_com",
         "https://dystr.com"
       ],
       "knowsAbout": [
@@ -194,9 +194,9 @@ export default function HomePage() {
             <MatlabCodeCard />
           </div>
           <div className="mt-8 text-center">
-            <Link className="underline" href="/docs/language-coverage">Language Guide</Link>
+            <Link className="underline" href="/docs/language-coverage">Language guide</Link>
             <span className="hidden sm:inline text-blue-500"> • </span>
-            <Link className="underline" href="/docs/matlab-function-reference">Built-in Function Reference</Link>
+            <Link className="underline" href="/docs/matlab-function-reference">Built-in function reference</Link>
           </div>
         </div>
       </section>
@@ -215,21 +215,23 @@ export default function HomePage() {
 
           <div className="grid md:grid-cols-2 gap-8 max-w-5xl mx-auto">
             <div className="rounded-xl border border-border overflow-hidden bg-muted/40">
-              <video
-                className="w-full h-auto"
-                autoPlay
-                muted
-                loop
-                playsInline
-                aria-label="RunMat 3D interactive plotting demo"
-              >
-                <source
-                  src="https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4"
-                  type="video/mp4"
-                />
-              </video>
+              <Link href="/sandbox" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-xl overflow-hidden">
+                <video
+                  className="w-full h-auto"
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                  aria-label="RunMat 3D interactive plotting demo"
+                >
+                  <source
+                    src="https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4"
+                    type="video/mp4"
+                  />
+                </video>
+              </Link>
               <div className="p-4">
-                <h3 className="font-semibold text-lg">Interactive 3D Plotting</h3>
+                <h3 className="font-semibold text-lg">Interactive 3D plotting</h3>
                 <p className="text-muted-foreground text-sm mt-1">
                   Explore your results as crisp, interactive 3D surfaces. Rotate, zoom in, and inspect your data from any angle.
                 </p>
@@ -237,21 +239,23 @@ export default function HomePage() {
             </div>
 
             <div className="rounded-xl border border-border overflow-hidden bg-muted/40">
-              <video
-                className="w-full h-auto"
-                autoPlay
-                muted
-                loop
-                playsInline
-                aria-label="RunMat shape tracking and type system demo"
-              >
-                <source
-                  src="https://web.runmatstatic.com/video/runmat-shape-tracking.mp4"
-                  type="video/mp4"
-                />
-              </video>
+              <Link href="/sandbox" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-xl overflow-hidden">
+                <video
+                  className="w-full h-auto"
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                  aria-label="RunMat shape tracking and type system demo"
+                >
+                  <source
+                    src="https://web.runmatstatic.com/video/runmat-shape-tracking.mp4"
+                    type="video/mp4"
+                  />
+                </video>
+              </Link>
               <div className="p-4">
-                <h3 className="font-semibold text-lg">Catch Errors Before You Run</h3>
+                <h3 className="font-semibold text-lg">Catch errors before you run</h3>
                 <p className="text-muted-foreground text-sm mt-1">
                   Hover to see matrix dimensions. Red underlines warn you about dimension
                   mismatches before execution.
@@ -309,9 +313,9 @@ export default function HomePage() {
           {/* Benchmarks Summary Table */}
           <div className="mt-12">
             <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-6 text-center mb-8">
-              <h3 className="font-heading text-2xl leading-[1.1] sm:text-3xl md:text-4xl">
+              <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
                 Real workloads, reproducible results
-              </h3>
+              </h2>
               <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-base">
                 Benchmarked on an <span className="font-semibold">Apple M2 Max, 32GB</span>.
                 Times are wall-clock <span className="font-semibold">milliseconds</span> for each configuration.
@@ -371,7 +375,7 @@ export default function HomePage() {
             <Card>
               <CardHeader className="items-center text-center">
                 <div className="mb-3 text-3xl">⚡</div>
-                <CardTitle>Browser, Desktop, or CLI</CardTitle>
+                <CardTitle>Browser, desktop, or CLI</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-center">
@@ -382,7 +386,7 @@ export default function HomePage() {
             <Card>
               <CardHeader className="items-center text-center">
                 <div className="mb-3 text-3xl">📦</div>
-                <CardTitle>Any GPU. No Lock-In.</CardTitle>
+                <CardTitle>Any GPU. No lock-in.</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-center">
@@ -393,7 +397,7 @@ export default function HomePage() {
             <Card>
               <CardHeader className="items-center text-center">
                 <div className="mb-3 text-3xl">🧱</div>
-                <CardTitle>Open Source and Free</CardTitle>
+                <CardTitle>Open source and free</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-center">
@@ -464,7 +468,7 @@ export default function HomePage() {
                     data-ph-capture-attribute-source="home-bottom-cta"
                     data-ph-capture-attribute-cta="launch-sandbox"
                   >
-                    Launch the Sandbox
+                    Launch the sandbox
                   </Link>
                 </Button>
                 <Button variant="outline" size="lg" asChild className="h-12 px-8 text-base">
