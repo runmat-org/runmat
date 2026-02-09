@@ -168,7 +168,7 @@ The Variables pane shows **Residency** for each variable:
 
 Plots render directly in the browser using GPU-accelerated graphics. Supported plot types include:
 - `plot` — 2D line plots
-- `scatter` — scatter plots
+- `scatter`, `scatter3` — scatter plots
 - `surf`, `mesh` — interactive 3D surface plots (rotate, zoom, and pan with the mouse)
 - `plot3` — 3D line plots
 
