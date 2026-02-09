@@ -66,7 +66,7 @@
     {
       "description": "Working with `gpuArray` inputs",
       "input": "G = gpuArray(linspace(0, pi, 5));\nS = arrayfun(@sin, G);\nH = gather(S)",
-      "output": "S =\n  1×5 gpuArray\n         0    0.7071    1.0000    0.7071         0\nH =\n         0    0.7071    1.0000    0.7071         0"
+      "output": "H =\n         0    0.7071    1.0000    0.7071         0"
     }
   ],
   "faqs": [
