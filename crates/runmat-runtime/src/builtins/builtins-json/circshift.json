@@ -61,7 +61,7 @@
     {
       "description": "Shifting along specific dimensions using the `dims` argument",
       "input": "A = reshape(1:12, [3 4]);\nV = circshift(A, [2 -1], [1 2])",
-      "output": "V =\n     6     7     8     5\n     9    10    11    12\n     3     4     1     2"
+      "output": "V =\n     5     8    11     2\n     6     9    12     3\n     4     7    10     1"
     },
     {
       "description": "Rotating a character matrix to cycle through rows and columns",
