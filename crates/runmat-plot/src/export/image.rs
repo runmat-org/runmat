@@ -2,7 +2,7 @@
 //!
 //! Static image export functionality.
 
-use crate::core::plot_renderer::{PlotRenderConfig, PlotRenderer};
+use crate::core::{Camera, plot_renderer::{PlotRenderConfig, PlotRenderer}};
 use crate::plots::Figure;
 #[cfg(feature = "gui")]
 use egui::{Align2, Color32, FontId, Pos2};
@@ -114,17 +114,60 @@ impl ImageExporter {
         figure: &mut Figure,
         path: P,
     ) -> Result<(), String> {
-        let pixels = self.render_rgba(figure).await?;
+        let pixels = self.render_rgba(figure, None).await?;
         self.save_png(&pixels, path).await
     }
 
     /// Render figure into a PNG buffer (RGBA data encoded as PNG bytes)
     pub async fn render_png_bytes(&self, figure: &mut Figure) -> Result<Vec<u8>, String> {
-        let pixels = self.render_rgba(figure).await?;
+        let pixels = self.render_rgba(figure, None).await?;
         self.encode_png_bytes(&pixels)
     }
 
-    async fn render_rgba(&self, figure: &mut Figure) -> Result<Vec<u8>, String> {
+    /// Render figure into a PNG buffer using an explicit camera override.
+    pub async fn render_png_bytes_with_camera(
+        &self,
+        figure: &mut Figure,
+        camera: &Camera,
+    ) -> Result<Vec<u8>, String> {
+        let pixels = self.render_rgba(figure, Some(camera)).await?;
+        self.encode_png_bytes(&pixels)
+    }
+
+    /// Render figure into a PNG buffer using per-axes camera overrides.
+    pub async fn render_png_bytes_with_axes_cameras(
+        &self,
+        figure: &mut Figure,
+        axes_cameras: &[Camera],
+    ) -> Result<Vec<u8>, String> {
+        let pixels = self
+            .render_rgba_with_axes_cameras(figure, axes_cameras)
+            .await?;
+        self.encode_png_bytes(&pixels)
+    }
+
+    async fn render_rgba(
+        &self,
+        figure: &mut Figure,
+        camera_override: Option<&Camera>,
+    ) -> Result<Vec<u8>, String> {
+        self.render_rgba_internal(figure, camera_override, None).await
+    }
+
+    async fn render_rgba_with_axes_cameras(
+        &self,
+        figure: &mut Figure,
+        axes_cameras: &[Camera],
+    ) -> Result<Vec<u8>, String> {
+        self.render_rgba_internal(figure, None, Some(axes_cameras)).await
+    }
+
+    async fn render_rgba_internal(
+        &self,
+        figure: &mut Figure,
+        camera_override: Option<&Camera>,
+        axes_camera_overrides: Option<&[Camera]>,
+    ) -> Result<Vec<u8>, String> {
         // Create an offscreen texture as color target
         let sc_desc = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -147,6 +190,13 @@ impl ImageExporter {
             .map_err(|e| format!("plot renderer init failed: {e}"))?;
 
         plot_renderer.set_figure(figure.clone());
+        if let Some(overrides) = axes_camera_overrides {
+            for (idx, camera) in overrides.iter().enumerate() {
+                if let Some(target) = plot_renderer.axes_camera_mut(idx) {
+                    *target = camera.clone();
+                }
+            }
+        }
 
         // Render into an offscreen texture
         let mut encoder = self
@@ -252,7 +302,9 @@ impl ImageExporter {
                 .map_err(|e| format!("render subplot failed: {e}"))?;
         } else {
             let viewport = (0u32, 0u32, self.settings.width, self.settings.height);
-            let cam = plot_renderer.camera().clone();
+            let cam = camera_override
+                .cloned()
+                .unwrap_or_else(|| plot_renderer.camera().clone());
             plot_renderer
                 .render_camera_to_viewport(&mut encoder, &color_view, viewport, &cfg, &cam)
                 .map_err(|e| format!("render failed: {e}"))?;

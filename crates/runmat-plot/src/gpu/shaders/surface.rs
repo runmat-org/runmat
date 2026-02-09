@@ -65,8 +65,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let stride_y = max(params.y_stride, 1u);
     let lod_row = idx % lod_x_len;
     let lod_col = idx / lod_x_len;
-    let mut row = lod_row * stride_x;
-    let mut col = lod_col * stride_y;
+    var row = lod_row * stride_x;
+    var col = lod_col * stride_y;
     row = min(row, params.x_len - 1u);
     col = min(col, params.y_len - 1u);
     let source_idx = col * params.x_len + row;
@@ -125,10 +125,10 @@ struct SurfaceParams {
 };
 
 @group(0) @binding(0)
-var<storage, read> buf_x: array<f32>;
+var<storage, read> buf_x: array<f64>;
 
 @group(0) @binding(1)
-var<storage, read> buf_y: array<f32>;
+var<storage, read> buf_y: array<f64>;
 
 @group(0) @binding(2)
 var<storage, read> buf_z: array<f64>;
@@ -170,14 +170,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let stride_y = max(params.y_stride, 1u);
     let lod_row = idx % lod_x_len;
     let lod_col = idx / lod_x_len;
-    let mut row = lod_row * stride_x;
-    let mut col = lod_col * stride_y;
+    var row = lod_row * stride_x;
+    var col = lod_col * stride_y;
     row = min(row, params.x_len - 1u);
     col = min(col, params.y_len - 1u);
     let source_idx = col * params.x_len + row;
 
-    let px = buf_x[row];
-    let py = buf_y[col];
+    let px = f32(buf_x[row]);
+    let py = f32(buf_y[col]);
     let raw_z64 = buf_z[source_idx];
     let raw_z = f32(raw_z64);
     let z_extent = max(params.max_z - params.min_z, 1e-6);

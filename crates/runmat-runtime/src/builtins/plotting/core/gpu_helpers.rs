@@ -13,6 +13,23 @@ use super::plotting_error;
 use glam::Vec3;
 #[cfg(feature = "plot-core")]
 use runmat_plot::core::BoundingBox;
+#[cfg(feature = "plot-core")]
+use runmat_plot::SharedWgpuContext;
+
+/// Ensure a shared WGPU plotting context is installed and return it.
+///
+/// On web, this is critical for the "zero-copy" plotting path: plotting builtins
+/// may execute before any renderer surface has been installed, so we proactively
+/// seed the shared context from the active acceleration provider.
+#[cfg(feature = "plot-core")]
+pub fn ensure_shared_wgpu_context(name: &'static str) -> BuiltinResult<SharedWgpuContext> {
+    super::context::ensure_context_from_provider().map_err(|err| {
+        plotting_error(name, format!("{name}: {}", err.message().to_string()))
+    })?;
+    runmat_plot::shared_wgpu_context().ok_or_else(|| {
+        plotting_error(name, format!("{name}: plotting GPU context unavailable"))
+    })
+}
 
 /// Compute the min/max bounds for a GPU tensor by delegating to the runtime
 /// `min`/`max` builtins. Results are returned as `f32` so they can flow directly

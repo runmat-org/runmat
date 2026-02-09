@@ -209,10 +209,10 @@ struct ContourParams {
 };
 
 @group(0) @binding(0)
-var<storage, read> buf_x: array<f32>;
+var<storage, read> buf_x: array<f64>;
 
 @group(0) @binding(1)
-var<storage, read> buf_y: array<f32>;
+var<storage, read> buf_y: array<f64>;
 
 @group(0) @binding(2)
 var<storage, read> buf_z: array<f64>;
@@ -326,10 +326,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx01 = idx00 + params.x_len;
     let idx11 = idx01 + 1u;
 
-    let x0 = buf_x[row];
-    let x1 = buf_x[row + 1u];
-    let y0 = buf_y[col];
-    let y1 = buf_y[col + 1u];
+    let x0 = f32(buf_x[row]);
+    let x1 = f32(buf_x[row + 1u]);
+    let y0 = f32(buf_y[col]);
+    let y1 = f32(buf_y[col + 1u]);
 
     let z00 = f32(buf_z[idx00]);
     let z10 = f32(buf_z[idx10]);

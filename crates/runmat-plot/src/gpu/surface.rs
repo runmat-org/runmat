@@ -1,14 +1,18 @@
 use crate::core::renderer::Vertex;
 use crate::core::scene::GpuVertexBuffer;
+use crate::gpu::axis::{axis_storage_buffer, AxisData};
 use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
+/// Axis data source used by the GPU surface vertex packer.
+pub type SurfaceAxis<'a> = AxisData<'a>;
+
 /// Inputs required to pack surface vertices directly on the GPU.
 pub struct SurfaceGpuInputs<'a> {
-    pub x_axis: &'a [f32],
-    pub y_axis: &'a [f32],
+    pub x_axis: SurfaceAxis<'a>,
+    pub y_axis: SurfaceAxis<'a>,
     pub z_buffer: Arc<wgpu::Buffer>,
     pub color_table: &'a [[f32; 4]],
     pub x_len: u32,
@@ -59,21 +63,8 @@ pub fn pack_surface_vertices(
     let workgroup_size = tuning::effective_workgroup_size();
     let shader = compile_shader(device, workgroup_size, inputs.scalar);
 
-    let x_buffer = Arc::new(
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("surface-x-axis"),
-            contents: bytemuck::cast_slice(inputs.x_axis),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        }),
-    );
-
-    let y_buffer = Arc::new(
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("surface-y-axis"),
-            contents: bytemuck::cast_slice(inputs.y_axis),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        }),
-    );
+    let x_buffer = axis_storage_buffer(device, "surface-x-axis", &inputs.x_axis, inputs.scalar)?;
+    let y_buffer = axis_storage_buffer(device, "surface-y-axis", &inputs.y_axis, inputs.scalar)?;
 
     let color_buffer = Arc::new(
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -328,8 +319,8 @@ mod stress_tests {
             .collect();
 
         let inputs = SurfaceGpuInputs {
-            x_axis: &x_axis,
-            y_axis: &y_axis,
+            x_axis: SurfaceAxis::F32(&x_axis),
+            y_axis: SurfaceAxis::F32(&y_axis),
             z_buffer,
             color_table: &color_table,
             x_len,

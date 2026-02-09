@@ -101,7 +101,12 @@ pub(crate) fn plotting_error_with_source(
 }
 
 #[cfg(feature = "plot-core")]
-pub use engine::{render_figure_png_bytes, render_figure_snapshot};
+pub use engine::{
+    render_figure_png_bytes,
+    render_figure_png_bytes_with_axes_cameras,
+    render_figure_png_bytes_with_camera,
+    render_figure_snapshot,
+};
 
 pub mod ops {
     pub use super::hist;
