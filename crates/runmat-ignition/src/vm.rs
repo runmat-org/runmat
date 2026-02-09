@@ -24,8 +24,9 @@ use runmat_runtime::{
     builtins::common::shape::is_scalar_shape,
     builtins::common::tensor,
     builtins::stats::random::stochastic_evolution::stochastic_evolution_host,
-    gather_if_needed, user_functions,
+    gather_if_needed,
     output_context::push_output_count,
+    user_functions,
     workspace::{self as runtime_workspace, WorkspaceResolver},
     CallFrame, RuntimeError,
 };
@@ -2876,19 +2877,17 @@ async fn run_interpreter_inner(
                 let a = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let push_logical = |data: Vec<u8>,
-                                    shape: Vec<usize>,
-                                    stack: &mut Vec<Value>|
-                 -> VmResult<()> {
-                    if data.len() == 1 && is_scalar_shape(&shape) {
-                        stack.push(Value::Bool(data[0] != 0));
-                        return Ok(());
-                    }
-                    let logical = runmat_builtins::LogicalArray::new(data, shape)
-                        .map_err(|e| format!("eq: {e}"))?;
-                    stack.push(Value::LogicalArray(logical));
-                    Ok(())
-                };
+                let push_logical =
+                    |data: Vec<u8>, shape: Vec<usize>, stack: &mut Vec<Value>| -> VmResult<()> {
+                        if data.len() == 1 && is_scalar_shape(&shape) {
+                            stack.push(Value::Bool(data[0] != 0));
+                            return Ok(());
+                        }
+                        let logical = runmat_builtins::LogicalArray::new(data, shape)
+                            .map_err(|e| format!("eq: {e}"))?;
+                        stack.push(Value::LogicalArray(logical));
+                        Ok(())
+                    };
                 let logical_eq_scalar = |array: &runmat_builtins::LogicalArray,
                                          scalar: f64,
                                          stack: &mut Vec<Value>|
@@ -2913,7 +2912,11 @@ async fn run_interpreter_inner(
                     let mut out = Vec::with_capacity(array.data.len());
                     for i in 0..array.data.len() {
                         let val = if array.data[i] != 0 { 1.0 } else { 0.0 };
-                        out.push(if (val - tensor.data[i]).abs() < 1e-12 { 1 } else { 0 });
+                        out.push(if (val - tensor.data[i]).abs() < 1e-12 {
+                            1
+                        } else {
+                            0
+                        });
                     }
                     push_logical(out, array.shape.clone(), stack)
                 };
@@ -5402,7 +5405,8 @@ async fn run_interpreter_inner(
                         args[0].clone(),
                         &args[1..],
                     )
-                    .await {
+                    .await
+                    {
                         Ok(eval) => eval,
                         Err(err) => vm_bail!(err),
                     };
@@ -5432,7 +5436,8 @@ async fn run_interpreter_inner(
                         args[0].clone(),
                         &args[1..],
                     )
-                    .await {
+                    .await
+                    {
                         Ok(eval) => eval,
                         Err(err) => vm_bail!(err),
                     };
@@ -6585,7 +6590,8 @@ async fn run_interpreter_inner(
                                     per_dim_indices.push(idxs);
                                     scalar_mask.push(matches!(sel, Sel::Scalar(_)));
                                 }
-                                let out_dims = matlab_squeezed_shape(&selection_lengths, &scalar_mask);
+                                let out_dims =
+                                    matlab_squeezed_shape(&selection_lengths, &scalar_mask);
                                 // Strides for column-major order (first dimension fastest)
                                 let mut strides: Vec<usize> = vec![0; dims];
                                 let full_shape: Vec<usize> = if rank < dims {
@@ -10372,7 +10378,10 @@ async fn run_interpreter_inner(
                 let assignable = |v: &Value| {
                     matches!(
                         v,
-                        Value::Object(_) | Value::HandleObject(_) | Value::Tensor(_) | Value::GpuTensor(_)
+                        Value::Object(_)
+                            | Value::HandleObject(_)
+                            | Value::Tensor(_)
+                            | Value::GpuTensor(_)
                     )
                 };
                 let base_idx_opt = (0..stack.len()).rev().find(|&j| assignable(&stack[j]));

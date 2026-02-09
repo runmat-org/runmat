@@ -73,8 +73,7 @@ async fn empty_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
 
     match class {
         EmptyClass::Double => {
-            let tensor = tensor::zeros(&shape)
-                .map_err(|e| empty_error(format!("{LABEL}: {e}")))?;
+            let tensor = tensor::zeros(&shape).map_err(|e| empty_error(format!("{LABEL}: {e}")))?;
             Ok(tensor::tensor_into_value(tensor))
         }
         EmptyClass::Single => {
@@ -85,8 +84,8 @@ async fn empty_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         EmptyClass::Logical => Ok(Value::LogicalArray(LogicalArray::zeros(shape))),
         EmptyClass::Char => {
             let (rows, cols) = char_shape(&shape)?;
-            let chars =
-                CharArray::new(Vec::new(), rows, cols).map_err(|e| empty_error(format!("{LABEL}: {e}")))?;
+            let chars = CharArray::new(Vec::new(), rows, cols)
+                .map_err(|e| empty_error(format!("{LABEL}: {e}")))?;
             Ok(Value::CharArray(chars))
         }
         EmptyClass::Cell => make_cell_with_shape(Vec::new(), shape)
@@ -202,8 +201,12 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_empty_zero_by_n() {
-        let result = empty_builtin(vec![Value::from(0.0), Value::from(5.0), Value::from("char")])
-            .expect("char.empty");
+        let result = empty_builtin(vec![
+            Value::from(0.0),
+            Value::from(5.0),
+            Value::from("char"),
+        ])
+        .expect("char.empty");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 0);
@@ -217,8 +220,13 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_empty_keeps_shape() {
-        let result = empty_builtin(vec![Value::from(2.0), Value::from(0.0), Value::from(4.0), Value::from("cell")])
-            .expect("cell.empty");
+        let result = empty_builtin(vec![
+            Value::from(2.0),
+            Value::from(0.0),
+            Value::from(4.0),
+            Value::from("cell"),
+        ])
+        .expect("cell.empty");
         match result {
             Value::Cell(cell) => {
                 assert_eq!(cell.shape, vec![2, 0, 4]);
