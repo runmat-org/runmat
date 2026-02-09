@@ -1917,9 +1917,7 @@ impl Compiler {
                         self.emit(Instr::Transpose);
                     }
                     runmat_parser::UnOp::Not => {
-                        // Simple lowering: x -> (x == 0)
-                        self.emit(Instr::LoadConst(0.0));
-                        self.emit(Instr::Equal);
+                        self.emit(Instr::CallBuiltin("not".to_string(), 1));
                     }
                 }
             }

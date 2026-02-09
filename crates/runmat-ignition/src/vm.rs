@@ -2855,6 +2855,47 @@ async fn run_interpreter_inner(
                 let a = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let push_logical = |data: Vec<u8>,
+                                    shape: Vec<usize>,
+                                    stack: &mut Vec<Value>|
+                 -> VmResult<()> {
+                    if data.len() == 1 && is_scalar_shape(&shape) {
+                        stack.push(Value::Bool(data[0] != 0));
+                        return Ok(());
+                    }
+                    let logical = runmat_builtins::LogicalArray::new(data, shape)
+                        .map_err(|e| format!("eq: {e}"))?;
+                    stack.push(Value::LogicalArray(logical));
+                    Ok(())
+                };
+                let logical_eq_scalar = |array: &runmat_builtins::LogicalArray,
+                                         scalar: f64,
+                                         stack: &mut Vec<Value>|
+                 -> VmResult<()> {
+                    let mut out = Vec::with_capacity(array.data.len());
+                    for &bit in &array.data {
+                        let val = if bit != 0 { 1.0 } else { 0.0 };
+                        out.push(if (val - scalar).abs() < 1e-12 { 1 } else { 0 });
+                    }
+                    push_logical(out, array.shape.clone(), stack)
+                };
+                let logical_eq_tensor = |array: &runmat_builtins::LogicalArray,
+                                         tensor: &runmat_builtins::Tensor,
+                                         stack: &mut Vec<Value>|
+                 -> VmResult<()> {
+                    if array.shape != tensor.shape {
+                        return Err(mex(
+                            "ShapeMismatch",
+                            "shape mismatch for element-wise comparison",
+                        ));
+                    }
+                    let mut out = Vec::with_capacity(array.data.len());
+                    for i in 0..array.data.len() {
+                        let val = if array.data[i] != 0 { 1.0 } else { 0.0 };
+                        out.push(if (val - tensor.data[i]).abs() < 1e-12 { 1 } else { 0 });
+                    }
+                    push_logical(out, array.shape.clone(), stack)
+                };
                 match (&a, &b) {
                     (Value::Object(obj), _) => {
                         let args = vec![
@@ -2890,6 +2931,43 @@ async fn run_interpreter_inner(
                         // Delegate to runtime eq builtin which implements identity semantics
                         let v = call_builtin_vm!("eq", &[a.clone(), b.clone()])?;
                         stack.push(v);
+                    }
+                    (Value::LogicalArray(la), Value::LogicalArray(lb)) => {
+                        if la.shape != lb.shape {
+                            return Err(mex(
+                                "ShapeMismatch",
+                                "shape mismatch for element-wise comparison",
+                            ));
+                        }
+                        let mut out = Vec::with_capacity(la.data.len());
+                        for i in 0..la.data.len() {
+                            out.push(if la.data[i] == lb.data[i] { 1 } else { 0 });
+                        }
+                        push_logical(out, la.shape.clone(), &mut stack)?;
+                    }
+                    (Value::LogicalArray(la), Value::Num(n)) => {
+                        logical_eq_scalar(la, *n, &mut stack)?;
+                    }
+                    (Value::LogicalArray(la), Value::Int(i)) => {
+                        logical_eq_scalar(la, i.to_f64(), &mut stack)?;
+                    }
+                    (Value::LogicalArray(la), Value::Bool(flag)) => {
+                        logical_eq_scalar(la, if *flag { 1.0 } else { 0.0 }, &mut stack)?;
+                    }
+                    (Value::Num(n), Value::LogicalArray(lb)) => {
+                        logical_eq_scalar(lb, *n, &mut stack)?;
+                    }
+                    (Value::Int(i), Value::LogicalArray(lb)) => {
+                        logical_eq_scalar(lb, i.to_f64(), &mut stack)?;
+                    }
+                    (Value::Bool(flag), Value::LogicalArray(lb)) => {
+                        logical_eq_scalar(lb, if *flag { 1.0 } else { 0.0 }, &mut stack)?;
+                    }
+                    (Value::LogicalArray(la), Value::Tensor(tb)) => {
+                        logical_eq_tensor(la, tb, &mut stack)?;
+                    }
+                    (Value::Tensor(ta), Value::LogicalArray(lb)) => {
+                        logical_eq_tensor(lb, ta, &mut stack)?;
                     }
                     (Value::Tensor(ta), Value::Tensor(tb)) => {
                         // Element-wise eq; shapes must match

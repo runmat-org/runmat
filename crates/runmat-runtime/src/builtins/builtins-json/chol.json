@@ -44,7 +44,7 @@
     {
       "description": "Upper-triangular Cholesky factor of a symmetric positive-definite matrix",
       "input": "A = [4 12 -16; 12 37 -43; -16 -43 98];\nR = chol(A)",
-      "output": "R =\n     2     6    -8\n     0     1    -5\n     0     0     3"
+      "output": "R =\n     2     6    -8\n     0     1     5\n     0     0     3"
     },
     {
       "description": "Lower-triangular factor using the `'lower'` option",
