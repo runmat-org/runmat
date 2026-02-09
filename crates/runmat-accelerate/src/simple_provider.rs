@@ -693,9 +693,12 @@ fn conv2d_full_real(
             }
             for kc in 0..kernel_cols {
                 let out_c = sc + kc;
+                let kc_rev = kernel_cols - 1 - kc;
                 for kr in 0..kernel_rows {
                     let out_r = sr + kr;
-                    let kval = kernel[kc * kernel_rows + kr];
+                    let kr_rev = kernel_rows - 1 - kr;
+                    // Convolution flips the kernel (rotate 180°).
+                    let kval = kernel[kc_rev * kernel_rows + kr_rev];
                     out[out_c * full_rows + out_r] += aval * kval;
                 }
             }

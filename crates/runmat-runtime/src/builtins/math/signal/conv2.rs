@@ -356,9 +356,12 @@ fn conv2_matrices(a: &Matrix, b: &Matrix, mode: Conv2Mode) -> Matrix {
             let aval = a.get(ar, ac);
             for bc in 0..b.cols {
                 let out_c = ac + bc;
+                let bc_rev = b.cols - 1 - bc;
                 for br in 0..b.rows {
                     let out_r = ar + br;
-                    let bval = b.get(br, bc);
+                    let br_rev = b.rows - 1 - br;
+                    // Convolution flips the kernel (rotate 180°).
+                    let bval = b.get(br_rev, bc_rev);
                     full.add_assign(out_r, out_c, aval * bval);
                 }
             }
@@ -500,6 +503,31 @@ pub(crate) mod tests {
                     3,
                     3,
                     &[12.0, 21.0, 16.0, 27.0, 45.0, 33.0, 24.0, 39.0, 28.0],
+                );
+                assert_eq!(t.data, expected.data);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn conv2_same_flips_kernel() {
+        let a = tensor_from_rows(3, 3, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+        let b = tensor_from_rows(3, 3, &[1.0, 0.0, -1.0, 1.0, 0.0, -1.0, 1.0, 0.0, -1.0]);
+        let result = conv2_builtin(
+            Value::Tensor(a),
+            Value::Tensor(b),
+            vec![Value::from("same")],
+        )
+        .expect("conv2 same");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![3, 3]);
+                let expected = tensor_from_rows(
+                    3,
+                    3,
+                    &[-7.0, -4.0, 7.0, -15.0, -6.0, 15.0, -13.0, -4.0, 13.0],
                 );
                 assert_eq!(t.data, expected.data);
             }

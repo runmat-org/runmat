@@ -34,6 +34,7 @@
   "description": "`dir` returns metadata for files and folders. Without arguments, it lists the current working directory. With an argument, it can list a specific directory, match wildcard patterns, or report information about a single file. The result is a column vector of structs matching MATLAB's signature: each element contains `name`, `folder`, `date`, `bytes`, `isdir`, and `datenum` fields.",
   "behaviors": [
     "`dir` with no inputs returns the contents of the current folder (including `.` and `..`).",
+    "When you call `dir` without capturing the output, RunMat prints the listing in the REPL. Assigning the result to a variable suppresses the listing and returns the struct array.",
     "`dir(path)` accepts absolute or relative paths, character vectors, or string scalars. When the path names a directory, its contents are listed; when it names a file, metadata for that file alone is returned.",
     "`dir(pattern)` and `dir(folder, pattern)` support wildcard expansion with `*` and `?`. Patterns are evaluated relative to the supplied folder or the current working directory.",
     "The returned struct fields mirror MATLAB:",

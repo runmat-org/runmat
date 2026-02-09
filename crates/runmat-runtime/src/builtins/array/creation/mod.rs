@@ -4,6 +4,7 @@ pub(crate) mod eye;
 pub(crate) mod fill;
 pub(crate) mod linspace;
 pub(crate) mod logspace;
+pub(crate) mod magic;
 pub mod meshgrid;
 pub(crate) mod ones;
 pub(crate) mod rand;

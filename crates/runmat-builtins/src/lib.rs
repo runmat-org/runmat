@@ -1396,7 +1396,7 @@ fn format_number_short_g(value: f64) -> String {
 
     if use_scientific {
         // 5 significant digits in scientific notation for short g style
-        let s = format!("{v:.5e}");
+        let s = format!("{v:.4e}");
         // Trim trailing zeros in fraction part
         if let Some(idx) = s.find('e') {
             let (mut mantissa, exp) = s.split_at(idx);
