@@ -5055,7 +5055,7 @@ async fn run_interpreter_inner(
                         Err(err) => vm_bail!(err),
                     };
                     match out_count {
-                        0 => continue,
+                        0 => {}
                         1 => {
                             if !eval.is_positive_definite() {
                                 vm_bail!(runmat_runtime::build_runtime_error(
@@ -5065,18 +5065,18 @@ async fn run_interpreter_inner(
                                 .build());
                             }
                             stack.push(eval.factor());
-                            continue;
                         }
                         2 => {
                             stack.push(eval.factor());
                             stack.push(eval.flag());
-                            continue;
                         }
                         _ => vm_bail!(mex(
                             "TooManyOutputs",
                             "chol currently supports at most two outputs"
                         )),
                     }
+                    pc += 1;
+                    continue;
                 }
                 if name == "lu" {
                     if args.is_empty() {

@@ -54,7 +54,7 @@
     {
       "description": "Detecting a non-positive-definite matrix with the two-output form",
       "input": "A = [1 2; 2 1];\n[R, p] = chol(A)",
-      "output": "p =\n     2\n\nR =\n     1     2\n     0     0"
+      "output": "R =\n     1     2\n     0     0\n\np =\n     2"
     },
     {
       "description": "Using the Cholesky factor to solve linear systems",
@@ -63,12 +63,12 @@
     {
       "description": "Cholesky factor of a complex Hermitian positive-definite matrix",
       "input": "A = [5 1-2i; 1+2i 4];\n[R, p] = chol(A)",
-      "output": "p =\n     0\n\nR =\n    2.2361   0.2236 -0.8944i\n         0   1.9849 +0.5046i"
+      "output": "R =\n    2.2361   0.4472 -0.8944i\n         0   1.7321\n\np =\n     0"
     },
     {
       "description": "Running `chol` on a `gpuArray`",
       "input": "G = gpuArray([6 2; 2 5]);\n[R, p] = chol(G);\nclass(R)",
-      "output": "p =\n     0\n\nans =\n    'gpuArray'"
+      "output": "ans =\n    'gpuArray'"
     }
   ],
   "faqs": [

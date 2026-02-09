@@ -110,3 +110,19 @@ fn complex_literal_matrix_executes() {
         other => panic!("expected complex tensor, got {other:?}"),
     }
 }
+
+#[test]
+fn chol_multiassign_reports_failure() {
+    let input = "A = [1 2; 2 1]; [R, p] = chol(A);";
+    let ast = parse(input).unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    let p: f64 = (&vars[2]).try_into().unwrap();
+    assert_eq!(p, 2.0);
+    match &vars[1] {
+        Value::Tensor(tensor) => {
+            assert_eq!(tensor.shape, vec![2, 2]);
+        }
+        other => panic!("expected chol factor tensor, got {other:?}"),
+    }
+}
