@@ -2097,7 +2097,10 @@ pub fn infer_global_variable_types(
 pub fn lint_shapes(result: &LoweringResult) -> Vec<HirDiagnostic> {
     fn vector_literal_length(expr: &HirExpr) -> Option<usize> {
         let shape = tensor_literal_shape(expr)?;
-        match (shape.first().copied().flatten(), shape.get(1).copied().flatten()) {
+        match (
+            shape.first().copied().flatten(),
+            shape.get(1).copied().flatten(),
+        ) {
             (Some(r), Some(c)) => {
                 if r == 1 {
                     Some(c)

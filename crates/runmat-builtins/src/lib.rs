@@ -934,9 +934,7 @@ impl Type {
                     || (a_norm.is_some() && b_norm.is_none())
                 {
                     Type::Tensor { shape: a_norm }
-                } else if (a_unknown && !b_unknown)
-                    || (a_norm.is_none() && b_norm.is_some())
-                {
+                } else if (a_unknown && !b_unknown) || (a_norm.is_none() && b_norm.is_some()) {
                     Type::Tensor { shape: b_norm }
                 } else {
                     Type::tensor()
@@ -964,9 +962,7 @@ impl Type {
                     || (a_norm.is_some() && b_norm.is_none())
                 {
                     Type::Logical { shape: a_norm }
-                } else if (a_unknown && !b_unknown)
-                    || (a_norm.is_none() && b_norm.is_some())
-                {
+                } else if (a_unknown && !b_unknown) || (a_norm.is_none() && b_norm.is_some()) {
                     Type::Logical { shape: b_norm }
                 } else {
                     Type::logical()
