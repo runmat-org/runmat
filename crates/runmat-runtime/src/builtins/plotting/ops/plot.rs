@@ -527,8 +527,8 @@ impl PlotSeriesInput {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::plotting::tests::ensure_plot_test_env;
     use crate::builtins::plotting::state::{clear_figure, reset_hold_state_for_run};
+    use crate::builtins::plotting::tests::ensure_plot_test_env;
     use crate::builtins::plotting::{clone_figure, current_figure_handle};
     use crate::RuntimeError;
     use futures::executor::block_on;
@@ -674,7 +674,10 @@ pub(crate) mod tests {
     #[test]
     fn plot_type_is_string() {
         assert_eq!(
-            string_type(&[Type::tensor(), Type::tensor()], &ResolveContext::new(Vec::new())),
+            string_type(
+                &[Type::tensor(), Type::tensor()],
+                &ResolveContext::new(Vec::new())
+            ),
             Type::String
         );
     }

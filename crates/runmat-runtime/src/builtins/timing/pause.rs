@@ -10,9 +10,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::timing::type_resolvers::pause_type;
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
 use crate::builtins::plotting;
+use crate::builtins::timing::type_resolvers::pause_type;
 #[cfg(not(test))]
 use crate::interaction;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};

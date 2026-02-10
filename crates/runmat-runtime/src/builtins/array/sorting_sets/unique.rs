@@ -132,61 +132,61 @@ fn parse_unique_option(
     seen_occurrence: &mut Option<UniqueOccurrence>,
     lowered: &str,
 ) -> crate::BuiltinResult<()> {
-        match lowered {
-            "sorted" => {
-                if let Some(prev) = seen_order {
-                    if *prev != UniqueOrder::Sorted {
-                        return Err(unique_error(
-                            "unique: cannot combine 'sorted' with 'stable'",
-                        ));
-                    }
+    match lowered {
+        "sorted" => {
+            if let Some(prev) = seen_order {
+                if *prev != UniqueOrder::Sorted {
+                    return Err(unique_error(
+                        "unique: cannot combine 'sorted' with 'stable'",
+                    ));
                 }
-                *seen_order = Some(UniqueOrder::Sorted);
-                opts.order = UniqueOrder::Sorted;
             }
-            "stable" => {
-                if let Some(prev) = seen_order {
-                    if *prev != UniqueOrder::Stable {
-                        return Err(unique_error(
-                            "unique: cannot combine 'sorted' with 'stable'",
-                        ));
-                    }
-                }
-                *seen_order = Some(UniqueOrder::Stable);
-                opts.order = UniqueOrder::Stable;
-            }
-            "rows" => {
-                opts.rows = true;
-            }
-            "first" => {
-                if let Some(prev) = seen_occurrence {
-                    if *prev != UniqueOccurrence::First {
-                        return Err(unique_error("unique: cannot combine 'first' with 'last'"));
-                    }
-                }
-                *seen_occurrence = Some(UniqueOccurrence::First);
-                opts.occurrence = UniqueOccurrence::First;
-            }
-            "last" => {
-                if let Some(prev) = seen_occurrence {
-                    if *prev != UniqueOccurrence::Last {
-                        return Err(unique_error("unique: cannot combine 'first' with 'last'"));
-                    }
-                }
-                *seen_occurrence = Some(UniqueOccurrence::Last);
-                opts.occurrence = UniqueOccurrence::Last;
-            }
-            "legacy" | "r2012a" => {
-                return Err(unique_error(
-                    "unique: the 'legacy' behaviour is not supported",
-                ));
-            }
-            other => {
-                return Err(unique_error(format!(
-                    "unique: unrecognised option '{other}'"
-                )));
-            }
+            *seen_order = Some(UniqueOrder::Sorted);
+            opts.order = UniqueOrder::Sorted;
         }
+        "stable" => {
+            if let Some(prev) = seen_order {
+                if *prev != UniqueOrder::Stable {
+                    return Err(unique_error(
+                        "unique: cannot combine 'sorted' with 'stable'",
+                    ));
+                }
+            }
+            *seen_order = Some(UniqueOrder::Stable);
+            opts.order = UniqueOrder::Stable;
+        }
+        "rows" => {
+            opts.rows = true;
+        }
+        "first" => {
+            if let Some(prev) = seen_occurrence {
+                if *prev != UniqueOccurrence::First {
+                    return Err(unique_error("unique: cannot combine 'first' with 'last'"));
+                }
+            }
+            *seen_occurrence = Some(UniqueOccurrence::First);
+            opts.occurrence = UniqueOccurrence::First;
+        }
+        "last" => {
+            if let Some(prev) = seen_occurrence {
+                if *prev != UniqueOccurrence::Last {
+                    return Err(unique_error("unique: cannot combine 'first' with 'last'"));
+                }
+            }
+            *seen_occurrence = Some(UniqueOccurrence::Last);
+            opts.occurrence = UniqueOccurrence::Last;
+        }
+        "legacy" | "r2012a" => {
+            return Err(unique_error(
+                "unique: the 'legacy' behaviour is not supported",
+            ));
+        }
+        other => {
+            return Err(unique_error(format!(
+                "unique: unrecognised option '{other}'"
+            )));
+        }
+    }
     Ok(())
 }
 

@@ -5,12 +5,12 @@ use runmat_builtins::{LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
+use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{random, tensor};
-use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use runmat_builtins::{ResolveContext, Type};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::randi")]
@@ -582,7 +582,10 @@ pub(crate) mod tests {
 
     #[test]
     fn randi_type_single_bound_is_num() {
-        assert_eq!(randi_type(&[Type::Num], &ResolveContext::new(Vec::new())), Type::Num);
+        assert_eq!(
+            randi_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::Num
+        );
     }
 
     #[test]

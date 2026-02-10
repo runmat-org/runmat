@@ -23,12 +23,10 @@ use runmat_plot::SharedWgpuContext;
 /// seed the shared context from the active acceleration provider.
 #[cfg(feature = "plot-core")]
 pub fn ensure_shared_wgpu_context(name: &'static str) -> BuiltinResult<SharedWgpuContext> {
-    super::context::ensure_context_from_provider().map_err(|err| {
-        plotting_error(name, format!("{name}: {}", err.message().to_string()))
-    })?;
-    runmat_plot::shared_wgpu_context().ok_or_else(|| {
-        plotting_error(name, format!("{name}: plotting GPU context unavailable"))
-    })
+    super::context::ensure_context_from_provider()
+        .map_err(|err| plotting_error(name, format!("{name}: {}", err.message())))?;
+    runmat_plot::shared_wgpu_context()
+        .ok_or_else(|| plotting_error(name, format!("{name}: plotting GPU context unavailable")))
 }
 
 /// Compute the min/max bounds for a GPU tensor by delegating to the runtime
@@ -43,17 +41,17 @@ pub async fn axis_bounds_async(
     // For plotting bounds we always want the global extrema, so call the provider global
     // reduction hooks directly when available.
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
-        let min_handle = provider
-            .reduce_min(handle)
-            .await
-            .map_err(|err| plotting_error(context, format!("{context}: reduce_min failed: {err}")))?;
-        let max_handle = provider
-            .reduce_max(handle)
-            .await
-            .map_err(|err| plotting_error(context, format!("{context}: reduce_max failed: {err}")))?;
+        let min_handle = provider.reduce_min(handle).await.map_err(|err| {
+            plotting_error(context, format!("{context}: reduce_min failed: {err}"))
+        })?;
+        let max_handle = provider.reduce_max(handle).await.map_err(|err| {
+            plotting_error(context, format!("{context}: reduce_max failed: {err}"))
+        })?;
 
-        let min_scalar = value_to_scalar_async(Value::GpuTensor(min_handle.clone()), context).await?;
-        let max_scalar = value_to_scalar_async(Value::GpuTensor(max_handle.clone()), context).await?;
+        let min_scalar =
+            value_to_scalar_async(Value::GpuTensor(min_handle.clone()), context).await?;
+        let max_scalar =
+            value_to_scalar_async(Value::GpuTensor(max_handle.clone()), context).await?;
 
         // These temporary scalar handles are purely intermediate; free them eagerly.
         let _ = provider.free(&min_handle);

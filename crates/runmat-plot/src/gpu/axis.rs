@@ -29,7 +29,7 @@ pub fn axis_storage_buffer(
             Ok(Arc::new(device.create_buffer_init(
                 &wgpu::util::BufferInitDescriptor {
                     label: Some(label),
-                    contents: bytemuck::cast_slice(*values),
+                    contents: bytemuck::cast_slice(values),
                     usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 },
             )))
@@ -41,11 +41,10 @@ pub fn axis_storage_buffer(
             Ok(Arc::new(device.create_buffer_init(
                 &wgpu::util::BufferInitDescriptor {
                     label: Some(label),
-                    contents: bytemuck::cast_slice(*values),
+                    contents: bytemuck::cast_slice(values),
                     usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 },
             )))
         }
     }
 }
-

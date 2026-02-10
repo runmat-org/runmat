@@ -83,8 +83,7 @@ async fn polyfit_builtin(
             outputs.push(eval.mu());
         }
         return Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            outputs,
+            out_count, outputs,
         ));
     }
     Ok(eval.coefficients())

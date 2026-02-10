@@ -94,11 +94,7 @@ async fn eig_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
         }
         if out_count == 3 {
             let left = eval.left()?;
-            return Ok(Value::OutputList(vec![
-                eval.right(),
-                eval.diagonal(),
-                left,
-            ]));
+            return Ok(Value::OutputList(vec![eval.right(), eval.diagonal(), left]));
         }
         return Err(eig_error("eig currently supports at most three outputs"));
     }

@@ -14,8 +14,8 @@ use runmat_builtins::{StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 use runmat_time::unix_timestamp_ns;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::stats::type_resolvers::rng_type;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "rng";
 

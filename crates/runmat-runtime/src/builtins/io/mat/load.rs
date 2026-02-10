@@ -63,8 +63,7 @@ async fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             for (name, value) in eval.variables() {
-                crate::workspace::assign(name, value.clone())
-                    .map_err(|err| load_error(err))?;
+                crate::workspace::assign(name, value.clone()).map_err(|err| load_error(err))?;
             }
             return Ok(Value::OutputList(Vec::new()));
         }

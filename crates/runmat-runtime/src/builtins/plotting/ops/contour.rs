@@ -205,11 +205,15 @@ fn from_explicit_args(
     // Axis vectors can be supplied as gpuArray; gather them (small) while keeping Z on-device.
     let x_tensor = match &x_value {
         Value::GpuTensor(handle) => super::common::gather_tensor_from_gpu(handle.clone(), name)?,
-        _ => Tensor::try_from(&x_value).map_err(|e| plotting_error(name, format!("{name}: {e}")))?,
+        _ => {
+            Tensor::try_from(&x_value).map_err(|e| plotting_error(name, format!("{name}: {e}")))?
+        }
     };
     let y_tensor = match &y_value {
         Value::GpuTensor(handle) => super::common::gather_tensor_from_gpu(handle.clone(), name)?,
-        _ => Tensor::try_from(&y_value).map_err(|e| plotting_error(name, format!("{name}: {e}")))?,
+        _ => {
+            Tensor::try_from(&y_value).map_err(|e| plotting_error(name, format!("{name}: {e}")))?
+        }
     };
     let x_axis = numeric_vector(x_tensor);
     let y_axis = numeric_vector(y_tensor);
@@ -621,13 +625,7 @@ pub(crate) fn build_contour_gpu_plot(
             .iter()
             .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v as f32)),
     );
-    let bounds = contour_bounds(
-        min_x,
-        max_x,
-        min_y,
-        max_y,
-        base_z,
-    );
+    let bounds = contour_bounds(min_x, max_x, min_y, max_y, base_z);
 
     let x_axis_data = if let Some(values) = x_f32.as_ref() {
         runmat_plot::gpu::axis::AxisData::F32(values.as_slice())

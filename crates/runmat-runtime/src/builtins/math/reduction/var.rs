@@ -17,8 +17,8 @@ use crate::builtins::common::{
     tensor,
 };
 use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
-use runmat_builtins::ResolveContext;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use runmat_builtins::ResolveContext;
 
 const NAME: &str = "var";
 
@@ -124,32 +124,30 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     while idx < args.len() {
         let arg = &args[idx];
 
-        if let Some(token) = tokens.get(idx) {
-            if let crate::builtins::common::arg_tokens::ArgToken::String(text) = token {
-                match text.as_str() {
-                    "omitnan" => {
-                        nan_mode = ReductionNaN::Omit;
-                        idx += 1;
-                        continue;
-                    }
-                    "includenan" => {
-                        nan_mode = ReductionNaN::Include;
-                        idx += 1;
-                        continue;
-                    }
-                    "all" => {
-                        if axes_set && !matches!(axes, VarAxes::Default) {
-                            return Err(var_error(
-                                "var: 'all' cannot be combined with an explicit dimension",
-                            ));
-                        }
-                        axes = VarAxes::All;
-                        axes_set = true;
-                        idx += 1;
-                        continue;
-                    }
-                    _ => {}
+        if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
+            match text.as_str() {
+                "omitnan" => {
+                    nan_mode = ReductionNaN::Omit;
+                    idx += 1;
+                    continue;
                 }
+                "includenan" => {
+                    nan_mode = ReductionNaN::Include;
+                    idx += 1;
+                    continue;
+                }
+                "all" => {
+                    if axes_set && !matches!(axes, VarAxes::Default) {
+                        return Err(var_error(
+                            "var: 'all' cannot be combined with an explicit dimension",
+                        ));
+                    }
+                    axes = VarAxes::All;
+                    axes_set = true;
+                    idx += 1;
+                    continue;
+                }
+                _ => {}
             }
         }
 

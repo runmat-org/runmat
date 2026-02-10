@@ -619,9 +619,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
-        CharArray, ComplexTensor, LogicalArray, ResolveContext, Tensor, Type,
-    };
+    use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, ResolveContext, Tensor, Type};
 
     const EPS: f64 = 1e-12;
 

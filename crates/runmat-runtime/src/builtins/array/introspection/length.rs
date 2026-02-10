@@ -85,7 +85,10 @@ pub(crate) mod tests {
     #[test]
     fn length_type_returns_int() {
         assert_eq!(
-            super::length_type(&[Type::Tensor { shape: None }], &ResolveContext::new(Vec::new())),
+            super::length_type(
+                &[Type::Tensor { shape: None }],
+                &ResolveContext::new(Vec::new())
+            ),
             Type::Int
         );
     }

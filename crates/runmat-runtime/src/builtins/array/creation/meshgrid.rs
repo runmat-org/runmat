@@ -497,7 +497,7 @@ fn axis_from_meshgrid_matrix_real(
         // Extract the first row as the axis vector (length = cols).
         let mut values = Vec::with_capacity(cols);
         for col in 0..cols {
-            let idx = 0 + rows * col;
+            let idx = rows * col;
             values.push((tensor.data[idx], 0.0));
         }
         return Ok(Some(AxisData {
@@ -543,7 +543,7 @@ fn axis_from_meshgrid_matrix_complex(
         }
         let mut values = Vec::with_capacity(cols);
         for col in 0..cols {
-            let idx = 0 + rows * col;
+            let idx = rows * col;
             values.push(tensor.data[idx]);
         }
         let is_complex = values.iter().any(|&(_, im)| !im.is_nan() && im != 0.0);
@@ -574,7 +574,7 @@ fn axis_from_meshgrid_matrix_complex(
 fn matrix_rows_are_identical_real(tensor: &Tensor, rows: usize, cols: usize) -> bool {
     for row in 1..rows {
         for col in 0..cols {
-            let idx0 = 0 + rows * col;
+            let idx0 = rows * col;
             let idx = row + rows * col;
             if tensor.data[idx] != tensor.data[idx0] {
                 return false;
@@ -587,7 +587,7 @@ fn matrix_rows_are_identical_real(tensor: &Tensor, rows: usize, cols: usize) -> 
 fn matrix_cols_are_identical_real(tensor: &Tensor, rows: usize, cols: usize) -> bool {
     for col in 1..cols {
         for row in 0..rows {
-            let idx0 = row + rows * 0;
+            let idx0 = row;
             let idx = row + rows * col;
             if tensor.data[idx] != tensor.data[idx0] {
                 return false;
@@ -600,7 +600,7 @@ fn matrix_cols_are_identical_real(tensor: &Tensor, rows: usize, cols: usize) -> 
 fn matrix_rows_are_identical_complex(tensor: &ComplexTensor, rows: usize, cols: usize) -> bool {
     for row in 1..rows {
         for col in 0..cols {
-            let idx0 = 0 + rows * col;
+            let idx0 = rows * col;
             let idx = row + rows * col;
             if tensor.data[idx] != tensor.data[idx0] {
                 return false;
@@ -613,7 +613,7 @@ fn matrix_rows_are_identical_complex(tensor: &ComplexTensor, rows: usize, cols: 
 fn matrix_cols_are_identical_complex(tensor: &ComplexTensor, rows: usize, cols: usize) -> bool {
     for col in 1..cols {
         for row in 0..rows {
-            let idx0 = row + rows * 0;
+            let idx0 = row;
             let idx = row + rows * col;
             if tensor.data[idx] != tensor.data[idx0] {
                 return false;
@@ -647,10 +647,7 @@ async fn axis_to_host_async(axis: &AxisData) -> crate::BuiltinResult<AxisData> {
     if axis.gpu_real.is_none() {
         return Ok(axis.clone());
     }
-    let handle = axis
-        .gpu_real
-        .as_ref()
-        .expect("checked gpu_real is_some");
+    let handle = axis.gpu_real.as_ref().expect("checked gpu_real is_some");
     let tensor = gpu_helpers::gather_tensor_async(handle).await?;
     // Index is only used for error messages; tensor came from a validated vector-like handle.
     axis_from_tensor(tensor, 0)
@@ -701,7 +698,7 @@ fn try_meshgrid_gpu_from_vector_axes(
         .map_err(|e| builtin_error(format!("meshgrid: reshape Y failed: {e}")))?;
 
     let mut outputs = Vec::with_capacity(if z_handle.is_some() { 3 } else { 2 });
-    if z_handle.is_some() {
+    if let Some(z) = z_handle {
         let x_base = provider
             .reshape(&x_row, &[1, nx, 1])
             .map_err(|e| builtin_error(format!("meshgrid: reshape X(3d) failed: {e}")))?;
@@ -718,8 +715,6 @@ fn try_meshgrid_gpu_from_vector_axes(
 
         outputs.push(MeshgridOutput::GpuReal(x_grid));
         outputs.push(MeshgridOutput::GpuReal(y_grid));
-
-        let z = z_handle.expect("checked z_handle is_some");
         let z_axis_row = provider
             .reshape(z, &[1, nz])
             .map_err(|e| builtin_error(format!("meshgrid: reshape Z failed: {e}")))?;

@@ -199,7 +199,9 @@ async fn build_mesh_cpu(
     };
     let z_tensor = match z_input {
         SurfaceDataInput::Host(t) => t.clone(),
-        SurfaceDataInput::Gpu(h) => super::common::gather_tensor_from_gpu_async(h.clone(), BUILTIN_NAME).await?,
+        SurfaceDataInput::Gpu(h) => {
+            super::common::gather_tensor_from_gpu_async(h.clone(), BUILTIN_NAME).await?
+        }
     };
     let grid = tensor_to_surface_grid(z_tensor, x_host.len(), y_host.len(), BUILTIN_NAME)?;
     build_mesh_surface(x_host, y_host, grid)

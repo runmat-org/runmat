@@ -84,8 +84,7 @@ async fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult
         let eval = evaluate_quotient(first, rest.into_iter().next().unwrap()).await?;
         let outputs = vec![eval.numerator(), eval.denominator()];
         return Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            outputs,
+            out_count, outputs,
         ));
     }
     match rest.len() {

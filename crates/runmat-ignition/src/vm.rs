@@ -3301,8 +3301,7 @@ async fn run_interpreter_inner(
                                         .await
                                     }
                                     None => {
-                                        runmat_runtime::call_builtin_async(&qual, &qual_args)
-                                            .await
+                                        runmat_runtime::call_builtin_async(&qual, &qual_args).await
                                     }
                                 };
                                 match result {
@@ -3351,8 +3350,7 @@ async fn run_interpreter_inner(
                                         .await
                                     }
                                     None => {
-                                        runmat_runtime::call_builtin_async(&qual, &qual_args)
-                                            .await
+                                        runmat_runtime::call_builtin_async(&qual, &qual_args).await
                                     }
                                 };
                                 match result {

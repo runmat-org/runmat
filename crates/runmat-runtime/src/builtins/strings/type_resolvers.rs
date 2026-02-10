@@ -55,7 +55,7 @@ pub fn text_concat_type(args: &[Type], _context: &ResolveContext) -> Type {
         return Type::cell_of(Type::String);
     }
 
-    if args.iter().any(|ty| *ty == Type::String) {
+    if args.contains(&Type::String) {
         return Type::String;
     }
 

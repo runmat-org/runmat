@@ -1,7 +1,7 @@
 use crate::{DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags};
+use chrono::DateTime;
 use crossbeam_utils::thread;
 use once_cell::sync::Lazy;
-use chrono::DateTime;
 use reqwest::blocking::{Client, Response};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -139,10 +139,7 @@ impl RemoteInner {
             }
             std::thread::sleep(self.retry_delay(attempt));
         }
-        Err(io::Error::new(
-            ErrorKind::Other,
-            "request retries exhausted",
-        ))
+        Err(io::Error::other("request retries exhausted"))
     }
 
     fn get_url_with_retry(&self, url: &str, range: Option<String>) -> io::Result<Response> {
@@ -157,10 +154,7 @@ impl RemoteInner {
             }
             std::thread::sleep(self.retry_delay(attempt));
         }
-        Err(io::Error::new(
-            ErrorKind::Other,
-            "request retries exhausted",
-        ))
+        Err(io::Error::other("request retries exhausted"))
     }
 
     fn endpoint(&self, route: &str) -> Url {
@@ -194,8 +188,7 @@ impl RemoteInner {
         route: &str,
         query: &[(&str, String)],
     ) -> io::Result<T> {
-        let resp = self
-            .send_with_retry(reqwest::Method::GET, route, query)?;
+        let resp = self.send_with_retry(reqwest::Method::GET, route, query)?;
         handle_error(resp)?.json().map_err(map_http_err)
     }
 
@@ -223,8 +216,7 @@ impl RemoteInner {
     }
 
     fn delete_empty(&self, route: &str, query: &[(&str, String)]) -> io::Result<()> {
-        let resp = self
-            .send_with_retry(reqwest::Method::DELETE, route, query)?;
+        let resp = self.send_with_retry(reqwest::Method::DELETE, route, query)?;
         handle_error(resp)?;
         Ok(())
     }
@@ -255,12 +247,7 @@ impl RemoteInner {
         Ok(buf)
     }
 
-    fn download_range_from_url(
-        &self,
-        url: &str,
-        offset: u64,
-        length: u64,
-    ) -> io::Result<Vec<u8>> {
+    fn download_range_from_url(&self, url: &str, offset: u64, length: u64) -> io::Result<Vec<u8>> {
         if length == 0 {
             return Ok(Vec::new());
         }
@@ -509,7 +496,10 @@ impl RemoteFsProvider {
         let manifest: ShardManifest = serde_json::from_slice(&manifest_bytes)
             .map_err(|_| io::Error::new(ErrorKind::InvalidData, "invalid shard manifest"))?;
         if manifest.version != 1 {
-            return Err(io::Error::new(ErrorKind::InvalidData, "unsupported manifest"));
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "unsupported manifest",
+            ));
         }
         let mut buffer = Vec::with_capacity(manifest.total_size as usize);
         for shard in manifest.shards {
@@ -601,12 +591,7 @@ impl RemoteFsProvider {
         self.upload_unsharded_file(path, data, None)
     }
 
-    fn upload_unsharded_file(
-        &self,
-        path: &str,
-        data: &[u8],
-        hash: Option<&str>,
-    ) -> io::Result<()> {
+    fn upload_unsharded_file(&self, path: &str, data: &[u8], hash: Option<&str>) -> io::Result<()> {
         if data.len() as u64 >= self.inner.direct_write_threshold_bytes {
             return self.upload_multipart_file(path, data);
         }
@@ -621,21 +606,13 @@ impl RemoteFsProvider {
             let slice = &data[offset..end];
             let truncate = offset == 0;
             let final_chunk = end == data.len();
-            let result = self.inner.upload_chunk(
-                path,
-                offset as u64,
-                truncate,
-                final_chunk,
-                slice,
-                hash,
-            )?;
+            let result =
+                self.inner
+                    .upload_chunk(path, offset as u64, truncate, final_chunk, slice, hash)?;
             if let Some(session) = result {
                 let expected = offset as u64 + slice.len() as u64;
                 if session.next_offset as u64 != expected {
-                    return Err(io::Error::new(
-                        ErrorKind::Other,
-                        "unexpected next offset",
-                    ));
+                    return Err(io::Error::other("unexpected next offset"));
                 }
             }
             offset = end;

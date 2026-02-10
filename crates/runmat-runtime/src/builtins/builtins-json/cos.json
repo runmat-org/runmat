@@ -59,7 +59,7 @@
     },
     {
       "description": "Cosine on a GPU tensor without manual residency",
-      "input": "A = reshape(0:5, [3 2]);\nresult = cos(A);        % planner keeps the tensor on device when beneficial",
+      "input": "A = reshape(0:5, [3 2]);\nresult = cos(A)        % planner keeps the tensor on device when beneficial",
       "output": "result =\n    1.0000   -0.9900\n    0.5403   -0.6536\n   -0.4161    0.2837"
     },
     {

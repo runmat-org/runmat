@@ -29,8 +29,10 @@ fn request_promise(request: &IdbRequest) -> js_sys::Promise {
         let resolve = resolve.clone();
         let onsuccess = Closure::once(move |_event: web_sys::Event| {
             // `result` can be null; still resolve it.
-            let _ =
-                resolve.call1(&JsValue::NULL, &request_success.result().unwrap_or(JsValue::NULL));
+            let _ = resolve.call1(
+                &JsValue::NULL,
+                &request_success.result().unwrap_or(JsValue::NULL),
+            );
         });
         let request_error = request.clone();
         let reject = reject.clone();
@@ -114,4 +116,3 @@ pub async fn save(key: &str, json: &str) -> Result<(), JsValue> {
     let _ = JsFuture::from(request_promise(&req)).await?;
     Ok(())
 }
-

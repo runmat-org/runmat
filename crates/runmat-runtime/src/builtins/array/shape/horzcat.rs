@@ -1,7 +1,7 @@
 //! MATLAB-compatible `horzcat` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
 use runmat_builtins::shape_rules::scalar_tensor_shape;
+use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, RuntimeError};
@@ -149,8 +149,9 @@ fn concat_type_with_dim(args: &[Type], dim_1based: usize) -> Type {
         return Type::cell_of(Type::String);
     }
 
-    let has_numeric =
-        args.iter().any(|arg| matches!(arg, Type::Tensor { .. } | Type::Num | Type::Int));
+    let has_numeric = args
+        .iter()
+        .any(|arg| matches!(arg, Type::Tensor { .. } | Type::Num | Type::Int));
     let has_logical = args
         .iter()
         .any(|arg| matches!(arg, Type::Logical { .. } | Type::Bool));

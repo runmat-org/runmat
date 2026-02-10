@@ -88,8 +88,14 @@ pub async fn surfc_builtin(
                     Err(err) => {
                         warn!("surfc contour GPU path unavailable: {err}");
                         let z_tensor =
-                            super::common::gather_tensor_from_gpu_async(z_gpu, BUILTIN_NAME).await?;
-                        let grid = tensor_to_surface_grid(z_tensor, x_axis.len(), y_axis.len(), BUILTIN_NAME)?;
+                            super::common::gather_tensor_from_gpu_async(z_gpu, BUILTIN_NAME)
+                                .await?;
+                        let grid = tensor_to_surface_grid(
+                            z_tensor,
+                            x_axis.len(),
+                            y_axis.len(),
+                            BUILTIN_NAME,
+                        )?;
                         let base_z = surface.bounds().min.z;
                         let contour = build_contour_plot(
                             BUILTIN_NAME,
@@ -107,8 +113,10 @@ pub async fn surfc_builtin(
             }
             Err(err) => {
                 warn!("surfc surface GPU path unavailable: {err}");
-                let z_tensor = super::common::gather_tensor_from_gpu_async(z_gpu, BUILTIN_NAME).await?;
-                let grid = tensor_to_surface_grid(z_tensor, x_axis.len(), y_axis.len(), BUILTIN_NAME)?;
+                let z_tensor =
+                    super::common::gather_tensor_from_gpu_async(z_gpu, BUILTIN_NAME).await?;
+                let grid =
+                    tensor_to_surface_grid(z_tensor, x_axis.len(), y_axis.len(), BUILTIN_NAME)?;
                 let mut surface = build_surface(x_axis.clone(), y_axis.clone(), grid.clone())?;
                 style.apply_to_plot(&mut surface);
                 let base_z = surface.bounds().min.z;
@@ -148,7 +156,9 @@ pub async fn surfc_builtin(
         (surface, contour)
     };
 
-    surface = surface.with_colormap(ColorMap::Parula).with_shading(ShadingMode::Smooth);
+    surface = surface
+        .with_colormap(ColorMap::Parula)
+        .with_shading(ShadingMode::Smooth);
 
     let mut surface_opt = Some(surface);
     let mut contour_opt = Some(contour);

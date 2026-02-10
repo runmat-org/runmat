@@ -98,7 +98,7 @@ fn matrix_rows_are_identical(tensor: &Tensor) -> bool {
     }
     for row in 1..rows {
         for col in 0..cols {
-            let idx0 = 0 + rows * col;
+            let idx0 = rows * col;
             let idx = row + rows * col;
             if tensor.data[idx] != tensor.data[idx0] {
                 return false;
@@ -116,7 +116,7 @@ fn matrix_cols_are_identical(tensor: &Tensor) -> bool {
     }
     for col in 1..cols {
         for row in 0..rows {
-            let idx0 = row + rows * 0;
+            let idx0 = row;
             let idx = row + rows * col;
             if tensor.data[idx] != tensor.data[idx0] {
                 return false;
@@ -150,7 +150,7 @@ pub(crate) fn extract_meshgrid_axes_from_xy_matrices(
     // Extract x vector (length = cols) from the first row of X.
     let mut x_vec = Vec::with_capacity(cols);
     for col in 0..cols {
-        let idx = 0 + rows * col;
+        let idx = rows * col;
         x_vec.push(x.data[idx]);
     }
     // Extract y vector (length = rows) from the first column of Y.
@@ -303,8 +303,7 @@ pub async fn surf_builtin(
             }
         }
     } else {
-        let (x_host, y_host) =
-            gather_axes_for_cpu_fallback(&x_axis, &y_axis, BUILTIN_NAME).await?;
+        let (x_host, y_host) = gather_axes_for_cpu_fallback(&x_axis, &y_axis, BUILTIN_NAME).await?;
         build_surface_cpu(&z_input, x_host, y_host).await?
     };
 
@@ -329,12 +328,7 @@ async fn build_surface_cpu(
             super::common::gather_tensor_from_gpu_async(handle, BUILTIN_NAME).await?
         }
     };
-    let grid = tensor_to_surface_grid(
-        z_tensor,
-        x_axis.len(),
-        y_axis.len(),
-        BUILTIN_NAME,
-    )?;
+    let grid = tensor_to_surface_grid(z_tensor, x_axis.len(), y_axis.len(), BUILTIN_NAME)?;
     build_surface(x_axis, y_axis, grid)
 }
 
@@ -414,9 +408,7 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
             name,
             format!(
                 "{name}: Z must contain exactly {} elements ({}×{})",
-                expected_len,
-                x_len,
-                y_len
+                expected_len, x_len, y_len
             ),
         ));
     }
@@ -459,7 +451,10 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
             if exported.len as usize != x_len {
                 return Err(plotting_error(
                     name,
-                    format!("{name}: X axis length mismatch (expected {x_len}, got {})", exported.len),
+                    format!(
+                        "{name}: X axis length mismatch (expected {x_len}, got {})",
+                        exported.len
+                    ),
                 ));
             }
             if exported.precision != z_ref.precision {
@@ -486,7 +481,10 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
             if exported.len as usize != y_len {
                 return Err(plotting_error(
                     name,
-                    format!("{name}: Y axis length mismatch (expected {y_len}, got {})", exported.len),
+                    format!(
+                        "{name}: Y axis length mismatch (expected {y_len}, got {})",
+                        exported.len
+                    ),
                 ));
             }
             if exported.precision != z_ref.precision {
@@ -557,13 +555,8 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
         .map_err(|_| plotting_error(name, format!("{name}: LOD X size overflowed")))?;
     let lod_y_len = usize::try_from(lod.lod_y_len)
         .map_err(|_| plotting_error(name, format!("{name}: LOD Y size overflowed")))?;
-    let mut surface = SurfacePlot::from_gpu_buffer(
-        lod_x_len,
-        lod_y_len,
-        gpu_vertices,
-        vertex_count,
-        bounds,
-    );
+    let mut surface =
+        SurfacePlot::from_gpu_buffer(lod_x_len, lod_y_len, gpu_vertices, vertex_count, bounds);
     surface.colormap = colormap;
     surface.alpha = alpha;
     surface.flatten_z = flatten_z;

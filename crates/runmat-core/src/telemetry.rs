@@ -59,7 +59,10 @@ impl TelemetryRunGuard {
     }
 
     pub fn finish(self, mut finish: TelemetryRunFinish) {
-        let duration = finish.duration.take().or_else(|| Some(self.started_at.elapsed()));
+        let duration = finish
+            .duration
+            .take()
+            .or_else(|| Some(self.started_at.elapsed()));
         let duration_us = duration.map(|d| (d.as_micros().min(u64::MAX as u128)) as u64);
 
         let (gpu_wall_ns, gpu_dispatches, upload_bytes, download_bytes, fusion_hits, fusion_misses) =
@@ -203,4 +206,3 @@ impl RunMatSession {
         })
     }
 }
-

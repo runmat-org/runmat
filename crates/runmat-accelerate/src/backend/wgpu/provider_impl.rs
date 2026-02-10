@@ -12470,7 +12470,8 @@ impl WgpuProvider {
         } else {
             entry.buffer.clone()
         };
-        let mut out_buffer = self.create_storage_buffer_checked(out_len, "runmat-reduce-dim-out")?;
+        let mut out_buffer =
+            self.create_storage_buffer_checked(out_len, "runmat-reduce-dim-out")?;
         // Prevent aliasing: output must not be identical to input buffer
         if std::ptr::eq(out_buffer.as_ref(), entry.buffer.as_ref()) {
             if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {

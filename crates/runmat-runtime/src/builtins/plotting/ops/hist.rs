@@ -24,8 +24,8 @@ use super::common::{numeric_vector, value_as_f64};
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarStyle, BarStyleDefaults};
-use crate::builtins::plotting::type_resolvers::hist_type;
 use crate::builtins::plotting::gpu_helpers::{axis_bounds_async, gather_tensor_from_gpu_async};
+use crate::builtins::plotting::type_resolvers::hist_type;
 use crate::{BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::hist")]
@@ -1308,11 +1308,11 @@ impl HistInput {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::array::type_resolvers::row_vector_type;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_builtins::{ResolveContext, Type};
-    use crate::builtins::array::type_resolvers::row_vector_type;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();

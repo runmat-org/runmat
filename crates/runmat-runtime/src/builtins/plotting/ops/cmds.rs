@@ -7,9 +7,8 @@ use runmat_macros::runtime_builtin;
 
 use super::plotting_error;
 use super::state::{
-    clear_current_axes, set_axis_equal, set_axis_limits, set_box_enabled, set_colormap,
-    set_colorbar_enabled, set_grid_enabled, set_surface_shading, toggle_box, toggle_colorbar,
-    toggle_grid,
+    clear_current_axes, set_axis_equal, set_axis_limits, set_box_enabled, set_colorbar_enabled,
+    set_colormap, set_grid_enabled, set_surface_shading, toggle_box, toggle_colorbar, toggle_grid,
 };
 use crate::builtins::plotting::type_resolvers::string_type;
 
@@ -21,7 +20,10 @@ fn as_lower_str(val: &Value) -> Option<String> {
     }
 }
 
-fn parse_on_off(builtin: &'static str, arg: Option<&Value>) -> Result<Option<bool>, crate::RuntimeError> {
+fn parse_on_off(
+    builtin: &'static str,
+    arg: Option<&Value>,
+) -> Result<Option<bool>, crate::RuntimeError> {
     let Some(arg) = arg else {
         return Ok(None);
     };
@@ -167,7 +169,10 @@ pub fn colormap_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
         return Err(plotting_error("colormap", "colormap: expected a name"));
     };
     let Some(name) = as_lower_str(arg) else {
-        return Err(plotting_error("colormap", "colormap: expected a string name"));
+        return Err(plotting_error(
+            "colormap",
+            "colormap: expected a string name",
+        ));
     };
     let cmap = match name.trim() {
         "parula" => runmat_plot::plots::surface::ColorMap::Parula,
@@ -246,12 +251,21 @@ pub fn colorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     match parse_on_off("colorbar", args.first())? {
         Some(enabled) => {
             set_colorbar_enabled(enabled);
-            Ok(if enabled { "colorbar on" } else { "colorbar off" }.to_string())
+            Ok(if enabled {
+                "colorbar on"
+            } else {
+                "colorbar off"
+            }
+            .to_string())
         }
         None => {
             let enabled = toggle_colorbar();
-            Ok(if enabled { "colorbar on" } else { "colorbar off" }.to_string())
+            Ok(if enabled {
+                "colorbar on"
+            } else {
+                "colorbar off"
+            }
+            .to_string())
         }
     }
 }
-

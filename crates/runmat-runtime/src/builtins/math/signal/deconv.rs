@@ -70,8 +70,7 @@ async fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinR
             outputs.push(eval.remainder());
         }
         return Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            outputs,
+            out_count, outputs,
         ));
     }
     Ok(eval.quotient())

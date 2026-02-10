@@ -109,6 +109,8 @@ pub struct VarId(pub usize);
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SourceId(pub usize);
 
+type FuncDef = (Vec<VarId>, Vec<VarId>, Vec<HirStmt>);
+
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct HirExpr {
     pub kind: HirExprKind,
@@ -754,7 +756,7 @@ pub fn infer_function_output_types(
         stmts: &[HirStmt],
         mut env: HashMap<VarId, Type>,
         returns: &HashMap<String, Vec<Type>>,
-        func_defs: &HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)>,
+        func_defs: &HashMap<String, FuncDef>,
     ) -> Analysis {
         let mut exits = Vec::new();
         let mut i = 0usize;
@@ -1179,7 +1181,7 @@ pub fn infer_function_output_types(
 
     // Collect function defs for simple callsite fallback inference
     #[allow(clippy::type_complexity)]
-    let mut func_defs: HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)> = HashMap::new();
+    let mut func_defs: HashMap<String, FuncDef> = HashMap::new();
     for stmt in &prog.body {
         if let HirStmt::Function {
             name,
@@ -1342,7 +1344,7 @@ pub fn infer_function_variable_types(
 
     // Collect function defs for simple callsite fallback inference
     #[allow(clippy::type_complexity)]
-    let mut func_defs: HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)> = HashMap::new();
+    let mut func_defs: HashMap<String, FuncDef> = HashMap::new();
     for stmt in &prog.body {
         if let HirStmt::Function {
             name,
@@ -1409,7 +1411,7 @@ pub fn infer_function_variable_types(
         stmts: &[HirStmt],
         mut env: HashMap<VarId, Type>,
         returns: &HashMap<String, Vec<Type>>,
-        func_defs: &HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)>,
+        func_defs: &HashMap<String, FuncDef>,
     ) -> Analysis {
         let mut exits = Vec::new();
         let mut i = 0usize;
@@ -1833,7 +1835,7 @@ pub fn infer_global_variable_types(
         stmts: &[HirStmt],
         mut env: HashMap<VarId, Type>,
         returns: &HashMap<String, Vec<Type>>,
-        func_defs: &HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)>,
+        func_defs: &HashMap<String, FuncDef>,
     ) -> Analysis {
         let mut exits = Vec::new();
         let mut i = 0usize;
@@ -2036,7 +2038,7 @@ pub fn infer_global_variable_types(
         }
     }
 
-    let mut func_defs: HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)> = HashMap::new();
+    let mut func_defs: HashMap<String, FuncDef> = HashMap::new();
     for stmt in &prog.body {
         if let HirStmt::Function {
             name,
@@ -2095,10 +2097,7 @@ pub fn infer_global_variable_types(
 pub fn lint_shapes(result: &LoweringResult) -> Vec<HirDiagnostic> {
     fn vector_literal_length(expr: &HirExpr) -> Option<usize> {
         let shape = tensor_literal_shape(expr)?;
-        match (
-            shape.get(0).cloned().unwrap_or(None),
-            shape.get(1).cloned().unwrap_or(None),
-        ) {
+        match (shape.first().copied().flatten(), shape.get(1).copied().flatten()) {
             (Some(r), Some(c)) => {
                 if r == 1 {
                     Some(c)

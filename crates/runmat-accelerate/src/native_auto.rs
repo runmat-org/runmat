@@ -692,8 +692,7 @@ async fn initialize_async() -> Option<NativeAutoOffload> {
         if let Some((cached, path)) = load_cached_thresholds_async(&device_info).await {
             info!(
                 "Native auto-offload: loaded cached calibration for '{}' from {}",
-                device_info.name,
-                path
+                device_info.name, path
             );
             config = cached;
             cache_path = Some(path);
@@ -713,8 +712,7 @@ async fn initialize_async() -> Option<NativeAutoOffload> {
                         cache_path = Some(path.clone());
                         info!(
                             "Native auto-offload: persisted calibration for '{}' to {}",
-                            device_info.name,
-                            path
+                            device_info.name, path
                         );
                     }
                     Err(err) => {

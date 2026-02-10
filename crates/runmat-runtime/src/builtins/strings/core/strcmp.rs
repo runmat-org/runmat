@@ -97,9 +97,7 @@ fn evaluate_strcmp(left: &TextCollection, right: &TextCollection) -> BuiltinResu
 pub(crate) mod tests {
     use super::*;
     use crate::RuntimeError;
-    use runmat_builtins::{
-        CellArray, CharArray, LogicalArray, ResolveContext, StringArray, Type,
-    };
+    use runmat_builtins::{CellArray, CharArray, LogicalArray, ResolveContext, StringArray, Type};
 
     fn strcmp_builtin(a: Value, b: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strcmp_builtin(a, b))

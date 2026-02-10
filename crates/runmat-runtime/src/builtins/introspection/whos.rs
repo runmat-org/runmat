@@ -500,9 +500,9 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> usize {
                 acc.saturating_add(frame.len().saturating_mul(2))
             })
         }
-        Value::OutputList(values) => values
-            .iter()
-            .fold(0usize, |acc, v| acc.saturating_add(value_memory_bytes(v, seen))),
+        Value::OutputList(values) => values.iter().fold(0usize, |acc, v| {
+            acc.saturating_add(value_memory_bytes(v, seen))
+        }),
     }
 }
 

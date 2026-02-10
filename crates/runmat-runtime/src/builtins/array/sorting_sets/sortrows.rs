@@ -76,8 +76,7 @@ async fn sortrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
             outputs.push(indices);
         }
         return Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            outputs,
+            out_count, outputs,
         ));
     }
     Ok(eval.into_sorted_value())

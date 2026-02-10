@@ -92,11 +92,7 @@ async fn svd_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
             return Ok(Value::OutputList(vec![eval.u(), eval.sigma()]));
         }
         if out_count == 3 {
-            return Ok(Value::OutputList(vec![
-                eval.u(),
-                eval.sigma(),
-                eval.v(),
-            ]));
+            return Ok(Value::OutputList(vec![eval.u(), eval.sigma(), eval.v()]));
         }
         return Err(svd_error("svd currently supports at most three outputs"));
     }

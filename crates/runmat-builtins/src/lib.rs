@@ -929,15 +929,14 @@ impl Type {
                     .as_ref()
                     .map(|dims| dims.iter().all(|d| d.is_none()))
                     .unwrap_or(true);
-                if a_norm == b_norm {
+                if a_norm == b_norm
+                    || (!a_unknown && b_unknown)
+                    || (a_norm.is_some() && b_norm.is_none())
+                {
                     Type::Tensor { shape: a_norm }
-                } else if !a_unknown && b_unknown {
-                    Type::Tensor { shape: a_norm }
-                } else if a_unknown && !b_unknown {
-                    Type::Tensor { shape: b_norm }
-                } else if a_norm.is_some() && b_norm.is_none() {
-                    Type::Tensor { shape: a_norm }
-                } else if a_norm.is_none() && b_norm.is_some() {
+                } else if (a_unknown && !b_unknown)
+                    || (a_norm.is_none() && b_norm.is_some())
+                {
                     Type::Tensor { shape: b_norm }
                 } else {
                     Type::tensor()
@@ -960,15 +959,14 @@ impl Type {
                     .as_ref()
                     .map(|dims| dims.iter().all(|d| d.is_none()))
                     .unwrap_or(true);
-                if a_norm == b_norm {
+                if a_norm == b_norm
+                    || (!a_unknown && b_unknown)
+                    || (a_norm.is_some() && b_norm.is_none())
+                {
                     Type::Logical { shape: a_norm }
-                } else if !a_unknown && b_unknown {
-                    Type::Logical { shape: a_norm }
-                } else if a_unknown && !b_unknown {
-                    Type::Logical { shape: b_norm }
-                } else if a_norm.is_some() && b_norm.is_none() {
-                    Type::Logical { shape: a_norm }
-                } else if a_norm.is_none() && b_norm.is_some() {
+                } else if (a_unknown && !b_unknown)
+                    || (a_norm.is_none() && b_norm.is_some())
+                {
                     Type::Logical { shape: b_norm }
                 } else {
                     Type::logical()

@@ -89,8 +89,7 @@ async fn orderfields_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Va
             outputs.push(permutation);
         }
         return Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            outputs,
+            out_count, outputs,
         ));
     }
     Ok(eval.into_ordered_value())

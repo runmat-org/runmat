@@ -774,7 +774,10 @@ pub(crate) mod tests {
     #[test]
     fn scatter_type_is_string() {
         assert_eq!(
-            string_type(&[Type::tensor(), Type::tensor()], &ResolveContext::new(Vec::new())),
+            string_type(
+                &[Type::tensor(), Type::tensor()],
+                &ResolveContext::new(Vec::new())
+            ),
             Type::String
         );
     }

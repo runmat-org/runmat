@@ -455,7 +455,10 @@ pub(crate) mod tests {
 
     #[test]
     fn fill_type_scalar_numeric_is_num() {
-        assert_eq!(fill_type(&[Type::Num], &ResolveContext::new(Vec::new())), Type::Num);
+        assert_eq!(
+            fill_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::Num
+        );
     }
 
     #[test]

@@ -179,8 +179,7 @@ async fn strjoin_rowwise(a: Value, delim: Value) -> crate::BuiltinResult<Value> 
 async fn deal_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if let Some(out_count) = crate::output_count::current_output_count() {
         return Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            rest,
+            out_count, rest,
         ));
     }
     // Return cell row vector of inputs for expansion
@@ -1033,7 +1032,7 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
                 }
             }
         }
-        Ok(crate::call_builtin_async(name, args).await?)
+        crate::call_builtin_async(name, args).await
     }
 
     match f {

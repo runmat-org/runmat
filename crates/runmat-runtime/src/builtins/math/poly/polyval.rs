@@ -72,8 +72,7 @@ async fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> crate::Builtin
             outputs.push(eval.delta()?);
         }
         return Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            outputs,
+            out_count, outputs,
         ));
     }
     let eval = evaluate(p, x, &rest, false).await?;

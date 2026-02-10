@@ -18,13 +18,13 @@ pub mod fusion_residency;
 pub mod graph;
 mod host_lu;
 pub mod native_auto;
-#[cfg(target_arch = "wasm32")]
-mod web_auto_offload_store;
 pub mod precision;
 mod reduction_meta;
 pub mod simple_provider;
 mod sortrows_host;
 pub mod telemetry;
+#[cfg(target_arch = "wasm32")]
+mod web_auto_offload_store;
 #[cfg(feature = "wgpu")]
 use crate::backend::wgpu::provider::WgpuProvider;
 pub use fusion::*;

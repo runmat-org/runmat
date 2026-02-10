@@ -104,9 +104,7 @@ fn evaluate_strcmpi(left: &TextCollection, right: &TextCollection) -> BuiltinRes
 pub(crate) mod tests {
     use super::*;
     use crate::RuntimeError;
-    use runmat_builtins::{
-        CellArray, CharArray, LogicalArray, ResolveContext, StringArray, Type,
-    };
+    use runmat_builtins::{CellArray, CharArray, LogicalArray, ResolveContext, StringArray, Type};
 
     fn strcmpi_builtin(a: Value, b: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strcmpi_builtin(a, b))

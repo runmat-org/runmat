@@ -7,11 +7,13 @@ use std::sync::Mutex;
 
 /// Resolver used by the runtime to access the caller workspace when builtins
 /// (such as `save`) need to look up variables by name.
+type AssignFn = fn(&str, Value) -> Result<(), String>;
+
 pub struct WorkspaceResolver {
     pub lookup: fn(&str) -> Option<Value>,
     pub snapshot: fn() -> Vec<(String, Value)>,
     pub globals: fn() -> Vec<String>,
-    pub assign: Option<fn(&str, Value) -> Result<(), String>>,
+    pub assign: Option<AssignFn>,
 }
 
 mod resolver_storage {

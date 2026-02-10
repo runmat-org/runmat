@@ -104,8 +104,7 @@ async fn regexp_builtin(
             outputs.truncate(out_count);
         }
         return Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            outputs,
+            out_count, outputs,
         ));
     }
     let mut outputs = evaluation.outputs_for_single()?;

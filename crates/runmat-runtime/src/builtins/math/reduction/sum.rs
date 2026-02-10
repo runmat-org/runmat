@@ -244,32 +244,30 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut idx = 0;
     while idx < args.len() {
         let arg = &args[idx];
-        if let Some(token) = tokens.get(idx) {
-            if let crate::builtins::common::arg_tokens::ArgToken::String(text) = token {
-                match text.as_str() {
-                    "omitnan" => {
-                        nan_mode = ReductionNaN::Omit;
-                        idx += 1;
-                        continue;
-                    }
-                    "includenan" => {
-                        nan_mode = ReductionNaN::Include;
-                        idx += 1;
-                        continue;
-                    }
-                    "all" => {
-                        if selection_set && !matches!(selection, DimSelection::Auto) {
-                            return Err(sum_error(
-                                "sum: 'all' cannot be combined with an explicit dimension",
-                            ));
-                        }
-                        selection = DimSelection::All;
-                        selection_set = true;
-                        idx += 1;
-                        continue;
-                    }
-                    _ => {}
+        if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
+            match text.as_str() {
+                "omitnan" => {
+                    nan_mode = ReductionNaN::Omit;
+                    idx += 1;
+                    continue;
                 }
+                "includenan" => {
+                    nan_mode = ReductionNaN::Include;
+                    idx += 1;
+                    continue;
+                }
+                "all" => {
+                    if selection_set && !matches!(selection, DimSelection::Auto) {
+                        return Err(sum_error(
+                            "sum: 'all' cannot be combined with an explicit dimension",
+                        ));
+                    }
+                    selection = DimSelection::All;
+                    selection_set = true;
+                    idx += 1;
+                    continue;
+                }
+                _ => {}
             }
         }
         if let Some(keyword) = keyword_of(arg) {

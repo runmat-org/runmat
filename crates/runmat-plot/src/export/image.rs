@@ -2,7 +2,10 @@
 //!
 //! Static image export functionality.
 
-use crate::core::{Camera, plot_renderer::{PlotRenderConfig, PlotRenderer}};
+use crate::core::{
+    plot_renderer::{PlotRenderConfig, PlotRenderer},
+    Camera,
+};
 use crate::plots::Figure;
 #[cfg(feature = "gui")]
 use egui::{Align2, Color32, FontId, Pos2};
@@ -151,7 +154,8 @@ impl ImageExporter {
         figure: &mut Figure,
         camera_override: Option<&Camera>,
     ) -> Result<Vec<u8>, String> {
-        self.render_rgba_internal(figure, camera_override, None).await
+        self.render_rgba_internal(figure, camera_override, None)
+            .await
     }
 
     async fn render_rgba_with_axes_cameras(
@@ -159,7 +163,8 @@ impl ImageExporter {
         figure: &mut Figure,
         axes_cameras: &[Camera],
     ) -> Result<Vec<u8>, String> {
-        self.render_rgba_internal(figure, None, Some(axes_cameras)).await
+        self.render_rgba_internal(figure, None, Some(axes_cameras))
+            .await
     }
 
     async fn render_rgba_internal(

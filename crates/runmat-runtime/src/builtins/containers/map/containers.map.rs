@@ -10,13 +10,13 @@ use once_cell::sync::Lazy;
 use runmat_builtins::{CharArray, HandleRef, IntValue, LogicalArray, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::containers::type_resolvers::{
-    map_cell_type, map_handle_type, map_is_key_type, map_unknown_type,
-};
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
+};
+use crate::builtins::containers::type_resolvers::{
+    map_cell_type, map_handle_type, map_is_key_type, map_unknown_type,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
