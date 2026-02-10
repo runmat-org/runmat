@@ -111,7 +111,7 @@ fn main(
     tile[lid.x] = acc;
     workgroupBarrier();
 
-    var stride = 128u;
+    var stride = wg / 2u;
     loop {
         if stride == 0u { break; }
         if lid.x < stride { tile[lid.x] = combine(tile[lid.x], tile[lid.x + stride], params.op); }
@@ -211,7 +211,7 @@ fn main(
     tile[lid.x] = acc;
     workgroupBarrier();
 
-    var stride = 128u;
+    var stride = wg / 2u;
     loop {
         if stride == 0u { break; }
         if lid.x < stride { tile[lid.x] = combine(tile[lid.x], tile[lid.x + stride], params.op); }
