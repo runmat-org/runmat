@@ -134,6 +134,13 @@ export default function Navigation() {
                   </Link>
                 </NavigationMenuLink>
               </NavigationMenuItem>
+              <NavigationMenuItem>
+                <NavigationMenuLink className={navigationMenuTriggerStyle()} asChild>
+                  <Link href="/pricing">
+                    Pricing
+                  </Link>
+                </NavigationMenuLink>
+              </NavigationMenuItem>
             </NavigationMenuList>
           </NavigationMenu>
         </div>
@@ -270,6 +277,14 @@ export default function Navigation() {
               >
                 <Scale className="mr-2 h-4 w-4" />
                 Benchmarks
+              </Link>
+              <Link
+                href="/pricing"
+                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <Scale className="mr-2 h-4 w-4" />
+                Pricing
               </Link>
               <Link
                 href="/download"
