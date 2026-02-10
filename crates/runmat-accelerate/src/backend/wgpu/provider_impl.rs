@@ -3940,7 +3940,7 @@ impl WgpuProvider {
         );
         if std::env::var("RUNMAT_DEBUG_PIPELINE_ONLY").is_ok() {
             let out_len = num_slices.max(1);
-            let out_buffer = self.create_storage_buffer(out_len, "runmat-reduction-out");
+            let out_buffer = self.create_storage_buffer_checked(out_len, "runmat-reduction-out")?;
             return Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len));
         }
         let key =
@@ -3968,13 +3968,11 @@ impl WgpuProvider {
             });
         self.submit(flush_enc);
         let out_len = num_slices.max(1);
-        let mut out_buffer = self
-            .create_storage_buffer_for_usage(
-                BufferUsageClass::FusionOut,
-                out_len,
-                "runmat-reduction-out",
-            )
-            .0;
+        let mut out_buffer = self.create_storage_buffer_checked_with_usage(
+            out_len,
+            "runmat-reduction-out",
+            BufferUsageClass::FusionOut,
+        )?;
         {
             let out_ptr = out_buffer.as_ref() as *const wgpu::Buffer as usize;
             let mut alias = false;
@@ -3986,13 +3984,11 @@ impl WgpuProvider {
                 }
             }
             if alias {
-                out_buffer = self
-                    .create_storage_buffer_for_usage(
-                        BufferUsageClass::FusionOut,
-                        out_len,
-                        "runmat-reduction-out-unique",
-                    )
-                    .0;
+                out_buffer = self.create_storage_buffer_checked_with_usage(
+                    out_len,
+                    "runmat-reduction-out-unique",
+                    BufferUsageClass::FusionOut,
+                )?;
             }
         }
         #[repr(C)]
@@ -4205,7 +4201,7 @@ impl WgpuProvider {
         );
         if std::env::var("RUNMAT_DEBUG_PIPELINE_ONLY").is_ok() {
             let out_len = num_slices.max(1);
-            let out_buffer = self.create_storage_buffer(out_len, "runmat-reduction-out");
+            let out_buffer = self.create_storage_buffer_checked(out_len, "runmat-reduction-out")?;
             return Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len));
         }
         let p2_key = self.compute_pipeline_hash_bytes(
@@ -4912,7 +4908,7 @@ impl WgpuProvider {
             input_buffers.push(self.get_entry(handle)?.buffer.clone());
         }
 
-        let output_buffer = self.create_storage_buffer(len, "runmat-sub2ind-out");
+        let output_buffer = self.create_storage_buffer_checked(len, "runmat-sub2ind-out")?;
         let error_bytes = vec![0u8; std::mem::size_of::<u32>() * 4];
         let error_buffer = Arc::new(self.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -5110,7 +5106,7 @@ impl WgpuProvider {
 
         let mut output_buffers = Vec::with_capacity(dims.len());
         for _ in 0..dims.len() {
-            output_buffers.push(self.create_storage_buffer(len, "runmat-ind2sub-out"));
+            output_buffers.push(self.create_storage_buffer_checked(len, "runmat-ind2sub-out")?);
         }
 
         let error_bytes = vec![0u8; std::mem::size_of::<u32>() * 4];
@@ -6230,7 +6226,7 @@ impl WgpuProvider {
         );
 
         let out_shape = conv1d_output_shape(output_len, options.orientation);
-        let out_buffer = self.create_storage_buffer(output_len, "runmat-conv1d-out");
+        let out_buffer = self.create_storage_buffer_checked(output_len, "runmat-conv1d-out")?;
 
         let params = Conv1dParams {
             signal_len: signal_len as u32,
@@ -7037,7 +7033,7 @@ impl WgpuProvider {
 
         let normalized_shape = normalize_concat_shape(output_shape.clone(), dim_zero);
 
-        let out_buffer = self.create_storage_buffer(total_len, "runmat-cat-out");
+        let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-cat-out")?;
         if total_len == 0 {
             return Ok(self.register_existing_buffer(out_buffer, normalized_shape, 0));
         }
@@ -7215,7 +7211,7 @@ impl WgpuProvider {
             stride_b_arr[i] = crate::backend::wgpu::params::AlignedU32::new(strides_b[i] as u32);
         }
 
-        let out_buffer = self.create_storage_buffer(len_out, "runmat-kron-out");
+        let out_buffer = self.create_storage_buffer_checked(len_out, "runmat-kron-out")?;
         let out_shape = shape_out.clone();
 
         {
@@ -7835,7 +7831,8 @@ impl WgpuProvider {
         let total_len = out_page_size
             .checked_mul(page_volume)
             .ok_or_else(|| anyhow!("pagefun: output size overflow"))?;
-        let out_buffer = self.create_storage_buffer(total_len, "runmat-pagefun-mtimes-out");
+        let out_buffer =
+            self.create_storage_buffer_checked(total_len, "runmat-pagefun-mtimes-out")?;
 
         if total_len == 0 {
             return Ok(self.register_existing_buffer(
@@ -8643,7 +8640,7 @@ impl WgpuProvider {
         }
         let total_len = product_checked(&normalized)
             .ok_or_else(|| anyhow!("eye: tensor size exceeds GPU limits"))?;
-        let out_buffer = self.create_storage_buffer(total_len, "runmat-eye-out");
+        let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-eye-out")?;
         if total_len == 0 {
             return Ok(self.register_existing_buffer(out_buffer, normalized, total_len));
         }
@@ -9325,7 +9322,7 @@ impl WgpuProvider {
         let total_len = product_checked(shape)
             .ok_or_else(|| anyhow!("fill: tensor size exceeds GPU limits"))?;
         let shape_vec = shape.to_vec();
-        let out_buffer = self.create_storage_buffer(total_len, "runmat-fill-out");
+        let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-fill-out")?;
         if total_len == 0 {
             return Ok(self.register_existing_buffer(out_buffer, shape_vec, 0));
         }
@@ -9514,7 +9511,7 @@ impl WgpuProvider {
             }
         };
 
-        let out_buffer = self.create_storage_buffer(output_len, "runmat-imfilter-out");
+        let out_buffer = self.create_storage_buffer_checked(output_len, "runmat-imfilter-out")?;
         if output_len == 0 {
             return Ok(self.register_existing_buffer(out_buffer, plan.final_shape.clone(), 0));
         }
@@ -10199,7 +10196,7 @@ impl WgpuProvider {
         let shape_vec = vec![rows, cols];
         let total_len = product_checked(&shape_vec)
             .ok_or_else(|| anyhow!("fspecial: tensor size exceeds GPU limits"))?;
-        let out_buffer = self.create_storage_buffer(total_len, "runmat-fspecial-out");
+        let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-fspecial-out")?;
         if total_len == 0 {
             return Ok(self.register_existing_buffer(out_buffer, shape_vec, 0));
         }
@@ -10513,7 +10510,7 @@ impl WgpuProvider {
             self.submit(enc);
         }
 
-        let out_buffer = self.create_storage_buffer(len, "runmat-polyval-out");
+        let out_buffer = self.create_storage_buffer_checked(len, "runmat-polyval-out")?;
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
         let (mu_mean, mu_scale) = options.mu.map(|m| (m.mean, m.scale)).unwrap_or((0.0, 1.0));
@@ -10641,7 +10638,7 @@ impl WgpuProvider {
         );
 
         let output_len = entry.len + 1;
-        let out_buffer = self.create_storage_buffer(output_len, "runmat-polyint-out");
+        let out_buffer = self.create_storage_buffer_checked(output_len, "runmat-polyint-out")?;
         let params_buffer = match self.precision {
             NumericPrecision::F64 => {
                 let params = PolyintParamsF64 {
@@ -10748,7 +10745,7 @@ impl WgpuProvider {
             "polyder: polynomial length exceeds GPU limits"
         );
         let output_len = entry.len - 1;
-        let out_buffer = self.create_storage_buffer(output_len, "runmat-polyder-out");
+        let out_buffer = self.create_storage_buffer_checked(output_len, "runmat-polyder-out")?;
         let params = PolyderParams {
             input_len: entry.len as u32,
             output_len: output_len as u32,
@@ -11418,7 +11415,7 @@ impl WgpuProvider {
                 });
             self.submit(enc);
         }
-        let out_buffer = self.create_storage_buffer(len, "runmat-binary-out");
+        let out_buffer = self.create_storage_buffer_checked(len, "runmat-binary-out")?;
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
         let mut offset = 0usize;
@@ -11552,7 +11549,7 @@ impl WgpuProvider {
         }
 
         // Create output buffer
-        let out_buffer = self.create_storage_buffer(len, "runmat-binary-bcast-out");
+        let out_buffer = self.create_storage_buffer_checked(len, "runmat-binary-bcast-out")?;
         // Prepare params buffer and bind group once; update params per chunk
         let params_size = std::mem::size_of::<BinaryBroadcastParams>() as u64;
         let params_buffer = self.kernel_resources.uniform_buffer(
@@ -12019,7 +12016,7 @@ impl WgpuProvider {
         }
         let entry_a = self.get_entry(a)?;
         let len = entry_a.len;
-        let out_buffer = self.create_storage_buffer(len, "runmat-unary-out");
+        let out_buffer = self.create_storage_buffer_checked(len, "runmat-unary-out")?;
         if len == 0 {
             return Ok(self.register_existing_buffer(out_buffer, entry_a.shape, entry_a.len));
         }
@@ -12116,7 +12113,7 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let entry_a = self.get_entry(a)?;
         let len = entry_a.len;
-        let out_buffer = self.create_storage_buffer(len, "runmat-scalar-out");
+        let out_buffer = self.create_storage_buffer_checked(len, "runmat-scalar-out")?;
         if len == 0 {
             return Ok(self.register_existing_buffer(out_buffer, entry_a.shape, entry_a.len));
         }
@@ -12301,7 +12298,8 @@ impl WgpuProvider {
                 self.submit(enc);
                 input_for_pass = snap;
             }
-            let mut out_buffer = self.create_storage_buffer(output_len_total, "runmat-reduce-pass");
+            let mut out_buffer =
+                self.create_storage_buffer_checked(output_len_total, "runmat-reduce-pass")?;
             // Prevent aliasing: output buffer must not be the same as input buffer
             if std::ptr::eq(out_buffer.as_ref(), input_for_pass.as_ref()) {
                 if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
@@ -12321,6 +12319,12 @@ impl WgpuProvider {
                     );
                 }
                 let size_bytes = (output_len_total * self.element_size) as u64;
+                ensure!(
+                    size_bytes <= self.adapter_limits.max_buffer_size,
+                    "runmat-reduce-pass-unique: requested {} bytes exceeds device max {}",
+                    size_bytes,
+                    self.adapter_limits.max_buffer_size
+                );
                 out_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("runmat-reduce-pass-unique"),
                     size: size_bytes,
@@ -12466,7 +12470,7 @@ impl WgpuProvider {
         } else {
             entry.buffer.clone()
         };
-        let mut out_buffer = self.create_storage_buffer(out_len, "runmat-reduce-dim-out");
+        let mut out_buffer = self.create_storage_buffer_checked(out_len, "runmat-reduce-dim-out")?;
         // Prevent aliasing: output must not be identical to input buffer
         if std::ptr::eq(out_buffer.as_ref(), entry.buffer.as_ref()) {
             if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
@@ -12480,6 +12484,12 @@ impl WgpuProvider {
                 );
             }
             let size_bytes = (out_len * self.element_size) as u64;
+            ensure!(
+                size_bytes <= self.adapter_limits.max_buffer_size,
+                "runmat-reduce-dim-out-unique: requested {} bytes exceeds device max {}",
+                size_bytes,
+                self.adapter_limits.max_buffer_size
+            );
             out_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-dim-out-unique"),
                 size: size_bytes,
@@ -12566,12 +12576,19 @@ impl WgpuProvider {
         } else {
             vec![rows, 1]
         };
-        let mut values_buffer = self.create_storage_buffer(out_len, "runmat-reduce-dim-ext-values");
+        let mut values_buffer =
+            self.create_storage_buffer_checked(out_len, "runmat-reduce-dim-ext-values")?;
         let mut indices_buffer =
-            self.create_storage_buffer(out_len, "runmat-reduce-dim-ext-indices");
+            self.create_storage_buffer_checked(out_len, "runmat-reduce-dim-ext-indices")?;
         // Prevent aliasing either output with input buffer
         if std::ptr::eq(values_buffer.as_ref(), entry.buffer.as_ref()) {
             let size_bytes = (out_len * self.element_size) as u64;
+            ensure!(
+                size_bytes <= self.adapter_limits.max_buffer_size,
+                "runmat-reduce-dim-ext-values-unique: requested {} bytes exceeds device max {}",
+                size_bytes,
+                self.adapter_limits.max_buffer_size
+            );
             values_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-dim-ext-values-unique"),
                 size: size_bytes,
@@ -12583,6 +12600,12 @@ impl WgpuProvider {
         }
         if std::ptr::eq(indices_buffer.as_ref(), entry.buffer.as_ref()) {
             let size_bytes = (out_len * self.element_size) as u64;
+            ensure!(
+                size_bytes <= self.adapter_limits.max_buffer_size,
+                "runmat-reduce-dim-ext-indices-unique: requested {} bytes exceeds device max {}",
+                size_bytes,
+                self.adapter_limits.max_buffer_size
+            );
             indices_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-dim-ext-indices-unique"),
                 size: size_bytes,
@@ -16567,6 +16590,13 @@ impl AccelProvider for WgpuProvider {
         .entered();
         let len = host.data.len();
         let shape = host.shape.to_vec();
+        let bytes = (len as u64).saturating_mul(self.element_size as u64);
+        ensure!(
+            bytes <= self.adapter_limits.max_buffer_size,
+            "upload: requested {} bytes exceeds device max {}",
+            bytes,
+            self.adapter_limits.max_buffer_size
+        );
         let buffer =
             if len == 0 {
                 self.create_storage_buffer(0, "runmat-upload-empty")
@@ -16599,7 +16629,6 @@ impl AccelProvider for WgpuProvider {
                     }
                 }
             };
-        let bytes = (len as u64).saturating_mul(self.element_size as u64);
         self.telemetry.record_upload_bytes(bytes);
         Ok(self.register_existing_buffer(buffer, shape, len))
     }
