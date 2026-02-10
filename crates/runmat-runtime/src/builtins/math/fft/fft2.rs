@@ -180,7 +180,8 @@ fn parse_fft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usiz
         | Value::Listener(_)
         | Value::Object(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(fft2_error("fft2: transform lengths must be numeric")),
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(fft2_error("fft2: transform lengths must be numeric")),
     }
 }
 

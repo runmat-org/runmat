@@ -371,9 +371,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use num_complex::Complex;
-    use runmat_builtins::{
-        ComplexTensor as HostComplexTensor, IntValue, ResolveContext, Type,
-    };
+    use runmat_builtins::{ComplexTensor as HostComplexTensor, IntValue, ResolveContext, Type};
 
     fn approx_eq((a_re, a_im): (f64, f64), (b_re, b_im): (f64, f64), tol: f64) -> bool {
         (a_re - b_re).abs() <= tol && (a_im - b_im).abs() <= tol

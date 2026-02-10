@@ -74,7 +74,8 @@ pub fn parse_length(value: &Value, builtin: &str) -> BuiltinResult<Option<usize>
         | Value::Listener(_)
         | Value::Object(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(builtin_error(
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(builtin_error(
             builtin,
             format!("{builtin}: length must be numeric"),
         )),
@@ -468,7 +469,8 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(builtin_error(
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(builtin_error(
             builtin,
             format!("{builtin}: dimension indices must be numeric"),
         )),

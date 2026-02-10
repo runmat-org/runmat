@@ -230,11 +230,12 @@ impl PlotRenderer {
         // Convert figure to scene nodes
         let prev_has_3d = self.figure_has_3d;
         let stats = figure.statistics();
-        let next_has_3d =
-            stats.plot_type_counts.contains_key(&crate::plots::figure::PlotType::Surface)
-                || stats
-                    .plot_type_counts
-                    .contains_key(&crate::plots::figure::PlotType::Scatter3);
+        let next_has_3d = stats
+            .plot_type_counts
+            .contains_key(&crate::plots::figure::PlotType::Surface)
+            || stats
+                .plot_type_counts
+                .contains_key(&crate::plots::figure::PlotType::Scatter3);
         self.figure_has_3d = next_has_3d;
 
         // If the plot "mode" changed (2D <-> 3D), reset auto-fit so the new mode gets a sensible
@@ -277,12 +278,10 @@ impl PlotRenderer {
         self.needs_update = true;
 
         // Recompute bounds and fit camera immediately (only once per initial dataset).
-        if self.camera_auto_fit {
-            if self.fit_camera_to_data() {
-                // Freeze the initial fit (CAD-like): don't re-fit as data updates (e.g. animations)
-                // unless the user explicitly asks (Fit Extents / Reset View) or we change plot mode.
-                self.camera_auto_fit = false;
-            }
+        if self.camera_auto_fit && self.fit_camera_to_data() {
+            // Freeze the initial fit (CAD-like): don't re-fit as data updates (e.g. animations)
+            // unless the user explicitly asks (Fit Extents / Reset View) or we change plot mode.
+            self.camera_auto_fit = false;
         }
     }
 
@@ -1305,10 +1304,17 @@ impl PlotRenderer {
 
             if plane_pts.len() >= 2 {
                 min_x = plane_pts.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
-                max_x = plane_pts.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max);
+                max_x = plane_pts
+                    .iter()
+                    .map(|p| p.x)
+                    .fold(f32::NEG_INFINITY, f32::max);
                 min_y = plane_pts.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
-                max_y = plane_pts.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
-            } else if let crate::core::camera::ProjectionType::Perspective { fov, .. } = cam.projection
+                max_y = plane_pts
+                    .iter()
+                    .map(|p| p.y)
+                    .fold(f32::NEG_INFINITY, f32::max);
+            } else if let crate::core::camera::ProjectionType::Perspective { fov, .. } =
+                cam.projection
             {
                 let dist = (cam.position - cam.target).length().max(1e-3);
                 let extent = (dist * (0.5 * fov).tan() * 1.25).max(0.5);
@@ -1401,18 +1407,19 @@ impl PlotRenderer {
             // popping and keeps line density stable via shader derivatives.
             if self.figure_show_grid {
                 self.wgpu_renderer.ensure_grid_plane_pipeline();
-                self.wgpu_renderer.update_grid_uniforms(crate::core::renderer::GridUniforms {
-                    major_step: major_step as f32,
-                    minor_step: minor_step as f32,
-                    fade_start: (0.60 * dx.max(dy)).max(major_step as f32),
-                    fade_end: (0.95 * dx.max(dy)).max((major_step as f32) * 2.0),
-                    camera_pos: cam.position.to_array(),
-                    _pad0: 0.0,
-                    target_pos: Vec3::new(cam.target.x, cam.target.y, 0.0).to_array(),
-                    _pad1: 0.0,
-                    major_color: [0.90, 0.92, 0.96, 0.30],
-                    minor_color: [0.82, 0.84, 0.88, 0.18],
-                });
+                self.wgpu_renderer
+                    .update_grid_uniforms(crate::core::renderer::GridUniforms {
+                        major_step: major_step as f32,
+                        minor_step: minor_step as f32,
+                        fade_start: (0.60 * dx.max(dy)).max(major_step as f32),
+                        fade_end: (0.95 * dx.max(dy)).max((major_step as f32) * 2.0),
+                        camera_pos: cam.position.to_array(),
+                        _pad0: 0.0,
+                        target_pos: Vec3::new(cam.target.x, cam.target.y, 0.0).to_array(),
+                        _pad1: 0.0,
+                        major_color: [0.90, 0.92, 0.96, 0.30],
+                        minor_color: [0.82, 0.84, 0.88, 0.18],
+                    });
 
                 let quad_vertices = [
                     Vertex::new(Vec3::new(min_x, min_y, z_grid), Vec4::ONE),
@@ -1455,7 +1462,11 @@ impl PlotRenderer {
                         break;
                     }
                     let p = origin + axis * t;
-                    push_line(p - perp * tick_len, p + perp * tick_len, Vec4::new(col.x, col.y, col.z, col.w * 0.85));
+                    push_line(
+                        p - perp * tick_len,
+                        p + perp * tick_len,
+                        Vec4::new(col.x, col.y, col.z, col.w * 0.85),
+                    );
                 }
             };
             add_ticks(Vec3::X, Vec3::Y, col_x);
@@ -1486,7 +1497,10 @@ impl PlotRenderer {
                 if let Some(dc) = owned_render_data[idx].draw_calls.get_mut(0) {
                     dc.vertex_count = vcount;
                 }
-                let vb = Arc::new(self.wgpu_renderer.create_vertex_buffer(&owned_render_data[idx].vertices));
+                let vb = Arc::new(
+                    self.wgpu_renderer
+                        .create_vertex_buffer(&owned_render_data[idx].vertices),
+                );
                 // Draw helpers first (under data, depth-tested).
                 let rd_ref: &crate::core::RenderData = &owned_render_data[idx];
                 render_items.insert(0, (rd_ref, vb, None));

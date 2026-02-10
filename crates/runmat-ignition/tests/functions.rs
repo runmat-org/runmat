@@ -2,8 +2,8 @@ mod test_helpers;
 
 use runmat_parser::parse;
 use std::collections::HashMap;
-use std::thread;
 use std::convert::TryFrom;
+use std::thread;
 use test_helpers::lower;
 use test_helpers::{execute, interpret};
 

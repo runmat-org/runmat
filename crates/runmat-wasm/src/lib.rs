@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
+use glam::Vec2;
 use js_sys::{Error as JsError, Reflect, Uint8Array};
 use log::warn;
 use miette::{SourceOffset, SourceSpan};
@@ -23,20 +24,19 @@ use runmat_core::{
     WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview,
     WorkspaceSliceOptions, WorkspaceSnapshot,
 };
+use runmat_core::{TelemetryPlatformInfo, TelemetryRunConfig, TelemetryRunFinish, TelemetrySink};
 use runmat_logging::{
     init_logging, set_runtime_log_hook, LoggingGuard, LoggingOptions, RuntimeLogRecord,
 };
 use runmat_runtime::build_runtime_error;
+use runmat_telemetry::TelemetryRunKind;
 use runmat_thread_local::runmat_thread_local;
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 use std::backtrace::Backtrace;
 use tracing::{info, info_span};
-use runmat_core::{TelemetryPlatformInfo, TelemetryRunConfig, TelemetryRunFinish, TelemetrySink};
-use runmat_telemetry::TelemetryRunKind;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use glam::Vec2;
 
 #[cfg(target_arch = "wasm32")]
 mod fs;
@@ -57,6 +57,8 @@ use runmat_runtime::builtins::plotting::{
     context as plotting_context, current_axes_state as runtime_current_axes_state,
     current_figure_handle as runtime_current_figure_handle,
     detach_surface as runtime_detach_surface, figure_handles as runtime_figure_handles,
+    fit_surface_extents as runtime_fit_surface_extents,
+    handle_plot_surface_event as runtime_handle_plot_surface_event,
     install_figure_observer as runtime_install_figure_observer,
     install_surface as runtime_install_surface, new_figure_handle as runtime_new_figure_handle,
     present_figure_on_surface as runtime_present_figure_on_surface,
@@ -64,12 +66,10 @@ use runmat_runtime::builtins::plotting::{
     render_current_scene as runtime_render_current_scene,
     render_figure_snapshot as runtime_render_figure_snapshot,
     reset_hold_state_for_run as runtime_reset_hold_state_for_run,
-    resize_surface as runtime_resize_surface, select_figure as runtime_select_figure,
-    set_hold as runtime_set_hold, web_renderer_ready as runtime_plot_renderer_ready,
-    handle_plot_surface_event as runtime_handle_plot_surface_event,
-    fit_surface_extents as runtime_fit_surface_extents,
-    reset_surface_camera as runtime_reset_surface_camera,
-    FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
+    reset_surface_camera as runtime_reset_surface_camera, resize_surface as runtime_resize_surface,
+    select_figure as runtime_select_figure, set_hold as runtime_set_hold,
+    web_renderer_ready as runtime_plot_renderer_ready, FigureAxesState, FigureError,
+    FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
 #[cfg(target_arch = "wasm32")]
 use runmat_runtime::builtins::{
@@ -84,6 +84,7 @@ use serde::{Deserialize, Serialize};
 const MAX_DATA_PREVIEW: usize = 4096;
 const MAX_STRUCT_FIELDS: usize = 64;
 const MAX_OBJECT_FIELDS: usize = 64;
+const MAX_OUTPUT_LIST_ITEMS: usize = 64;
 
 #[derive(Clone, Copy)]
 enum InitErrorCode {
@@ -805,8 +806,8 @@ struct PlotSurfaceEventPayload {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = handlePlotSurfaceEvent)]
 pub fn handle_plot_surface_event(surface_id: u32, event: JsValue) -> Result<(), JsValue> {
-    use runmat_plot::core::interaction::MouseButton as PlotMouseButton;
     use runmat_plot::core::interaction::Modifiers as PlotModifiers;
+    use runmat_plot::core::interaction::MouseButton as PlotMouseButton;
     use runmat_plot::core::PlotEvent;
 
     let payload: PlotSurfaceEventPayload =
@@ -1340,7 +1341,9 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
                     parsed_opts.snapshot_stream = Some(stream_value);
                 }
             }
-            if let Ok(emitter_value) = Reflect::get(&options, &JsValue::from_str("telemetryEmitter")) {
+            if let Ok(emitter_value) =
+                Reflect::get(&options, &JsValue::from_str("telemetryEmitter"))
+            {
                 if !emitter_value.is_null() && !emitter_value.is_undefined() {
                     parsed_opts.telemetry_emitter = Some(emitter_value);
                 }
@@ -2848,6 +2851,20 @@ fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             "cols": ca.cols,
             "length": ca.data.len(),
         }),
+        Value::OutputList(values) => {
+            let truncated = values.len() > MAX_OUTPUT_LIST_ITEMS;
+            let items: Vec<JsonValue> = values
+                .iter()
+                .take(MAX_OUTPUT_LIST_ITEMS)
+                .map(|v| value_to_json(v, depth + 1))
+                .collect();
+            json!({
+                "kind": "output-list",
+                "length": values.len(),
+                "items": items,
+                "truncated": truncated,
+            })
+        }
         Value::Struct(st) => struct_to_json(st, depth + 1),
         Value::GpuTensor(handle) => {
             let (rows, cols) = rows_cols_from_shape(&handle.shape);

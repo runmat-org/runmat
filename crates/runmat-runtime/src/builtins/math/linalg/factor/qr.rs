@@ -5,11 +5,11 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
 use crate::builtins::math::linalg::type_resolvers::{matrix_dims, numeric_tensor_from_shape};
 use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
+use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
 use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
@@ -99,6 +99,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn qr_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(value, &rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        if out_count == 1 {
+            return Ok(Value::OutputList(vec![eval.r()]));
+        }
+        if out_count == 2 {
+            return Ok(Value::OutputList(vec![eval.q(), eval.r()]));
+        }
+        if out_count == 3 {
+            return Ok(Value::OutputList(vec![
+                eval.q(),
+                eval.r(),
+                eval.permutation(),
+            ]));
+        }
+        return Err(qr_error("qr currently supports at most three outputs"));
+    }
     Ok(eval.r())
 }
 

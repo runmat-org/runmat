@@ -8,10 +8,10 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use runmat_builtins::shape_rules::element_count_if_known;
-use runmat_builtins::ResolveContext;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_builtins::shape_rules::element_count_if_known;
+use runmat_builtins::ResolveContext;
 use runmat_builtins::{
     CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
 };
@@ -582,14 +582,19 @@ pub(crate) mod tests {
     fn repmat_type_preserves_logical_kind() {
         let out = repmat_type(
             &[
-            Type::Logical {
-                shape: Some(vec![Some(2), Some(2)]),
-            },
-            Type::Num,
+                Type::Logical {
+                    shape: Some(vec![Some(2), Some(2)]),
+                },
+                Type::Num,
             ],
             &ResolveContext::new(Vec::new()),
         );
-        assert_eq!(out, Type::Logical { shape: Some(vec![None, None]) });
+        assert_eq!(
+            out,
+            Type::Logical {
+                shape: Some(vec![None, None])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

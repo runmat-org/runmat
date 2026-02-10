@@ -78,7 +78,21 @@ fn orderfields_flow(message_id: &str, message: impl Into<String>) -> RuntimeErro
     builtin_path = "crate::builtins::structs::core::orderfields"
 )]
 async fn orderfields_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    Ok(evaluate(value, &rest)?.into_ordered_value())
+    let eval = evaluate(value, &rest)?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        let (ordered, permutation) = eval.into_values();
+        let mut outputs = vec![ordered];
+        if out_count >= 2 {
+            outputs.push(permutation);
+        }
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count, outputs,
+        ));
+    }
+    Ok(eval.into_ordered_value())
 }
 
 /// Evaluate the `orderfields` builtin once and expose both outputs.

@@ -60,7 +60,21 @@ fn sort_error(message: impl Into<String>) -> crate::RuntimeError {
     builtin_path = "crate::builtins::array::sorting_sets::sort"
 )]
 async fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    Ok(evaluate(value, &rest).await?.into_sorted_value())
+    let eval = evaluate(value, &rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        let (sorted, indices) = eval.into_values();
+        let mut outputs = vec![sorted];
+        if out_count >= 2 {
+            outputs.push(indices);
+        }
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count, outputs,
+        ));
+    }
+    Ok(eval.into_sorted_value())
 }
 
 /// Evaluate the `sort` builtin once and expose both outputs.
@@ -434,56 +448,54 @@ impl SortArgs {
                     }
                 }
             }
-            if let Some(token) = tokens.get(i) {
-                if let ArgToken::String(text) = token {
-                    match text.as_str() {
-                        "ascend" | "ascending" => {
-                            args.direction = SortDirection::Ascend;
-                            i += 1;
-                            continue;
-                        }
-                        "descend" | "descending" => {
-                            args.direction = SortDirection::Descend;
-                            i += 1;
-                            continue;
-                        }
-                        "comparisonmethod" => {
-                            i += 1;
-                            if i >= rest.len() {
-                                return Err(sort_error(
-                                    "sort: expected a value for 'ComparisonMethod'",
-                                ));
-                            }
-                            let value = match tokens.get(i) {
-                                Some(ArgToken::String(value)) => value.as_str(),
-                                _ => {
-                                    return Err(sort_error(
-                                        "sort: 'ComparisonMethod' requires a string value",
-                                    ))
-                                }
-                            };
-                            args.comparison = match value {
-                                "auto" => ComparisonMethod::Auto,
-                                "real" => ComparisonMethod::Real,
-                                "abs" | "magnitude" => ComparisonMethod::Abs,
-                                other => {
-                                    return Err(sort_error(format!(
-                                        "sort: unsupported ComparisonMethod '{other}'"
-                                    ))
-                                    .into())
-                                }
-                            };
-                            i += 1;
-                            continue;
-                        }
-                        "missingplacement" => {
-                            return Err(sort_error(
-                                "sort: the 'MissingPlacement' option is not supported yet",
-                            )
-                            .into());
-                        }
-                        _ => {}
+            if let Some(ArgToken::String(text)) = tokens.get(i) {
+                match text.as_str() {
+                    "ascend" | "ascending" => {
+                        args.direction = SortDirection::Ascend;
+                        i += 1;
+                        continue;
                     }
+                    "descend" | "descending" => {
+                        args.direction = SortDirection::Descend;
+                        i += 1;
+                        continue;
+                    }
+                    "comparisonmethod" => {
+                        i += 1;
+                        if i >= rest.len() {
+                            return Err(sort_error(
+                                "sort: expected a value for 'ComparisonMethod'",
+                            ));
+                        }
+                        let value = match tokens.get(i) {
+                            Some(ArgToken::String(value)) => value.as_str(),
+                            _ => {
+                                return Err(sort_error(
+                                    "sort: 'ComparisonMethod' requires a string value",
+                                ))
+                            }
+                        };
+                        args.comparison = match value {
+                            "auto" => ComparisonMethod::Auto,
+                            "real" => ComparisonMethod::Real,
+                            "abs" | "magnitude" => ComparisonMethod::Abs,
+                            other => {
+                                return Err(sort_error(format!(
+                                    "sort: unsupported ComparisonMethod '{other}'"
+                                ))
+                                .into())
+                            }
+                        };
+                        i += 1;
+                        continue;
+                    }
+                    "missingplacement" => {
+                        return Err(sort_error(
+                            "sort: the 'MissingPlacement' option is not supported yet",
+                        )
+                        .into());
+                    }
+                    _ => {}
                 }
             }
             if let Some(keyword) = tensor::value_to_string(&rest[i]) {

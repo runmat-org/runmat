@@ -358,7 +358,12 @@ pub(crate) mod tests {
             }],
             &ResolveContext::new(Vec::new()),
         );
-        assert_eq!(out, Type::Tensor { shape: Some(vec![None, None]) });
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![None, None])
+            }
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

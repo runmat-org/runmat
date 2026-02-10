@@ -108,8 +108,7 @@ impl ParsedLogical {
             }
 
             if shape_source.is_none() {
-                shape_source =
-                    Some(shape_from_value(&arg).map_err(|e| builtin_error(name, e))?);
+                shape_source = Some(shape_from_value(&arg).map_err(|e| builtin_error(name, e))?);
             }
             idx += 1;
         }

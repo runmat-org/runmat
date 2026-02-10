@@ -109,6 +109,8 @@ pub struct VarId(pub usize);
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SourceId(pub usize);
 
+type FuncDef = (Vec<VarId>, Vec<VarId>, Vec<HirStmt>);
+
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct HirExpr {
     pub kind: HirExprKind,
@@ -754,7 +756,7 @@ pub fn infer_function_output_types(
         stmts: &[HirStmt],
         mut env: HashMap<VarId, Type>,
         returns: &HashMap<String, Vec<Type>>,
-        func_defs: &HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)>,
+        func_defs: &HashMap<String, FuncDef>,
     ) -> Analysis {
         let mut exits = Vec::new();
         let mut i = 0usize;
@@ -1179,7 +1181,7 @@ pub fn infer_function_output_types(
 
     // Collect function defs for simple callsite fallback inference
     #[allow(clippy::type_complexity)]
-    let mut func_defs: HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)> = HashMap::new();
+    let mut func_defs: HashMap<String, FuncDef> = HashMap::new();
     for stmt in &prog.body {
         if let HirStmt::Function {
             name,
@@ -1342,7 +1344,7 @@ pub fn infer_function_variable_types(
 
     // Collect function defs for simple callsite fallback inference
     #[allow(clippy::type_complexity)]
-    let mut func_defs: HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)> = HashMap::new();
+    let mut func_defs: HashMap<String, FuncDef> = HashMap::new();
     for stmt in &prog.body {
         if let HirStmt::Function {
             name,
@@ -1409,7 +1411,7 @@ pub fn infer_function_variable_types(
         stmts: &[HirStmt],
         mut env: HashMap<VarId, Type>,
         returns: &HashMap<String, Vec<Type>>,
-        func_defs: &HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)>,
+        func_defs: &HashMap<String, FuncDef>,
     ) -> Analysis {
         let mut exits = Vec::new();
         let mut i = 0usize;
@@ -1833,7 +1835,7 @@ pub fn infer_global_variable_types(
         stmts: &[HirStmt],
         mut env: HashMap<VarId, Type>,
         returns: &HashMap<String, Vec<Type>>,
-        func_defs: &HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)>,
+        func_defs: &HashMap<String, FuncDef>,
     ) -> Analysis {
         let mut exits = Vec::new();
         let mut i = 0usize;
@@ -1849,6 +1851,21 @@ pub fn infer_global_variable_types(
                         let needs_fallback = per_out.is_empty()
                             || per_out.iter().any(|t| matches!(t, Type::Unknown));
                         if needs_fallback {
+                            if let HirExprKind::FuncCall(_, args) = &expr.kind {
+                                if let Some(builtin) = runmat_builtins::builtin_functions()
+                                    .iter()
+                                    .find(|b| b.name.eq_ignore_ascii_case(name))
+                                {
+                                    let arg_types: Vec<Type> = args
+                                        .iter()
+                                        .map(|arg| infer_expr_type_with_env(arg, &env, returns))
+                                        .collect();
+                                    let ctx = resolve_context_from_args(args);
+                                    let out_type =
+                                        builtin.infer_return_type_with_context(&arg_types, &ctx);
+                                    per_out = vec![out_type; vars.len()];
+                                }
+                            }
                             if let Some((params, outs, body)) = func_defs.get(name).cloned() {
                                 let mut penv: HashMap<VarId, Type> = HashMap::new();
                                 for p in params {
@@ -1988,7 +2005,15 @@ pub fn infer_global_variable_types(
                     }
                 }
                 HirStmt::For { expr, body, .. } => {
-                    let _ = infer_expr_type_with_env(expr, &env, returns);
+                    let range_ty = infer_expr_type_with_env(expr, &env, returns);
+                    if let HirStmt::For { var, .. } = &stmts[i] {
+                        let iter_ty = match &range_ty {
+                            Type::Tensor { .. } => Type::Num,
+                            Type::Logical { .. } => Type::Bool,
+                            other => other.clone(),
+                        };
+                        env.insert(*var, iter_ty);
+                    }
                     let body_analysis = analyze_stmts(body, env.clone(), returns, func_defs);
                     if let Some(f) = &body_analysis.fallthrough {
                         env = join_env(&env, f);
@@ -2013,7 +2038,7 @@ pub fn infer_global_variable_types(
         }
     }
 
-    let mut func_defs: HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)> = HashMap::new();
+    let mut func_defs: HashMap<String, FuncDef> = HashMap::new();
     for stmt in &prog.body {
         if let HirStmt::Function {
             name,
@@ -2073,8 +2098,8 @@ pub fn lint_shapes(result: &LoweringResult) -> Vec<HirDiagnostic> {
     fn vector_literal_length(expr: &HirExpr) -> Option<usize> {
         let shape = tensor_literal_shape(expr)?;
         match (
-            shape.get(0).cloned().unwrap_or(None),
-            shape.get(1).cloned().unwrap_or(None),
+            shape.first().copied().flatten(),
+            shape.get(1).copied().flatten(),
         ) {
             (Some(r), Some(c)) => {
                 if r == 1 {

@@ -9,9 +9,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use runmat_builtins::shape_rules::element_count_if_known;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
     CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
 };
@@ -493,8 +493,10 @@ pub(crate) mod tests {
         let order = Type::Tensor {
             shape: Some(vec![Some(1), Some(2)]),
         };
-        let out =
-            permute_type(&[Type::Tensor { shape: None }, order], &ResolveContext::new(Vec::new()));
+        let out = permute_type(
+            &[Type::Tensor { shape: None }, order],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(
             out,
             Type::Tensor {

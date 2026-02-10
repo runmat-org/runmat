@@ -163,7 +163,10 @@ pub(crate) mod wasm {
         })
     }
 
-    pub(super) fn handle_surface_event_impl(surface_id: u32, event: PlotEvent) -> BuiltinResult<()> {
+    pub(super) fn handle_surface_event_impl(
+        surface_id: u32,
+        event: PlotEvent,
+    ) -> BuiltinResult<()> {
         SURFACES.with(|slot| {
             let mut map = slot.borrow_mut();
             let entry = map.get_mut(&surface_id).ok_or_else(|| {

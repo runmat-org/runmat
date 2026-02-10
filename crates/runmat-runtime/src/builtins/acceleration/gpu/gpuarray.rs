@@ -5,12 +5,12 @@
 //! acceleration provider is registered the builtin surfaces a MATLAB-style
 //! error, ensuring callers know residency could not be established.
 
+use crate::builtins::acceleration::gpu::type_resolvers::gpuarray_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::acceleration::gpu::type_resolvers::gpuarray_type;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{CharArray, IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;

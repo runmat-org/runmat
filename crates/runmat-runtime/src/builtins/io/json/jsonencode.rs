@@ -262,7 +262,8 @@ fn value_to_json(value: &Value, options: &JsonEncodeOptions) -> BuiltinResult<Js
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(jsonencode_error(UNSUPPORTED_TYPE_ERROR)),
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(jsonencode_error(UNSUPPORTED_TYPE_ERROR)),
     }
 }
 

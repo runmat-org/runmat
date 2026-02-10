@@ -198,6 +198,139 @@ impl<'a> GraphBuilder<'a> {
                 self.nodes.push(node);
                 self.stack.push(out_value);
             }
+            Instr::CreateMatrixDynamic(num_rows) => {
+                let num_rows = *num_rows;
+                if self.stack.len() < num_rows {
+                    self.reset_stack();
+                    return;
+                }
+                let mut row_length_ids = Vec::with_capacity(num_rows);
+                for _ in 0..num_rows {
+                    if let Some(id) = self.pop_value() {
+                        row_length_ids.push(id);
+                    } else {
+                        self.reset_stack();
+                        return;
+                    }
+                }
+                row_length_ids.reverse();
+
+                let mut row_lengths: Vec<usize> = Vec::with_capacity(num_rows);
+                for &id in &row_length_ids {
+                    let info = &self.values[id as usize];
+                    let len = match &info.constant {
+                        Some(Value::Num(n)) if n.is_finite() => {
+                            let r = n.round();
+                            if (r - n).abs() <= f64::EPSILON && r >= 0.0 {
+                                r as usize
+                            } else {
+                                self.reset_stack();
+                                return;
+                            }
+                        }
+                        Some(Value::Int(i)) => {
+                            let v = i.to_i64();
+                            if v >= 0 {
+                                v as usize
+                            } else {
+                                self.reset_stack();
+                                return;
+                            }
+                        }
+                        _ => {
+                            self.reset_stack();
+                            return;
+                        }
+                    };
+                    row_lengths.push(len);
+                }
+
+                let total: usize = row_lengths.iter().sum();
+                if self.stack.len() < total {
+                    self.reset_stack();
+                    return;
+                }
+
+                let mut rows_data: Vec<Vec<f64>> = Vec::with_capacity(num_rows);
+                let mut all_numeric = true;
+                for &row_len in row_lengths.iter().rev() {
+                    let mut row_values = Vec::with_capacity(row_len);
+                    for _ in 0..row_len {
+                        if let Some(id) = self.pop_value() {
+                            let info = &self.values[id as usize];
+                            match &info.constant {
+                                Some(Value::Num(n)) => row_values.push(*n),
+                                Some(Value::Int(i)) => row_values.push(i.to_f64()),
+                                _ => {
+                                    all_numeric = false;
+                                    row_values.push(0.0);
+                                }
+                            }
+                        } else {
+                            self.reset_stack();
+                            return;
+                        }
+                    }
+                    row_values.reverse();
+                    rows_data.push(row_values);
+                }
+                rows_data.reverse();
+
+                let node_id = self.nodes.len() as NodeId;
+                let span = InstrSpan { start: pc, end: pc };
+                let mut node = AccelNode {
+                    id: node_id,
+                    label: AccelNodeLabel::Primitive(PrimitiveOp::UPlus),
+                    category: AccelOpCategory::Other,
+                    inputs: Vec::new(),
+                    outputs: Vec::new(),
+                    span,
+                    tags: vec![],
+                };
+
+                let cols = row_lengths.first().copied().unwrap_or(0);
+                let uniform_cols = row_lengths.iter().all(|len| *len == cols);
+                let ty = if uniform_cols {
+                    Type::Tensor {
+                        shape: Some(vec![Some(num_rows), Some(cols)]),
+                    }
+                } else {
+                    Type::Unknown
+                };
+
+                let tensor_const = if all_numeric && uniform_cols {
+                    let mut data_cm = vec![0.0f64; num_rows * cols];
+                    for r in 0..num_rows {
+                        for c in 0..cols {
+                            if let Some(row) = rows_data.get(r) {
+                                if let Some(val) = row.get(c) {
+                                    let idx = r + c * num_rows;
+                                    data_cm[idx] = *val;
+                                }
+                            }
+                        }
+                    }
+                    runmat_builtins::Tensor::new(data_cm, vec![num_rows, cols]).ok()
+                } else {
+                    None
+                };
+
+                let out_value = if let Some(t) = tensor_const {
+                    self.new_value(
+                        ValueOrigin::NodeOutput {
+                            node: node_id,
+                            output: 0,
+                        },
+                        ty.clone(),
+                        Some(Value::Tensor(t)),
+                    )
+                } else {
+                    self.new_node_output(node_id, 0, ty)
+                };
+                node.outputs.push(out_value);
+                self.nodes.push(node);
+                self.stack.push(out_value);
+            }
             Instr::Swap => {
                 if self.stack.len() >= 2 {
                     let len = self.stack.len();
@@ -580,40 +713,35 @@ impl<'a> GraphBuilder<'a> {
             let Some(info) = self.values.get(vid as usize) else {
                 continue;
             };
-            match &info.ty {
-                Type::Tensor { shape: Some(dims) } if dims.len() == 2 => {
-                    // Expect a constant tensor encoded as Value::Tensor; pull from constant if available
-                    if let Some(Value::Tensor(t)) = &info.constant {
-                        let rows = t.rows();
-                        let cols = t.cols();
-                        if (rows == 1 || rows == 0) && cols > 0 {
-                            // 1xN row vector
-                            let mut out: Vec<Option<usize>> = Vec::with_capacity(cols);
-                            for j in 0..cols {
-                                let v = t.data[j].round() as i64;
-                                if v >= 0 {
-                                    out.push(Some(v as usize));
-                                } else {
-                                    out.push(None);
-                                }
-                            }
-                            return Some(Type::Tensor { shape: Some(out) });
-                        } else if (cols == 1 || cols == 0) && rows > 0 {
-                            // Nx1 column vector
-                            let mut out: Vec<Option<usize>> = Vec::with_capacity(rows);
-                            for i in 0..rows {
-                                let v = t.data[i].round() as i64;
-                                if v >= 0 {
-                                    out.push(Some(v as usize));
-                                } else {
-                                    out.push(None);
-                                }
-                            }
-                            return Some(Type::Tensor { shape: Some(out) });
+            // Expect a constant tensor encoded as Value::Tensor; pull from constant if available
+            if let Some(Value::Tensor(t)) = &info.constant {
+                let rows = t.rows();
+                let cols = t.cols();
+                if (rows == 1 || rows == 0) && cols > 0 {
+                    // 1xN row vector
+                    let mut out: Vec<Option<usize>> = Vec::with_capacity(cols);
+                    for j in 0..cols {
+                        let v = t.data[j].round() as i64;
+                        if v >= 0 {
+                            out.push(Some(v as usize));
+                        } else {
+                            out.push(None);
                         }
                     }
+                    return Some(Type::Tensor { shape: Some(out) });
+                } else if (cols == 1 || cols == 0) && rows > 0 {
+                    // Nx1 column vector
+                    let mut out: Vec<Option<usize>> = Vec::with_capacity(rows);
+                    for i in 0..rows {
+                        let v = t.data[i].round() as i64;
+                        if v >= 0 {
+                            out.push(Some(v as usize));
+                        } else {
+                            out.push(None);
+                        }
+                    }
+                    return Some(Type::Tensor { shape: Some(out) });
                 }
-                _ => {}
             }
         }
 

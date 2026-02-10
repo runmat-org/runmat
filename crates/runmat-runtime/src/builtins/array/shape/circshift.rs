@@ -7,11 +7,11 @@
 //! gathers the tensor once, performs the rotation on the host, and re-uploads
 //! the result so downstream operations continue to benefit from gpu residency.
 
+use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
@@ -61,8 +61,12 @@ fn preserve_array_type(args: &[Type], _context: &ResolveContext) -> Type {
         None => return Type::Unknown,
     };
     match input {
-        Type::Tensor { shape } => Type::Tensor { shape: shape.clone() },
-        Type::Logical { shape } => Type::Logical { shape: shape.clone() },
+        Type::Tensor { shape } => Type::Tensor {
+            shape: shape.clone(),
+        },
+        Type::Logical { shape } => Type::Logical {
+            shape: shape.clone(),
+        },
         Type::Num | Type::Int | Type::Bool => Type::tensor(),
         Type::Cell { element_type, .. } => Type::Cell {
             element_type: element_type.clone(),
@@ -142,7 +146,8 @@ async fn circshift_builtin(
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(circshift_error("circshift: unsupported input type")),
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(circshift_error("circshift: unsupported input type")),
     }
 }
 
@@ -305,7 +310,8 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(circshift_error(
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(circshift_error(
             "circshift: unsupported shift argument type",
         )),
     }
@@ -397,7 +403,8 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(circshift_error(
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(circshift_error(
             "circshift: unsupported dimension argument type",
         )),
     }

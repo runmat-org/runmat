@@ -1002,6 +1002,85 @@ mod tests {
     }
 
     #[test]
+    fn debug_full_script_analysis_errors() {
+        let text = r#"% Grid
+XRange = -2:0.02:2;
+YRange = -2:0.02:2;
+[X, Y] = meshgrid(XRange, YRange);
+
+% Constants
+T = 5;
+FPS = 30;
+dT = 1/FPS;
+noise = 1.0;
+
+for t = 0:dT:T
+
+    % Elementwise math
+    R = sqrt(X.^2 + Y.^2) + 1e-6;
+    W = sin(t*R) ./ R;
+    Z = W + rand(W) * noise;
+
+    scatter3(X, Y, Z);
+
+    % Hold the frame for dT seconds
+    pause(dT);
+
+end
+"#;
+        let analysis = analyze_document(text);
+        if let Some(err) = &analysis.syntax_error {
+            eprintln!("syntax error: {} at {}", err.message, err.position);
+        }
+        if let Some(err) = &analysis.lowering_error {
+            eprintln!("lowering error: {err}");
+        }
+        if let Some(err) = &analysis.compile_error {
+            eprintln!("compile error: {err}");
+        }
+        assert!(analysis.syntax_error.is_none());
+        assert!(analysis.lowering_error.is_none());
+    }
+
+    #[test]
+    fn hover_full_script_range_shape() {
+        let text = r#"% Grid
+XRange = -2:0.02:2;
+YRange = -2:0.02:2;
+[X, Y] = meshgrid(XRange, YRange);
+
+% Constants
+T = 5;
+FPS = 30;
+dT = 1/FPS;
+noise = 1.0;
+
+for t = 0:dT:T
+
+    % Elementwise math
+    R = sqrt(X.^2 + Y.^2) + 1e-6;
+    W = sin(t*R) ./ R;
+    Z = W + rand(W) * noise;
+
+    scatter3(X, Y, Z);
+
+    % Hold the frame for dT seconds
+    pause(dT);
+
+end
+"#;
+        let analysis = analyze_document(text);
+        let x_offset = text.find("XRange").expect("XRange offset");
+        let x_position = offset_to_position(text, x_offset);
+        let hover = hover_at(text, &analysis, &x_position).expect("hover result");
+        let value = match hover.contents {
+            lsp_types::HoverContents::Markup(markup) => markup.value,
+            other => panic!("unexpected hover {other:?}"),
+        };
+        assert!(value.contains("1 x 201"), "unexpected hover {value}");
+    }
+
+    #[test]
     fn diagnostics_include_shape_lints() {
         let text = "a = ones(2,3); b = ones(4,2); c = a * b;";
         let analysis = analyze_document(text);

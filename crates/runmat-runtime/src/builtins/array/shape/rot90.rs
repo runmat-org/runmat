@@ -129,7 +129,8 @@ async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(rot90_error("rot90: unsupported input type")),
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(rot90_error("rot90: unsupported input type")),
     }
 }
 

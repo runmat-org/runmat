@@ -14,7 +14,6 @@ use crate::builtins::common::spec::{
 };
 
 use super::common::{numeric_vector, tensor_to_surface_grid, SurfaceDataInput};
-use super::gpu_helpers::axis_bounds;
 use super::perf::compute_surface_lod;
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
@@ -35,6 +34,62 @@ fn is_vector_like(tensor: &Tensor) -> bool {
     tensor.rows == 1 || tensor.cols == 1
 }
 
+pub(crate) fn is_vector_like_shape(shape: &[usize]) -> bool {
+    if shape.is_empty() {
+        return true;
+    }
+    let non_singleton = shape.iter().copied().filter(|d| *d > 1).count();
+    non_singleton <= 1
+}
+
+pub(crate) fn vector_len_from_shape(shape: &[usize]) -> usize {
+    if shape.is_empty() {
+        return 1;
+    }
+    shape.iter().copied().max().unwrap_or(1)
+}
+
+#[derive(Clone)]
+pub(crate) enum AxisSource {
+    Host(Vec<f64>),
+    Gpu(GpuTensorHandle),
+}
+
+impl AxisSource {
+    fn len(&self) -> usize {
+        match self {
+            AxisSource::Host(v) => v.len(),
+            AxisSource::Gpu(h) => vector_len_from_shape(&h.shape),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+async fn gather_axes_for_cpu_fallback(
+    x: &AxisSource,
+    y: &AxisSource,
+    name: &'static str,
+) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
+    let x_vec = match x {
+        AxisSource::Host(v) => v.clone(),
+        AxisSource::Gpu(h) => {
+            let t = super::common::gather_tensor_from_gpu_async(h.clone(), name).await?;
+            numeric_vector(t)
+        }
+    };
+    let y_vec = match y {
+        AxisSource::Host(v) => v.clone(),
+        AxisSource::Gpu(h) => {
+            let t = super::common::gather_tensor_from_gpu_async(h.clone(), name).await?;
+            numeric_vector(t)
+        }
+    };
+    Ok((x_vec, y_vec))
+}
+
 fn matrix_rows_are_identical(tensor: &Tensor) -> bool {
     let rows = tensor.rows;
     let cols = tensor.cols;
@@ -43,7 +98,7 @@ fn matrix_rows_are_identical(tensor: &Tensor) -> bool {
     }
     for row in 1..rows {
         for col in 0..cols {
-            let idx0 = 0 + rows * col;
+            let idx0 = rows * col;
             let idx = row + rows * col;
             if tensor.data[idx] != tensor.data[idx0] {
                 return false;
@@ -61,7 +116,7 @@ fn matrix_cols_are_identical(tensor: &Tensor) -> bool {
     }
     for col in 1..cols {
         for row in 0..rows {
-            let idx0 = row + rows * 0;
+            let idx0 = row;
             let idx = row + rows * col;
             if tensor.data[idx] != tensor.data[idx0] {
                 return false;
@@ -71,7 +126,7 @@ fn matrix_cols_are_identical(tensor: &Tensor) -> bool {
     true
 }
 
-fn extract_meshgrid_axes_from_xy_matrices(
+pub(crate) fn extract_meshgrid_axes_from_xy_matrices(
     x: &Tensor,
     y: &Tensor,
     rows: usize,
@@ -95,7 +150,7 @@ fn extract_meshgrid_axes_from_xy_matrices(
     // Extract x vector (length = cols) from the first row of X.
     let mut x_vec = Vec::with_capacity(cols);
     for col in 0..cols {
-        let idx = 0 + rows * col;
+        let idx = rows * col;
         x_vec.push(x.data[idx]);
     }
     // Extract y vector (length = rows) from the first column of Y.
@@ -118,12 +173,15 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    // Plotting is a sink: it does not participate in fusion, but it *can* consume GPU-resident
+    // tensors directly (zero-copy) when the renderer shares the provider WGPU context.
+    // Do not force implicit gathers here; that defeats GPU-resident workloads.
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Surface rendering runs on the host/WebGPU pipeline; single-precision gpuArray inputs stay on device.",
+    notes: "Surface rendering runs on the host/WebGPU pipeline; gpuArray inputs may remain on device when a shared WGPU context is available.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::surf")]
@@ -147,18 +205,53 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::surf"
 )]
-pub fn surf_builtin(
+pub async fn surf_builtin(
     x: Value,
     y: Value,
     z: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<String> {
-    let x_tensor =
-        Tensor::try_from(&x).map_err(|e| plotting_error(BUILTIN_NAME, format!("surf: {e}")))?;
-    let y_tensor =
-        Tensor::try_from(&y).map_err(|e| plotting_error(BUILTIN_NAME, format!("surf: {e}")))?;
-    let mut xy = Some((x_tensor, y_tensor));
-    let mut z_input = Some(SurfaceDataInput::from_value(z, "surf")?);
+    let z_input = SurfaceDataInput::from_value(z, "surf")?;
+    let (rows, cols) = z_input.grid_shape(BUILTIN_NAME)?;
+
+    // Prefer a no-download path for vector-like gpuArray axes: keep X/Y on-device and pass
+    // their buffers through to the GPU vertex packer. If X/Y are meshgrid matrices, we still
+    // need to validate and extract axes on the host.
+    let (x_axis, y_axis) = match (x, y) {
+        (Value::GpuTensor(xh), Value::GpuTensor(yh))
+            if is_vector_like_shape(&xh.shape) && is_vector_like_shape(&yh.shape) =>
+        {
+            (AxisSource::Gpu(xh), AxisSource::Gpu(yh))
+        }
+        (x_val, y_val) => {
+            // Gather only when needed (host axis inputs, or matrix meshgrid validation).
+            let x_tensor = match x_val {
+                Value::GpuTensor(handle) => {
+                    super::common::gather_tensor_from_gpu_async(handle, BUILTIN_NAME).await?
+                }
+                other => Tensor::try_from(&other)
+                    .map_err(|e| plotting_error(BUILTIN_NAME, format!("surf: {e}")))?,
+            };
+            let y_tensor = match y_val {
+                Value::GpuTensor(handle) => {
+                    super::common::gather_tensor_from_gpu_async(handle, BUILTIN_NAME).await?
+                }
+                other => Tensor::try_from(&other)
+                    .map_err(|e| plotting_error(BUILTIN_NAME, format!("surf: {e}")))?,
+            };
+            if is_vector_like(&x_tensor) && is_vector_like(&y_tensor) {
+                (
+                    AxisSource::Host(numeric_vector(x_tensor)),
+                    AxisSource::Host(numeric_vector(y_tensor)),
+                )
+            } else {
+                let (x_vec, y_vec) =
+                    extract_meshgrid_axes_from_xy_matrices(&x_tensor, &y_tensor, rows, cols)?;
+                (AxisSource::Host(x_vec), AxisSource::Host(y_vec))
+            }
+        }
+    };
+
     let style = Arc::new(parse_surface_style_args(
         "surf",
         &rest,
@@ -178,44 +271,65 @@ pub fn surf_builtin(
         axis_equal: false,
         ..Default::default()
     };
-    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
-        let (x_tensor, y_tensor) = xy.take().expect("surf: X/Y consumed once");
-        let z_arg = z_input.take().expect("surf: Z consumed once");
-        let (rows, cols) = z_arg.grid_shape(BUILTIN_NAME)?;
 
-        let (x_axis_vec, y_axis_vec) = if is_vector_like(&x_tensor) && is_vector_like(&y_tensor) {
-            (numeric_vector(x_tensor), numeric_vector(y_tensor))
-        } else {
-            extract_meshgrid_axes_from_xy_matrices(&x_tensor, &y_tensor, rows, cols)?
-        };
-
-        if let Some(z_gpu) = z_arg.gpu_handle() {
-            let style = Arc::clone(&style);
-            match build_surface_gpu_plot(BUILTIN_NAME, &x_axis_vec, &y_axis_vec, z_gpu) {
-                Ok(mut surface) => {
-                    style.apply_to_plot(&mut surface);
-                    figure.add_surface_plot_on_axes(surface, axes);
-                    return Ok(());
-                }
+    let mut surface = if let Some(z_gpu) = z_input.gpu_handle().cloned() {
+        match super::gpu_helpers::axis_bounds_async(&z_gpu, BUILTIN_NAME).await {
+            Ok((min_z, max_z)) => match build_surface_gpu_plot_with_bounds_async(
+                BUILTIN_NAME,
+                &x_axis,
+                &y_axis,
+                &z_gpu,
+                min_z,
+                max_z,
+                style.colormap,
+                style.alpha,
+                style.flatten_z,
+            )
+            .await
+            {
+                Ok(surface) => surface,
                 Err(err) => {
                     warn!("surf GPU path unavailable: {err}");
+                    let (x_host, y_host) =
+                        gather_axes_for_cpu_fallback(&x_axis, &y_axis, BUILTIN_NAME).await?;
+                    build_surface_cpu(&z_input, x_host, y_host).await?
                 }
+            },
+            Err(err) => {
+                warn!("surf GPU bounds unavailable: {err}");
+                let (x_host, y_host) =
+                    gather_axes_for_cpu_fallback(&x_axis, &y_axis, BUILTIN_NAME).await?;
+                build_surface_cpu(&z_input, x_host, y_host).await?
             }
         }
+    } else {
+        let (x_host, y_host) = gather_axes_for_cpu_fallback(&x_axis, &y_axis, BUILTIN_NAME).await?;
+        build_surface_cpu(&z_input, x_host, y_host).await?
+    };
 
-        let grid = tensor_to_surface_grid(
-            z_arg.into_tensor(BUILTIN_NAME)?,
-            x_axis_vec.len(),
-            y_axis_vec.len(),
-            BUILTIN_NAME,
-        )?;
-        let mut surface = build_surface(x_axis_vec, y_axis_vec, grid)?;
-        let style = Arc::clone(&style);
-        style.apply_to_plot(&mut surface);
+    style.apply_to_plot(&mut surface);
+    let mut surface = Some(surface);
+    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+        let surface = surface.take().expect("surf plot consumed once");
         figure.add_surface_plot_on_axes(surface, axes);
         Ok(())
     })?;
     Ok(rendered)
+}
+
+async fn build_surface_cpu(
+    z_input: &SurfaceDataInput,
+    x_axis: Vec<f64>,
+    y_axis: Vec<f64>,
+) -> BuiltinResult<SurfacePlot> {
+    let z_tensor = match z_input.clone() {
+        SurfaceDataInput::Host(tensor) => tensor,
+        SurfaceDataInput::Gpu(handle) => {
+            super::common::gather_tensor_from_gpu_async(handle, BUILTIN_NAME).await?
+        }
+    };
+    let grid = tensor_to_surface_grid(z_tensor, x_axis.len(), y_axis.len(), BUILTIN_NAME)?;
+    build_surface(x_axis, y_axis, grid)
 }
 
 pub(crate) fn build_surface(
@@ -237,11 +351,40 @@ pub(crate) fn build_surface(
     Ok(surface)
 }
 
-pub(crate) fn build_surface_gpu_plot(
+pub(crate) async fn build_surface_gpu_plot(
     name: &'static str,
     x_axis: &[f64],
     y_axis: &[f64],
     z: &GpuTensorHandle,
+    colormap: ColorMap,
+    alpha: f32,
+    flatten_z: bool,
+) -> BuiltinResult<SurfacePlot> {
+    let (min_z, max_z) = super::gpu_helpers::axis_bounds_async(z, name).await?;
+    build_surface_gpu_plot_with_bounds_async(
+        name,
+        &AxisSource::Host(x_axis.to_vec()),
+        &AxisSource::Host(y_axis.to_vec()),
+        z,
+        min_z,
+        max_z,
+        colormap,
+        alpha,
+        flatten_z,
+    )
+    .await
+}
+
+pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
+    name: &'static str,
+    x_axis: &AxisSource,
+    y_axis: &AxisSource,
+    z: &GpuTensorHandle,
+    min_z: f32,
+    max_z: f32,
+    colormap: ColorMap,
+    alpha: f32,
+    flatten_z: bool,
 ) -> BuiltinResult<SurfacePlot> {
     if x_axis.is_empty() || y_axis.is_empty() {
         return Err(plotting_error(
@@ -250,65 +393,149 @@ pub(crate) fn build_surface_gpu_plot(
         ));
     }
 
-    let context = runmat_plot::shared_wgpu_context()
-        .ok_or_else(|| plotting_error(name, format!("{name}: plotting GPU context unavailable")))?;
+    let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;
 
     let z_ref = runmat_accelerate_api::export_wgpu_buffer(z)
         .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Z data")))?;
 
-    let expected_len = x_axis
-        .len()
-        .checked_mul(y_axis.len())
+    let x_len = x_axis.len();
+    let y_len = y_axis.len();
+    let expected_len = x_len
+        .checked_mul(y_len)
         .ok_or_else(|| plotting_error(name, format!("{name}: grid dimensions overflowed")))?;
     if z_ref.len as usize != expected_len {
         return Err(plotting_error(
             name,
             format!(
                 "{name}: Z must contain exactly {} elements ({}×{})",
-                expected_len,
-                x_axis.len(),
-                y_axis.len()
+                expected_len, x_len, y_len
             ),
         ));
     }
-    let (min_z, max_z) = axis_bounds(z, name)?;
-    let min_x = x_axis
-        .iter()
-        .fold(f32::INFINITY, |acc, &val| acc.min(val as f32));
-    let max_x = x_axis
-        .iter()
-        .fold(f32::NEG_INFINITY, |acc, &val| acc.max(val as f32));
-    let min_y = y_axis
-        .iter()
-        .fold(f32::INFINITY, |acc, &val| acc.min(val as f32));
-    let max_y = y_axis
-        .iter()
-        .fold(f32::NEG_INFINITY, |acc, &val| acc.max(val as f32));
+
+    let (min_x, max_x) = match x_axis {
+        AxisSource::Host(v) => (
+            v.iter()
+                .fold(f32::INFINITY, |acc, &val| acc.min(val as f32)),
+            v.iter()
+                .fold(f32::NEG_INFINITY, |acc, &val| acc.max(val as f32)),
+        ),
+        AxisSource::Gpu(h) => super::gpu_helpers::axis_bounds_async(h, name).await?,
+    };
+    let (min_y, max_y) = match y_axis {
+        AxisSource::Host(v) => (
+            v.iter()
+                .fold(f32::INFINITY, |acc, &val| acc.min(val as f32)),
+            v.iter()
+                .fold(f32::NEG_INFINITY, |acc, &val| acc.max(val as f32)),
+        ),
+        AxisSource::Gpu(h) => super::gpu_helpers::axis_bounds_async(h, name).await?,
+    };
     let bounds = runmat_plot::core::scene::BoundingBox::new(
         Vec3::new(min_x, min_y, min_z),
         Vec3::new(max_x, max_y, max_z),
     );
     let extent_hint = ((max_x - min_x).powi(2) + (max_y - min_y).powi(2)).sqrt();
 
-    let x_axis_f32: Vec<f32> = x_axis.iter().map(|&v| v as f32).collect();
-    let y_axis_f32: Vec<f32> = y_axis.iter().map(|&v| v as f32).collect();
-    let color_table = build_color_lut(ColorMap::Parula, 512, 1.0);
+    let color_table = build_color_lut(colormap, 512, 1.0);
+    let scalar = ScalarType::from_is_f64(z_ref.precision == ProviderPrecision::F64);
+
+    let mut x_axis_f32: Vec<f32> = Vec::new();
+    let mut y_axis_f32: Vec<f32> = Vec::new();
+
+    let x_axis_gpu = match x_axis {
+        AxisSource::Gpu(h) => {
+            let exported = runmat_accelerate_api::export_wgpu_buffer(h).ok_or_else(|| {
+                plotting_error(name, format!("{name}: unable to export GPU X axis buffer"))
+            })?;
+            if exported.len as usize != x_len {
+                return Err(plotting_error(
+                    name,
+                    format!(
+                        "{name}: X axis length mismatch (expected {x_len}, got {})",
+                        exported.len
+                    ),
+                ));
+            }
+            if exported.precision != z_ref.precision {
+                return Err(plotting_error(
+                    name,
+                    format!("{name}: X axis precision must match Z precision"),
+                ));
+            }
+            Some(exported.buffer.clone())
+        }
+        AxisSource::Host(v) => {
+            if scalar == ScalarType::F32 {
+                x_axis_f32 = v.iter().map(|&val| val as f32).collect::<Vec<f32>>();
+            }
+            None
+        }
+    };
+
+    let y_axis_gpu = match y_axis {
+        AxisSource::Gpu(h) => {
+            let exported = runmat_accelerate_api::export_wgpu_buffer(h).ok_or_else(|| {
+                plotting_error(name, format!("{name}: unable to export GPU Y axis buffer"))
+            })?;
+            if exported.len as usize != y_len {
+                return Err(plotting_error(
+                    name,
+                    format!(
+                        "{name}: Y axis length mismatch (expected {y_len}, got {})",
+                        exported.len
+                    ),
+                ));
+            }
+            if exported.precision != z_ref.precision {
+                return Err(plotting_error(
+                    name,
+                    format!("{name}: Y axis precision must match Z precision"),
+                ));
+            }
+            Some(exported.buffer.clone())
+        }
+        AxisSource::Host(v) => {
+            if scalar == ScalarType::F32 {
+                y_axis_f32 = v.iter().map(|&val| val as f32).collect::<Vec<f32>>();
+            }
+            None
+        }
+    };
 
     let inputs = runmat_plot::gpu::surface::SurfaceGpuInputs {
-        x_axis: &x_axis_f32,
-        y_axis: &y_axis_f32,
+        x_axis: if let Some(buffer) = x_axis_gpu.as_ref() {
+            runmat_plot::gpu::surface::SurfaceAxis::Buffer(buffer.clone())
+        } else if z_ref.precision == ProviderPrecision::F64 {
+            match x_axis {
+                AxisSource::Host(v) => runmat_plot::gpu::surface::SurfaceAxis::F64(v.as_slice()),
+                AxisSource::Gpu(_) => unreachable!("gpu X axis handled above"),
+            }
+        } else {
+            runmat_plot::gpu::surface::SurfaceAxis::F32(x_axis_f32.as_slice())
+        },
+        y_axis: if let Some(buffer) = y_axis_gpu.as_ref() {
+            runmat_plot::gpu::surface::SurfaceAxis::Buffer(buffer.clone())
+        } else if z_ref.precision == ProviderPrecision::F64 {
+            match y_axis {
+                AxisSource::Host(v) => runmat_plot::gpu::surface::SurfaceAxis::F64(v.as_slice()),
+                AxisSource::Gpu(_) => unreachable!("gpu Y axis handled above"),
+            }
+        } else {
+            runmat_plot::gpu::surface::SurfaceAxis::F32(y_axis_f32.as_slice())
+        },
         z_buffer: z_ref.buffer.clone(),
         color_table: &color_table,
-        x_len: x_axis.len() as u32,
-        y_len: y_axis.len() as u32,
-        scalar: ScalarType::from_is_f64(z_ref.precision == ProviderPrecision::F64),
+        x_len: x_len as u32,
+        y_len: y_len as u32,
+        scalar,
     };
-    let lod = compute_surface_lod(x_axis.len(), y_axis.len(), extent_hint);
+    let lod = compute_surface_lod(x_len, y_len, extent_hint);
     let params = runmat_plot::gpu::surface::SurfaceGpuParams {
         min_z,
         max_z,
-        alpha: 1.0,
-        flatten_z: false,
+        alpha,
+        flatten_z,
         x_stride: lod.stride_x,
         y_stride: lod.stride_y,
         lod_x_len: lod.lod_x_len,
@@ -324,15 +551,15 @@ pub(crate) fn build_surface_gpu_plot(
     .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
 
     let vertex_count = lod.vertex_count();
-    let mut surface = SurfacePlot::from_gpu_buffer(
-        x_axis.to_vec(),
-        y_axis.to_vec(),
-        gpu_vertices,
-        vertex_count,
-        bounds,
-    );
-    surface.colormap = ColorMap::Parula;
-    surface.shading_mode = ShadingMode::Smooth;
+    let lod_x_len = usize::try_from(lod.lod_x_len)
+        .map_err(|_| plotting_error(name, format!("{name}: LOD X size overflowed")))?;
+    let lod_y_len = usize::try_from(lod.lod_y_len)
+        .map_err(|_| plotting_error(name, format!("{name}: LOD Y size overflowed")))?;
+    let mut surface =
+        SurfacePlot::from_gpu_buffer(lod_x_len, lod_y_len, gpu_vertices, vertex_count, bounds);
+    surface.colormap = colormap;
+    surface.alpha = alpha;
+    surface.flatten_z = flatten_z;
     Ok(surface)
 }
 
@@ -371,7 +598,7 @@ pub(crate) mod tests {
     #[test]
     fn surf_requires_matching_grid() {
         setup_plot_tests();
-        let res = surf_builtin(
+        let res = futures::executor::block_on(surf_builtin(
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[0.0])),
             Value::Tensor(Tensor {
@@ -382,7 +609,7 @@ pub(crate) mod tests {
                 dtype: runmat_builtins::NumericDType::F64,
             }),
             Vec::new(),
-        );
+        ));
         assert!(res.is_err());
     }
 

@@ -75,9 +75,9 @@ pub use state::{
     FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
 pub use web::{
-    bind_surface_to_figure, detach_surface, install_surface, present_figure_on_surface,
-    present_surface, render_current_scene, resize_surface, web_renderer_ready,
-    fit_surface_extents, reset_surface_camera,
+    bind_surface_to_figure, detach_surface, fit_surface_extents, install_surface,
+    present_figure_on_surface, present_surface, render_current_scene, reset_surface_camera,
+    resize_surface, web_renderer_ready,
 };
 
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
@@ -101,7 +101,10 @@ pub(crate) fn plotting_error_with_source(
 }
 
 #[cfg(feature = "plot-core")]
-pub use engine::{render_figure_png_bytes, render_figure_snapshot};
+pub use engine::{
+    render_figure_png_bytes, render_figure_png_bytes_with_axes_cameras,
+    render_figure_png_bytes_with_camera, render_figure_snapshot,
+};
 
 pub mod ops {
     pub use super::hist;

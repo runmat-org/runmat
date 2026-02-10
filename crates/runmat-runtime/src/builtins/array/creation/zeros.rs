@@ -284,6 +284,7 @@ fn value_tag(value: &Value) -> &'static str {
         Value::Closure(_) => "Closure",
         Value::ClassRef(_) => "ClassRef",
         Value::MException(_) => "MException",
+        Value::OutputList(_) => "OutputList",
     }
 }
 
@@ -327,7 +328,9 @@ async fn zeros_gpu(shape: &[usize]) -> crate::BuiltinResult<Value> {
                 return Ok(Value::GpuTensor(handle));
             }
             Err(err) => {
-                log::debug!("zeros_gpu: provider.zeros failed ({err}); falling back to host upload");
+                log::debug!(
+                    "zeros_gpu: provider.zeros failed ({err}); falling back to host upload"
+                );
             }
         }
         // Fallback: build a host tensor and upload

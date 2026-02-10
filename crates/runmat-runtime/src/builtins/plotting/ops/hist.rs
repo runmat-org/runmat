@@ -24,8 +24,8 @@ use super::common::{numeric_vector, value_as_f64};
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarStyle, BarStyleDefaults};
-use crate::builtins::plotting::type_resolvers::hist_type;
 use crate::builtins::plotting::gpu_helpers::{axis_bounds_async, gather_tensor_from_gpu_async};
+use crate::builtins::plotting::type_resolvers::hist_type;
 use crate::{BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::hist")]
@@ -36,12 +36,13 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    // Plotting is a sink, but can consume gpuArray inputs zero-copy when a shared WGPU context exists.
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Single-precision gpuArray vectors render zero-copy when the shared renderer is active; other contexts gather first.",
+    notes: "Histogram rendering terminates fusion graphs; gpuArray inputs may remain on device when shared plotting context is installed.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::hist")]
@@ -1113,8 +1114,7 @@ async fn build_histogram_gpu_chart_async(
     style: &BarStyle,
     weights: &HistWeightsInput,
 ) -> BuiltinResult<HistComputation> {
-    let context = runmat_plot::shared_wgpu_context()
-        .ok_or_else(|| hist_err("hist: plotting GPU context unavailable"))?;
+    let context = crate::builtins::plotting::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
     let exported = runmat_accelerate_api::export_wgpu_buffer(values)
         .ok_or_else(|| hist_err("hist: unable to export GPU data"))?;
     if exported.len == 0 {
@@ -1308,11 +1308,11 @@ impl HistInput {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::array::type_resolvers::row_vector_type;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_builtins::{ResolveContext, Type};
-    use crate::builtins::array::type_resolvers::row_vector_type;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();

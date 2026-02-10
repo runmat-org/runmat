@@ -353,12 +353,16 @@ impl Camera {
 
     pub fn set_clip_planes(&mut self, near: f32, far: f32) {
         match &mut self.projection {
-            ProjectionType::Perspective { near: n, far: f, .. } => {
+            ProjectionType::Perspective {
+                near: n, far: f, ..
+            } => {
                 *n = near.max(1e-4);
                 *f = far.max(*n + 1e-3);
                 self.view_proj_dirty = true;
             }
-            ProjectionType::Orthographic { near: n, far: f, .. } => {
+            ProjectionType::Orthographic {
+                near: n, far: f, ..
+            } => {
                 *n = near;
                 *f = far;
                 self.view_proj_dirty = true;
@@ -498,7 +502,6 @@ impl Camera {
 
         self.view_proj_dirty = false;
     }
-
 }
 
 /// Camera controller for handling input events
@@ -563,7 +566,11 @@ impl CameraController {
                 // - Alt+LMB: orbit; Alt+MMB: pan; Alt+RMB: dolly/zoom
                 //
                 // Also keep LMB orbit + Shift+LMB pan as a convenient fallback.
-                let fine = if modifiers.ctrl || modifiers.meta { 0.35 } else { 1.0 };
+                let fine = if modifiers.ctrl || modifiers.meta {
+                    0.35
+                } else {
+                    1.0
+                };
                 let d = self.mouse_delta * fine;
 
                 if modifiers.alt {

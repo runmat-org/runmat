@@ -72,6 +72,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn lu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(value, &rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        if out_count == 1 {
+            return Ok(Value::OutputList(vec![eval.combined()]));
+        }
+        if out_count == 2 {
+            return Ok(Value::OutputList(vec![eval.lower(), eval.upper()]));
+        }
+        if out_count == 3 {
+            return Ok(Value::OutputList(vec![
+                eval.lower(),
+                eval.upper(),
+                eval.permutation(),
+            ]));
+        }
+        return Err(lu_error("lu currently supports at most three outputs"));
+    }
     Ok(eval.combined())
 }
 

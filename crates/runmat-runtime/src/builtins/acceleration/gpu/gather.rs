@@ -1,10 +1,10 @@
 //! MATLAB-compatible `gather` builtin with provider-aware semantics.
 
+use crate::builtins::acceleration::gpu::type_resolvers::gather_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::acceleration::gpu::type_resolvers::gather_type;
 use crate::{build_runtime_error, make_cell, RuntimeError};
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
@@ -52,6 +52,23 @@ fn gather_error(message: impl Into<String>) -> RuntimeError {
 async fn gather_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&args).await?;
     let len = eval.len();
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        if len == 1 {
+            if out_count > 1 {
+                return Err(gather_error("gather: too many output arguments").into());
+            }
+            return Ok(Value::OutputList(vec![eval.into_first()]));
+        }
+        if out_count != len {
+            return Err(
+                gather_error("gather: number of outputs must match number of inputs").into(),
+            );
+        }
+        return Ok(Value::OutputList(eval.into_outputs()));
+    }
     if len == 1 {
         Ok(eval.into_first())
     } else {

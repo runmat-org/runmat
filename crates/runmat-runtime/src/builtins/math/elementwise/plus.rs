@@ -216,7 +216,8 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(builtin_error(
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(builtin_error(
             "plus: unsupported prototype conversion to GPU output",
         )),
     }

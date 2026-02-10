@@ -362,7 +362,7 @@ async fn build_line_gpu_plot_async(
     let api_provider_present = runmat_accelerate_api::provider().is_some();
     let api_provider_for_x_present = runmat_accelerate_api::provider_for_handle(x).is_some();
     let api_provider_for_y_present = runmat_accelerate_api::provider_for_handle(y).is_some();
-    let shared_ctx = runmat_plot::shared_wgpu_context();
+    let shared_ctx_present = runmat_plot::shared_wgpu_context().is_some();
     trace!(
         "plot-gpu: attempt label={label:?} x(device_id={}, buffer_id={}, shape={:?}) y(device_id={}, buffer_id={}, shape={:?}) shared_ctx_present={} api_provider_present={} api_provider_for_x_present={} api_provider_for_y_present={}",
         x.device_id,
@@ -371,13 +371,12 @@ async fn build_line_gpu_plot_async(
         y.device_id,
         y.buffer_id,
         y.shape,
-        shared_ctx.is_some(),
+        shared_ctx_present,
         api_provider_present,
         api_provider_for_x_present,
         api_provider_for_y_present
     );
-    let context = shared_ctx
-        .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot: plotting GPU context unavailable"))?;
+    let context = crate::builtins::plotting::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
 
     let x_ref = match runmat_accelerate_api::export_wgpu_buffer(x) {
         Some(buf) => {
@@ -528,8 +527,8 @@ impl PlotSeriesInput {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::plotting::tests::ensure_plot_test_env;
     use crate::builtins::plotting::state::{clear_figure, reset_hold_state_for_run};
+    use crate::builtins::plotting::tests::ensure_plot_test_env;
     use crate::builtins::plotting::{clone_figure, current_figure_handle};
     use crate::RuntimeError;
     use futures::executor::block_on;
@@ -675,7 +674,10 @@ pub(crate) mod tests {
     #[test]
     fn plot_type_is_string() {
         assert_eq!(
-            string_type(&[Type::tensor(), Type::tensor()], &ResolveContext::new(Vec::new())),
+            string_type(
+                &[Type::tensor(), Type::tensor()],
+                &ResolveContext::new(Vec::new())
+            ),
             Type::String
         );
     }

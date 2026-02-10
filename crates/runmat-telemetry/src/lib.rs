@@ -133,4 +133,3 @@ pub type RuntimeFinishedEnvelope = RuntimeTelemetryEnvelope<RuntimeFinishedPaylo
 pub fn serialize_envelope<P: Serialize>(envelope: &RuntimeTelemetryEnvelope<P>) -> Option<String> {
     serde_json::to_string(envelope).ok()
 }
-

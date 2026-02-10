@@ -107,9 +107,7 @@ fn char_row_value(text: &str) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::{builtins::common::test_support, make_cell};
-    use runmat_builtins::{
-        CharArray, IntValue, ResolveContext, StringArray, Tensor, Type,
-    };
+    use runmat_builtins::{CharArray, IntValue, ResolveContext, StringArray, Tensor, Type};
 
     fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::sprintf_builtin(format_spec, rest))

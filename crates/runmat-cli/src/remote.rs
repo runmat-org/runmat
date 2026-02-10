@@ -1,31 +1,31 @@
 use anyhow::{Context, Result};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use chrono::{DateTime, Utc};
 use rand::RngCore;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
-use uuid::Uuid;
-use chrono::{DateTime, Utc};
-use url::Url;
-use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
 use tokio::time::{timeout, Duration};
+use url::Url;
+use uuid::Uuid;
 
-use runmat_filesystem::{FsFileType, FsProvider, RemoteFsConfig, RemoteFsProvider};
 use runmat_config::RunMatConfig;
+use runmat_filesystem::{FsFileType, FsProvider, RemoteFsConfig, RemoteFsProvider};
 
 const DEFAULT_SERVER_URL: &str = "https://api.runmat.com";
 
+use crate::public_api;
 use crate::{
     FsCommand, OrgCommand, ProjectCommand, ProjectMembersCommand, ProjectRetentionCommand,
     RemoteCommand,
 };
-use crate::public_api;
 
 #[derive(Default, Serialize, Deserialize)]
 struct RemoteConfig {
@@ -136,7 +136,9 @@ pub async fn execute_project_command(command: ProjectCommand) -> Result<()> {
     match command {
         ProjectCommand::List { org, limit, cursor } => list_projects(org, limit, cursor).await,
         ProjectCommand::Create { org, name } => create_project(org, name).await,
-        ProjectCommand::Members { members_command } => execute_project_members_command(members_command).await,
+        ProjectCommand::Members { members_command } => {
+            execute_project_members_command(members_command).await
+        }
         ProjectCommand::Retention { retention_command } => {
             execute_project_retention_command(retention_command).await
         }
@@ -171,7 +173,11 @@ pub async fn execute_fs_command(command: FsCommand) -> Result<()> {
     };
     let server_url = resolve_server_url(&config, None)?;
     let token = resolve_auth_token(&mut config, &server_url).await?;
-    let base_url = format!("{}/v1/projects/{}", server_url.trim_end_matches('/'), project_id);
+    let base_url = format!(
+        "{}/v1/projects/{}",
+        server_url.trim_end_matches('/'),
+        project_id
+    );
 
     if matches!(
         command,
@@ -214,8 +220,15 @@ pub async fn execute_fs_command(command: FsCommand) -> Result<()> {
                 manifest,
                 ..
             } => {
-                update_manifest(&server_url, &token, project_id, &path, base_version, &manifest)
-                    .await?
+                update_manifest(
+                    &server_url,
+                    &token,
+                    project_id,
+                    &path,
+                    base_version,
+                    &manifest,
+                )
+                .await?
             }
             FsCommand::SnapshotList { .. } => {
                 list_snapshots(&server_url, &token, project_id).await?
@@ -225,9 +238,7 @@ pub async fn execute_fs_command(command: FsCommand) -> Result<()> {
                 parent,
                 tag,
                 ..
-            } => {
-                create_snapshot(&server_url, &token, project_id, message, parent, tag).await?
-            }
+            } => create_snapshot(&server_url, &token, project_id, message, parent, tag).await?,
             FsCommand::SnapshotRestore { snapshot, .. } => {
                 restore_snapshot(&server_url, &token, project_id, snapshot).await?
             }
@@ -244,25 +255,19 @@ pub async fn execute_fs_command(command: FsCommand) -> Result<()> {
                 delete_snapshot_tag(&server_url, &token, project_id, &tag).await?
             }
             FsCommand::GitClone {
-                directory,
-                server,
-                ..
+                directory, server, ..
             } => {
                 let url = resolve_server_url(&config, server.clone())?;
                 git_clone(&url, &token, project_id, &directory).await?
             }
             FsCommand::GitPull {
-                directory,
-                server,
-                ..
+                directory, server, ..
             } => {
                 let url = resolve_server_url(&config, server.clone())?;
                 git_pull(&url, &token, project_id, &directory).await?
             }
             FsCommand::GitPush {
-                directory,
-                server,
-                ..
+                directory, server, ..
             } => {
                 let url = resolve_server_url(&config, server.clone())?;
                 git_push(&url, &token, project_id, &directory).await?
@@ -278,10 +283,10 @@ pub async fn execute_fs_command(command: FsCommand) -> Result<()> {
         let provider = RemoteFsProvider::new(RemoteFsConfig {
             base_url,
             auth_token: Some(token),
-            shard_threshold_bytes: shard_threshold_bytes.unwrap_or(
-                RemoteFsConfig::default().shard_threshold_bytes,
-            ),
-            shard_size_bytes: shard_size_bytes.unwrap_or(RemoteFsConfig::default().shard_size_bytes),
+            shard_threshold_bytes: shard_threshold_bytes
+                .unwrap_or(RemoteFsConfig::default().shard_threshold_bytes),
+            shard_size_bytes: shard_size_bytes
+                .unwrap_or(RemoteFsConfig::default().shard_size_bytes),
             ..RemoteFsConfig::default()
         })
         .context("Failed to initialize remote filesystem")?;
@@ -325,9 +330,7 @@ pub async fn execute_fs_command(command: FsCommand) -> Result<()> {
                 Ok(())
             }
             FsCommand::Mkdir {
-                path,
-                recursive,
-                ..
+                path, recursive, ..
             } => {
                 if recursive {
                     provider
@@ -464,10 +467,7 @@ async fn create_project(org: Option<Uuid>, name: String) -> Result<()> {
     let token = resolve_auth_token(&mut config, &server_url).await?;
     let client = build_public_client(&server_url, &token)?;
     let response = client
-        .create_project(
-            &org_id,
-            &public_api::types::ProjectCreateRequest { name },
-        )
+        .create_project(&org_id, &public_api::types::ProjectCreateRequest { name })
         .await
         .map_err(map_public_error)?
         .into_inner();
@@ -486,7 +486,11 @@ async fn list_project_members(
     let token = resolve_auth_token(&mut config, &server_url).await?;
     let client = build_public_client(&server_url, &token)?;
     let response = client
-        .list_project_memberships(&project_id, cursor.as_deref(), limit.map(|value| value as u64))
+        .list_project_memberships(
+            &project_id,
+            cursor.as_deref(),
+            limit.map(|value| value as u64),
+        )
         .await
         .map_err(map_public_error)?
         .into_inner();
@@ -509,8 +513,8 @@ async fn select_project(project_id: Uuid) -> Result<()> {
 
 fn build_public_client(server_url: &str, token: &str) -> Result<public_api::Client> {
     let mut headers = HeaderMap::new();
-    let auth_value = HeaderValue::from_str(&format!("Bearer {token}"))
-        .context("Invalid auth token")?;
+    let auth_value =
+        HeaderValue::from_str(&format!("Bearer {token}")).context("Invalid auth token")?;
     headers.insert(AUTHORIZATION, auth_value);
     let client = reqwest::Client::builder()
         .default_headers(headers)
@@ -521,8 +525,8 @@ fn build_public_client(server_url: &str, token: &str) -> Result<public_api::Clie
 
 fn build_http_client(server_url: &str, token: &str) -> Result<(reqwest::Client, String)> {
     let mut headers = HeaderMap::new();
-    let auth_value = HeaderValue::from_str(&format!("Bearer {token}"))
-        .context("Invalid auth token")?;
+    let auth_value =
+        HeaderValue::from_str(&format!("Bearer {token}")).context("Invalid auth token")?;
     headers.insert(AUTHORIZATION, auth_value);
     let client = reqwest::Client::builder()
         .default_headers(headers)
@@ -544,7 +548,11 @@ async fn run_with_remote_fs(
         .unwrap_or(RemoteFsConfig::default().shard_threshold_bytes);
     let shard_size_bytes = read_u64_env("RUNMAT_FS_SHARD_SIZE_BYTES")
         .unwrap_or(RemoteFsConfig::default().shard_size_bytes);
-    let base_url = format!("{}/v1/projects/{}", server_url.trim_end_matches('/'), project_id);
+    let base_url = format!(
+        "{}/v1/projects/{}",
+        server_url.trim_end_matches('/'),
+        project_id
+    );
     let provider = RemoteFsProvider::new(RemoteFsConfig {
         base_url,
         auth_token: Some(token),
@@ -579,8 +587,7 @@ fn resolve_org_id(config: &RemoteConfig, override_value: Option<Uuid>) -> Result
     }
     if let Ok(value) = env::var("RUNMAT_ORG_ID") {
         if !value.is_empty() {
-            return Ok(Uuid::parse_str(&value)
-                .context("RUNMAT_ORG_ID must be a UUID")?);
+            return Uuid::parse_str(&value).context("RUNMAT_ORG_ID must be a UUID");
         }
     }
     config
@@ -596,8 +603,7 @@ fn resolve_project_id(config: &RemoteConfig, override_value: Option<Uuid>) -> Re
     }
     if let Ok(value) = env::var("RUNMAT_PROJECT_ID") {
         if !value.is_empty() {
-            return Ok(Uuid::parse_str(&value)
-                .context("RUNMAT_PROJECT_ID must be a UUID")?);
+            return Uuid::parse_str(&value).context("RUNMAT_PROJECT_ID must be a UUID");
         }
     }
     config
@@ -689,7 +695,7 @@ fn keyring_entry(server_url: &str) -> Result<keyring::Entry> {
         .ok()
         .and_then(|url| url.host_str().map(|host| host.to_string()))
         .unwrap_or_else(|| server_url.to_string());
-    Ok(keyring::Entry::new("runmat", &account).context("Failed to open keyring")?)
+    keyring::Entry::new("runmat", &account).context("Failed to open keyring")
 }
 
 fn keyring_refresh_entry(server_url: &str) -> Result<keyring::Entry> {
@@ -697,7 +703,7 @@ fn keyring_refresh_entry(server_url: &str) -> Result<keyring::Entry> {
         .ok()
         .and_then(|url| url.host_str().map(|host| format!("{host}:refresh")))
         .unwrap_or_else(|| format!("{}:refresh", server_url));
-    Ok(keyring::Entry::new("runmat", &account).context("Failed to open keyring")?)
+    keyring::Entry::new("runmat", &account).context("Failed to open keyring")
 }
 
 async fn interactive_login(server_url: &str, email: Option<String>) -> Result<AuthToken> {
@@ -712,7 +718,8 @@ async fn interactive_login(server_url: &str, email: Option<String>) -> Result<Au
         .map_err(map_public_error)?
         .into_inner();
     let pkce = generate_pkce();
-    let (authorize_url, expected_state) = apply_pkce_to_authorize_url(&response.redirect_url, &pkce)?;
+    let (authorize_url, expected_state) =
+        apply_pkce_to_authorize_url(&response.redirect_url, &pkce)?;
     let redirect_uri = extract_redirect_uri(&authorize_url)?;
     let client_id = extract_client_id(&authorize_url)?;
     let (host, port) = loopback_host_port(&redirect_uri)?;
@@ -744,9 +751,7 @@ async fn interactive_login(server_url: &str, email: Option<String>) -> Result<Au
 
 fn prompt_for_email() -> Result<String> {
     let mut stdout = io::stdout();
-    stdout
-        .write_all(b"Email: ")
-        .context("Failed to prompt")?;
+    stdout.write_all(b"Email: ").context("Failed to prompt")?;
     stdout.flush().context("Failed to flush prompt")?;
     let mut input = String::new();
     io::stdin()
@@ -895,12 +900,7 @@ async fn restore_manifest_version(
     Ok(())
 }
 
-async fn list_history(
-    server_url: &str,
-    token: &str,
-    project_id: Uuid,
-    path: &str,
-) -> Result<()> {
+async fn list_history(server_url: &str, token: &str, project_id: Uuid, path: &str) -> Result<()> {
     let (client, base) = build_http_client(server_url, token)?;
     let url = format!("{}/v1/projects/{}/history", base, project_id);
     let response = client
@@ -919,7 +919,10 @@ async fn list_history(
         .await
         .context("Failed to parse history")?;
     for item in payload.items {
-        println!("{}\t{}\t{}\t{}", item.id, item.created_at, item.size, item.path);
+        println!(
+            "{}\t{}\t{}\t{}",
+            item.id, item.created_at, item.size, item.path
+        );
     }
     Ok(())
 }
@@ -954,7 +957,10 @@ async fn delete_version(
     version_id: Uuid,
 ) -> Result<()> {
     let (client, base) = build_http_client(server_url, token)?;
-    let url = format!("{}/v1/projects/{}/fs/history/{}", base, project_id, version_id);
+    let url = format!(
+        "{}/v1/projects/{}/fs/history/{}",
+        base, project_id, version_id
+    );
     let response = client
         .delete(&url)
         .send()
@@ -1044,8 +1050,8 @@ async fn update_manifest(
 ) -> Result<()> {
     let contents = fs::read_to_string(manifest_path)
         .with_context(|| format!("Failed to read {}", manifest_path.display()))?;
-    let manifest: serde_json::Value = serde_json::from_str(&contents)
-        .context("Manifest must be valid JSON")?;
+    let manifest: serde_json::Value =
+        serde_json::from_str(&contents).context("Manifest must be valid JSON")?;
     let (client, base) = build_http_client(server_url, token)?;
     let url = format!("{}/v1/projects/{}/fs/manifest/update", base, project_id);
     let response = client
@@ -1189,7 +1195,10 @@ async fn delete_snapshot(
     snapshot_id: Uuid,
 ) -> Result<()> {
     let (client, base) = build_http_client(server_url, token)?;
-    let url = format!("{}/v1/projects/{}/fs/snapshots/{}", base, project_id, snapshot_id);
+    let url = format!(
+        "{}/v1/projects/{}/fs/snapshots/{}",
+        base, project_id, snapshot_id
+    );
     let response = client
         .delete(&url)
         .send()
@@ -1279,7 +1288,10 @@ async fn delete_snapshot_tag(
     tag: &str,
 ) -> Result<()> {
     let (client, base) = build_http_client(server_url, token)?;
-    let url = format!("{}/v1/projects/{}/fs/snapshots/tags/{}", base, project_id, tag);
+    let url = format!(
+        "{}/v1/projects/{}/fs/snapshots/tags/{}",
+        base, project_id, tag
+    );
     let response = client
         .delete(&url)
         .send()
@@ -1343,8 +1355,11 @@ async fn git_push(
     project_id: Uuid,
     directory: &PathBuf,
 ) -> Result<()> {
-    let branches = run_git_capture(directory, &["for-each-ref", "refs/heads", "--format=%(refname)"])
-        .context("Failed to list branches")?;
+    let branches = run_git_capture(
+        directory,
+        &["for-each-ref", "refs/heads", "--format=%(refname)"],
+    )
+    .context("Failed to list branches")?;
     let branch_list = branches
         .lines()
         .filter(|line| !line.trim().is_empty())
@@ -1356,9 +1371,13 @@ async fn git_push(
         directory,
         &["fast-export", "--full-tree", "--all", "--show-original-ids"],
     )
-        .context("Failed to export git history")?;
+    .context("Failed to export git history")?;
     let client = reqwest::Client::new();
-    let url = format!("{}/v1/projects/{}/fs/git/receive", server_url.trim_end_matches('/'), project_id);
+    let url = format!(
+        "{}/v1/projects/{}/fs/git/receive",
+        server_url.trim_end_matches('/'),
+        project_id
+    );
     let response = client
         .post(url)
         .header("authorization", format!("Bearer {}", token))
@@ -1378,7 +1397,11 @@ async fn git_push(
 
 async fn fetch_git_stream(server_url: &str, token: &str, project_id: Uuid) -> Result<Vec<u8>> {
     let client = reqwest::Client::new();
-    let url = format!("{}/v1/projects/{}/fs/git/upload", server_url.trim_end_matches('/'), project_id);
+    let url = format!(
+        "{}/v1/projects/{}/fs/git/upload",
+        server_url.trim_end_matches('/'),
+        project_id
+    );
     let response = client
         .get(url)
         .header("authorization", format!("Bearer {}", token))
@@ -1544,9 +1567,7 @@ fn loopback_host_port(redirect_uri: &Url) -> Result<(String, u16)> {
         .context("Missing redirect_uri host")?
         .to_string();
     if host != "127.0.0.1" && host != "localhost" {
-        anyhow::bail!(
-            "Interactive login requires a loopback redirect URI; use --api-key instead."
-        );
+        anyhow::bail!("Interactive login requires a loopback redirect URI; use --api-key instead.");
     }
     let port = redirect_uri.port().unwrap_or(80);
     Ok((host, port))
@@ -1559,15 +1580,17 @@ async fn listen_for_auth_code(listener: TcpListener, expected_state: &str) -> Re
         .context("Failed to accept callback")?;
     let mut buf = vec![0u8; 4096];
     stream.readable().await.context("Failed to read callback")?;
-    let n = stream.try_read(&mut buf).context("Failed to read callback")?;
+    let n = stream
+        .try_read(&mut buf)
+        .context("Failed to read callback")?;
     let request = String::from_utf8_lossy(&buf[..n]);
     let path = request
         .lines()
         .next()
         .and_then(|line| line.split_whitespace().nth(1))
         .unwrap_or("/");
-    let callback_url = Url::parse(&format!("http://localhost{path}"))
-        .context("Invalid callback URL")?;
+    let callback_url =
+        Url::parse(&format!("http://localhost{path}")).context("Invalid callback URL")?;
     let code = callback_url
         .query_pairs()
         .find(|(key, _)| key == "code")

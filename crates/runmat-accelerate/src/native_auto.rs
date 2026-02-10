@@ -14,6 +14,7 @@ use crate::{
     AutoOffloadLogLevel,
 };
 use anyhow::{anyhow, Result};
+use futures::lock::Mutex as AsyncMutex;
 use log::{debug, info, trace, warn};
 use once_cell::sync::{Lazy, OnceCell};
 use runmat_accelerate_api::{AccelProvider, ApiDeviceInfo, HostTensorView, ProviderPrecision};
@@ -613,6 +614,7 @@ pub struct NativeAutoOffload {
 }
 
 static GLOBAL: OnceCell<Option<NativeAutoOffload>> = OnceCell::new();
+static GLOBAL_INIT_LOCK: Lazy<AsyncMutex<()>> = Lazy::new(|| AsyncMutex::new(()));
 static PROFILE_MODEL: OnceCell<Option<ProfileCostModel>> = OnceCell::new();
 
 fn env_bool(key: &str) -> Option<bool> {
@@ -660,11 +662,20 @@ fn element_count_pair(a: &Value, b: &Value) -> Option<usize> {
     Some(la.max(lb))
 }
 
-pub fn global() -> Option<&'static NativeAutoOffload> {
-    GLOBAL.get_or_init(initialize).as_ref()
+pub async fn global() -> Option<&'static NativeAutoOffload> {
+    if let Some(existing) = GLOBAL.get() {
+        return existing.as_ref();
+    }
+    let _guard = GLOBAL_INIT_LOCK.lock().await;
+    if let Some(existing) = GLOBAL.get() {
+        return existing.as_ref();
+    }
+    let initialized = initialize_async().await;
+    let _ = GLOBAL.set(initialized);
+    GLOBAL.get().and_then(|value| value.as_ref())
 }
 
-fn initialize() -> Option<NativeAutoOffload> {
+async fn initialize_async() -> Option<NativeAutoOffload> {
     if !auto_enabled() {
         clear_decisions();
         return None;
@@ -673,16 +684,15 @@ fn initialize() -> Option<NativeAutoOffload> {
     let device_info = provider.device_info_struct();
     let mut config = ThresholdConfig::default();
     let mut base_source = ThresholdBase::BuiltInDefault;
-    let mut cache_path: Option<PathBuf> = None;
+    let mut cache_path: Option<String> = None;
     let mut calibrate_duration_ms: Option<u128> = None;
     let refresh_calibration = calibrate_refresh_enabled();
 
     if !refresh_calibration {
-        if let Some((cached, path)) = load_cached_thresholds(&device_info) {
+        if let Some((cached, path)) = load_cached_thresholds_async(&device_info).await {
             info!(
                 "Native auto-offload: loaded cached calibration for '{}' from {}",
-                device_info.name,
-                path.display()
+                device_info.name, path
             );
             config = cached;
             cache_path = Some(path);
@@ -697,13 +707,12 @@ fn initialize() -> Option<NativeAutoOffload> {
             Ok(()) => {
                 calibrate_duration_ms = Some(start.elapsed().as_millis());
                 base_source = ThresholdBase::Calibrated;
-                match persist_thresholds(&device_info, &config) {
+                match persist_thresholds_async(&device_info, &config).await {
                     Ok(path) => {
                         cache_path = Some(path.clone());
                         info!(
                             "Native auto-offload: persisted calibration for '{}' to {}",
-                            device_info.name,
-                            path.display()
+                            device_info.name, path
                         );
                     }
                     Err(err) => {
@@ -736,9 +745,7 @@ fn initialize() -> Option<NativeAutoOffload> {
         env_overrides_applied
     );
 
-    let cache_path_str = cache_path
-        .as_ref()
-        .map(|p| p.to_string_lossy().into_owned());
+    let cache_path_str = cache_path.clone();
     let state = AutoOffloadState {
         provider: Some(cached_provider_info(&device_info)),
         thresholds: config.clone(),
@@ -1316,6 +1323,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::ComplexTensor(_) => "ComplexTensor",
         Value::Listener(_) => "Listener",
         Value::MException(_) => "MException",
+        Value::OutputList(_) => "OutputList",
     }
 }
 
@@ -1438,6 +1446,77 @@ struct CalibrationProviderDetails {
     vendor: String,
     backend: Option<String>,
     device_id: u32,
+}
+
+#[cfg(target_arch = "wasm32")]
+fn calibration_cache_key(info: &ApiDeviceInfo) -> String {
+    let vendor = slugify(&info.vendor);
+    let name = slugify(&info.name);
+    let backend = slugify(info.backend.as_deref().unwrap_or("unknown"));
+    format!("{}-{}-{}-{}.json", vendor, name, backend, info.device_id)
+}
+
+async fn load_cached_thresholds_async(info: &ApiDeviceInfo) -> Option<(ThresholdConfig, String)> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let key = calibration_cache_key(info);
+        let contents = crate::web_auto_offload_store::load(&key).await?;
+        match serde_json::from_str::<CalibrationRecord>(&contents) {
+            Ok(record) => {
+                if record.version != CALIBRATION_VERSION {
+                    debug!(
+                        "Native auto-offload calibration cache version mismatch (found {}, expected {})",
+                        record.version,
+                        CALIBRATION_VERSION
+                    );
+                    None
+                } else {
+                    Some((record.thresholds, key))
+                }
+            }
+            Err(err) => {
+                debug!(
+                    "Native auto-offload failed to parse cached calibration for '{}': {err}",
+                    info.name
+                );
+                None
+            }
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        load_cached_thresholds(info).map(|(cfg, path)| (cfg, path.display().to_string()))
+    }
+}
+
+async fn persist_thresholds_async(info: &ApiDeviceInfo, cfg: &ThresholdConfig) -> Result<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let key = calibration_cache_key(info);
+        let record = CalibrationRecord {
+            version: CALIBRATION_VERSION,
+            recorded_at: system_time_now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_else(|_| Duration::from_secs(0))
+                .as_secs(),
+            provider: CalibrationProviderDetails {
+                name: info.name.clone(),
+                vendor: info.vendor.clone(),
+                backend: info.backend.clone(),
+                device_id: info.device_id,
+            },
+            thresholds: cfg.clone(),
+        };
+        let payload = serde_json::to_string_pretty(&record).map_err(|e| anyhow!(e.to_string()))?;
+        crate::web_auto_offload_store::save(&key, &payload)
+            .await
+            .map_err(|e| anyhow!(format!("indexeddb persist failed: {e:?}")))?;
+        Ok(key)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        persist_thresholds(info, cfg).map(|path| path.display().to_string())
+    }
 }
 
 fn load_cached_thresholds(info: &ApiDeviceInfo) -> Option<(ThresholdConfig, PathBuf)> {
@@ -2017,22 +2096,22 @@ fn load_profile_cost_model() -> Option<ProfileCostModel> {
     None
 }
 
-pub fn promote_binary(op: BinaryOp, a: &Value, b: &Value) -> Result<(Value, Value)> {
+pub async fn promote_binary(op: BinaryOp, a: &Value, b: &Value) -> Result<(Value, Value)> {
     if !auto_enabled() {
         return Ok((a.clone(), b.clone()));
     }
-    if let Some(auto) = global() {
+    if let Some(auto) = global().await {
         auto.promote_binary(op, a, b)
     } else {
         Ok((a.clone(), b.clone()))
     }
 }
 
-pub fn promote_unary(op: UnaryOp, value: &Value) -> Result<Value> {
+pub async fn promote_unary(op: UnaryOp, value: &Value) -> Result<Value> {
     if !auto_enabled() {
         return Ok(value.clone());
     }
-    if let Some(auto) = global() {
+    if let Some(auto) = global().await {
         auto.promote_unary(op, value)
     } else {
         Ok(value.clone())
@@ -2061,7 +2140,7 @@ pub async fn prepare_builtin_args(name: &str, args: &[Value]) -> Result<Vec<Valu
     if !auto_enabled() {
         return Ok(args.to_vec());
     }
-    if let Some(auto) = global() {
+    if let Some(auto) = global().await {
         auto.prepare_builtin(name, args).await
     } else {
         Ok(args.to_vec())
@@ -2072,11 +2151,11 @@ pub fn is_sink(name: &str) -> bool {
     builtin_policy(name).map(|p| p.is_sink).unwrap_or(false)
 }
 
-pub fn promote_reduction_args(op: ReductionOp, args: &[Value]) -> Result<Vec<Value>> {
+pub async fn promote_reduction_args(op: ReductionOp, args: &[Value]) -> Result<Vec<Value>> {
     if !auto_enabled() {
         return Ok(args.to_vec());
     }
-    if let Some(auto) = global() {
+    if let Some(auto) = global().await {
         auto.promote_reduction(op, args)
     } else {
         Ok(args.to_vec())

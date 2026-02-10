@@ -2,8 +2,8 @@
 
 use runmat_macros::runtime_builtin;
 
-use crate::BuiltinResult;
 use crate::builtins::plotting::type_resolvers::string_type;
+use crate::BuiltinResult;
 
 /// Flush pending figure updates to any bound plot surfaces.
 ///

@@ -112,7 +112,8 @@ async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(ifftshift_error("ifftshift: unsupported input type")),
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(ifftshift_error("ifftshift: unsupported input type")),
     }
 }
 
@@ -202,9 +203,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type,
-    };
+    use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type};
 
     fn error_message(error: crate::RuntimeError) -> String {
         error.message().to_string()

@@ -157,7 +157,10 @@ pub(crate) mod tests {
     #[test]
     fn numel_type_returns_int() {
         assert_eq!(
-            numel_type(&[Type::Tensor { shape: None }], &ResolveContext::new(Vec::new())),
+            numel_type(
+                &[Type::Tensor { shape: None }],
+                &ResolveContext::new(Vec::new())
+            ),
             Type::Int
         );
     }
