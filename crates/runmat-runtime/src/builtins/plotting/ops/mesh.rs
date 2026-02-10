@@ -142,6 +142,9 @@ pub async fn mesh_builtin(
                 &z_gpu,
                 min_z,
                 max_z,
+                style.colormap,
+                style.alpha,
+                style.flatten_z,
             )
             .await
             {

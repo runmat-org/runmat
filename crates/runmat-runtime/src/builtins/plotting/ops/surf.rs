@@ -275,7 +275,15 @@ pub async fn surf_builtin(
     let mut surface = if let Some(z_gpu) = z_input.gpu_handle().cloned() {
         match super::gpu_helpers::axis_bounds_async(&z_gpu, BUILTIN_NAME).await {
             Ok((min_z, max_z)) => match build_surface_gpu_plot_with_bounds_async(
-                BUILTIN_NAME, &x_axis, &y_axis, &z_gpu, min_z, max_z,
+                BUILTIN_NAME,
+                &x_axis,
+                &y_axis,
+                &z_gpu,
+                min_z,
+                max_z,
+                style.colormap,
+                style.alpha,
+                style.flatten_z,
             )
             .await
             {
@@ -354,6 +362,9 @@ pub(crate) async fn build_surface_gpu_plot(
     x_axis: &[f64],
     y_axis: &[f64],
     z: &GpuTensorHandle,
+    colormap: ColorMap,
+    alpha: f32,
+    flatten_z: bool,
 ) -> BuiltinResult<SurfacePlot> {
     let (min_z, max_z) = super::gpu_helpers::axis_bounds_async(z, name).await?;
     build_surface_gpu_plot_with_bounds_async(
@@ -363,6 +374,9 @@ pub(crate) async fn build_surface_gpu_plot(
         z,
         min_z,
         max_z,
+        colormap,
+        alpha,
+        flatten_z,
     )
     .await
 }
@@ -374,6 +388,9 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
     z: &GpuTensorHandle,
     min_z: f32,
     max_z: f32,
+    colormap: ColorMap,
+    alpha: f32,
+    flatten_z: bool,
 ) -> BuiltinResult<SurfacePlot> {
     if x_axis.is_empty() || y_axis.is_empty() {
         return Err(plotting_error(
@@ -428,7 +445,7 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
     );
     let extent_hint = ((max_x - min_x).powi(2) + (max_y - min_y).powi(2)).sqrt();
 
-    let color_table = build_color_lut(ColorMap::Parula, 512, 1.0);
+    let color_table = build_color_lut(colormap, 512, 1.0);
     let scalar = ScalarType::from_is_f64(z_ref.precision == ProviderPrecision::F64);
 
     let mut x_axis_f32: Vec<f32> = Vec::new();
@@ -515,12 +532,12 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
         y_len: y_len as u32,
         scalar,
     };
-    let lod = compute_surface_lod(x_axis.len(), y_axis.len(), extent_hint);
+    let lod = compute_surface_lod(x_len, y_len, extent_hint);
     let params = runmat_plot::gpu::surface::SurfaceGpuParams {
         min_z,
         max_z,
-        alpha: 1.0,
-        flatten_z: false,
+        alpha,
+        flatten_z,
         x_stride: lod.stride_x,
         y_stride: lod.stride_y,
         lod_x_len: lod.lod_x_len,
@@ -536,15 +553,20 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
     .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
 
     let vertex_count = lod.vertex_count();
+    let lod_x_len = usize::try_from(lod.lod_x_len)
+        .map_err(|_| plotting_error(name, format!("{name}: LOD X size overflowed")))?;
+    let lod_y_len = usize::try_from(lod.lod_y_len)
+        .map_err(|_| plotting_error(name, format!("{name}: LOD Y size overflowed")))?;
     let mut surface = SurfacePlot::from_gpu_buffer(
-        x_len,
-        y_len,
+        lod_x_len,
+        lod_y_len,
         gpu_vertices,
         vertex_count,
         bounds,
     );
-    surface.colormap = ColorMap::Parula;
-    surface.shading_mode = ShadingMode::Smooth;
+    surface.colormap = colormap;
+    surface.alpha = alpha;
+    surface.flatten_z = flatten_z;
     Ok(surface)
 }
 

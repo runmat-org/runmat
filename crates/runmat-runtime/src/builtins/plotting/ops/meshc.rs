@@ -61,7 +61,17 @@ pub async fn meshc_builtin(
     let level_spec = ContourLevelSpec::Count(default_level_count());
     let contour_map = style.colormap;
     let (mut surface, contour) = if let Some(z_gpu) = z_input.gpu_handle().cloned() {
-        match build_surface_gpu_plot(BUILTIN_NAME, &x_axis, &y_axis, &z_gpu).await {
+        match build_surface_gpu_plot(
+            BUILTIN_NAME,
+            &x_axis,
+            &y_axis,
+            &z_gpu,
+            style.colormap,
+            style.alpha,
+            style.flatten_z,
+        )
+        .await
+        {
             Ok(surface_gpu) => {
                 let mut surface = surface_gpu.with_wireframe(true);
                 style.apply_to_plot(&mut surface);

@@ -3,7 +3,7 @@
 use std::cmp::max;
 
 use log::warn;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, MeshgridAxisView};
+use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
 
 use crate::builtins::array::type_resolvers::size_vector_len;
@@ -149,55 +149,31 @@ pub async fn evaluate(args: &[Value]) -> crate::BuiltinResult<MeshgridEval> {
         OutputTemplate::Like(spec) => spec.residency,
     };
 
-    let mut gpu_outputs: Option<Vec<MeshgridOutput>> = None;
     let axes_all_real = !require_complex;
+    let mut outputs: Vec<MeshgridOutput> = Vec::new();
 
     if axes_all_real
         && matches!(target_class, PrototypeClass::Real)
         && matches!(target_residency, DevicePreference::Gpu)
     {
-        if let Some(provider) = runmat_accelerate_api::provider() {
-            let x_real = axis_real_values(&x_axis);
-            let y_real = axis_real_values(&y_axis);
-            let z_real = z_axis.as_ref().map(axis_real_values);
-            let mut axis_views: Vec<MeshgridAxisView<'_>> =
-                Vec::with_capacity(if z_real.is_some() { 3 } else { 2 });
-            axis_views.push(MeshgridAxisView { data: &x_real });
-            axis_views.push(MeshgridAxisView { data: &y_real });
-            if let Some(ref data) = z_real {
-                axis_views.push(MeshgridAxisView { data });
-            }
-            match provider.meshgrid(&axis_views) {
-                Ok(result) => {
-                    let expected = if z_axis.is_some() { 3 } else { 2 };
-                    let outputs: Vec<MeshgridOutput> = result
-                        .outputs
-                        .into_iter()
-                        .map(MeshgridOutput::GpuReal)
-                        .collect();
-                    if outputs.len() == expected {
-                        gpu_outputs = Some(outputs);
-                    } else {
-                        warn!(
-                            "meshgrid: provider returned {}/{} outputs; falling back to host",
-                            outputs.len(),
-                            expected
-                        );
-                    }
-                }
-                Err(err) => {
-                    warn!("meshgrid: provider meshgrid hook failed, falling back to host: {err}")
-                }
-            }
+        if let Some(gpu) = try_meshgrid_gpu_from_vector_axes(&x_axis, &y_axis, z_axis.as_ref())? {
+            outputs = gpu;
         }
     }
 
-    let outputs = gpu_outputs.unwrap_or_else(|| {
-        build_outputs(&x_axis, &y_axis, z_axis.as_ref())
+    if outputs.is_empty() {
+        // Host fallback: ensure we have host axis values materialized.
+        let x_host = axis_to_host_async(&x_axis).await?;
+        let y_host = axis_to_host_async(&y_axis).await?;
+        let z_host = match z_axis.as_ref() {
+            Some(axis) => Some(axis_to_host_async(axis).await?),
+            None => None,
+        };
+        outputs = build_outputs(&x_host, &y_host, z_host.as_ref())
             .into_iter()
             .map(MeshgridOutput::Host)
-            .collect()
-    });
+            .collect();
+    }
 
     Ok(MeshgridEval {
         outputs,
@@ -374,6 +350,7 @@ struct AxisData {
     values: Vec<(f64, f64)>,
     len: usize,
     is_complex: bool,
+    gpu_real: Option<GpuTensorHandle>,
 }
 
 async fn axis_from_value(
@@ -391,6 +368,7 @@ async fn axis_from_value(
             values: vec![(n, 0.0)],
             len: 1,
             is_complex: false,
+            gpu_real: None,
         }),
         Value::Int(i) => {
             let val = i.to_f64();
@@ -398,25 +376,37 @@ async fn axis_from_value(
                 values: vec![(val, 0.0)],
                 len: 1,
                 is_complex: false,
+                gpu_real: None,
             })
         }
         Value::Bool(b) => Ok(AxisData {
             values: vec![(if b { 1.0 } else { 0.0 }, 0.0)],
             len: 1,
             is_complex: false,
+            gpu_real: None,
         }),
         Value::Complex(re, im) => Ok(AxisData {
             values: vec![(re, im)],
             len: 1,
             is_complex: im != 0.0,
+            gpu_real: None,
         }),
         Value::ComplexTensor(tensor) => axis_from_complex_tensor(tensor, index),
         Value::GpuTensor(handle) => {
+            // Fast path: if the gpuArray is vector-like, keep it on-device and avoid a download.
+            // We'll validate any non-vector shapes by gathering below.
+            if is_vector_shape(&handle.shape) {
+                *prefer_gpu = true;
+                return Ok(AxisData {
+                    values: Vec::new(),
+                    len: vector_len_from_shape(&handle.shape),
+                    is_complex: false,
+                    gpu_real: Some(handle),
+                });
+            }
+
+            // Fallback: gather to validate / recover axes from meshgrid matrices.
             let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-            // Only treat GPU inputs as a signal to prefer GPU outputs when the input
-            // is actually a vector axis. When the caller passes a full coordinate
-            // matrix (already meshed), default to host output unless the user forces
-            // GPU residency via `like`.
             if is_vector_shape(&tensor.shape) {
                 *prefer_gpu = true;
             }
@@ -439,6 +429,7 @@ fn axis_from_tensor(tensor: Tensor, index: usize) -> crate::BuiltinResult<AxisDa
             len: values.len(),
             values,
             is_complex: false,
+            gpu_real: None,
         });
     }
 
@@ -468,6 +459,7 @@ fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> crate::Built
             len: tensor.data.len(),
             values: tensor.data,
             is_complex,
+            gpu_real: None,
         });
     }
 
@@ -512,6 +504,7 @@ fn axis_from_meshgrid_matrix_real(
             len: values.len(),
             values,
             is_complex: false,
+            gpu_real: None,
         }));
     }
 
@@ -527,6 +520,7 @@ fn axis_from_meshgrid_matrix_real(
         len: values.len(),
         values,
         is_complex: false,
+        gpu_real: None,
     }))
 }
 
@@ -557,6 +551,7 @@ fn axis_from_meshgrid_matrix_complex(
             len: values.len(),
             values,
             is_complex,
+            gpu_real: None,
         }));
     }
 
@@ -572,6 +567,7 @@ fn axis_from_meshgrid_matrix_complex(
         len: values.len(),
         values,
         is_complex,
+        gpu_real: None,
     }))
 }
 
@@ -627,10 +623,6 @@ fn matrix_cols_are_identical_complex(tensor: &ComplexTensor, rows: usize, cols: 
     true
 }
 
-fn axis_real_values(axis: &AxisData) -> Vec<f64> {
-    axis.values.iter().map(|(re, _)| *re).collect()
-}
-
 fn is_vector_shape(shape: &[usize]) -> bool {
     if shape.is_empty() {
         return true;
@@ -642,6 +634,114 @@ fn is_vector_shape(shape: &[usize]) -> bool {
         }
     }
     non_singleton <= 1
+}
+
+fn vector_len_from_shape(shape: &[usize]) -> usize {
+    if shape.is_empty() {
+        return 1;
+    }
+    shape.iter().copied().max().unwrap_or(0)
+}
+
+async fn axis_to_host_async(axis: &AxisData) -> crate::BuiltinResult<AxisData> {
+    if axis.gpu_real.is_none() {
+        return Ok(axis.clone());
+    }
+    let handle = axis
+        .gpu_real
+        .as_ref()
+        .expect("checked gpu_real is_some");
+    let tensor = gpu_helpers::gather_tensor_async(handle).await?;
+    // Index is only used for error messages; tensor came from a validated vector-like handle.
+    axis_from_tensor(tensor, 0)
+}
+
+fn try_meshgrid_gpu_from_vector_axes(
+    x_axis: &AxisData,
+    y_axis: &AxisData,
+    z_axis: Option<&AxisData>,
+) -> crate::BuiltinResult<Option<Vec<MeshgridOutput>>> {
+    let Some(x_handle) = x_axis.gpu_real.as_ref() else {
+        return Ok(None);
+    };
+    let Some(y_handle) = y_axis.gpu_real.as_ref() else {
+        return Ok(None);
+    };
+
+    let z_handle = match z_axis {
+        Some(axis) => match axis.gpu_real.as_ref() {
+            Some(h) => Some(h),
+            None => return Ok(None),
+        },
+        None => None,
+    };
+
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(x_handle) else {
+        return Ok(None);
+    };
+    if runmat_accelerate_api::provider_for_handle(y_handle).is_none() {
+        return Ok(None);
+    }
+    if let Some(z) = z_handle {
+        if runmat_accelerate_api::provider_for_handle(z).is_none() {
+            return Ok(None);
+        }
+    }
+
+    let nx = x_axis.len;
+    let ny = y_axis.len;
+    let nz = z_axis.map(|axis| axis.len).unwrap_or(1);
+
+    // Reshape axis vectors (metadata-only) so repmat can build full grids on-device.
+    let x_row = provider
+        .reshape(x_handle, &[1, nx])
+        .map_err(|e| builtin_error(format!("meshgrid: reshape X failed: {e}")))?;
+    let y_col = provider
+        .reshape(y_handle, &[ny, 1])
+        .map_err(|e| builtin_error(format!("meshgrid: reshape Y failed: {e}")))?;
+
+    let mut outputs = Vec::with_capacity(if z_handle.is_some() { 3 } else { 2 });
+    if z_handle.is_some() {
+        let x_base = provider
+            .reshape(&x_row, &[1, nx, 1])
+            .map_err(|e| builtin_error(format!("meshgrid: reshape X(3d) failed: {e}")))?;
+        let y_base = provider
+            .reshape(&y_col, &[ny, 1, 1])
+            .map_err(|e| builtin_error(format!("meshgrid: reshape Y(3d) failed: {e}")))?;
+
+        let x_grid = provider
+            .repmat(&x_base, &[ny, 1, nz])
+            .map_err(|e| builtin_error(format!("meshgrid: repmat X failed: {e}")))?;
+        let y_grid = provider
+            .repmat(&y_base, &[1, nx, nz])
+            .map_err(|e| builtin_error(format!("meshgrid: repmat Y failed: {e}")))?;
+
+        outputs.push(MeshgridOutput::GpuReal(x_grid));
+        outputs.push(MeshgridOutput::GpuReal(y_grid));
+
+        let z = z_handle.expect("checked z_handle is_some");
+        let z_axis_row = provider
+            .reshape(z, &[1, nz])
+            .map_err(|e| builtin_error(format!("meshgrid: reshape Z failed: {e}")))?;
+        let z_base = provider
+            .reshape(&z_axis_row, &[1, 1, nz])
+            .map_err(|e| builtin_error(format!("meshgrid: reshape Z(3d) failed: {e}")))?;
+        let z_grid = provider
+            .repmat(&z_base, &[ny, nx, 1])
+            .map_err(|e| builtin_error(format!("meshgrid: repmat Z failed: {e}")))?;
+        outputs.push(MeshgridOutput::GpuReal(z_grid));
+    } else {
+        let x_grid = provider
+            .repmat(&x_row, &[ny, 1])
+            .map_err(|e| builtin_error(format!("meshgrid: repmat X failed: {e}")))?;
+        let y_grid = provider
+            .repmat(&y_col, &[1, nx])
+            .map_err(|e| builtin_error(format!("meshgrid: repmat Y failed: {e}")))?;
+        outputs.push(MeshgridOutput::GpuReal(x_grid));
+        outputs.push(MeshgridOutput::GpuReal(y_grid));
+    }
+
+    Ok(Some(outputs))
 }
 
 fn normalise_axes(axes: &[AxisData]) -> (AxisData, AxisData, Option<AxisData>) {

@@ -60,7 +60,17 @@ pub async fn surfc_builtin(
     // Build plots up-front so we can await GPU work without blocking the render loop.
     let contour_map = style.colormap;
     let (mut surface, contour) = if let Some(z_gpu) = z_input.gpu_handle().cloned() {
-        match build_surface_gpu_plot(BUILTIN_NAME, &x_axis, &y_axis, &z_gpu).await {
+        match build_surface_gpu_plot(
+            BUILTIN_NAME,
+            &x_axis,
+            &y_axis,
+            &z_gpu,
+            style.colormap,
+            style.alpha,
+            style.flatten_z,
+        )
+        .await
+        {
             Ok(mut surface) => {
                 let base_z = surface.bounds().min.z;
                 style.apply_to_plot(&mut surface);

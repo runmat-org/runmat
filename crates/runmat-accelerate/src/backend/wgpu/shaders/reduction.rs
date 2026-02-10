@@ -94,15 +94,18 @@ fn main(
     @builtin(local_invocation_id) lid: vec3<u32>,
     @builtin(workgroup_id) wid: vec3<u32>,
 ) {
-    let base = params.offset + wid.x * 512u;
+    let wg: u32 = @WG@u;
+    let group_stride: u32 = 2u * wg;
+    let base = params.offset + wid.x * group_stride;
     let idx = base + lid.x;
+    let end = params.offset + params.len;
     var acc = identity(params.op);
-    if idx < params.len {
+    if idx < end {
         let mapped = map_value(InBuf.data[idx], params.op);
         acc = combine(acc, mapped, params.op);
     }
-    if idx + 256u < params.len {
-        let mapped = map_value(InBuf.data[idx + 256u], params.op);
+    if idx + wg < end {
+        let mapped = map_value(InBuf.data[idx + wg], params.op);
         acc = combine(acc, mapped, params.op);
     }
     tile[lid.x] = acc;
@@ -115,7 +118,10 @@ fn main(
         stride = stride / 2u;
         workgroupBarrier();
     }
-    if lid.x == 0u { let out_index = (params.offset / 512u) + wid.x; OutBuf.data[out_index] = tile[0u]; }
+    if lid.x == 0u {
+        let out_index = (params.offset / group_stride) + wid.x;
+        OutBuf.data[out_index] = tile[0u];
+    }
 }
 "#;
 
@@ -188,15 +194,18 @@ fn main(
     @builtin(local_invocation_id) lid: vec3<u32>,
     @builtin(workgroup_id) wid: vec3<u32>,
 ) {
-    let base = params.offset + wid.x * 512u;
+    let wg: u32 = @WG@u;
+    let group_stride: u32 = 2u * wg;
+    let base = params.offset + wid.x * group_stride;
     let idx = base + lid.x;
+    let end = params.offset + params.len;
     var acc = identity(params.op);
-    if idx < params.len {
+    if idx < end {
         let mapped = map_value(InBuf.data[idx], params.op);
         acc = combine(acc, mapped, params.op);
     }
-    if idx + 256u < params.len {
-        let mapped = map_value(InBuf.data[idx + 256u], params.op);
+    if idx + wg < end {
+        let mapped = map_value(InBuf.data[idx + wg], params.op);
         acc = combine(acc, mapped, params.op);
     }
     tile[lid.x] = acc;
@@ -209,7 +218,10 @@ fn main(
         stride = stride / 2u;
         workgroupBarrier();
     }
-    if lid.x == 0u { let out_index = (params.offset / 512u) + wid.x; OutBuf.data[out_index] = tile[0u]; }
+    if lid.x == 0u {
+        let out_index = (params.offset / group_stride) + wid.x;
+        OutBuf.data[out_index] = tile[0u];
+    }
 }
 "#;
 
