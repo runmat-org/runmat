@@ -35,7 +35,7 @@ resolver = "2"
 
 [workspace.dependencies]
 # External dependencies used across multiple crates
-inventory = "0.1"
+inventory = "0.2"
 syn = { version = "1", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"
