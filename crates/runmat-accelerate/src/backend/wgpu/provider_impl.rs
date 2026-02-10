@@ -6865,7 +6865,9 @@ impl WgpuProvider {
             strides_arr[i] = crate::backend::wgpu::params::AlignedU32::new(base_strides[i] as u32);
         }
 
-        let out_buffer = self.create_storage_buffer(new_total, "runmat-repmat-out");
+        // Use checked allocation so we fail with a clear error instead of
+        // creating an invalid WebGPU buffer (which later triggers a validation error).
+        let out_buffer = self.create_storage_buffer_checked(new_total, "runmat-repmat-out")?;
         let out_shape = new_shape.clone();
         if new_total == 0 {
             return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
