@@ -22,6 +22,8 @@ use std::time::SystemTime;
 use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
 #[cfg(feature = "otlp")]
 use opentelemetry::Context as OtelContext;
+#[cfg(feature = "otlp")]
+use opentelemetry::trace::TraceContextExt;
 
 const DEFAULT_LOG_FILTER: &str = "info";
 
