@@ -165,7 +165,7 @@ export default function PricingPage() {
                   ["JIT compilation and fusion engine", "check", "check", "check"],
                   ["Cross-platform (macOS/Linux/Windows)", "check", "check", "check"],
                 ].map(([label, ...cells]) => (
-                  <ProductRow key={label} label={label} cells={cells} />
+                  <ProductRow key={label} label={label} cells={cells as [string, string, string]} />
                 ))}
                 <tr className="border-b border-border/40">
                   <td colSpan={4} className="py-2 pt-6 font-semibold text-foreground sticky left-0 bg-background">
@@ -179,7 +179,7 @@ export default function PricingPage() {
                   ["Interactive 2D/3D plotting", "check", "check", "check"],
                   ["Type and shape diagnostics", "check", "check", "check"],
                 ].map(([label, ...cells]) => (
-                  <ProductRow key={label} label={label} cells={cells} />
+                  <ProductRow key={label} label={label} cells={cells as [string, string, string]} />
                 ))}
                 <tr className="border-b border-border/40">
                   <td colSpan={4} className="py-2 pt-6 font-semibold text-foreground sticky left-0 bg-background">
@@ -192,7 +192,7 @@ export default function PricingPage() {
                   ["Team workspaces", "x", "check", "check"],
                   ["File versioning", "x", "check", "check"],
                 ].map(([label, ...cells]) => (
-                  <ProductRow key={label} label={label} cells={cells} />
+                  <ProductRow key={label} label={label} cells={cells as [string, string, string]} />
                 ))}
                 <tr className="border-b border-border/40">
                   <td colSpan={4} className="py-2 pt-6 font-semibold text-foreground sticky left-0 bg-background">
@@ -206,7 +206,7 @@ export default function PricingPage() {
                   ["Audit logs", "x", "Team plan", "check"],
                   ["Air-gapped deployment", "x", "x", "check"],
                 ].map(([label, ...cells]) => (
-                  <ProductRow key={label} label={label} cells={cells} />
+                  <ProductRow key={label} label={label} cells={cells as [string, string, string]} />
                 ))}
                 <tr className="border-b border-border/40">
                   <td colSpan={4} className="py-2 pt-6 font-semibold text-foreground sticky left-0 bg-background">
@@ -219,7 +219,7 @@ export default function PricingPage() {
                   ["Priority support", "x", "Paid plans", "check"],
                   ["Dedicated support and SLA", "x", "x", "check"],
                 ].map(([label, ...cells]) => (
-                  <ProductRow key={label} label={label} cells={cells} />
+                  <ProductRow key={label} label={label} cells={cells as [string, string, string]} />
                 ))}
               </tbody>
             </table>
@@ -254,7 +254,7 @@ export default function PricingPage() {
                   ["Cloud storage", "1 GB", "50 GB", "250 GB"],
                   ["Version history", "7 days", "30 days", "90 days"],
                 ].map(([label, ...cells]) => (
-                  <CloudRow key={label} label={label} cells={cells} />
+                  <CloudRow key={label} label={label} cells={cells as [string, string, string]} />
                 ))}
                 <tr className="border-b border-border/40">
                   <td colSpan={4} className="py-2 pt-6 font-semibold text-foreground sticky left-0 bg-background">
@@ -266,7 +266,7 @@ export default function PricingPage() {
                   ["Shared workspaces", "x", "check", "check"],
                   ["Real-time collaboration", "x", "x", "Coming soon"],
                 ].map(([label, ...cells]) => (
-                  <CloudRow key={label} label={label} cells={cells} />
+                  <CloudRow key={label} label={label} cells={cells as [string, string, string]} />
                 ))}
                 <tr className="border-b border-border/40">
                   <td colSpan={4} className="py-2 pt-6 font-semibold text-foreground sticky left-0 bg-background">
@@ -277,7 +277,7 @@ export default function PricingPage() {
                   ["LLM-assisted coding", "check", "check", "check"],
                   ["LLM zero data retention", "x", "check", "check"],
                 ].map(([label, ...cells]) => (
-                  <CloudRow key={label} label={label} cells={cells} />
+                  <CloudRow key={label} label={label} cells={cells as [string, string, string]} />
                 ))}
                 <tr className="border-b border-border/40">
                   <td colSpan={4} className="py-2 pt-6 font-semibold text-foreground sticky left-0 bg-background">
@@ -289,7 +289,7 @@ export default function PricingPage() {
                   ["SSO / SAML", "x", "x", "check"],
                   ["Audit logs", "x", "x", "check"],
                 ].map(([label, ...cells]) => (
-                  <CloudRow key={label} label={label} cells={cells} />
+                  <CloudRow key={label} label={label} cells={cells as [string, string, string]} />
                 ))}
                 <tr className="border-b border-border/40">
                   <td colSpan={4} className="py-2 pt-6 font-semibold text-foreground sticky left-0 bg-background">
@@ -302,7 +302,7 @@ export default function PricingPage() {
                   ["Centralized billing", "x", "x", "check"],
                   ["Invoice / PO billing", "x", "x", "check"],
                 ].map(([label, ...cells]) => (
-                  <CloudRow key={label} label={label} cells={cells} />
+                  <CloudRow key={label} label={label} cells={cells as [string, string, string]} />
                 ))}
               </tbody>
             </table>
