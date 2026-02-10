@@ -94,7 +94,9 @@ pub async fn load(key: &str) -> Option<String> {
     if value.is_null() || value.is_undefined() {
         return None;
     }
-    value.as_string()
+    // `save` stores an object `{ key, json }`. Extract the JSON payload.
+    let json = Reflect::get(&value, &JsValue::from_str("json")).ok()?;
+    json.as_string()
 }
 
 /// Persist a calibration JSON payload by key (best-effort).
