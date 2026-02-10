@@ -116,8 +116,8 @@ fn magic_doubly_even(n: usize) -> Result<Vec<usize>, String> {
             let value = row * n + col + 1;
             let row_mod = row % 4;
             let col_mod = col % 4;
-            let keep = row_mod == col_mod || row_mod + col_mod == 3;
-            let final_value = if keep { value } else { size + 1 - value };
+            let swap = row_mod == col_mod || row_mod + col_mod == 3;
+            let final_value = if swap { size + 1 - value } else { value };
             data[idx(row, col, n)] = final_value;
         }
     }
