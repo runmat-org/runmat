@@ -83,6 +83,15 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 )]
 async fn rmdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&args).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count,
+            eval.outputs(),
+        ));
+    }
     Ok(eval.first_output())
 }
 

@@ -74,6 +74,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn fgets_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&fid, &rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count,
+            eval.outputs(),
+        ));
+    }
     Ok(eval.first_output())
 }
 

@@ -19,6 +19,8 @@ use tracing_subscriber::reload;
 use std::time::SystemTime;
 
 #[cfg(feature = "otlp")]
+use opentelemetry::trace::TraceContextExt;
+#[cfg(feature = "otlp")]
 use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
 #[cfg(feature = "otlp")]
 use opentelemetry::Context as OtelContext;

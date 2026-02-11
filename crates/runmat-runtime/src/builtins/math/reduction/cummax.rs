@@ -101,7 +101,21 @@ impl CummaxEvaluation {
     builtin_path = "crate::builtins::math::reduction::cummax"
 )]
 async fn cummax_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    evaluate(value, &rest).await.map(|eval| eval.into_value())
+    let eval = evaluate(value, &rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        if out_count == 1 {
+            return Ok(Value::OutputList(vec![eval.into_value()]));
+        }
+        let (values, indices) = eval.into_pair();
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count,
+            vec![values, indices],
+        ));
+    }
+    Ok(eval.into_value())
 }
 
 /// Evaluate the builtin once and expose both outputs (value + indices).

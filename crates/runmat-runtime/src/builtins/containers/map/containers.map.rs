@@ -1179,7 +1179,8 @@ fn normalize_numeric_value(value: Value, builtin: &'static str) -> BuiltinResult
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::GpuTensor(_) => Err(map_error(
+        | Value::GpuTensor(_)
+        | Value::OutputList(_) => Err(map_error(
             "containers.Map: values must be numeric when ValueType is 'double' or 'single'",
             builtin,
         )),
@@ -1215,7 +1216,8 @@ fn normalize_logical_value(value: Value, builtin: &'static str) -> BuiltinResult
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::GpuTensor(_) => Err(map_error(
+        | Value::GpuTensor(_)
+        | Value::OutputList(_) => Err(map_error(
             "containers.Map: values must be logical when ValueType is 'logical'",
             builtin,
         )),

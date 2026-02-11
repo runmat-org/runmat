@@ -1,13 +1,14 @@
 use crate::core::renderer::Vertex;
 use crate::core::scene::GpuVertexBuffer;
+use crate::gpu::axis::{axis_storage_buffer, AxisData};
 use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 pub struct ContourFillGpuInputs<'a> {
-    pub x_axis: &'a [f32],
-    pub y_axis: &'a [f32],
+    pub x_axis: AxisData<'a>,
+    pub y_axis: AxisData<'a>,
     pub z_buffer: Arc<wgpu::Buffer>,
     pub color_table: &'a [[f32; 4]],
     pub level_values: &'a [f32],
@@ -67,21 +68,8 @@ pub fn pack_contour_fill_vertices(
     let workgroup_size = tuning::effective_workgroup_size();
     let shader = compile_shader(device, workgroup_size, inputs.scalar);
 
-    let x_buffer = Arc::new(
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("contourf-x-axis"),
-            contents: bytemuck::cast_slice(inputs.x_axis),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        }),
-    );
-
-    let y_buffer = Arc::new(
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("contourf-y-axis"),
-            contents: bytemuck::cast_slice(inputs.y_axis),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        }),
-    );
+    let x_buffer = axis_storage_buffer(device, "contourf-x-axis", &inputs.x_axis, inputs.scalar)?;
+    let y_buffer = axis_storage_buffer(device, "contourf-y-axis", &inputs.y_axis, inputs.scalar)?;
 
     let color_buffer = Arc::new(
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

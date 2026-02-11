@@ -126,7 +126,12 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
 }
 
 #[async_recursion::async_recursion(?Send)]
-pub async fn call_builtin_async(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+async fn call_builtin_async_impl(
+    name: &str,
+    args: &[Value],
+    output_count: Option<usize>,
+) -> Result<Value, RuntimeError> {
+    let _output_guard = crate::output_count::push_output_count(output_count);
     let mut matching_builtins = Vec::new();
 
     // Collect all builtins with the matching name
@@ -142,7 +147,7 @@ pub async fn call_builtin_async(name: &str, args: &[Value]) -> Result<Value, Run
             // Prefer explicit constructor method with the same name as class (static)
             if let Some(ctor) = cls.methods.get(name) {
                 // Dispatch to constructor builtin; pass args through
-                return call_builtin_async(&ctor.function_name, args).await;
+                return call_builtin_async_impl(&ctor.function_name, args, output_count).await;
             }
             // Otherwise default-construct object
             return new_object_builtin(name.to_string()).await;
@@ -209,6 +214,18 @@ pub async fn call_builtin_async(name: &str, args: &[Value]) -> Result<Value, Run
         last_error.message()
     ))
     .build())
+}
+
+pub async fn call_builtin_async(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+    call_builtin_async_impl(name, args, None).await
+}
+
+pub async fn call_builtin_async_with_outputs(
+    name: &str,
+    args: &[Value],
+    output_count: usize,
+) -> Result<Value, RuntimeError> {
+    call_builtin_async_impl(name, args, Some(output_count)).await
 }
 
 fn should_retry_with_gpu_gather(err: &RuntimeError, args: &[Value]) -> bool {

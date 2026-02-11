@@ -66,7 +66,7 @@
     {
       "description": "Complex polynomial division",
       "input": "b = [1+2i 3-4i 2];\na = [1-i 2+i];\n[q, r] = deconv(b, a)",
-      "output": "q = [1+0i 1-2i];\nr = [0+0i]"
+      "output": "q = [-0.5+1.5i 6-0.5i];\nr = [-10.5-5i]"
     },
     {
       "description": "GPU inputs with automatic host fallback",

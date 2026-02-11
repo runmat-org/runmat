@@ -223,6 +223,11 @@ impl MarkSweepCollector {
                     self.mark_value_contents(v, max_generation)?;
                 }
             }
+            Value::OutputList(values) => {
+                for v in values {
+                    self.mark_value_contents(v, max_generation)?;
+                }
+            }
             Value::MException(_e) => {
                 // Contains only strings; no GC references
             }
@@ -273,6 +278,11 @@ impl MarkSweepCollector {
             }
             Value::Struct(st) => {
                 for v in st.fields.values() {
+                    self.mark_value_contents(v, _max_generation)?;
+                }
+            }
+            Value::OutputList(values) => {
+                for v in values {
                     self.mark_value_contents(v, _max_generation)?;
                 }
             }

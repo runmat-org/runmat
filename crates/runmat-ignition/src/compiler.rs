@@ -1412,6 +1412,7 @@ impl Compiler {
                                                     fargs.len(),
                                                     outc,
                                                 ));
+                                                self.emit(Instr::Unpack(outc));
                                                 if dims_len == 1 || is_col_slice {
                                                     self.emit(Instr::PackToCol(outc));
                                                 } else {
@@ -1506,6 +1507,7 @@ impl Compiler {
                                             fargs.len(),
                                             outc,
                                         ));
+                                        self.emit(Instr::Unpack(outc));
                                         self.emit(Instr::PackToCol(outc));
                                     } else {
                                         self.compile_expr(rhs)?;
@@ -1743,6 +1745,7 @@ impl Compiler {
                                 Instr::CallFunctionMulti(name.clone(), args.len(), vars.len()),
                                 &call_arg_spans,
                             );
+                            self.emit(Instr::Unpack(vars.len()));
                             // Store outputs in order
                             for (_i, var) in vars.iter().enumerate().rev() {
                                 if let Some(v) = var {
@@ -1757,9 +1760,10 @@ impl Compiler {
                                 self.compile_expr(arg)?;
                             }
                             self.emit_call_with_arg_spans(
-                                Instr::CallBuiltinMulti(name.clone(), args.len(), vars.len()),
+                                Instr::CallBuiltin(name.clone(), args.len()),
                                 &call_arg_spans,
                             );
+                            self.emit(Instr::Unpack(vars.len()));
                             for (_i, var) in vars.iter().enumerate().rev() {
                                 if let Some(v) = var {
                                     self.emit(Instr::StoreVar(v.0));
@@ -2306,6 +2310,7 @@ impl Compiler {
                                             inner_args.len(),
                                             outc,
                                         ));
+                                        self.emit(Instr::Unpack(outc));
                                         total_argc += outc;
                                         continue;
                                     }
@@ -2378,6 +2383,7 @@ impl Compiler {
                                         inner_args.len(),
                                         outc,
                                     ));
+                                    self.emit(Instr::Unpack(outc));
                                     total_argc += outc;
                                     did_expand_inner = true;
                                 } else {

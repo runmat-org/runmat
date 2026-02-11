@@ -153,7 +153,8 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(flip_error_for("flip", "flip: unsupported input type")),
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(flip_error_for("flip", "flip: unsupported input type")),
     }
 }
 

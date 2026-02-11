@@ -362,7 +362,7 @@ async fn build_line_gpu_plot_async(
     let api_provider_present = runmat_accelerate_api::provider().is_some();
     let api_provider_for_x_present = runmat_accelerate_api::provider_for_handle(x).is_some();
     let api_provider_for_y_present = runmat_accelerate_api::provider_for_handle(y).is_some();
-    let shared_ctx = runmat_plot::shared_wgpu_context();
+    let shared_ctx_present = runmat_plot::shared_wgpu_context().is_some();
     trace!(
         "plot-gpu: attempt label={label:?} x(device_id={}, buffer_id={}, shape={:?}) y(device_id={}, buffer_id={}, shape={:?}) shared_ctx_present={} api_provider_present={} api_provider_for_x_present={} api_provider_for_y_present={}",
         x.device_id,
@@ -371,13 +371,12 @@ async fn build_line_gpu_plot_async(
         y.device_id,
         y.buffer_id,
         y.shape,
-        shared_ctx.is_some(),
+        shared_ctx_present,
         api_provider_present,
         api_provider_for_x_present,
         api_provider_for_y_present
     );
-    let context = shared_ctx
-        .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot: plotting GPU context unavailable"))?;
+    let context = crate::builtins::plotting::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
 
     let x_ref = match runmat_accelerate_api::export_wgpu_buffer(x) {
         Some(buf) => {

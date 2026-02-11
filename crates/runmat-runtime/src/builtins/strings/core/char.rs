@@ -129,7 +129,8 @@ fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<char>>> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(char_flow(format!(
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(char_flow(format!(
             "char: unsupported input type {:?}",
             value
         ))),

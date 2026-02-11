@@ -46,7 +46,7 @@
     {
       "description": "Tracking column-wise running minima",
       "input": "A = [4 2 7; 3 5 1];\n[Y, I] = cummin(A)",
-      "output": "Y =\n     4     2     1\n     3     2     1\nI =\n     1     1     2\n     2     1     2"
+      "output": "Y =\n     4     2     7\n     3     2     1\nI =\n     1     1     1\n     2     1     2"
     },
     {
       "description": "Requesting running minima across rows",

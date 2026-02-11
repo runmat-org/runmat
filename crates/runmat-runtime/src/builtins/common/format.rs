@@ -1025,6 +1025,11 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
                 .map_err(|flow| map_control_flow_with_context(flow, context))?;
             flatten_value(gathered, output, context).await?;
         }
+        Value::OutputList(values) => {
+            for value in values {
+                flatten_value(value, output, context).await?;
+            }
+        }
         Value::MException(_)
         | Value::HandleObject(_)
         | Value::Listener(_)

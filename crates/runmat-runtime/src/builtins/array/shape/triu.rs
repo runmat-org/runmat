@@ -139,7 +139,8 @@ async fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(triu_error("triu: unsupported input type")),
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(triu_error("triu: unsupported input type")),
     }
 }
 

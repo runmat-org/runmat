@@ -65,7 +65,7 @@
     },
     {
       "description": "Capturing running maxima and indices on the GPU",
-      "input": "G = gpuArray([3 1 4 1 5]);\n[Y, I] = cummax(G);\nhostY = gather(Y);\nhostI = gather(I)",
+      "input": "G = gpuArray([3 1 4 1 5]);\n[Y, I] = cummax(G);\nhostY = gather(Y)\nhostI = gather(I)",
       "output": "hostY = [3 3 4 4 5];\nhostI = [1 1 3 3 5]"
     }
   ],

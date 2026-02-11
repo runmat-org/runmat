@@ -146,7 +146,8 @@ async fn circshift_builtin(
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(circshift_error("circshift: unsupported input type")),
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(circshift_error("circshift: unsupported input type")),
     }
 }
 
@@ -309,7 +310,8 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(circshift_error(
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(circshift_error(
             "circshift: unsupported shift argument type",
         )),
     }
@@ -401,7 +403,8 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(circshift_error(
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(circshift_error(
             "circshift: unsupported dimension argument type",
         )),
     }

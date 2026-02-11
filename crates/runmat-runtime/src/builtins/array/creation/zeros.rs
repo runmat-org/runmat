@@ -284,6 +284,7 @@ fn value_tag(value: &Value) -> &'static str {
         Value::Closure(_) => "Closure",
         Value::ClassRef(_) => "ClassRef",
         Value::MException(_) => "MException",
+        Value::OutputList(_) => "OutputList",
     }
 }
 

@@ -36,12 +36,13 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    // Plotting is a sink, but can consume gpuArray inputs zero-copy when a shared WGPU context exists.
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Single-precision gpuArray vectors render zero-copy when the shared renderer is active; other contexts gather first.",
+    notes: "Histogram rendering terminates fusion graphs; gpuArray inputs may remain on device when shared plotting context is installed.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::hist")]
@@ -1113,8 +1114,7 @@ async fn build_histogram_gpu_chart_async(
     style: &BarStyle,
     weights: &HistWeightsInput,
 ) -> BuiltinResult<HistComputation> {
-    let context = runmat_plot::shared_wgpu_context()
-        .ok_or_else(|| hist_err("hist: plotting GPU context unavailable"))?;
+    let context = crate::builtins::plotting::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
     let exported = runmat_accelerate_api::export_wgpu_buffer(values)
         .ok_or_else(|| hist_err("hist: unable to export GPU data"))?;
     if exported.len == 0 {

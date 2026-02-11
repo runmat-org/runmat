@@ -6298,6 +6298,7 @@ dependencies = [
  "env_logger 0.11.8",
  "futures",
  "futures-channel",
+ "js-sys",
  "log",
  "num-complex",
  "once_cell",
@@ -6319,6 +6320,9 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
  "wgpu",
 ]
 

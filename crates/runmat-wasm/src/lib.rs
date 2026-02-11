@@ -84,6 +84,7 @@ use serde::{Deserialize, Serialize};
 const MAX_DATA_PREVIEW: usize = 4096;
 const MAX_STRUCT_FIELDS: usize = 64;
 const MAX_OBJECT_FIELDS: usize = 64;
+const MAX_OUTPUT_LIST_ITEMS: usize = 64;
 
 #[derive(Clone, Copy)]
 enum InitErrorCode {
@@ -2939,6 +2940,20 @@ fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             "cols": ca.cols,
             "length": ca.data.len(),
         }),
+        Value::OutputList(values) => {
+            let truncated = values.len() > MAX_OUTPUT_LIST_ITEMS;
+            let items: Vec<JsonValue> = values
+                .iter()
+                .take(MAX_OUTPUT_LIST_ITEMS)
+                .map(|v| value_to_json(v, depth + 1))
+                .collect();
+            json!({
+                "kind": "output-list",
+                "length": values.len(),
+                "items": items,
+                "truncated": truncated,
+            })
+        }
         Value::Struct(st) => struct_to_json(st, depth + 1),
         Value::GpuTensor(handle) => {
             let (rows, cols) = rows_cols_from_shape(&handle.shape);

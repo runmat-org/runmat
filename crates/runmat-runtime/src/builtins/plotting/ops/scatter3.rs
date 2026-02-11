@@ -46,12 +46,13 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    // Plotting is a sink, but can consume gpuArray inputs zero-copy when a shared WGPU context exists.
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Rendering executes outside fusion; gpuArray inputs are gathered prior to plotting.",
+    notes: "Rendering terminates fusion graphs; gpuArray inputs may remain on device when shared plotting context is installed.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::scatter3")]
@@ -339,8 +340,7 @@ fn build_scatter3_gpu_plot(
     z: &GpuTensorHandle,
     style: &Scatter3ResolvedStyle,
 ) -> BuiltinResult<Scatter3Plot> {
-    let context = runmat_plot::shared_wgpu_context()
-        .ok_or_else(|| scatter3_err("scatter3: plotting GPU context unavailable"))?;
+    let context = super::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
 
     let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
         .ok_or_else(|| scatter3_err("scatter3: unable to export GPU X data"))?;

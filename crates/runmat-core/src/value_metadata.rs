@@ -22,6 +22,9 @@ pub fn matlab_class_name(value: &Value) -> String {
             }
         }
         Value::Listener(_) => "event.listener".to_string(),
+        // Internal destructuring helper; shouldn't surface in user-facing values,
+        // but handle it defensively for completeness.
+        Value::OutputList(_) => "OutputList".to_string(),
         Value::Object(obj) => obj.class_name.clone(),
         Value::ClassRef(_) => "meta.class".to_string(),
         Value::MException(_) => "MException".to_string(),
@@ -88,6 +91,7 @@ pub fn preview_numeric_values(value: &Value, limit: usize) -> Option<(Vec<f64>, 
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
+        | Value::OutputList(_)
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)

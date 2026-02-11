@@ -14,6 +14,9 @@ pub struct SurfacePlot {
     pub x_data: Vec<f64>,
     pub y_data: Vec<f64>,
     pub z_data: Option<Vec<Vec<f64>>>, // Host data when available
+    /// Grid resolution for rendering/index generation (kept even for GPU-backed plots).
+    x_len: usize,
+    y_len: usize,
 
     /// Surface properties
     pub colormap: ColorMap,
@@ -130,6 +133,8 @@ impl SurfacePlot {
         }
 
         Ok(Self {
+            x_len: x_data.len(),
+            y_len: y_data.len(),
             x_data,
             y_data,
             z_data: Some(z_data),
@@ -159,16 +164,18 @@ impl SurfacePlot {
 
     /// Create a surface plot backed by a GPU vertex buffer.
     pub fn from_gpu_buffer(
-        x_data: Vec<f64>,
-        y_data: Vec<f64>,
+        x_len: usize,
+        y_len: usize,
         buffer: GpuVertexBuffer,
         vertex_count: usize,
         bounds: BoundingBox,
     ) -> Self {
         Self {
-            x_data,
-            y_data,
+            x_data: Vec::new(),
+            y_data: Vec::new(),
             z_data: None,
+            x_len,
+            y_len,
             colormap: ColorMap::default(),
             shading_mode: ShadingMode::default(),
             wireframe: false,
@@ -307,12 +314,12 @@ impl SurfacePlot {
 
     /// Get the number of grid points
     pub fn len(&self) -> usize {
-        self.x_data.len() * self.y_data.len()
+        self.x_len * self.y_len
     }
 
     /// Check if the surface has no data
     pub fn is_empty(&self) -> bool {
-        self.x_data.is_empty() || self.y_data.is_empty()
+        self.x_len == 0 || self.y_len == 0
     }
 
     /// Get the bounding box of the surface
@@ -366,9 +373,9 @@ impl SurfacePlot {
 
     /// Get plot statistics for debugging
     pub fn statistics(&self) -> SurfaceStatistics {
-        let grid_size = self.x_data.len() * self.y_data.len();
-        let triangle_count = if self.x_data.len() > 1 && self.y_data.len() > 1 {
-            (self.x_data.len() - 1) * (self.y_data.len() - 1) * 2
+        let grid_size = self.x_len * self.y_len;
+        let triangle_count = if self.x_len > 1 && self.y_len > 1 {
+            (self.x_len - 1) * (self.y_len - 1) * 2
         } else {
             0
         };
@@ -376,8 +383,8 @@ impl SurfacePlot {
         SurfaceStatistics {
             grid_points: grid_size,
             triangle_count,
-            x_resolution: self.x_data.len(),
-            y_resolution: self.y_data.len(),
+            x_resolution: self.x_len,
+            y_resolution: self.y_len,
             memory_usage: self.estimated_memory_usage(),
         }
     }
@@ -492,8 +499,8 @@ impl SurfacePlot {
             log::trace!(target: "runmat_plot", "surface generating indices");
 
             let mut indices = Vec::new();
-            let x_res = self.x_data.len();
-            let y_res = self.y_data.len();
+            let x_res = self.x_len;
+            let y_res = self.y_len;
 
             // Generate triangle indices for surface mesh
             for i in 0..x_res - 1 {
@@ -526,8 +533,8 @@ impl SurfacePlot {
         log::debug!(
             target: "runmat_plot",
             "surface render_data start: {} x {}",
-            self.x_data.len(),
-            self.y_data.len()
+            self.x_len,
+            self.y_len
         );
 
         let using_gpu = self.gpu_vertices.is_some();
@@ -537,13 +544,6 @@ impl SurfacePlot {
             self.generate_vertices().clone()
         };
         let indices = self.generate_indices().clone();
-
-        log::debug!(
-            target: "runmat_plot",
-            "surface render_data generated: vertices={}, indices={}",
-            vertices.len(),
-            indices.len()
-        );
 
         let material = Material {
             albedo: Vec4::new(1.0, 1.0, 1.0, self.alpha),
@@ -555,6 +555,14 @@ impl SurfacePlot {
         } else {
             vertices.len()
         };
+
+        log::debug!(
+            target: "runmat_plot",
+            "surface render_data generated: vertex_count={} (gpu={}), indices={}",
+            vertex_count,
+            using_gpu,
+            indices.len()
+        );
 
         let draw_call = DrawCall {
             vertex_offset: 0,

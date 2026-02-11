@@ -817,6 +817,7 @@ pub(crate) mod tests {
                 entries
             },
             globals: || Vec::new(),
+            assign: None,
         });
     }
 

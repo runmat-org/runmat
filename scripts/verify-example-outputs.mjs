@@ -15,8 +15,8 @@ import { basename, dirname, extname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 
 /**
- * @typedef {import("../BuiltinMetadataSpecification").BuiltinMetadata} BuiltinMetadata
- * @typedef {import("../BuiltinMetadataSpecification").Example} BuiltinExample
+ * @typedef {import("./BuiltinMetadataSpecification").BuiltinMetadata} BuiltinMetadata
+ * @typedef {import("./BuiltinMetadataSpecification").Example} BuiltinExample
  */
 
 /**
@@ -121,7 +121,7 @@ console.log(`Wrote consolidated reports to:
 function findRepoRoot(startDir) {
     let current = startDir;
     while (true) {
-        if (existsSync(join(current, "BuiltinMetadataSpecification.ts"))) {
+      if (existsSync(join(current, "rust-toolchain.toml"))) {
             return current;
         }
         const parent = dirname(current);

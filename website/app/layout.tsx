@@ -94,7 +94,7 @@ export default function RootLayout({
                     "RunMat is a high-performance, open-source runtime for math that lets you run MATLAB-syntax code in the browser, on the desktop, or from the CLI, while getting GPU-speed execution.",
                   "sameAs": [
                     "https://github.com/runmat-org/runmat",
-                    "https://x.com/runmat_org",
+                    "https://x.com/runmat_com",
                     "https://dystr.com"
                   ],
                   "knowsAbout": [

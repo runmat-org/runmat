@@ -21,6 +21,7 @@ pub mod callsite;
 pub mod console;
 pub mod interaction;
 pub mod interrupt;
+pub mod output_count;
 pub mod output_context;
 pub mod source_context;
 
@@ -59,8 +60,8 @@ extern "C" {}
 extern crate openblas_src;
 
 pub use dispatcher::{
-    call_builtin, call_builtin_async, gather_if_needed, gather_if_needed_async, is_gpu_value,
-    value_contains_gpu,
+    call_builtin, call_builtin_async, call_builtin_async_with_outputs, gather_if_needed,
+    gather_if_needed_async, is_gpu_value, value_contains_gpu,
 };
 
 pub use runmat_macros::{register_fusion_spec, register_gpu_spec};
@@ -177,6 +178,11 @@ async fn strjoin_rowwise(a: Value, delim: Value) -> crate::BuiltinResult<Value> 
 // deal: distribute inputs to multiple outputs (via cell for expansion)
 #[runmat_macros::runtime_builtin(name = "deal", builtin_path = "crate")]
 async fn deal_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count, rest,
+        ));
+    }
     // Return cell row vector of inputs for expansion
     let cols = rest.len();
     make_cell(rest, 1, cols).map_err(Into::into)
@@ -1014,7 +1020,18 @@ async fn overidx_xor(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     async fn call_by_name(name: &str, args: &[Value]) -> crate::BuiltinResult<Value> {
         if let Some(result) = crate::user_functions::try_call_user_function(name, args).await {
-            return result;
+            match result {
+                Ok(value) => return Ok(value),
+                Err(err) => {
+                    let identifier = err.identifier().unwrap_or("").to_ascii_lowercase();
+                    let message = err.message().to_ascii_lowercase();
+                    let is_undefined = identifier.contains("undefinedfunction")
+                        || message.contains("undefined function");
+                    if !is_undefined {
+                        return Err(err);
+                    }
+                }
+            }
         }
         crate::call_builtin_async(name, args).await
     }

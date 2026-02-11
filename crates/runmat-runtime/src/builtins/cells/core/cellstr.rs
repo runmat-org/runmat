@@ -88,7 +88,8 @@ async fn cellstr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(cellstr_error_with_identifier(
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(cellstr_error_with_identifier(
             ERR_INPUT_NOT_TEXT,
             IDENT_INVALID_INPUT,
         )),

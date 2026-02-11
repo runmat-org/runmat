@@ -542,7 +542,8 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
         | Value::HandleObject(_)
         | Value::Object(_)
         | Value::Listener(_)
-        | Value::Struct(_) => Err(string_flow("string: unsupported format argument type")),
+        | Value::Struct(_)
+        | Value::OutputList(_) => Err(string_flow("string: unsupported format argument type")),
         Value::FunctionHandle(_) | Value::Closure(_) | Value::ClassRef(_) => {
             Err(string_flow("string: unsupported format argument type"))
         }
@@ -579,7 +580,11 @@ async fn convert_to_string_array(
         Value::Struct(_) => Err(string_flow(
             "string: structs are not supported for automatic conversion",
         )),
-        Value::FunctionHandle(_) | Value::Closure(_) | Value::ClassRef(_) | Value::MException(_) => Err(
+        Value::FunctionHandle(_)
+        | Value::Closure(_)
+        | Value::ClassRef(_)
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(
             string_flow("string: unsupported conversion for function or exception handles"),
         ),
     }

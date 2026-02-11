@@ -20,7 +20,9 @@ use wgpu::PowerPreference;
 const VALUE_TOLERANCE: f64 = 1e-5;
 const VALUE_REL_TOLERANCE: f64 = 1e-4;
 
-#[tokio::main]
+// `wasm32` builds of this crate use Tokio without `rt-multi-thread`, so we must
+// opt into the single-thread runtime flavor.
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 

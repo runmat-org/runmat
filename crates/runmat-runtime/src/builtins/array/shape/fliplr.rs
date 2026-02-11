@@ -140,7 +140,8 @@ async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(fliplr_error("fliplr: unsupported input type")),
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(fliplr_error("fliplr: unsupported input type")),
     }
 }
 
