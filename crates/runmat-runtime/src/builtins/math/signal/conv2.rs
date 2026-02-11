@@ -72,10 +72,10 @@ async fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
             let right = convert_matrix(b, "conv2", "B").await?;
             if mode == Conv2Mode::Full && left.cols == 1 && right.rows == 1 {
                 let result = outer_product(&left.data, &right.data);
-                return Ok(matrix_to_value(result)?);
+                return matrix_to_value(result);
             }
             let result = conv2_matrices(&left, &right, mode);
-            Ok(matrix_to_value(result)?)
+            matrix_to_value(result)
         }
         1 => {
             let signal = convert_matrix(extras.remove(0), "conv2", "A").await?;
@@ -83,7 +83,7 @@ async fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
             let row = convert_vector(b, "conv2", "H row").await?;
             let kernel = outer_product(&column, &row);
             let result = conv2_matrices(&kernel, &signal, mode);
-            Ok(matrix_to_value(result)?)
+            matrix_to_value(result)
         }
         _ => Err(runtime_error_for(
             "conv2: expected at most four input arguments",

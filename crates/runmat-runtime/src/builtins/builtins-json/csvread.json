@@ -69,7 +69,7 @@
     },
     {
       "description": "Read Numeric Data From A File In The Home Directory",
-      "input": "homePath = fullfile(getenv(\"HOME\"), \"runmat_csvread_home.csv\");\nfid = fopen(homePath, \"w\");\nfprintf(fid, \"9,10\\n11,12\\n\");\nfclose(fid);\n\nM = csvread(fullfile(\"~\", \"runmat_csvread_home.csv\"))\ndelete(homePath);",
+      "input": "homePath = fullfile(getenv(\"HOME\"), \"runmat_csvread_home.csv\");\nfid = fopen(homePath, \"w\");\nfprintf(fid, \"9,10\\n11,12\\n\");\nfclose(fid);\n\nM = csvread(fullfile(\"~\", \"runmat_csvread_home.csv\"), 0, 0);\ndisp(M);\ndelete(homePath);",
       "output": "M =\n     9    10\n    11    12"
     },
     {

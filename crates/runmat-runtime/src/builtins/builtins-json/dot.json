@@ -55,7 +55,7 @@
     },
     {
       "description": "Applying `dot` along a chosen dimension",
-      "input": "X = [1 2 3; 4 5 6];\nY = [6 5 4; 3 2 1];\ncols = dot(X, Y, 1);  % collapse rows\nrows = dot(X, Y, 2);  % collapse columns",
+      "input": "X = [1 2 3; 4 5 6];\nY = [6 5 4; 3 2 1];\ncols = dot(X, Y, 1)  % collapse rows\nrows = dot(X, Y, 2)  % collapse columns",
       "output": "cols = [18 20 18];\nrows = [28; 28]"
     },
     {

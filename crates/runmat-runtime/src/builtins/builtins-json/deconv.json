@@ -45,7 +45,7 @@
   "examples": [
     {
       "description": "Recovering a factor from a polynomial product",
-      "input": "p = conv([1 2], [1 -3 2]);   % Multiply two polynomials\n[q, r] = deconv(p, [1 2]);   % Divide by the first factor",
+      "input": "p = conv([1 2], [1 -3 2]);   % Multiply two polynomials\n[q, r] = deconv(p, [1 2])   % Divide by the first factor",
       "output": "q = [1 -3 2];\nr = 0"
     },
     {

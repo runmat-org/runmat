@@ -1344,6 +1344,16 @@ fn ensure_workspace_resolver_registered() {
     });
 }
 
+fn ensure_wasm_builtins_registered() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        static REGISTER: Once = Once::new();
+        REGISTER.call_once(|| {
+            runmat_runtime::builtins::wasm_registry::register_all();
+        });
+    }
+}
+
 pub struct PendingWorkspaceGuard;
 
 impl Drop for PendingWorkspaceGuard {
@@ -1549,6 +1559,7 @@ async fn run_interpreter_inner(
         function = state.current_function_name.as_str()
     );
     let _run_guard = run_span.enter();
+    ensure_wasm_builtins_registered();
     ensure_workspace_resolver_registered();
     #[cfg(feature = "native-accel")]
     activate_fusion_plan(state.fusion_plan.clone());
