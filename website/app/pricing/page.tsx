@@ -9,26 +9,17 @@ import CloudPricingCard from "@/components/pricing/CloudPricingCard";
 import { CompareProductsTable, CompareCloudTable } from "@/components/pricing/ComparisonTables";
 
 export const metadata: Metadata = {
-  title: "RunMat Pricing | Runtime, Cloud, and Server Plans",
+  title: "RunMat Pricing | Free, Cloud, and Enterprise",
   description:
-    "Simple RunMat pricing from open source runtime and free app to RunMat Cloud and enterprise RunMat Server.",
+    "Simple RunMat pricing: free runtime and app (open source CLI, free browser & desktop), RunMat Cloud, and RunMat Enterprise for on-prem.",
   alternates: { canonical: "https://runmat.com/pricing" },
 };
 
-const runtimeFeatures = [
-  "MIT licensed",
-  "CLI for scripts and CI/CD",
-  "Cross-platform (macOS/Linux/Windows)",
+const runmatFreeFeatures = [
   "GPU acceleration (Metal/Vulkan/DX12)",
-  "JIT compiler and fusion engine",
-];
-
-const appFeatures = [
-  "Full IDE with code editor and file explorer",
-  "Browser sandbox (zero install)",
-  "Desktop app",
-  "Interactive 2D/3D plotting",
-  "Real-time type and shape diagnostics",
+  "Interactive, high performance 2D/3D plotting",
+  "CLI for scripts and CI/CD",
+  "Zero-install (in browser) and IDE desktop app",
 ];
 
 const serverFeatures = [
@@ -41,14 +32,14 @@ const serverFeatures = [
 
 const pricingFaqItems: { question: string; answer: string }[] = [
   {
-    question: "What's the difference between Runtime, App, Cloud, and Server?",
+    question: "What's the difference between RunMat (free), Cloud, and Enterprise?",
     answer:
-      "Runtime is the free open source engine you can use via the CLI. App adds the full IDE in browser and desktop with no account required. Cloud adds cloud storage, sharing, and team workspaces with optional Pro and Team paid plans. Server is self-hosted and air-gapped with SSO and audit logs for enterprises.",
+      "RunMat is free: the runtime is open source (CLI), and the browser sandbox and desktop app are free to use. RunMat Cloud adds cloud storage, sharing, and team workspaces with optional Pro and Team paid plans. RunMat Enterprise is self-hosted and air-gapped with SSO and audit logs for organizations.",
   },
   {
     question: "Is RunMat really free?",
     answer:
-      "Yes. RunMat Runtime and RunMat App are free. RunMat Cloud has a free tier with 5 projects and 1GB storage. Pro and Team are paid; RunMat Server is custom pricing.",
+      "Yes. The RunMat runtime is open source and the browser and desktop app are free. RunMat Cloud has a free tier with unlimited projects and 200MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.",
   },
   {
     question: "Do I need an account to use RunMat?",
@@ -58,17 +49,17 @@ const pricingFaqItems: { question: string; answer: string }[] = [
   {
     question: "What's included in Cloud Free vs Pro vs Team?",
     answer:
-      "Free: 5 projects, 1GB storage, 7-day version history, 1 seat. Pro: unlimited projects, 50GB storage, 30-day history, 5 seats, priority support, and LLM zero data retention. Team: 250GB storage, 90-day history, unlimited seats, SSO and audit logs, and centralized billing.",
+      "All plans include version history (counts toward storage; you choose how many versions to keep per project). Free: unlimited projects, 200MB storage, limited LLM (small models only). Pro: unlimited projects, 10GB storage, $10/mo LLM credits included ($30/mo per user). Team: SSO / SAML (and SCIM), audit logs, 100GB storage, $25/mo LLM credits included, unlimited seats, priority support ($100/mo per user).",
   },
   {
     question: "How does RunMat Cloud billing work?",
     answer:
-      "Pro and Team are monthly subscriptions. You can upgrade or change plan from your account. Billing is per subscription, not per usage.",
+      "Pro and Team are monthly subscriptions billed per user (per seat). You can upgrade or change plan from your account. Beyond included storage and LLM credits, usage is pay-as-you-go; you can set a usage cap so you never spend more than you're comfortable with.",
   },
   {
-    question: "When do I need RunMat Server instead of Cloud?",
+    question: "When do I need RunMat Enterprise instead of Cloud?",
     answer:
-      "Choose Server when you need on-prem or air-gapped deployment, strict data residency, or SSO and audit compliance that must stay in your environment.",
+      "Choose Enterprise when you need on-prem or air-gapped deployment, strict data residency, or SSO and audit compliance that must stay in your environment.",
   },
   {
     question: "Is there a free trial for Pro or Team?",
@@ -76,9 +67,9 @@ const pricingFaqItems: { question: string; answer: string }[] = [
       "You can start on the free tier and upgrade when you need more. Contact us for trial or pilot options for Team.",
   },
   {
-    question: "Who do I contact for Team or Server pricing?",
+    question: "Who do I contact for Team or Enterprise pricing?",
     answer:
-      "For Team plans and RunMat Server (custom deployment), contact team@runmat.com or use the Contact Sales option on this page.",
+      "For Team plans and RunMat Enterprise (custom deployment), contact team@runmat.com or use the Contact Sales option on this page.",
   },
 ];
 
@@ -117,20 +108,22 @@ export default function PricingPage() {
         </section>
 
         <section className="pb-20 md:pb-28">
-          <div className="grid gap-4 lg:grid-cols-4">
-            <Card className="h-full border border-border/60 bg-muted/40">
+          <div className="grid gap-4 lg:grid-cols-3">
+            <Card className="flex h-full flex-col border border-border/60 bg-muted/40">
               <CardHeader className="space-y-3 pb-4">
                 <Badge className="w-fit bg-green-500/20 text-green-800 border-green-600/50 dark:text-green-200 dark:border-green-400/40 hover:bg-green-500/20">
-                  Open Source
+                  Open Source Runtime
                 </Badge>
-                <CardTitle className="text-xl text-foreground">RunMat Runtime</CardTitle>
-                <p className="text-3xl font-bold text-foreground">Free forever</p>
-                <p className="text-sm text-muted-foreground">The open source engine behind all RunMat products. Use it standalone via the CLI.</p>
+                <CardTitle className="text-xl text-foreground">RunMat</CardTitle>
+                <p className="text-3xl font-bold text-foreground">Free, forever</p>
+                <p className="text-sm text-muted-foreground">
+                  Blazing fast, MIT licensed math runtime
+                </p>
               </CardHeader>
               <CardContent className="flex flex-1 min-h-0 flex-col space-y-6">
                 <div className="flex min-h-0 flex-1 flex-col">
                   <ul className="space-y-2">
-                    {runtimeFeatures.map(feature => (
+                    {runmatFreeFeatures.map(feature => (
                       <li key={feature} className="flex items-start gap-2 text-sm text-muted-foreground">
                         <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-green-300" />
                         <span>{feature}</span>
@@ -138,51 +131,33 @@ export default function PricingPage() {
                     ))}
                   </ul>
                 </div>
-                <Button asChild variant="outline" className="w-full">
-                  <Link href="https://github.com/runmat-org/runmat" target="_blank" rel="noopener noreferrer">
-                    View on GitHub
-                  </Link>
-                </Button>
-              </CardContent>
-            </Card>
-
-            <Card className="h-full border border-border/60 bg-muted/40">
-              <CardHeader className="space-y-3 pb-4">
-                <Badge className="w-fit bg-blue-500/20 text-blue-800 border-blue-600/50 dark:text-blue-200 dark:border-blue-400/40 hover:bg-blue-500/20">
-                  No Account Required
-                </Badge>
-                <CardTitle className="text-xl text-foreground">RunMat App</CardTitle>
-                <p className="text-3xl font-bold text-foreground">Included</p>
-                <p className="text-sm text-muted-foreground">Full IDE, browser sandbox, and desktop app. Start instantly.</p>
-              </CardHeader>
-              <CardContent className="flex flex-1 min-h-0 flex-col space-y-6">
-                <div className="flex min-h-0 flex-1 flex-col">
-                  <ul className="space-y-2">
-                    {appFeatures.map(feature => (
-                      <li key={feature} className="flex items-start gap-2 text-sm text-muted-foreground">
-                        <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-300" />
-                        <span>{feature}</span>
-                      </li>
-                    ))}
-                  </ul>
+                <div className="flex flex-col gap-2">
+                  <Button asChild variant="outline" className="w-full">
+                    <Link href="https://github.com/runmat-org/runmat" target="_blank" rel="noopener noreferrer">
+                      View on GitHub
+                    </Link>
+                  </Button>
+                  <Button asChild variant="outline" className="w-full">
+                    <Link href="/download">Download</Link>
+                  </Button>
+                  <Button
+                    asChild
+                    className="w-full rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow border-0 hover:from-blue-600 hover:to-purple-700 transition-colors"
+                  >
+                    <Link href="/sandbox">Try in Browser</Link>
+                  </Button>
                 </div>
-                <Button
-                  asChild
-                  className="w-full rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow border-0 hover:from-blue-600 hover:to-purple-700 transition-colors"
-                >
-                  <Link href="/sandbox">Try in Browser</Link>
-                </Button>
               </CardContent>
             </Card>
 
             <CloudPricingCard />
 
-            <Card className="h-full border border-border/60 bg-muted/40">
+            <Card className="flex h-full flex-col border border-border/60 bg-muted/40">
               <CardHeader className="space-y-3 pb-4">
                 <Badge className="w-fit bg-amber-500/20 text-amber-800 border-amber-600/50 dark:text-amber-200 dark:border-amber-400/40 hover:bg-amber-500/20">
                   Enterprise
                 </Badge>
-                <CardTitle className="text-xl text-foreground">RunMat Server</CardTitle>
+                <CardTitle className="text-xl text-foreground">RunMat Enterprise</CardTitle>
                 <p className="text-3xl font-bold text-foreground">Custom</p>
                 <p className="text-sm text-muted-foreground">Self-hosted deployment for secure, air-gapped environments.</p>
               </CardHeader>
@@ -198,7 +173,7 @@ export default function PricingPage() {
                   </ul>
                 </div>
                 <Button asChild variant="outline" className="w-full">
-                  <Link href="mailto:team@runmat.com?subject=RunMat%20Server%20Inquiry">Contact Sales</Link>
+                  <Link href="mailto:team@runmat.com?subject=RunMat%20Enterprise%20Inquiry">Contact Sales</Link>
                 </Button>
               </CardContent>
             </Card>

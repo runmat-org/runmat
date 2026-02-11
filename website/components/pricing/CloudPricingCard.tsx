@@ -22,40 +22,40 @@ const cloudTierConfig: Record<
   }
 > = {
   free: {
-    price: "$0/mo",
+    price: "Free",
     description: "Sign up free to get cloud storage and collaboration.",
     features: [
-      "5 projects",
-      "1GB cloud storage",
+      "Unlimited projects",
+      "200MB cloud storage",
+      "Version history",
+      "Limited LLM (small models only)",
       "Community support",
-      "Version history (7 days)",
     ],
     ctaLabel: "Start Free",
     ctaHref: "/sandbox",
   },
   pro: {
-    price: "$30/mo",
+    price: "$30/mo per user",
     description: "For individuals and small teams shipping real work.",
     features: [
       "Unlimited projects",
-      "50GB cloud storage",
-      "LLM zero data retention",
-      "Collaboration (5 seats)",
-      "Version history (30 days)",
-      "Priority support",
+      "10GB cloud storage",
+      "$10/mo LLM credits included",
+      "Version history",
     ],
     ctaLabel: "Get Started",
     ctaHref: "/sandbox",
   },
   team: {
-    price: "$99/mo",
-    description: "For organizations that need collaboration and compliance.",
+    price: "$100/mo per user",
+    description: "For organizations that need SSO and centralized identity management.",
     features: [
+      "SSO / SAML (and SCIM)",
       "Team seats + shared workspaces",
-      "250GB cloud storage",
-      "LLM zero data retention",
-      "Versioning and audit logs",
-      "Centralized billing",
+      "100GB cloud storage",
+      "$25/mo LLM credits included",
+      "Version history",
+      "Audit logs",
       "Priority support",
     ],
     ctaLabel: "Contact Sales",
@@ -74,7 +74,7 @@ export default function CloudPricingCard() {
   const currentTier = cloudTierConfig[activeTier];
 
   return (
-    <Card className="relative h-full border border-blue-500/50 bg-muted/40 shadow-lg shadow-blue-500/10">
+    <Card className="relative flex h-full flex-col border border-blue-500/50 bg-muted/40 shadow-lg shadow-blue-500/10">
       <CardHeader className="space-y-4 pb-4">
         <div className="flex items-center justify-between">
           <Badge className="bg-violet-500/20 text-violet-800 border-violet-600/50 dark:text-violet-200 dark:border-violet-400/40 hover:bg-violet-500/20">

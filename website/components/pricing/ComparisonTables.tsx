@@ -27,14 +27,11 @@ const productRows: ProductRow[] = [
   ["Team workspaces", "x", "check", "check", "Organize work in shared team workspaces."],
   ["File versioning", "x", "check", "check", "Version history and restore for project files."],
   ["SOC 2 compliance", "x", "check", "check", "Audited security and compliance controls."],
-  ["LLM zero data retention", "x", "Paid plans", "check", "LLM usage with zero data retention on paid tiers."],
   ["SSO / SAML", "x", "Team plan", "check", "Single sign-on and SAML for enterprise."],
   ["Audit logs", "x", "Team plan", "check", "Audit logging for team and compliance."],
-  ["Air-gapped deployment", "x", "x", "check", "Deploy RunMat Server in isolated networks."],
+  ["Air-gapped deployment", "x", "x", "check", "Deploy RunMat Enterprise in isolated networks."],
   ["Community (GitHub)", "check", "check", "check", "Community support and open source on GitHub."],
-  ["Email support", "x", "check", "check", "Email-based support for Cloud and Server."],
-  ["Priority support", "x", "Paid plans", "check", "Priority support on paid Cloud and Server."],
-  ["Dedicated support and SLA", "x", "x", "check", "Dedicated support and SLA for RunMat Server."],
+  ["Priority support", "x", "Team plan", "check", "Priority support on Team and Enterprise."],
 ];
 
 const productSectionLabels = [
@@ -44,28 +41,25 @@ const productSectionLabels = [
   "Security and Compliance",
   "Support",
 ];
-const productSectionSizes = [4, 5, 4, 5, 4];
+const productSectionSizes = [4, 5, 4, 4, 2];
 
 const cloudRows: CloudRow[] = [
-  ["Projects", "5", "Unlimited", "Unlimited", "Number of projects you can create and store."],
-  ["Cloud storage", "1 GB", "50 GB", "250 GB", "Total cloud storage for project files and assets."],
-  ["Version history", "7 days", "30 days", "90 days", "How long version history is retained."],
-  ["Seats", "1", "5", "Unlimited", "Number of team members or seats included."],
+  ["Projects", "Unlimited", "Unlimited", "Unlimited", "Number of projects you can create and store."],
+  ["Cloud storage", "200 MB", "10 GB", "100 GB", "Total cloud storage for project files and assets."],
+  ["Version history", "check", "check", "check", "File version history included for all plans; counts toward storage. Configure how many versions to keep per project."],
   ["Shared workspaces", "x", "check", "check", "Create and use shared team workspaces."],
   ["Real-time collaboration", "x", "x", "Coming soon", "See edits and presence in real time."],
   ["LLM-assisted coding", "check", "check", "check", "AI-assisted coding features in the editor."],
-  ["LLM zero data retention", "x", "check", "check", "Guaranteed zero data retention for LLM usage on paid plans."],
+  ["Included LLM credits", "Limited", "$10/mo", "$25/mo", "Free: limited token budgets, small-model-only. Pro: $10/month included credits; Team: $25/month included; pay-as-you-go overage on paid tiers."],
   ["SOC 2 compliance", "check", "check", "check", "RunMat Cloud is SOC 2 compliant."],
   ["SSO / SAML", "x", "x", "check", "Single sign-on and SAML on Team plan."],
   ["Audit logs", "x", "x", "check", "Audit logs for team activity on Team plan."],
   ["Community support", "check", "check", "check", "Community and documentation support."],
-  ["Priority support", "x", "check", "check", "Priority email support on Pro and Team."],
-  ["Centralized billing", "x", "x", "check", "Single invoice and billing for the team."],
-  ["Invoice / PO billing", "x", "x", "check", "Invoice and purchase order billing for Team."],
+  ["Priority support", "x", "x", "check", "Priority email support on Team plan."],
 ];
 
-const cloudSectionLabels = ["Usage", "Collaboration", "AI and Compute", "Security", "Billing and Support"];
-const cloudSectionSizes = [3, 3, 2, 3, 4];
+const cloudSectionLabels = ["Usage", "Collaboration", "AI and Compute", "Security", "Support"];
+const cloudSectionSizes = [3, 2, 2, 3, 2];
 
 function SectionHeaderRow({ label }: { label: string }) {
   return (
@@ -153,7 +147,7 @@ export function CompareProductsTable() {
                   Feature
                 </th>
                 <th className="text-center py-4 px-3 w-[20%]">
-                  <div className="text-sm font-semibold text-foreground">Runtime & App</div>
+                  <div className="text-sm font-semibold text-foreground">RunMat</div>
                   <div className="text-xs font-normal text-muted-foreground mt-0.5">Essential runtime features</div>
                 </th>
                 <th className="text-center py-4 px-3 w-[20%]">
@@ -161,8 +155,8 @@ export function CompareProductsTable() {
                   <div className="text-xs font-normal text-muted-foreground mt-0.5">Cloud-based solution</div>
                 </th>
                 <th className="text-center py-4 px-3 w-[20%]">
-                  <div className="text-sm font-semibold text-foreground">Server</div>
-                  <div className="text-xs font-normal text-muted-foreground mt-0.5">Enterprise server deployment</div>
+                  <div className="text-sm font-semibold text-foreground">Enterprise</div>
+                  <div className="text-xs font-normal text-muted-foreground mt-0.5">Enterprise deployment</div>
                 </th>
               </tr>
             </thead>
@@ -216,11 +210,11 @@ export function CompareCloudTable() {
                   <div className="text-xs font-normal text-muted-foreground mt-0.5">Get started</div>
                 </th>
                 <th className="text-center py-4 px-3 w-[22%]">
-                  <div className="text-sm font-semibold text-foreground">Pro ($30/mo)</div>
+                  <div className="text-sm font-semibold text-foreground">Pro ($30/mo per user)</div>
                   <div className="text-xs font-normal text-muted-foreground mt-0.5">For individuals and teams</div>
                 </th>
                 <th className="text-center py-4 px-3 w-[22%]">
-                  <div className="text-sm font-semibold text-foreground">Team ($99/mo)</div>
+                  <div className="text-sm font-semibold text-foreground">Team ($100/mo per user)</div>
                   <div className="text-xs font-normal text-muted-foreground mt-0.5">Organization-wide</div>
                 </th>
               </tr>
