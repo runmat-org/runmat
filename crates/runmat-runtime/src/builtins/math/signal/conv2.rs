@@ -70,6 +70,10 @@ async fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
             }
             let left = convert_matrix(a, "conv2", "A").await?;
             let right = convert_matrix(b, "conv2", "B").await?;
+            if mode == Conv2Mode::Full && left.cols == 1 && right.rows == 1 {
+                let result = outer_product(&left.data, &right.data);
+                return Ok(matrix_to_value(result)?);
+            }
             let result = conv2_matrices(&left, &right, mode);
             Ok(matrix_to_value(result)?)
         }
@@ -78,7 +82,7 @@ async fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
             let column = convert_vector(a, "conv2", "H column").await?;
             let row = convert_vector(b, "conv2", "H row").await?;
             let kernel = outer_product(&column, &row);
-            let result = conv2_matrices(&signal, &kernel, mode);
+            let result = conv2_matrices(&kernel, &signal, mode);
             Ok(matrix_to_value(result)?)
         }
         _ => Err(runtime_error_for(
@@ -114,14 +118,20 @@ fn try_conv2_gpu(a: &Value, b: &Value, mode: Conv2Mode) -> BuiltinResult<Option<
         }
     }
 
-    let _lhs_dims = match conv2_dimensions(&lhs.shape) {
+    let lhs_dims = match conv2_dimensions(&lhs.shape) {
         Some(dims) => dims,
         None => return Ok(None),
     };
-    let _rhs_dims = match conv2_dimensions(&rhs.shape) {
+    let rhs_dims = match conv2_dimensions(&rhs.shape) {
         Some(dims) => dims,
         None => return Ok(None),
     };
+
+    // Keep the explicit full-mode vector kernel path on the host so it can
+    // return an outer-product kernel that matches MATLAB's separable identity.
+    if mode == Conv2Mode::Full && lhs_dims.1 == 1 && rhs_dims.0 == 1 {
+        return Ok(None);
+    }
 
     // If either operand is effectively empty we can still defer to the provider, which will
     // honour MATLAB's shape rules. No additional guarding is required here.
@@ -350,18 +360,19 @@ fn conv2_matrices(a: &Matrix, b: &Matrix, mode: Conv2Mode) -> Matrix {
     let rows = a.rows + b.rows - 1;
     let cols = a.cols + b.cols - 1;
     let mut full = Matrix::zeros(rows, cols);
+    let flip_rows = mode != Conv2Mode::Same || b.rows % 2 == 1;
+    let flip_cols = mode != Conv2Mode::Same || b.cols % 2 == 1;
 
     for ac in 0..a.cols {
         for ar in 0..a.rows {
             let aval = a.get(ar, ac);
             for bc in 0..b.cols {
                 let out_c = ac + bc;
-                let bc_rev = b.cols - 1 - bc;
+                let bcol = if flip_cols { b.cols - 1 - bc } else { bc };
                 for br in 0..b.rows {
                     let out_r = ar + br;
-                    let br_rev = b.rows - 1 - br;
-                    // Convolution flips the kernel (rotate 180°).
-                    let bval = b.get(br_rev, bc_rev);
+                    let brow = if flip_rows { b.rows - 1 - br } else { br };
+                    let bval = b.get(brow, bcol);
                     full.add_assign(out_r, out_c, aval * bval);
                 }
             }

@@ -683,6 +683,8 @@ fn conv2d_full_real(
     kernel_cols: usize,
     full_rows: usize,
     full_cols: usize,
+    flip_rows: bool,
+    flip_cols: bool,
 ) -> Vec<f64> {
     let mut out = vec![0.0; full_rows * full_cols];
     for sc in 0..signal_cols {
@@ -693,12 +695,11 @@ fn conv2d_full_real(
             }
             for kc in 0..kernel_cols {
                 let out_c = sc + kc;
-                let kc_rev = kernel_cols - 1 - kc;
+                let kcol = if flip_cols { kernel_cols - 1 - kc } else { kc };
                 for kr in 0..kernel_rows {
                     let out_r = sr + kr;
-                    let kr_rev = kernel_rows - 1 - kr;
-                    // Convolution flips the kernel (rotate 180°).
-                    let kval = kernel[kc_rev * kernel_rows + kr_rev];
+                    let krow = if flip_rows { kernel_rows - 1 - kr } else { kr };
+                    let kval = kernel[kcol * kernel_rows + krow];
                     out[out_c * full_rows + out_r] += aval * kval;
                 }
             }
@@ -3549,6 +3550,8 @@ impl AccelProvider for InProcessProvider {
         full_rows
             .checked_mul(full_cols)
             .ok_or_else(|| anyhow!("conv2d: output size overflow"))?;
+        let flip_rows = mode != ProviderConvMode::Same || kernel_rows % 2 == 1;
+        let flip_cols = mode != ProviderConvMode::Same || kernel_cols % 2 == 1;
 
         let full = conv2d_full_real(
             &signal_data,
@@ -3559,6 +3562,8 @@ impl AccelProvider for InProcessProvider {
             kernel_cols,
             full_rows,
             full_cols,
+            flip_rows,
+            flip_cols,
         );
 
         let (shaped, out_rows, out_cols) = apply_conv2_mode_real_2d(

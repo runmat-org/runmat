@@ -38,7 +38,7 @@
     "`diag(A)` with a matrix `A` returns a column vector containing the main diagonal of `A`.",
     "`diag(A, k)` extracts the `k`-th diagonal. When the requested diagonal does not exist, an empty column vector is returned.",
     "`diag(v, 'vector')` always returns a column vector copy of `v`, even when `v` is already a vector.",
-    "`diag(v, m)` forces an `m × m` square result, while `diag(v, [m n])` creates an explicit rectangular size. You can combine both with offsets (e.g. `diag(v, k, [m n])`) when you need a wider diagonal band.",
+    "`diag(v, [m n])` creates an explicit rectangular size. You can combine it with offsets (e.g. `diag(v, k, [m n])`) when you need a wider diagonal band.",
     "`diag(___, 'logical')` converts the result to a logical array. `diag(___, 'double')` forces a double-precision result when inputs are logical.",
     "`diag(___, 'like', prototype)` matches the numeric flavour and residency of `prototype` (including GPU handles).",
     "Logical inputs stay logical; complex inputs stay complex; character arrays preserve padding with spaces off the diagonal.",
@@ -108,7 +108,7 @@
     },
     {
       "question": "Can I place a diagonal inside a non-square matrix?",
-      "answer": "No. MATLAB (and RunMat) always produces a square matrix when building from a vector."
+      "answer": "Yes. Pass an explicit size vector such as `diag(v, [m n])`, and optionally combine it with an offset via `diag(v, k, [m n])`."
     },
     {
       "question": "What if the vector is empty?",

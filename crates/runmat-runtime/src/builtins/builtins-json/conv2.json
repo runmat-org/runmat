@@ -42,6 +42,7 @@
   "behaviors": [
     "`conv2(A, B)` returns the full 2-D convolution of `A` and `B`.",
     "`conv2(A, B, 'same')` slices the central part of the full convolution so the output matches the shape of `A`.",
+    "For even-sized kernels with `'same'`, alignment follows MATLAB's top-left convention in each even dimension.",
     "`conv2(A, B, 'valid')` returns only those points where `B` overlaps `A` completely.",
     "`conv2(hcol, hrow, A)` is syntactic sugar for `conv2(hcol(:) * hrow(:)', A)`.",
     "Scalars are treated as `1×1` matrices and preserve the orientation of the other input.",
@@ -72,7 +73,7 @@
     {
       "description": "Using the separable form with column and row vectors",
       "input": "hcol = [1; 2; 1];\nhrow = [1 0 -1];\nA = [3 4 5; 6 7 8; 9 10 11];\ngx = conv2(hcol, hrow, A, 'same')",
-      "output": "gx =\n   -15    -6    15\n   -28    -8    28\n   -27    -6    27"
+      "output": "gx =\n    27    -6   -27\n    28    -8   -28\n    15    -6   -15"
     },
     {
       "description": "Convolving gpuArray inputs with transparent fallbacks",

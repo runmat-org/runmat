@@ -44,12 +44,12 @@
   "examples": [
     {
       "description": "Import Entire CSV File",
-      "input": "writematrix([1 2 3; 4 5 6], \"scores.csv\");\nM = csvread(\"scores.csv\");\ndelete(\"scores.csv\")",
+      "input": "writematrix([1 2 3; 4 5 6], \"scores.csv\");\nM = csvread(\"scores.csv\");\ndisp(M);\ndelete(\"scores.csv\")",
       "output": "M =\n     1     2     3\n     4     5     6"
     },
     {
       "description": "Skip Header Row And Column Using Zero-Based Offsets",
-      "input": "fid = fopen(\"with_header.csv\", \"w\");\nfprintf(fid, \"Name,Jan,Feb\\nalpha,1,2\\nbeta,3,4\\n\");\nfclose(fid);\n\nM = csvread(\"with_header.csv\", 1, 1)\ndelete(\"with_header.csv\");",
+      "input": "fid = fopen(\"with_header.csv\", \"w\");\nfprintf(fid, \"Name,Jan,Feb\\nalpha,1,2\\nbeta,3,4\\n\");\nfclose(fid);\n\nM = csvread(\"with_header.csv\", 1, 1);\ndisp(M);\ndelete(\"with_header.csv\");",
       "output": "M =\n     1     2\n     3     4"
     },
     {

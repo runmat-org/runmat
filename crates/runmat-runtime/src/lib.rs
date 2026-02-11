@@ -21,8 +21,8 @@ pub mod callsite;
 pub mod console;
 pub mod interaction;
 pub mod interrupt;
-pub mod output_count;
 pub mod output_context;
+pub mod output_count;
 pub mod source_context;
 
 pub mod arrays;
