@@ -812,28 +812,28 @@ fn build_slice_plan(
     })
 }
 
-fn matlab_squeezed_shape(selection_lengths: &[usize], scalar_mask: &[bool]) -> Vec<usize> {
-    let mut kept_lengths: Vec<usize> = Vec::new();
-    let mut kept_dims: Vec<usize> = Vec::new();
-    for (d, (&len, &is_scalar)) in selection_lengths.iter().zip(scalar_mask).enumerate() {
-        if is_scalar {
-            continue;
-        }
-        kept_lengths.push(len);
-        kept_dims.push(d);
+/// Output shape after indexing, following MATLAB's rule: only *trailing* singleton
+/// dimensions are removed. E.g. A(:, 2, :) on 3×4×5 → [3, 1, 5], not [3, 5].
+fn matlab_squeezed_shape(selection_lengths: &[usize], _scalar_mask: &[bool]) -> Vec<usize> {
+    let mut dims: Vec<(usize, usize)> = selection_lengths
+        .iter()
+        .enumerate()
+        .map(|(d, &len)| (d, len))
+        .collect();
+    while dims.len() > 2 && dims.last().map(|&(_, len)| len == 1).unwrap_or(false) {
+        dims.pop();
     }
-    if kept_lengths.is_empty() {
+    if dims.is_empty() {
         return vec![1, 1];
     }
-    if kept_lengths.len() == 1 {
-        let len = kept_lengths[0];
-        let dim = kept_dims[0];
+    if dims.len() == 1 {
+        let (dim, len) = dims[0];
         if dim == 1 {
             return vec![1, len];
         }
         return vec![len, 1];
     }
-    kept_lengths
+    dims.into_iter().map(|(_, len)| len).collect()
 }
 
 fn gather_string_slice(sa: &runmat_builtins::StringArray, plan: &SlicePlan) -> VmResult<Value> {
