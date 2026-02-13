@@ -68,7 +68,7 @@
     {
       "description": "Convert character codes to exponentials",
       "input": "C = 'ABC';\nY = exp(C)",
-      "output": "Y = [5.9874e+41 1.2946e+42 2.7992e+42]"
+      "output": "Y = [1.6949e+28 4.6072e+28 1.2524e+29]"
     }
   ],
   "faqs": [

@@ -126,3 +126,18 @@ fn chol_multiassign_reports_failure() {
         other => panic!("expected chol factor tensor, got {other:?}"),
     }
 }
+
+#[test]
+fn uint16_cast_is_callable_in_vm() {
+    let input = "A = uint16([3.49 -2 70000]);";
+    let ast = parse(input).unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    match &vars[0] {
+        Value::Tensor(tensor) => {
+            assert_eq!(tensor.shape, vec![1, 3]);
+            assert_eq!(tensor.data, vec![3.0, 0.0, u16::MAX as f64]);
+        }
+        other => panic!("expected tensor output, got {other:?}"),
+    }
+}

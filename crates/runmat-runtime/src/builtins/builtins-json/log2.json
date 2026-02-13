@@ -70,7 +70,7 @@
     {
       "description": "Applying `log2` to character codes",
       "input": "C = 'ABC';\nvalues = log2(C)",
-      "output": "values = [6.0224 6.1293 6.1990]"
+      "output": "values = [6.0224 6.0444 6.0661]"
     }
   ],
   "faqs": [

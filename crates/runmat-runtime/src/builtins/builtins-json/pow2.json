@@ -71,7 +71,7 @@
     {
       "description": "Convert characters to power-of-two values",
       "input": "codes = pow2('ABC')",
-      "output": "codes = [5.9874e+41 1.2946e+42 2.7992e+42]"
+      "output": "codes = [3.6893e+19 7.3787e+19 1.4757e+20]"
     }
   ],
   "faqs": [

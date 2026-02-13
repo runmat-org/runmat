@@ -67,7 +67,7 @@
     },
     {
       "description": "Remove delimiters before splitting text",
-      "input": "path = \"runmat/bin:runmat/lib\";\nclean = erase(path, \":\");\nparts = split(clean, \"runmat/\")",
+      "input": "path = \"runmat/bin:runmat/lib\";\nclean = erase(path, \":\")\nparts = split(clean, \"runmat/\")",
       "output": "clean = \"runmat/binrunmat/lib\"\nparts = 1×3 string\n    \"\"    \"bin\"    \"lib\""
     }
   ],

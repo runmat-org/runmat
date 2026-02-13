@@ -55,7 +55,7 @@
     },
     {
       "description": "Replicating an identity matrix across pages",
-      "input": "K = eye(2, 3, 2);   % Two 2x3 identity slices stacked along the third dimension",
+      "input": "K = eye(2, 3, 2)   % Two 2x3 identity slices stacked along the third dimension",
       "output": "K(:, :, 1) =\n     1     0     0\n     0     1     0\n\nK(:, :, 2) =\n     1     0     0\n     0     1     0"
     },
     {

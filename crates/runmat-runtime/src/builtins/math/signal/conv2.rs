@@ -360,18 +360,15 @@ fn conv2_matrices(a: &Matrix, b: &Matrix, mode: Conv2Mode) -> Matrix {
     let rows = a.rows + b.rows - 1;
     let cols = a.cols + b.cols - 1;
     let mut full = Matrix::zeros(rows, cols);
-    let flip_rows = mode != Conv2Mode::Same || b.rows % 2 == 1;
-    let flip_cols = mode != Conv2Mode::Same || b.cols % 2 == 1;
-
     for ac in 0..a.cols {
         for ar in 0..a.rows {
             let aval = a.get(ar, ac);
             for bc in 0..b.cols {
                 let out_c = ac + bc;
-                let bcol = if flip_cols { b.cols - 1 - bc } else { bc };
+                let bcol = b.cols - 1 - bc;
                 for br in 0..b.rows {
                     let out_r = ar + br;
-                    let brow = if flip_rows { b.rows - 1 - br } else { br };
+                    let brow = b.rows - 1 - br;
                     let bval = b.get(brow, bcol);
                     full.add_assign(out_r, out_c, aval * bval);
                 }
@@ -711,9 +708,9 @@ pub(crate) mod tests {
                     3,
                     3,
                     &[
-                        1.0, 4.0, 7.0, //
-                        7.0, 23.0, 33.0, //
-                        19.0, 53.0, 63.0,
+                        4.0, 11.0, 18.0, //
+                        18.0, 37.0, 47.0, //
+                        36.0, 67.0, 77.0,
                     ],
                 );
                 assert_eq!(t.data, expected.data);

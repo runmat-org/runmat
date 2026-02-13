@@ -166,7 +166,10 @@ fn magic_singly_even(n: usize) -> Result<Vec<usize>, String> {
         }
     }
 
-    swap_cells(&mut data, n, k, k, k + m, k);
+    // Center row `k`: swap columns 1..=k (instead of 0..k-1 used for other rows).
+    for col in 1..=k {
+        swap_cells(&mut data, n, k, col, k + m, col);
+    }
 
     Ok(data)
 }
@@ -241,6 +244,51 @@ mod tests {
         assert_eq!(tensor.data, expected);
     }
 
+    /// Verify that every value 1..=n² appears exactly once and that all rows,
+    /// columns, and both diagonals sum to the magic constant n*(n²+1)/2.
+    fn assert_magic_properties(data: &[f64], n: usize) {
+        let n_sq = n * n;
+        let magic_const = n * (n_sq + 1) / 2;
+
+        // All values 1..=n² present
+        let mut sorted: Vec<u64> = data.iter().map(|&v| v as u64).collect();
+        sorted.sort();
+        let expected: Vec<u64> = (1..=n_sq as u64).collect();
+        assert_eq!(
+            sorted, expected,
+            "magic({n}): not a permutation of 1..={n_sq}"
+        );
+
+        // Row sums (column-major storage: element (r,c) = data[r + c*n])
+        for r in 0..n {
+            let row_sum: f64 = (0..n).map(|c| data[r + c * n]).sum();
+            assert_eq!(
+                row_sum as usize, magic_const,
+                "magic({n}): row {r} sum mismatch"
+            );
+        }
+        // Column sums
+        for c in 0..n {
+            let col_sum: f64 = (0..n).map(|r| data[r + c * n]).sum();
+            assert_eq!(
+                col_sum as usize, magic_const,
+                "magic({n}): col {c} sum mismatch"
+            );
+        }
+        // Main diagonal
+        let diag1: f64 = (0..n).map(|i| data[i + i * n]).sum();
+        assert_eq!(
+            diag1 as usize, magic_const,
+            "magic({n}): main diagonal sum mismatch"
+        );
+        // Anti-diagonal
+        let diag2: f64 = (0..n).map(|i| data[i + (n - 1 - i) * n]).sum();
+        assert_eq!(
+            diag2 as usize, magic_const,
+            "magic({n}): anti-diagonal sum mismatch"
+        );
+    }
+
     #[test]
     fn magic_six_matches_matlab() {
         let value = magic_builtin(vec![Value::Num(6.0)]).expect("magic");
@@ -255,5 +303,27 @@ mod tests {
             24.0, 25.0, 20.0, 15.0, 16.0, 11.0,
         ];
         assert_eq!(tensor.data, expected);
+    }
+
+    #[test]
+    fn magic_ten_is_valid_magic_square() {
+        let value = magic_builtin(vec![Value::Num(10.0)]).expect("magic");
+        let tensor = match value {
+            Value::Tensor(tensor) => tensor,
+            other => panic!("expected tensor, got {other:?}"),
+        };
+        assert_eq!(tensor.shape, vec![10, 10]);
+        assert_magic_properties(&tensor.data, 10);
+    }
+
+    #[test]
+    fn magic_fourteen_is_valid_magic_square() {
+        let value = magic_builtin(vec![Value::Num(14.0)]).expect("magic");
+        let tensor = match value {
+            Value::Tensor(tensor) => tensor,
+            other => panic!("expected tensor, got {other:?}"),
+        };
+        assert_eq!(tensor.shape, vec![14, 14]);
+        assert_magic_properties(&tensor.data, 14);
     }
 }

@@ -812,28 +812,36 @@ fn build_slice_plan(
     })
 }
 
-/// Output shape after indexing, following MATLAB's rule: only *trailing* singleton
-/// dimensions are removed. E.g. A(:, 2, :) on 3×4×5 → [3, 1, 5], not [3, 5].
-fn matlab_squeezed_shape(selection_lengths: &[usize], _scalar_mask: &[bool]) -> Vec<usize> {
-    let mut dims: Vec<(usize, usize)> = selection_lengths
+/// Output shape after indexing:
+/// - preserve non-trailing singleton dimensions
+/// - drop trailing singleton dimensions only when produced by scalar selectors.
+///
+/// E.g. A(:, 2, :) on 3×4×5 -> [3, 1, 5], not [3, 5].
+fn matlab_squeezed_shape(selection_lengths: &[usize], scalar_mask: &[bool]) -> Vec<usize> {
+    let mut dims: Vec<(usize, usize, bool)> = selection_lengths
         .iter()
         .enumerate()
-        .map(|(d, &len)| (d, len))
+        .map(|(d, &len)| (d, len, scalar_mask.get(d).copied().unwrap_or(false)))
         .collect();
-    while dims.len() > 2 && dims.last().map(|&(_, len)| len == 1).unwrap_or(false) {
+    while dims.len() > 2
+        && dims
+            .last()
+            .map(|&(_, len, is_scalar)| len == 1 && is_scalar)
+            .unwrap_or(false)
+    {
         dims.pop();
     }
     if dims.is_empty() {
         return vec![1, 1];
     }
     if dims.len() == 1 {
-        let (dim, len) = dims[0];
+        let (dim, len, _) = dims[0];
         if dim == 1 {
             return vec![1, len];
         }
         return vec![len, 1];
     }
-    dims.into_iter().map(|(_, len)| len).collect()
+    dims.into_iter().map(|(_, len, _)| len).collect()
 }
 
 fn gather_string_slice(sa: &runmat_builtins::StringArray, plan: &SlicePlan) -> VmResult<Value> {

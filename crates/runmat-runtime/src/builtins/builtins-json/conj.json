@@ -62,7 +62,7 @@
     },
     {
       "description": "Convert MATLAB char arrays to numeric codes with conj",
-      "input": "chars = 'RunMat';\ncodes = conj(chars);\noutputClass = class(codes)",
+      "input": "chars = 'RunMat';\ncodes = conj(chars)\noutputClass = class(codes)",
       "output": "codes = [82 117 110 77 97 116];\noutputClass = 'double'"
     },
     {
